@@ -753,6 +753,147 @@ export function looksLikeImperativeRerun(message: string): boolean {
   return false;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// EXPLICIT-ANALYSIS-REQUEST — the admission half of the analysis-election
+// gate (`analysis-election-gate.ts`).
+// ─────────────────────────────────────────────────────────────────────────
+//
+// ⭐ DERIVED FROM THE PRODUCER, NOT FROM A CORPUS (preamble P7). The rule this
+// predicate enforces is not invented here: it is the sentence the SERVED
+// routing prompt already states to the model. Read at the bytes on
+// `src/orchestrator-v5/context/__tests__/fixtures/served-orchestrator-prompt.txt`,
+// whose sha256 is `adcc5128d4e6e6bc…` — byte-identical to
+// `Prompts/canonical/manifest.json`'s `routing` v120 `cee_content_hash_16`,
+// i.e. the prompt identity observed on the wire (`routing=120#adcc5128`):
+//
+//   line 134  "COMPUTATION:
+//              - run_analysis: only for explicit requests to run, rerun,
+//                simulate or analyse. Target the goal. Never use it to explain
+//                results, drivers, robustness or what would change."
+//
+// The four verbs below ARE that sentence's four verbs. The gate makes an
+// instruction the model is already given, and violates on a measured ~43.8% of
+// turn-2 follow-ups, ENFORCING instead of advisory.
+//
+// ⚠⚠ WHY THIS IS A SECOND PREDICATE AND NOT A WIDENING OF
+// `looksLikeImperativeRerun` (CLAUDE.md trap 21 — two questions under one
+// name). The two answer DIFFERENT QUESTIONS and therefore have OPPOSITE safe
+// directions:
+//
+//   `looksLikeImperativeRerun`  "may I EXECUTE an analysis with no LLM call?"
+//                               A false positive DESTROYS the user's computed
+//                               result, so it must fail CLOSED. Its four
+//                               oscillation rounds and its determiner rule all
+//                               exist to keep it narrow.
+//
+//   `looksLikeExplicitAnalysisRequest`
+//                               "may I HONOUR an analysis the LLM already
+//                               elected?" A false NEGATIVE demotes a genuine
+//                               request to a conversational answer that still
+//                               offers the analysis as a chip — one extra
+//                               click. A false POSITIVE reproduces today's
+//                               staging behaviour EXACTLY and adds no new harm
+//                               class, because the election was going to be
+//                               honoured anyway. So it may fail OPEN.
+//
+// Merging them would force one window to serve two opposite defaults, which is
+// the precise shape trap 22b bans. They share the SAFETY ENVELOPE
+// (`RERUN_NEGATION_VETO_PATTERNS`, `RERUN_INTERROGATIVE_VETO_PATTERNS`,
+// `isVerbPosition`) by REUSE rather than by copy, so there is no second
+// hand-maintained mirror of English (trap 12).
+//
+// ⚠ ON THE DETERMINER. `IMPERATIVE_RERUN_PATTERNS` requires a determiner on a
+// bare noun object, because a nominal reading there costs a destroyed
+// analysis. Here the determiner is OPTIONAL, and that is a deliberate
+// asymmetry with a measured reason: the product's own most-emitted run chip
+// says exactly `"Run analysis."` (`no-analysis-guard.ts`,
+// `draft-graph-dispatch.ts`, `edit-graph-dispatch.ts`, and `chip-generator`'s
+// `executableChip` via `USER_FACING_LABELS.run_analysis`). A user who types
+// back the sentence the product printed must be honoured — preamble P8, the
+// repair-binding invariant: never emit an affordance whose direct answer the
+// system then refuses. Admitting the nominal reading alongside it costs
+// nothing this gate is responsible for, per the fail-open argument above.
+//
+// ⚠ KNOWN-DROPPED, pinned by test rather than papered over (trap 22f's honest
+// -gap rule). The left-context allowlist is REUSED unchanged, so every shape
+// it declines for the re-run predicate is declined here too — "Just run the
+// analysis.", "You should run the analysis.", "I want you to analyse this."
+// Each costs one click on the offered chip, never a wrong action. The set is
+// pinned EXACTLY in `analysis-election-gate.test.ts`, so it REDs if it grows
+// OR shrinks.
+
+/**
+ * The four verbs the served routing prompt names at line 134, plus their
+ * `re-` inflections. Single-sourced so the pattern list below and any future
+ * consumer cannot drift from the prompt sentence they encode.
+ */
+const ANALYSIS_REQUEST_VERB_SOURCE =
+  String.raw`(?:re-?)?(?:run|simulate|analy[sz]e)`;
+
+/**
+ * Objects that make the verb an analysis instruction rather than an unrelated
+ * imperative ("run the numbers" vs "run the shop"). Pronoun objects are
+ * admitted bare, exactly as in `IMPERATIVE_RERUN_PATTERNS`; noun objects take
+ * an OPTIONAL determiner (see the determiner note above).
+ */
+const ANALYSIS_REQUEST_OBJECT_SOURCE = String.raw`(?:(?:the|this|that|my|our|a|an)\s+)?(?:provisional\s+)?(?:analysis|analyses|simulation|model|scenario|numbers|decision|graph)|(?:it|this|that)`;
+
+const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
+  // "Run analysis.", "Run the analysis.", "Simulate the model.",
+  // "Analyse this decision.", "Re-run the numbers.", "Analyse it."
+  new RegExp(
+    String.raw`\b${ANALYSIS_REQUEST_VERB_SOURCE}\s+(?:${ANALYSIS_REQUEST_OBJECT_SOURCE})\b`,
+    'i',
+  ),
+  // Bare `re-`-prefixed instruction with no object: "Re-analyse.", "Rerun."
+  // is deliberately NOT here — a bare `rerun` is the nominal shape that cost
+  // the sibling predicate two rounds. Only the explicit re-analysis verb,
+  // which has no common nominal reading, stands alone.
+  /\bre-?analy[sz]e\b/i,
+];
+
+/**
+ * True when the message is an EXPLICIT request to run, rerun, simulate or
+ * analyse — the admission condition the served routing prompt already states
+ * for `run_analysis` (see the block comment above).
+ *
+ * Pure and total. No LLM. Shares the negation veto, the interrogative veto and
+ * the verb-position allowlist with {@link looksLikeImperativeRerun} by reuse.
+ *
+ * Deliberately returns TRUE for messages {@link looksLikeImperativeRerun} also
+ * matches: this predicate is a superset, and the re-run predicate remains the
+ * only one authorised to DISPATCH without an LLM.
+ */
+export function looksLikeExplicitAnalysisRequest(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  // Refusal outranks everything: "Don't run the analysis yet."
+  for (const re of RERUN_NEGATION_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  // A question ABOUT whether to analyse is not a request to analyse. The
+  // prompt's own word is "explicit requests"; "Should I run the analysis?" is
+  // a `rerun_question` for `classifyAnalyticalIntent`, not an instruction.
+  for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  for (const re of EXPLICIT_ANALYSIS_REQUEST_PATTERNS) {
+    const scanner = new RegExp(
+      re.source,
+      re.flags.includes('g') ? re.flags : `${re.flags}g`,
+    );
+    let m: RegExpExecArray | null;
+    while ((m = scanner.exec(trimmed)) !== null) {
+      if (m[0].length === 0) {
+        scanner.lastIndex += 1;
+        continue;
+      }
+      if (isVerbPosition(trimmed, m.index)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Positive vague-edit signal. True when the message is shaped like an
  * edit request that lacks a specific target — typical phrasings: "Update
