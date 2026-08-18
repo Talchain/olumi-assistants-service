@@ -21,7 +21,11 @@ import type { FastifyRequest } from 'fastify';
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
-import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
+import {
+  handleEditGraph,
+  parseEditGraphResponse,
+  type EditGraphResult,
+} from '../../orchestrator/tools/edit-graph.js';
 import { extractEditLlmCallTelemetry, type EditGraphLlmCallTelemetry } from '../diagnostics/v5-diagnostic-trace.js';
 import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
@@ -51,6 +55,16 @@ import {
   formatWithheldWriteNotice,
   resolveNodeLabels,
 } from '../routing/option-intervention-write-guard.js';
+// ⭐⭐ ROADMAP 2.1266 — the WRITE PATH the guard above exists because we lacked.
+// `option-intervention-write-guard.ts` withholds a wrong-entity write; this
+// composes the RIGHT one deterministically, so the product's own advised
+// sentence has an acceptance path (P8). See its module header.
+import {
+  buildOptionEffectRawOperation,
+  formatOptionEffectWriteAck,
+  readCommittedOptionEffect,
+  resolveOptionEffectWrite,
+} from '../routing/option-effect-write.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import {
@@ -1511,6 +1525,60 @@ export function selectEditAssistantText(result: EditGraphResult, fallback: strin
   return result.assistantText ?? fallback;
 }
 
+/**
+ * ⭐⭐ ROADMAP 2.1266 — canonicalise the deterministic option-effect operation
+ * through the SAME parser the edit LLM's output goes through.
+ *
+ * `buildOptionEffectRawOperation` emits the served prompt's EXAMPLE-2
+ * vocabulary (`/nodes/<opt>/data/interventions/<factor_id>`, object leaf,
+ * `old_value: null`). Everything downstream of composition expects the
+ * POST-PARSE shape — `path` reduced to the bare node id, the leaf re-keyed by
+ * its slash field so factor attribution survives (the P0-2 object-leaf fix in
+ * `normaliseOperation`). Spelling that shape by hand here would be a MIRROR of
+ * the parser (trap 12) and would go stale the day the parser gains a rule; so
+ * the raw op is round-tripped through `parseEditGraphResponse` instead, and the
+ * deterministic path's operation is BY CONSTRUCTION identical to the one the
+ * model produces for the same edit.
+ *
+ * Returns `null` — never a short or empty batch — when the round trip does not
+ * yield exactly one operation. An empty `preComposedOperations` would reach the
+ * no-operations branch and answer "No changes were needed", which is a WORSE
+ * outcome than the LLM path this is replacing; a null hands the turn straight
+ * back to that path.
+ */
+function canonicaliseOptionEffectOperation(
+  resolved: {
+    readonly optionId: string;
+    readonly optionLabel: string;
+    readonly factorId: string;
+    readonly factorLabel: string;
+    readonly value: number;
+  },
+  requestId: string,
+): readonly PatchOperation[] | null {
+  const raw = buildOptionEffectRawOperation(resolved);
+  let parsedOperations: unknown[];
+  try {
+    parsedOperations = parseEditGraphResponse(
+      JSON.stringify({ operations: [raw], removed_edges: [], warnings: [], coaching: null }),
+    ).operations;
+  } catch {
+    parsedOperations = [];
+  }
+  if (parsedOperations.length !== 1) {
+    log.error(
+      {
+        event: 'v5.edit_graph.option_effect_operation_canonicalise_failed',
+        request_id: requestId,
+        operations_count: parsedOperations.length,
+      },
+      'V5 edit_graph — the deterministic option-effect operation did not survive canonicalisation; falling back to the edit LLM',
+    );
+    return null;
+  }
+  return parsedOperations as readonly PatchOperation[];
+}
+
 function editResultToOlumiResponse(
   result: EditGraphResult,
   payload: MessageTurnPayload,
@@ -2254,6 +2322,80 @@ export async function dispatchEditGraph(
           'V5 edit_graph proposal-continuation intercept emitted deterministic response without LLM call',
         );
       } else {
+        // ⭐⭐ ROADMAP 2.1266 — THE DETERMINISTIC OPTION-EFFECT WRITE.
+        //
+        // No wire verb on this build could set an option's effect value. The
+        // nine `system_event` types carry none (`factor_value_edit` moves a
+        // FACTOR's `observed_state.value` — a different entity), and the chat
+        // path depends on the edit LLM emitting the sanctioned `update_node`
+        // at `/nodes/<opt>/data/interventions/<factor_id>`. On the witnessed
+        // J4 t5 turn it emitted a factor-baseline `parameter_update` instead,
+        // #1016's guard correctly withheld the write, and the product's OWN
+        // advised sentence therefore terminated in a refusal (P8).
+        //
+        // When the sentence binds — one option, one of ITS linked factors, one
+        // model-unit value, all resolved by IDENTITY against this graph — the
+        // operation is composed here instead of asked for. See
+        // `routing/option-effect-write.ts` for the binding predicate and for
+        // every shape it deliberately declines.
+        //
+        // ⚠ RESOLVED TWICE ON PURPOSE, AND THE TWO CALLS ANSWER DIFFERENT
+        // QUESTIONS (trap 21). route-v2 asks *"is this sentence ambiguous
+        // enough that I should ASK instead of dispatching?"* and returns its
+        // own deterministic reply when it is. THIS call asks *"against the
+        // graph I am about to apply to, does the sentence bind?"* — and it is
+        // this one that governs the write, because `parsedGraph` is the graph
+        // `handleEditGraph` mutates. Nothing is inherited across the seam, so
+        // the two cannot disagree in a way that writes anything.
+        //
+        // ⚠ STRICT-PARSE GATE, same rule as the deterministic add_risk path:
+        // a non-canonical ingress graph reaches `handleEditGraph` as a
+        // STRUCTURAL FALLBACK (id/kind/label + edges only), so resolving a
+        // write against it would bind against a graph missing the very
+        // interventions data the decision depends on. Non-strict ingress keeps
+        // the pre-existing LLM path.
+        //
+        // ⚠⚠ MEASURED: THIS GATE IS CURRENTLY REDUNDANT, AND IT STAYS ANYWAY.
+        // Its mutant SURVIVED, and the equivalence was DEMONSTRATED rather than
+        // assumed (trap 13c): `buildStructuralFallback` stamps
+        // `strength: { mean: 0, std: 0 }`, and GraphV3 requires `std > 0`, so
+        // the fallback NEVER strict-parses and `resolveOptionEffectWrite`'s own
+        // `GraphV3.safeParse` already declines `graph_unparseable` on it.
+        // The redundancy therefore rests entirely on one inert default in an
+        // unrelated function: change that `0` to `0.01` and the fallback starts
+        // parsing, at which point a write would bind against a graph whose
+        // `interventions` were dropped on the way in. A guard held up by a
+        // coincidence in someone else's constant is exactly the kind this
+        // estate loses; keeping it costs one boolean.
+        const optionEffect = graphStrictlyCanonical
+          ? resolveOptionEffectWrite({
+              // The instruction this turn is actually executing — the SAME
+              // expression handed to `handleEditGraph` below, so the writer and
+              // the LLM can never be asked to perform different sentences.
+              message: params.editInstructionOverride ?? payload.message,
+              graph: parsedGraph,
+            })
+          : { matched: false as const, reason: 'graph_unparseable' as const };
+        const optionEffectResolved =
+          optionEffect.matched && optionEffect.kind === 'write' ? optionEffect : null;
+        const optionEffectOperations = optionEffectResolved === null
+          ? null
+          : canonicaliseOptionEffectOperation(optionEffectResolved, requestId);
+        // Bound to the OPERATIONS, not to the resolution: a resolution whose
+        // operation did not canonicalise must take the LLM path, and every
+        // downstream branch below reads this one variable so none of them can
+        // be left behind (the same structural-honesty rule the withhold verdict
+        // is threaded by).
+        const optionEffectWrite =
+          optionEffectOperations === null ? null : optionEffectResolved;
+        if (optionEffectWrite !== null) {
+          emit(TelemetryEvents.V5OptionEffectWriteResolved, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            option_id: optionEffectWrite.optionId,
+            factor_id: optionEffectWrite.factorId,
+          });
+        }
         editResult = await handleEditGraph(
           context,
           // ⭐ ROADMAP 2.1261 — the bind instruction substitutes ONLY here (the
@@ -2263,7 +2405,61 @@ export async function dispatchEditGraph(
           adapter,
           requestId,
           payload.turn_id,
+          // ⭐ ONE ENTRY SEAM, ONE APPLIER (ROADMAP 2.474 / A1). The
+          // pre-composed batch replaces the LLM's COMPOSITION and nothing
+          // else: normalisation, the field-safety screen, Zod, the referee
+          // gate, the intervention encoder, apply, commit and receipts are the
+          // same code on both paths.
+          //
+          // ⚠ A1's own comment says a pre-composed batch "cannot reach this
+          // line unless the hold is live", justified by the structural-edit
+          // tool's `holdSpineActive` entry gate. THAT WAS A CLAIM ABOUT A CALL
+          // GRAPH WITH ONE CALLER (trap 20), and this is the second. It does
+          // not hold here and does not need to: this batch carries a single
+          // NON-structural tunable field update, which the referee gate judges
+          // on its merits exactly as it judges the LLM's identical operation
+          // (`option-configure-apply-chain.test.ts` hop 2 pins that verdict).
+          // No structural operation can be composed by this path — the shape
+          // is fixed by `buildOptionEffectRawOperation`.
+          optionEffectOperations === null
+            ? undefined
+            : { preComposedOperations: optionEffectOperations },
         );
+        if (optionEffectWrite !== null) {
+          // ⭐ P5 — THE ACKNOWLEDGEMENT CITES THE COMMITTED BYTES, NOT THE
+          // REQUEST. The value is read back out of the applied graph through
+          // `mergeInterventionSources` — the same reader the readiness badge
+          // and #1016's guard use. If the write did not survive (referee hold,
+          // canonicalisation, encoder deferral) nothing is claimed and the
+          // pre-existing machinery answers: 2.427 will compose its recovery
+          // copy exactly as it does today.
+          const committed = readCommittedOptionEffect(
+            editResult.appliedGraph,
+            optionEffectWrite.optionId,
+            optionEffectWrite.factorId,
+          );
+          if (committed === optionEffectWrite.value) {
+            editResult = {
+              ...editResult,
+              assistantText: formatOptionEffectWriteAck({
+                optionLabel: optionEffectWrite.optionLabel,
+                factorLabel: optionEffectWrite.factorLabel,
+                committedValue: committed,
+              }),
+            };
+          } else {
+            log.warn(
+              {
+                event: 'v5.edit_graph.option_effect_write_did_not_land',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                option_id: optionEffectWrite.optionId,
+                factor_id: optionEffectWrite.factorId,
+              },
+              'V5 edit_graph — the deterministic option-effect operation did not survive to the applied graph; no acknowledgement claimed',
+            );
+          }
+        }
         // ── ROADMAP 2.474 — THE SECOND PATH (A9) ─────────────────────────
         // The rulebook has now had the turn. If it CLAIMED the utterance
         // (produced operations) we are done: one composer per turn, because
@@ -2274,14 +2470,23 @@ export async function dispatchEditGraph(
         // the whole fix: a second path on the following turn is the dead-end
         // with an extra step, because the user has to notice the failure and
         // rephrase before anything different can happen.
-        const toolOutcome = await tryStructuralEditTool({
-          editResult,
-          context,
-          adapter,
-          payload,
-          requestId,
-          requestStartMs,
-        });
+        //
+        // ⭐ 2.1266 — NOT after a deterministic option-effect write. That path
+        // IS the composer for this turn: the rulebook was never asked, so "the
+        // rulebook did not claim the utterance" is not the state we are in, and
+        // handing an option-effect request to the STRUCTURAL edit tool would
+        // ask a second composer to invent topology for a value the user
+        // already gave. One composer per turn (A9's own rule) applies here too.
+        const toolOutcome = optionEffectWrite !== null
+          ? null
+          : await tryStructuralEditTool({
+              editResult,
+              context,
+              adapter,
+              payload,
+              requestId,
+              requestStartMs,
+            });
         if (toolOutcome !== null) {
           editResult = toolOutcome.editResult;
           // A3 — carried to the response-assembly region below, where the hold

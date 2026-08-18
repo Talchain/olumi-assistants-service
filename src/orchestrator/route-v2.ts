@@ -227,6 +227,10 @@ import {
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 // L16 / N16 — deterministic remedy for a bare configure-option turn.
 import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/configure-option-clarify.js';
+// ⭐ ROADMAP 2.1266 — the ASK half of the option-effect write path (the WRITE
+// half binds inside `dispatchEditGraph`, against the graph it applies to).
+import { resolveOptionEffectWrite } from '../orchestrator-v5/routing/option-effect-write.js';
+import { composeOptionEffectAskResponse } from '../orchestrator-v5/compose/option-effect-ask-response.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
@@ -5025,6 +5029,63 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
     const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
     if (isEditGraphShape) {
+      // ────────────────────────────────────────────────────────────────
+      // ⭐ ROADMAP 2.1266 — the ASK half of the option-effect write path.
+      //
+      // The write half lives in `dispatchEditGraph` (it must bind against the
+      // graph it applies to). THIS site answers a different question (trap 21):
+      // *is the sentence so ambiguous about WHICH entity that dispatching at
+      // all would be a guess?* — two options named, or two of one option's
+      // linked factors. The estate's ruling for that state is to make the
+      // ambiguity the product and never guess (trap 22f), and the guess is only
+      // avoidable BEFORE the edit lane runs: once it has, 2.427's recovery copy
+      // resolves an option by first-match and speaks about it by name.
+      //
+      // ⚠ SCOPE: inside `isEditGraphShape`, so every existing gate that decides
+      // "this turn goes to the edit lane" still decides it. The only turns this
+      // can change are ones the edit LLM would otherwise have been asked to
+      // perform — and only the strict subset of those that name a value it
+      // could not safely place.
+      //
+      // Nothing is written on this path, and readiness is derived from the
+      // UNCHANGED graph (gate-reason integrity — the disambiguation turn must
+      // not be the turn the user's specific blocker disappears).
+      const optionEffectAsk = resolveOptionEffectWrite({
+        message: ingress.message,
+        graph: effectiveGraphState,
+      });
+      if (optionEffectAsk.matched && optionEffectAsk.kind === 'ask') {
+        emit(TelemetryEvents.V5OptionEffectAskEmitted, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          ambiguity: optionEffectAsk.ambiguity,
+          candidate_count: optionEffectAsk.candidates.length,
+        });
+        const askReadiness = buildCanonicalAnalysisReadyFromGraph(effectiveGraphState);
+        const askResponse = composeOptionEffectAskResponse({
+          ambiguity: optionEffectAsk.ambiguity,
+          value: optionEffectAsk.value,
+          candidates: optionEffectAsk.candidates,
+          optionLabels: optionEffectAsk.optionLabels,
+          stage: ingress.stage,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', askResponse, {
+          ...(askReadiness !== undefined ? { analysisReady: askReadiness } : {}),
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a
+          // literal: the permission belongs to the fact this response
+          // DISPLAYS, not to whether this turn ran an analysis.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
+
       // V5 edit lifecycle recovery v1 — chip-simplify and vague-edit
       // intercepts have already run BEFORE editIntentDetected (see
       // the block above). If we reach this point, neither matched
