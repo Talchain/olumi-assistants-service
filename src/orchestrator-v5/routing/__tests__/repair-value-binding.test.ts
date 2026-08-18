@@ -110,7 +110,7 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     },
   );
 
-  it('the KNOWN-DROPPED set is exactly the reviewed FOUR — it shrank by four, consciously', () => {
+  it('the KNOWN-DROPPED set is exactly the reviewed FIVE — it shrank by four, then grew by one', () => {
     // ⚠⚠ THIS SET WAS EIGHT AND IS NOW FOUR. The protocol above says the set must
     // shrink CONSCIOUSLY and RED here otherwise; this is that conscious decision,
     // recorded where the next reader will find it (ROADMAP 2.1267).
@@ -128,11 +128,19 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     // STILL DROPPED, with the reason stated at the owner
     // (`MISSING_VALUE_ANSWER_KNOWN_DROPPED`): a hedge, a word number, a bare
     // number with no antecedent, and a named target the edit lane owns.
+    // ⭐ FIFTH MEMBER ADDED 19 Aug 2026 (ROADMAP 2.1266/A3) — BY A SURVIVING
+    // MUTANT, not by a design decision. Deleting `CLAUSE_BREAK`'s trailing
+    // `\s+` requirement left the whole battery green; measured, the only thing
+    // it discriminates is punctuation with NO FOLLOWING SPACE, and it
+    // discriminates identically at pristine on the `.` form — a PRE-EXISTING
+    // gap on a conjunct that change never touched. Pinned in the DECLINING
+    // direction rather than widened: "while we're here" work is prohibited.
     expect(REPAIR_BARE_VALUE_KNOWN_DROPPED).toEqual([
       'Set it to about 0.12.',
       'Set it to a third.',
       '0.12',
       'Set it to 0.12 for the subcontracting option.',
+      'It went up a lot,set it to 0.12.',
     ]);
   });
 

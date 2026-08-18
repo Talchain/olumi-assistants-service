@@ -106,12 +106,20 @@ describe('ordinary human answers are ACCEPTED and bound (the four forms that loo
 });
 
 describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
-  it('⭐ the pinned known-dropped set is EXACTLY these four (REDs if it grows OR shrinks)', () => {
+  it('⭐ the pinned known-dropped set is EXACTLY these five (REDs if it grows OR shrinks)', () => {
+    // ⭐ FIFTH MEMBER ADDED 19 Aug 2026 (ROADMAP 2.1266/A3) — BY A SURVIVING
+    // MUTANT, not by a design decision. Deleting `CLAUSE_BREAK`'s trailing
+    // `\s+` requirement left the whole battery green; measured, the only thing
+    // it discriminates is punctuation with NO FOLLOWING SPACE, and it
+    // discriminates identically at pristine on the `.` form — a PRE-EXISTING
+    // gap on a conjunct that change never touched. Pinned in the DECLINING
+    // direction rather than widened: "while we're here" work is prohibited.
     expect([...MISSING_VALUE_ANSWER_KNOWN_DROPPED]).toStrictEqual([
       'Set it to about 0.12.',
       'Set it to a third.',
       '0.12',
       'Set it to 0.12 for the subcontracting option.',
+      'It went up a lot,set it to 0.12.',
     ]);
     // The repair module re-exports the same set — one owner, not two lists.
     expect([...REPAIR_BARE_VALUE_KNOWN_DROPPED]).toStrictEqual([

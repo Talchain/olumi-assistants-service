@@ -317,6 +317,20 @@ export const MISSING_VALUE_ANSWER_KNOWN_DROPPED: readonly string[] = [
   'Set it to a third.',
   '0.12',
   'Set it to 0.12 for the subcontracting option.',
+  // ⭐ ADDED 19 Aug 2026 BECAUSE A MUTANT SURVIVED AND HAD TO BE SETTLED BY
+  // EXECUTION, NOT ARGUED (trap 13c). Deleting `CLAUSE_BREAK`'s trailing
+  // `\s+` requirement (`\s+` → `\s*`) left the whole battery GREEN. MEASURED,
+  // the ONLY thing it discriminates is punctuation with NO following space:
+  //   "…up a lot,set it to 0.8."  original → no break;  mutant → binds.
+  // ⚠ AND IT DISCRIMINATES THE SAME WAY AT PRISTINE, on the `.` form
+  // ("the costs are fixed.set it to 0.12."), so the `\s+` conjunct was
+  // ALREADY unguarded before this lane added the comma — a pre-existing
+  // coverage gap on a conjunct this change never touched, now pinned rather
+  // than left as a silent survivor. Kept in the DECLINING direction: a
+  // space-less break is where run-together tokens live, and widening a
+  // conjunct this lane did not come to change is the "while we're here" work
+  // the scope rule prohibits.
+  'It went up a lot,set it to 0.12.',
 ];
 
 export type MissingValueAnswer =

@@ -55,7 +55,10 @@ import {
   impliesOptionInterventionEdit,
 } from '../option-intervention-guard.js';
 import { tryDeterministicValueUpdate } from '../deterministic-value-update.js';
-import { readMissingValueAnswer } from '../missing-value-answer.js';
+import {
+  MISSING_VALUE_ANSWER_KNOWN_DROPPED,
+  readMissingValueAnswer,
+} from '../missing-value-answer.js';
 import {
   deriveAskedEffectPair,
   deriveMissingEffectPairs,
@@ -387,6 +390,27 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
       'It would push it up a lot, set it to 0.8 for the Status Quo: Hold current strategy option.',
     ]) {
       expect(resolveOptionEffectWrite({ message, graph: graph() }).matched, message).toBe(false);
+    }
+  });
+
+  it('⭐ M2 — a comma with NO FOLLOWING SPACE is not a break (pinned, was a survivor)', () => {
+    // Settled by execution after the mutant `\s+` → `\s*` survived the whole
+    // battery (trap 13c). Measured: the missing space is the ONLY thing it
+    // discriminates, and it discriminates identically at pristine on the `.`
+    // form — so this is a PRE-EXISTING gap on a conjunct this lane never
+    // touched, now pinned so it cannot drift silently in either direction.
+    const noSpace = R1.replace(', set it to', ',set it to');
+    expect(noSpace).not.toBe(R1);
+    expect(readMissingValueAnswer(noSpace)).toBeNull();
+    expect(resolveOptionEffectWrite({ message: noSpace, graph: graph() }).matched).toBe(false);
+    // …and the shape is recorded in the pinned set, so the suite REDs if the
+    // reader silently widens to claim it.
+    expect(
+      MISSING_VALUE_ANSWER_KNOWN_DROPPED.some((m) => /,set it to/.test(m)),
+      'the space-less break must stay pinned as data',
+    ).toBe(true);
+    for (const dropped of MISSING_VALUE_ANSWER_KNOWN_DROPPED) {
+      expect(matchBareRepairValue(dropped), dropped).toBeNull();
     }
   });
 
