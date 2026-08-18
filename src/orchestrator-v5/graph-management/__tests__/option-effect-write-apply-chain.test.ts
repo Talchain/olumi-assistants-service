@@ -409,3 +409,104 @@ describe('W5 — the witnessed repair answer, through the full chain', () => {
     expect(anyInterventionWriteLanded(GraphV3.parse(j18()) as GraphV3T, encoded)).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A2 — THE SAME CHAIN, DRIVEN BY THE ORDINARY PROSE ANSWER (rule 3c).
+//
+// ⚠ THE SENTENCE IS THE VERBATIM WIRE CAPTURE, never one composed here (trap
+// 16-inverse): `wire.t4_user_message` from the 18 Aug composed model-compiler
+// journey witness. On deployed `585f8dce` it was REFUSED, the turn fell to the
+// value-update path, and a FACTOR BASELINE moved instead — `interventions`
+// stayed 0 on all four options while the blocker copy's constant went 0.5 → 0.8.
+//
+// The three assertions below are the exact inverse of that outcome, each bound
+// by IDENTITY rather than by a count that a different write could satisfy.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('A2 — the prose answer, through the full chain', () => {
+  const optionsCarryingInterventions = (g: unknown): readonly string[] =>
+    ((g as { nodes: Array<Record<string, unknown>> }).nodes ?? [])
+      .filter((n) => n.kind === 'option')
+      .filter((n) => Object.keys(mergeInterventionSources(n) ?? {}).length > 0)
+      .map((n) => n.id as string);
+
+  const observedStateOf = (g: unknown, id: string): unknown =>
+    ((g as { nodes: Array<Record<string, unknown>> }).nodes ?? []).find((n) => n.id === id)
+      ?.observed_state;
+
+  function applyProseAnswer() {
+    const resolved = resolveOrThrow(J18.wire.t4_user_message, j18());
+    const applied = applyPatchOperations(GraphV3.parse(j18()) as GraphV3T, canonicalise(resolved));
+    return encodeOptionInterventionsForEdit(applied, new Set([J18.ids.option_id])).graph;
+  }
+
+  it('RED BASELINE — zero of four options carry an intervention, and the pair is blocked', () => {
+    // Trap 13: prove the presence before believing the change.
+    expect(j18().nodes.filter((n: Record<string, unknown>) => n.kind === 'option')).toHaveLength(4);
+    expect(optionsCarryingInterventions(j18())).toEqual([]);
+    const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(j18()));
+    expect(
+      pairs.some(
+        (p) => p.optionId === J18.ids.option_id && p.factorId === J18.ids.factor_id,
+      ),
+    ).toBe(true);
+  });
+
+  it('ACCEPTANCE — interventions 0/4 → 1/4, and it is the NAMED option that moved', () => {
+    const encoded = applyProseAnswer();
+    // BY IDENTITY on both halves: exactly one option carries interventions and
+    // it is the captured option, carrying the captured factor at the user's
+    // value. A count alone would pass for a write to any of the four.
+    expect(optionsCarryingInterventions(encoded)).toEqual([J18.ids.option_id]);
+    expect(readCommittedOptionEffect(encoded, J18.ids.option_id, J18.ids.factor_id)).toBeCloseTo(
+      0.8,
+    );
+  });
+
+  it("ACCEPTANCE — the factor's OWN observed_state is untouched (the witnessed harm, inverted)", () => {
+    const encoded = applyProseAnswer();
+    // The witnessed defect wrote the factor baseline. Compared as whole objects
+    // so a change to any field of it — not just `.value` — turns this RED.
+    expect(observedStateOf(encoded, J18.ids.factor_id)).toEqual(
+      observedStateOf(j18(), J18.ids.factor_id),
+    );
+    // And its sibling, which the deployed refusal copy actually named.
+    expect(observedStateOf(encoded, J18.ids.sibling_factor_id)).toEqual(
+      observedStateOf(j18(), J18.ids.sibling_factor_id),
+    );
+  });
+
+  it('ACCEPTANCE — that pair\'s blocker is gone, with BYTE-IDENTICAL survivors in order', () => {
+    const beforeBlockers = (buildCanonicalAnalysisReadyFromGraph(j18())!.blockers ??
+      []) as readonly unknown[];
+    const afterBlockers = (buildCanonicalAnalysisReadyFromGraph(applyProseAnswer())!.blockers ??
+      []) as readonly unknown[];
+    const target = `${J18.ids.option_id}::${J18.ids.factor_id}`;
+    expect(beforeBlockers.map(blockerKey)).toContain(target);
+    expect(afterBlockers.map(blockerKey)).not.toContain(target);
+    // The strongest form: the survivors are the before-set minus exactly one
+    // entry, in order, every field unchanged. The witnessed failure re-issued
+    // the SAME blocker with its fabricated constant moved 0.5 → 0.8; that
+    // outcome cannot pass this line.
+    expect(afterBlockers).toEqual(beforeBlockers.filter((b) => blockerKey(b) !== target));
+  });
+
+  it('#1016 ALLOWS, and 2.427 does not replace the acknowledgement', () => {
+    const encoded = applyProseAnswer();
+    expect(anyInterventionWriteLanded(GraphV3.parse(j18()) as GraphV3T, encoded)).toBe(true);
+    const verdict = decideOptionInterventionWrite({
+      message: J18.wire.t4_user_message,
+      before: j18(),
+      after: encoded,
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('allow');
+    // The outcome guard must not read this turn as a mis-targeted configure.
+    expect(
+      evaluateConfigureOptionOutcome({
+        message: J18.wire.t4_user_message,
+        before: j18(),
+        after: encoded,
+      }).status,
+    ).not.toBe('not_honoured');
+  });
+});
