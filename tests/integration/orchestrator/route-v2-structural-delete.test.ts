@@ -31,6 +31,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
 
 // ── the persisted model ────────────────────────────────────────────────────
 // Two options so a delete leaves the model analysable, plus an edge on each so
@@ -446,6 +447,83 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
 
     // NOTHING LANDED — not the graph, and not a turn row either.
     expect(appendMock).not.toHaveBeenCalled();
+    expect(nodeIds(persisted as Record<string, unknown>)).toContain('o-launch');
+  });
+
+  /**
+   * THE ATOMIC-CAS LIMB — a DIFFERENT gate from the stale-base twin above, and
+   * until this test existed it was UNPINNED ON THE P0'S OWN PATH.
+   *
+   * ⚠ HOW THE GAP WAS FOUND, recorded because the gap is the lesson: an
+   * adversarial review reverted ONLY the `structural_delete` limb of
+   * `dispatch.ts` to the pre-fix `err.expected_base_graph_hash ?? null` — a
+   * type-valid, applied-check-exactly-1 mutation directly on the path this P0
+   * travels — and `pnpm test:required` returned **31,101 passed, exit 0**. A
+   * GENUINE SURVIVOR. The sibling `edge_strength_edit` limb carried a corrected
+   * pair; this one carried nothing, so the whole gate agreed with a reverted
+   * fix. Two call sites of one changed expression, only one of them watched.
+   *
+   * The two gates are easy to conflate and must not be — they answer DIFFERENT
+   * questions, which is exactly how this estate loses a field's meaning:
+   *   - the twin above  → "was the CLIENT's asserted base stale?"  (checked at
+   *     T0, in the adapter, `BASE_HASH_DIVERGED`, nothing reaches the store);
+   *   - this one        → "had the SERVER's row moved by commit time?"
+   *     (checked in-transaction by append_turn_atomic_v3/v4, `OLGC1` →
+   *     `rpc_cas_conflict`, the whole turn rolls back).
+   * Both land on the SAME 409 envelope and the SAME `expected_base_graph_hash`
+   * field, so both must answer in the SAME hash space or the field means two
+   * things depending on which gate refused.
+   *
+   * The POSITIVE/NEGATIVE pair is what makes this discriminating rather than
+   * merely green. Either half alone passes for the wrong reason: the positive
+   * alone would still pass if the identity hash happened to be null-ish, and
+   * the negative alone would pass for ANY value that is not the sentinel.
+   */
+  it('TWIN (atomic CAS): an OLGC1 rejection answers in ANALYSIS space, never the identity hash', async () => {
+    // The 64-hex identity hash the error carries. It has NO wire emitter, so a
+    // client can neither hold it nor send it back: echoing it would name a
+    // recovery that cannot be performed (P8).
+    const IDENTITY_SENTINEL = 'f'.repeat(64);
+    appendMock.mockRejectedValueOnce(
+      new GraphStaleWriteError('simulated OLGC1 atomic CAS conflict', {
+        conflict_category: 'rpc_cas_conflict',
+        expected_base_graph_hash: IDENTITY_SENTINEL,
+      }),
+    );
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['o-launch'],
+        removed_edges: [],
+        // A VALID base hash — this must clear the T0 gate so the request
+        // actually reaches the store. Pinning the precondition in-test: if
+        // this were stale we would be re-measuring the twin above and this
+        // test would prove nothing about the CAS limb.
+        base_graph_hash: currentBaseHash(),
+      },
+      '18',
+    );
+    expect(appendMock).toHaveBeenCalledTimes(1);
+
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('GRAPH_DIVERGED');
+    expect(body.details?.conflict_category).toBe('rpc_cas_conflict');
+    expect(body.details?.recovery_action).toBe('refresh_and_reconfirm');
+
+    // POSITIVE — the exact analysis-space hash of the graph the server still
+    // holds (the append rolled back, so the row never moved). Bound by
+    // IDENTITY to a recomputed value, not to a shape another string could
+    // satisfy.
+    const expectedAnalysisHash = computeAnalysisAffectingGraphHash(persisted as never);
+    expect(expectedAnalysisHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(body.details?.expected_base_graph_hash).toBe(expectedAnalysisHash);
+
+    // NEGATIVE — the identity-space value the error carried is not echoed.
+    expect(body.details?.expected_base_graph_hash).not.toBe(IDENTITY_SENTINEL);
+
+    // And the refusal is real: the option the user tried to delete survives.
     expect(nodeIds(persisted as Record<string, unknown>)).toContain('o-launch');
   });
 
