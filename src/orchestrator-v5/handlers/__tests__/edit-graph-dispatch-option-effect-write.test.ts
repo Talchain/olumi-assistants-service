@@ -271,7 +271,14 @@ describe("ACCEPTANCE 1 — the product's own advised sentence is written determi
     expect(result.response.assistant_text).not.toContain('now has an effect value');
   });
 
-  it('acknowledges the COMMITTED value even when it differs from the requested one', async () => {
+  it('claims NOTHING when the committed value differs from the requested one', async () => {
+    // ⚠ NAME CORRECTED (F1 lane) — the old title said "acknowledges the
+    // COMMITTED value", which the branch does not do: on a divergence
+    // `edit-graph-dispatch.ts` logs `option_effect_write_did_not_land` and
+    // composes NO acknowledgement, leaving the pre-existing machinery to
+    // answer. Behaviour is unchanged here; only the title, which asserted a
+    // capability the code does not ship.
+    //
     // The pipeline can rewrite a value (encoder normalisation). The
     // acknowledgement is read back from the graph, so a divergence must NOT
     // produce a sentence about the number the user typed.
@@ -282,6 +289,10 @@ describe("ACCEPTANCE 1 — the product's own advised sentence is written determi
     const result = await dispatch(ADVISED_SENTENCE, 'req-2-1266-divergent');
 
     expect(result.response.assistant_text).not.toContain('effect value of 0.12');
+    // …and nothing about the COMMITTED value either — the branch composes no
+    // acknowledgement at all. Without this the renamed title would be as
+    // unpinned as the old one (trap 14: a label must be evidenced).
+    expect(result.response.assistant_text).not.toContain('now has an effect value');
   });
 });
 

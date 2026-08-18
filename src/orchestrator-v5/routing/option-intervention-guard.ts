@@ -106,6 +106,44 @@ export function collectOptionGuardLabels(lookup: OptionGuardLabelSource): {
   };
 }
 
+/** A single word-bounded occurrence of a phrase, as a half-open `[start, end)`. */
+export interface PhraseOccurrence {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * EVERY word-bounded occurrence of `needle` in `paddedHaystack`, in order.
+ *
+ * Same boundary rule as `containsPhrase` — which is DERIVED from this function
+ * rather than re-spelling the rule, so the two can never disagree about what
+ * counts as a match (trap 12: the second copy is the one that drifts).
+ *
+ * Positions matter because "does this phrase appear" and "WHERE does this
+ * phrase appear" are different questions, and a caller that needs the second
+ * cannot answer it from the first. `matchLabels` in `option-effect-write.ts`
+ * asked the first and acted on the second, and bound a write to an option the
+ * user had explicitly excluded.
+ */
+export function phraseOccurrences(
+  paddedHaystack: string,
+  needle: string,
+): PhraseOccurrence[] {
+  const out: PhraseOccurrence[] = [];
+  if (needle.length === 0) return out;
+  let from = 0;
+  for (;;) {
+    const at = paddedHaystack.indexOf(needle, from);
+    if (at === -1) return out;
+    const before = paddedHaystack[at - 1];
+    const after = paddedHaystack[at + needle.length];
+    const boundedBefore = before === undefined || !/[a-z0-9]/.test(before);
+    const boundedAfter = after === undefined || !/[a-z0-9]/.test(after);
+    if (boundedBefore && boundedAfter) out.push({ start: at, end: at + needle.length });
+    from = at + 1;
+  }
+}
+
 /**
  * Whole-word / phrase membership. Returns true when `needle` appears in
  * `paddedHaystack` bounded by non-alphanumerics (so "hire" matches "the
@@ -115,18 +153,7 @@ export function collectOptionGuardLabels(lookup: OptionGuardLabelSource): {
  * matched literally.
  */
 export function containsPhrase(paddedHaystack: string, needle: string): boolean {
-  if (needle.length === 0) return false;
-  let from = 0;
-  for (;;) {
-    const at = paddedHaystack.indexOf(needle, from);
-    if (at === -1) return false;
-    const before = paddedHaystack[at - 1];
-    const after = paddedHaystack[at + needle.length];
-    const boundedBefore = before === undefined || !/[a-z0-9]/.test(before);
-    const boundedAfter = after === undefined || !/[a-z0-9]/.test(after);
-    if (boundedBefore && boundedAfter) return true;
-    from = at + 1;
-  }
+  return phraseOccurrences(paddedHaystack, needle).length > 0;
 }
 
 /**
