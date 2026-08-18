@@ -133,6 +133,126 @@ export const LEG_COVERAGE = Object.freeze({
   "CANONICAL-DB": "the persisted row itself, read with CEE out of the path",
 });
 
+/**
+ * THE ACCEPTANCE CHAIN, CLAUSE BY CLAUSE — which leg entitles the report to say
+ * which sentence.
+ *
+ * WHY THIS EXISTS. The report used to print ONE fixed banner —
+ * *"a deleted option was acknowledged truthfully, left the persisted canonical
+ * graph, and stayed gone across a rerun and a fresh uncached read"* — whenever
+ * no leg had FAILED. UNKNOWN legs did not count. So a run whose RERUN never
+ * recomputed and whose CANONICAL-DB was never configured printed that sentence
+ * in full and exited 0, asserting two properties it had not measured. This is
+ * the acceptance authority for a domain closure; a banner that overstates will
+ * eventually be believed.
+ *
+ * The banner is now DERIVED from this map: a clause is printed as established
+ * only when its leg actually PASSED, and every other clause is printed under
+ * NOT ESTABLISHED with the verdict that withheld it. Adding a leg to the
+ * acceptance chain therefore cannot silently escape the banner, and removing a
+ * clause's leg cannot silently strengthen it.
+ *
+ * The five clauses are the founder's own acceptance, in his order. `ORPHAN` is
+ * the leg that carries *"a second delete also succeeds"* — it issues the second
+ * `structural_delete` on the same scenario. RERUN does not; RERUN re-runs the
+ * ANALYSIS. Those two were conflated on the board once.
+ */
+export const ACCEPTANCE_CLAUSES = Object.freeze({
+  DELETE: "the delete was acknowledged truthfully",
+  PERSISTED: "the deletion changed the persisted canonical graph",
+  ORPHAN: "a second delete on the same scenario also succeeded, orphaning nothing",
+  RERUN: "the option was still gone after re-running the analysis",
+  RELOAD: "the option was still gone on a fresh uncached read of the canonical state",
+  "CANONICAL-DB": "the persisted row itself agrees, with CEE out of the path",
+});
+
+/**
+ * Exit codes. INCOMPLETE is deliberately its OWN code, not folded into either
+ * neighbour: a caller that treats non-zero as "broken" must not read an
+ * unmeasured leg as a defect, and a caller that treats zero as "witnessed" must
+ * not read it as a pass. 2 is already spoken for by the preflight refusals
+ * (missing secret, production host, unparseable base URL), which must keep it.
+ */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, PREFLIGHT: 2, INCOMPLETE: 3 });
+
+/**
+ * Which UNKNOWN legs get an explicit remedy printed, because the reader can act
+ * on them. CANONICAL-DB is the one that matters most: `options[]`, `meta.roots`
+ * and `meta.leaves` are NOT emitted on the CEE wire at all
+ * (`compose/applied-graph-emit.ts` emits nodes+edges), so when this leg is
+ * unconfigured those fields are unverifiable ON EVERY SURFACE — not merely
+ * unverified on this run.
+ */
+const UNKNOWN_REMEDIES = Object.freeze({
+  "CANONICAL-DB":
+    "set WITNESS_SUPABASE_URL and WITNESS_SUPABASE_KEY. Without them options[], meta.roots and " +
+    "meta.leaves are unverifiable ON EVERY SURFACE — they are not on the CEE wire at all — so the " +
+    "persisted row is never inspected directly and the closure rests on CEE's own account of itself.",
+});
+
+/**
+ * Decide the run's outcome from its legs. PURE — no I/O, no process.exit — so
+ * the spec can drive every state, including the ones a live run rarely reaches.
+ *
+ * THE RULE: a PASS requires every acceptance clause's leg to have PASSED and no
+ * leg anywhere to be UNKNOWN. An UNKNOWN can never be reported as, or contribute
+ * to, a PASS — it yields INCOMPLETE, which is neither.
+ *
+ * @param {Array<{name?: string, verdict?: string, detail?: string}>} legs
+ * @returns {{status: "PASS"|"FAIL"|"INCOMPLETE", exitCode: number, lines: string[]}}
+ */
+export function decideOutcome(legs) {
+  const list = Array.isArray(legs) ? legs.filter((l) => l && typeof l.name === "string") : [];
+  const verdictOf = (name) => list.find((l) => l.name === name)?.verdict ?? null;
+
+  const failed = list.filter((l) => l.verdict === "FAIL");
+  const unknown = list.filter((l) => l.verdict === "UNKNOWN");
+  const recorded = list.filter((l) => l.verdict === "RECORDED");
+
+  /** @type {string[]} */ const established = [];
+  /** @type {string[]} */ const withheld = [];
+  for (const [leg, clause] of Object.entries(ACCEPTANCE_CLAUSES)) {
+    const v = verdictOf(leg);
+    if (v === "PASS") established.push(clause);
+    else withheld.push(`${leg} [${v ?? "NEVER REACHED"}] — NOT established: ${clause}`);
+  }
+
+  const status = failed.length > 0 ? "FAIL" : unknown.length > 0 || withheld.length > 0 || list.length === 0 ? "INCOMPLETE" : "PASS";
+  const exitCode = status === "PASS" ? EXIT.PASS : status === "FAIL" ? EXIT.FAIL : EXIT.INCOMPLETE;
+
+  /** @type {string[]} */ const lines = [];
+  if (status === "PASS") {
+    lines.push(`PASS — the structural_delete acceptance chain was witnessed end to end:`);
+    for (const c of established) lines.push(`  + ${c}`);
+    lines.push(`This witness covers the DELETE journey and is silent about every other path.`);
+  } else {
+    lines.push(
+      status === "FAIL"
+        ? `FAIL — ${failed.length} leg(s) failed. The closure is NOT witnessed.`
+        : `INCOMPLETE — no leg failed, but the closure is NOT witnessed: ` +
+          `${unknown.length} leg(s) were not measured and ${withheld.length} acceptance clause(s) are unestablished.`,
+    );
+    lines.push(``, `  ESTABLISHED (${established.length}/${Object.keys(ACCEPTANCE_CLAUSES).length}):`);
+    if (established.length === 0) lines.push(`    (nothing)`);
+    for (const c of established) lines.push(`    + ${c}`);
+    lines.push(``, `  NOT ESTABLISHED — do not report these as witnessed:`);
+    if (withheld.length === 0) lines.push(`    (nothing)`);
+    for (const w of withheld) {
+      lines.push(`    - ${w}`);
+      const remedy = UNKNOWN_REMEDIES[w.split(" [")[0]];
+      if (remedy) lines.push(`      REMEDY: ${remedy}`);
+    }
+  }
+  if (recorded.length > 0) {
+    lines.push(
+      ``,
+      `  RECORDED, not asserted: ${recorded.map((l) => l.name).join(", ")} — ` +
+        `set WITNESS_EXPECT_SHA to turn build freshness into an assertion rather than a note.`,
+    );
+  }
+  return { status, exitCode, lines };
+}
+
 /* ------------------------------------------------------------------ */
 /* Producer-derived constants — each cites where it came from.         */
 /* ------------------------------------------------------------------ */
@@ -1503,15 +1623,16 @@ function report() {
     log(`\n${unknown.length} leg(s) UNKNOWN — not measured, and deliberately NOT counted as a pass:`);
     for (const l of unknown) log(`  ? ${l.name}: ${l.detail.split("\n")[0]}`);
   }
-  if (failed.length === 0) {
-    log(`\nPASS — a deleted option was acknowledged truthfully, left the persisted canonical graph, and`);
-    log(`stayed gone across a rerun and a fresh uncached read of the canonical state.`);
-    log(`This witness covers the DELETE journey and is silent about every other path.`);
-    process.exit(0);
+  if (failed.length > 0) {
+    log(`\nFindings:`);
+    for (const l of failed) for (const m of l.findings) log(`  x ${m}`);
   }
-  log(`\nFAIL — ${failed.length} leg(s):`);
-  for (const l of failed) for (const m of l.findings) log(`  x ${m}`);
-  process.exit(1);
+  // The banner and the exit code come from ONE pure decision, so the sentence
+  // printed and the status returned cannot disagree. See `decideOutcome`.
+  const outcome = decideOutcome(legs);
+  log(``);
+  for (const line of outcome.lines) log(line);
+  process.exit(outcome.exitCode);
 }
 
 if (isMain) {
