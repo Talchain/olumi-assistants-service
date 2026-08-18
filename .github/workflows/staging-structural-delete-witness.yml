@@ -1,0 +1,100 @@
+name: Staging Structural-Delete Witness
+
+# THE ACCEPTANCE WITNESS for Canonical State / Transactional Editing.
+#
+# It drives the founder's own acceptance against DEPLOYED staging:
+#   delete an option -> acknowledged truthfully -> the persisted canonical graph
+#   changes -> rerun -> still gone -> a fresh uncached read -> still gone
+# plus the four negatives: no silent 200, no second add-option authority, no
+# misuse of direct_graph_edit, atomic batched delete semantics preserved.
+#
+# Built WITHOUT the mechanisms that made two earlier smoke workflows silently
+# dead:
+#   - NO `continue-on-error`   -> a red step fails the run.
+#   - NO `if: vars.X == 'true'` -> it cannot be switched off by leaving a
+#                                  repository variable unset.
+#   - NOT production            -> the script itself refuses the production
+#                                  hostname and exits 2.
+# Those properties are ASSERTED BY A TEST that parses THIS FILE
+# (tests/unit/ci/staging-structural-delete-witness.test.ts), derived from the
+# YAML rather than mirrored, so re-introducing any of them turns the suite red.
+#
+# WHY THIS IS NOT ON PUSH — a deliberate, reversible call, recorded rather than
+# assumed.
+#   1. It creates a real staging scenario row on every run, and it needs a live
+#      LLM draft (~60s) before it can bind a delete target.
+#   2. The upstream draft/readiness path is measurably unreliable today: the
+#      board records 3 of 11 core journeys failing on deployed staging, and two
+#      of this witness's own four live runs drew a model whose options carried no
+#      interventions at all. A push-blocking gate sitting on top of a ~27%
+#      upstream failure rate is a BROKEN ALARM, and an alarm people learn to
+#      ignore is worse than no alarm — that is precisely how the two dead smoke
+#      workflows above got that way.
+# RE-SURFACE TRIGGER: move this to `on: push: branches: [staging]` once the
+# turn-2 goal-node defect behind those failures is closed. The change is one
+# stanza; nothing else here needs to move.
+#
+# The DELETE journey itself is deterministic once a model exists — DELETE,
+# PERSISTED, RELOAD and the two controls passed on every run that reached them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expect_sha:
+        description: "Commit expected to be serving (blank = the commit this run was dispatched from)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-structural-delete-witness
+  cancel-in-progress: true
+
+jobs:
+  witness:
+    name: structural_delete acceptance against deployed staging
+    runs-on: ubuntu-latest
+    # Freshness poll (15 min) + a live draft + ~10 turns + CAS retries.
+    timeout-minutes: 30
+    steps:
+      # SPARSE on purpose, same as the journey gate: the witness is a
+      # dependency-free .mjs that reads no repository files, so a full checkout
+      # would clone ~160MB for one directory.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No `pnpm install`: built-in fetch only, so the witness keeps working even
+      # when the dependency graph is what broke.
+      - name: Drive the structural_delete acceptance
+        env:
+          WITNESS_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
+          # Same secret the journey smoke gate uses. If it is missing the script
+          # exits 2 and the run goes RED — a missing secret must never read as a
+          # pass.
+          WITNESS_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
+          WITNESS_EXPECT_SHA: ${{ github.event.inputs.expect_sha || github.sha }}
+          # OPTIONAL. Without both, the CANONICAL-DB leg reports UNKNOWN rather
+          # than PASS, and `options[]` / `meta.roots` / `meta.leaves` stay
+          # unverified — they are not observable on the CEE wire at all.
+          WITNESS_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          WITNESS_SUPABASE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+        # `shell: bash` is LOAD-BEARING. GitHub's default Linux shell is
+        # `bash -e {0}` WITHOUT pipefail, so `node ... | tee` would exit with
+        # tee's status (0) and this witness would pass while the deletion was
+        # broken. `shell: bash` selects `bash --noprofile --norc -eo pipefail {0}`.
+        shell: bash
+        run: node scripts/ci/staging-structural-delete-witness.mjs 2>&1 | tee staging-structural-delete-witness.log
+
+      - name: Upload witness log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-structural-delete-witness-log
+          path: staging-structural-delete-witness.log
