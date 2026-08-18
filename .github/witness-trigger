@@ -1,23 +1,11 @@
-# Acceptance-witness trigger sentinel
-#
-# Touching this file on `staging` fires
-# `.github/workflows/staging-structural-delete-witness.yml`, the acceptance
-# witness for the Canonical State / Transactional Editing closure. Nothing reads
-# the CONTENTS — the commit itself is the signal — so append a dated line saying
-# why you fired it and leave the history in place.
-#
-# It drives the founder's acceptance against DEPLOYED staging: delete an option,
-# see it acknowledged truthfully, see the persisted canonical graph change, see
-# it still gone across a rerun, a fresh uncached read, and a second delete.
-#
-# BEFORE YOU FIRE IT, know what it costs and what it needs:
-#   - it creates exactly ONE real staging scenario row per run;
-#   - it needs a live LLM draft, so a run takes minutes, not seconds;
-#   - it polls for the serving build to match the commit you push here, so push
-#     it AFTER the build you mean to witness has deployed;
-#   - exit 0 = witnessed, 1 = a leg FAILED, 3 = INCOMPLETE (a leg was not
-#     measured — that is NOT a pass), 2 = it refused to start (missing
-#     credential, or a base URL that is not staging).
-#
-# ---- fire log (append below) ----
-2026-08-18  created with the push trigger; not yet fired.
+Touch this file to fire the structural-delete acceptance witness.
+
+Fired 18 Aug 2026 by the integration owner, against serving CEE 2d998fa5
+(#1027 router election gate + #1028 option-effect writer).
+
+Purpose: complete the Canonical State / Transactional Editing closure RERUN leg,
+which was blocked because no wire verb could set an option effect value (2.1266).
+
+Read the result LEG BY LEG. Exit 3 = INCOMPLETE = not measured, not a failure.
+The canonical-DB leg will be UNKNOWN until STAGING_SUPABASE_URL and
+STAGING_SUPABASE_SERVICE_ROLE_KEY exist as repo secrets; they do not today.
