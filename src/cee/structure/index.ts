@@ -3,6 +3,8 @@ import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
 import { buildCompoundGoalLabel } from "./compound-goal-label.js";
+import { buildOutcomeToGoalEdge } from "./goal-inference.js";
+import { deriveGoalObjectiveLabel } from "../draft/records/objective-label.js";
 import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
@@ -263,16 +265,128 @@ function edgePriority(edge: any): number {
   return score;
 }
 
+const canonicalLabelText = (text: unknown): string =>
+  String(text ?? "").replace(/\s+/g, " ").trim();
+
 /**
- * Enforce single goal constraint.
- * If multiple goal nodes exist, merge them into a compound goal.
+ * Convert one non-primary goal node into the outcome node that carries its
+ * objective (quality bar §8 A3). Pure; the caller owns placement and edges.
  *
- * Strategy:
- * - Keep the first goal node as the primary
- * - Update its label to combine all goal labels
- * - Redirect all edges pointing to other goals to point to the primary
- * - Remove the duplicate goal nodes
- * - When deduplicating edges, prefer edges with provenance/metadata
+ * ⭐ THE LABEL RULE IS IDEMPOTENT BY CONSTRUCTION. `deriveGoalObjectiveLabel`
+ * runs ONLY where the label is still the verbatim quote, so:
+ *   · a projector-authored label ("Increase Productivity") is left alone —
+ *     re-deriving an already-authored string is a second transformation over
+ *     natural language, and this estate has ratified stopping at the first;
+ *   · a legacy/LLM-path label that IS the quote gets one authoring pass;
+ *   · a refusal (deliberation frame, discarded qualification, no concise form)
+ *     keeps the user's exact words. Refusal falls back to verbatim, never to a
+ *     guess — the deriver cannot emit a token the user did not write.
+ *
+ * ⚠ EVERY OTHER FIELD IS CARRIED THROUGH UNTOUCHED, and that is load-bearing
+ * for A2 conservation: the `goal_threshold` quad rides along, so a demoted
+ * objective's numerals survive in `label ∪ goal_threshold*` — the union the
+ * conservation rule is asserted over once `source_quote` is excluded from it.
+ * The quality bar's HARD rule is that no repair may discard a `goal_threshold`
+ * quad; before this it was discarded at the wire in every case.
+ *
+ * `provenance_class` stays `stated`: the user DID state this objective, and A1
+ * is explicit that the class means *the user stated this*, not *this text is the
+ * user's*. `label_authored` beside it is what says the display string is ours.
+ * Three live readers key on `stated` and none of them is touched.
+ */
+function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
+  const source = (node ?? {}) as Record<string, unknown>;
+  const provenance = (source.provenance ?? undefined) as Record<string, unknown> | undefined;
+  const quote = typeof provenance?.source_quote === "string" ? provenance.source_quote : undefined;
+  const currentLabel = typeof source.label === "string" ? source.label : "";
+
+  const labelIsStillTheQuote =
+    quote !== undefined && canonicalLabelText(currentLabel) === canonicalLabelText(quote);
+
+  const authored = labelIsStillTheQuote ? deriveGoalObjectiveLabel(quote!) : undefined;
+  const label = authored?.authored ? authored.label : currentLabel;
+  const labelAuthored =
+    authored?.authored === true || provenance?.label_authored === true;
+
+  return {
+    ...source,
+    kind: "outcome",
+    ...(label.length > 0 && { label }),
+    ...(provenance !== undefined && {
+      provenance: {
+        ...provenance,
+        ...(labelAuthored && { label_authored: true }),
+      },
+    }),
+  };
+}
+
+/**
+ * ⭐⭐ A NON-PRIMARY OBJECTIVE BECOMES AN OUTCOME NODE. IT IS NOT DELETED.
+ *
+ * ── THE RULING (quality bar §8 A3, Paul, 18 Aug 2026) ───────────────────────
+ * "A brief with multiple objectives yields ONE overarching goal node + SEPARATE
+ *  explicit outcome/criterion nodes carrying the distinct objectives/targets.
+ *  Not several goal roots; not objectives hidden in coaching; never a string
+ *  join. Exact user wording preserved as provenance."
+ *
+ * ── THE DEFECT THIS CLOSES, MEASURED AT THE WIRE ───────────────────────────
+ * This function kept `goalIds[0]` and FILTERED THE REST OUT, recording them in
+ * `merged_from` (labels) and `merged_goals` (full records). Both are stripped at
+ * the wire — `NodeV3` is a plain `z.object`, so undeclared keys are deleted by
+ * `GraphV3.safeParse` — and both have ZERO product readers (producer site and
+ * tests only, swept `rg -a` across the repo).
+ *
+ * So on the founder's own brief, driven through the real chain
+ * (`projectRecordsToGraph` → here → `projectGraphAndOptionsToV3` → `GraphV3`):
+ *
+ *   projected     goal "Spend Less" · goal "Increase Productivity" · goal "Maintain Code Quality"
+ *   at the wire   goal "Spend Less" — and the strings "productivity" and
+ *                 "code quality" reach **ZERO nodes**.
+ *
+ * Two of three objectives left the product entirely. `merged_goals` was not a
+ * preservation mechanism, it was a comment addressed to nobody.
+ *
+ * ── WHY `outcome`, AND WHY THIS TOPOLOGY IS DERIVED RATHER THAN INVENTED ────
+ * `outcome` is a canonical kind at every hop (`NodeKindV3`, `V3_VALID_KINDS`,
+ * `NODE_KIND_MAP`), and `ALLOWED_EDGES` (`validators/graph-validator.types.ts`
+ * :293-302) declares exactly one shape with `outcome` as a source:
+ * `{ fromKind: "outcome", toKind: "goal" }`. That is the edge minted here, built
+ * by `buildOutcomeToGoalEdge` — the SAME constructor `wireOutcomesToGoal` has
+ * always used for this shape, extracted rather than copied so the two cannot
+ * drift.
+ *
+ * ⚠ THE EDGE IS NOT OPTIONAL, and this is the P6 half. `validateReachability`
+ * (`graph-validator.ts:578-608`) exempts an outcome from `UNREACHABLE_FROM_DECISION`
+ * only when `canReachGoal.has(node.id)` — with the edge it is an `info` issue
+ * (`EXEMPT_UNREACHABLE_OUTCOME_RISK`, reason `isolated`); WITHOUT it the node is
+ * an `error`. A demoted objective with no edge would therefore manufacture a
+ * blocking obligation out of structure the system created, which P6 forbids by
+ * name. Adding the node also cannot create `MISSING_BRIDGE` — that error fires
+ * when outcomes and risks are BOTH absent, so a new outcome can only relieve it.
+ * And it mints no `MISSING_OPTION_VALUE`: that ask is keyed `option_id::factor_id`
+ * over option→factor pairs, which this edge is not.
+ *
+ * ── WHAT IS DELIBERATELY UNCHANGED ─────────────────────────────────────────
+ * The EDGE REDIRECT IS BYTE-IDENTICAL. Edges that pointed at a demoted goal
+ * still move to the primary, exactly as before, and are deduplicated exactly as
+ * before. This change is purely ADDITIVE — one node kept alive per demoted
+ * objective, plus one `outcome → goal` edge each. Letting the old edges follow
+ * the demoted node instead would produce `outcome → outcome` and `risk → outcome`
+ * shapes, which `ALLOWED_EDGES` does not admit; that is a different and larger
+ * change, and it is not this one.
+ *
+ * `merged_from` / `merged_goals` are also left in place. They are now redundant
+ * rather than load-bearing, but they are pinned by existing suites and removing
+ * them is a separate deletion with its own review.
+ *
+ * ── THE LABEL ──────────────────────────────────────────────────────────────
+ * Authored via the whitelist deriver, and IDEMPOTENT BY CONSTRUCTION: the
+ * deriver runs only when the label is still the verbatim quote. Where the
+ * projector already authored it ("increase productivity" → "Increase
+ * Productivity") the existing label stands untouched; where the deriver refuses
+ * (a deliberation-framed quote, a discarded qualification) the verbatim stands.
+ * Refusal falls back to the user's own words, never to a guess.
  */
 export function enforceSingleGoal(
   graph: GraphV1 | undefined,
@@ -344,7 +458,12 @@ export function enforceSingleGoal(
       };
     });
 
-  // Create updated nodes array
+  // Create updated nodes array.
+  //
+  // A non-primary goal is CONVERTED to an outcome node in place — same id, same
+  // provenance, same `goal_threshold` quad — rather than filtered away. Keeping
+  // the id is what lets the edge redirect below stay byte-identical while the
+  // objective itself survives to the wire.
   const updatedNodes = nodes.map((node) => {
     if ((node as any)?.id === primaryId) {
       return {
@@ -354,8 +473,11 @@ export function enforceSingleGoal(
         ...(mergedGoalRecords.length > 0 && { merged_goals: mergedGoalRecords }),
       };
     }
+    if (otherGoalIds.has((node as any)?.id)) {
+      return demoteGoalToOutcome(node);
+    }
     return node;
-  }).filter((node) => !otherGoalIds.has((node as any)?.id));
+  });
 
   // Redirect edges from other goals to primary goal
   const updatedEdges = edges.map((edge) => {
@@ -395,6 +517,21 @@ export function enforceSingleGoal(
     return edge;
   });
 
+  // Each demoted objective gets its `outcome → goal` edge. Appended AFTER the
+  // dedup above so the redirect/dedup behaviour it must not disturb has already
+  // finished, and guarded on the id actually surviving as an outcome.
+  const demotedOutcomeIds = updatedNodes
+    .filter((node) => otherGoalIds.has((node as any)?.id) && (node as any)?.kind === "outcome")
+    .map((node) => (node as any).id as string);
+  const edgesWithDemotedOutcomes = [...dedupedEdges];
+  for (const outcomeId of demotedOutcomeIds) {
+    // Never a second edge where one already survived the redirect.
+    if (edgesWithDemotedOutcomes.some((e) => (e as any)?.from === outcomeId && (e as any)?.to === primaryId)) {
+      continue;
+    }
+    edgesWithDemotedOutcomes.push(buildOutcomeToGoalEdge(outcomeId, primaryId, "outcome") as any);
+  }
+
   // Update meta.roots to reflect single goal
   const updatedMeta = {
     ...((graph as any).meta || {}),
@@ -405,7 +542,7 @@ export function enforceSingleGoal(
     graph: {
       ...(graph as any),
       nodes: updatedNodes as any,
-      edges: dedupedEdges as any,
+      edges: edgesWithDemotedOutcomes as any,
       meta: updatedMeta,
     } as GraphV1,
     hadMultipleGoals: true,
