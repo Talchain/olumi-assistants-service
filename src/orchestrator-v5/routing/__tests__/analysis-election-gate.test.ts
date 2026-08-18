@@ -215,10 +215,20 @@ describe('the four discriminating twins (predicate level)', () => {
   });
 
   it.each([
-    'Run the analysis.',
-    'Re-run the analysis.',
-    'Analyse this decision.',
-    'Simulate the model.',
+    // ⚠ ONE CASE PER (VERB × OBJECT-PRESENCE) CELL. Two mutants that deleted a
+    // verb from one of the two pattern sources SURVIVED an earlier green suite
+    // because the sources overlapped and every case here happened to carry an
+    // object. The object-LESS rows are what make the object-less pattern
+    // observable, and the `re-` rows are what make its inflection observable.
+    'Run the analysis.',        // run   + object   (the ambiguous verb)
+    'Run analysis.',            // run   + bare noun object
+    'Re-run the analysis.',     // rerun + object
+    'Rerun the numbers.',       // rerun + object, other noun
+    'Analyse this decision.',   // analyse  + object
+    'Analyse.',                 // analyse  + NO object
+    'Simulate the model.',      // simulate + object
+    'Simulate.',                // simulate + NO object
+    'Re-analyse.',              // re-analyse + NO object
   ])('TWIN B (opposite direction) — explicit intent %j is ADMITTED', (message) => {
     expect(
       evaluateAnalysisElection({

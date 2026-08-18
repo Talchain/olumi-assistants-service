@@ -823,12 +823,18 @@ export function looksLikeImperativeRerun(message: string): boolean {
 // OR shrinks.
 
 /**
- * The four verbs the served routing prompt names at line 134, plus their
- * `re-` inflections. Single-sourced so the pattern list below and any future
- * consumer cannot drift from the prompt sentence they encode.
+ * The AMBIGUOUS verb of the four the served routing prompt names at line 134,
+ * plus its `re-` inflection. `run` is the only one that needs an object (see
+ * the note on {@link OBJECTLESS_ANALYSIS_VERB_SOURCE}); `rerun` / `simulate` /
+ * `analyse` are covered there.
+ *
+ * ⚠ THE TWO SOURCES ARE DISJOINT ON PURPOSE. An earlier draft listed
+ * `simulate` and `analy[sz]e` in BOTH, so either pattern alone still admitted
+ * every corpus member — and two mutants that deleted a verb from one of them
+ * SURVIVED a green suite, because the other silently covered for it. Redundant
+ * alternations make a predicate untestable: keep each verb in exactly one home.
  */
-const ANALYSIS_REQUEST_VERB_SOURCE =
-  String.raw`(?:re-?)?(?:run|simulate|analy[sz]e)`;
+const ANALYSIS_REQUEST_VERB_SOURCE = String.raw`(?:re-?)?run`;
 
 /**
  * Objects that make the verb an analysis instruction rather than an unrelated
@@ -865,7 +871,8 @@ const ANALYSIS_REQUEST_OBJECT_SOURCE = String.raw`(?:(?:the|this|that|my|our|a|a
 const OBJECTLESS_ANALYSIS_VERB_SOURCE = String.raw`(?:re-?)?(?:simulate|analy[sz]e)`;
 
 const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
-  // Object-bearing form, needed for the ambiguous verb `run`:
+  // Object-bearing form — `run` / `rerun` ONLY, the verbs with a nominal
+  // homograph and an everyday transitive sense:
   // "Run analysis.", "Run the analysis.", "Re-run the numbers.", "Run it."
   new RegExp(
     String.raw`\b${ANALYSIS_REQUEST_VERB_SOURCE}\s+(?:${ANALYSIS_REQUEST_OBJECT_SOURCE})\b`,
