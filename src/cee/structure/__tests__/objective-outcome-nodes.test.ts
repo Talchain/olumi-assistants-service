@@ -205,6 +205,104 @@ describe("⭐ THE LEAD RED — the founder's brief must not lose objectives", ()
 });
 
 // ---------------------------------------------------------------------------
+// The quad. `merged_goals` claimed to preserve it and could not: `GraphV3`
+// strips that key, and only ONE of the four fields was ever copied into it. The
+// outcome node is the mechanism that actually delivers the quality bar's HARD
+// rule, so the rule is asserted where it is now kept — at the wire, per node.
+// ---------------------------------------------------------------------------
+describe("the goal_threshold quad rides the demoted objective all the way to the wire", () => {
+  const THRESHOLD_BRIEF =
+    "We must reach 800 active customers. We also want to cut support cost.";
+  const THRESHOLD_OBJECTIVES = ["reach 800 active customers", "cut support cost"] as const;
+  const QUAD = {
+    goal_threshold: 0.8,
+    goal_threshold_raw: 800,
+    goal_threshold_unit: "customers",
+    goal_threshold_cap: 1000,
+  } as const;
+
+  function thresholdRecords(): DraftRecordSet {
+    return {
+      stated_items: [
+        { kind: "goal", source_quote: THRESHOLD_OBJECTIVES[0] },
+        { kind: "goal", source_quote: THRESHOLD_OBJECTIVES[1] },
+        { kind: "option", source_quote: "hire two reps" },
+        { kind: "option", source_quote: "keep the current team" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Sales Capacity", basis: [2] },
+        { claim_kind: "outcome", label: "Customer Growth", basis: [2] },
+        {
+          claim_kind: "causal_link",
+          label: "hiring moves capacity",
+          from_stated: 2,
+          to_claim: 0,
+          effect: "positive",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "status quo holds capacity",
+          from_stated: 3,
+          to_claim: 0,
+          effect: "positive",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "capacity drives growth",
+          from_claim: 0,
+          to_claim: 1,
+          effect: "positive",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "growth reaches the goal",
+          from_claim: 1,
+          to_stated: 0,
+          effect: "positive",
+        },
+      ],
+    } as unknown as DraftRecordSet;
+  }
+
+  it("all FOUR threshold fields survive on the demoted objective's own node", () => {
+    const projected = projectRecordsToGraph(thresholdRecords(), THRESHOLD_BRIEF).graph;
+    // Put the quad on the NON-PRIMARY objective — the one the old code deleted.
+    const secondary = (projected.nodes as unknown as AnyNode[]).filter(
+      (n) => n.kind === "goal",
+    )[1]!;
+    Object.assign(secondary, QUAD);
+
+    // Positive control: the quad is genuinely on the node we are about to merge.
+    expect((secondary as unknown as Record<string, unknown>).goal_threshold_raw).toBe(800);
+
+    const merged = enforceSingleGoal({
+      nodes: projected.nodes,
+      edges: projected.edges,
+    } as never)!;
+    const nodes = wireNodes(merged.graph, THRESHOLD_BRIEF);
+
+    // Bound by identity: THIS objective's node, not "a node carrying 800".
+    const node = nodeForObjective(nodes, THRESHOLD_OBJECTIVES[1]);
+    expect(node, "the demoted objective is not on the wire at all").toBeDefined();
+    expect(node!.kind).toBe("outcome");
+
+    const wire = node as unknown as Record<string, unknown>;
+    for (const [field, value] of Object.entries(QUAD)) {
+      expect(wire[field], `${field} did not survive to the wire`).toBe(value);
+    }
+  });
+
+  it("the superseded carriers are gone — no node ships merged_from or merged_goals", () => {
+    const { graph } = mergedGraph(founderRecords(), FOUNDER_BRIEF);
+    for (const node of graph.nodes) {
+      const n = node as unknown as Record<string, unknown>;
+      expect(n).not.toHaveProperty("merged_from");
+      expect(n).not.toHaveProperty("merged_goals");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A2 conservation, per node, with `source_quote` EXCLUDED from the union.
 //
 // ⚠ THE EXCLUSION IS THE WHOLE POINT. `source_quote` is the quote, so a union

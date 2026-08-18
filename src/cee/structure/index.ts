@@ -441,22 +441,24 @@ export function enforceSingleGoal(
   // is not in this repo — and it does not change WHICH goals merge.
   const composed = buildCompoundGoalLabel(labels);
 
-  // Everything the merged-away goals carried, preserved rather than filtered
-  // away with them. The quality bar's HARD rule is that no repair may discard a
-  // `goal_threshold` quad; before this, the `.filter` below dropped the whole
-  // node and the quad went with it.
-  const mergedGoalRecords = nodes
-    .filter((node) => otherGoalIds.has((node as any)?.id))
-    .map((node) => {
-      const n = node as any;
-      return {
-        id: n.id,
-        label: n.label,
-        ...(n.goal_threshold !== undefined && { goal_threshold: n.goal_threshold }),
-        ...(n.goal_constraints !== undefined && { goal_constraints: n.goal_constraints }),
-        ...(n.provenance !== undefined && { provenance: n.provenance }),
-      };
-    });
+  // ⭐⭐ `merged_from` / `merged_goals` ARE DELETED HERE, NOT KEPT ALONGSIDE.
+  //
+  // They were this function's answer to the quality bar's HARD rule that no
+  // repair may discard a `goal_threshold` quad. Measured, that answer never
+  // delivered: `NodeV3` is a plain `z.object`, so `GraphV3.safeParse` strips
+  // both keys, and a repo-wide `rg -a` finds ZERO product readers — the survivor
+  // set for those fields is `['id','kind','label']`, while the contrast control
+  // `source_quote`/`label_authored` DOES survive the same parse. The quad
+  // reached a V1-only field nothing reads, and only ONE of the four threshold
+  // fields was even copied into it (`goal_threshold`, never `_raw`/`_unit`/
+  // `_cap`).
+  //
+  // The demotion below IS the conservation mechanism `merged_from` was failing
+  // to be: the objective survives as a real node, carrying its FULL quad and its
+  // verbatim quote, and it crosses the wire. Keeping the old field beside the
+  // new one would leave two authorities for one concept with only one of them
+  // true — this estate's chronic defect, and the reason this is a deletion
+  // rather than a deprecation comment.
 
   // Create updated nodes array.
   //
@@ -466,11 +468,13 @@ export function enforceSingleGoal(
   // objective itself survives to the wire.
   const updatedNodes = nodes.map((node) => {
     if ((node as any)?.id === primaryId) {
+      // Label only. `buildCompoundGoalLabel` still RETURNS `merged_from` — it is
+      // a pure selection function with its own suite and its `labels[0]` choice
+      // is what keeps `label_authored`/`source_quote` truthful on this node — but
+      // nothing is attached to the graph from it any more.
       return {
         ...(node as any),
         label: composed.label,
-        ...(composed.merged_from !== undefined && { merged_from: composed.merged_from }),
-        ...(mergedGoalRecords.length > 0 && { merged_goals: mergedGoalRecords }),
       };
     }
     if (otherGoalIds.has((node as any)?.id)) {
