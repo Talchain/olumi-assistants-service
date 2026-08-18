@@ -583,9 +583,7 @@ describe("⭐ the user's stated causality survives — a driver of objective B r
       (n) => n.label === "Marketing Spend",
     )!;
     expect(
-      (projected.edges as Array<Record<string, unknown>>).some(
-        (e) => e.from === factorIn.id && e.to === bIn.id,
-      ),
+      projected.edges.some((e) => e.from === factorIn.id && e.to === bIn.id),
       "instrument: the stated factor→objective-B edge is not in the projection",
     ).toBe(true);
 
