@@ -202,14 +202,23 @@ describe('graph-structure-validator — absolute size is NOT this gate\'s author
   // pin: re-adding a `CEE_GRAPH_MAX_*`-driven clause turns this RED.
   // -------------------------------------------------------------------------
   it('CEE_GRAPH_MAX_NODES / CEE_GRAPH_MAX_EDGES no longer reintroduce a size refusal', async () => {
+    // `vi.resetModules()` + a PLAIN dynamic import, deliberately not the
+    // `?query-string` cache-buster the deleted env tests used: that pattern is
+    // unresolvable to `tsc` and is why this file's predecessor sat in
+    // `scripts/ci/typecheck-baseline.txt`. Resetting the registry re-evaluates
+    // module-level constants against the stubbed env just as well, and adds no
+    // type error to baseline.
+    vi.resetModules();
     vi.stubEnv('CEE_GRAPH_MAX_NODES', '4');
     vi.stubEnv('CEE_GRAPH_MAX_EDGES', '3');
-    const { validateGraphStructure: validate } = await import(
-      '../../../src/orchestrator/graph-structure-validator.js?size-authority-env-test'
-    );
-    const result = validate(makeRealisticDraftGraph());
-    expect(result.violations.map((v: { code: string }) => v.code)).toEqual([]);
-    vi.unstubAllEnvs();
+    try {
+      const fresh = await import('../../../src/orchestrator/graph-structure-validator.js');
+      const result = fresh.validateGraphStructure(makeRealisticDraftGraph());
+      expect(result.violations.map((v) => v.code)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
 
