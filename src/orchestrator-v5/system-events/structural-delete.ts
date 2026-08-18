@@ -174,7 +174,15 @@ function edgePath(from: string, to: string): string {
  * resolves ids against the POST-commit graph — where this node no longer is.
  */
 function nodeLabel(graph: GraphV3T, id: string): string {
-  return graph.nodes.find((n) => n.id === id)?.label ?? id;
+  // ⚠ `||`, NOT `??` — and this is a measured defect, not a style choice.
+  // `NodeV3.label` is a bare `z.string()` with no minimum (`cee-v3.ts:147`),
+  // while the receipt's `affected_entities[].label` is `z.string().min(1)` in
+  // 0.48.0. A nullish `??` lets an EMPTY-STRING label through, the fact then
+  // fails its own contract, and the fail-closed branch refuses the deletion with
+  // no recovery offered — so a node with an empty label could NEVER be deleted
+  // and the user repeats forever (P8). The estate already treats empty labels as
+  // real: `reconcile-top-level-options.ts` guards `node.label.length > 0`.
+  return graph.nodes.find((n) => n.id === id)?.label || id;
 }
 
 /** Node kind for the fact's `affected_entities`, from the base graph. */
@@ -252,6 +260,137 @@ export function hasDanglingEdge(graph: GraphV3T): boolean {
   return graph.edges.some((e) => !ids.has(e.from) || !ids.has(e.to));
 }
 
+function isDict(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Delete every key naming a removed node from an intervention-shaped record. */
+function pruneInterventionKeys(
+  holder: Record<string, unknown>,
+  field: 'interventions' | 'raw_interventions',
+  removed: ReadonlySet<string>,
+): number {
+  const bag = holder[field];
+  if (!isDict(bag)) return 0;
+  let pruned = 0;
+  for (const key of Object.keys(bag)) {
+    if (removed.has(key)) {
+      delete bag[key];
+      pruned += 1;
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Remove every reference to a deleted node from the fields that carry node ids
+ * BY VALUE rather than by structure.
+ *
+ * ⭐ WHY THIS IS NOT TIDINESS — it changes analysis RESULTS. Derived end to end,
+ * by execution, not by argument:
+ *
+ *  1. CEE does not filter interventions to existing nodes. `run-analysis.ts:687`
+ *     spreads `requestProjection.perOption[index]` onto the wire wholesale.
+ *  2. Deleting a factor's NODE removes its cap from `buildFactorScaleMap`, so the
+ *     canonical persisted intervention shape `{value: 0.4, raw_value: 40000}`
+ *     projects to **40000** instead of **0.4** — measured against the real
+ *     modules, a 100,000× change, because the cap that anchored it is gone.
+ *  3. PLoT's `needsNormalisation` (`lib/intervention-normaliser.ts:837-847`) is a
+ *     WHOLE-REQUEST gate: it scans every intervention of every option and returns
+ *     true if ANY value is outside [0,1]. A stranded 40000 opens it.
+ *  4. Opening it routes the entire request through `normaliseOptionsForISL`
+ *     (`routes/v2/run.ts:6600`) instead of the passthrough, so EVERY OTHER
+ *     factor's value reaching ISL changes too.
+ *
+ * So an orphaned intervention is not inert: one deleted factor silently re-scales
+ * the whole analysis. Pruning here is the intervention-level twin of the edge
+ * cascade — a delete must not leave references to what it removed.
+ *
+ * Mutates a structuredClone the caller owns. Never throws.
+ */
+export function pruneDanglingNodeReferences(
+  graph: Record<string, unknown>,
+  removedNodeIds: ReadonlySet<string>,
+): { readonly interventionsPruned: number; readonly metaIdsPruned: number } {
+  let interventionsPruned = 0;
+  let metaIdsPruned = 0;
+
+  // Option-KIND nodes carry `interventions` (cee-v3.ts:199).
+  if (Array.isArray(graph.nodes)) {
+    for (const node of graph.nodes) {
+      if (!isDict(node)) continue;
+      interventionsPruned += pruneInterventionKeys(node, 'interventions', removedNodeIds);
+      interventionsPruned += pruneInterventionKeys(node, 'raw_interventions', removedNodeIds);
+    }
+  }
+
+  // The top-level `options[]` mirror carries the SAME keys (cee-v3.ts:405) and is
+  // the surface live CEE readers prefer — pruning only the nodes would leave the
+  // two views disagreeing, which is the defect this PR already fixed once.
+  if (Array.isArray(graph.options)) {
+    for (const option of graph.options) {
+      if (!isDict(option)) continue;
+      interventionsPruned += pruneInterventionKeys(option, 'interventions', removedNodeIds);
+      interventionsPruned += pruneInterventionKeys(option, 'raw_interventions', removedNodeIds);
+    }
+  }
+
+  // `meta.roots` / `meta.leaves` are plain id arrays (cee-v3.ts:516-518).
+  if (isDict(graph.meta)) {
+    for (const field of ['roots', 'leaves'] as const) {
+      const list = graph.meta[field];
+      if (!Array.isArray(list)) continue;
+      const kept = list.filter((id) => !(typeof id === 'string' && removedNodeIds.has(id)));
+      metaIdsPruned += list.length - kept.length;
+      if (kept.length !== list.length) graph.meta[field] = kept;
+    }
+  }
+
+  return { interventionsPruned, metaIdsPruned };
+}
+
+/**
+ * Any SURVIVING reference to a removed node, or null when the graph is clean.
+ *
+ * The postcondition twin of the prune above, asserted on the PROJECTED bytes —
+ * the projection runs after the prune and could reintroduce a reference.
+ *
+ * `goal_node_id` is deliberately NOT auto-repaired. Every other field here holds
+ * a reference that becomes meaningless once its node is gone, so dropping it
+ * restores coherence; the goal is the model's whole point, and silently choosing
+ * a different one — or blanking it — would be the system deciding something the
+ * user never asked for. Refusing is the honest answer.
+ */
+export function findOrphanedNodeReference(
+  graph: Record<string, unknown>,
+  removedNodeIds: ReadonlySet<string>,
+): string | null {
+  const goalNodeId = graph.goal_node_id;
+  if (typeof goalNodeId === 'string' && removedNodeIds.has(goalNodeId)) {
+    return 'goal_node_id';
+  }
+  const scan = (holder: unknown, where: string): string | null => {
+    if (!isDict(holder)) return null;
+    for (const field of ['interventions', 'raw_interventions'] as const) {
+      const bag = holder[field];
+      if (!isDict(bag)) continue;
+      for (const key of Object.keys(bag)) {
+        if (removedNodeIds.has(key)) return `${where}.${field}`;
+      }
+    }
+    return null;
+  };
+  for (const node of Array.isArray(graph.nodes) ? graph.nodes : []) {
+    const hit = scan(node, 'nodes[]');
+    if (hit !== null) return hit;
+  }
+  for (const option of Array.isArray(graph.options) ? graph.options : []) {
+    const hit = scan(option, 'options[]');
+    if (hit !== null) return hit;
+  }
+  return null;
+}
+
 export function applyStructuralDelete(
   params: ApplyStructuralDeleteParams,
 ): StructuralDeleteResult {
@@ -320,11 +459,23 @@ export function applyStructuralDelete(
     );
   }
 
-  // ── 3. resolve EVERY target against the server's graph, or refuse ────────
+  // ── 3. resolve targets against the server's graph, or refuse ─────────────
   // Wholesale, never partial: a delete the server can only half-honour is the
   // dangling-edge hazard, and "I removed some of that" is not an outcome the
   // user asked for. Duplicates in the persisted graph are refused rather than
   // arbitrarily disambiguated — the same rule `edge_strength_edit` applies.
+  //
+  // ⚠ ONE DELIBERATE HOLE, stated because an earlier version of this comment
+  // claimed "EVERY target" and that was FALSE. An edge sharing an endpoint with
+  // a node being removed in the SAME event is NOT resolved: the cascade is about
+  // to take it regardless, so requiring it to exist first would refuse the
+  // ordinary select-a-node-and-its-edges gesture. The cost is that a MALFORMED
+  // half of such a pair rides through unchecked — `{from: 'o-launch',
+  // to: 'no-such-node'}` alongside removing `o-launch` commits silently, because
+  // the cascade already achieved the end state the op asked for. The end state
+  // is correct; the unresolvable id is simply not reported. Narrowing that
+  // further means resolving each pair against the POST-cascade graph, which is a
+  // separate change — it is a reporting gap, not a correctness one.
   const nodeIdsInGraph = new Set(baseGraph.nodes.map((n) => n.id));
   const missingNodeIds = event.removed_node_ids.filter((id) => !nodeIdsInGraph.has(id));
   if (missingNodeIds.length > 0) {
@@ -349,7 +500,16 @@ export function applyStructuralDelete(
   // An edge the client named that a node removal in THIS SAME event will cascade
   // away is not "missing" — it is already accounted for. Resolve edge presence
   // against the pre-delete graph, and let the cascade elision below handle the
-  // ordering. Anything else is genuinely absent.
+  // ordering.
+  //
+  // ⚠ WHAT THIS EXEMPTION COSTS, stated precisely — an earlier version of this
+  // line said "anything else is genuinely absent", which is FALSE. The exemption
+  // is keyed on EITHER endpoint being removed, so only the OTHER half of the pair
+  // goes unchecked: `{from: 'o-launch', to: 'no-such-node'}` alongside removing
+  // `o-launch` is accepted and commits, because the cascade already delivers the
+  // end state that op asked for. The resulting graph is correct; what is lost is
+  // the REPORT that one named id was unresolvable. Tightening this means
+  // resolving each pair against the post-cascade graph — a separate change.
   const removedNodeIdSet = new Set(event.removed_node_ids);
   const unresolvableEdges = event.removed_edges.filter(
     (e) =>
@@ -468,6 +628,28 @@ export function applyStructuralDelete(
     requestId,
     scenarioId: payload.scenario_id,
   });
+
+  // ── 5b. drop references to what we just removed ──────────────────────────
+  // The merge fixes the two STRUCTURAL surfaces (nodes/edges and the top-level
+  // `options[]` roster). It does not touch fields that name a node BY VALUE —
+  // interventions keyed on a factor id, `meta.roots`/`meta.leaves`. Those are
+  // not cosmetic: an orphaned intervention re-scales the WHOLE analysis (see
+  // `pruneDanglingNodeReferences`). Same principle as the edge cascade, one
+  // field-class over.
+  const removedIdSet = new Set(event.removed_node_ids);
+  const pruneCounts = pruneDanglingNodeReferences(merged, removedIdSet);
+  if (pruneCounts.interventionsPruned > 0 || pruneCounts.metaIdsPruned > 0) {
+    log.info(
+      {
+        event: 'v5.system_event.structural_delete.dangling_refs_pruned',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        interventions_pruned: pruneCounts.interventionsPruned,
+        meta_ids_pruned: pruneCounts.metaIdsPruned,
+      },
+      'structural_delete — dropped references to the removed nodes',
+    );
+  }
   // Project here for the same reason `edge_strength_edit` does: the commit
   // chokepoint applies this same idempotent function on the way to the store, so
   // projecting now makes this adapter's readback and hashes describe those
@@ -510,6 +692,74 @@ export function applyStructuralDelete(
       payload,
       'dangling_edge',
       `I couldn't remove that cleanly without leaving the model inconsistent, so I haven't changed anything.`,
+    );
+  }
+
+  // ── 6b. no SURVIVING reference to a removed node, on the projected bytes ──
+  const orphanedRef = findOrphanedNodeReference(
+    projectedGraph as Record<string, unknown>,
+    removedIdSet,
+  );
+  if (orphanedRef !== null) {
+    log.error(
+      {
+        event: 'v5.system_event.structural_delete.orphaned_node_reference',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        orphaned_reference: orphanedRef,
+      },
+      'structural_delete — post-delete graph would still reference a removed node; refusing the write',
+    );
+    return refuse(
+      payload,
+      'orphaned_node_reference',
+      orphanedRef === 'goal_node_id'
+        ? `That's the outcome the whole model is measured against, so removing it would leave nothing to compare options on. I haven't changed anything — tell me what you'd like to measure instead and I'll change it with you.`
+        : `I couldn't remove that cleanly without leaving the model inconsistent, so I haven't changed anything.`,
+    );
+  }
+
+  // ── 6c. THE WRITE MUST BE DESCRIBABLE — decided BEFORE it happens ─────────
+  // ⚠ THIS GUARD'S POSITION IS THE WHOLE POINT. It used to live AFTER the
+  // commit, inside the receipt check, where it could only ever MISREPORT an
+  // irreversible write: an adversarial review measured a select-all delete on a
+  // graph with no `goal_node_id` landing atomically (`nodes 0` persisted) and
+  // the route then answering `500 · retryable: true`. The user's model was gone
+  // and the product invited them to retry. A guard placed after an irreversible
+  // write is not a guard.
+  //
+  // WHY REFUSE rather than accept a null hash as a valid receipt (the other
+  // option, considered and rejected): the analysis hash is the spine of every
+  // downstream promise — the wire `graph_hash`, freshness, the CAS expected
+  // base, and the committed-bytes readback below all key off a non-null value.
+  // Accepting null would mean committing a state we cannot describe to the user
+  // or to the next turn, and threading "no hash" through all four would be a
+  // widening far beyond this lane.
+  //
+  // AND IT COSTS ALMOST NOTHING, measured rather than assumed:
+  // `computeAnalysisAffectingGraphHash` returns null ONLY when
+  // `nodes.length === 0 && edges.length === 0 && !Array.isArray(options) &&
+  // goalNodeId === undefined` (`context/graph-hash.ts:126-133`). Any real
+  // decision model carries a goal, and 6b above already refuses deleting it, so
+  // the only shape reaching here is "delete everything from a graph that never
+  // had a goal or an options roster". That is refused truthfully, BEFORE the
+  // write, instead of being wiped and reported as a retryable failure.
+  const postDeleteHash = computeAnalysisAffectingGraphHash(
+    projectedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+  );
+  if (postDeleteHash === null) {
+    log.warn(
+      {
+        event: 'v5.system_event.structural_delete.unhashable_result',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'structural_delete — the post-delete graph has no analysis hash; refusing BEFORE the write rather than committing a state we cannot describe',
+    );
+    return refuse(
+      payload,
+      'unhashable_result',
+      `Removing all of that would leave nothing for me to work with, so I haven't changed anything. Delete what you don't need and keep at least one thing to measure.`,
     );
   }
 
@@ -567,9 +817,7 @@ export function applyStructuralDelete(
       operations_count: elided.operations.length,
       affected_entities: affectedEntities,
       graph_hash_before: currentBaseHash,
-      graph_hash_after: computeAnalysisAffectingGraphHash(
-        projectedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
-      ),
+      graph_hash_after: postDeleteHash,
       safe_summary: buildSafeSummary(baseGraph, removedNodeIds, removedEdgePairs.length),
       // A structural removal always changes the analysis-affecting projection,
       // so any prior analysis is out of date by construction.

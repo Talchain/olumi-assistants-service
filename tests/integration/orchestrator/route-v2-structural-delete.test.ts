@@ -203,6 +203,11 @@ function edgePairs(graph: Record<string, unknown> | undefined): string[] {
   );
 }
 
+/** Parsed 200 body — a named helper so assertions read as claims, not plumbing. */
+function body200(res: { body: string }): Record<string, unknown> {
+  return JSON.parse(res.body) as Record<string, unknown>;
+}
+
 async function post(event: Record<string, unknown>, suffix: string) {
   return await app.inject({
     method: 'POST',
@@ -563,6 +568,227 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
       edgePairs(persisted as Record<string, unknown>).filter((p) => p === 'o-wait->g-revenue')
         .length,
     ).toBe(2);
+  });
+
+  // ══ A1 — a destructive write must never LAND and then be reported failed ══
+
+  it('A1: an UNHASHABLE result is refused BEFORE the write — the model is not wiped', async () => {
+    // The adversarial-review probe, pinned. A graph with NO `goal_node_id` and no
+    // top-level `options[]` hashes to null once emptied, and the guard used to sit
+    // AFTER `store.append`: the wipe committed atomically and the route answered
+    // 500 `retryable: true`. The user's model was gone and the product invited
+    // them to retry. A guard after an irreversible write can only misreport it.
+    persisted = {
+      schema_version: 'cee-v3',
+      nodes: [
+        { id: 'f-a', kind: 'factor', label: 'Factor A' },
+        { id: 'f-b', kind: 'factor', label: 'Factor B' },
+      ],
+      edges: [],
+    };
+    const before = JSON.stringify(persisted);
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['f-a', 'f-b'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '11',
+    );
+
+    // 200 with an honest refusal — NOT a 500, and NOT a retry invitation.
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    // NOTHING was handed to the store: no graph, on any call.
+    for (const call of appendMock.mock.calls) {
+      expect((call[0] as { graph?: unknown }).graph).toBeUndefined();
+    }
+    // The model is intact, byte-for-byte.
+    expect(JSON.stringify(persisted)).toBe(before);
+    expect(body.assistant_text).toMatch(/haven't changed anything/i);
+  });
+
+  it('A1 TWIN: the same select-all delete on a graph WITH a goal is applied, not refused', async () => {
+    // The opposite-direction twin. Without it, "refuse when unhashable" could be
+    // silently over-wide and block every select-all delete — trading a wipe for a
+    // capability the contract explicitly blesses as legitimate and uncapped.
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['o-launch', 'o-wait', 'f-budget'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '12',
+    );
+
+    expect(res.statusCode).toBe(200);
+    const graph = committedGraph();
+    expect(graph).toBeDefined();
+    // Everything named is gone; the goal survives and keeps the graph hashable.
+    expect(nodeIds(graph)).toEqual(['g-revenue']);
+    expect(typeof body200(res).graph_hash).toBe('string');
+  });
+
+  it('A1: deleting the GOAL node is refused with a recovery, never silently orphaning goal_node_id', async () => {
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['g-revenue'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '13',
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(committedGraph()).toBeUndefined();
+    expect(nodeIds(persisted as Record<string, unknown>)).toContain('g-revenue');
+    // P8: the refusal names something the user can actually do next.
+    expect(body.assistant_text).toMatch(/what you'd like to measure instead/i);
+  });
+
+  // ══ B1 — an empty label must not make a node undeletable ═════════════════
+
+  it('B1: a node with an EMPTY label is still deletable (nullish `??` made it permanently stuck)', async () => {
+    // `NodeV3.label` is a bare `z.string()`; the receipt's
+    // `affected_entities[].label` is `z.string().min(1)`. With `?? id` an empty
+    // label survived, the fact failed its own contract, and the fail-closed
+    // branch refused with no recovery — the node could NEVER be deleted (P8).
+    const g = buildPersistedGraph();
+    (g.nodes.find((n) => n.id === 'o-launch') as { label: string }).label = '';
+    persisted = g;
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['o-launch'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '14',
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    // It APPLIES — the whole point.
+    expect(nodeIds(committedGraph())).not.toContain('o-launch');
+    expect(body.assistant_text).not.toMatch(/couldn't record that deletion/i);
+    // …and falls back to the id rather than emitting an empty name.
+    expect(body.assistant_text).toContain('o-launch');
+  });
+
+  it('B1 TWIN: a node with a REAL label still names the label, never the raw id', async () => {
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['o-launch'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '15',
+    );
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('Launch now');
+    // The `||` fallback must not fire when a label exists — otherwise the fix
+    // would trade an undeletable node for an id leaking into user-facing prose.
+    expect(body.assistant_text).not.toContain('o-launch');
+  });
+
+  // ══ C2 — an orphaned intervention target changes the ANALYSIS ════════════
+
+  it('C2: deleting a factor PRUNES interventions keyed on it, from nodes AND top-level options', async () => {
+    // NOT tidiness — measured to change results. Deleting the factor removes its
+    // cap from `buildFactorScaleMap`, so the canonical `{value, raw_value}` shape
+    // projects to 40000 instead of 0.4; PLoT's `needsNormalisation` is a
+    // WHOLE-REQUEST gate, so that one stranded value re-scales every other
+    // factor's value reaching ISL.
+    persisted = {
+      ...buildPersistedGraph(),
+      options: [
+        {
+          id: 'o-launch',
+          label: 'Launch now',
+          interventions: { 'f-budget': { value: 0.4, raw_value: 40000 } },
+          raw_interventions: { 'f-budget': { value: 40000 } },
+        },
+      ],
+      meta: { roots: ['f-budget', 'o-wait'], leaves: ['g-revenue'] },
+    };
+    (persisted as { nodes: Array<Record<string, unknown>> }).nodes.find(
+      (n) => n.id === 'o-launch',
+    )!.interventions = { 'f-budget': { value: 0.4, raw_value: 40000 } };
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['f-budget'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '16',
+    );
+
+    expect(res.statusCode).toBe(200);
+    const graph = committedGraph()!;
+    expect(nodeIds(graph)).not.toContain('f-budget');
+
+    const optionNode = ((graph.nodes ?? []) as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'o-launch',
+    )!;
+    expect(Object.keys(optionNode.interventions as object)).not.toContain('f-budget');
+
+    const topOption = ((graph.options ?? []) as Array<Record<string, unknown>>)[0]!;
+    expect(Object.keys(topOption.interventions as object)).not.toContain('f-budget');
+    expect(Object.keys(topOption.raw_interventions as object)).not.toContain('f-budget');
+
+    // meta id lists too — same reference class.
+    expect((graph.meta as { roots: string[] }).roots).not.toContain('f-budget');
+    // TWIN: the prune takes ONLY what was removed.
+    expect((graph.meta as { roots: string[] }).roots).toContain('o-wait');
+    expect((graph.meta as { leaves: string[] }).leaves).toContain('g-revenue');
+  });
+
+  it('C2 TWIN: interventions on factors that SURVIVE are preserved untouched', async () => {
+    persisted = {
+      ...buildPersistedGraph(),
+      options: [
+        {
+          id: 'o-launch',
+          label: 'Launch now',
+          interventions: {
+            'f-budget': { value: 0.4, raw_value: 40000 },
+            'f-keep': { value: 0.7 },
+          },
+        },
+      ],
+    };
+    (persisted as { nodes: Array<Record<string, unknown>> }).nodes.push({
+      id: 'f-keep',
+      kind: 'factor',
+      label: 'Team size',
+    });
+
+    await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['f-budget'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      '17',
+    );
+
+    const topOption = ((committedGraph()!.options ?? []) as Array<Record<string, unknown>>)[0]!;
+    const keys = Object.keys(topOption.interventions as object);
+    expect(keys).not.toContain('f-budget');
+    // A prune that took the survivors too would be a worse defect than the one
+    // being fixed — it would silently unconfigure the user's model.
+    expect(keys).toContain('f-keep');
+    expect((topOption.interventions as Record<string, { value: number }>)['f-keep'].value).toBe(0.7);
   });
 
   it('the CONTRACT refuses a no-op delete (both arrays empty) at the boundary — 422, never a turn', async () => {

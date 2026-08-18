@@ -879,14 +879,28 @@ async function dispatchEdgeStrengthEdit(
  * unchanged. The estate's standing rulings forbid exactly that ("ship
  * capabilities ON; rollback = code revert"; no new env gates).
  *
- * Safety does not rest on that flag here. Two independent gates run regardless
- * of RPC mode: the adapter's `base_graph_hash` stale gate (which refuses a
- * removal aimed at a graph the user was not looking at) and the committed-bytes
- * readback below (which withholds success unless the removal actually landed).
- * The atomic RPC hashes are still threaded, so the moment the deployment moves
- * to `enforce` this writer gets in-transaction CAS with no code change — the
- * same posture as `factor_value_edit`, the sibling mutating writer that has
- * never been gated on it.
+ * ⚠ THE HONEST SAFETY POSTURE — do NOT restate this as "two gates make the write
+ * safe". An earlier draft did, and it claimed more than the mechanisms deliver.
+ * `CEE_V5_GRAPH_CAS_RPC` defaults to `shadow` (the UPDATE stays UNCONDITIONAL —
+ * the CAS is stamped, not enforced) and `CEE_V5_GRAPH_CAS_MODE` defaults to
+ * `off`, so NEITHER the adapter's `base_graph_hash` gate nor the receipt check
+ * closes the read→write window. The base hash is checked at T0 and the write
+ * happens later; nothing in that pair is atomic.
+ *
+ * What largely closes the window is a DIFFERENT mechanism: the TURN FENCE
+ * (`session/turn-fence.ts`), which refuses a graph write from a superseded turn
+ * — post-migration inside the append transaction under a FOR UPDATE on the
+ * turn's own fence row, and fail-closed when the fence RPC is unavailable.
+ *
+ * State the posture exactly as: **base checked at T0, writes ordered by the turn
+ * fence, CAS stamped-not-enforced** — adequate for single-user acceptance. What
+ * IS true about the flag is narrower and still worth having: both the stale gate
+ * and the receipt check run UNCONDITIONALLY, so no shadow-mode path reaches the
+ * write with an unchecked base hash, and the atomic CAS hashes are threaded so
+ * moving the deployment to `enforce` upgrades this writer with no code change —
+ * the same posture as `factor_value_edit`, the sibling mutating writer that has
+ * never been gated on it. A safety claim stronger than its mechanism is how the
+ * next lane gets hurt.
  */
 async function dispatchStructuralDelete(
   payload: SystemEventTurnPayload,
@@ -1121,12 +1135,32 @@ async function dispatchStructuralDelete(
     return { response: result.response, commitPerformed: false, graph: null };
   }
 
-  // ── the committed-bytes readback ─────────────────────────────────────────
+  // ── the post-commit receipt check ────────────────────────────────────────
   // A successful append without a trustworthy receipt is an ambiguous transport
-  // outcome, never a 200 mutation success. For a DELETE the specific claim to
-  // verify is ABSENCE: every id the user removed must be gone from the bytes the
-  // store actually holds. Never fabricate this from the adapter's pre-commit
-  // copy — that copy is exactly what would agree with itself.
+  // outcome, never a 200 mutation success. For a DELETE the claim to verify is
+  // ABSENCE: every id the user removed must be gone.
+  //
+  // ⚠⚠ WHAT THIS ACTUALLY CHECKS — READ BEFORE RELYING ON IT. An earlier version
+  // of this comment called it "the bytes the store actually holds" and told the
+  // next lane never to fabricate it "from the adapter's pre-commit copy". THAT
+  // WAS A STRONGER CLAIM THAN THE CODE DELIVERS, which is exactly the defect
+  // class this estate calls an honest label overwritten by a false one.
+  //
+  // `commitResult.persistedGraph` is `graphForStore`, and `commit.ts:372-373`
+  // says so in terms: *"Do NOT treat it as a general read-back: it is this
+  // commit's own input after projection, not a re-read."* So this compares the
+  // adapter's projected graph against the commit chokepoint's own SECOND
+  // projection of it. It is a non-idempotent-projection check, NOT a database
+  // read-back.
+  //
+  // That is still worth having — `projectGraphForPersistence` repairs,
+  // normalises and reconciles, and `reconcileTopLevelOptionsFromNodes` is
+  // precisely a pass that can re-add option entries — so a projection that
+  // reintroduced a removed id would be caught here. What it CANNOT see is the
+  // store persisting something different from what it was handed. A real
+  // read-back would need a post-commit SELECT this seam does not perform.
+  // (This is the demonstrated reason the M12 mutant survives: with no second,
+  // independent source of bytes, the comparison has nothing to disagree with.)
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const committedNodeIds = committedParse.success
     ? new Set(committedParse.data.nodes.map((n) => n.id))
