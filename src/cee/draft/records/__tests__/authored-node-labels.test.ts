@@ -328,6 +328,53 @@ describe("the decision node carries a real label derived from the decision being
     expect(derived.label).toBe("Refactor the Monolith, or Buy a Platform");
   });
 
+  /**
+   * ⭐⭐ THE DECISION PATH IS WHERE THE CLAUSE CUTS STILL LIVE, AND THEREFORE
+   * WHERE THEIR VETOES MUST BE EXERCISED.
+   *
+   * ⚠ A review found V1 and V3 had ZERO over-refusal coverage: forcing either
+   * to always fire left the governed goal labels at 9/13 unchanged, because
+   * **not one governed goal quote ever reaches a cut**. The corpus was silent
+   * about them, not reassuring — a guard nothing exercises is a guard nobody
+   * would notice losing (trap 13b). The goal path no longer cuts at all, so the
+   * cuts and their vetoes are scoped to the decision node, and each is pinned
+   * here with a DISCRIMINATING TWIN: same construction, qualification removed,
+   * which must author. One alone proves nothing; the pair proves the veto is
+   * reading the qualification and not merely the shape.
+   */
+  const DECISION_VETO_PAIRS: ReadonlyArray<readonly [string, string, string, string]> = [
+    [
+      "V1 · a discarded tail carrying a qualification",
+      "We are deciding whether to launch a subscription, which would help but not for enterprise customers.",
+      "We are deciding whether to launch a subscription, which would help enterprise customers.",
+      "Launch a Subscription",
+    ],
+    [
+      "V3 · a restrictive clause after a quantifier",
+      "We are deciding whether to close every office that is below break-even.",
+      "We are deciding whether to close the Leeds office that is below break-even.",
+      "Close the Leeds Office",
+    ],
+    [
+      "V1 · a discarded parenthetical carrying an exception",
+      "We are deciding whether to move to Azure (but not the payments platform).",
+      "We are deciding whether to move to Azure (a twelve month programme).",
+      "Move to Azure",
+    ],
+  ];
+
+  it.each(DECISION_VETO_PAIRS)(
+    "%s — refuses, while its qualification-free twin authors",
+    (_name, vetoed, twin, twinLabel) => {
+      const refused = deriveDecisionLabel({ brief: vetoed, goalQuotes: [] });
+      expect(refused.authored, `must refuse: ${vetoed}`).toBe(false);
+      expect(refused.label).toBe("Decision");
+      const authored = deriveDecisionLabel({ brief: twin, goalQuotes: [] });
+      expect(authored.authored, `twin must author: ${twin}`).toBe(true);
+      expect(authored.label).toBe(twinLabel);
+    },
+  );
+
   it("a refused decision keeps the honest generic and says so", () => {
     const derived = deriveDecisionLabel({ brief: "The board set two main options.", goalQuotes: [] });
     expect(derived.authored).toBe(false);
@@ -391,12 +438,17 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   });
 
   it("A2 conservation: no numeral in the quote is lost from label ∪ source_quote ∪ goal_threshold", () => {
-    const brief = "We must increase MRR from £215k to £250k within 6 months.";
+    // ⚠ THE QUOTE IS A GERUND WITH A POSSESSIVE, DELIBERATELY. It read
+    // "increase MRR …", whose label differs from it only by CAPITALISATION —
+    // so both non-vacuity assertions below were satisfied by a case flip and
+    // the twin never exercised a real transformation. This one exercises
+    // gerund→base AND the possessive drop as well.
+    const brief = "We must keep increasing our MRR from £215k to £250k within 6 months.";
     const records: DraftRecordSet = {
       stated_items: [
         {
           kind: "goal",
-          source_quote: "increase MRR from £215k to £250k within 6 months",
+          source_quote: "increasing our MRR from £215k to £250k within 6 months",
           value: 250000,
           unit: "£",
           role: "target",
@@ -447,6 +499,11 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     // Non-vacuity: the label really is a different string from the quote, so
     // the union above is not the quote wearing a hat.
     expect(canonical(goal?.label ?? "")).not.toBe(canonical(goal?.provenance?.source_quote ?? ""));
+    // …and differs by MORE than case: the transformation really ran.
+    expect((goal?.label ?? "").toLowerCase()).not.toBe(
+      (goal?.provenance?.source_quote ?? "").toLowerCase(),
+    );
+    expect(goal?.label).toBe("Increase MRR from £215k to £250k Within 6 Months");
   });
 
   it("a node that is not the goal is untouched — option, factor and constraint labels stay verbatim", () => {
@@ -511,27 +568,36 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   });
 
   /**
-   * ⭐⭐⭐ THE ADVERSARIAL CORPUS, AND IT IS THE LOAD-BEARING EVIDENCE HERE.
+   * ⭐⭐⭐ THE ADVERSARIAL CORPORA, AND THEY ARE THE LOAD-BEARING EVIDENCE.
    *
-   * These quotes were written OUTSIDE the author's head, by an adversarial
-   * review, in ordinary British business prose. The first version of this
-   * module authored a misrepresenting label for **28 of 61** of them — and not
-   * one could have been caught by `labelIsDerivedFrom`, because every word on
-   * screen was genuinely the user's. **The guard detected ADDITION and every
-   * harm was DELETION** (trap 13d: the invariant written with the same
-   * asymmetry as the code it guards).
+   * Written OUTSIDE the author's head by two rounds of adversarial review, in
+   * ordinary British business prose (trap 22: the reviewer's corpus is the
+   * evidence, the author's is a development aid).
    *
-   * Each case is named by the harm class it produced. Per trap 22, the
-   * reviewer's corpus is the evidence and the author's was the development aid.
+   * ── ROUND 2: the guard detected ADDITION, every harm was DELETION ─────────
+   * 28 of 61 quotes produced a misrepresenting label, and not one could have
+   * been caught by `labelIsDerivedFrom`, because every word on screen was
+   * genuinely the user's (trap 13d).
+   *
+   * ── ROUND 3: token vetoes are the same 14 cases in structural clothing ────
+   * Round 2 answered with three vetoes black-listing the tokens deletion tends
+   * to carry. A FRESH 46-quote corpus, none of them pinned, showed 32 of 45
+   * authored quotes still changing meaning — and the six MINIMAL PAIRS below
+   * settled it: hold the meaning constant, vary only the veto token, and the
+   * pinned harm refuses while its twin sails through. **Each veto matched a
+   * token list, not a semantic class, so every class had a synonym.** The fix
+   * was to invert the shape, not to add a fifth token: the goal path now
+   * white-lists the transformations and refuses the moment any clause would be
+   * discarded. `clause_discarded` below is that gate.
    */
   const MEASURED_HARMS: ReadonlyArray<readonly [string, string, string]> = [
-    ["disclaimer shown as the goal", "This is not about cutting costs: we want to double our delivery speed", "head_disclaims"],
-    ["disclaimer shown as the goal", "We are not trying to grow headcount — the aim is to raise output per engineer", "head_disclaims"],
-    ["disclaimer shown as the goal", "Cost is not the problem; the problem is that we cannot ship weekly", "head_disclaims"],
+    ["disclaimer shown as the goal", "This is not about cutting costs: we want to double our delivery speed", "clause_discarded"],
+    ["disclaimer shown as the goal", "We are not trying to grow headcount — the aim is to raise output per engineer", "clause_discarded"],
+    ["disclaimer shown as the goal", "Cost is not the problem; the problem is that we cannot ship weekly", "clause_discarded"],
     ["unmade alternative settled", "Build our own last-mile fleet — or partner with a third-party courier", "states_alternatives"],
-    ["scope silently widened", "Cut cloud spend by 25% without any change that degrades latency", "would_drop_a_qualification"],
-    ["exception dropped", "Raise prices — but only for new customers", "would_drop_a_qualification"],
-    ["label contradicts its own quote", "Move the whole estate to Azure (but not the payments platform)", "would_drop_a_qualification"],
+    ["scope silently widened", "Cut cloud spend by 25% without any change that degrades latency", "clause_discarded"],
+    ["exception dropped", "Raise prices — but only for new customers", "clause_discarded"],
+    ["label contradicts its own quote", "Move the whole estate to Azure (but not the payments platform)", "clause_discarded"],
     ["deliberation the frame list missed", "Torn between rebuilding and buying", "deliberation_frame"],
     ["deliberation the frame list missed", "The question is whether to rebuild or buy", "deliberation_frame"],
     ["deliberation the frame list missed", "Whether to enter the German market", "deliberation_frame"],
@@ -554,23 +620,72 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   );
 
   /**
-   * ⚠ THE OPPOSITE DIRECTION FOR THE SAME VETOES, or they would be a licence to
-   * refuse everything. A hedge that SURVIVES into the label is not a dropped
-   * hedge, and must still author.
+   * ⭐⭐⭐ THE MINIMAL PAIRS — the result that killed the token vetoes.
+   *
+   * Meaning held constant, only the veto token varied. Under the blacklist the
+   * left column refused and the right column authored, 6 for 6. Under the
+   * whitelist BOTH refuse, because the property is now structural — a clause
+   * was cut, or it was not — and there is no synonym for that.
+   *
+   * ⚠ This is the test that must never be allowed to pass by luck: it asserts
+   * the TWIN, which is the half no blacklist could ever satisfy.
    */
-  it("a qualification that survives into the label does NOT trip the deletion vetoes", () => {
-    for (const quote of [
-      "Improve retention unless it costs more than £50k",
-      "Ship weekly, except for the payments service",
-    ]) {
+  const MINIMAL_PAIR_TWINS: ReadonlyArray<readonly [string, string]> = [
+    ["`or` → `and`", "Build our own last-mile fleet — and partner with a third-party courier"],
+    ["`but only` → `alone`", "Raise prices — new customers alone"],
+    ["`but not` → `excluded`", "Move the whole estate to Azure (payments platform excluded)"],
+    ["`without` → `using`", "Cut cloud spend by 25% using the changes that preserve latency"],
+    ["`or` → `;`", "Cut support costs; grow self-serve"],
+    ["`not about` → `not cost`", "The priority is not cost: we want to double our delivery speed"],
+  ];
+
+  it.each(MINIMAL_PAIR_TWINS)(
+    "REFUSES the synonym twin that walked through the token vetoes (%s): %s",
+    (_swap, quote) => {
       const derived = deriveGoalObjectiveLabel(quote);
-      expect(derived.authored, `must still author: ${quote}`).toBe(true);
-      for (const kept of ["Unless", "Except"]) {
-        if (quote.toLowerCase().includes(kept.toLowerCase())) {
-          expect(derived.label).toContain(kept);
-        }
-      }
-    }
+      expect(derived.authored, `the twin must refuse too: ${quote}`).toBe(false);
+      expect(derived.label).toBe(quote);
+    },
+  );
+
+  /**
+   * ⭐ THE SEVEN CLASSES THE TOKEN VETOES NEVER GUARDED AT ALL. Each deletes
+   * propositional content while every surviving word is the user's own.
+   */
+  const UNGUARDED_CLASSES: ReadonlyArray<readonly [string, string]> = [
+    ["restrictive clause narrows a set", "Close the offices that are below break-even"],
+    ["second objective, joined by `;`", "Cut support costs; grow self-serve revenue"],
+    ["temporal clause makes it contingent", "Expand into Germany — once the Series B closes"],
+    ["conditional clause", "Double delivery speed, provided the platform team is fully staffed"],
+    ["quantifier plus restriction", "Migrate every service that stores personal data"],
+    ["beneficiary / region", "Cut cloud spend by 25% (for the EU region)"],
+    ["comparative baseline", "Grow revenue faster than we did last year: at least 15%"],
+    ["purpose clause", "Rebuild the platform so that onboarding takes under a day"],
+  ];
+
+  it.each(UNGUARDED_CLASSES)("REFUSES an unguarded class (%s): %s", (_kind, quote) => {
+    expect(deriveGoalObjectiveLabel(quote).authored, `must not author: ${quote}`).toBe(false);
+  });
+
+  /**
+   * ⚠⚠ THE OPPOSITE DIRECTION, AND IT IS WHAT STOPS THE WHITELIST BEING A
+   * LICENCE TO REFUSE EVERYTHING. Nothing is discarded in any of these, so each
+   * must still author — including the two that KEEP a hedge in the label, which
+   * is the discrimination the round-2 blacklist could not make.
+   */
+  const MUST_STILL_AUTHOR: ReadonlyArray<readonly [string, string]> = [
+    ["achieve 15% revenue growth within 18 months", "Achieve 15% Revenue Growth Within 18 Months"],
+    ["cutting our burn rate by 30%", "Cut Burn Rate by 30%"],
+    ["we'd like to spend less", "Spend Less"],
+    ["Improve retention unless it costs more than £50k", "Improve Retention Unless It Costs More Than £50k"],
+    ["Ship weekly, except for the payments service", "Ship Weekly, Except for the Payments Service"],
+    ["Cut support costs and grow self-serve revenue", "Cut Support Costs and Grow Self-Serve Revenue"],
+  ];
+
+  it.each(MUST_STILL_AUTHOR)("still AUTHORS when no clause is discarded: %s", (quote, expected) => {
+    const derived = deriveGoalObjectiveLabel(quote);
+    expect(derived.authored, `must still author: ${quote}`).toBe(true);
+    expect(derived.label).toBe(expected);
   });
 
   it("a deliberation-framed goal is REFUSED, not authored into an invented objective", () => {

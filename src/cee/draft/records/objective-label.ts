@@ -98,6 +98,8 @@ export type AuthoredLabelRefusal =
   | "states_alternatives"
   /** A reduction would have thrown away a negation, exception, hedge or alternative. */
   | "would_drop_a_qualification"
+  /** ⭐ The goal path's whitelist gate: a clause would have been discarded. */
+  | "clause_discarded"
   /** The surviving head says what the objective is NOT. A disclaimer is not a goal. */
   | "head_disclaims"
   /** Still over the bound after every permitted reduction. */
@@ -605,6 +607,68 @@ function normaliseHead(text: string): string {
 }
 
 /**
+ * ⭐⭐⭐ WOULD ANY CLAUSE BE THROWN AWAY? — the goal path's single question.
+ *
+ * ── WHY THIS REPLACED THREE VETOES, AND WHY IT IS NOT "ONE MORE RULE" ──────
+ * Round 2 answered "the harm is DELETION" with three vetoes that black-listed
+ * the TOKENS deletion tends to carry: `not`, `but`, `only`, `or`, `without`…
+ * A verification against a fresh 46-quote corpus — none of the 14 cases those
+ * vetoes were built against — showed why that could not work: **32 of 45
+ * authored quotes still changed meaning**, and six MINIMAL PAIRS settled it,
+ * meaning held constant with only the veto token varied:
+ *
+ *     `— or partner with a courier`        refused
+ *     `— and partner with a courier`       AUTHORED as `Build Our Own Fleet`
+ *     `— but only for new customers`       refused
+ *     `— new customers alone`              AUTHORED as `Raise Prices`
+ *     `(but not the payments platform)`    refused
+ *     `(payments platform excluded)`       AUTHORED as `Move the Whole Estate to Azure`
+ *
+ * Six for six. **Each veto matched a token list, not a semantic class, so every
+ * class had a synonym that walked straight through** — and seven whole classes
+ * (restrictive clauses, temporal and conditional clauses, quantifiers,
+ * beneficiaries, regions, comparative baselines, purpose clauses) were never
+ * guarded at all. The vetoes were the fourteen original cases in structural
+ * clothing.
+ *
+ * ── THE INVERSION ──────────────────────────────────────────────────────────
+ * Stop black-listing what is discarded. **WHITE-LIST THE TRANSFORMATIONS.** On
+ * the goal path a label may be produced only by transformations that delete no
+ * propositional content —
+ *
+ *     · strip a first-person intent preamble ("we'd like to …")
+ *     · gerund → base form, from the closed map
+ *     · drop a bare possessive
+ *     · title case
+ *
+ * — and the derivation REFUSES the moment any clause would be discarded at all.
+ * No token list to outrun, because the property is structural: either a clause
+ * was cut or it was not.
+ *
+ * ⭐ THE ASYMMETRY THAT MAKES THIS THE RIGHT SHAPE: refusal falls back to the
+ * verbatim, which IS the shipped behaviour, so over-refusal cannot regress
+ * anything while under-refusal ships a lie. A whitelist errs in the free
+ * direction. **Measured: governed goal labels 9/13 → 9/13, zero cost** — not
+ * one of the thirteen governed goal quotes ever reached a cut, so the entire
+ * clause-cutting apparatus on this path bought nothing measurable and was the
+ * sole source of the harms.
+ *
+ * ⚠ AND IT IS DELIBERATELY *NOT* APPLIED TO THE DECISION PATH, where the same
+ * cuts genuinely earn four labels (9/14 → 5/14 without them). The residual risk
+ * is scoped there on purpose: a decision node names the QUESTION being asked,
+ * not the team's objective, so a clause lost from it understates the question
+ * rather than misstating what the team wants.
+ */
+function wouldDiscardAClause(text: string): boolean {
+  if (/\([^)]*\)/.test(text)) return true;
+  const preamble = cutAt(text, PREAMBLE_CUTS);
+  if (preamble && preamble.head.length > 0 && preamble.tail.trim().length > 0) return true;
+  const relative = cutAt(text, RELATIVE_CUTS);
+  if (relative && relative.head.length > 0 && relative.tail.trim().length > 0) return true;
+  return false;
+}
+
+/**
  * ⭐ THE GOAL NODE'S DISPLAY LABEL.
  *
  * Returns the authored objective, or the quote unchanged with the reason it
@@ -622,43 +686,30 @@ export function deriveGoalObjectiveLabel(quote: string): AuthoredLabel {
     return { label: source, authored: false, reason: "deliberation_frame" };
   }
 
-  // ⭐ AND THE STRUCTURAL FORM OF THE SAME THING, which the frame list cannot
-  // reach. A review found every short deliberation phrasing outside the closed
-  // list being authored as a goal — "Torn between rebuilding and buying",
-  // "Whether to enter the German market", "Do we rebuild or buy". Some were
-  // refused in the first round, but by WORD COUNT, which is the right answer
-  // for the wrong reason: shorten the phrasing and they authored. A quote
-  // offering a free-standing alternative is a choice, and a choice is not an
-  // objective however it is worded. New frames are still added, but this is
-  // what stops the list being the only defence.
+  // The structural form of the same thing, which no frame list can outrun: a
+  // quote offering a free-standing alternative is a choice, and a choice is not
+  // an objective however it is worded.
   if (NAMES_AN_ALTERNATIVE.test(source)) {
     return { label: source, authored: false, reason: "states_alternatives" };
   }
 
-  const stripped = stripPreamble(source);
-  const withoutAsides = dropParentheticals(stripped);
-  // A parenthetical is a discard like any other — `Move the whole estate to
-  // Azure (but not the payments platform)` produced a label contradicting its
-  // own quote, entirely in the user's words.
-  if (withoutAsides.removed.some(discardIsUnsafe)) {
-    return { label: source, authored: false, reason: "would_drop_a_qualification" };
+  const stripped = stripPreamble(source).replace(/[.?!]+$/, "").trim();
+
+  // ⭐⭐ THE WHITELIST GATE. Everything the six minimal pairs exposed lives on
+  // the other side of this line.
+  if (wouldDiscardAClause(stripped)) {
+    return { label: source, authored: false, reason: "clause_discarded" };
   }
-  const body = withoutAsides.text.replace(/[.?!]+$/, "").trim();
-  const reduced = reduceToLabelBody(body);
-  if (reduced === undefined) {
-    return { label: source, authored: false, reason: "would_drop_a_qualification" };
-  }
-  const normalised = normaliseHead(reduced);
-  // ⭐ THE WORST CLASS THE REVIEW FOUND: a disclaimer displayed as the goal.
-  // "This is not about cutting costs: we want to double our delivery speed"
-  // reduced to `This Is Not About Cutting Costs` — the user's exact words, the
-  // exact inverse of their objective, and fluent enough that nobody reading the
-  // canvas would query it. A head that says what the objective is NOT is not an
-  // objective, whatever survives the cut.
+
+  const normalised = normaliseHead(stripped);
+  // A head that says what the objective is NOT is not an objective, even when
+  // nothing was discarded to produce it.
   if (HEAD_DISCLAIMS.test(normalised) || CONTRACTED_NEGATION.test(normalised)) {
     return { label: source, authored: false, reason: "head_disclaims" };
   }
   const tokenCount = words(normalised).length;
+  // ⚠ NOTHING MAY BE CUT TO REACH THE BOUND ANY MORE — an over-long objective
+  // is refused, not shortened. That is the whitelist's whole point.
   if (tokenCount > GOAL_WORD_BOUND) {
     return { label: source, authored: false, reason: "no_concise_form" };
   }
