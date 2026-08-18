@@ -286,8 +286,8 @@ function pruneInterventionKeys(
  * Remove every reference to a deleted node from the fields that carry node ids
  * BY VALUE rather than by structure.
  *
- * ⭐ WHY THIS IS NOT TIDINESS — it changes analysis RESULTS. Derived end to end,
- * by execution, not by argument:
+ * ⭐ WHY THIS IS NOT TIDINESS — an orphaned intervention TURNS A WORKING ANALYSIS
+ * INTO A REFUSAL. Derived end to end, by execution, not by argument:
  *
  *  1. CEE does not filter interventions to existing nodes. `run-analysis.ts:687`
  *     spreads `requestProjection.perOption[index]` onto the wire wholesale.
@@ -295,16 +295,27 @@ function pruneInterventionKeys(
  *     canonical persisted intervention shape `{value: 0.4, raw_value: 40000}`
  *     projects to **40000** instead of **0.4** — measured against the real
  *     modules, a 100,000× change, because the cap that anchored it is gone.
- *  3. PLoT's `needsNormalisation` (`lib/intervention-normaliser.ts:837-847`) is a
- *     WHOLE-REQUEST gate: it scans every intervention of every option and returns
- *     true if ANY value is outside [0,1]. A stranded 40000 opens it.
- *  4. Opening it routes the entire request through `normaliseOptionsForISL`
- *     (`routes/v2/run.ts:6600`) instead of the passthrough, so EVERY OTHER
- *     factor's value reaching ISL changes too.
+ *  3. That strands a raw magnitude beside unit-scale siblings, so the request
+ *     projection reports `mixedUnresolved: true` where it reported `false` with
+ *     the cap in place (measured: the identical payload flips purely on the
+ *     node's presence).
+ *  4. `decideAnalysisScaleBlock` turns that into
+ *     `{blocked: true, reason_code: 'mixed_scale_unresolved'}`, and
+ *     `run-analysis.ts:565-580` throws `HandlerInvocationFailedError` with
+ *     `cause_kind: 'analysis_not_ready', retryable: false`.
  *
- * So an orphaned intervention is not inert: one deleted factor silently re-scales
- * the whole analysis. Pruning here is the intervention-level twin of the edge
- * cascade — a delete must not leave references to what it removed.
+ * ⚠ STATE THIS PRECISELY — the first version of this comment said the request
+ * reaches PLoT and "EVERY OTHER factor's value reaching ISL changes too". That
+ * is the WEAKER and mostly UNREACHABLE claim: on the canonical shape CEE never
+ * calls PLoT at all, because the scale block fires first. An adversarial
+ * verifier enumerated 3 orphan shapes × 4 sibling shapes and found the
+ * reach-PLoT-and-re-scale path live in only ONE of the twelve cells.
+ * **The true and more damning outcome is the refusal**: the user deletes a
+ * factor and an analysis that would have run correctly now refuses, non
+ * retryably, naming a factor that is no longer in their model.
+ *
+ * Pruning here is the intervention-level twin of the edge cascade — a delete
+ * must not leave references to what it removed.
  *
  * Mutates a structuredClone the caller owns. Never throws.
  */
@@ -387,6 +398,20 @@ export function findOrphanedNodeReference(
   for (const option of Array.isArray(graph.options) ? graph.options : []) {
     const hit = scan(option, 'options[]');
     if (hit !== null) return hit;
+  }
+  // `meta.roots` / `meta.leaves` are pruned above, so this rung has nothing to
+  // catch TODAY. It exists because the prune and the postcondition must cover
+  // the SAME field set: a postcondition narrower than its prune silently stops
+  // guarding the moment someone refactors the prune, and the gap reads as green.
+  // Cheap, derived from the same two field names, and it fails loud on drift.
+  if (isDict(graph.meta)) {
+    for (const field of ['roots', 'leaves'] as const) {
+      const list = graph.meta[field];
+      if (!Array.isArray(list)) continue;
+      if (list.some((id) => typeof id === 'string' && removedNodeIds.has(id))) {
+        return `meta.${field}`;
+      }
+    }
   }
   return null;
 }

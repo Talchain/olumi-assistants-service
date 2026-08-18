@@ -701,11 +701,12 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
   // ══ C2 — an orphaned intervention target changes the ANALYSIS ════════════
 
   it('C2: deleting a factor PRUNES interventions keyed on it, from nodes AND top-level options', async () => {
-    // NOT tidiness — measured to change results. Deleting the factor removes its
-    // cap from `buildFactorScaleMap`, so the canonical `{value, raw_value}` shape
-    // projects to 40000 instead of 0.4; PLoT's `needsNormalisation` is a
-    // WHOLE-REQUEST gate, so that one stranded value re-scales every other
-    // factor's value reaching ISL.
+    // NOT tidiness. Deleting the factor removes its cap from
+    // `buildFactorScaleMap`, so the canonical `{value, raw_value}` shape projects
+    // to 40000 instead of 0.4; that strands a raw magnitude beside unit-scale
+    // siblings and `decideAnalysisScaleBlock` BLOCKS the run
+    // (`mixed_scale_unresolved`, non-retryable). The user's working analysis
+    // turns into a refusal naming a factor that is no longer in their model.
     persisted = {
       ...buildPersistedGraph(),
       options: [
