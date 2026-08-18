@@ -7,7 +7,12 @@
  * the test's import needs this declaration (without it: TS7016).
  *
  * MIRROR CAVEAT (honest note): this is a hand-written type mirror of the .mjs
- * exports, so it can drift from the implementation. The drift is BOUNDED and
+ * exports, so it can drift from the implementation. ⚠ IT DID, AND THE ALARM
+ * THAT CAUGHT IT IS NOT THE ONE YOU WOULD EXPECT: adding an export to the .mjs
+ * without adding it here passes `pnpm typecheck` (tsconfig.build.json excludes
+ * tests) and passes the whole vitest suite (vitest strips types), and REDs only
+ * in the separate `Typecheck Drift (ratchet)` CI job. If you add an export
+ * there, add it here in the same commit. The drift is BOUNDED and
  * cannot make the alarm wrong: every export here is exercised at RUNTIME
  * against the real module by tests/unit/ci/staging-journey-smoke.test.ts,
  * including a positive control on a real captured outage response. A stale
@@ -57,11 +62,23 @@ export declare function readinessDiagnosis(body: unknown): string;
 export declare function draftGraphCensus(body: unknown): string;
 
 /**
+ * The analyse-refusal arm's FINGERPRINT: `blocked_reason` present AND
+ * `readiness_issues` absent.
+ *
+ * ⚠ NOT `blocked_reason` alone. Three sites write that field to the wire
+ * (`analysis-ready-helper.ts` :1441 / :1117 / :1126), so a SUCCESSFUL
+ * `structural_delete` receipt can carry `OPTION_NO_FACTOR_EDGES`. Only
+ * `buildAnalysisRefusalReadiness` omits `readiness_issues`.
+ */
+export declare function hasAnalysisRefusalFingerprint(body: unknown): boolean;
+
+/**
  * The product must not answer a CONVERSATIONAL turn with an ANALYSIS REFUSAL.
  *
- * Keyed on `blocked_reason` — which only `buildAnalysisRefusalReadiness` writes,
- * and which the refusal-payload fix PRESERVES — rather than on `options`, which
- * that fix repopulates. Orthogonal to the fix by construction, so the routing
+ * Keyed on the refusal arm's FINGERPRINT (see `hasAnalysisRefusalFingerprint`) —
+ * a conjunction, not the `blocked_reason` field alone, which three producers
+ * write. Both halves survive the refusal-payload fix: it repopulates `options`
+ * and touches neither `blocked_reason` nor `readiness_issues`, so the routing
  * defect stays observable after the payload defect is closed.
  *
  * `requestedAnalysis` is DECLARED by the caller (this gate composes the

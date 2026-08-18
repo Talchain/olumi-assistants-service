@@ -8,7 +8,12 @@
  *
  * MIRROR CAVEAT (the same honest note the sibling gate carries): this is a
  * hand-written type mirror of the `.mjs` exports, so it can drift from the
- * implementation. The drift is BOUNDED and cannot make the witness wrong — every
+ * implementation. ⚠ IT DID, AND THE ALARM THAT CAUGHT IT IS NOT THE ONE YOU
+ * WOULD EXPECT: adding an export to the `.mjs` without adding it here passes
+ * `pnpm typecheck` (tsconfig.build.json excludes tests) and passes the whole
+ * vitest suite (vitest strips types), and REDs only in the separate
+ * `Typecheck Drift (ratchet)` CI job. If you add an export there, add it here
+ * in the same commit. The drift is BOUNDED and cannot make the witness wrong — every
  * export here is exercised at RUNTIME against the real module by
  * `tests/unit/ci/staging-structural-delete-witness.test.ts`, including positive
  * controls on real captured staging responses. A stale declaration can only make
@@ -129,6 +134,29 @@ export declare function assertNotifyDidNotMutate(
 
 /** The 16-hex analysis-affecting hash shape. */
 export declare function looksLikeAnalysisHash(v: unknown): boolean;
+
+/**
+ * RACE, or a PERMANENT at-rest mismatch? — decided from SAME-SPACE observations
+ * only.
+ *
+ * ⚠ The comparison this replaces tested the 64-hex identity COLUMN against the
+ * wire's 16-hex ANALYSIS-space `expected_base_graph_hash`: disjoint by length,
+ * so `!==` was unconditionally true and every transient race read as PERMANENT.
+ * The two axes here are each internally same-space — the identity column
+ * sampled over time, and the analysis hash sent vs returned. `PERMANENT` names
+ * its own limit (this witness cannot recompute `identity(scenarios.graph)`);
+ * an unconfigured canonical-DB arm yields `UNKNOWN`, never `PERMANENT`.
+ */
+export declare function classifyCasConflict(input?: {
+  columnSamples?: ReadonlyArray<{ attempt?: number; identityHash?: string | null; updatedAt?: string }>;
+  analysisSamples?: ReadonlyArray<{ attempt?: number; sentAnalysisHash?: string | null; serverAnalysisHash?: string | null }>;
+}): { verdict: "RACE" | "PERMANENT" | "UNKNOWN"; why: string };
+
+/** Print a 16-hex analysis hash WHOLE, labelled — never with a fake truncation. */
+export declare function describeAnalysisHash(v: unknown): string;
+
+/** Print the 64-hex identity column truncated, saying by how much. */
+export declare function describeIdentityHash(v: unknown): string;
 
 /** Did the rerun recompute, and does any refusal name something the user deleted? */
 export declare function classifyRerun(
