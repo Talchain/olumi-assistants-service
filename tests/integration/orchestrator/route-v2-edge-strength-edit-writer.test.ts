@@ -933,16 +933,40 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expectedGraphIdentityHash: expect.any(String),
       expectedGraphAnalysisHash: expect.any(String),
     });
-    expect(BoundaryErrorSchema.parse(JSON.parse(response.body))).toMatchObject({
+    // ⚠ THIS ASSERTION WAS INVERTED UNTIL THE P0 FIX, and the old expectation
+    // — `expected_base_graph_hash: 'expected-base-identity'`, i.e. whatever
+    // 64-hex IDENTITY value the error happened to carry — was PINNING THE
+    // DEFECT. The envelope tells the user to "refresh and reconfirm", and the
+    // only hash a client can hold or send is the 16-hex ANALYSIS hash
+    // (`OlumiResponse.graph_hash` / `freshness.current_graph_hash`); the
+    // identity hash has no wire emitter at all. Handing one back named a
+    // recovery that could never be performed (P8), and it made ONE wire field
+    // carry TWO hash spaces depending on which gate refused.
+    //
+    // The pair below is what makes this discriminating rather than merely
+    // green: the POSITIVE names the exact analysis-space value the server
+    // holds, and the NEGATIVE proves the identity-space value the error
+    // carried is no longer echoed. Either alone would pass for the wrong
+    // reason.
+    const currentAnalysisHash = computeAnalysisAffectingGraphHash(
+      persisted as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    );
+    expect(currentAnalysisHash).toMatch(/^[0-9a-f]{16}$/);
+    const body = BoundaryErrorSchema.parse(JSON.parse(response.body));
+    expect(body).toMatchObject({
       error: 'GRAPH_DIVERGED',
       retryable: false,
       details: {
         reason: 'graph_write_conflict',
         recovery_action: 'refresh_and_reconfirm',
         conflict_category: 'rpc_cas_conflict',
-        expected_base_graph_hash: 'expected-base-identity',
+        expected_base_graph_hash: currentAnalysisHash,
       },
     });
+    expect(
+      (body.details as { expected_base_graph_hash?: unknown })
+        .expected_base_graph_hash,
+    ).not.toBe('expected-base-identity');
   });
 
   it.each([

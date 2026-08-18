@@ -136,9 +136,50 @@ export interface DispatchSystemEventResult {
   readonly graphConflict?: {
     readonly recovery_action: 'refresh_and_reconfirm';
     readonly conflict_category: string;
+    /**
+     * ⚠ ALWAYS ANALYSIS-SPACE (16-hex), NEVER the 64-hex identity hash.
+     * See `readClientRecoverableBaseHash` — this field is the target of a
+     * user-facing "refresh and reconfirm", so a value the client cannot hold
+     * or send makes the instruction unfollowable.
+     */
     readonly expected_base_graph_hash: string | null;
     readonly edge?: EdgeStrengthEditAuthorityConflict['edge'];
   };
+}
+
+/**
+ * The hash to hand a client that has just been told to REFRESH AND RECONFIRM.
+ *
+ * ⚠⚠ ONE WIRE FIELD, TWO HASH SPACES — the defect this exists to close, and it
+ * is this estate's "two authorities under one name" class exactly.
+ *
+ * `expected_base_graph_hash` had two producers:
+ *   - the stale-base gate (`structural-delete.ts`) emitted
+ *     `computeAnalysisAffectingGraphHash` — 16-hex, the SAME space as the
+ *     client's own `base_graph_hash`, so a refresh can actually satisfy it;
+ *   - the atomic-CAS conflict path emitted `GraphStaleWriteError`'s
+ *     `expected_base_graph_hash`, which is the 64-hex IDENTITY hash.
+ *
+ * `structural-delete.ts`'s own header states the rule the second producer
+ * broke: *"The 64-hex IDENTITY hash has no wire emitter at all, so a client
+ * cannot hold one; comparing against it would be a gate that can never match —
+ * an affordance terminating in refusal (P8)."* Handing that value back while
+ * saying "refresh and reconfirm" names a recovery that cannot be performed.
+ *
+ * So this reads the CURRENT persisted graph and answers in analysis space.
+ * A FRESH read, deliberately: on a CAS conflict this turn's own base is stale
+ * BY DEFINITION, so echoing it back would be a claim about persisted state that
+ * the persisted state does not support (P5). Best-effort and total — a failed
+ * read yields `null` ("I cannot name a target"), which is honest, and must
+ * never convert a typed 409 into a different failure.
+ */
+async function readClientRecoverableBaseHash(scenarioId: string): Promise<string | null> {
+  try {
+    const current = await loadPersistedGraphStrict(scenarioId);
+    return computeExpectedGraphCasHashes(current).expectedGraphAnalysisHash;
+  } catch {
+    return null;
+  }
 }
 
 export interface DispatchSystemEventParams {
@@ -726,7 +767,9 @@ async function dispatchEdgeStrengthEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
-          expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+          // Analysis-space (16-hex), from a FRESH read — never the 64-hex
+          // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
     }
@@ -1116,7 +1159,9 @@ async function dispatchStructuralDelete(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
-          expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+          // Analysis-space (16-hex), from a FRESH read — never the 64-hex
+          // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
     }

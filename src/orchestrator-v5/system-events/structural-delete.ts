@@ -646,13 +646,51 @@ export function applyStructuralDelete(
       `I couldn't save that deletion safely, so I haven't removed anything.`,
     );
   }
-  const merged = mergeAppliedGraphForPersistence({
-    appliedGraph: candidate,
-    persistedBase: persistedGraph,
-    ingressBase: ingressParse.data,
-    requestId,
-    scenarioId: payload.scenario_id,
-  });
+  // ⚠⚠ THE CLONE IS THE P0 FIX — DO NOT REMOVE IT, AND DO NOT "OPTIMISE" IT INTO
+  // A SHALLOW COPY. It is the difference between a user being able to delete
+  // more than one thing per scenario and not.
+  //
+  // `mergeAppliedGraphForPersistence` composes the candidate with a SHALLOW
+  // spread — `{...base, nodes, edges}` — so ONLY `nodes` and `edges` are fresh.
+  // `merged.meta`, `merged.options` and every other top-level object/array are
+  // THE SAME OBJECT REFERENCES the trusted base holds. `pruneDanglingNodeReferences`
+  // below mutates IN PLACE (`delete bag[key]`, `graph.meta[field] = kept`), so
+  // without this clone it writes THROUGH the spread and rewrites `persistedGraph`
+  // — the very read this module's header calls the trusted base.
+  //
+  // WHY THAT WAS A P0 AND NOT AN AESTHETIC POINT: `dispatch.ts` derives the
+  // atomic-CAS expected base from `result.baseGraph` (i.e. `persistedGraph`)
+  // AFTER this adapter returns. A mutated base yields an expected hash for a
+  // graph that WAS NEVER PERSISTED, so it can never equal the stamped
+  // `scenarios.graph_identity_hash`, and `append_turn_atomic_v3/v4` raises OLGC1
+  // → 409 GRAPH_DIVERGED / `rpc_cas_conflict` on every subsequent delete, at
+  // rest, forever. Measured on real staging graphs: the base moved on 47/150,
+  // and on those the CAS would fire against a divergence this code manufactured.
+  // The two other post-adapter readers of `persistedGraph` in `dispatch.ts` —
+  // `contentGraph` and the advertised `currentAnalysisHash` — were reading the
+  // same corrupted bytes.
+  //
+  // ⚠ THE CAS ITSELF IS CORRECT AND IS NOT RELAXED. The column agreed with
+  // `computeExpectedGraphCasHashes(scenarios.graph)` on 976/976 live rows: the
+  // stored value was right and the DERIVATION was wrong. A genuinely stale base
+  // must still be refused — pinned by the opposite-direction twin in
+  // `structural-delete-trusted-base-purity.test.ts`.
+  //
+  // Cloning the MERGE RESULT (not the base) is the tightest containment: the
+  // merge is measured pure (0/150), so one clone covers the prune and every
+  // projection pass without changing any shared helper other lanes own.
+  // `structuredClone` is used rather than a JSON round-trip because it is not
+  // silently lossy on `undefined`/`NaN`; the value is wire-originated JSON, so
+  // no unclonable types can reach it.
+  const merged = structuredClone(
+    mergeAppliedGraphForPersistence({
+      appliedGraph: candidate,
+      persistedBase: persistedGraph,
+      ingressBase: ingressParse.data,
+      requestId,
+      scenarioId: payload.scenario_id,
+    }),
+  );
 
   // ── 5b. drop references to what we just removed ──────────────────────────
   // The merge fixes the two STRUCTURAL surfaces (nodes/edges and the top-level
