@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 import {
+  OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT,
   OPTION_EFFECT_WRITE_EXCLUDED_TRIGGERS,
   OPTION_EFFECT_WRITE_KNOWN_DROPPED,
   buildOptionEffectRawOperation,
@@ -46,6 +47,8 @@ import {
   resolveOptionEffectWrite,
 } from '../option-effect-write.js';
 import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
+import { deriveMissingEffectPairs } from '../repair-value-binding.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 
 // ── the witnessed bytes ────────────────────────────────────────────
@@ -686,12 +689,36 @@ describe('F1 — a nested label is dropped only WHERE it is nested (position, no
     // the boundary test (trap 13b — a guard agreeing with itself). These two
     // words DO contain "hire", each with exactly one bounded side, so they
     // discriminate the AND from the OR.
-    expect(
-      resolveOptionEffectWrite({
-        message: `Set the ${word} option's effect on Payroll cost to 0.5.`,
-        graph: hiringGraph({ withLonger: false }),
-      }),
-    ).toEqual({ matched: false, reason: 'option_not_named' });
+    //
+    // ⚠⚠ THE GRAPH AND THE EXPECTED VERDICT CHANGED WITH RULE 3b, AND THE
+    // DISCRIMINATION IS SHARPER, NOT WEAKER — stated here rather than left for
+    // a reader to reconstruct, because silently re-pointing a mutant-derived
+    // guard is how this estate loses one.
+    //
+    // WHAT MOVED. Rule 3b resolves the option from the product's own
+    // outstanding ask when the message names none, so on the ONE-option graph
+    // this sentence now binds a write to "Hire" — and the `||` mutant binds the
+    // same write, so the pair would no longer discriminate. On the TWO-option
+    // graph the same factor is outstanding for both, so:
+    //     pristine → `ask` (no option matched by label, two candidates)
+    //     `||` mutant → "hire" matches inside "hired"/"rehire" → ONE option
+    //                   matched by label → a WRITE
+    // The verdicts now differ in KIND, which is a stronger signal than one
+    // decline reason differing from another. Re-measured by execution: the
+    // mutant bites this case on the two-option graph (`M4` in the lane's
+    // battery).
+    const resolution = resolveOptionEffectWrite({
+      message: `Set the ${word} option's effect on Payroll cost to 0.5.`,
+      graph: hiringGraph({ withLonger: true }),
+    });
+    // THE LOAD-BEARING HALF: the near-miss matched no option BY LABEL, so no
+    // write may be produced from it.
+    expect(resolution.matched && resolution.kind).toBe('ask');
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('unreachable');
+    expect(resolution.optionSource).toBe('outstanding_ask');
+    expect(new Set(resolution.candidates.map((c) => c.optionId))).toEqual(
+      new Set([HIRE_ID, HIRE_TWO_ID]),
+    );
   });
 
   it('TWIN — a SUFFIX-nested label is dropped too (the nest is not always a prefix)', () => {
@@ -847,5 +874,316 @@ describe('F1 — a nested label is dropped only WHERE it is nested (position, no
       optionId: HIRE_ID,
       factorId: 'fac_payroll_overrun',
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — RULE 3b: THE PRODUCT'S OWN OUTSTANDING ASK RESOLVES THE OPTION
+//
+// ⚠ PROVENANCE, stated before any assertion (trap 16-inverse). Every USER
+// SENTENCE below is a VERBATIM capture from the 18 Aug 2026 composed
+// model-compiler journey witness (deployed CEE `585f8dce` / UI `dd089a50`,
+// fresh guest, real governed-corpus brief) — not a sentence composed here. The
+// node IDENTITIES are captured too. The EDGES are RECONSTRUCTED, and the
+// fixture's `__provenance__` says exactly which half is which and what that
+// costs (a blocker COUNT from this fixture is not a wire figure; the pair
+// IDENTITIES are).
+//
+// THE WITNESSED DEFECT. Olumi asked, on screen:
+//   "Next, choose the missing effect value for "double down on enterprise
+//    sales (higher…" on "Sales Headcount - Hybrid Maintained" …"
+// The user answered it. The write landed on the FACTOR BASELINE instead:
+// `interventions` stayed 0 on all four options, the MISSING_OPTION_VALUE
+// blocker survived BY IDENTITY, and only the fabricated constant in the
+// blocker copy moved, 0.5 → 0.8.
+//
+// ⭐ RED-FIRST SIGNATURES AT PRISTINE `b5f9aa2e` (measured, not predicted):
+//   · "binds the user's verbatim answer to the product's own ask, BY IDENTITY"
+//     → AssertionError: expected { matched: false, reason: 'option_not_named' }
+//   · "the write lands as an OPTION INTERVENTION, not a factor baseline"
+//     → Error: expected a write, got {"matched":false,"reason":"option_not_named"}
+//   · "a factor two options are waiting on ASKS rather than guessing"
+//     → AssertionError: expected 'option_not_named' to be 'ask'
+// The three twins below (T6 baseline, full-label, plain factor edit) were GREEN
+// at pristine and MUST STAY GREEN — they are the opposite-direction half.
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface JourneyWitnessFixture {
+  readonly ids: {
+    readonly option_id: string;
+    readonly option_label: string;
+    readonly factor_id: string;
+    readonly factor_label: string;
+    readonly sibling_factor_id: string;
+    readonly sibling_factor_label: string;
+    readonly two_option_factor_id: string;
+    readonly two_option_factor_label: string;
+  };
+  readonly wire: {
+    readonly on_screen_ask: string;
+    readonly t4_user_message: string;
+    readonly t5_user_message: string;
+    readonly t6_user_message: string;
+  };
+  readonly draft_graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+}
+
+const J18 = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../__tests__/fixtures/witness-2026-08-18/model-compiler-option-effect.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as JourneyWitnessFixture;
+
+const j18Graph = (): unknown => JSON.parse(JSON.stringify(J18.draft_graph)) as unknown;
+
+describe('W5 — the fixture is what it claims to be (positive control)', () => {
+  it('the captured pair IS outstanding on this graph, and the option label is untypeable', () => {
+    // Without this the W5 assertions could pass on a graph that was never
+    // blocked, or on a label short enough to make rule 3b pointless (trap 13:
+    // an absence probe needs a presence first).
+    const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(j18Graph()));
+    expect(
+      pairs.some((p) => p.optionId === J18.ids.option_id && p.factorId === J18.ids.factor_id),
+    ).toBe(true);
+    // EXACTLY ONE option is waiting on the captured factor — the conjunct that
+    // makes rule 3b a resolution rather than a guess.
+    expect(pairs.filter((p) => p.factorId === J18.ids.factor_id)).toHaveLength(1);
+    // …and TWO are waiting on the other captured factor: the ask twin's
+    // discriminator is a fact of this graph, not a shape invented for it.
+    expect(pairs.filter((p) => p.factorId === J18.ids.two_option_factor_id)).toHaveLength(2);
+
+    // The reason the user cannot take path (3): the label is a brief fragment
+    // the product itself renders truncated.
+    expect(J18.ids.option_label.length).toBeGreaterThan(80);
+    expect(J18.wire.on_screen_ask).toContain('double down on enterprise sales (higher…');
+    expect(J18.wire.t5_user_message).not.toContain(J18.ids.option_label);
+  });
+});
+
+describe('W5 — ACCEPTANCE 1: the product\'s own asked-for answer binds', () => {
+  it('binds the user\'s verbatim answer to the product\'s own ask, BY IDENTITY', () => {
+    const resolution = resolveOptionEffectWrite({
+      message: J18.wire.t5_user_message,
+      graph: j18Graph(),
+    });
+    expect(resolution).toEqual({
+      matched: true,
+      kind: 'write',
+      optionId: J18.ids.option_id,
+      optionLabel: J18.ids.option_label,
+      factorId: J18.ids.factor_id,
+      factorLabel: J18.ids.factor_label,
+      value: 0.8,
+    });
+  });
+
+  it('the trigger gate is UNCHANGED — the sentence was always effect-framed; only identity failed', () => {
+    // P7 / trap 21: this pins WHICH gate moved. The intent classifier already
+    // said yes at pristine, so a later reader cannot mistake rule 3b for a
+    // widening of the trigger set.
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(J18.wire.t5_user_message, projectOptionLabels(parsed.nodes)),
+    ).toEqual({ matched: true, trigger: 'effect_vocab' });
+  });
+
+  it('a factor two options are waiting on ASKS rather than guessing', () => {
+    const message =
+      `Set the option's effect on ${J18.ids.two_option_factor_label} to 0.4.`;
+    const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+    expect(resolution.matched && resolution.kind).toBe('ask');
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('unreachable');
+    expect(resolution.ambiguity).toBe('option');
+    expect(resolution.optionSource).toBe('outstanding_ask');
+    expect(resolution.candidates).toHaveLength(2);
+    // Bound by IDENTITY, not by count: every candidate is the SAME factor and a
+    // DIFFERENT option, which is the only shape an option-ambiguity may take.
+    expect(new Set(resolution.candidates.map((c) => c.factorId))).toEqual(
+      new Set([J18.ids.two_option_factor_id]),
+    );
+    expect(new Set(resolution.candidates.map((c) => c.optionId)).size).toBe(2);
+  });
+
+  it('a factor the product is NOT asking about does not resolve an option', () => {
+    // The conjunct that stops rule 3b reaching a pair nobody asked about. The
+    // captured pair is satisfied first, so the ask no longer names it.
+    const satisfied = GraphV3.parse(j18Graph()) as GraphV3T;
+    const option = satisfied.nodes.find((n) => n.id === J18.ids.option_id) as Record<string, unknown>;
+    option.interventions = { [J18.ids.factor_id]: 0.4 };
+    const resolution = resolveOptionEffectWrite({
+      message: J18.wire.t5_user_message,
+      graph: satisfied,
+    });
+    expect(resolution).toEqual({ matched: false, reason: 'no_outstanding_ask_for_factor' });
+  });
+});
+
+describe('W5 — OPPOSITE-DIRECTION TWINS: what must NOT change', () => {
+  it('TWIN — the witnessed turn 6 says "baseline" and is STILL suppressed', () => {
+    // Requirement 4: the W1 exclusion class stays excluded. This sentence is
+    // the user's genuine option-effect intent and we still decline it, because
+    // at the graph it is indistinguishable from a baseline edit.
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t6_user_message, graph: j18Graph() }),
+    ).toEqual({ matched: false, reason: 'baseline_framing' });
+  });
+
+  it('TWIN — a plain factor-BASELINE edit still never reaches this module', () => {
+    // Requirement 3, at its own seam: "Set <factor> to 0.3" is not
+    // effect-framed, so `set_factor_value` keeps it, exactly as at pristine.
+    const message = `Set ${J18.ids.sibling_factor_label} to 0.3`;
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes)).matched).toBe(
+      false,
+    );
+    expect(resolveOptionEffectWrite({ message, graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
+  it('TWIN — naming the option IN FULL still takes path (3), unchanged', () => {
+    // Rule 3b must be unreachable when the message names an option. The pair
+    // here is the SIBLING factor, so a fallback that fired anyway would bind a
+    // different factor and this would go red.
+    const message =
+      `Set the ${J18.ids.option_label} option's effect on ${J18.ids.sibling_factor_label} to 0.2.`;
+    const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+    expect(resolution.matched && resolution.kind === 'write' && resolution.factorId).toBe(
+      J18.ids.sibling_factor_id,
+    );
+  });
+
+  it('DISCRIMINATING PAIR — rule 3b is bound to the ASKED factor, not to any factor', () => {
+    // RED HALF: rename the factor the message names → the write withdraws.
+    const renamed = GraphV3.parse(j18Graph()) as GraphV3T;
+    const target = renamed.nodes.find((n) => n.id === J18.ids.factor_id) as Record<string, unknown>;
+    target.label = 'Zzz Unrelated Factor Label';
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t5_user_message, graph: renamed }).matched,
+    ).toBe(false);
+
+    // GREEN HALF: rename a DIFFERENT factor → the verdict is byte-identical.
+    const other = GraphV3.parse(j18Graph()) as GraphV3T;
+    const bystander = other.nodes.find((n) => n.id === J18.ids.sibling_factor_id) as Record<string, unknown>;
+    bystander.label = 'Zzz Unrelated Factor Label';
+    expect(resolveOptionEffectWrite({ message: J18.wire.t5_user_message, graph: other })).toEqual(
+      resolveOptionEffectWrite({ message: J18.wire.t5_user_message, graph: j18Graph() }),
+    );
+  });
+});
+
+describe('W5 — the residual is STATED, not papered over', () => {
+  it('turn 4 (the prose answer) is STILL not claimed — and the record says why', () => {
+    // ⚠ HONEST GAP, reported rather than fixed. The witnessed turn 4 names
+    // neither entity in full: `detectConfigureOptionIntent` does not match it
+    // at all, so no change to THIS module can bind it. Its P8 refusal is
+    // composed by the turn-executor's `set_factor_value` misroute guard, a
+    // different seam with a different blast radius. Pinned here so the gap is
+    // visible in the suite (trap 22f's honest-gap protocol) and REDs if
+    // something later starts claiming it silently.
+    expect(resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: j18Graph() })).toEqual(
+      { matched: false, reason: 'not_effect_framed_intent' },
+    );
+  });
+
+  it('the stated limit is real behaviour, and the acknowledgement makes it VISIBLE', () => {
+    // An option reference this reader cannot resolve, next to a factor the
+    // product IS asking about for a different option. It binds to the
+    // outstanding one — and the ack NAMES that option, so the user reads which
+    // entity moved. The witnessed defect was the opposite: a wrong entity
+    // written while the reply said nothing had changed.
+    expect(OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT.behaviour).toContain('names it in the acknowledgement');
+    const message = `For the hybrid option, set the effect on ${J18.ids.factor_label} to 0.8.`;
+    const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+    expect(resolution.matched && resolution.kind === 'write' && resolution.optionId).toBe(
+      J18.ids.option_id,
+    );
+    if (!resolution.matched || resolution.kind !== 'write') throw new Error('unreachable');
+    expect(
+      formatOptionEffectWriteAck({
+        optionLabel: resolution.optionLabel,
+        factorLabel: resolution.factorLabel,
+        committedValue: resolution.value,
+      }),
+    ).toContain(J18.ids.option_label);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — THE FACTOR AXIS OF "NEVER GUESS BETWEEN AMBIGUOUS ENTITIES"
+//
+// ⚠ ADDED FROM A SURVIVING MUTANT, not from imagination. The battery mutated
+// rule 3b's `factorMatches.length !== 1` to `< 1` and the whole 132-test slice
+// stayed GREEN — so nothing pinned what happens when the message names TWO
+// factors the product is currently asking about. Under that mutant rule 3b
+// silently takes `factorMatches[0]`: the product PICKS one of two entities the
+// user might have meant, which is the wrong-entity class this seam exists to
+// remove, arriving on the factor axis instead of the option axis.
+//
+// The option axis was already covered — two outstanding options on one factor
+// ASK. This is its opposite-direction twin on the other half of the pair.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('W5 — rule 3b never picks between two factors the product is asking about', () => {
+  it('two ASKED-ABOUT factors and no option named → declines, and picks NEITHER', () => {
+    // Both factors are genuinely outstanding on this graph — the positive
+    // control, so a decline cannot pass by the factors being absent.
+    const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(j18Graph()));
+    const asked = new Set(pairs.map((p) => p.factorId));
+    expect(asked.has(J18.ids.factor_id)).toBe(true);
+    expect(asked.has(J18.ids.sibling_factor_id)).toBe(true);
+
+    const message =
+      `I meant the option's effect — set ${J18.ids.factor_label} and `
+      + `${J18.ids.sibling_factor_label} to 0.8.`;
+    // The trigger gate still says yes, so the decline is rule 3b's own decision
+    // and not an intent miss (trap 13b — pin the precondition in-test).
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes)).matched,
+    ).toBe(true);
+
+    const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+    // BY IDENTITY, both halves: no write at all, and specifically not a write
+    // to either candidate factor.
+    expect(resolution).toEqual({ matched: false, reason: 'no_outstanding_ask_for_factor' });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — THE OTHER SURVIVING MUTANT, DEMONSTRATED EQUIVALENT RATHER THAN PINNED.
+//
+// `messageCarriesOptionCue`'s `optionLabels.length === 0 → false` was mutated
+// to `true` and survived. It is EQUIVALENT, and this is the demonstration
+// rather than the assertion (trap 13c: a survivor is a claim either way).
+// Caller 1, `impliesOptionInterventionEdit`, short-circuits on the same
+// condition before it can call. Caller 2 is rule 3b, and on an option-less
+// graph BOTH readings decline `option_not_named` — the mutant directly, the
+// original because the outstanding-ask set is necessarily empty.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('W5 — an option-less graph declines by BOTH routes (equivalence demonstration)', () => {
+  it('no options ⇒ no outstanding pairs ⇒ `option_not_named`, whichever branch is taken', () => {
+    const optionless = GraphV3.parse(j18Graph()) as GraphV3T;
+    const optionIds = new Set(
+      optionless.nodes.filter((n) => n.kind === 'option').map((n) => n.id),
+    );
+    expect(optionIds.size).toBe(4);
+    const stripped = {
+      ...optionless,
+      nodes: optionless.nodes.filter((n) => !optionIds.has(n.id)),
+      edges: optionless.edges.filter((e) => !optionIds.has(e.from) && !optionIds.has(e.to)),
+    };
+    // The second branch's premise, measured: with no options there is nothing
+    // for the product to be asking about.
+    expect(
+      deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(stripped)),
+    ).toEqual([]);
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t5_user_message, graph: stripped }),
+    ).toEqual({ matched: false, reason: 'option_not_named' });
   });
 });

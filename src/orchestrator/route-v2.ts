@@ -5060,10 +5060,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           scenario_id: ingress.scenario_id,
           ambiguity: optionEffectAsk.ambiguity,
           candidate_count: optionEffectAsk.candidates.length,
+          option_source: optionEffectAsk.optionSource,
         });
         const askReadiness = buildCanonicalAnalysisReadyFromGraph(effectiveGraphState);
         const askResponse = composeOptionEffectAskResponse({
           ambiguity: optionEffectAsk.ambiguity,
+          // Threaded, never re-derived here: the copy's truthfulness about the
+          // user's own sentence is the resolver's fact, not this site's guess.
+          optionSource: optionEffectAsk.optionSource,
           value: optionEffectAsk.value,
           candidates: optionEffectAsk.candidates,
           optionLabels: optionEffectAsk.optionLabels,

@@ -50,6 +50,16 @@ function joinQuoted(labels: readonly string[]): string {
 export interface ComposeOptionEffectAskInput {
   /** Which half of the pair could not be pinned down. */
   readonly ambiguity: 'option' | 'factor';
+  /**
+   * ⭐ WHERE THE CANDIDATE OPTIONS CAME FROM — a copy contract, threaded from
+   * the resolver rather than inferred here. `named_in_message` is the
+   * pre-existing case and its sentence is unchanged. `outstanding_ask` is rule
+   * 3b: the message named NO option, and the candidates are the pairs the
+   * PRODUCT is still asking about — so the sentence must not claim the user
+   * named them (P5: a claim about the user's own words needs a grounding read,
+   * and here the grounding read says the opposite).
+   */
+  readonly optionSource: 'named_in_message' | 'outstanding_ask';
   /** The user's value, verbatim from their sentence. */
   readonly value: number;
   /** Complete, routable candidates. May be empty when no chip is honest. */
@@ -79,10 +89,16 @@ export function composeOptionEffectAskResponse(
   // exactly the class this seam exists to remove.
   const count = input.ambiguity === 'option' ? input.optionLabels.length : input.candidates.length;
   const subject = input.ambiguity === 'option' ? 'options' : 'factors';
+  const factorNamed = input.candidates[0]?.factorLabel ?? '';
   const opening =
-    input.ambiguity === 'option'
-      ? `Your message names ${count} ${subject} — ${named} — so I do not know which one ${input.value} belongs to.`
-      : `Your message names ${count} ${subject} on "${input.optionLabels[0] ?? ''}" — ${named} — so I do not know which one ${input.value} belongs to.`;
+    input.ambiguity !== 'option'
+      ? `Your message names ${count} ${subject} on "${input.optionLabels[0] ?? ''}" — ${named} — so I do not know which one ${input.value} belongs to.`
+      : input.optionSource === 'outstanding_ask'
+        // ⚠ THE MESSAGE NAMED NO OPTION. Saying it did would be a fabricated
+        // claim about the user's own sentence, inside the copy written to stop
+        // the product guessing. State whose question this is instead.
+        ? `${count} ${subject} are still waiting on a value for "${factorNamed}" — ${named} — so I do not know which one ${input.value} belongs to.`
+        : `Your message names ${count} ${subject} — ${named} — so I do not know which one ${input.value} belongs to.`;
 
   const closing =
     offered.length > 0

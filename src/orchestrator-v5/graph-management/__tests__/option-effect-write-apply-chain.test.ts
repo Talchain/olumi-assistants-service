@@ -283,3 +283,129 @@ describe('2.1266 — deterministic option-effect write, full apply chain', () =>
     expect(pairsAfter.some((p) => p.optionId === OPTION_ID && p.factorId === FACTOR_ID)).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — THE 18 AUG JOURNEY: the user's VERBATIM answer to the product's own
+// on-screen ask, driven through the SAME chain, end to end.
+//
+// ⚠ PROVENANCE (trap 16-inverse). The sentence is a verbatim DOM capture from
+// the 18 Aug 2026 composed model-compiler journey witness (deployed CEE
+// `585f8dce`, fresh guest). The node IDENTITIES are captured; the EDGES are
+// RECONSTRUCTED — the fixture's `__provenance__` says which half is which, and
+// why a blocker COUNT from it is not a wire figure while the pair IDENTITIES
+// are.
+//
+// ⭐ RED-FIRST SIGNATURE AT PRISTINE `b5f9aa2e` (measured):
+//   `Error: expected a write, got {"matched":false,"reason":"option_not_named"}`
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface JourneyFixture {
+  readonly ids: {
+    readonly option_id: string;
+    readonly option_label: string;
+    readonly factor_id: string;
+    readonly factor_label: string;
+  };
+  readonly wire: { readonly t5_user_message: string };
+  readonly draft_graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+}
+
+const J18 = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../__tests__/fixtures/witness-2026-08-18/model-compiler-option-effect.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as JourneyFixture;
+
+const j18 = () => clone(J18.draft_graph);
+interface BlockerIdentity { readonly option_id?: string; readonly factor_id?: string }
+const blockerKey = (b: unknown): string => {
+  const { option_id, factor_id } = (b ?? {}) as BlockerIdentity;
+  return `${option_id ?? ''}::${factor_id ?? ''}`;
+};
+
+describe('W5 — the witnessed repair answer, through the full chain', () => {
+  it('RED BASELINE — every option carries ZERO effect values and the pair is blocked', () => {
+    const parsed = GraphV3.parse(j18()) as GraphV3T;
+    const counts = parsed.nodes
+      .filter((n) => n.kind === 'option')
+      .map((n) => Object.keys(mergeInterventionSources(n as Record<string, unknown>) ?? {}).length);
+    expect(counts).toHaveLength(4);
+    expect(counts.every((c) => c === 0)).toBe(true);
+    const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(j18()));
+    expect(
+      pairs.some((p) => p.optionId === J18.ids.option_id && p.factorId === J18.ids.factor_id),
+    ).toBe(true);
+  });
+
+  it('the write lands as an OPTION INTERVENTION, not a factor baseline', () => {
+    const resolved = resolveOrThrow(J18.wire.t5_user_message, j18());
+    expect(resolved.optionId).toBe(J18.ids.option_id);
+    expect(resolved.factorId).toBe(J18.ids.factor_id);
+
+    const applied = applyPatchOperations(GraphV3.parse(j18()) as GraphV3T, canonicalise(resolved));
+    const { graph: encoded } = encodeOptionInterventionsForEdit(
+      applied,
+      new Set([J18.ids.option_id]),
+    );
+
+    // ⭐ BY IDENTITY, both halves. The named option gains exactly this one
+    // effect value; every OTHER option still carries none.
+    const after = GraphV3.parse(encoded) as GraphV3T;
+    const byId = new Map(
+      after.nodes
+        .filter((n) => n.kind === 'option')
+        .map((n) => [n.id, mergeInterventionSources(n as Record<string, unknown>) ?? {}]),
+    );
+    expect(byId.get(J18.ids.option_id)).toEqual({ [J18.ids.factor_id]: 0.8 });
+    for (const [id, interventions] of byId) {
+      if (id === J18.ids.option_id) continue;
+      expect(Object.keys(interventions)).toEqual([]);
+    }
+
+    // ⚠ THE FACTOR'S OWN BASELINE IS UNTOUCHED — the witnessed defect's exact
+    // signature, asserted as an absence with the value it actually held.
+    const factorBefore = (GraphV3.parse(j18()) as GraphV3T).nodes.find(
+      (n) => n.id === J18.ids.factor_id,
+    ) as Record<string, unknown>;
+    const factorAfter = after.nodes.find((n) => n.id === J18.ids.factor_id) as Record<string, unknown>;
+    expect(factorAfter.observed_state).toEqual(factorBefore.observed_state);
+    expect((factorAfter.observed_state as { value?: unknown }).value).toBe(0.5);
+  });
+
+  it('the blocker for THAT pair disappears and every other blocker is byte-identical', () => {
+    const resolved = resolveOrThrow(J18.wire.t5_user_message, j18());
+    const beforeBlockers: readonly unknown[] = clone(
+      buildCanonicalAnalysisReadyFromGraph(j18())!.blockers ?? [],
+    ) as readonly unknown[];
+    const applied = applyPatchOperations(GraphV3.parse(j18()) as GraphV3T, canonicalise(resolved));
+    const { graph: encoded } = encodeOptionInterventionsForEdit(
+      applied,
+      new Set([J18.ids.option_id]),
+    );
+    const afterBlockers: readonly unknown[] =
+      buildCanonicalAnalysisReadyFromGraph(encoded)!.blockers ?? [];
+
+    const target = `${J18.ids.option_id}::${J18.ids.factor_id}`;
+    expect(beforeBlockers.map(blockerKey)).toContain(target);
+    expect(afterBlockers.map(blockerKey)).not.toContain(target);
+    // BYTE-IDENTICAL, not merely same-length: the survivors are the before-set
+    // minus exactly one entry, in order, with every field unchanged — so a
+    // write that "cleared the blocker" by rewriting the copy (the witnessed
+    // 0.5 → 0.8 re-issue) could not pass this.
+    expect(afterBlockers).toEqual(beforeBlockers.filter((b) => blockerKey(b) !== target));
+  });
+
+  it('#1016 ALLOWS on `interventions_write_landed` — the writer does not bypass the guard', () => {
+    const resolved = resolveOrThrow(J18.wire.t5_user_message, j18());
+    const applied = applyPatchOperations(GraphV3.parse(j18()) as GraphV3T, canonicalise(resolved));
+    const { graph: encoded } = encodeOptionInterventionsForEdit(
+      applied,
+      new Set([J18.ids.option_id]),
+    );
+    expect(anyInterventionWriteLanded(GraphV3.parse(j18()) as GraphV3T, encoded)).toBe(true);
+  });
+});

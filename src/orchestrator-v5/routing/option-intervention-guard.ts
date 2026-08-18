@@ -298,32 +298,68 @@ export function impliesOptionInterventionEdit(
   if (/\boptions?\b/.test(padded)) return true;
   if (/\binterventions?\b/.test(padded)) return true;
 
-  // (2) names a specific option by its full label.
+  // (2) names a specific option by its full label, and (3) uses a word that
+  // identifies an option and nothing else here — BOTH now live in
+  // `messageCarriesOptionCue` and are asked ONCE. Spelling trigger (2) here as
+  // well would be the hand-maintained mirror this extraction exists to remove
+  // (trap 12): two copies of "does this name an option", in a REFUSAL guard and
+  // in a WRITE resolver, are exactly the pair that must never drift (trap 21).
+  // Behaviour is unchanged — these are pure predicates combined with OR, and
+  // `messageCarriesOptionCue` runs the same full-label loop first.
+  return messageCarriesOptionCue(message, optionLabels, nonOptionLabels);
+}
+
+/**
+ * ⭐ TRIGGER (3), ON ITS OWN: does this message use a word that identifies an
+ * OPTION and nothing else in this graph — a full label, or a distinctive token
+ * or an inflection of one?
+ *
+ * EXTRACTED, NOT COPIED (trap 12). `impliesOptionInterventionEdit` above is now
+ * its only other caller, so the two cannot drift; a second spelling of "does
+ * this name an option" is exactly the two-same-named-helpers defect this estate
+ * keeps paying for, and here the two readers would be a REFUSAL and a WRITE
+ * disagreeing about the same sentence (trap 21).
+ *
+ * ⚠ IT DELIBERATELY EXCLUDES THE BARE WORD "option". `impliesOptionInterventionEdit`
+ * treats that as a trigger in its own right because a false positive there costs
+ * one clarify turn. The question THIS function answers is narrower and is asked
+ * by `option-effect-write.ts`'s rule 3b: *did the user REFER TO A PARTICULAR
+ * OPTION we then failed to match?* "…the option's effect on X…" names no
+ * particular option; "…the Franchising option…" does. Only the second is a
+ * reason to refuse to resolve from context.
+ */
+export function messageCarriesOptionCue(
+  message: string,
+  optionLabels: readonly string[],
+  nonOptionLabels: readonly string[],
+): boolean {
+  if (optionLabels.length === 0) return false;
+  const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  const padded = ` ${normalised} `;
+
   for (const raw of optionLabels) {
     if (typeof raw !== 'string') continue;
     const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
     if (label.length >= 3 && containsPhrase(padded, label)) return true;
   }
 
-  // (3) uses a word that identifies an option and nothing else here.
   const { cues, claimedElsewhere } = deriveOptionDistinctiveTokens(
     optionLabels,
     nonOptionLabels,
   );
-  if (cues.size > 0) {
-    for (const token of tokenise(normalised)) {
-      if (token.length < MIN_DISTINCTIVE_TOKEN_LENGTH) continue;
-      // A word that names another entity is evidence for THAT entity, never
-      // for an option — even if it happens to share a stem with an option
-      // cue. Without this the exclusion is one-sided and the inflection rule
-      // leaks: the live fixture "Hire Two Senior Engineers Locally" (option)
-      // and "Local Senior Hire Indicator" (factor) let the factor's own word
-      // "local" match the option's "locally", refusing a perfectly ordinary
-      // factor edit. Subtraction has to apply to BOTH sides of the match.
-      if (claimedElsewhere.has(token)) continue;
-      for (const cue of cues) {
-        if (tokensShareLexeme(cue, token)) return true;
-      }
+  if (cues.size === 0) return false;
+  for (const token of tokenise(normalised)) {
+    if (token.length < MIN_DISTINCTIVE_TOKEN_LENGTH) continue;
+    // A word that names another entity is evidence for THAT entity, never
+    // for an option — even if it happens to share a stem with an option
+    // cue. Without this the exclusion is one-sided and the inflection rule
+    // leaks: the live fixture "Hire Two Senior Engineers Locally" (option)
+    // and "Local Senior Hire Indicator" (factor) let the factor's own word
+    // "local" match the option's "locally", refusing a perfectly ordinary
+    // factor edit. Subtraction has to apply to BOTH sides of the match.
+    if (claimedElsewhere.has(token)) continue;
+    for (const cue of cues) {
+      if (tokensShareLexeme(cue, token)) return true;
     }
   }
 

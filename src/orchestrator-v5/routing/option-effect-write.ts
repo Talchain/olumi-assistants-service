@@ -66,7 +66,9 @@
  *      states the scale (`src/prompts/edit-graph-v6.ts`: "effect values are
  *      on the 0-1 scale") — P7: derived from the PRODUCER's instruction, not
  *      from a corpus.
- *   3. EXACTLY ONE option node's label appears in the message, word-bounded.
+ *   3. EXACTLY ONE option node's label appears in the message, word-bounded —
+ *      OR, when NO option label appears at all, the option is resolved from
+ *      THE PRODUCT'S OWN OUTSTANDING ASK (rule 3b below).
  *   4. EXACTLY ONE of THAT OPTION'S LINKED factors' labels appears in the
  *      message, word-bounded. "Linked" reads `edge.from === optionId` and
  *      `kind === 'factor'` — byte-identical to `collectCandidateFactorLabels`
@@ -77,6 +79,85 @@
  * TWO or more candidates on (3) or (4) → `ask`. Anything else → decline, and
  * a decline is byte-identical to today: the edit LLM gets the turn exactly as
  * it does now, #1016 still guards its output.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⭐⭐ RULE 3b — WHEN THE USER CANNOT TYPE THE OPTION'S LABEL, THE PRODUCT'S
+ * OWN OUTSTANDING ASK RESOLVES IT. (Added after the 18 Aug 2026 composed
+ * model-compiler journey witness, `585f8dce` / UI `dd089a50`.)
+ *
+ * WHAT WAS WITNESSED, on the deployed product, driven as a fresh guest. Olumi
+ * asked, on screen:
+ *
+ *   "Next, choose the missing effect value for "double down on enterprise
+ *    sales (higher…" on "Sales Headcount - Hybrid Maintained" so the
+ *    comparison can be prepared."
+ *
+ * The user answered it (turn 5, verbatim): *"I meant the option's effect. For
+ * the enterprise sales option, set Sales Headcount - Hybrid Maintained to
+ * 0.8."* — effect-framed, one 0–1 value, the factor named IN FULL, exactly as
+ * asked. **This resolver declined `option_not_named`**, the turn fell to the
+ * edit LLM, and a FACTOR BASELINE was written instead: `interventions` stayed
+ * `0` on all four options, the `MISSING_OPTION_VALUE` blocker survived BY
+ * IDENTITY (`4abad64d` × `4d3256b4`), and the only thing that moved was the
+ * fabricated constant in the blocker copy, `0.5` → `0.8`.
+ *
+ * ⚠⚠ THE ROOT CAUSE IS NOT THIS MODULE ALONE — IT IS ONE READER SHARED BY
+ * THREE SURFACES, AND IT WAS MEASURED, NOT REASONED ABOUT. Every path that
+ * needs to know WHICH OPTION the user means resolves it by requiring the
+ * option's FULL label word-bounded in the message. On the witnessed graph the
+ * drafter had minted 84- and 101-character option labels (they ARE the user's
+ * own brief fragments), and the product renders them TRUNCATED
+ * (*"double down on enterprise sales (higher…"*). So on that turn:
+ *
+ *   this resolver                         → `option_not_named`   (no write)
+ *   `configure-option-clarify.ts`'s
+ *     `buildConfigureOptionRecoveryCopy`  → `option_not_identified` (no copy)
+ *   `configure-option-outcome.ts`, and
+ *     through it #1016's write guard      → skip → **allow** the wrong entity
+ *
+ * — three guards, one blind spot, and the product asks a question whose answer
+ * it structurally cannot accept (P8). Reproduced at pristine `b5f9aa2e`
+ * against the captured identities; see `__tests__/option-effect-write.test.ts`
+ * block `W5`.
+ *
+ * THE RULE, and why it cannot become the defect it removes. When the message
+ * names NO option label at all, the option is taken from
+ * `deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(graph))` —
+ * the estate's ONE OWNER of *"which option × factor pairs is the product
+ * currently saying it has no value for"* (`repair-value-binding.ts`), and the
+ * SAME payload the blocker sentence the user is answering was composed from.
+ * Three conjuncts, each load-bearing:
+ *
+ *   (a) NO option label matched. A message that names an option in full is
+ *       untouched by this rule — it takes path (3) exactly as before.
+ *   (b) EXACTLY ONE factor is named, word-bounded, AND that factor is one the
+ *       product is CURRENTLY ASKING ABOUT. Factors outside the outstanding ask
+ *       are not candidates, so this rule can only ever bind a pair the product
+ *       itself put on screen. It cannot reach a pair nobody asked about.
+ *   (c) EXACTLY ONE outstanding pair carries that factor. Two or more → `ask`,
+ *       with one chip per candidate carrying the full-label advised format.
+ *       The ambiguity becomes the product (trap 22f); it is never guessed.
+ *
+ * ⚠ WHAT IT STILL CANNOT DO, stated rather than papered over (trap 22's
+ * limit). If the user means an option that is NOT in the outstanding set for
+ * the factor they named — *"For the hybrid option, set <factor> to 0.8"*,
+ * where only the enterprise option is outstanding on that factor — this rule
+ * binds the outstanding one. That is a bounded residual, not a silent one:
+ * `formatOptionEffectWriteAck` names the option it wrote BY LABEL, so the user
+ * reads which entity moved. The witnessed defect had the opposite shape — a
+ * wrong entity written while the reply said nothing had changed. Pinned as
+ * `OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT`.
+ *
+ * ⚠ NOT WIDENED, DELIBERATELY: the effect-framed trigger set, the
+ * `option_value_set` / `chip_prefix` exclusions, the `baseline` suppressor and
+ * the 0–1 single-value grammar are ALL untouched. This rule changes only how
+ * an option's IDENTITY is resolved once every one of those gates has already
+ * said yes. The W1 class (*"…change the <factor> baseline to 0.3"*) is still
+ * suppressed on the word "baseline" and is still in
+ * `OPTION_EFFECT_WRITE_KNOWN_DROPPED`; so is the witnessed turn 6, which
+ * carries that word. A genuine factor-baseline edit ("Set <factor> to 0.3")
+ * never reaches this module at all — `detectConfigureOptionIntent` does not
+ * match it — and its twin is pinned.
  *
  * ⚠ THE `baseline` SUPPRESSOR — a CLOSED single-token narrowing, not a
  * predicate. A message containing the word "baseline" is never claimed, even
@@ -113,13 +194,21 @@
  */
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
-import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  mergeInterventionSources,
+} from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   detectConfigureOptionIntent,
   projectOptionLabels,
   type ConfigureOptionIntentTrigger,
 } from './configure-option-intent.js';
-import { phraseOccurrences, type PhraseOccurrence } from './option-intervention-guard.js';
+import {
+  messageCarriesOptionCue,
+  phraseOccurrences,
+  type PhraseOccurrence,
+} from './option-intervention-guard.js';
+import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value-binding.js';
 
 /**
  * The triggers that mean "this sentence is explicitly about an OPTION'S
@@ -335,8 +424,35 @@ export type OptionEffectWriteDeclineReason =
   | 'graph_unparseable'
   | 'no_single_unit_scale_value'
   | 'option_not_named'
+  /**
+   * Rule 3b reached and could not resolve: the message named no option label,
+   * and the outstanding ask does not name EXACTLY ONE of the factors the
+   * message names. Distinct from `option_not_named` on purpose — it says the
+   * fallback RAN and declined, which is the only way to tell "the product was
+   * never asking about this" from "the option reference was unreadable".
+   */
+  | 'no_outstanding_ask_for_factor'
   | 'factor_not_named'
   | 'value_already_set';
+
+/**
+ * ⚠ Rule 3b's stated residual, pinned as data so the suite REDs if someone
+ * "fixes" it by widening rather than by rowing it (trap 22f's honest-gap
+ * protocol, and trap 20 — a limit recorded loosely becomes a false claim).
+ *
+ * The companion spec executes this exact shape and asserts BOTH halves: the
+ * write binds to the outstanding option, AND the acknowledgement names that
+ * option by label — so the residual is bounded and VISIBLE, never silent.
+ */
+export const OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT = Object.freeze({
+  shape: "an option reference this reader cannot resolve, alongside a factor the product IS asking about for a DIFFERENT option — e.g. \"For the hybrid option, set {factor} to 0.8\"",
+  behaviour: 'binds to the OUTSTANDING option for that factor, and names it in the acknowledgement',
+  why_not_closed:
+    'closing it needs a partial/synonym option-reference reader; four rounds of open-ended '
+    + 'natural-language predicate tuning oscillated on a neighbouring seam (CLAUDE.md trap 22f), '
+    + 'and the honest exit there is to ask rather than guess — which is what two or more '
+    + 'outstanding options on the same factor already does',
+});
 
 /** One candidate pair the ask offers. */
 export interface OptionEffectCandidate {
@@ -362,6 +478,16 @@ export type OptionEffectWriteResolution =
       readonly kind: 'ask';
       /** Which half of the pair could not be pinned down. */
       readonly ambiguity: 'option' | 'factor';
+      /**
+       * ⭐ WHERE THE CANDIDATE OPTIONS CAME FROM — and it is a copy contract,
+       * not telemetry. The pre-existing ask says *"Your message names 2
+       * options"*, which is TRUE only when the message named them. Rule 3b's
+       * candidates come from the product's own outstanding ask on a message
+       * that named NO option, so reusing that sentence would be a fabricated
+       * claim about the user's own words (P5) inside the copy written to stop
+       * the product guessing. The composer branches on this field.
+       */
+      readonly optionSource: 'named_in_message' | 'outstanding_ask';
       readonly value: number;
       /**
        * Every candidate the message could have meant, by identity. A candidate
@@ -376,6 +502,109 @@ export type OptionEffectWriteResolution =
 
 function decline(reason: OptionEffectWriteDeclineReason): OptionEffectWriteResolution {
   return { matched: false, reason };
+}
+
+/**
+ * ⭐⭐ RULE 3b — resolve the OPTION from the product's own outstanding ask.
+ *
+ * Reached ONLY when the message names no option label at all. Everything it
+ * can bind to comes from `deriveMissingEffectPairs` — the estate's one owner
+ * of "which option × factor pairs is the product currently saying it has no
+ * value for", read off the SAME canonical payload the blocker sentence the
+ * user is answering was composed from (trap 12: one reader, no mirror). So
+ * this cannot name a pair the product is not already asking about.
+ *
+ * ⚠ THE CANDIDATE SET IS THE ASK, NOT THE GRAPH. Matching factor labels
+ * against `graph.nodes` instead would let a factor nobody asked about resolve
+ * an option by proximity — the wrong-entity write in a new costume. The
+ * restriction to asked-about factors is what makes this an ACCEPTANCE of the
+ * product's own question rather than a second intent parser (P8).
+ */
+function resolveFromOutstandingAsk(
+  paddedMessage: string,
+  graph: GraphV3T,
+  rawGraph: unknown,
+  value: number,
+): OptionEffectWriteResolution {
+  // ⭐⭐ CONJUNCT (a), AND IT WAS PUT HERE BY THREE PRE-EXISTING GUARDS GOING
+  // RED — the outside corpus refuting the first cut of this rule (trap 22c).
+  //
+  // Without it, rule 3b fired on any message whose option reference this
+  // reader could not match, including a deliberate near-miss. It turned
+  // `option-effect-write.test.ts`'s discriminating pair ("rename THE NAMED
+  // option and the write withdraws") and both mutant-derived word-boundary
+  // guards from RED to a WRITE — i.e. the fix reproduced, in a narrower form,
+  // exactly the wrong-entity class it was written to remove. The lead question
+  // was "could this fix be another instance of the defect it claims to
+  // remove?", and the honest answer at the first cut was yes.
+  //
+  // THE DISCRIMINATOR IS THE SHIPPED READER, NOT A NEW ONE. `messageCarriesOptionCue`
+  // is trigger (3) of `impliesOptionInterventionEdit` — the same subtraction
+  // (`deriveOptionDistinctiveTokens`) the misroute guard uses — extracted so
+  // there is ONE implementation. A sentence that names a PARTICULAR option we
+  // could not match is a sentence whose option we must not choose; a sentence
+  // that names none ("…the option's effect on <factor>…") leaves the ask as the
+  // only authority on which option is meant. That also makes the writer and
+  // the refusal guard agree about the same sentence, which is the trap-21
+  // defect this seam produced in the first place.
+  const optionLabels: string[] = [];
+  const nonOptionLabels: string[] = [];
+  for (const node of graph.nodes) {
+    if (typeof node.label !== 'string' || node.label.trim().length === 0) continue;
+    (node.kind === 'option' ? optionLabels : nonOptionLabels).push(node.label);
+  }
+  if (messageCarriesOptionCue(paddedMessage, optionLabels, nonOptionLabels)) {
+    return decline('option_not_named');
+  }
+
+  const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(rawGraph));
+  if (pairs.length === 0) return decline('option_not_named');
+
+  // One entry per FACTOR the product is currently asking about. Deduplicated
+  // by factor id: the same factor can be outstanding for several options, and
+  // that is precisely the case rule 3b must ASK about rather than resolve.
+  const askedFactors: { readonly id: string; readonly label: string }[] = [];
+  const seenFactorIds = new Set<string>();
+  for (const pair of pairs) {
+    if (seenFactorIds.has(pair.factorId)) continue;
+    seenFactorIds.add(pair.factorId);
+    askedFactors.push({ id: pair.factorId, label: pair.factorLabel });
+  }
+
+  const factorMatches = matchLabels(paddedMessage, askedFactors);
+  if (factorMatches.length !== 1) return decline('no_outstanding_ask_for_factor');
+  const factor = factorMatches[0]!;
+
+  const candidates: MissingEffectPair[] = pairs.filter((p) => p.factorId === factor.id);
+  // `pairs` is already deduplicated by (option, factor), so two entries here
+  // are two genuinely different OPTIONS waiting on this one factor.
+  if (candidates.length > 1) {
+    return {
+      matched: true,
+      kind: 'ask',
+      ambiguity: 'option',
+      optionSource: 'outstanding_ask',
+      value,
+      candidates: candidates.map((pair) => ({
+        optionId: pair.optionId,
+        optionLabel: pair.optionLabel,
+        factorId: pair.factorId,
+        factorLabel: pair.factorLabel,
+      })),
+      optionLabels: candidates.map((pair) => pair.optionLabel),
+    };
+  }
+
+  const pair = candidates[0]!;
+  return {
+    matched: true,
+    kind: 'write',
+    optionId: pair.optionId,
+    optionLabel: pair.optionLabel,
+    factorId: pair.factorId,
+    factorLabel: pair.factorLabel,
+    value,
+  };
 }
 
 /**
@@ -415,7 +644,11 @@ export function resolveOptionEffectWrite(params: {
     padded,
     graph.nodes.filter((n) => n.kind === 'option').map((n) => ({ id: n.id, label: n.label })),
   );
-  if (optionMatches.length === 0) return decline('option_not_named');
+  if (optionMatches.length === 0) {
+    // ⭐ RULE 3b — the product's own outstanding ask resolves the option. See
+    // the header for the witness, the conjuncts and the stated residual.
+    return resolveFromOutstandingAsk(padded, graph, params.graph, value);
+  }
 
   if (optionMatches.length > 1) {
     // AMBIGUOUS OPTION. Offer a complete sentence per option, but only where
@@ -437,6 +670,7 @@ export function resolveOptionEffectWrite(params: {
       matched: true,
       kind: 'ask',
       ambiguity: 'option',
+      optionSource: 'named_in_message',
       value,
       candidates,
       optionLabels: optionMatches.map((m) => m.label),
@@ -458,6 +692,7 @@ export function resolveOptionEffectWrite(params: {
       matched: true,
       kind: 'ask',
       ambiguity: 'factor',
+      optionSource: 'named_in_message',
       value,
       candidates: factorMatches.map((factor) => ({
         optionId: option.id,
