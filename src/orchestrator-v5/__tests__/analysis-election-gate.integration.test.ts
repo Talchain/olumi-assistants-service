@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
-import { setTestSink } from '../../utils/telemetry.js';
+import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -246,7 +246,12 @@ afterEach(() => {
 });
 
 function gateEvents(): SinkEvent[] {
-  return events.filter((e) => e.event === 'v5.analysis_election_gate');
+  // Bound to the FROZEN ENUM, not to a re-typed literal. The event was renamed
+  // into the `v5.routing.*` namespace during this change and a hand-copied
+  // string here silently stopped matching — the twins went green-to-red on a
+  // rename that changed no behaviour at all (CLAUDE.md rule 12: derive, never
+  // mirror). Reading the enum makes a future rename impossible to miss.
+  return events.filter((e) => e.event === TelemetryEvents.V5AnalysisElectionGate);
 }
 
 // ---------------------------------------------------------------------------

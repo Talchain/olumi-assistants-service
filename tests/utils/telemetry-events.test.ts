@@ -715,6 +715,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
         V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
         V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
+        V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
@@ -1445,6 +1446,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5RunComparisonGate,
         TelemetryEvents.V5ProposedChangeEmitted,
         TelemetryEvents.V5NoAnalysisGuard,
+        // The analysis-election gate. Diagnostic-only for now: the demoted /
+        // admitted split is read from structured logs while the deployed
+        // demotion rate is established. It is deliberately emitted on BOTH
+        // arms so the rate is derivable rather than inferred from absences.
+        TelemetryEvents.V5AnalysisElectionGate,
         TelemetryEvents.V5EditGraphNoOpRecovery,
         TelemetryEvents.V5EditGraphPartAccounting,
         TelemetryEvents.V5EditGraphTurn,
@@ -2267,6 +2273,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.resumed",
         "v5.routing.first_pass_coerced",
         "v5.routing.forced_pill_outcome",
+        "v5.routing.analysis_election_gate",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.imperative_pre_route",
         "v5.run_analysis.intercept_guard",

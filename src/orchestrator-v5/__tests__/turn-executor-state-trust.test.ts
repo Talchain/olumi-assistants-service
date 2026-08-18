@@ -32,7 +32,14 @@ const TURN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: TURN_ID,
   scenario_id: SCENARIO_ID,
-  message: 'why does the leading option win?',
+  // ⚠ MESSAGE CORRECTED — the analysis-election gate. This fixture drove a
+  // routed `run_analysis` on "why does the leading option win?", which is
+  // verbatim the FIRST entry in the served routing prompt's own
+  // `DO NOT ROUTE TO run_analysis:` list (it belongs to explain_results). The
+  // turn now demotes, so the freshness threading this test is about never
+  // runs. The sentence is corrected to the turn actually under test; the
+  // facts, graph and assertions are untouched.
+  message: 'Run the analysis.',
   turn_class: 'decide',
   stage: 'analyse',
 });

@@ -838,18 +838,42 @@ const ANALYSIS_REQUEST_VERB_SOURCE =
  */
 const ANALYSIS_REQUEST_OBJECT_SOURCE = String.raw`(?:(?:the|this|that|my|our|a|an)\s+)?(?:provisional\s+)?(?:analysis|analyses|simulation|model|scenario|numbers|decision|graph)|(?:it|this|that)`;
 
+/**
+ * ⭐ THE OBJECT IS REQUIRED FOR `run` AND NOT FOR `analyse` / `simulate`, and
+ * the reason is a property of the words rather than a convenience.
+ *
+ * The sibling re-run predicate requires an object because `rerun` has a
+ * NOMINAL HOMOGRAPH — "Rerun analysis showed a different leader." is a noun
+ * phrase, and admitting it there would destroy a computed result. `run` has
+ * the same problem twice over: it is also an ordinary transitive verb about
+ * anything at all ("run the shop", "run it past legal"). So `run` keeps the
+ * object requirement.
+ *
+ * `analyse` / `analyze` / `simulate` have NO nominal homograph in English —
+ * the nouns are `analysis` and `simulation`, spelled differently — so in a
+ * licensed verb position they can only be imperatives, and there is no
+ * nominal reading for a bare object-less form to be confused with. The
+ * existing `IMPERATIVE_RERUN_PATTERNS` already relies on exactly this for
+ * `re-?analy[sz]e`, which it admits standing alone; this generalises that
+ * to the un-prefixed verbs the served prompt names.
+ *
+ * The practical consequence is that "Analyse options", "Analyse.",
+ * "Simulate it" are admitted without enumerating an object vocabulary — and
+ * an object list is precisely the hand-maintained mirror of English that
+ * CLAUDE.md trap 12 and trap 22f say will keep needing another round.
+ */
+const OBJECTLESS_ANALYSIS_VERB_SOURCE = String.raw`(?:re-?)?(?:simulate|analy[sz]e)`;
+
 const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
-  // "Run analysis.", "Run the analysis.", "Simulate the model.",
-  // "Analyse this decision.", "Re-run the numbers.", "Analyse it."
+  // Object-bearing form, needed for the ambiguous verb `run`:
+  // "Run analysis.", "Run the analysis.", "Re-run the numbers.", "Run it."
   new RegExp(
     String.raw`\b${ANALYSIS_REQUEST_VERB_SOURCE}\s+(?:${ANALYSIS_REQUEST_OBJECT_SOURCE})\b`,
     'i',
   ),
-  // Bare `re-`-prefixed instruction with no object: "Re-analyse.", "Rerun."
-  // is deliberately NOT here — a bare `rerun` is the nominal shape that cost
-  // the sibling predicate two rounds. Only the explicit re-analysis verb,
-  // which has no common nominal reading, stands alone.
-  /\bre-?analy[sz]e\b/i,
+  // Object-less form, for the verbs with no nominal homograph:
+  // "Analyse.", "Analyse options", "Simulate it", "Re-analyse."
+  new RegExp(String.raw`\b${OBJECTLESS_ANALYSIS_VERB_SOURCE}\b`, 'i'),
 ];
 
 /**

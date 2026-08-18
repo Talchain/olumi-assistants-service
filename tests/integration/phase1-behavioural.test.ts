@@ -179,7 +179,21 @@ describe('phase 1 behavioural — right-tool-for-job', () => {
         }),
       ),
     };
-    const wrongTool = await runTurnExecutor(BASE_PAYLOAD, 'req-rt-wrong', {
+    // ⚠ MESSAGE CORRECTED — the analysis-election gate. Same correction class
+    // as ROADMAP 2.652 above, one handler along: this call passed a payload
+    // whose message is not a request to analyse anything, while the adapter
+    // elects `run_analysis`. That mismatch was invisible while any LLM-elected
+    // proposal could execute regardless of what the user said. It is now
+    // visible, because an unrequested analysis election demotes to a
+    // conversational answer before STEP 2 validation runs.
+    //
+    // Fixed by giving the case a real analysis request rather than by
+    // exempting it — an unrequested analysis reaching the validator at all IS
+    // the defect the gate closes, so asserting on it would pin the defect.
+    // The graph, the adapter, the registries and every assertion are
+    // unchanged; only the user's sentence now matches the turn being tested.
+    const wrongToolPayload = { ...BASE_PAYLOAD, message: 'Run the analysis.' };
+    const wrongTool = await runTurnExecutor(wrongToolPayload, 'req-rt-wrong', {
       routingAdapter: adapterWrong,
       handlerRegistry,
       validationRegistry: validationRegistryWithRunAnalysis,

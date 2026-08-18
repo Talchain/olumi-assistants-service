@@ -67,10 +67,19 @@ function mockAdapter(result: ChatWithToolsResult) {
   };
 }
 
+// ⚠ MESSAGE CORRECTED — the analysis-election gate (same class as the
+// ROADMAP 2.652 correction in phase1-behavioural.test.ts). Every case in this
+// file drives an execute/`run_analysis` proposal, and 'do something' is not a
+// request to run one, so the turns now demote before reaching the validator
+// and handler these regressions are about. The sentence is made to match the
+// turn; nothing else changes. Measured inert to every deterministic pre-route
+// and guard (imperative-rerun, no-analysis, stale-rerun, state-query,
+// analytical-question, mutation, vague-edit), so the turn still reaches the
+// mocked routing adapter exactly as before.
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-  message: 'do something',
+  message: 'Run the analysis.',
 });
 
 function mkConfiguredGraph(): GraphStateIngress {

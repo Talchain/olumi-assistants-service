@@ -1874,7 +1874,7 @@ export const TelemetryEvents = {
   // inferred. `outcome` is the gate's own enum
   // ('admitted' | 'demoted'); `reason` is its structural reason enum.
   // NEVER carries the message or any user copy.
-  V5AnalysisElectionGate: "v5.analysis_election_gate",
+  V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
 
   // V5 Context Management v1 — edit_graph no-op recovery. Emitted from
   // the dispatchEditGraph no-op branch when the recovery decision is
