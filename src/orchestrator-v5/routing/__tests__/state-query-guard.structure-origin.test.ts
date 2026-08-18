@@ -164,7 +164,7 @@ describe('TWIN: the readback class the guard exists for is unchanged', () => {
     expect(outcome.matched).toBe(false);
   });
 
-  it('TWIN-6 with a recorded session mutation, the ambiguous "why did you change X" defers to the grounded readback arm', () => {
+  it('TWIN-6 the deferral is SUBJECT-BOUND: a recorded change to the SAME element still defers', () => {
     // trap 22f: where direction cannot be determined, do not guess. The
     // readback arm quotes a REAL persisted mutation; that is grounded.
     //
@@ -176,24 +176,59 @@ describe('TWIN: the readback class the guard exists for is unchanged', () => {
     // Caught by the mutant, not by inspection (trap 13b: a guard whose
     // discrimination depends on a fixture nothing pins).
     //
-    // So: assert FIRST that the origin arm genuinely COULD answer this message,
-    // which makes the deferral the only thing that can produce the expected
-    // outcome.
     // ⚠ MESSAGE CHANGED IN ROUND 2. 'why did you CHANGE x' is no longer an
     // origin question at all — the narrowed frame requires a creation/inclusion
-    // predicate — so it would have made this test vacuous a second time. This
-    // message IS an origin question, which is what puts the deferral under test.
+    // predicate — so it would have made this test vacuous a second time.
+    //
+    // ⚠⚠ FIXTURE CHANGED IN ROUND 4, AND THE REASON IS THE WHOLE FINDING OF THAT
+    // ROUND. The recorded mutation here was `ADD_CONSTRAINT_50K` — target
+    // "Total cost" — while the question asks about the HYBRID OPTION. Those
+    // subjects are DISJOINT, so what this test actually pinned was the guard
+    // answering a provenance challenge with a receipt about something else
+    // entirely. That is not the ambiguity trap 22f is about; it is the very
+    // defect the origin arm exists to remove, and it went live: composed journey
+    // witness 18 Aug 2026 on `4a513781`, LINK 6 —
+    //   "Why did you add a status quo option? …"
+    //   -> "Updated Enterprise sales headcount and spend"  (`llm_calls: 0`)
+    // The deferral is therefore SUBJECT-BOUND now, and this test pins the case it
+    // was always meant to pin: the recorded change is about the element asked
+    // about, so the two readings really are indistinguishable and we do not guess.
     const message = 'Why did you add the Hybrid Phased Approach?';
     expect(tryStructureOriginAnswer(message, WITNESS_GRAPH)).not.toBeNull();
 
+    const changeToTheSameElement: RecentMutation = {
+      action: 'graph_edited',
+      summary: 'Updated Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)',
+      target_label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)',
+    };
     const outcome = tryStateQueryGuard({
       message,
-      contextPack: ctx([ADD_CONSTRAINT_50K]),
+      contextPack: ctx([changeToTheSameElement]),
       briefAudit: { briefText: null, graph: WITNESS_GRAPH },
     });
     expect(outcome.matched).toBe(true);
     if (!outcome.matched) return;
     expect(outcome.dispatch).toBe('with_recent_change');
+  });
+
+  it('TWIN-6b …and a recorded change to a DIFFERENT element does NOT defer', () => {
+    // ⭐ THE OPPOSITE-DIRECTION TWIN (trap 22b). Without it, "always defer" passes
+    // TWIN-6 and the live defect ships again. Same message, same graph, same
+    // pinned precondition — only the recorded change's SUBJECT differs, so the
+    // deferral is the only thing that can produce a different outcome.
+    const message = 'Why did you add the Hybrid Phased Approach?';
+    expect(tryStructureOriginAnswer(message, WITNESS_GRAPH)).not.toBeNull();
+
+    const outcome = tryStateQueryGuard({
+      message,
+      contextPack: ctx([ADD_CONSTRAINT_50K]), // target_label: 'Total cost'
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH },
+    });
+    // The receipt about "Total cost" must never be offered as the answer.
+    if (outcome.matched) {
+      expect(outcome.dispatch).not.toBe('with_recent_change');
+      expect(outcome.assistant_text).not.toContain('Total cost');
+    }
   });
 });
 
