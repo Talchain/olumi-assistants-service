@@ -27,22 +27,36 @@ import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-gu
 const WITNESS_TURN_2 =
   'Why did you add a hybrid phased option? I never mentioned one — where did that come from?';
 
+/**
+ * ⚠⚠ THE PERSISTED V3 SHAPE, AND THAT IS THE POINT OF ROUND 3.
+ *
+ * Rounds 1 and 2 passed this guard a RECORDS-DICT graph
+ * (`provenance: { provenance_class, basis, unbased }`). Persistence never
+ * produces that shape: `transformNodeToV3` (`cee/transforms/schema-v3.ts:222`)
+ * rebuilds each node field-by-field without ever naming `provenance`, and every
+ * later assignment to `v3Node.provenance` is a STRING. The guard reads
+ * `input.briefAudit.graph` = `context.persistedGraph` = the `scenarios.graph`
+ * column, so a dict-shaped fixture here tested a seam the product does not have
+ * — and the arm was DARK end to end while these tests were green.
+ *
+ * Fields derived from the producer, not invented: string `provenance` at
+ * `schema-v3.ts:1136`, `source_quote` lifted at `:1145`.
+ */
 const WITNESS_GRAPH = {
   nodes: [
     {
       id: '939d4630',
       kind: 'option',
       label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)',
-      provenance: { provenance_class: 'ai_inferred', basis: ['4abad64d'], unbased: false },
+      provenance: 'ai_inferred',
     },
     {
       id: '4abad64d',
       kind: 'option',
       label: 'double down on enterprise sales (higher margins but longer cycles and more headcount)',
-      provenance: {
-        provenance_class: 'stated',
-        source_quote: 'double down on enterprise sales (higher margins but longer cycles and more headcount)',
-      },
+      provenance: 'from_brief',
+      source_quote:
+        'double down on enterprise sales (higher margins but longer cycles and more headcount)',
     },
   ],
   edges: [],
@@ -209,39 +223,63 @@ describe('the origin frame is exercised and disjoint (fail-loud, not hand-mainta
 });
 
 // ============================================================================
-// ⭐⭐ THE LIVE PATH — a PERSISTED-shape graph through the real guard
+// ⭐⭐ THE SHAPE THE GUARD MUST NOT BE CERTIFIED BY
 // ============================================================================
-// Round 1's guard tests all passed a records-dict graph, which persistence never
-// produces, so the arm was dark end to end while these tests were green.
-const PERSISTED_GRAPH = {
-  nodes: [
-    { id: '939d4630', kind: 'option', label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)', provenance: 'ai_inferred' },
-    { id: '4abad64d', kind: 'option', label: 'double down on enterprise sales (higher margins)', provenance: 'from_brief', source_quote: 'double down on enterprise sales (higher margins)' },
-  ],
-  edges: [],
-};
-
-describe('the guard answers from a PERSISTED graph, not just a records-dict one', () => {
-  it('RED-F turn 2 verbatim is answered through the guard on the persisted shape', () => {
+describe('a pre-boundary fixture can never certify this arm again', () => {
+  it('RED-F a records-dict graph produces NO structure_origin dispatch, and no deflection either', () => {
+    const preBoundary = {
+      nodes: [
+        {
+          id: '939d4630',
+          kind: 'option',
+          label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)',
+          provenance: { provenance_class: 'ai_inferred', basis: ['4abad64d'], unbased: false },
+        },
+      ],
+      edges: [],
+    };
     const outcome = tryStateQueryGuard({
       message: WITNESS_TURN_2,
       contextPack: ctx([]),
-      briefAudit: { briefText: null, graph: PERSISTED_GRAPH },
+      briefAudit: { briefText: null, graph: preBoundary },
     });
-    expect(outcome.matched).toBe(true);
-    if (!outcome.matched) return;
-    expect(outcome.dispatch).toBe('structure_origin');
-    expect(outcome.assistant_text).toContain('Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)');
+    // Declines to the reasoning layer. Critically it must ALSO not fall back to
+    // the edit-history deflection, which is the harm this arm exists to remove.
+    expect(outcome.matched).toBe(false);
+
+    // ⭐ POSITIVE CONTROL in the same run: the identical turn on the PERSISTED
+    // shape IS claimed. Without it, RED-F would also pass on a dead guard.
+    const live = tryStateQueryGuard({
+      message: WITNESS_TURN_2,
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH },
+    });
+    expect(live.matched).toBe(true);
+    if (!live.matched) return;
+    expect(live.dispatch).toBe('structure_origin');
   });
 
   it('RED-G an ANALYSIS question is not claimed by the guard at all', () => {
     const outcome = tryStateQueryGuard({
       message: 'Why is the hybrid option scoring highest in the analysis?',
       contextPack: ctx([]),
-      briefAudit: { briefText: null, graph: PERSISTED_GRAPH },
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH },
     });
     // Neither answered from provenance NOR deflected — it belongs to the
     // reasoning layer.
     expect(outcome.matched).toBe(false);
+  });
+
+  it('RED-H the from_brief element is quoted back through the guard, not just through the module', () => {
+    const outcome = tryStateQueryGuard({
+      message: 'Where did double down on enterprise sales come from?',
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched) return;
+    expect(outcome.dispatch).toBe('structure_origin');
+    expect(outcome.assistant_text.toLowerCase()).toContain('your brief');
+    expect(outcome.assistant_text).toContain('You wrote:');
   });
 });

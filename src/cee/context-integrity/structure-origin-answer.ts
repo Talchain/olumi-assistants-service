@@ -84,30 +84,44 @@
  * so a pattern added without a case reddens rather than shipping unobserved.
  *
  * ── PROVENANCE IS READ, NEVER INFERRED (P5, P7) ──────────────────────────────
- * Every sentence this module emits is derived from the node's own
- * `provenance` record as written by the PRODUCER
- * (`cee/draft/records/projector.ts`, `RecordProvenance` at `:212`):
- *   · `provenance_class: 'stated'`  → the user stated it; `source_quote` is
- *     "the verbatim quote, canonicalised" (declared "present iff `stated`").
- *   · `provenance_class: 'ai_inferred'` → ours; `basis` holds "minted ids of the
- *     stated items it builds on" and `unbased` is "TRUE when `basis` is empty —
- *     pure invention, and marked so".
- *   · `provenance_class: 'projector_structural'` → "the machine put this here"
- *     (`PROJECTOR_STRUCTURAL_CLASS`, the one authority for machine topology).
- *   · `label_authored` → "the DISPLAY LABEL is ours rather than the user's
- *     verbatim", derived at the producer from `label !== source_quote`.
- * The producer's declared meanings are the oracle here, not any distribution
- * observed in a corpus.
+ * Every sentence this module emits is derived from the node's own persisted
+ * fields as DECLARED BY THE PRODUCER, never from a distribution observed in a
+ * corpus. The producer here is `cee/transforms/schema-v3.ts` + the V3 node
+ * contract at `schemas/cee-v3.ts:208-237`:
+ *   · `provenance: "from_brief"` — set at `schema-v3.ts:1136` when the typed
+ *     record is `provenance_class === 'stated' && brief_binding === 'verified'`,
+ *     and at `:1165`/`:1171` when `bindingEarnsBriefClaim(bindOptionLabelToBrief(...))`
+ *     holds. `verified` is defined by `cee/provenance/brief-binding.ts:88` as
+ *     "tied to brief bytes; may claim brief provenance". THE BRIEF-BINDING GATE
+ *     IS THEREFORE ALREADY INSIDE THE ENUM — we inherit the producer's verdict
+ *     rather than re-deciding it, which is also what the wire badge obeys.
+ *   · `provenance: "ai_inferred"` — everything else, INCLUDING a stated record
+ *     whose brief check came back `unverified`/`unchecked`. It is a catch-all,
+ *     not a claim of invention (see the ambiguity note on `composeAnswer`).
+ *   · `provenance: "user_set"` — declared by the V3 node contract at
+ *     `cee-v3.ts:208` and by the route contract at `assist.v1.draft-graph.ts:49`.
+ *   · `source_quote` — "the user's verbatim words", lifted to node level at
+ *     `schema-v3.ts:1145`, OUTSIDE the enum decision.
+ *   · `label_authored` — "the DISPLAY LABEL is ours rather than the user's
+ *     verbatim", derived at the producer from `label !== source_quote`
+ *     (`cee-v3.ts:231-237`), lifted at `schema-v3.ts:1146`.
  *
- * ⚠ MEASURED, AND IT BOUNDS WHAT WE MAY SAY: on the governed capture
- * `tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json`
- * (238 node-level provenance records), **only 131 of 238 `basis` references —
- * 55% — resolve to a node id.** The rest are record ids for stated items that
- * never became nodes. So the basis clause names ONLY what resolves, and an
- * unresolvable basis is reported as NOTHING rather than as "based on nothing":
- * `unbased: true` is the sole warrant for the no-basis sentence. Claiming a
- * basis we cannot name and claiming an absence we have not established are both
- * fabrications, in opposite directions.
+ * ⚠⚠ WHAT IS NOT HERE, AND WHY THE MODULE NO LONGER LOOKS FOR IT.
+ * Round 1 composed its answer from `provenance.provenance_class` / `basis` /
+ * `unbased` — the RECORDS-DICT shape written by `cee/draft/records/projector.ts`.
+ * **That shape cannot exist in the graph this module receives.** Derived at the
+ * producer, not inferred: `transformNodeToV3` (`schema-v3.ts:222`) REBUILDS each
+ * node field-by-field — there is no spread of the V1 node, and the producer's own
+ * comment at `:248` states the consequence ("the transform rebuilds the node
+ * field-by-field, so a `goal_threshold_frame` minted on the V1 draft graph is
+ * dropped here unless it is named"). `provenance` is never named there, and every
+ * later assignment to `v3Node.provenance` is a STRING (`:538`, `:554`, `:1136`,
+ * `:1165`, `:1171`). So `basis` and `unbased` are not merely absent from the wire,
+ * they are unreachable — and the "working from what you said about X" clause and
+ * the "did not draw it from anything specific" sentence are **dropped, not
+ * re-grounded and not faked**. An answer naming a basis here would be inventing
+ * one. `RED-DICT` pins the consequence: an object-shaped provenance DECLINES, so
+ * no pre-boundary fixture can ever certify this arm again.
  *
  * British English. No em dashes in user-facing copy, per the guard's convention.
  */
@@ -240,11 +254,19 @@ interface GraphNodeView {
   readonly id: string;
   readonly kind: string;
   readonly label: string;
-  /** The RECORDS-dict shape (pre-boundary seams only). Null on a persisted graph. */
-  readonly provenanceRecord: Record<string, unknown> | null;
-  /** The PERSISTED V3 shape: a display enum string. This is what fires live. */
+  /**
+   * The PERSISTED V3 shape, and the ONLY shape read here: a display enum string
+   * (`schemas/cee-v3.ts:208`).
+   *
+   * ⚠ NULL FOR AN OBJECT, DELIBERATELY. A records-dict `provenance` is a
+   * PRE-BOUNDARY artefact that `transformNodeToV3` cannot emit, so meeting one
+   * means we are being handed a graph from a seam this module does not serve.
+   * The honest response is to decline, not to grow a second reader for it —
+   * a second reader is how round 1 shipped a dark arm certified by its own
+   * fixture (trap 16-inverse). Pinned by `RED-DICT`.
+   */
   readonly provenanceEnum: string | null;
-  /** Lifted to node level by `projectNodeProvenance`, on BOTH branches. */
+  /** Lifted to node level by `projectNodeProvenance` (`schema-v3.ts:1145-1146`). */
   readonly sourceQuote: string | null;
   readonly labelAuthored: boolean;
 }
@@ -262,7 +284,6 @@ function nodeViews(graph: unknown): readonly GraphNodeView[] {
       id,
       kind: typeof kind === 'string' ? kind : '',
       label,
-      provenanceRecord: asRecord(node.provenance),
       provenanceEnum: typeof node.provenance === 'string' ? node.provenance : null,
       sourceQuote:
         typeof node.source_quote === 'string' && node.source_quote.length > 0
@@ -336,157 +357,112 @@ function quote(text: string): string {
   return `"${text}"`;
 }
 
-function joinEnglish(values: readonly string[]): string {
-  if (values.length === 1) return values[0]!;
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}`;
-}
-
-/** Labels of the basis records that resolve to a real element of THIS graph. */
-function resolvableBasisLabels(
-  provenance: Record<string, unknown>,
-  nodes: readonly GraphNodeView[],
-): string[] {
-  const basis = provenance.basis;
-  if (!Array.isArray(basis)) return [];
-  const byId = new Map(nodes.map((n) => [n.id, n.label] as const));
-  const labels: string[] = [];
-  for (const ref of basis) {
-    if (typeof ref !== 'string') continue;
-    const label = byId.get(ref);
-    if (label !== undefined && !labels.includes(label)) labels.push(label);
-  }
-  // Two is enough to make the answer concrete; more makes it a list, not a reply.
-  return labels.slice(0, 2);
-}
-
 /**
- * ⭐⭐ TWO DECLARED SHAPES, READ SEPARATELY — and round 1 read only the one that
- * never reaches this code.
+ * ⭐⭐ ONE SHAPE, THE ONE THAT REACHES THIS CODE — and round 1 read the other.
  *
- * ── THE DEFECT (adversarial review, measured at every hop; I reproduced it) ───
+ * ── THE DEFECT (adversarial review, measured at every hop; reproduced here) ──
  * Round 1 composed its answer from `provenance.provenance_class` / `basis` /
  * `unbased`, the RECORDS-dict shape written by `cee/draft/records/projector.ts`.
  * That shape does not survive to persistence. `transformResponseToV3`'s
- * `projectNodeProvenance` (`cee/transforms/schema-v3.ts:1133-1152`) **collapses
- * node provenance to the string enum** `"from_brief" | "ai_inferred" | "user_set"`,
- * and `NodeV3` strips undeclared keys. So `asRecord(node.provenance)` returned
- * `null` on every real graph and **the arm was DARK: it could never fire live.**
+ * `projectNodeProvenance` (`cee/transforms/schema-v3.ts:1122-1175`) **collapses
+ * node provenance to the string enum** `"from_brief" | "ai_inferred" | "user_set"`.
+ * So `asRecord(node.provenance)` returned `null` on every real graph and **the arm
+ * was DARK: it could never fire live.** Its own journey witness had already
+ * recorded the tell — *"All 19 nodes carry `provenance: "ai_inferred"`"*, a STRING
+ * — and round 1 did not read it as one.
+ * **Trap 16-inverse: a fixture you wrote yourself is not evidence about the wire.**
  *
- * Probe, run against a persisted-shape graph: the witness turn verbatim returned
- * `null`. My own journey witness had already recorded the tell and I did not read
- * it as one — *"All 19 nodes carry `provenance: "ai_inferred"`"*, a STRING. Every
- * dict-shaped fixture in this repo sits at a pre-boundary seam
- * (`draft/records/`, `structure/`, `unified-pipeline/stages/repair/`).
- * **Trap 16-inverse: a fixture I wrote myself is not evidence about the wire —
- * the trap this module's own header cites.**
+ * ⚠ ROUND 2 KEPT A SECOND, DICT-READING BRANCH "for the pre-boundary seams". THAT
+ * IS ALSO REMOVED, and the removal is the substantive half of this closure.
+ * Reachability was DERIVED, not assumed: this module has exactly ONE call site
+ * (`orchestrator-v5/routing/state-query-guard.ts:417`), which passes
+ * `input.briefAudit.graph` = `context.persistedGraph` = the `scenarios.graph`
+ * column (`session/supabase-store.ts:1676`). Every writer of that column writes a
+ * post-boundary `GraphV3T`, and `transformNodeToV3` rebuilds each node
+ * field-by-field without ever naming `provenance` — so a dict-shaped provenance
+ * is not merely unlikely there, it is unproducible. A branch that cannot execute
+ * is not a fallback; it is a second reader whose green tests describe a seam the
+ * product does not have. That is exactly how the dark arm shipped, so keeping it
+ * would leave the defect class in place while claiming to have removed it.
  *
- * ── THE OTHER HALF: AUTHORSHIP MUST BE GATED ON THE BRIEF BINDING ────────────
+ * ── THE BRIEF-BINDING GATE IS INSIDE THE ENUM, WHICH IS WHY READING THE RIGHT
+ *    SHAPE ALSO FIXES THE FABRICATION ───────────────────────────────────────
  * Round 1's `stated` branch keyed on `provenance_class === 'stated'` alone and
  * emitted *"came from your brief. You wrote: …"* for records whose
  * `brief_binding` is `unverified` — which the producer defines as **"the brief was
- * available and does NOT support it"** (`cee/provenance/brief-binding.ts:88`).
- * Only `verified` earns a brief claim (`bindingEarnsBriefClaim`), and the wire
- * badge already obeys that, so the reply would have contradicted the badge on the
- * same node.
+ * available and does NOT support it"** (`cee/provenance/brief-binding.ts:88`;
+ * 22% of stated records on the reference capture). The reply would have
+ * contradicted the wire badge on the same node. `"from_brief"` is *defined* at
+ * `schema-v3.ts:1136` as `provenance_class === "stated" && brief_binding ===
+ * "verified"`, and at `:1165`/`:1171` as `bindingEarnsBriefClaim(...)`. Reading
+ * the enum INHERITS the producer's verdict instead of re-deciding it, so the
+ * chat reply and the badge cannot disagree.
  *
- * ⭐ The persisted enum makes this gate FREE, which is why reading the right shape
- * also fixes the fabrication: `"from_brief"` is *defined* as
- * `provenance_class === "stated" && brief_binding === "verified"`. Reading the enum
- * inherits the producer's own verdict instead of re-deciding it.
+ * ⚠ Note the second producer path this admits, and it is legitimate: an option
+ * whose LABEL binds to the brief (`bindOptionLabelToBrief`) earns `"from_brief"`
+ * with NO `source_quote`. "Came from your brief, not from me" is exactly the
+ * claim the badge makes for it, so it is honest with no quote to offer, and the
+ * `You wrote:` clause is simply omitted. Pinned by `RED-24`.
  *
  * ── THE AMBIGUITY THE ENUM CREATES, AND WHY WE DECLINE ON IT ─────────────────
  * `"ai_inferred"` is the enum's catch-all: it covers BOTH "the model invented
  * this" AND "the user stated it but it could not be verified against the brief".
  * Saying *"this was my suggestion, not something you wrote"* about the second is a
  * fabrication in the opposite direction. They are separable, because
- * `projectNodeProvenance` lifts `source_quote` **outside** the enum decision — so
- * an unverified-stated node carries `ai_inferred` AND a `source_quote`. Where both
- * are present we DECLINE rather than guess (trap 22f), and the reasoning layer
- * takes the turn.
+ * `projectNodeProvenance` lifts `source_quote` **outside** the enum decision
+ * (`:1145`) — so an unverified-stated node carries `ai_inferred` AND a
+ * `source_quote`. Where both are present we DECLINE rather than guess (trap 22f),
+ * and the reasoning layer takes the turn.
  *
- * ⚠ WHAT DOES NOT SURVIVE, STATED PLAINLY RATHER THAN FAKED: `basis` and
- * `unbased` are absent from the persisted shape. The "working from what you said
- * about X" clause and the "did not draw it from anything specific" sentence are
- * therefore **confined to the records-dict branch** and are simply not offered on
- * the persisted path. An answer that named a basis there would be inventing one.
+ * ⚠ WHAT IS DROPPED RATHER THAN FAKED: `basis` and `unbased` do not exist in the
+ * persisted shape, so the "working from what you said about X" clause and the
+ * "did not draw it from anything specific in your brief" sentence are GONE. There
+ * is no honest re-grounding available for them here, and inventing one would be
+ * the fabrication this module exists to prevent.
  */
-function composeAnswer(node: GraphNodeView, nodes: readonly GraphNodeView[]): string | null {
+function composeAnswer(node: GraphNodeView): string | null {
   const label = quote(node.label);
   const authoredTail = node.labelAuthored
     ? ' The label you see is mine rather than your own wording; your exact words are above.'
     : '';
 
-  // ── The PERSISTED shape (what fires live) ─────────────────────────────────
-  if (node.provenanceEnum !== null) {
-    if (node.provenanceEnum === 'from_brief') {
-      // Already means stated AND brief-verified. No second opinion needed.
-      return node.sourceQuote === null
-        ? `${label} came from your brief, not from me.`
-        : `${label} came from your brief, not from me. You wrote: ${quote(node.sourceQuote)}.${authoredTail}`;
-    }
-    if (node.provenanceEnum === 'user_set') {
-      return `${label} is there because you set it yourself, not because I suggested it.`;
-    }
-    if (node.provenanceEnum === 'ai_inferred') {
-      // ⚠ The ambiguous case. A source_quote here means the user DID state
-      // something that the brief check could not confirm — neither "mine" nor
-      // "yours" is safe, so we say nothing.
-      if (node.sourceQuote !== null) return null;
-      return `${label} was my suggestion, not something you wrote. I put it forward while drafting the model from your brief.`;
-    }
-    // An enum value this code does not know. Never a guess.
-    return null;
-  }
+  // ⚠ NULL HERE MEANS THE PROVENANCE WAS ABSENT **OR** OBJECT-SHAPED. Both
+  // decline. An object is a pre-boundary artefact from a seam this module does
+  // not serve (see the header derivation); guessing at it would rebuild the
+  // dark-arm defect. Pinned by `RED-DICT` and `RED-10`.
+  if (node.provenanceEnum === null) return null;
 
-  // ── The RECORDS-dict shape (pre-boundary seams) ───────────────────────────
-  const provenance = node.provenanceRecord;
-  if (!provenance) return null;
-  const cls = provenance.provenance_class;
-
-  if (cls === 'stated') {
-    // ⭐ THE BINDING GATE. `verified` is the only verdict that earns a brief
-    // claim; `unverified` means the brief was checked and does NOT support it,
-    // and `unchecked`/absent means nothing was established. In the latter two we
-    // decline outright rather than pick a side the badge would contradict.
-    if (provenance.brief_binding !== 'verified') return null;
-    const sq = typeof provenance.source_quote === 'string' && provenance.source_quote.length > 0
-      ? provenance.source_quote
-      : node.sourceQuote;
-    const tail = provenance.label_authored === true || node.labelAuthored
-      ? ' The label you see is mine rather than your own wording; your exact words are above.'
-      : '';
-    return sq === null || sq === undefined
+  if (node.provenanceEnum === 'from_brief') {
+    // Already means stated AND brief-verified, or label-bound-and-verified.
+    // No second opinion needed, and none may be substituted.
+    return node.sourceQuote === null
       ? `${label} came from your brief, not from me.`
-      : `${label} came from your brief, not from me. You wrote: ${quote(sq)}.${tail}`;
+      : `${label} came from your brief, not from me. You wrote: ${quote(node.sourceQuote)}.${authoredTail}`;
   }
 
-  if (cls === 'ai_inferred') {
-    const basisLabels = resolvableBasisLabels(provenance, nodes);
-    if (basisLabels.length > 0) {
-      return (
-        `${label} was my suggestion, not something you wrote. ` +
-        `I put it forward while drafting the model, working from what you said about ` +
-        `${joinEnglish(basisLabels.map(quote))}.`
-      );
-    }
-    if (provenance.unbased === true) {
-      return (
-        `${label} was my suggestion, not something you wrote, ` +
-        `and I did not draw it from anything specific in your brief.`
-      );
-    }
-    // A basis exists but none of it resolves here. Claim neither it nor its absence.
+  if (node.provenanceEnum === 'user_set') {
+    return `${label} is there because you set it yourself, not because I suggested it.`;
+  }
+
+  if (node.provenanceEnum === 'ai_inferred') {
+    // ⚠ The ambiguous case. A source_quote here means the user DID state
+    // something that the brief check could not confirm — neither "mine" nor
+    // "yours" is safe, so we say nothing.
+    if (node.sourceQuote !== null) return null;
+    // ⚠⚠ ROUND 2 APPENDED "I put it forward while drafting the model from your
+    // brief." — CAUGHT BY THE DERIVED GUARD (RED-21), NOT BY INSPECTION, and it
+    // is this module's own defect class one level down. The enum records that
+    // the content is not the user's stated words. It records NOTHING about WHEN
+    // the element was introduced or WHAT it was drafted from, and `ai_inferred`
+    // is equally the value for an element Olumi minted during a LATER
+    // `edit_graph` turn in response to the user's own instruction. Telling that
+    // user we put it forward "while drafting the model from your brief" is a
+    // narrative the persisted state does not support, and it contradicts what
+    // they remember doing. The bare, warranted sentence is the whole answer.
     return `${label} was my suggestion, not something you wrote.`;
   }
 
-  if (cls === 'projector_structural') {
-    return (
-      `${label} is scaffolding I added so the model holds together structurally. ` +
-      `It is not something you wrote, and it carries no reasoning of its own.`
-    );
-  }
-
+  // An enum value this code does not know. Never a guess.
   return null;
 }
 
@@ -503,5 +479,5 @@ export function tryStructureOriginAnswer(message: string, graph: unknown): strin
   if (nodes.length === 0) return null;
   const element = resolveElement(message, graph);
   if (element === null) return null;
-  return composeAnswer(element, nodes);
+  return composeAnswer(element);
 }

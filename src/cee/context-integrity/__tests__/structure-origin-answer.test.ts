@@ -9,11 +9,18 @@
  *
  * ⚠ EVERY MESSAGE IN THE PRIMARY CORPUS IS VERBATIM FROM THAT WITNESS OR FROM ITS
  * EXECUTED CONTRAST TABLE — not composed here (trap 22 / P7: a corpus from the
- * author's head cannot see the class the author did not imagine). The graph
- * fixture carries the witness's real labels and real provenance classes, and the
- * provenance RECORD SHAPE is taken from a governed capture
- * (`tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json`,
- * 238 node-level records), never invented.
+ * author's head cannot see the class the author did not imagine).
+ *
+ * ⚠⚠ AND EVERY GRAPH FIXTURE IS THE **PERSISTED V3 SHAPE**, WHICH IS THE WHOLE
+ * POINT OF ROUND 3. Round 1 and round 2 both carried records-dict fixtures
+ * (`provenance: { provenance_class, basis, unbased }`), a PRE-BOUNDARY artefact
+ * that the persisted graph cannot contain — so a green suite certified an arm
+ * that could never fire (trap 16-inverse: a fixture you wrote yourself is not
+ * evidence about the wire). The shape here is derived from the PRODUCER, not
+ * invented: `schema-v3.ts:1136-1146` sets a string `provenance` and lifts
+ * `source_quote` / `label_authored` to node level; `schemas/cee-v3.ts:208-237`
+ * declares all three fields. `RED-DICT` pins the consequence so the old shape
+ * can never certify this module again.
  *
  * Opposite-direction twins are mandatory here (trap 22b): a fix that stops the
  * guard deflecting is indistinguishable from a fix that disables the guard unless
@@ -21,70 +28,73 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { bindingEarnsBriefClaim } from '../../provenance/brief-binding.js';
+import { NodeV3 } from '../../../schemas/cee-v3.js';
+import { isAnalyticalQuestion } from '../../../orchestrator-v5/routing/analytical-question-guard.js';
 import {
   isStructureOriginQuestion,
   tryStructureOriginAnswer,
 } from '../structure-origin-answer.js';
 
-// ── The witness's model, real labels + real provenance classes ────────────────
+// ── The witness's model, real labels, PERSISTED provenance strings ───────────
 // Note the built-in ambiguity: FOUR elements carry the token "hybrid". A
 // resolver that binds by a value predicate another object could satisfy
 // (trap 19) will pick the wrong one.
+//
+// Shapes derived from the producer (`schema-v3.ts:1136-1171`):
+//   ai_inferred, no source_quote      -> Olumi's own structure
+//   from_brief + source_quote         -> stated AND brief-verified
+//   from_brief, NO source_quote       -> option label bound to the brief
+//   ai_inferred + source_quote        -> stated but brief-UNVERIFIED (ambiguous)
+//   provenance absent                 -> nothing was established
 const WITNESS_GRAPH = {
   nodes: [
     {
       id: '939d4630',
       kind: 'option',
       label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)',
-      provenance: { provenance_class: 'ai_inferred', basis: ['4abad64d', 'e755ec33'], unbased: false },
+      provenance: 'ai_inferred',
     },
     {
       id: '4abad64d',
       kind: 'option',
       label: 'double down on enterprise sales (higher margins but longer cycles and more headcount)',
-      provenance: {
-        provenance_class: 'stated',
-        source_quote: 'double down on enterprise sales (higher margins but longer cycles and more headcount)',
-        brief_binding: 'verified',
-      },
+      provenance: 'from_brief',
+      source_quote:
+        'double down on enterprise sales (higher margins but longer cycles and more headcount)',
     },
     {
       id: 'e755ec33',
       kind: 'option',
-      label: 'invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)',
-      provenance: {
-        provenance_class: 'stated',
-        source_quote: 'invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)',
-        brief_binding: 'verified',
-      },
+      label:
+        'invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)',
+      provenance: 'from_brief',
+      source_quote:
+        'invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)',
     },
     {
       id: 'e5dc21d6',
       kind: 'option',
       label: 'Continue Current Mix (Status Quo)',
-      provenance: { provenance_class: 'ai_inferred', basis: [], unbased: true },
+      provenance: 'ai_inferred',
       is_baseline: true,
     },
-    { id: '4d3256b4', kind: 'factor', label: 'Sales Headcount - Hybrid Maintained', provenance: { provenance_class: 'ai_inferred', basis: [], unbased: true } },
-    { id: 'e53e6665', kind: 'factor', label: 'Customer Acquisition Cost - Hybrid', provenance: { provenance_class: 'ai_inferred', basis: [], unbased: true } },
-    { id: '9061009e', kind: 'factor', label: 'Engineering Spend (Upfront Capex) - Hybrid', provenance: { provenance_class: 'ai_inferred', basis: [], unbased: true } },
+    { id: '4d3256b4', kind: 'factor', label: 'Sales Headcount - Hybrid Maintained', provenance: 'ai_inferred' },
+    { id: 'e53e6665', kind: 'factor', label: 'Customer Acquisition Cost - Hybrid', provenance: 'ai_inferred' },
+    { id: '9061009e', kind: 'factor', label: 'Engineering Spend (Upfront Capex) - Hybrid', provenance: 'ai_inferred' },
     {
       id: '666659b7',
       kind: 'goal',
       label: 'Cut Burn Rate by 30%',
-      provenance: {
-        provenance_class: 'stated',
-        source_quote: 'cutting our burn rate by 30%',
-        label_authored: true,
-        brief_binding: 'verified',
-      },
+      provenance: 'from_brief',
+      source_quote: 'cutting our burn rate by 30%',
+      label_authored: true,
     },
-    {
-      id: 'd24307c3',
-      kind: 'decision',
-      label: 'Decision',
-      provenance: { provenance_class: 'projector_structural', source: 'synthetic', quote: 'Decision-to-option scaffold minted by the projector' },
-    },
+    // The projector's structural scaffold reaches persistence as a plain
+    // ai_inferred node: the enum has no `projector_structural` member
+    // (`schemas/cee-v3.ts:208`), so we may not claim one.
+    { id: 'd24307c3', kind: 'decision', label: 'Decision', provenance: 'ai_inferred' },
+    // Nothing was established about this one. It must not acquire an origin.
     { id: '24931e51', kind: 'factor', label: 'NHS Data Regulation Outcome' },
   ],
   edges: [],
@@ -158,10 +168,20 @@ describe('tryStructureOriginAnswer — grounded in the persisted provenance reco
     expect(answer!.toLowerCase()).not.toContain('i added');
   });
 
-  it('RED-5 an ai_inferred element with a resolvable basis names what it was built on', () => {
+  // ⚠ ROUND 1 ASSERTED THE OPPOSITE HERE, AND THAT IS THE POINT. It required the
+  // answer to name the basis ("working from what you said about …"), which it
+  // could only do because its fixture was pre-boundary. `basis` and `unbased` do
+  // not exist in the persisted shape, so naming one would be an invention.
+  it('RED-5 P5: no basis clause is offered on the persisted shape, because there is no basis to read', () => {
     const answer = tryStructureOriginAnswer(WITNESS_TURN_2, WITNESS_GRAPH);
-    // basis ['4abad64d','e755ec33'] both resolve to nodes in this graph.
-    expect(answer).toContain('double down on enterprise sales');
+    expect(answer).not.toBeNull();
+    expect(answer!.toLowerCase()).not.toContain('working from what you said');
+    expect(answer!.toLowerCase()).not.toContain('based it on');
+    // …and it must not fabricate the opposite either (an unestablished absence).
+    expect(answer!.toLowerCase()).not.toContain('anything specific');
+    // The sibling options it was in fact built on are NOT named, because the
+    // persisted graph does not record that they were.
+    expect(answer).not.toContain('double down on enterprise sales');
   });
 
   it('RED-6 a STATED element quotes the user back verbatim from source_quote', () => {
@@ -174,7 +194,7 @@ describe('tryStructureOriginAnswer — grounded in the persisted provenance reco
     expect(answer!.toLowerCase()).toContain('your brief');
   });
 
-  it('RED-7 an UNBASED invention says so, and does not invent a basis', () => {
+  it('RED-7 an ai_inferred element with no quote is attributed to Olumi, and claims nothing further', () => {
     const answer = tryStructureOriginAnswer(
       'Why did you add Continue Current Mix? Where did that come from?',
       WITNESS_GRAPH,
@@ -182,6 +202,7 @@ describe('tryStructureOriginAnswer — grounded in the persisted provenance reco
     expect(answer).not.toBeNull();
     expect(answer!.toLowerCase()).toContain('my suggestion');
     expect(answer!.toLowerCase()).not.toContain('based it on');
+    expect(answer!.toLowerCase()).not.toContain('anything specific');
   });
 
   it('RED-8 AMBIGUOUS reference declines rather than guessing (trap 22f)', () => {
@@ -211,28 +232,72 @@ describe('tryStructureOriginAnswer — grounded in the persisted provenance reco
     expect(tryStructureOriginAnswer(WITNESS_TURN_2, {})).toBeNull();
   });
 
-  it('RED-12 P5: it never claims a basis it cannot resolve to a real element', () => {
-    // 45% of real `basis` refs do not resolve to a node (measured on the
-    // governed capture: 131 of 238). An unresolvable basis must be silent,
-    // NOT reported as "based on nothing" — that would be a fabrication in the
-    // opposite direction.
-    const graph = {
+  /**
+   * ⭐⭐ RED-DICT — THE STRUCTURAL CLOSE OF THE REVIEW BLOCK.
+   *
+   * This is the fixture shape that rounds 1 and 2 used to certify the module.
+   * `transformNodeToV3` (`schema-v3.ts:222`) rebuilds every node field-by-field
+   * and never names `provenance`, and every later assignment to
+   * `v3Node.provenance` is a STRING (`:538`, `:554`, `:1136`, `:1165`, `:1171`)
+   * — so an object-shaped provenance CANNOT reach this module's only call site
+   * (`state-query-guard.ts:417` <- `context.persistedGraph` <- `scenarios.graph`).
+   *
+   * The module therefore DECLINES on it rather than carrying a second reader for
+   * a seam the product does not have. Without this pin, a future lane could
+   * re-add a dict branch, write dict fixtures, watch them go green, and ship
+   * another dark arm — which is exactly what happened twice.
+   */
+  it('RED-DICT a PRE-BOUNDARY records-dict provenance DECLINES; it can never certify this arm again', () => {
+    const preBoundary = {
       nodes: [
         {
           id: 'x1',
           kind: 'option',
           label: 'Partnership Channel Expansion',
-          provenance: { provenance_class: 'ai_inferred', basis: ['ghost1', 'ghost2'], unbased: false },
+          provenance: {
+            provenance_class: 'ai_inferred',
+            basis: ['ghost1', 'ghost2'],
+            unbased: false,
+          },
         },
       ],
       edges: [],
     };
-    const answer = tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', graph);
+    expect(
+      tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', preBoundary),
+    ).toBeNull();
+
+    // ⭐ POSITIVE CONTROL, in the same run: the identical question against the
+    // identical label in the PERSISTED shape IS answered. Without this the
+    // assertion above would also pass if the resolver were simply broken.
+    const persisted = {
+      nodes: [
+        { id: 'x1', kind: 'option', label: 'Partnership Channel Expansion', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const answer = tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', persisted);
     expect(answer).not.toBeNull();
-    expect(answer!.toLowerCase()).not.toContain('based it on');
-    expect(answer).not.toContain('ghost1');
-    // and it must not claim it was unbased either
-    expect(answer!.toLowerCase()).not.toContain('anything specific');
+    expect(answer).toContain('Partnership Channel Expansion');
+  });
+
+  it('RED-DICT-2 a stated+verified records-dict node also DECLINES (the shape, not the class, is what is refused)', () => {
+    const preBoundary = {
+      nodes: [
+        {
+          id: 'g1',
+          kind: 'goal',
+          label: 'Revenue Growth Rate',
+          provenance: {
+            provenance_class: 'stated',
+            source_quote: 'Revenue is 10 million pounds',
+            brief_binding: 'verified',
+          },
+        },
+      ],
+      edges: [],
+    };
+    expect(tryStructureOriginAnswer('Why did you add Revenue Growth Rate?', preBoundary)).toBeNull();
   });
 });
 
@@ -348,45 +413,139 @@ describe('a question about BEHAVIOUR is not a question about ORIGIN', () => {
 });
 
 // ============================================================================
-// The binding gate on the records-dict branch (finding 2)
+// ⭐⭐ THE AUTHORSHIP GATE IS THE PRODUCER'S, NOT OURS — pinned by DERIVATION
 // ============================================================================
-describe('records-dict branch gates authorship on the brief binding', () => {
-  function statedWith(binding: string | undefined) {
-    return {
+// Round 1 re-decided the brief claim itself, keying on `provenance_class ===
+// 'stated'` alone, and so emitted "came from your brief. You wrote: …" for
+// records the brief does NOT support (22% of stated records on the reference
+// capture) — putting the chat reply in direct contradiction with the canvas
+// badge on the same node.
+//
+// The fix is not a better local rule. It is to INHERIT the producer's verdict:
+// `"from_brief"` is *defined* at `schema-v3.ts:1136` as `provenance_class ===
+// 'stated' && brief_binding === 'verified'`, and at `:1165`/`:1171` as
+// `bindingEarnsBriefClaim(...)`. These tests pin that dependency so a widening
+// of the producer's gate REDs here rather than silently widening our claim
+// (trap 12: derive, do not mirror).
+describe('the brief claim is inherited from the producer, never re-decided here', () => {
+  it('RED-20 the producer gate we depend on still means what we read it to mean', () => {
+    // If `bindingEarnsBriefClaim` ever admits another verdict, our
+    // "came from your brief" sentence silently widens with it. Fail loud.
+    expect(bindingEarnsBriefClaim('verified')).toBe(true);
+    expect(bindingEarnsBriefClaim('unverified')).toBe(false);
+    expect(bindingEarnsBriefClaim('unchecked')).toBe(false);
+  });
+
+  it('RED-21 DERIVED: every provenance value the producer DECLARES is handled, and only from_brief claims the brief', () => {
+    // Derived from the V3 node contract itself, not from a hand-copied list.
+    const enumSchema = (NodeV3.shape.provenance as unknown as { unwrap: () => { options: readonly string[] } }).unwrap();
+    const declared = [...enumSchema.options];
+    expect(declared.length).toBeGreaterThan(0);
+
+    const claimsBrief: string[] = [];
+    for (const value of declared) {
+      const graph = {
+        nodes: [{ id: 'n1', kind: 'option', label: 'Partnership Channel Expansion', provenance: value }],
+        edges: [],
+      };
+      const answer = tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', graph);
+      // Every DECLARED value must be handled — a declared value we return null
+      // for is a gap in this module, not a safe decline.
+      expect(answer, `declared provenance "${value}" produced no answer`).not.toBeNull();
+      if (answer!.toLowerCase().includes('your brief')) claimsBrief.push(value);
+    }
+    expect(claimsBrief).toEqual(['from_brief']);
+  });
+
+  it('RED-22 an UNDECLARED enum value is never guessed at', () => {
+    const graph = {
+      nodes: [{ id: 'n1', kind: 'option', label: 'Partnership Channel Expansion', provenance: 'imported_from_csv' }],
+      edges: [],
+    };
+    expect(tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', graph)).toBeNull();
+  });
+
+  /**
+   * ⭐ RED-23 — the ambiguous class, restated at the PERSISTED shape.
+   * A stated record whose brief check returned `unverified` reaches persistence
+   * as `ai_inferred` WITH its `source_quote` intact (the quote is lifted at
+   * `schema-v3.ts:1145`, outside the enum decision at `:1136`). Claiming "my
+   * suggestion" would deny the user's own words; claiming "your brief" would
+   * contradict the badge. Both are fabrications, so we say nothing.
+   */
+  it('RED-23 ai_inferred + a surviving source_quote is the unverified-stated class and DECLINES', () => {
+    const graph = {
       nodes: [
         {
           id: 'g1',
           kind: 'goal',
           label: 'Revenue Growth Rate',
-          provenance: {
-            provenance_class: 'stated',
-            source_quote: 'Revenue is 10 million pounds',
-            ...(binding === undefined ? {} : { brief_binding: binding }),
-          },
+          provenance: 'ai_inferred',
+          source_quote: 'Revenue is 10 million pounds',
         },
       ],
       edges: [],
     };
-  }
-  const Q = 'Why did you add Revenue Growth Rate?';
+    expect(tryStructureOriginAnswer('Why did you add Revenue Growth Rate?', graph)).toBeNull();
+  });
 
-  it('RED-20 verified EARNS the brief claim', () => {
-    const answer = tryStructureOriginAnswer(Q, statedWith('verified'));
+  /**
+   * ⭐ RED-24 — the SECOND producer path into `from_brief`, previously untested.
+   * `projectNodeProvenance` also awards `from_brief` to an OPTION whose LABEL
+   * binds to the brief (`schema-v3.ts:1164-1167`, via `bindOptionLabelToBrief`).
+   * Such a node carries NO `source_quote`. "Came from your brief, not from me"
+   * is exactly the claim the wire badge makes for it, so it is honest — and the
+   * `You wrote:` clause must simply be omitted rather than filled with anything.
+   */
+  it('RED-24 from_brief with NO source_quote claims the brief but quotes nothing', () => {
+    const graph = {
+      nodes: [
+        { id: 'o1', kind: 'option', label: 'Partnership Channel Expansion', provenance: 'from_brief' },
+      ],
+      edges: [],
+    };
+    const answer = tryStructureOriginAnswer('Why did you add Partnership Channel Expansion?', graph);
     expect(answer).not.toBeNull();
     expect(answer!.toLowerCase()).toContain('your brief');
+    expect(answer!.toLowerCase()).not.toContain('you wrote');
   });
+});
 
-  // ⚠ The producer: `unverified` means "the brief was available and does NOT
-  // support it". 22% of stated records on the reference capture are unverified.
-  it('RED-21 unverified must NOT claim the brief (it would contradict the wire badge)', () => {
-    expect(tryStructureOriginAnswer(Q, statedWith('unverified'))).toBeNull();
-  });
+// ============================================================================
+// ⭐⭐ A REFUTED PRESCRIPTION, PINNED SO IT IS NOT RE-LITIGATED FROM PROSE
+// ============================================================================
+// The review prescribed reusing the estate's existing `isAnalyticalQuestion` as
+// the negative gate for analysis questions, on the reasonable principle that we
+// should not own a second predicate. MEASURED at this tip, it is constant-FALSE
+// over this seam's entire input class — it fires on neither the analysis
+// questions it was prescribed for nor the origin questions it might have
+// harmed, because it is anchored on ANALYTICAL_OUTCOME_NOUNS in
+// "what could change the …" constructions that this seam never sees.
+//
+// Adding it would therefore have been a guard that cannot fail (trap 13). The
+// narrowing that DOES close the defect is `CREATION_VERBS` in conjunct 1, and
+// RED-18/RED-19 measure it in both directions.
+//
+// This test is the honest record of that refutation: if `isAnalyticalQuestion`
+// is ever widened to cover these, it REDs and the decision is revisited with
+// evidence rather than inherited from a comment.
+describe('the prescribed isAnalyticalQuestion gate: measured, refuted, pinned', () => {
+  it('RED-25 isAnalyticalQuestion does not fire on ANY message at this seam (so it could not be the gate)', () => {
+    const seamCorpus = [
+      // the three RED cases the gate was prescribed for
+      'Why is the hybrid option scoring highest in the analysis?',
+      'Why would the hybrid approach fail?',
+      'Why does the burn rate goal matter so much?',
+      // origin questions it must not have suppressed
+      'Why did you add a hybrid phased option?',
+      'What is the leading option based on?',
+      'Where did the ranking come from?',
+    ];
+    expect(seamCorpus.filter((m) => isAnalyticalQuestion(m))).toEqual([]);
 
-  it('RED-22 unchecked must NOT claim the brief', () => {
-    expect(tryStructureOriginAnswer(Q, statedWith('unchecked'))).toBeNull();
-  });
-
-  it('RED-23 an ABSENT binding establishes nothing and must NOT claim the brief', () => {
-    expect(tryStructureOriginAnswer(Q, statedWith(undefined))).toBeNull();
+    // ⭐ POSITIVE CONTROL — the import is live and the predicate CAN fire.
+    // Without this, the assertion above would pass on a broken import
+    // (trap 13: an absence claim needs a demonstrated presence).
+    expect(isAnalyticalQuestion('What could change the outcome?')).toBe(true);
   });
 });
