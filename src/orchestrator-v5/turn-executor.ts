@@ -9352,8 +9352,29 @@ export async function runTurnExecutor(
           // their failures are deliberately out of scope too.
           let analyseShapedRecoveryResponse: OlumiResponse | null = null;
           if (proposedHandlerId === ANALYSE_HANDLER_ID) {
+            // ⭐ THE STRUCTURAL PROJECTION IS HANDED IN, NOT DISCARDED (measured
+            // on staging 18 Aug 2026: 4 of 13 core-journey runs).
+            //
+            // `analysisReadyForTurn` at this point is the projection from the
+            // CANONICAL persisted graph (`deriveCanonicalReadiness`, :2281 — and
+            // re-projected after any committed D1 mutation), i.e. the model the
+            // user actually has. Overwriting it with the empty carrier made a
+            // fresh follow-up turn ship `goal_node_id: ""` and `options: []`
+            // about a model whose own `graph_hash` on that same turn was
+            // IDENTICAL to the drafting turn's — the product denying a model it
+            // had just read intact.
+            //
+            // The refusal still withdraws the VERDICT, which is the harm the
+            // carrier was introduced for. It no longer withdraws the model's
+            // IDENTITY. `buildAnalysisRefusalReadiness` decides which of the two
+            // applies from the projection's own status, so the rule lives with
+            // the vocabulary rather than being restated at each arm — the
+            // hand-maintained mirror this estate keeps paying for, and the exact
+            // shape of the two-arms-disagreeing defect (trap 21) that produced
+            // this bug in the first place.
             analysisReadyForTurn = buildAnalysisRefusalReadiness(
               blockedReasonForHandlerFailure(error),
+              analysisReadyForTurn,
             );
             // R1 — THE REFUSAL MUST BE ANALYSE-SHAPED. `composeRecoverable-
             // HandlerResponse` stamps `stage_indicator` from the REQUEST's

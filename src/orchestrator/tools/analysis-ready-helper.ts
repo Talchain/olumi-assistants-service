@@ -1359,17 +1359,100 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * so omitting either fails egress validation and destroys the whole turn.
  * Pinned by a test.
  *
+ * ⭐⭐ THE PRESENT-BUT-EMPTY CARRIER IS NOW CONDITIONAL, AND THE CONDITION IS THE
+ * WHOLE POINT (measured on staging 18 Aug 2026, builds `1f5eb2b` and
+ * `10d0aba5`; the core two-turn journey failed on 4 of 13 runs).
+ *
+ * WHAT WAS MEASURED. Turn 1 drafted a healthy model — `goal:1`, `option:4`,
+ * `analysis_ready.goal_node_id = "378f195a"`, four options. Turn 2 came back
+ * `status="blocked" goal_node_id="" options=[] blocked_reason="MISSING_OPTION_VALUE"`
+ * with NO `readiness_issues`, NO `bias_findings`, freshness
+ * `unknown/no_successful_run_analysis_fact` — and **`graph_hash` IDENTICAL to
+ * turn 1's**. That key set is this function and no other producer; that
+ * freshness pair is `clampRefusalFreshness` and no other producer; and the
+ * identical hash proves the read returned exactly the model that was committed.
+ * The turn had routed to the analyse handler, the handler correctly refused
+ * (the fresh draft's options carry no effect values — the PASSING runs report
+ * nine `MISSING_OPTION_VALUE` issues on the same journey), and this carrier
+ * then REPLACED the turn's structural readiness with an empty one.
+ *
+ * TWO CORRECT PIECES, ONE HARM (CLAUDE.md trap 21). Withdrawing the verdict is
+ * right. The empty carrier was ALSO right for the case the adversarial review
+ * MEASURED — a model that is complete, refused only by a scale gate, where
+ * shipping real options flips `DecisionOverviewCard` from `unassessed` to
+ * `needs_input` and auto-expands "Olumi needs a little more from you" over a
+ * gap that does not exist. Neither piece is wrong; the pair is.
+ *
+ * THE DISCRIMINATOR IS THE STRUCTURAL PROJECTION'S OWN STATUS, because that is
+ * the fact the disputed UI surface is about:
+ *
+ *   · structural NOT ready → "this model needs input" is TRUE. Preserving the
+ *     model's identity is then strictly more truthful than denying it, and the
+ *     reviewers' harm cannot occur, because the card would be describing a real
+ *     gap. On a FRESH follow-up turn the empty carrier preserves no user state
+ *     at all — it IS the user's only readiness payload, and it asserts a
+ *     goal-less, option-less model while the canonical persisted state it was
+ *     projected from holds a goal and four options. That is P5 — a product
+ *     claim about the user's model contradicted by its own authoritative read.
+ *   · structural `ready`   → "needs input" would be FALSE. The empty carrier
+ *     stays, exactly as the review required.
+ *
+ * This is P3's mirror: a producer may replace a consumer's payload only with
+ * something AT LEAST AS TRUE. Completeness is not truth, and neither is
+ * emptiness.
+ *
+ * WHAT IS CARRIED, AND WHAT IS STILL REFUSED. `options` and `goal_node_id` are
+ * the model's IDENTITY and come from the canonical readiness authority. Every
+ * other field — blockers, bias findings, model adjustments, readiness issues,
+ * repair proposals — is OUTPUT this turn declined to produce, and is dropped.
+ * ROADMAP 2.1134(a)'s surviving requirement holds unchanged: this function
+ * writes no per-option status of its own. A refusal turn produces no
+ * `option_comparison` and names no leader, so there is nothing for
+ * `isRecommendableOption` to read and nothing to reconcile.
+ *
+ * The one-argument call is BYTE-IDENTICAL to the previous behaviour, so callers
+ * with no structural payload — including the chip-click arm, deliberately: see
+ * `chip-click-dispatch.ts`, where a user clicking "Run analysis" mid-session is
+ * the very case the empty carrier was measured for — are unchanged.
+ *
  * @param blockedReason Stable, SPECIFIC code. Callers derive it with
  *                     `blockedReasonForHandlerFailure`, which cannot return
  *                     an empty or generic value.
+ * @param structuralReadiness The readiness this turn already projected from the
+ *                     canonical graph, when it has one. Consulted ONLY for the
+ *                     model's identity, and ONLY when it is both non-`ready`
+ *                     and actually carries an identity to preserve.
  */
 export function buildAnalysisRefusalReadiness(
   blockedReason: string,
+  // The BASE wire payload, deliberately NOT this module's `AnalysisReadyPayload`
+  // (which narrows `readiness_issues[].code` to `CanonicalReadinessIssueCode`).
+  // Callers hold the base type, and this function reads only `status`,
+  // `goal_node_id` and `options` — none of them narrowed — so requiring the
+  // narrower type here would force a cast at the call site for a field this
+  // function never touches.
+  structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>,
 ): AnalysisReadyPayload {
-  return {
+  const refusal: AnalysisReadyPayload = {
     options: [],
     goal_node_id: '',
     status: ANALYSIS_READY_BLOCKED_STATUS,
     blocked_reason: blockedReason,
   };
+  if (structuralReadiness === undefined) return refusal;
+  // A degenerate structural payload preserves nothing, so there is nothing to
+  // prefer over the default — without this the branch would report success on
+  // a no-op and the guard would be agreeing with itself.
+  const goalNodeId = structuralReadiness.goal_node_id;
+  const options = structuralReadiness.options;
+  if (
+    structuralReadiness.status === 'ready'
+    || typeof goalNodeId !== 'string'
+    || goalNodeId.length === 0
+    || !Array.isArray(options)
+    || options.length === 0
+  ) {
+    return refusal;
+  }
+  return { ...refusal, goal_node_id: goalNodeId, options };
 }
