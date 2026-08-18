@@ -185,3 +185,59 @@ describe('the opposite direction: what must be left exactly as it is', () => {
     );
   });
 });
+
+/**
+ * ⭐ THE BACK-OFF IS A `while` LOOP OVER USER-SUPPLIED TEXT, AND IT RUNS ON
+ * EVERY DRAFT TURN. Termination is an argument on paper — each pass moves the
+ * cut strictly leftwards — but a composer that hangs on one adversarial label
+ * would take the turn with it, so the argument is made executable here.
+ *
+ * The fuzz alphabet is deliberately delimiter-DENSE: brackets, braces, both
+ * quote styles and the punctuation the trailing trim strips, at a frequency no
+ * real brief would produce. That is the point — the property must hold on
+ * inputs far worse than anything the corpus above contains.
+ */
+describe('the delimiter back-off always terminates', () => {
+  const DQ = String.fromCharCode(34);
+
+  it('terminates on hand-picked pathological shapes', () => {
+    const pathological = [
+      '( ( ( ( a b c d e f g h i j k l m n o p',
+      `a ${DQ} b ${DQ} c ${DQ} d e f g h i j`,
+      '((((((((((',
+      '   spaced   out   words   here   more   ',
+      '(a (b (c (d (e (f (g (h',
+      '\u201cx \u201cy \u201cz w v u t s r q',
+      ')))) unmatched closers only ))))',
+      '',
+      ' ',
+      'single',
+    ];
+    for (const label of pathological) {
+      for (const max of [0, 1, 2, 5, 10, 40, 80]) {
+        // A hang fails by test timeout; a throw fails here. Either way it REDs.
+        expect(typeof elideAtWordBoundary(label, max)).toBe('string');
+      }
+    }
+  });
+
+  it('terminates, and never invents, across a delimiter-dense fuzz', () => {
+    const alphabet = ['a', 'b', 'c', ' ', '(', ')', '[', ']', '{', '}', DQ, '\u201c', '\u201d', '-', ','];
+    let checked = 0;
+    for (let i = 0; i < 2000; i += 1) {
+      const length = 1 + ((i * 7) % 60);
+      let label = '';
+      for (let j = 0; j < length; j += 1) {
+        label += alphabet[(i * 31 + j * 17) % alphabet.length]!;
+      }
+      const max = 1 + ((i * 13) % 50);
+      const out = elideAtWordBoundary(label, max);
+      // The invariant holds over the whole fuzz, not just the readable corpus:
+      // whatever comes out is the input, or a word-bounded prefix of it.
+      expect(isWordBoundedPrefixOf(out, label), JSON.stringify({ label, max, out })).toBe(true);
+      checked += 1;
+    }
+    // Non-vacuity: the loop really ran the number of cases it claims.
+    expect(checked).toBe(2000);
+  });
+});
