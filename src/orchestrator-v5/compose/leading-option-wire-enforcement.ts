@@ -5,11 +5,11 @@
  * THE DEFECT THIS CLOSES, live-confirmed 28 Jul and pinned by the estate's own
  * test as alarm-fires-only.
  *
- * `route-v2.ts` has TWENTY-ONE `sendFinalised200` call sites (derived 2026-08-17;
- * this said NINETEEN, which was true when written and drifted as dispatch
- * families were added — the count is now enumerated by
- * `__tests__/route-egress-analysis-state-freshness.drift.test.ts` rather than
- * typed here). ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they
+ * `route-v2.ts` has a population of `sendFinalised200` call sites that GROWS.
+ * The count is deliberately not written here: it said NINETEEN, was corrected to
+ * TWENTY-ONE on 2026-08-17, and was TWENTY-TWO a day later. It is enumerated by
+ * `__tests__/route-egress-analysis-state-freshness.drift.test.ts`; read that.
+ * ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they
  * never pass through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) —
  * which is a function nested inside `runTurnExecutor`, closed over run-local
  * state, and therefore not callable from the route at all. ⚠ The exact split is
@@ -367,15 +367,18 @@ export interface WireLeaderClaimEnforcementOpts {
    * defensively.
    *
    * ⚠ A NULL GRAPH MEANS NO ROSTER MEANS NO ENFORCEMENT, and the hole is real:
-   * **15 of `route-v2.ts`'s 21 exits pass `graph: null`** (re-derived 2026-08-17
-   * by the 2.1264 lane's per-call-site enumeration; this read "13 of 19" from the
-   * `16d0d704` derivation and drifted as dispatch families were added — the
-   * population is now enumerated by
-   * `__tests__/route-egress-analysis-state-freshness.drift.test.ts`, so read that
-   * rather than trusting this figure). They are exactly the deterministic-copy exits —
-   * all three model-text-capable exits (`chip_click` ok `:2420`, `draft_graph`
-   * `:3520`, MAIN edit `:4192`) and the executor exit `:4650` thread a real
-   * graph. But a dispatch that returns a null graph on some branch disarms this
+   * MOST of `route-v2.ts`'s exits pass `graph: null`. No ratio and no line
+   * numbers are written here, and that is deliberate — this sentence has
+   * carried "13 of 19", then "15 of 21", and both went stale within days, while
+   * the line references beside them (`:2420`, `:3520`, `:4192`, `:4650`) had
+   * drifted to different code entirely. A figure re-typed is a mirror re-armed
+   * (trap 12). The population, the split, and which exits thread a real graph
+   * are all enumerated by
+   * `__tests__/route-egress-analysis-state-freshness.drift.test.ts` — read it.
+   * QUALITATIVELY, and this is the part that does not drift: the graph-less
+   * exits are the deterministic-copy ones, while the model-text-capable exits
+   * (`chip_click` ok, `draft_graph`, the MAIN edit exit) and the executor exit
+   * thread a real graph. But a dispatch that returns a null graph on some branch disarms this
    * gate for that turn, so the stand-down is REPORTED
    * (`mode: 'roster_unavailable'`) rather than silent.
    *

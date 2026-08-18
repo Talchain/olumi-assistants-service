@@ -1442,14 +1442,19 @@ async function sendFinalised200(
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
   //
-  // THE POPULATION. This file has TWENTY-ONE `sendFinalised200` call sites.
+  // THE POPULATION. This file's `sendFinalised200` call sites — however many
+  // there are TODAY. The number is deliberately NOT written here.
   //
-  // ⚠ THE COUNT HERE READ "nineteen" UNTIL 2026-08-17, and it was correct when
-  // written — it drifted as dispatch families were added, which is what a number
-  // typed into a comment does. It is now DERIVED by a balanced-paren enumeration
-  // in `__tests__/route-egress-analysis-state-freshness.drift.test.ts` (and the
-  // claim-safety marking guard beside it), so the population fails loud instead
-  // of quietly aging. Do not re-type a number here; read the guard.
+  // ⚠ THIS COMMENT HAS NOW CARRIED A WRONG COUNT TWICE. It read "nineteen",
+  // was corrected to "twenty-one" on 2026-08-17 in the very same edit that said
+  // "do not re-type a number here" — and by 2026-08-18 it was twenty-two. The
+  // second correction was the same defect as the first: UPDATING a hand-typed
+  // number resets the clock on the mirror instead of removing it (trap 12). So
+  // the figure is gone rather than refreshed. The population is DERIVED by a
+  // balanced-paren enumeration in
+  // `__tests__/route-egress-analysis-state-freshness.drift.test.ts` (and the
+  // claim-safety marking guard beside it), which fails loud on a new exit.
+  // Read the guard; do not restore a number here.
   //
   // ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they never pass
   // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
