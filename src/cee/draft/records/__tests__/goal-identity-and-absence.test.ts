@@ -262,8 +262,11 @@ describe("one objective stated twice is one goal node", () => {
     const goals = graph.nodes.filter((n) => n.kind === "goal");
 
     expect(goals).toHaveLength(1);
-    // The user's own words survive the collapse, byte for byte.
-    expect(goals[0]!.label).toBe(DUPLICATE_QUOTE);
+    // The user's own words survive the collapse, byte for byte — on the
+    // PROVENANCE, which is where they live now that the display label is an
+    // authored objective (quality bar §8 A1). This is the assertion that
+    // matters: the collapse must not lose the quote it collapsed on.
+    expect(goals[0]!.provenance?.source_quote).toBe(DUPLICATE_QUOTE);
 
     // ⭐ AND IT MUST NOT BE AN ORPHAN — the defect was never "two nodes", it was
     // "the surviving edges attach to one of them". Bind to the goal BY ID.
@@ -327,7 +330,9 @@ describe("one objective stated twice is one goal node", () => {
     const goals = graph.nodes.filter((n) => n.kind === "goal");
 
     expect(goals).toHaveLength(2);
-    expect(goals.map((g) => g.label).sort()).toEqual(
+    // Bound on the QUOTES, which is what "two different objectives" means. The
+    // labels are authored restatements of exactly these two (§8 A1).
+    expect(goals.map((g) => g.provenance?.source_quote).sort()).toEqual(
       ["achieve 3x user growth this year", "cutting our burn rate by 30%"].sort(),
     );
   });

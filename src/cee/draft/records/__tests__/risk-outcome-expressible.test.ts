@@ -157,7 +157,10 @@ describe("a record set carrying risk and outcome claims projects risk and outcom
     const throughput = idOf("Engineering Throughput");
     const risk = idOf("Engineering Attrition");
     const outcome = idOf("Feature Delivery Rate");
-    const goal = idOf("grow ARR 15% next year");
+    // By KIND: the goal's label is an authored objective, its verbatim is on
+    // `provenance.source_quote` (quality bar §8 A1).
+    const goal = nodes.find((n) => n.kind === "goal")?.id;
+    expect(goal, "the record set states a goal").toBeDefined();
 
     expect(edges.some((e) => e.from === throughput && e.to === outcome)).toBe(true);
     expect(edges.some((e) => e.from === throughput && e.to === risk)).toBe(true);

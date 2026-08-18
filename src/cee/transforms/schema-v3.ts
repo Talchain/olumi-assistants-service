@@ -1069,6 +1069,12 @@ type TypedRecordBriefBinding = "verified" | "unverified" | "unchecked";
 interface RecognizedTypedRecordProvenance {
   readonly provenance_class: TypedRecordProvenanceClass;
   readonly brief_binding?: TypedRecordBriefBinding;
+  /** The user's exact words, carried through to the wire node — see the note on
+   *  `NodeV3.source_quote`. Read here because this is already the one function
+   *  that recognises the typed vocabulary; adding a second reader of the same
+   *  object would be a mirror to keep in sync. */
+  readonly source_quote?: string;
+  readonly label_authored?: boolean;
 }
 
 /**
@@ -1090,11 +1096,15 @@ function readTypedRecordProvenance(node: V1Node): RecognizedTypedRecordProvenanc
   }
 
   const binding = value.brief_binding;
+  const quote = value.source_quote;
+  const authored = value.label_authored;
   return {
     provenance_class: provenanceClass,
     ...(binding === "verified" || binding === "unverified" || binding === "unchecked"
       ? { brief_binding: binding }
       : {}),
+    ...(typeof quote === "string" && quote.length > 0 ? { source_quote: quote } : {}),
+    ...(authored === true ? { label_authored: true } : {}),
   };
 }
 
@@ -1124,6 +1134,16 @@ function projectNodeProvenance(
         typed.provenance_class === "stated" && typed.brief_binding === "verified"
           ? "from_brief"
           : "ai_inferred";
+      // ⭐ ADDITIVE ONLY, and the authorship verdict above is BYTE-UNCHANGED.
+      // These two carry the user's own words to the surface that shows them
+      // beside an authored label; nothing here participates in deciding
+      // `from_brief` vs `ai_inferred`, which still keys on `provenance_class`
+      // and `brief_binding` exactly as before. Note what that means for the
+      // label change upstream: this typed path RETURNS before the label-bound
+      // matching at `:1130` and `:1150`, so authoring a goal's label cannot
+      // move its provenance verdict.
+      if (typed.source_quote !== undefined) node.source_quote = typed.source_quote;
+      if (typed.label_authored === true) node.label_authored = true;
       continue;
     }
 

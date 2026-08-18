@@ -206,6 +206,35 @@ export const NodeV3 = z.object({
    *  on every response. Not read by analysis, repair, or PLoT pipelines.
    *  Safe to ignore on round-tripped graphs — value is regenerated. */
   provenance: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
+  /** ⭐⭐ THE USER'S EXACT WORDS, for the inspector and the hover surface.
+   *
+   *  Present only on nodes projected from a stated record, carrying that
+   *  record's `provenance.source_quote` verbatim. It exists because the goal
+   *  node's LABEL is now an authored objective rather than the user's raw brief
+   *  fragment (quality bar §8 A1), and that ruling is only honest if the exact
+   *  language is still retrievable: A1 keeps the verbatim as PROVENANCE, shown
+   *  in the inspector and on hover, NOT as a permanent second line under every
+   *  node. Without a declared field here it would not survive — `NodeV3` strips
+   *  undeclared keys, so the V1 node's structured provenance object (which does
+   *  carry `source_quote`) is replaced by the bare `provenance` enum above and
+   *  the user's own words never reached the wire. A label change without this
+   *  field would delete them from the product, which is strictly worse than the
+   *  defect it fixes.
+   *
+   *  RESPONSE-ONLY, like its two neighbours: recomputed from the source node on
+   *  every response, never read by analysis, repair or PLoT. Additive and
+   *  optional — `NodeV3` is not mirrored in `openapi.yaml` (verified: three
+   *  distinctive NodeV3 field names return zero there while `provenance`
+   *  returns 40), so this is not a published-contract change. */
+  source_quote: z.string().optional(),
+  /** TRUE when `label` is our authored display string rather than the user's
+   *  verbatim words. Sibling of `source_quote`: together they let a surface say
+   *  *"you said: …"* beside an authored objective. DERIVED at the producer from
+   *  `label !== source_quote`, never hand-set. Absent means the label IS the
+   *  user's own text — which is still the case for options, constraints,
+   *  factors, and for the goals whose quote states a decision rather than an
+   *  objective, where authoring is refused rather than guessed. */
+  label_authored: z.boolean().optional(),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 

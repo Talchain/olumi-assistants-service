@@ -149,7 +149,9 @@ describe("interventions are the model's stated magnitudes (scale-projected onto 
         { claim_kind: "causal_link", label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
       ],
     });
-    const goalId = idOf(graph, "raise sales productivity");
+    // By KIND: the goal's display label is an authored objective (quality bar
+    // §8 A1); its verbatim lives on `provenance.source_quote`.
+    const goalId = graph.nodes.find((n) => n.kind === "goal")!.id;
     const newCrm = idOf(graph, "replace the CRM");
     const built = interventionsOf(graph, newCrm) ?? {};
     expect(Object.keys(built)).not.toContain(goalId);
