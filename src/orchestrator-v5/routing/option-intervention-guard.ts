@@ -298,14 +298,14 @@ export function impliesOptionInterventionEdit(
   if (/\boptions?\b/.test(padded)) return true;
   if (/\binterventions?\b/.test(padded)) return true;
 
-  // (2) names a specific option by its full label.
-  for (const raw of optionLabels) {
-    if (typeof raw !== 'string') continue;
-    const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (label.length >= 3 && containsPhrase(padded, label)) return true;
-  }
-
-  // (3) uses a word that identifies an option and nothing else here.
+  // (2) names a specific option by its full label, and (3) uses a word that
+  // identifies an option and nothing else here — BOTH now live in
+  // `messageCarriesOptionCue` and are asked ONCE. Spelling trigger (2) here as
+  // well would be the hand-maintained mirror this extraction exists to remove
+  // (trap 12): two copies of "does this name an option", in a REFUSAL guard and
+  // in a WRITE resolver, are exactly the pair that must never drift (trap 21).
+  // Behaviour is unchanged — these are pure predicates combined with OR, and
+  // `messageCarriesOptionCue` runs the same full-label loop first.
   return messageCarriesOptionCue(message, optionLabels, nonOptionLabels);
 }
 
