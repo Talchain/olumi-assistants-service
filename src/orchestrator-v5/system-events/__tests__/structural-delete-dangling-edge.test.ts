@@ -26,7 +26,11 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { hasDanglingEdge } from '../structural-delete.js';
+import {
+  findOrphanedNodeReference,
+  hasDanglingEdge,
+  pruneDanglingNodeReferences,
+} from '../structural-delete.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 
 function graph(
@@ -79,5 +83,137 @@ describe('hasDanglingEdge — every surviving edge must have both endpoints', ()
     expect(
       hasDanglingEdge(graph(['a', 'b'], [['a', 'b'], ['b', 'a'], ['a', 'gone']])),
     ).toBe(true);
+  });
+});
+
+/**
+ * `pruneDanglingNodeReferences` / `findOrphanedNodeReference` — the
+ * intervention-level twin of the edge cascade, and its postcondition.
+ *
+ * ⭐ WHY THE POSTCONDITION IS UNIT-PINNED RATHER THAN MUTANT-KILLED, disclosed
+ * for the same reason as `hasDanglingEdge` above. A mutant that makes
+ * `findOrphanedNodeReference` always-clean cannot be killed through the route:
+ * the prune runs first and no projection pass re-adds an intervention, so the
+ * postcondition has nothing to catch. That is a TRUE result about reachability,
+ * not missing coverage — the guard exists for a change one seam past the prune.
+ * The prune ITSELF is route-level and mutant-killed (removing it, or narrowing
+ * it to the option nodes only, REDs the C2 pair).
+ *
+ * WHY IT IS NOT COSMETIC — measured end to end, not argued: an intervention
+ * keyed on a deleted factor loses its cap, so `{value: 0.4, raw_value: 40000}`
+ * reaches the wire as 40000; PLoT's `needsNormalisation` is a WHOLE-REQUEST
+ * gate; one stranded value re-scales every other factor's value at ISL.
+ */
+describe('pruneDanglingNodeReferences — a delete must not leave references behind', () => {
+  function graphWithRefs(): Record<string, unknown> {
+    return {
+      goal_node_id: 'g',
+      nodes: [
+        { id: 'g', kind: 'goal', label: 'Goal' },
+        {
+          id: 'o1',
+          kind: 'option',
+          label: 'Option 1',
+          interventions: { 'f-gone': { value: 0.4 }, 'f-stays': { value: 0.7 } },
+        },
+      ],
+      options: [
+        {
+          id: 'o1',
+          interventions: { 'f-gone': { value: 0.4 }, 'f-stays': { value: 0.7 } },
+          raw_interventions: { 'f-gone': { value: 40000 } },
+        },
+      ],
+      meta: { roots: ['f-gone', 'f-stays'], leaves: ['g'] },
+    };
+  }
+
+  it('drops intervention keys on removed nodes from option NODES', () => {
+    const g = graphWithRefs();
+    pruneDanglingNodeReferences(g, new Set(['f-gone']));
+    const node = (g.nodes as Array<Record<string, unknown>>)[1]!;
+    expect(Object.keys(node.interventions as object)).toEqual(['f-stays']);
+  });
+
+  it('drops them from the TOP-LEVEL options[] mirror too, including raw_interventions', () => {
+    const g = graphWithRefs();
+    pruneDanglingNodeReferences(g, new Set(['f-gone']));
+    const option = (g.options as Array<Record<string, unknown>>)[0]!;
+    expect(Object.keys(option.interventions as object)).toEqual(['f-stays']);
+    expect(Object.keys(option.raw_interventions as object)).toEqual([]);
+  });
+
+  it('filters meta.roots / meta.leaves', () => {
+    const g = graphWithRefs();
+    pruneDanglingNodeReferences(g, new Set(['f-gone']));
+    expect((g.meta as { roots: string[] }).roots).toEqual(['f-stays']);
+    expect((g.meta as { leaves: string[] }).leaves).toEqual(['g']);
+  });
+
+  // THE OPPOSITE-DIRECTION TWIN. A prune that took survivors too would silently
+  // unconfigure the user's model — worse than the defect being fixed.
+  it('takes ONLY the removed ids, never a survivor', () => {
+    const g = graphWithRefs();
+    const counts = pruneDanglingNodeReferences(g, new Set(['f-gone']));
+    expect(counts.interventionsPruned).toBe(3); // node + option + raw_interventions
+    expect(counts.metaIdsPruned).toBe(1);
+    const option = (g.options as Array<Record<string, unknown>>)[0]!;
+    expect((option.interventions as Record<string, { value: number }>)['f-stays'].value).toBe(0.7);
+  });
+
+  it('is a no-op on a graph that references nothing removed', () => {
+    const g = graphWithRefs();
+    const before = JSON.stringify(g);
+    const counts = pruneDanglingNodeReferences(g, new Set(['not-present']));
+    expect(counts).toEqual({ interventionsPruned: 0, metaIdsPruned: 0 });
+    expect(JSON.stringify(g)).toBe(before);
+  });
+
+  it('is total against hostile shapes — never throws', () => {
+    expect(() =>
+      pruneDanglingNodeReferences(
+        { nodes: 'not-an-array', options: [null, 7], meta: { roots: 'nope' } } as never,
+        new Set(['x']),
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe('findOrphanedNodeReference — the postcondition on the projected bytes', () => {
+  it('returns null for a clean graph', () => {
+    expect(
+      findOrphanedNodeReference({ goal_node_id: 'g', nodes: [], options: [] }, new Set(['f-gone'])),
+    ).toBeNull();
+  });
+
+  it('names goal_node_id when the goal itself was removed', () => {
+    expect(findOrphanedNodeReference({ goal_node_id: 'g' }, new Set(['g']))).toBe('goal_node_id');
+  });
+
+  it('names a surviving intervention key on a node', () => {
+    expect(
+      findOrphanedNodeReference(
+        { nodes: [{ id: 'o1', interventions: { 'f-gone': { value: 1 } } }] },
+        new Set(['f-gone']),
+      ),
+    ).toBe('nodes[].interventions');
+  });
+
+  it('names a surviving intervention key on the top-level options mirror', () => {
+    expect(
+      findOrphanedNodeReference(
+        { options: [{ id: 'o1', raw_interventions: { 'f-gone': { value: 1 } } }] },
+        new Set(['f-gone']),
+      ),
+    ).toBe('options[].raw_interventions');
+  });
+
+  it('does NOT fire on a reference to a node that was not removed', () => {
+    expect(
+      findOrphanedNodeReference(
+        { goal_node_id: 'g', nodes: [{ id: 'o1', interventions: { 'f-stays': { value: 1 } } }] },
+        new Set(['f-gone']),
+      ),
+    ).toBeNull();
   });
 });
