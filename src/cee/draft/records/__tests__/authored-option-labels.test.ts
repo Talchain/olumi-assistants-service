@@ -154,6 +154,51 @@ describe("the instrument: the governed corpus can SEE the defect, and discrimina
   });
 });
 
+// The one record set both tests below drive, so the mutant pair varies only the
+// derivation and never the input.
+const WEEKLY_BRIEF =
+    "We are deciding how to schedule deliveries. We could carry on keeping weekly deliveries, " +
+    "or partner with third-party couriers.";
+const WEEKLY_RECORDS: DraftRecordSet = {
+    stated_items: [
+      { kind: "goal", source_quote: "raise retention" },
+      { kind: "option", source_quote: "keeping weekly deliveries" },
+      { kind: "option", source_quote: "partner with third-party couriers" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "Delivery Flexibility", basis: [1] },
+      { claim_kind: "outcome", label: "Customer Retention", basis: [0] },
+      {
+        claim_kind: "causal_link",
+        label: "weekly holds flexibility",
+        from_stated: 1,
+        to_claim: 0,
+        effect: "negative",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "couriers move flexibility",
+        from_stated: 2,
+        to_claim: 0,
+        effect: "positive",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "flexibility drives retention",
+        from_claim: 0,
+        to_claim: 1,
+        effect: "positive",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "retention reaches the goal",
+        from_claim: 1,
+        to_stated: 0,
+        effect: "positive",
+      },
+    ],
+  };
+
 describe("a user-stated option's display label is authored by the same authority as a goal's", () => {
   /**
    * ⭐ THE LEAD RED. `keeping weekly deliveries` is a governed option quote
@@ -163,50 +208,7 @@ describe("a user-stated option's display label is authored by the same authority
    * pristine while the product still shipped the raw fragment.
    */
   it("the projector authors a reducible user-stated option label and badges it", () => {
-    const brief =
-      "We are deciding how to schedule deliveries. We could carry on keeping weekly deliveries, " +
-      "or partner with third-party couriers.";
-    const records: DraftRecordSet = {
-      stated_items: [
-        { kind: "goal", source_quote: "raise retention" },
-        { kind: "option", source_quote: "keeping weekly deliveries" },
-        { kind: "option", source_quote: "partner with third-party couriers" },
-      ],
-      claims: [
-        { claim_kind: "factor", label: "Delivery Flexibility", basis: [1] },
-        { claim_kind: "outcome", label: "Customer Retention", basis: [0] },
-        {
-          claim_kind: "causal_link",
-          label: "weekly holds flexibility",
-          from_stated: 1,
-          to_claim: 0,
-          effect: "negative",
-        },
-        {
-          claim_kind: "causal_link",
-          label: "couriers move flexibility",
-          from_stated: 2,
-          to_claim: 0,
-          effect: "positive",
-        },
-        {
-          claim_kind: "causal_link",
-          label: "flexibility drives retention",
-          from_claim: 0,
-          to_claim: 1,
-          effect: "positive",
-        },
-        {
-          claim_kind: "causal_link",
-          label: "retention reaches the goal",
-          from_claim: 1,
-          to_stated: 0,
-          effect: "positive",
-        },
-      ],
-    };
-
-    const projected = projectRecordsToGraph(records, brief).graph;
+    const projected = projectRecordsToGraph(WEEKLY_RECORDS, WEEKLY_BRIEF).graph;
 
     // Bound by IDENTITY — this option is found by its OWN source_quote, never
     // by a length or label predicate another node could satisfy (trap 19).
@@ -220,13 +222,25 @@ describe("a user-stated option's display label is authored by the same authority
     // asking "why is this called that?" must still receive.
     expect(weekly?.provenance?.source_quote).toBe("keeping weekly deliveries");
 
-    // ⭐ THE OPPOSITE-DIRECTION TWIN, in the same graph: an option the
-    // authority reduces to itself must NOT acquire the badge, so `authored`
-    // cannot degenerate into "always true".
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWIN, DELIBERATELY IN ITS OWN `it()`.
+   *
+   * It began life inside the test above, and a DISCRIMINATING MUTANT PAIR
+   * showed why that was wrong: loosening the derivation for THIS option alone
+   * ("couriers") turned the test above red, so that test was not in fact bound
+   * to the object it names. Split, the pair reads correctly — mutate the twin
+   * and the lead stays green; mutate `weekly` and only the lead goes red. One
+   * assertion, one object (trap 19).
+   */
+  it("a sibling option in the same graph is authored from its OWN quote, not the first one found", () => {
+    const projected = projectRecordsToGraph(WEEKLY_RECORDS, WEEKLY_BRIEF).graph;
     const couriers = projected.nodes.find(
       (n) =>
         n.kind === "option" && n.provenance?.source_quote === "partner with third-party couriers",
     );
+    expect(couriers).toBeDefined();
     expect(couriers?.label).toBe("Partner With Third-Party Couriers");
     expect(couriers?.provenance?.source_quote).toBe("partner with third-party couriers");
   });
