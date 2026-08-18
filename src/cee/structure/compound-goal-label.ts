@@ -114,21 +114,33 @@ export interface CompoundGoalLabel {
    * more than one goal merged, so nothing the merge collapsed is unrecoverable.
    */
   readonly merged_from?: readonly string[];
-  /** TRUE when brevity was declined because a shorter label would drop a figure. */
-  readonly label_extended_for_conservation?: boolean;
 }
 
 /**
  * Choose the display label for a merged goal.
  *
- * Selection, not paraphrase (see A7 above):
- *   1. The PRIMARY goal's label is the candidate — it is already one of the
- *      user's own authored objectives, and it is the node that survives.
- *   2. If it conserves every quantity across all merged labels, it is used as-is.
- *   3. Otherwise the objectives carrying the missing figures are appended, in
- *      their original order, until conservation holds.
+ * ⭐ SELECTION ONLY — THE PRIMARY OBJECTIVE, VERBATIM. No join, no paraphrase,
+ * no synthesis. The remaining objectives travel alongside as `merged_from`.
  *
- * In every case the verbatim originals travel alongside as `merged_from`.
+ * ── WHY THERE IS NO LONGER A CONSERVATION-DRIVEN EXTENSION ──────────────────
+ * An earlier version of this function appended further objectives, joined with
+ * `"; "`, whenever the primary label alone would drop a figure. That was
+ * REVERTED, and the reason is worth keeping because the instinct behind it was
+ * right and the implementation was still wrong:
+ *
+ *   **A2 asserts conservation across `label` ∪ `source_quote` ∪
+ *   `goal_threshold` ∪ `goal_constraints[]` — NOT within the label alone.**
+ *
+ * Because A1 retains the exact user language as PROVENANCE, no figure is lost
+ * from the record when the label omits it. The extension was therefore solving
+ * a problem that does not exist, and paying for it with a synthesised label —
+ * which A3 forbids while the "two goal nodes vs one plus a coaching card"
+ * question is open. **Do not reintroduce a string join here.** If a figure ever
+ * genuinely cannot be recovered from provenance, that is a PROVENANCE defect and
+ * must be fixed there, not papered over by lengthening the label.
+ *
+ * {@link conservesQuantities} is retained as the assertable form of the A2 rule
+ * — over the whole record, which is where it belongs.
  */
 export function buildCompoundGoalLabel(labels: readonly string[]): CompoundGoalLabel {
   const present = labels.filter((l) => typeof l === "string" && l.trim().length > 0);
@@ -136,27 +148,5 @@ export function buildCompoundGoalLabel(labels: readonly string[]): CompoundGoalL
   if (present.length === 0) return { label: "Goal" };
   if (present.length === 1) return { label: present[0] };
 
-  const primary = present[0];
-  const others = present.slice(1);
-
-  if (conservesQuantities(primary, present)) {
-    return { label: primary, merged_from: present };
-  }
-
-  // Brevity would cost a figure. Keep the clauses that carry the missing ones —
-  // and only those, so the label grows by exactly what truthfulness requires.
-  const parts = [primary];
-  for (const other of others) {
-    if (conservesQuantities(parts.join("; "), present)) break;
-    const missing = [...quantityTokens(other)].some(
-      (token) => !quantityTokens(parts.join("; ")).has(token),
-    );
-    if (missing) parts.push(other);
-  }
-
-  return {
-    label: parts.join("; "),
-    merged_from: present,
-    label_extended_for_conservation: true,
-  };
+  return { label: present[0], merged_from: present };
 }

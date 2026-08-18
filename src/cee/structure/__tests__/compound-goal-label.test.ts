@@ -83,42 +83,53 @@ describe("B — no numeral or named quantity may be dropped from a restatement",
     expect(quantityTokens("Deliver 4-Day Week")).toContain("4-day");
   });
 
-  it("EXTENDS the label rather than dropping a figure the primary omits", () => {
+  it("A2 — conservation holds across the RECORD, not within the label", () => {
     // The live-corpus shape: first clause has no figure, second carries £59.
+    // The label is free to omit `£59`; what may NOT happen is the figure leaving
+    // the record. A1 keeps the exact user language as provenance, so the union of
+    // label + provenance conserves it — and that union is what A2 asserts.
     const result = buildCompoundGoalLabel([
       "Our aim is to raise our average seat price",
       "I want to reach £59",
     ]);
 
-    expect(result.label).toContain("£59");
-    expect(result.label_extended_for_conservation).toBe(true);
-    expect(conservesQuantities(result.label, result.merged_from!)).toBe(true);
+    // Readable label, no synthesis, no join.
+    expect(result.label).toBe("Our aim is to raise our average seat price");
+    expect(result.label).not.toContain(";");
+    // …and the figure is still in the record.
+    expect(conservesQuantities(
+      [result.label, ...(result.merged_from ?? [])].join(" "),
+      result.merged_from!,
+    )).toBe(true);
   });
 
-  it("TWIN — a primary label that already carries every figure is NOT extended", () => {
-    // Opposite direction: brevity is permitted precisely when it costs nothing.
+  it("TWIN — a primary label that already carries every figure needs no provenance to conserve", () => {
     const result = buildCompoundGoalLabel([
       "Reach £20m ARR by End of FY28",
       "keep the team happy",
     ]);
 
     expect(result.label).toBe("Reach £20m ARR by End of FY28");
-    expect(result.label_extended_for_conservation).not.toBe(true);
+    // Conserves on the label ALONE — the stronger case, and it must still hold.
     expect(conservesQuantities(result.label, result.merged_from!)).toBe(true);
   });
 
-  it("conserves across MORE than two objectives", () => {
-    const originals = [
+  it("never joins labels, whatever the figures do (A3 is open — no synthesis)", () => {
+    const result = buildCompoundGoalLabel([
       "cut cost",
       "reach £20m ARR",
       "hold attrition under 15%",
-    ];
+    ]);
 
-    const result = buildCompoundGoalLabel(originals);
-
-    expect(conservesQuantities(result.label, originals)).toBe(true);
-    expect(result.label).toContain("£20m");
-    expect(result.label).toContain("15%");
+    // The label is exactly one of the user's objectives, verbatim.
+    expect(result.label).toBe("cut cost");
+    expect(result.label).not.toContain(";");
+    expect(result.label).not.toContain(" + ");
+    // Every figure remains recoverable from the record.
+    expect(conservesQuantities(
+      [result.label, ...(result.merged_from ?? [])].join(" "),
+      result.merged_from!,
+    )).toBe(true);
   });
 
   it("conservesQuantities is FALSE when a figure is genuinely lost (the guard bites)", () => {

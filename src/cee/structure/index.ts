@@ -351,9 +351,6 @@ export function enforceSingleGoal(
         ...(node as any),
         label: composed.label,
         ...(composed.merged_from !== undefined && { merged_from: composed.merged_from }),
-        ...(composed.label_extended_for_conservation === true && {
-          label_extended_for_conservation: true,
-        }),
         ...(mergedGoalRecords.length > 0 && { merged_goals: mergedGoalRecords }),
       };
     }
