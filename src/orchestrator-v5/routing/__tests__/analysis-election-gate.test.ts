@@ -334,12 +334,32 @@ describe('KNOWN-DROPPED — pinned exactly so the gap cannot drift unobserved', 
    * predicate cannot afford that).
    */
   const KNOWN_DROPPED: readonly string[] = [
+    // (a) UNLICENSED LEFT CONTEXT — inherited from the shared verb-position
+    // allowlist, which this predicate reuses rather than forking.
     'Actually run the analysis.',
     'I want you to analyse this.',
     'Just run the analysis.',
     'Next run the analysis.',
     'So run the analysis.',
     'You should run the analysis.',
+    // (b) A SHARED VETO FIRES ON A TOKEN ELSEWHERE IN THE MESSAGE. The verb
+    // here sits in a perfectly licensed position; what drops these is the
+    // negation / interrogative veto matching earlier text. The vetoes are
+    // deliberately over-reaching (see their ⚠ notes in analytical-intent.ts)
+    // and that over-reach lands in the SAFE direction for this gate — one
+    // extra click, never a wrong action.
+    //
+    // ⚠ THESE SIX ENTRIES ARE ALSO THE ONLY THING THAT MAKES THE TWO VETOES
+    // OBSERVABLE. Measured: with the negation veto deleted the first three
+    // flip to admitted; with the interrogative veto deleted the last two do.
+    // Every other message in every corpus here declines by POSITION instead,
+    // so without these rows both vetoes could be deleted with the whole suite
+    // green (they survived exactly that mutant before these were added).
+    'Do not bother. Run the analysis.',
+    'Never mind, run the analysis.',
+    'Stop. Run the analysis.',
+    'Do we need this? Run the analysis.',
+    'Is this still valid? Run the analysis.',
   ];
 
   const CANDIDATES: readonly string[] = [

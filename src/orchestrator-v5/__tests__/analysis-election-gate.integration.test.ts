@@ -164,8 +164,27 @@ const RUN_ANALYSIS_ELECTION = {
   },
 };
 
+/**
+ * ⚠ THE ROUTER'S PRE-ACTION ORIENTATION, and it is a LOAD-BEARING FIXTURE.
+ *
+ * The served routing prompt scopes the text beside a `run_analysis` tool call
+ * to "pre-action orientation only. Say what the simulation will test", so on a
+ * real election this channel carries a future-tense promise about a run. If a
+ * demoted turn reused it, the user would be told an analysis is happening on
+ * the very turn the gate stopped it.
+ *
+ * The first version of this fixture emitted NO text block, which made
+ * `orientationText` the empty string — and a mutant that pointed the demoted
+ * reply straight at `orientationText` SURVIVED, because there was nothing
+ * contaminated to leak. The fixture was the reason the twin could not see the
+ * defect (trap 13: an absence assertion must first be able to see a presence).
+ */
+const CONTAMINATED_ORIENTATION =
+  'Right, I will run the simulation now to test which option performs best.';
+
 function mkToolUseResult(input: unknown): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [
+    { type: 'text', text: CONTAMINATED_ORIENTATION },
     {
       type: 'tool_use',
       id: 'tu-1',
@@ -362,6 +381,12 @@ describe('TWIN D — a demoted election answers the user (no silent substitution
 
     expect(telemetry.failure_type).toBeNull();
     expect(response.assistant_text).toContain(ANALYSIS_ELECTION_DEMOTION_TEXT);
+    // ⭐ THE DISCRIMINATING ASSERTION. The router DID author a pre-action
+    // orientation on this turn (pinned below, so this is not an absence test
+    // over an absent thing), and none of it may reach the user.
+    expect(CONTAMINATED_ORIENTATION).toMatch(/\bI will run\b/);
+    expect(response.assistant_text).not.toContain(CONTAMINATED_ORIENTATION);
+    expect(response.assistant_text).not.toMatch(/\bsimulation\b/i);
     // The turn is answered, not dropped: a non-trivial reply reached the user.
     expect(response.assistant_text.trim().length).toBeGreaterThan(0);
     // ⚠ P1 — one seam BEYOND the guard. The guard's job is "do not run the
