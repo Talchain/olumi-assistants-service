@@ -165,6 +165,30 @@ describe('P8 — every chip has a named, pinned acceptance path', () => {
     expect(resolution.kind).toBe('ask');
   });
 
+  it('the count in the copy is DERIVED — three named options do not read as "two"', () => {
+    // The first draft hardcoded "two", the case that motivated the row. A
+    // sentence that miscounts what it is quoting back is the same class of
+    // small untruth this seam exists to remove.
+    const response = composeOptionEffectAskResponse({
+      ambiguity: 'option',
+      value: 0.4,
+      candidates: [],
+      optionLabels: [OPTION_LABEL, SIBLING_OPTION_LABEL, 'Pay daily clean-air charges and pass through to customers'],
+      stage: 'frame',
+    });
+    expect(response.assistant_text).toContain('names 3 options');
+    expect(response.assistant_text).not.toContain('names two options');
+    // Opposite-direction twin: the two-option case still reads as 2.
+    const two = composeOptionEffectAskResponse({
+      ambiguity: 'option',
+      value: 0.4,
+      candidates: [],
+      optionLabels: [OPTION_LABEL, SIBLING_OPTION_LABEL],
+      stage: 'frame',
+    });
+    expect(two.assistant_text).toContain('names 2 options');
+  });
+
   it('offers no chip it cannot complete honestly', () => {
     // A candidate is only emitted when exactly one of that option's linked
     // factors was named; with no complete candidate the copy still asks, and

@@ -73,11 +73,16 @@ export function composeOptionEffectAskResponse(
       ? joinQuoted(input.optionLabels)
       : joinQuoted(input.candidates.map((c) => c.factorLabel));
 
+  // ⚠ THE COUNT IS DERIVED, NOT WRITTEN. The first draft said "two" because
+  // two is the case that motivated the row — and the resolver can hand back
+  // three. A sentence that miscounts what it is quoting back is a small lie of
+  // exactly the class this seam exists to remove.
+  const count = input.ambiguity === 'option' ? input.optionLabels.length : input.candidates.length;
   const subject = input.ambiguity === 'option' ? 'options' : 'factors';
   const opening =
     input.ambiguity === 'option'
-      ? `Your message names two ${subject} — ${named} — so I do not know which one ${input.value} belongs to.`
-      : `Your message names two ${subject} on "${input.optionLabels[0] ?? ''}" — ${named} — so I do not know which one ${input.value} belongs to.`;
+      ? `Your message names ${count} ${subject} — ${named} — so I do not know which one ${input.value} belongs to.`
+      : `Your message names ${count} ${subject} on "${input.optionLabels[0] ?? ''}" — ${named} — so I do not know which one ${input.value} belongs to.`;
 
   const closing =
     offered.length > 0
