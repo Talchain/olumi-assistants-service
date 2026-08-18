@@ -33,6 +33,7 @@ import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
+import { stampFallbackDefault, FACTOR_VALUE_TIER_FIELD } from "../../../provenance/factor-value-provenance.js";
 import { log } from "../../../../utils/telemetry.js";
 import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
@@ -386,6 +387,10 @@ function fixControllableMissingData(
     // Only default when truly absent (Stage 1 adapter sets 0.5; this is a safety net).
     if (data.value === undefined || data.value === null) {
       data.value = 0.5;
+      // ⭐ STAMPED. See `factor-value-provenance.ts`'s FACTOR_VALUE_TIER_FIELD
+      // block: the site that invents the number is the only one that KNOWS it
+      // was invented, and a `0.5` magnitude is not a discriminator (trap 19).
+      data[FACTOR_VALUE_TIER_FIELD] = "fallback_default";
       changed = true;
     }
     if (data.extractionType === undefined) {
@@ -471,7 +476,12 @@ export function fixObservableMissingData(
     // it chose itself — is left alone; only the stamps this function writes change.
     if (!hasValue) {
       (node as any).data = {
-        ...(data ?? {}),
+        // ⭐ STAMPED — the branch that INVENTS the value says so, so that
+        // `unreachable-factors` cannot later narrow this 0.5 into a
+        // `[0.25, 0.75]` prior that reads as a measurement. Branch B below
+        // supplies only a LABEL for a value that already existed, so it is not
+        // a fabricated quantity and is deliberately NOT stamped.
+        ...stampFallbackDefault(data ?? {}),
         value: 0.5,
         extractionType: "inferred",
       };

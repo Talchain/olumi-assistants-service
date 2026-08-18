@@ -8,6 +8,7 @@
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
 import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
+import { stampFallbackDefault } from "../../cee/provenance/factor-value-provenance.js";
 
 // ============================================================================
 // Types
@@ -986,7 +987,14 @@ export function ensureControllableFactorBaselines(response: unknown): {
     return {
       ...node,
       data: {
-        ...(data || {}),
+        // ⭐ STAMPED, NOT LEFT TO BE GUESSED (quantities lane, 2026-08-18).
+        // This 0.5 carries no information, and the ONE place that knows it is
+        // right here. Downstream readers previously had to recover the fact
+        // from the magnitude (`value === 0.5`), which misreads a genuinely
+        // stated 0.5 as an invention and vice versa — CLAUDE.md trap 19. The
+        // stamp is what stops `unreachable-factors` narrowing this into a
+        // prior range that reads as a measurement.
+        ...stampFallbackDefault(data || {}),
         value: 0.5,
         // Preserve LLM-emitted extractionType if present; only default when
         // truly absent — matches the guard in fixControllableMissingData().
