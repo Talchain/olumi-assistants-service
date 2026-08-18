@@ -536,3 +536,316 @@ describe('the acknowledgement is read back from the COMMITTED graph (P5)', () =>
     expect(ack.toLowerCase()).not.toContain('rerun');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// F1 — NESTING IS POSITIONAL. A label that is a phrase-substring of another
+// label is a tokenisation artefact ONLY where it occurred INSIDE the longer
+// one. Where the sentence names the short label somewhere else, both are
+// genuinely named, and that is AMBIGUITY, not a nest.
+//
+// ⚠ THE DEFECT THIS BLOCK PINS, demonstrated by execution on `2d998fa5` by an
+// independent adversarial reviewer: with options "Hire" and "Hire two
+// engineers", the sentence
+//
+//   "Set the Hire option's effect on Payroll cost to 0.5 — not Hire two engineers."
+//
+// bound a WRITE to `opt_hire_two` — the option the user explicitly EXCLUDED —
+// because `matchLabels` dropped the "Hire" match on the LABELS being nested
+// without asking WHERE each occurred. A wrong-entity write inside the very
+// feature that exists to prevent wrong-entity writes.
+//
+// The CONTROL that makes it a defect rather than a blanket refusal: the same
+// sentence against a graph that does NOT carry the longer option binds
+// correctly to "Hire". Both halves are asserted below, so a fix that simply
+// stopped claiming these sentences would RED the control.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Ids are the binding, never the labels (trap 19). */
+const HIRE_ID = 'opt_hire';
+const HIRE_TWO_ID = 'opt_hire_two';
+const HIRE_THREE_ID = 'opt_hire_three';
+const PAYROLL_ID = 'fac_payroll';
+
+type MutableGraph = ReturnType<typeof graph>;
+
+function optionNode(id: string, label: string): Record<string, unknown> {
+  return { id, kind: 'option', label, interventions: {} };
+}
+
+function edgeTo(from: string, to: string): Record<string, unknown> {
+  return {
+    from,
+    to,
+    strength: { mean: 1, std: 0.01 },
+    exists_probability: 1,
+    effect_direction: 'positive',
+  };
+}
+
+/**
+ * The witnessed graph plus a nested option-label pair, both wired to the same
+ * factor. `withLonger: false` is the reviewer's CONTROL graph.
+ */
+function hiringGraph(opts: { withLonger: boolean; withThird?: boolean }): MutableGraph {
+  const g = graph();
+  g.nodes.push(optionNode(HIRE_ID, 'Hire'));
+  if (opts.withLonger) g.nodes.push(optionNode(HIRE_TWO_ID, 'Hire two engineers'));
+  if (opts.withThird === true) g.nodes.push(optionNode(HIRE_THREE_ID, 'Hire three engineers'));
+  g.nodes.push({
+    id: PAYROLL_ID,
+    kind: 'factor',
+    label: 'Payroll cost',
+    observed_state: { value: 0.5 },
+  });
+  g.edges.push(edgeTo(HIRE_ID, PAYROLL_ID) as never);
+  if (opts.withLonger) g.edges.push(edgeTo(HIRE_TWO_ID, PAYROLL_ID) as never);
+  if (opts.withThird === true) g.edges.push(edgeTo(HIRE_THREE_ID, PAYROLL_ID) as never);
+  return g;
+}
+
+/** The reviewer's exact sentence. The user NAMES "Hire" and EXCLUDES the other. */
+const EXCLUSION_SENTENCE =
+  "Set the Hire option's effect on Payroll cost to 0.5 — not Hire two engineers.";
+
+describe('F1 — a nested label is dropped only WHERE it is nested (position, not spelling)', () => {
+  it('POSITIVE CONTROL — the two fixture graphs differ only by the longer option', () => {
+    // Without this, a "the control still binds" assertion could be passing on
+    // a graph that never carried the nesting pair at all.
+    const withLonger = hiringGraph({ withLonger: true });
+    const withoutLonger = hiringGraph({ withLonger: false });
+    expect(GraphV3.safeParse(withLonger).success).toBe(true);
+    expect(GraphV3.safeParse(withoutLonger).success).toBe(true);
+    expect(withLonger.nodes.some((n) => n.id === HIRE_TWO_ID)).toBe(true);
+    expect(withoutLonger.nodes.some((n) => n.id === HIRE_TWO_ID)).toBe(false);
+    // Both options are genuinely wired to the same factor, so the wrong-entity
+    // write is reachable rather than blocked by a missing edge.
+    const parsed = GraphV3.parse(withLonger) as GraphV3T;
+    expect(linkedFactorsOf(parsed, HIRE_ID).map((f) => f.id)).toEqual([PAYROLL_ID]);
+    expect(linkedFactorsOf(parsed, HIRE_TWO_ID).map((f) => f.id)).toEqual([PAYROLL_ID]);
+  });
+
+  it('CONTROL — with the longer option absent, the sentence binds to "Hire" BY ID', () => {
+    expect(
+      resolveOptionEffectWrite({ message: EXCLUSION_SENTENCE, graph: hiringGraph({ withLonger: false }) }),
+    ).toMatchObject({
+      matched: true,
+      kind: 'write',
+      optionId: HIRE_ID,
+      factorId: PAYROLL_ID,
+      value: 0.5,
+    });
+  });
+
+  it('THE DEFECT — the EXCLUDED option must never be written; the turn ASKS', () => {
+    const resolution = resolveOptionEffectWrite({
+      message: EXCLUSION_SENTENCE,
+      graph: hiringGraph({ withLonger: true }),
+    });
+    // The load-bearing assertion: no write to the excluded entity, ever.
+    if (resolution.matched && resolution.kind === 'write') {
+      expect(resolution.optionId).not.toBe(HIRE_TWO_ID);
+    }
+    // And the sentence genuinely names both, so the honest answer is a
+    // question, not a winner (trap 22f — the ambiguity is the product).
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
+    expect(resolution.ambiguity).toBe('option');
+    expect(resolution.value).toBe(0.5);
+    expect(resolution.candidates.map((c) => c.optionId).sort()).toEqual(
+      [HIRE_ID, HIRE_TWO_ID].sort(),
+    );
+    for (const candidate of resolution.candidates) {
+      expect(candidate.factorId).toBe(PAYROLL_ID);
+    }
+  });
+
+  it('TWIN — a GENUINELY nested reference still resolves to the longer option', () => {
+    // The whole point of the nesting rule. If this REDs, the fix has traded a
+    // wrong write for a dead feature.
+    expect(
+      resolveOptionEffectWrite({
+        message: "Set the Hire two engineers option's effect on Payroll cost to 0.5.",
+        graph: hiringGraph({ withLonger: true }),
+      }),
+    ).toMatchObject({
+      matched: true,
+      kind: 'write',
+      optionId: HIRE_TWO_ID,
+      factorId: PAYROLL_ID,
+      value: 0.5,
+    });
+  });
+
+  it.each([
+    ['a trailing letter', 'hired'],
+    ['a leading letter', 'rehire'],
+  ])('BOTH word boundaries are load-bearing — "Hire" does not match %s', (_name, word) => {
+    // ⚠ ADDED AFTER A SURVIVING MUTANT. Relaxing `boundedBefore &&
+    // boundedAfter` to `||` in `phraseOccurrences` left the whole battery
+    // GREEN: the pre-existing boundary spec contrasts "hire" with "hiring",
+    // and "hire" is not a substring of "hiring" at all, so it never reached
+    // the boundary test (trap 13b — a guard agreeing with itself). These two
+    // words DO contain "hire", each with exactly one bounded side, so they
+    // discriminate the AND from the OR.
+    expect(
+      resolveOptionEffectWrite({
+        message: `Set the ${word} option's effect on Payroll cost to 0.5.`,
+        graph: hiringGraph({ withLonger: false }),
+      }),
+    ).toEqual({ matched: false, reason: 'option_not_named' });
+  });
+
+  it('TWIN — a SUFFIX-nested label is dropped too (the nest is not always a prefix)', () => {
+    // "two engineers" ends exactly where "Hire two engineers" ends. A
+    // containment test written with a strict upper bound would miss the whole
+    // suffix class — and every other case in this block is a PREFIX nest, so
+    // without this twin the corpus could not observe it (trap 22: check what
+    // the corpus EXCLUDES).
+    const g = hiringGraph({ withLonger: true });
+    g.nodes.push(optionNode('opt_two_engineers', 'two engineers'));
+    g.edges.push(edgeTo('opt_two_engineers', PAYROLL_ID) as never);
+    expect(GraphV3.safeParse(g).success).toBe(true);
+
+    expect(
+      resolveOptionEffectWrite({
+        message: "Set the Hire two engineers option's effect on Payroll cost to 0.5.",
+        graph: g,
+      }),
+    ).toMatchObject({ matched: true, kind: 'write', optionId: HIRE_TWO_ID, factorId: PAYROLL_ID });
+  });
+
+  it('TWIN — the SUFFIX label named on its OWN is still a candidate', () => {
+    // Opposite direction of the twin above: dropping it everywhere would be a
+    // dead feature rather than a fix.
+    const g = hiringGraph({ withLonger: true });
+    g.nodes.push(optionNode('opt_two_engineers', 'two engineers'));
+    g.edges.push(edgeTo('opt_two_engineers', PAYROLL_ID) as never);
+
+    expect(
+      resolveOptionEffectWrite({
+        message: "Set the two engineers option's effect on Payroll cost to 0.5.",
+        graph: g,
+      }),
+    ).toMatchObject({ matched: true, kind: 'write', optionId: 'opt_two_engineers' });
+  });
+
+  it('TWIN — naming only the SHORT label still resolves to the short option', () => {
+    expect(
+      resolveOptionEffectWrite({
+        message: "Set the Hire option's effect on Payroll cost to 0.5.",
+        graph: hiringGraph({ withLonger: true }),
+      }),
+    ).toMatchObject({ matched: true, kind: 'write', optionId: HIRE_ID, factorId: PAYROLL_ID });
+  });
+
+  it('TWIN — the short label REPEATED, every occurrence nested, still resolves to the longer', () => {
+    // Two occurrences, both inside an occurrence of the longer label. Nothing
+    // here is a second candidate, so a write is still the honest answer — this
+    // is the case a naive "more than one occurrence ⇒ ambiguous" rule would
+    // break.
+    expect(
+      resolveOptionEffectWrite({
+        message:
+          "Hire two engineers — yes, Hire two engineers: set that option's effect on Payroll cost to 0.5.",
+        graph: hiringGraph({ withLonger: true }),
+      }),
+    ).toMatchObject({ matched: true, kind: 'write', optionId: HIRE_TWO_ID });
+  });
+
+  it('TWIN — two DIFFERENT longer labels cover the short one; only the two longer are offered', () => {
+    // "Hire" occurs twice, each occurrence inside a DIFFERENT longer label. No
+    // single longer label covers both, but between them they cover every
+    // occurrence — so "Hire" is nowhere named in its own right and must not be
+    // offered as a third choice (a phrase and part of itself, the artefact the
+    // nesting rule exists to remove).
+    const resolution = resolveOptionEffectWrite({
+      message:
+        "Set the Hire two engineers option's effect and the Hire three engineers option's "
+        + 'effect on Payroll cost to 0.5.',
+      graph: hiringGraph({ withLonger: true, withThird: true }),
+    });
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
+    expect(resolution.candidates.map((c) => c.optionId).sort()).toEqual(
+      [HIRE_TWO_ID, HIRE_THREE_ID].sort(),
+    );
+    expect([...resolution.optionLabels].sort()).toEqual(
+      ['Hire three engineers', 'Hire two engineers'].sort(),
+    );
+  });
+
+  it('TWIN — the SAME exclusion shape on the FACTOR half also asks rather than writing', () => {
+    // The nesting filter runs over factors too, so the defect had a factor-side
+    // face: "…effect on Payroll cost to 0.5 — not Payroll cost overrun." would
+    // have bound the overrun factor. One seam past the option half (P1).
+    const g = hiringGraph({ withLonger: false });
+    g.nodes.push({
+      id: 'fac_payroll_overrun',
+      kind: 'factor',
+      label: 'Payroll cost overrun',
+      observed_state: { value: 0.5 },
+    });
+    g.edges.push(edgeTo(HIRE_ID, 'fac_payroll_overrun') as never);
+    expect(GraphV3.safeParse(g).success).toBe(true);
+
+    const resolution = resolveOptionEffectWrite({
+      message:
+        "Set the Hire option's effect on Payroll cost to 0.5 — not Payroll cost overrun.",
+      graph: g,
+    });
+    if (resolution.matched && resolution.kind === 'write') {
+      expect(resolution.factorId).not.toBe('fac_payroll_overrun');
+    }
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
+    expect(resolution.ambiguity).toBe('factor');
+    expect(resolution.candidates.map((c) => c.factorId).sort()).toEqual(
+      [PAYROLL_ID, 'fac_payroll_overrun'].sort(),
+    );
+  });
+
+  it('TWIN — two options carrying the SAME label are an ambiguity, not a mutual nest', () => {
+    // The length ordering must be STRICT. Identical labels contain each other,
+    // so a non-strict comparison drops BOTH and reports "no option named" —
+    // turning a genuine ambiguity into a silent decline.
+    const g = graph();
+    g.nodes.push(optionNode(HIRE_ID, 'Hire'), optionNode('opt_hire_dup', 'Hire'));
+    g.nodes.push({
+      id: PAYROLL_ID,
+      kind: 'factor',
+      label: 'Payroll cost',
+      observed_state: { value: 0.5 },
+    });
+    g.edges.push(edgeTo(HIRE_ID, PAYROLL_ID) as never);
+    g.edges.push(edgeTo('opt_hire_dup', PAYROLL_ID) as never);
+    expect(GraphV3.safeParse(g).success).toBe(true);
+
+    const resolution = resolveOptionEffectWrite({
+      message: "Set the Hire option's effect on Payroll cost to 0.5.",
+      graph: g,
+    });
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
+    expect(resolution.candidates.map((c) => c.optionId).sort()).toEqual(
+      [HIRE_ID, 'opt_hire_dup'].sort(),
+    );
+  });
+
+  it('TWIN (factor) — a genuinely nested FACTOR reference still resolves to the longer', () => {
+    const g = hiringGraph({ withLonger: false });
+    g.nodes.push({
+      id: 'fac_payroll_overrun',
+      kind: 'factor',
+      label: 'Payroll cost overrun',
+      observed_state: { value: 0.5 },
+    });
+    g.edges.push(edgeTo(HIRE_ID, 'fac_payroll_overrun') as never);
+    expect(
+      resolveOptionEffectWrite({
+        message: "Set the Hire option's effect on Payroll cost overrun to 0.5.",
+        graph: g,
+      }),
+    ).toMatchObject({
+      matched: true,
+      kind: 'write',
+      optionId: HIRE_ID,
+      factorId: 'fac_payroll_overrun',
+    });
+  });
+});

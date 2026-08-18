@@ -27,8 +27,10 @@
  * It is a RESOLVER, not a parser. It adds NO new natural-language predicate:
  * intent comes from the shipped `detectConfigureOptionIntent` classifier, and
  * identity comes from exact, word-bounded label matching against the
- * PERSISTED graph through `containsPhrase` — the same reader
- * `configure-option-intent.ts` and `configure-option-clarify.ts` use. Four
+ * PERSISTED graph through `phraseOccurrences` — the same boundary rule
+ * `containsPhrase` applies (and is now derived from), so this resolver and
+ * `configure-option-intent.ts` / `configure-option-clarify.ts` can never
+ * disagree about what counts as a match. Four
  * rounds of open-ended predicate tuning oscillated on a neighbouring seam
  * (CLAUDE.md trap 22f); the exit named there is to make the ambiguity the
  * product, which is what `kind: 'ask'` below does.
@@ -117,7 +119,7 @@ import {
   projectOptionLabels,
   type ConfigureOptionIntentTrigger,
 } from './configure-option-intent.js';
-import { containsPhrase } from './option-intervention-guard.js';
+import { phraseOccurrences, type PhraseOccurrence } from './option-intervention-guard.js';
 
 /**
  * The triggers that mean "this sentence is explicitly about an OPTION'S
@@ -229,20 +231,67 @@ interface LabelMatch {
   readonly id: string;
   readonly label: string;
   readonly normalised: string;
+  /** WHERE this label occurred, word-bounded. Nesting is decided on these. */
+  readonly occurrences: readonly PhraseOccurrence[];
 }
 
 /**
- * Labels that appear in the message, word-bounded, with NESTED matches
- * dropped.
+ * Is EVERY occurrence of `m` inside an occurrence of some strictly longer
+ * match? Then `m` is nowhere named in its own right.
  *
- * ⭐ WHY NESTING IS DROPPED RATHER THAN COUNTED AS AMBIGUITY. With options
- * "Expand" and "Expand to Leeds", the sentence "…the Expand to Leeds
- * option…" matches BOTH — the shorter one only because it is a prefix of the
- * longer. That is a tokenisation artefact, not a second candidate, and
- * treating it as ambiguity would ask the user to disambiguate between a
- * phrase and part of itself. A match that is a phrase-substring of another
- * match is therefore removed. Two matches that are NOT nested are a genuine
- * ambiguity and reach `ask`.
+ * ⭐⭐ NESTING IS A FACT ABOUT POSITIONS, NOT ABOUT SPELLINGS — and the
+ * difference is a wrong-entity write. The original rule dropped a match whose
+ * LABEL was a phrase-substring of a longer match's label, without asking WHERE
+ * either occurred. With options "Hire" and "Hire two engineers", the sentence
+ *
+ *   "Set the Hire option's effect on Payroll cost to 0.5 — not Hire two engineers."
+ *
+ * bound a write to "Hire two engineers" — the option the user had explicitly
+ * EXCLUDED — because the "Hire" match was discarded on spelling alone. The
+ * control proving it was a nesting defect and not a parsing one: the same
+ * sentence against a graph without the longer option binds correctly to
+ * "Hire". Demonstrated by execution on `2d998fa5`; pinned in
+ * `__tests__/option-effect-write.test.ts` under `F1`.
+ *
+ * The rule is now: drop `m` only where every one of its occurrences lies
+ * INSIDE an occurrence of a longer match. Where that does not hold, the
+ * sentence genuinely names both, and two genuinely-named options are an
+ * AMBIGUITY the product must ASK about rather than resolve by guessing
+ * (CLAUDE.md trap 22f — where direction cannot be determined, the ambiguity
+ * becomes the coaching moment).
+ *
+ * ⚠ COVERAGE IS TAKEN OVER THE WHOLE SET OF LONGER MATCHES, not against one
+ * at a time. "Set the Hire two engineers option's effect and the Hire three
+ * engineers option's effect on …" places each "Hire" occurrence inside a
+ * DIFFERENT longer label: no single longer match covers both, yet "Hire" is
+ * still nowhere named in its own right, and offering it as a third choice
+ * would be the "a phrase and part of itself" theatre this rule exists to
+ * remove. Pinned by an opposite-direction twin in the same block.
+ *
+ * ⚠ THE LENGTH ORDERING IS STRICT, AND LOAD-BEARING. Two options carrying the
+ * SAME label are mutually contained; a non-strict comparison would drop BOTH
+ * and turn a genuine ambiguity into "no option named". Pinned by its own twin.
+ */
+function isNestedThroughout(m: LabelMatch, all: readonly LabelMatch[]): boolean {
+  if (m.occurrences.length === 0) return false;
+  const longer = all.filter(
+    (other) => other.id !== m.id && other.normalised.length > m.normalised.length,
+  );
+  if (longer.length === 0) return false;
+  return m.occurrences.every((occurrence) =>
+    longer.some((other) =>
+      other.occurrences.some(
+        (outer) => outer.start <= occurrence.start && occurrence.end <= outer.end,
+      ),
+    ),
+  );
+}
+
+/**
+ * Labels that appear in the message, word-bounded, with matches that are
+ * nested EVERYWHERE THEY OCCUR dropped. See `isNestedThroughout` for why the
+ * test is positional. Two matches that are not nested are a genuine ambiguity
+ * and reach `ask`.
  */
 function matchLabels(
   paddedMessage: string,
@@ -253,18 +302,11 @@ function matchLabels(
     if (typeof candidate.label !== 'string') continue;
     const normalised = candidate.label.toLowerCase().replace(/\s+/g, ' ').trim();
     if (normalised.length < 3) continue;
-    if (!containsPhrase(paddedMessage, normalised)) continue;
-    matched.push({ id: candidate.id, label: candidate.label, normalised });
+    const occurrences = phraseOccurrences(paddedMessage, normalised);
+    if (occurrences.length === 0) continue;
+    matched.push({ id: candidate.id, label: candidate.label, normalised, occurrences });
   }
-  return matched.filter(
-    (m) =>
-      !matched.some(
-        (other) =>
-          other.id !== m.id
-          && other.normalised.length > m.normalised.length
-          && containsPhrase(` ${other.normalised} `, m.normalised),
-      ),
-  );
+  return matched.filter((m) => !isNestedThroughout(m, matched));
 }
 
 /** The factors this option is wired to. Same reader as the recovery copy. */
