@@ -845,17 +845,17 @@ async function readCanonicalHash(ctx) {
  * 409 payload lets you make.
  */
 async function readCasColumn(ctx) {
-  if (!ctx.dbUrl || !ctx.dbKey) return null;
+  if (!ctx.dbUrl || !ctx.dbKey) return { error: "canonical-DB arm not configured" };
   try {
     const res = await fetch(
       `${ctx.dbUrl.replace(/\/$/, "")}/rest/v1/scenarios?id=eq.${encodeURIComponent(ctx.scenarioId)}` +
         `&select=graph_identity_hash,updated_at`,
       { headers: { apikey: ctx.dbKey, Authorization: `Bearer ${ctx.dbKey}` }, signal: AbortSignal.timeout(30000) },
     );
-    if (!res.ok) return null;
-    return (await res.json())?.[0] ?? null;
-  } catch {
-    return null;
+    if (!res.ok) return { error: `row read HTTP ${res.status}` };
+    return (await res.json())?.[0] ?? { error: "no scenarios row" };
+  } catch (e) {
+    return { error: `row read threw: ${e?.name ?? e}` };
   }
 }
 
@@ -1298,21 +1298,29 @@ async function main() {
     const fdel = orphanDeleted.res;
     if (fdel === null) {
       orphanFindings = [`could not read a base hash for the orphan-exercising delete (${orphanDeleted.why})`];
+      orphanDetail = `${orphanPick.mode} mode: the canonical base-hash read failed, so the delete was never attempted`;
       orphanVerdict = "FAIL";
     } else if (fdel.status !== 200 || !carriedCommittedGraph(fdel.body)) {
       const casCol = await readCasColumn(ctx);
       const serverExpected = fdel.body?.details?.expected_base_graph_hash ?? null;
+      const casReadable = casCol !== null && casCol.error === undefined;
+      orphanDetail =
+        `${orphanPick.mode} mode: the second structural_delete on this scenario was REFUSED. ` +
+        `attempts=${orphanDeleted.attempts}`;
       orphanFindings = [
         `the orphan-exercising delete of '${orphanPick.id}' (${orphanPick.mode} mode) was NOT committed ` +
           `after ${orphanDeleted.attempts} attempt(s): HTTP ${fdel.status} error=${fdel.body?.error ?? "-"} ` +
           `category=${fdel.body?.details?.conflict_category ?? "-"} ` +
           `text=${JSON.stringify((fdel.body?.assistant_text ?? "").slice(0, 200))}` +
-          (fdel.body?.details?.conflict_category === RPC_CAS_CONFLICT && casCol !== null
-            ? `\n     ROOT-CAUSE READ (CEE out of the path): scenarios.graph_identity_hash = ` +
-              `${String(casCol.graph_identity_hash ?? "null").slice(0, 24)}… (written ${casCol.updated_at}), ` +
-              `while CEE's own read of the SAME row derives ${String(serverExpected ?? "?").slice(0, 24)}…. ` +
-              `${casCol.graph_identity_hash !== serverExpected ? "THEY DISAGREE AT REST, so no client value can satisfy the gate and the refusal is PERMANENT, not a race." : "They agree, so this WAS a race with a concurrent writer."}`
-            : ""),
+          (fdel.body?.details?.conflict_category !== RPC_CAS_CONFLICT
+            ? ""
+            : casReadable
+              ? `\n     ROOT-CAUSE READ (CEE out of the path): scenarios.graph_identity_hash = ` +
+                `${String(casCol.graph_identity_hash ?? "null").slice(0, 24)}… (written ${casCol.updated_at}), ` +
+                `while CEE's own read of the SAME row derives ${String(serverExpected ?? "?").slice(0, 24)}…. ` +
+                `${casCol.graph_identity_hash !== serverExpected ? "THEY DISAGREE AT REST, so no client value can satisfy the gate and the refusal is PERMANENT, not a race." : "They agree, so this WAS a race with a concurrent writer."}`
+              : `\n     ROOT-CAUSE READ NOT AVAILABLE (${casCol?.error ?? "unknown"}) — whether this is a race or a ` +
+                `permanent at-rest mismatch is therefore UNKNOWN on this run, not assumed.`),
       ];
       orphanVerdict = "FAIL";
     } else if ((preRefsWire + (preRefsDb ?? 0)) === 0) {
