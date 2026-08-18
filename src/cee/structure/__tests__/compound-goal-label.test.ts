@@ -156,7 +156,7 @@ describe("C — enforceSingleGoal", () => {
   }
 
   it("produces a label carrying no repair prefix and no ' + ' join", () => {
-    const { graph } = enforceSingleGoal(twoGoalGraph() as any);
+    const { graph } = enforceSingleGoal(twoGoalGraph() as any)!;
     const goal = (graph as any).nodes.find((n: any) => n.id === "goal_a");
 
     expect(goal.label).not.toContain("Compound Goal");
@@ -166,7 +166,7 @@ describe("C — enforceSingleGoal", () => {
   it("does NOT discard the merged-away goal's threshold quad", () => {
     // The quality bar's HARD rule. Before this fix the merged-away node was
     // filtered out entirely and its `goal_threshold` went with it.
-    const { graph } = enforceSingleGoal(twoGoalGraph() as any);
+    const { graph } = enforceSingleGoal(twoGoalGraph() as any)!;
     const goal = (graph as any).nodes.find((n: any) => n.id === "goal_a");
 
     // Bound by IDENTITY — the specific merged goal, not "some node with a threshold".
@@ -185,7 +185,7 @@ describe("C — enforceSingleGoal", () => {
       edges: [],
     };
 
-    const { graph, hadMultipleGoals } = enforceSingleGoal(single as any);
+    const { graph, hadMultipleGoals } = enforceSingleGoal(single as any)!;
     const goal = (graph as any).nodes.find((n: any) => n.id === "goal_a");
 
     expect(hadMultipleGoals).toBe(false);

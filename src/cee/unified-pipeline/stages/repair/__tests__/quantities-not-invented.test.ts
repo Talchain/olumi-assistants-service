@@ -56,6 +56,7 @@ import {
   obligationFor,
 } from "../../../../graph-readiness/obligation-provenance.js";
 import type { GraphT } from "../../../../../schemas/graph.js";
+import type { EdgeFormat } from "../../../utils/edge-format.js";
 
 /**
  * An option-UNREACHABLE factor — no inbound `option→factor` edge — which is the
@@ -76,6 +77,14 @@ function unreachableFactorGraph(data: Record<string, unknown>): GraphT {
     ],
   } as unknown as GraphT;
 }
+
+/**
+ * The edge format these graphs are written in. A GENUINE `EdgeFormat` member
+ * (`"V1_FLAT" | "LEGACY" | "NONE"`), typed rather than cast: the neighbouring
+ * suite passes `"edge_type" as any`, and an `as any` here would silence the
+ * very typecheck that caught this.
+ */
+const EDGE_FORMAT: EdgeFormat = "LEGACY";
 
 function factorNode(graph: GraphT): any {
   return (graph as any).nodes.find((n: any) => n.id === "fac_x");
@@ -114,7 +123,7 @@ describe("A — a system-defaulted baseline must not be narrowed into a prior th
       [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
     });
 
-    const result = handleUnreachableFactors(graph, "causal");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const prior = factorNode(graph).prior;
 
     // The laundered shape, named explicitly so this test states what it forbids.
@@ -133,7 +142,7 @@ describe("A — a system-defaulted baseline must not be narrowed into a prior th
     // fix keyed on `value === 0.5` this test and the one above could not both pass.
     const graph = unreachableFactorGraph({ value: 0.5, extractionType: "explicit" });
 
-    const result = handleUnreachableFactors(graph, "causal");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
 
     expect(factorNode(graph).prior).toEqual({
       distribution: "uniform",
@@ -149,7 +158,7 @@ describe("A — a system-defaulted baseline must not be narrowed into a prior th
     // (factor-value-provenance.ts). The model reasoned to 0.42; that is not ignorance.
     const graph = unreachableFactorGraph({ value: 0.42, extractionType: "inferred" });
 
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     // margin = max(0.1, 0.42 * 0.5) = 0.21 ⇒ narrowed, NOT the ignorance range.
     expect(factorNode(graph).prior).toEqual({
@@ -167,7 +176,7 @@ describe("A — a system-defaulted baseline must not be narrowed into a prior th
     // A quantities fix must not re-break the case that made stated figures survive.
     const graph = unreachableFactorGraph({ value: 1.12, extractionType: "explicit" });
 
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     const prior = factorNode(graph).prior;
     expect(prior.range_max).toBeGreaterThan(1);
@@ -193,7 +202,7 @@ describe("B — an unquantified factor stays visibly present", () => {
       [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
     });
 
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     // Bound by IDENTITY, never by a value predicate another node could satisfy.
     const node = factorNode(graph);
@@ -213,7 +222,7 @@ describe("B — an unquantified factor stays visibly present", () => {
       [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
     });
 
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     const node = factorNode(graph);
     // `data.value` is deleted by this repair, so the honest fact about where the
@@ -243,7 +252,7 @@ describe("C — end to end: an unvalued factor never acquires uniform(0.25, 0.75
     expect(factorNode(graph).data[FACTOR_VALUE_TIER_FIELD]).toBe("fallback_default");
 
     // 2. The real reclassifying producer runs.
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     // 3. The invented number never becomes a range that reads as evidence.
     expect(factorNode(graph).prior).toEqual({
@@ -311,7 +320,7 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
     (value) => {
       const graph = unreachableFactorGraph({ value });
 
-      handleUnreachableFactors(graph, "causal");
+      handleUnreachableFactors(graph, EDGE_FORMAT);
 
       expect(factorNode(graph).prior).toEqual({
         distribution: "uniform",
@@ -332,7 +341,7 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
     // it fires on that value only, never on an arbitrary unlabelled number.
     const graph = unreachableFactorGraph({ value: 0.5 });
 
-    handleUnreachableFactors(graph, "causal");
+    handleUnreachableFactors(graph, EDGE_FORMAT);
 
     expect(factorNode(graph).prior).toEqual({
       distribution: "uniform",
@@ -370,7 +379,7 @@ describe("F — the user is told, in the repair record that reaches them", () =>
       [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
     });
 
-    const result = handleUnreachableFactors(graph, "causal");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const repair = result.repairs.find((r) => r.path.includes("fac_x"));
 
     // Bound by identity to the disclosing repair, and to its CODE — because the
@@ -385,7 +394,7 @@ describe("F — the user is told, in the repair record that reaches them", () =>
   it("TWIN — a genuine baseline's disclosure does NOT claim ignorance", () => {
     const graph = unreachableFactorGraph({ value: 0.42, extractionType: "inferred" });
 
-    const result = handleUnreachableFactors(graph, "causal");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const repair = result.repairs.find((r) => r.path.includes("fac_x"));
 
     expect(repair?.action).not.toContain("system default");
