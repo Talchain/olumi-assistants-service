@@ -33,7 +33,7 @@
  *
  * So the turn ROUTED TO THE ANALYSE HANDLER, the handler correctly refused
  * (the fresh draft has options with no effect values — the PASSING runs report
- * exactly that, nine `MISSING_OPTION_VALUE` issues), and the refusal payload
+ * exactly that, `MISSING_OPTION_VALUE` issues in varying numbers), and the refusal payload
  * then REPLACED the turn's structural readiness with an empty carrier.
  *
  * TWO CORRECT PIECES, ONE HARM — CLAUDE.md trap 21. The refusal exists so a
@@ -147,6 +147,55 @@ describe('analyse refusal — the model keeps its identity when the refusal is n
       blocked_reason: 'mixed_scale_unresolved',
     });
     expect(buildAnalysisRefusalReadiness('mixed_scale_unresolved', undefined)).toEqual(out);
+    // ⚠ `null` TOO, and this is a runtime concern the types cannot cover. The
+    // parameter is optional, so `=== undefined` typechecks perfectly — and a
+    // `null` arriving from an untyped boundary or a JS caller would throw on
+    // the property reads and take the WHOLE TURN down. A crash traded for a
+    // payload defect is a worse bug than the one being fixed, so the guard is
+    // truthiness and this case pins it.
+    expect(
+      buildAnalysisRefusalReadiness(
+        'mixed_scale_unresolved',
+        null as unknown as AnalysisReadyPayload,
+      ),
+    ).toEqual(out);
+  });
+
+  it('the degeneracy guard matches the MOUNTED CONSUMER\'s own accept predicate', () => {
+    // Verified at the bytes on DecisionGuideAI staging `a4fd5485`:
+    // `normaliseV5AnalysisReady` (src/v5/applyV5State.ts:233-234) discards a
+    // payload whose `goal_node_id` is not a non-empty string, or whose
+    // `options` is not a non-empty array. This function preserves exactly the
+    // payloads that clear those two conditions.
+    //
+    // Executed as a TABLE against a local restatement of the consumer's
+    // predicate, so the two cannot silently diverge: for every case, "CEE
+    // preserved it" must equal "the UI would have accepted it". A mismatch in
+    // EITHER direction fails — CEE shipping something the UI throws away, or
+    // CEE withholding something the UI would have rendered.
+    const uiWouldAccept = (p: { goal_node_id: unknown; options: unknown }): boolean =>
+      typeof p.goal_node_id === 'string'
+      && p.goal_node_id.length > 0
+      && Array.isArray(p.options)
+      && p.options.length > 0;
+
+    const cases = [
+      { status: 'needs_user_input', goal_node_id: 'g1', options: [{ option_id: 'o1' }] },
+      { status: 'needs_user_input', goal_node_id: '', options: [{ option_id: 'o1' }] },
+      { status: 'needs_user_input', goal_node_id: 'g1', options: [] },
+      { status: 'blocked', goal_node_id: '', options: [] },
+      { status: 'needs_user_mapping', goal_node_id: 'g2', options: [{ option_id: 'a' }, { option_id: 'b' }] },
+    ] as unknown as AnalysisReadyPayload[];
+
+    for (const c of cases) {
+      const out = buildAnalysisRefusalReadiness('MISSING_OPTION_VALUE', c);
+      const ceePreserved = out.goal_node_id !== '' || out.options.length > 0;
+      expect(ceePreserved, JSON.stringify(c)).toBe(uiWouldAccept(c));
+    }
+    // Positive control: the table must contain BOTH answers, or the assertion
+    // is satisfied by a predicate that always returns the same value.
+    expect(cases.some(uiWouldAccept)).toBe(true);
+    expect(cases.some((c) => !uiWouldAccept(c))).toBe(true);
   });
 
   it('writes NO science content — identity is carried, findings are not (ROADMAP 2.1134(a))', () => {

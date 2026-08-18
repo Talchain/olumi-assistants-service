@@ -1372,9 +1372,10 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * freshness pair is `clampRefusalFreshness` and no other producer; and the
  * identical hash proves the read returned exactly the model that was committed.
  * The turn had routed to the analyse handler, the handler correctly refused
- * (the fresh draft's options carry no effect values — the PASSING runs report
- * nine `MISSING_OPTION_VALUE` issues on the same journey), and this carrier
- * then REPLACED the turn's structural readiness with an empty one.
+ * (the fresh draft's options carry no effect values — the PASSING runs of the
+ * same journey report `MISSING_OPTION_VALUE` issues too, in varying numbers
+ * across runs), and this carrier then REPLACED the turn's structural readiness
+ * with an empty one.
  *
  * TWO CORRECT PIECES, ONE HARM (CLAUDE.md trap 21). Withdrawing the verdict is
  * right. The empty carrier was ALSO right for the case the adversarial review
@@ -1439,10 +1440,23 @@ export function buildAnalysisRefusalReadiness(
     status: ANALYSIS_READY_BLOCKED_STATUS,
     blocked_reason: blockedReason,
   };
-  if (structuralReadiness === undefined) return refusal;
-  // A degenerate structural payload preserves nothing, so there is nothing to
-  // prefer over the default — without this the branch would report success on
-  // a no-op and the guard would be agreeing with itself.
+  // `!` not `=== undefined`: the parameter is optional at compile time, but a
+  // `null` reaching it at runtime would throw on the property reads below and
+  // take the WHOLE TURN down — a crash traded for a payload defect. Type safety
+  // is not runtime safety at a boundary this load-bearing.
+  if (!structuralReadiness) return refusal;
+  // ⭐ THE DEGENERACY GUARD IS THE CONSUMER'S OWN ACCEPT PREDICATE, verified at
+  // the bytes on DecisionGuideAI staging `a4fd5485`. `normaliseV5AnalysisReady`
+  // (`src/v5/applyV5State.ts:233-234`) rejects a payload with:
+  //     if (typeof goalNodeId !== 'string' || goalNodeId.length === 0) return undefined
+  //     if (!Array.isArray(obj.options) || obj.options.length === 0) return undefined
+  // — the same four conditions as below. So this function preserves EXACTLY what
+  // the mounted consumer accepts and drops EXACTLY what it would discard anyway.
+  // That is not a coincidence worth leaving unrecorded: it means the rule cannot
+  // ship a payload the UI silently throws away, and it is the reason a
+  // degenerate structural payload is no better than the empty carrier — without
+  // this the branch would report success on a no-op and the guard would be
+  // agreeing with itself.
   const goalNodeId = structuralReadiness.goal_node_id;
   const options = structuralReadiness.options;
   if (
