@@ -172,6 +172,37 @@ export interface DispatchSystemEventResult {
  * the persisted state does not support (P5). Best-effort and total — a failed
  * read yields `null` ("I cannot name a target"), which is honest, and must
  * never convert a typed 409 into a different failure.
+ *
+ * ⚠⚠ RESIDUAL — THE SPLIT MOVED, IT DID NOT CLOSE. DO NOT READ THIS AS DONE.
+ *
+ * Two producers of the SAME wire field still emit the 64-hex IDENTITY hash,
+ * both alongside `recovery_action: 'refresh_and_reconfirm'`:
+ *   - `turn-executor.ts:11559` (the commit-catch branch), and
+ *   - `turn-executor.ts:12448` (the hoisted finalise remap),
+ * both from `GraphStaleWriteError.expected_base_graph_hash`, which is
+ * `write.expectedGraphIdentityHash`.
+ *
+ * They are NOT a separate contract, and it would be comfortable and wrong to
+ * assume they were. Verified at the bytes: `expected_base_graph_hash` is a
+ * member of `GRAPH_CONFLICT_RECOVERY_KEYS` (graph-conflict-recovery-keys.ts:29),
+ * the manifest those producers are compile-bound to via
+ * `satisfies GraphConflictFailureDetails`, and `route-v2.ts`'s
+ * `extractGraphConflictRecovery` forwards it onto the SAME 409 envelope for the
+ * SAME UI recovery leg. So as of this change the field is ANALYSIS-space when a
+ * SYSTEM EVENT refused and IDENTITY-space when a CHAT TURN refused.
+ *
+ * Why it is not fixed here rather than "not worth fixing": converting those two
+ * needs an awaited persisted read inside the turn executor's failure-finalise
+ * path, which is a different capability's hot path and a materially larger
+ * blast radius than this P0 — the scope-expansion rule says stop at the
+ * boundary and disclose. Nobody is misled TODAY (measured: zero product
+ * consumers of the field at UI `c71ea7e0`, contrast controls fired), so this is
+ * a latent inconsistency, not a live harm.
+ *
+ * TO CLOSE IT: convert both sites to an analysis-space answer (or make
+ * `GraphStaleWriteError` carry both spaces explicitly) and delete this note.
+ * Until then the invariant this function's name implies holds for the
+ * system-event family ONLY.
  */
 async function readClientRecoverableBaseHash(scenarioId: string): Promise<string | null> {
   try {
