@@ -256,25 +256,31 @@ export interface SingleGoalResult {
    * nothing disappears; what the map now records is *"this id's KIND changed,
    * and some of its edges moved"*.
    *
-   * ⭐ THE ENTRIES ARE KEPT DELIBERATELY, and the derivation is the reason, not
-   * caution. Both consumers were read at the bytes:
+   * ⭐ THE ENTRIES ARE KEPT DELIBERATELY. Both consumers were read at the bytes,
+   * and the FIRST DRAFT OF THIS COMMENT GAVE THE WRONG REASON — corrected here
+   * rather than quietly, because a plausible-but-false rationale in a contract
+   * comment is what the next lane inherits:
    *
    *  1. `edge-identity.ts:131` `restoreEdgeFields` STRATEGY 3 — reverses this
-   *     map to recover a stash key when the current `from::to` misses. Still
-   *     REACHABLE and still NEEDED: the OUTBOUND limb of the merge is still
-   *     redirected (`demoted → decision` becomes `primary → decision`), so the
-   *     stash holds `demoted::decision` while the edge now reads
-   *     `primary::decision`, and only the reversal closes that gap. It is no
-   *     longer needed for INBOUND edges — those are not redirected any more, so
-   *     strategy 2 hits them directly — but "needed for one limb" is why the
-   *     entries stay rather than being dropped.
+   *     map to recover a stash key when the current `from::to` misses. ⚠ I first
+   *     wrote that the OUTBOUND limb keeps this reachable. **That is wrong: the
+   *     outbound limb is effectively DEAD in the live pipeline.**
+   *     `fixGoalHasOutgoing` (`deterministic-sweep.ts:266`) deletes EVERY
+   *     goal-sourced edge at repair substep 1, and the merge is substep 4; the
+   *     projector independently refuses `goal->option|factor|risk|goal` via
+   *     `UNRESCUABLE_EDGE_SHAPES`. Measured: ZERO outbound-from-demoted edges
+   *     across the governed corpus. Strategy 3 does still fire for a TRUE
+   *     DUPLICATE, whose edges are redirected at both ends — but that is a
+   *     narrow path, not the general one.
    *  2. `threshold-sweep.ts:85` — attestation transfer: the surviving primary
-   *     INHERITS the enricher-minted attestation of anything demoted into it.
-   *     Additive only; it never clears the demoted id.
+   *     INHERITS the enricher-minted attestation of anything merged into it.
+   *     Additive; it never clears the other id. **This is the LIVE consumer and
+   *     the real reason the entries stay.**
    *
-   * ⚠ A separate lane is pinning this map's CONTENT on staging. If that lane
-   * lands first, re-read this: the correct content for demoted ids is decided
-   * by consumer 1's outbound limb above, not by the map's name.
+   * The map therefore covers BOTH classes of non-primary goal: duplicates (node
+   * deleted, edges redirected) and distinct objectives (node survives as an
+   * outcome). For a distinct objective nothing is renamed at all — the entry
+   * exists for the attestation transfer above.
    */
   nodeRenames?: Map<string, string>;
 }
@@ -467,6 +473,49 @@ export function enforceSingleGoal(
   const primaryId = goalIds[0];
   const otherGoalIds = new Set(goalIds.slice(1));
 
+  // ⭐⭐ THE DUPLICATE GUARD — §8 A3's amendment, and the one case where the
+  // BASE behaviour (delete + redirect both ends) was right all along.
+  //
+  // A3 gives each distinct objective its own outcome node. That reasoning
+  // presupposes the objectives ARE distinct. When the model emits the SAME goal
+  // twice — and it does: `12-similar-options` in the governed corpus carries two
+  // goals with byte-identical `source_quote` — demoting the second one produces
+  // TWO wire nodes with the identical quote (the user sees one objective twice)
+  // plus a synthetic `duplicate → primary` edge with invented magnitudes, i.e.
+  // the product asserting that the objective positively drives ITSELF, while the
+  // real drivers reach the goal only through that fabricated link.
+  //
+  // For a true duplicate, redirecting inbound edges is not misattribution — it
+  // is correct CONSOLIDATION. Both ends move to the primary, exactly as before.
+  //
+  // ⚠ THE DISCRIMINATOR IS EXACT CANONICAL EQUALITY OF `source_quote`, and it
+  // stays that way. A fuzzy same-objective predicate over natural language is
+  // the shape this estate has already burned four rounds oscillating on
+  // (trap 22f); whitespace normalisation is the whole of the cleverness here.
+  //
+  // ⚠ AND IT FAILS TOWARD PRESERVATION. An absent or empty quote never matches,
+  // so two quote-less goals (the legacy/LLM path) are treated as DISTINCT and
+  // both survive. Wrongly keeping an objective is a duplicate node; wrongly
+  // deleting one is the silent loss A3 exists to fix. Only one of those is
+  // recoverable by the user.
+  const primaryQuote = canonicalLabelText(
+    ((goalNodes[0] as any)?.provenance ?? {})?.source_quote,
+  );
+  const duplicateGoalIds = new Set(
+    goalNodes
+      .slice(1)
+      .filter(
+        (n) =>
+          primaryQuote.length > 0 &&
+          canonicalLabelText(((n as any)?.provenance ?? {})?.source_quote) === primaryQuote,
+      )
+      .map((n) => (n as any).id as string),
+  );
+  /** Non-primary goals that state a genuinely different objective. */
+  const distinctGoalIds = new Set(
+    [...otherGoalIds].filter((id) => !duplicateGoalIds.has(id)),
+  );
+
   // Build nodeRenames map: each DEMOTED goal id → primary goal id. The node
   // itself survives under this id as an outcome (§8 A3) — see the field's
   // contract on `SingleGoalResult` for why the entries are still required.
@@ -524,11 +573,11 @@ export function enforceSingleGoal(
         label: composed.label,
       };
     }
-    if (otherGoalIds.has((node as any)?.id)) {
+    if (distinctGoalIds.has((node as any)?.id)) {
       return demoteGoalToOutcome(node);
     }
     return node;
-  });
+  }).filter((node) => !duplicateGoalIds.has((node as any)?.id));
 
   // ⭐⭐ THE INBOUND REDIRECT IS GONE. THE USER'S STATED CAUSALITY IS PRESERVED.
   //
@@ -558,12 +607,21 @@ export function enforceSingleGoal(
     const to = (edge as any)?.to;
     const newEdge = { ...(edge as any) };
 
-    // Outbound from a demoted objective: redirected, UNLESS it already lands on
-    // the primary goal, where it is the legal `outcome → goal` contribution.
-    if (typeof from === "string" && otherGoalIds.has(from) && to !== primaryId) {
+    // A TRUE DUPLICATE is consolidated exactly as the base implementation did:
+    // BOTH ends move to the primary, because the two nodes are one objective.
+    if (typeof from === "string" && duplicateGoalIds.has(from)) {
       newEdge.from = primaryId;
     }
-    // Inbound to a demoted objective: NEVER redirected. This is the ruling.
+    if (typeof to === "string" && duplicateGoalIds.has(to)) {
+      newEdge.to = primaryId;
+    }
+    // A DISTINCT objective survives, so only its OUTBOUND edges move — and not
+    // when they already land on the primary, where the edge IS the legal
+    // `outcome → goal` contribution and redirecting would make a self-loop.
+    if (typeof from === "string" && distinctGoalIds.has(from) && to !== primaryId) {
+      newEdge.from = primaryId;
+    }
+    // Inbound to a DISTINCT objective: NEVER redirected. This is the ruling.
 
     return newEdge;
   });
@@ -594,7 +652,7 @@ export function enforceSingleGoal(
   // dedup above so the redirect/dedup behaviour it must not disturb has already
   // finished, and guarded on the id actually surviving as an outcome.
   const demotedOutcomeIds = updatedNodes
-    .filter((node) => otherGoalIds.has((node as any)?.id) && (node as any)?.kind === "outcome")
+    .filter((node) => distinctGoalIds.has((node as any)?.id) && (node as any)?.kind === "outcome")
     .map((node) => (node as any).id as string);
   const edgesWithDemotedOutcomes = [...dedupedEdges];
   for (const outcomeId of demotedOutcomeIds) {

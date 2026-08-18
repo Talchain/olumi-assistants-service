@@ -27,6 +27,10 @@
  * node exists with a matching-looking label", which another objective's node
  * would satisfy just as well.
  */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { projectRecordsToGraph } from "../../draft/records/projector.js";
@@ -37,6 +41,10 @@ import { GraphV3 } from "../../../schemas/cee-v3.js";
 import { quantityTokens } from "../compound-goal-label.js";
 
 const canonical = (s: unknown): string => String(s ?? "").replace(/\s+/g, " ").trim();
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+/** `src/cee/structure/__tests__` → repo root. */
+const REPO_ROOT = path.resolve(HERE, "../../../..");
 
 interface AnyNode {
   id: string;
@@ -792,6 +800,140 @@ describe("P6 — demoting an objective adds no blocker and does not change run a
     const blockers = (g: unknown) =>
       ((assessRouteAdmission(g) as unknown as { blockers?: unknown[] }).blockers ?? []).length;
     expect(blockers(graph)).toBe(blockers(without));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE DUPLICATE CLASS — the amendment, and the reason this suite needed it.
+//
+// The causality ruling ("never redirect a demoted objective's inbound edges")
+// presupposes the two objectives are DISTINCT. When the model emits the SAME
+// goal twice — byte-identical `source_quote` — redirecting inbound edges is not
+// misattribution, it is correct CONSOLIDATION, and the base implementation did
+// it right. The rule was written against the failure mode in hand rather than
+// against the whole domain the code admits (trap 13d).
+//
+// ⚠ WHY THIS SUITE COULD NOT SEE IT: every fixture above uses DISTINCT quotes,
+// so the corpus shared the code's blind spot and was structurally incapable of
+// observing the class. The inputs below come from the GOVERNED CORPUS — real
+// deployed-model output — not from the author's head (trap 22).
+//
+// MEASURED HARM at `12-similar-options` before the guard: two wire nodes
+// carrying the identical quote (the user sees one objective twice), and a
+// synthetic edge `c100a827-2 -> c100a827` with invented magnitudes asserting
+// that the objective positively drives ITSELF, while the three real drivers
+// reached the goal only through that fabricated link.
+//
+// THE DISCRIMINATOR IS EXACT CANONICAL EQUALITY, deliberately. No fuzzy
+// natural-language predicate — this estate has already burned four rounds
+// oscillating on one (trap 22f).
+// ---------------------------------------------------------------------------
+describe("⭐ a TRUE DUPLICATE objective is consolidated, not demoted to a second node", () => {
+  const GOVERNED = path.join(
+    REPO_ROOT,
+    "tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json",
+  );
+  interface GovNode { id: string; kind: string; label?: string; provenance?: { source_quote?: string } }
+  interface GovCase { brief_id: string; graph?: { nodes?: GovNode[]; edges?: Array<Record<string, unknown>> } }
+
+  function governedCase(briefId: string): GovCase {
+    const run = JSON.parse(fs.readFileSync(GOVERNED, "utf8")) as { run: { cases: GovCase[] } };
+    return run.run.cases.find((c) => c.brief_id === briefId)!;
+  }
+
+  it("the instrument: 12-similar-options really does carry two byte-identical goal quotes", () => {
+    const c = governedCase("12-similar-options");
+    const goals = (c.graph?.nodes ?? []).filter((n) => n.kind === "goal");
+    expect(goals).toHaveLength(2);
+    expect(canonical(goals[0].provenance?.source_quote)).toBe(
+      canonical(goals[1].provenance?.source_quote),
+    );
+    expect(canonical(goals[0].provenance?.source_quote).length).toBeGreaterThan(0);
+  });
+
+  it("the duplicate is DELETED, so no objective appears twice on the wire", () => {
+    const c = governedCase("12-similar-options");
+    const src = JSON.parse(JSON.stringify(c.graph)) as { nodes: GovNode[]; edges: Array<Record<string, unknown>> };
+    const goals = src.nodes.filter((n) => n.kind === "goal");
+    const quote = canonical(goals[0].provenance?.source_quote);
+    const duplicateId = goals[1].id;
+
+    const merged = enforceSingleGoal(src as never)!;
+    const g = merged.graph as unknown as { nodes: AnyNode[]; edges: Array<Record<string, unknown>> };
+
+    // Bound by IDENTITY: the specific duplicate node id is gone entirely.
+    expect(g.nodes.some((n) => n.id === duplicateId)).toBe(false);
+    // …and exactly ONE node carries that objective's quote.
+    const carriers = g.nodes.filter((n) => canonical(n.provenance?.source_quote) === quote);
+    expect(carriers).toHaveLength(1);
+    expect(carriers[0].kind).toBe("goal");
+  });
+
+  it("the real drivers reach the goal DIRECTLY — no fabricated self-drive edge", () => {
+    const c = governedCase("12-similar-options");
+    const src = JSON.parse(JSON.stringify(c.graph)) as { nodes: GovNode[]; edges: Array<Record<string, unknown>> };
+    const goals = src.nodes.filter((n) => n.kind === "goal");
+    const primaryId = goals[0].id;
+    const duplicateId = goals[1].id;
+    const realInboundBefore = src.edges.filter(
+      (e) => e.to === primaryId || e.to === duplicateId,
+    ).length;
+    expect(realInboundBefore).toBeGreaterThan(1); // positive control
+
+    const merged = enforceSingleGoal(src as never)!;
+    const g = merged.graph as unknown as { nodes: AnyNode[]; edges: Array<Record<string, unknown>> };
+
+    // No synthetic edge was minted for a node that no longer exists…
+    expect(g.edges.some((e) => e.from === duplicateId)).toBe(false);
+    // …and NOTHING asserts the goal drives itself.
+    expect(g.edges.some((e) => e.from === primaryId && e.to === primaryId)).toBe(false);
+    // The real drivers land on the goal directly, and none of them is synthetic.
+    const inbound = g.edges.filter((e) => e.to === primaryId);
+    expect(inbound.length).toBe(realInboundBefore);
+    expect(inbound.every((e) => e.provenance_source !== "synthetic")).toBe(true);
+  });
+
+  it("TWIN — a genuinely DISTINCT objective STILL keeps its inbound edges", () => {
+    // The opposite direction, so the guard cannot be widened into "always
+    // consolidate" and trade one defect for the other. `04-conflicting-constraints`
+    // is the governed case whose two goals carry DIFFERENT quotes.
+    const c = governedCase("04-conflicting-constraints");
+    const src = JSON.parse(JSON.stringify(c.graph)) as { nodes: GovNode[]; edges: Array<Record<string, unknown>> };
+    const goals = src.nodes.filter((n) => n.kind === "goal");
+    expect(canonical(goals[0].provenance?.source_quote)).not.toBe(
+      canonical(goals[1].provenance?.source_quote),
+    );
+    const distinctId = goals[1].id;
+    const inboundBefore = src.edges.filter((e) => e.to === distinctId).map((e) => e.from).sort();
+    expect(inboundBefore.length).toBeGreaterThan(0); // positive control
+
+    const merged = enforceSingleGoal(src as never)!;
+    const g = merged.graph as unknown as { nodes: AnyNode[]; edges: Array<Record<string, unknown>> };
+
+    // It survives as an outcome, with its OWN drivers still pointing at it.
+    const node = g.nodes.find((n) => n.id === distinctId)!;
+    expect(node.kind).toBe("outcome");
+    expect(g.edges.filter((e) => e.to === distinctId).map((e) => e.from).sort()).toEqual(
+      inboundBefore,
+    );
+  });
+
+  it("TWIN — two goals with no quote at all are treated as DISTINCT, never merged away", () => {
+    // Fail-safe direction. `undefined === undefined` must NOT read as duplicate:
+    // on the legacy path a goal may carry no provenance, and deleting a real
+    // objective is the harm A3 exists to fix. Preservation is the safe default.
+    const graph: any = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "A" },
+        { id: "g2", kind: "goal", label: "B" },
+        { id: "d1", kind: "decision", label: "D" },
+      ],
+      edges: [],
+    };
+    const merged = enforceSingleGoal(graph)!;
+    const nodes = (merged.graph as any).nodes as AnyNode[];
+    expect(nodes.find((n) => n.id === "g2")).toBeDefined();
+    expect(nodes.find((n) => n.id === "g2")!.kind).toBe("outcome");
   });
 });
 
