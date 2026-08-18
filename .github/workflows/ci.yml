@@ -10,11 +10,34 @@ permissions:
   contents: read
   packages: read
 
+# ⏱ EVERY JOB IN THIS FILE CARRIES A `timeout-minutes`. GitHub's default is 360
+# (six hours) per job, and this repo has been wedged by a hung install/test job
+# holding a runner for hours while the PR page showed "in progress" — the failure
+# mode reads as *slow*, not as *broken*, so nobody clears it.
+#
+# The values are DERIVED, not guessed: measured over the 25 most recent completed
+# `ci.yml` runs (2026-08-18) and set to roughly 3x the observed MAXIMUM, with a
+# floor so a fast job still gets a usable margin. Observed max / value set:
+#   Lint, TypeCheck, Unit Tests   14.5 min  ->  45
+#   Full Test Suite (advisory)    16.6 min  ->  50
+#   Integration Tests (advisory)   3.9 min  ->  15
+#   Typecheck Drift (ratchet)      1.4 min  ->  10
+#   Security Audit                 4.7 min  ->  15   (network audit; generous)
+#   Live LLM key availability      0.1 min  ->   5
+#   Live LLM Integration Tests     no data  ->  30   (never runs today — the key
+#                                                     is unconfigured, see D0)
+# ⚠ THESE ARE SAFETY NETS, NOT GATES. A timeout that fires on a merely-slow run
+# is a broken alarm, and a broken alarm is how this estate loses real ones — so
+# widen the value if a legitimate run approaches it, and re-derive the table
+# above rather than trusting it. The other 8 workflows in this directory are
+# still uncapped; that is rowed, not done.
+
 jobs:
   # Job A: Required checks (no secrets needed)
   unit-tests:
     name: Lint, TypeCheck, Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -214,6 +237,7 @@ jobs:
   full-test-suite:
     name: Full Test Suite (advisory)
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -255,6 +279,7 @@ jobs:
   integration-tests:
     name: Integration Tests (advisory)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -283,6 +308,7 @@ jobs:
   typecheck-drift:
     name: Typecheck Drift (ratchet)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -306,6 +332,7 @@ jobs:
   security:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -455,6 +482,7 @@ jobs:
   live-tests-key:
     name: Live LLM key availability
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - id: probe
         name: Publish whether the live-LLM key is configured
@@ -488,6 +516,7 @@ jobs:
   live-tests:
     name: Live LLM Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [unit-tests, live-tests-key]
     if: ${{ needs.live-tests-key.outputs.has_key == 'true' }}
     steps:

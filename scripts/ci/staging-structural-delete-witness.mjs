@@ -92,6 +92,21 @@
 /* ------------------------------------------------------------------ */
 
 /**
+ * ⚠ THE ONE IMPORT, AND IT MUST STAY INSIDE `scripts/ci/`.
+ *
+ * Both this witness and `staging-journey-smoke.mjs` check out
+ * `sparse-checkout: scripts/ci` and run NO `pnpm install`, deliberately — the
+ * alarms must keep working when the dependency graph is what broke. So this
+ * resolves to a sibling file in the SAME checked-out directory and pulls in no
+ * package. Moving `lib/staging-harness.mjs` out of `scripts/ci/` breaks both
+ * workflows at import time with `ERR_MODULE_NOT_FOUND`; adding a package import
+ * to it breaks them the same way. The five helpers were near-verbatim copies and
+ * THIS copy had already drifted — it dropped `waitForBuild`'s deadline-clamp
+ * comment (CLAUDE.md trap 12).
+ */
+import { log, postTurn, readyOptionIds, uuid, waitForBuild } from "./lib/staging-harness.mjs";
+
+/**
  * WHAT "RELOAD" MEANS AT THE WIRE, EXACTLY.
  *
  * A browser reload re-hydrates a client store. This witness has no browser, so
@@ -221,20 +236,10 @@ export function edgePairs(edgesOrBody) {
     .map((e) => `${e.from}::${e.to}`);
 }
 
-/**
- * The USABLE `option_id`s a response says the model is comparing.
- *
- * Drops unusable ids deliberately — an option object with `option_id` `""`,
- * `null` or absent cannot participate in an identity check, and the contract
- * admits all three (`OptionForAnalysis.id` is a bare `z.string()`). Callers pin
- * that precondition rather than silently judging on a short list.
- */
-export function readyOptionIds(body) {
-  const opts = body?.analysis_ready?.options;
-  return (Array.isArray(opts) ? opts : [])
-    .map((o) => o?.option_id)
-    .filter((id) => typeof id === "string" && id.length > 0);
-}
+// `readyOptionIds` is RE-EXPORTED from the shared harness (see the import at
+// the top). It is part of this module's tested surface — the witness suite
+// imports it from here — so the re-export is deliberate, not incidental.
+export { readyOptionIds };
 
 /** Intervention target ids named by a node/option holder, sorted and de-duplicated. */
 export function interventionKeys(holder) {
@@ -731,9 +736,6 @@ export function classifyRerun(body, removedIds) {
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 
-const uuid = () => globalThis.crypto.randomUUID();
-const log = (msg) => process.stdout.write(`${msg}\n`);
-
 /** Leg results, in order, each with its own verdict. Never collapsed into one boolean. */
 const legs = [];
 /** The scenario this run created, echoed in the report so the row stays findable. */
@@ -779,24 +781,6 @@ function recordLeg(name, verdict, detail, findings = []) {
   log(`\n[${verdict}] ${name} — ${LEG_COVERAGE[name] ?? ""}`);
   if (detail) log(`   ${detail}`);
   for (const m of findings) log(`   x ${m}`);
-}
-
-async function postTurn(base, key, payload, timeoutMs) {
-  const started = Date.now();
-  const res = await fetch(`${base}/orchestrate/v2/turn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Olumi-Assist-Key": key },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await res.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = { __unparseable: text.slice(0, 500) };
-  }
-  return { status: res.status, body, ms: Date.now() - started };
 }
 
 /**
@@ -874,28 +858,6 @@ async function readCanonicalRow(ctx) {
   } catch (e) {
     return { graph: null, why: `row read threw: ${e?.name ?? e}` };
   }
-}
-
-async function waitForBuild(base, expectSha, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  const want = expectSha.slice(0, 7);
-  let served = null;
-  let attempt = 0;
-  while (Date.now() < deadline) {
-    attempt += 1;
-    try {
-      const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
-      served = (await res.json())?.build ?? null;
-      if (served && served.slice(0, 7) === want) return { ok: true, served, attempt };
-      log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
-    } catch (e) {
-      log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
-    }
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
-    await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
-  }
-  return { ok: false, served, attempt };
 }
 
 /** build_sha is stamped PER TURN. Render has made a rolled-back parent live mid-run. */
@@ -1016,12 +978,14 @@ async function main() {
   const buildShas = new Set();
 
   // ── LEG: BUILD ──────────────────────────────────────────────────────────
+  // ⚠ THE /healthz READ BELONGS TO EXACTLY ONE BRANCH. It used to run
+  // UNCONDITIONALLY above this `if`, and `waitForBuild` then read /healthz again
+  // on its very first attempt — so on the normal CI path (WITNESS_EXPECT_SHA is
+  // always set, to `github.sha`) the witness made two identical calls and threw
+  // the first away. It is not dead code, though: with no expected SHA it is the
+  // ONLY source for the RECORDED line, which is why it moves into the `else`
+  // rather than being deleted.
   let served = null;
-  try {
-    served = (await (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) })).json())?.build ?? null;
-  } catch {
-    served = null;
-  }
   if (expectSha) {
     const fresh = await waitForBuild(base, expectSha, freshnessTimeout);
     recordLeg(
@@ -1033,6 +997,11 @@ async function main() {
     if (!fresh.ok) return report();
     served = fresh.served;
   } else {
+    try {
+      served = (await (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) })).json())?.build ?? null;
+    } catch {
+      served = null;
+    }
     recordLeg("BUILD", "RECORDED", `serving build ${served ?? "unreachable"} (no WITNESS_EXPECT_SHA — freshness not asserted)`);
   }
 

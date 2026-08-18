@@ -1105,6 +1105,20 @@ export function assessCanonicalAnalysisReadiness(
           }
         : null;
 
+    // ⚠ THE SAME THREE CATEGORIES, A DIFFERENT QUESTION (CLAUDE.md trap 21).
+    // `OBLIGATION_EXEMPT_CATEGORIES` (`cee/graph-readiness/obligation-provenance.ts`)
+    // is byte-identical to this set and is NOT the same concept:
+    //   · here          — *"may this turn still be called READY?"* No: these
+    //                     three mean the model cannot be computed at all, so the
+    //                     status goes `blocked` and carries a `blocked_reason`.
+    //   · there         — *"may the product DEMAND that the user supply this?"*
+    //                     No: they are not a missing quantity, so INV-P6 exempts
+    //                     them from the obligation rule.
+    // Two authorities under one shape is precisely the pair that produced the
+    // leader-claim seam, so they are named at each other rather than merged or
+    // shared. If one of them should gain or lose a category, that is a decision
+    // about ONE of the two questions — check the other before assuming it moves
+    // too, and record which question you answered.
     const hardBlocked = blockingIssues.some(
       (issue) => issue.category === 'graph_structure'
         || issue.category === 'numeric_integrity'

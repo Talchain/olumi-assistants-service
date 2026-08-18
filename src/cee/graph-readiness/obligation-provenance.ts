@@ -51,6 +51,8 @@
  * stamps, so the twin is not vacuous: `__tests__/obligation-provenance.test.ts`
  * asserts both directions on the same corpus in the same run.
  */
+import type { z } from 'zod';
+
 import {
   OBSERVED_STATE_SOURCE_LITERALS,
   type KnownObservedStateSourceLiteral,
@@ -58,6 +60,7 @@ import {
 
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { ExtractionType } from '../../schemas/graph.js';
 
 // ============================================================================
 // The vocabulary
@@ -190,12 +193,25 @@ const EDGE_PROVENANCE_SOURCE: Readonly<
 };
 
 /**
- * `ExtractionType` (`schemas/graph.ts`) — HOW a value was extracted, which is a
- * different question from WHO supplied it, but the two agree on this axis:
+ * `ExtractionType` (`schemas/graph.ts:59`) — HOW a value was extracted, which is
+ * a different question from WHO supplied it, but the two agree on this axis:
  * `explicit`/`observed` are the user's own figures; `inferred`/`range` are the
  * model's.
+ *
+ * ⭐ DERIVED FROM THE CONTRACT, not re-typed here. This was a hand-copied union
+ * (CLAUDE.md trap 12): a fifth `ExtractionType` member would have left the map
+ * below quietly total over a stale four-member alphabet and the new label would
+ * have fallen through `classifyValueSource` to `unattributed` — a provenance
+ * downgrade with nothing red. `Record<ExtractionTypeLiteral, …>` IS exhaustive,
+ * so with the union derived, adding a member now fails `tsc` HERE.
+ *
+ * ⚠ Deliberately NOT merged with `factor-value-provenance.ts`'s partition of the
+ * same enum: that one answers *"may this value's badge read `from_brief`?"* and
+ * this one answers *"whose structure is this, for the obligation rule?"* — two
+ * questions under similar names is exactly the pair trap 21 says to keep apart.
+ * They are cross-named there and here so a future divergence is a choice.
  */
-type ExtractionTypeLiteral = 'explicit' | 'inferred' | 'range' | 'observed';
+type ExtractionTypeLiteral = z.infer<typeof ExtractionType>;
 
 const EXTRACTION_TYPE: Readonly<Record<ExtractionTypeLiteral, StructureProvenance>> = {
   explicit: 'user_stated',
@@ -404,6 +420,16 @@ export interface ObligationDecision {
  * first. A cycle the drafter drew is a real residual — the system should repair
  * it rather than ask — but that belongs to the repair seam, not to this rule, and
  * it is reported rather than quietly folded in.
+ *
+ * ⚠ THE SAME THREE CATEGORIES LIVE IN `analysis-ready-helper.ts` AS
+ * `hardBlocked`, AND THEY ARE NOT THE SAME CONCEPT (CLAUDE.md trap 21).
+ * That one answers *"may this turn still be called READY?"* — no, so the status
+ * goes `blocked` with a `blocked_reason`. This one answers *"may the product
+ * DEMAND the user supply this?"* — no, because these are not a missing quantity.
+ * The sets are byte-identical today and are deliberately NOT shared: a change to
+ * either is a decision about ONE of the two questions. Both sites name the other
+ * so the next divergence is a choice, made once, rather than a silent drift in
+ * whichever one the author happened to open.
  */
 const OBLIGATION_EXEMPT_CATEGORIES: ReadonlySet<CanonicalReadinessIssue['category']> = new Set([
   'graph_structure',

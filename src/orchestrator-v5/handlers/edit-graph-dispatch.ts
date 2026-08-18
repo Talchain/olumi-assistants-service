@@ -1707,7 +1707,30 @@ function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnve
  * node content is owned by `appliedGraph`, whose nodes were already
  * NodeV3-parsed at ingress. That remains a prompt/schema-lane issue.
  *
+ * ⭐⭐ RETURN CONTRACT — THE RESULT ALIASES NOTHING THE CALLER PASSED IN.
+ *
+ * The composition below is a SHALLOW spread, so `merged.options`, `merged.meta`
+ * and every other top-level object were THE SAME OBJECT REFERENCES as
+ * `persistedBase`'s. Any later pass that mutates the result in place
+ * (`pruneDanglingNodeReferences` does: `delete bag[key]`,
+ * `graph.meta[field] = kept`) therefore wrote THROUGH the spread and rewrote the
+ * caller's TRUSTED BASE — and `dispatch.ts` derives the atomic-CAS expected base
+ * from that same object AFTER the adapter returns, so the expected hash
+ * described a graph that was never persisted and every subsequent delete was
+ * refused, permanently. That was a live P0.
+ *
+ * The clone therefore lives HERE, not at the call site. It was fixed at ONE of
+ * the three CAS-deriving call sites; the other two had the identical hazard and
+ * no clone, latent only because neither runs a structural prune today — a guard
+ * one seam away from the thing it guards. This is the same ownership rule as
+ * `exposeCandidate` (`graph-management/candidate-graph.ts`), and it is pinned by
+ * `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`.
+ *
+ * Cost measured, not assumed: ~0.2ms against a ~988ms turn. Closed as negligible.
+ *
  * @internal Exported for testing.
+ * @returns A graph that shares no object with `appliedGraph`, `persistedBase`
+ *          or `ingressBase`. Callers may mutate it freely.
  */
 export function mergeAppliedGraphForPersistence(args: {
   readonly appliedGraph: GraphV3T;
@@ -1796,7 +1819,12 @@ export function mergeAppliedGraphForPersistence(args: {
     );
   }
 
-  return merged;
+  // ⭐ THE CLONE IS PART OF THE RETURN CONTRACT (see the docstring). It is here
+  // and not at the call sites because two of the three had no clone at all.
+  // `structuredClone` rather than a JSON round-trip: it is not silently lossy on
+  // `undefined`/`NaN`, and the value is wire-originated JSON so no unclonable
+  // type can reach it.
+  return structuredClone(merged);
 }
 
 /**

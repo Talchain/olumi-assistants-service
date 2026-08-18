@@ -38,6 +38,12 @@
  * There is deliberately NO fixture mode on the CLI: CI always drives real HTTP.
  * A smoke test against mocks proves nothing about a deployed service.
  *
+ * DEPENDENCIES — none installed. Node built-ins plus ONE sibling module,
+ * `./lib/staging-harness.mjs`, which is inside the same `scripts/ci` sparse
+ * checkout the workflow performs and itself imports nothing. The workflow's
+ * comment used to say this script had ZERO imports; that is no longer literally
+ * true and the workflow now says what IS true.
+ *
  * USAGE
  *   node scripts/ci/staging-journey-smoke.mjs
  * ENV
@@ -47,6 +53,20 @@
  *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
  *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
  */
+
+/**
+ * ⚠ THE ONE IMPORT, AND IT MUST STAY INSIDE `scripts/ci/`.
+ *
+ * Both this gate and the structural-delete witness check out
+ * `sparse-checkout: scripts/ci` and run NO `pnpm install`, deliberately — the
+ * alarms must keep working when the dependency graph is what broke. So this
+ * resolves to a sibling file in the SAME checked-out directory and pulls in no
+ * package. Moving `lib/staging-harness.mjs` out of `scripts/ci/` breaks both
+ * workflows at import time with `ERR_MODULE_NOT_FOUND`; adding a package import
+ * to it breaks them the same way. The shared helpers were near-verbatim copies
+ * and one had already drifted (CLAUDE.md trap 12).
+ */
+import { log, postTurn, readyOptionIds, readyOptions, uuid, waitForBuild } from "./lib/staging-harness.mjs";
 
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
@@ -106,11 +126,6 @@ export const READINESS_PRODUCING_EXIT_PATHS = new Set([
 export function carriedDraftGraph(body) {
   const g = body?.draft_graph;
   return Boolean(g) && typeof g === "object";
-}
-
-/** The option OBJECTS a response says the model is comparing (shape only). */
-function readyOptions(body) {
-  return Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options : [];
 }
 
 /**
@@ -306,25 +321,6 @@ export function assertHealthyDraft(body, label = "turn 2") {
   }
 
   return f;
-}
-
-/**
- * The USABLE `option_id`s a response says the model is comparing.
- *
- * Note what this drops, and read the precondition pin in `assertHealthyJourney`
- * before relying on it: an option object whose `option_id` is `""`, `null` or
- * absent is NOT identifiable, so it cannot participate in an identity check.
- * The contract admits all three — `OptionForAnalysis.id` is `z.string()` with no
- * `.min(1)` (src/schemas/analysis-ready.ts:85), the emit is `option_id: opt.id`
- * (analysis-ready-helper.ts:1123), and the wire envelope validates
- * `analysis_ready` as `z.unknown().optional()`
- * (src/orchestrator/validation/response-envelope-schema.ts:135) — so nothing
- * enforces a usable `option_id` on egress.
- */
-function readyOptionIds(body) {
-  return readyOptions(body)
-    .map((o) => o?.option_id)
-    .filter((id) => typeof id === "string" && id.length > 0);
 }
 
 /**
@@ -686,14 +682,6 @@ export function extractDiagnostics(body) {
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 
-function uuid() {
-  return globalThis.crypto.randomUUID();
-}
-
-function log(msg) {
-  process.stdout.write(`${msg}\n`);
-}
-
 /**
  * Describe the model on a turn, UNAMBIGUOUSLY.
  *
@@ -714,64 +702,6 @@ function graphLine(body) {
       ? `draft_graph=present nodes=${Array.isArray(g.nodes) ? g.nodes.length : "?"}`
       : "draft_graph=absent(no-block)";
   return `${graph} analysis_ready.options=${opts}`;
-}
-
-async function postTurn(base, key, payload, timeoutMs) {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  const started = Date.now();
-  try {
-    const res = await fetch(`${base}/orchestrate/v2/turn`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Olumi-Assist-Key": key },
-      body: JSON.stringify(payload),
-      signal: ac.signal,
-    });
-    const text = await res.text();
-    let body;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = { __unparseable: text.slice(0, 500) };
-    }
-    return { status: res.status, body, ms: Date.now() - started };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * PHASE 1. Poll /healthz until the served build matches `expectSha`.
- * Returns {ok, served, waitedMs}. Never throws on a bad build — the caller
- * decides, so the failure message stays in one place.
- */
-async function waitForBuild(base, expectSha, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  const want = expectSha.slice(0, 7);
-  let served = null;
-  let attempt = 0;
-  while (Date.now() < deadline) {
-    attempt += 1;
-    try {
-      const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
-      const body = await res.json();
-      served = body?.build ?? null;
-      if (served && served.slice(0, 7) === want) {
-        return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
-      }
-      log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
-    } catch (e) {
-      log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
-    }
-    // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
-    // burns up to 15s of job time after the poll has already given up. The
-    // 15s interval itself is deliberately kept — ~60 healthz GETs over 15
-    // minutes is negligible load and needs no backoff.
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
-    await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
-  }
-  return { ok: false, served, waitedMs: timeoutMs, attempt };
 }
 
 async function main() {

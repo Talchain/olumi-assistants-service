@@ -682,15 +682,27 @@ export function applyStructuralDelete(
   // `structuredClone` is used rather than a JSON round-trip because it is not
   // silently lossy on `undefined`/`NaN`; the value is wire-originated JSON, so
   // no unclonable types can reach it.
-  const merged = structuredClone(
-    mergeAppliedGraphForPersistence({
-      appliedGraph: candidate,
-      persistedBase: persistedGraph,
-      ingressBase: ingressParse.data,
-      requestId,
-      scenarioId: payload.scenario_id,
-    }),
-  );
+  //
+  // ⭐ THE CLONE MOVED INTO THE HELPER, AND THIS CALL SITE NO LONGER PERFORMS
+  // ONE. Everything above still describes the hazard exactly — it is why the
+  // helper now owns it. The clone was here at ONE of the THREE call sites that
+  // derive an atomic-CAS expected base from `persistedGraph`;
+  // `factor-value-edit.ts` and `edge-strength-edit.ts` reach the sibling helper
+  // with the same aliasing and had no clone at all, latent only because neither
+  // runs a structural prune today. A guard that sits one seam away from the
+  // thing it guards protects the seat it happens to occupy and no other, so
+  // `mergeAppliedGraphForPersistence` now returns a graph that aliases nothing
+  // — see its return contract, and the three-shape reproduction in
+  // `__tests__/persist-merge-helpers-own-their-clone.test.ts`. Cloning again
+  // here would be a second copy of a guarantee, which is how two authorities
+  // for one concept start.
+  const merged = mergeAppliedGraphForPersistence({
+    appliedGraph: candidate,
+    persistedBase: persistedGraph,
+    ingressBase: ingressParse.data,
+    requestId,
+    scenarioId: payload.scenario_id,
+  });
 
   // ── 5b. drop references to what we just removed ──────────────────────────
   // The merge fixes the two STRUCTURAL surfaces (nodes/edges and the top-level

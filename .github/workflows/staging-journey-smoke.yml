@@ -64,11 +64,22 @@ jobs:
     # Freshness poll (15 min) + two turns (~1 min) + headroom.
     timeout-minutes: 25
     steps:
-      # SPARSE on purpose. This gate runs a dependency-free .mjs that reads NO
-      # repository files (verified: zero `import` / `readFileSync` / `require(`
-      # in the script). A full checkout would clone ~160MB / 7,736 files —
-      # 56% of it the git-tracked `node_modules` — on every push to staging,
-      # for a script that needs exactly one directory.
+      # SPARSE on purpose. This gate runs a dependency-free .mjs. A full
+      # checkout would clone ~160MB / 7,736 files — 56% of it the git-tracked
+      # `node_modules` — on every push to staging, for a script that needs
+      # exactly one directory.
+      #
+      # ⚠ `scripts/ci` IS NOW LOAD-BEARING AS A DIRECTORY, NOT JUST AS A PATH.
+      # The comment here used to read "reads NO repository files (verified:
+      # zero `import` … in the script)". That is no longer true and saying so
+      # would be the stale-prose defect this repo keeps paying for: the script
+      # imports ONE sibling module, `scripts/ci/lib/staging-harness.mjs`,
+      # shared with the structural-delete witness. What still holds — and is
+      # the property that matters — is that NOTHING here needs `pnpm install`:
+      # the import is a relative file inside this same sparse checkout, and
+      # that module imports node built-ins only. Narrowing this pattern below
+      # `scripts/ci`, or letting the shared module take a package dependency,
+      # breaks this job at import time.
       - uses: actions/checkout@v4
         with:
           sparse-checkout: scripts/ci

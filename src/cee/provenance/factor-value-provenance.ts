@@ -206,14 +206,58 @@ export function factorValueIsFabricated(node: unknown): boolean {
  * stamp survives a turn, and a stale one cannot exist.
  */
 
+import type { z } from "zod";
+
+import type { ExtractionType } from "../../schemas/graph.js";
+
+/** `ExtractionType` (`schemas/graph.ts:59`), derived — never re-typed here. */
+type ExtractionTypeLiteral = z.infer<typeof ExtractionType>;
+
 /**
  * The value that a `fallback_default` inference lands on. Declared by the
  * counter's own comment: "inferred with default 0.5".
  */
 const INFERRED_DEFAULT_VALUE = 0.5;
 
-/** The labels that assert the value came from the brief or the environment. */
-const BRIEF_BACKED_EXTRACTION_TYPES: ReadonlySet<string> = new Set(["explicit", "observed"]);
+/**
+ * Which `ExtractionType` label asserts the value came from the brief or the
+ * environment — DERIVED from the contract enum (`schemas/graph.ts:59`), one
+ * entry per member.
+ *
+ * ⭐ WHY A RECORD AND NOT JUST A RETYPED SET. The membership list used to be a
+ * bare `ReadonlySet<string>` literal, so a fifth `ExtractionType` member would
+ * have been classified `fallback_default` by omission, silently. Retyping the
+ * SET does not fix that: `ReadonlySet<X>` is NOT exhaustive — a two-member set
+ * satisfies it however many members `X` has, the same defect
+ * `system-events/dispatch.ts` records for its own kind list. A `Record` over the
+ * union IS exhaustive, so adding a member now fails `tsc` HERE and the author
+ * has to decide which side it falls on.
+ *
+ * ⚠ Deliberately NOT merged with `graph-readiness/obligation-provenance.ts`'s
+ * partition of the same enum. That one answers *"whose structure is this, for
+ * the obligation rule?"*; this one answers *"may this factor's badge read
+ * `from_brief`?"*. Two questions under similar names is exactly the pair
+ * CLAUDE.md trap 21 says to keep apart — cross-named at both ends so a future
+ * divergence is a choice rather than an accident.
+ */
+const BRIEF_BACKED_BY_EXTRACTION_TYPE: Readonly<Record<ExtractionTypeLiteral, boolean>> = {
+  explicit: true,
+  observed: true,
+  inferred: false,
+  range: false,
+};
+
+/**
+ * The runtime membership test. Widened to `ReadonlySet<string>` ON PURPOSE at
+ * this one seam: the stamp reaching `classifyFactorValueTier` is an
+ * UNVALIDATED wire string, so narrowing here would only move the cast. The
+ * MEMBERSHIP is derived above; only the lookup type is wide.
+ */
+const BRIEF_BACKED_EXTRACTION_TYPES: ReadonlySet<string> = new Set(
+  Object.entries(BRIEF_BACKED_BY_EXTRACTION_TYPE)
+    .filter(([, briefBacked]) => briefBacked)
+    .map(([label]) => label),
+);
 
 interface Bag {
   readonly [key: string]: unknown;

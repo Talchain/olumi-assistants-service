@@ -437,8 +437,13 @@ describe('dispatchEditGraph — DL-7 PR B fact emission', () => {
       // content threading — not object identity. Merge semantics are
       // pinned in edit-graph-dispatch-persist-merge-back.test.ts.
       const committed = metadata.graph as { nodes: unknown; edges: unknown };
-      expect(committed.nodes).toBe(editResult.appliedGraph!.nodes);
-      expect(committed.edges).toBe(editResult.appliedGraph!.edges);
+      // ⚠ VALUE, NOT REFERENCE: `mergeAppliedGraphForPersistence` clones its
+      // result (return contract — see
+      // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+      // The R-001 invariant is about WHICH GRAPH reaches the commit, not about
+      // object identity.
+      expect(committed.nodes).toEqual(editResult.appliedGraph!.nodes);
+      expect(committed.edges).toEqual(editResult.appliedGraph!.edges);
     });
 
     it('B11 rich-builder throw → generic fallback fact emitted (war-room must-fix)', async () => {

@@ -261,8 +261,17 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
     );
 
     // The intended mutation is applied (appliedGraph wins on nodes/edges).
-    expect(graph.nodes).toBe(applied.nodes);
-    expect(graph.edges).toBe(applied.edges);
+    // ⚠ VALUE, NOT REFERENCE. `toBe` here was pinning the ALIASING, which
+    // `mergeAppliedGraphForPersistence` now forbids: it clones its result
+    // because two of the three CAS-deriving call sites had no clone and a
+    // prune over the result rewrote the caller's trusted base (see
+    // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+    // The question — "did nodes/edges come from the APPLIED graph, not the
+    // persisted base?" — is unchanged and is now asked by value plus the
+    // explicit opposite, which `toBe` could never distinguish.
+    expect(graph.nodes).toEqual(applied.nodes);
+    expect(graph.nodes).not.toEqual(RICH_PERSISTED_GRAPH.nodes);
+    expect(graph.edges).toEqual(applied.edges);
     const mutated = (graph.nodes as Array<Record<string, unknown>>).find(
       (n) => n.id === 'fac_local_hire',
     );
@@ -304,7 +313,8 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
     // legitimate no-persisted-graph case — there is nothing to lose, and
     // the edit must still persist.
     expect(graph.goal_node_id).toBe(ECHO_GRAPH_STATE.goal_node_id);
-    expect(graph.nodes).toBe(applied.nodes);
+    // Value, not reference — see the merge helper's return contract.
+    expect(graph.nodes).toEqual(applied.nodes);
   });
 
   it('DEGRADED persisted read (strict read throws) → FAIL CLOSED: dispatch rejects and NO graph is committed (Codex P0 — never overwrite canonical state with the lossy echo)', async () => {
@@ -356,7 +366,19 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
     expect(JSON.stringify(graph.options)).toBe(
       JSON.stringify(RICH_PERSISTED_GRAPH.options),
     );
-    expect(graph.nodes).toBe(applied.nodes);
+    // Value, not reference — see the merge helper's return contract.
+    // ⚠ AND WHAT THIS HALF DOES *NOT* PROVE, stated rather than implied: this
+    // case's applied graph is `buildAppliedGraphFromWireEcho(() => undefined)`,
+    // i.e. UNMUTATED, and `WIRE_ECHO.nodes` is value-identical to
+    // `RICH_PERSISTED_GRAPH.nodes` (they differ only in the top-level fields
+    // asserted above). So no value assertion can tell the two sources apart
+    // here, and this line is a shape check, not a provenance discriminator —
+    // the `toBe` it replaces WAS one, purely because the merge aliased its
+    // input, which is the defect that had to go. The provenance claim is
+    // discriminated by the two cases whose applied graph carries a real
+    // mutation (the decisive live-faithful case above, and the options-drop
+    // case below); this one is not asked to carry it.
+    expect(graph.nodes).toEqual(applied.nodes);
   });
 
   it('no-op / rejected edit commits NO graph (shape cannot be corrupted by a non-mutation; no strict read needed)', async () => {
@@ -391,7 +413,19 @@ describe('mergeAppliedGraphForPersistence — option precedence and base rules',
 
   it('persisted base wins for goal_node_id, options[], and unknown top-level fields; applied wins for nodes/edges', () => {
     const persisted = clone(RICH_PERSISTED_GRAPH);
-    const applied = buildAppliedGraphFromWireEcho(() => undefined);
+    // ⭐ THE APPLIED GRAPH MUST DIFFER FROM THE BASE, or "applied wins" is not
+    // a measurement. It used to be `() => undefined` — an UNMUTATED echo, whose
+    // `nodes` are value-identical to the persisted base's — and the "applied
+    // wins" half was carried entirely by a `toBe` reference check that only
+    // held because the merge ALIASED its input. That aliasing is now forbidden
+    // (the helper clones; see its return contract), so the discrimination has
+    // to come from the fixture instead of from a defect.
+    const applied = buildAppliedGraphFromWireEcho((g) => {
+      const target = g.nodes.find((n) => n.id === 'fac_local_hire');
+      if (target === undefined) throw new Error('fixture must contain fac_local_hire');
+      (target as { observed_state?: { value?: number } }).observed_state = { value: 1 };
+    });
+    expect(applied.nodes).not.toEqual(persisted.nodes);
     const merged = mergeAppliedGraphForPersistence({
       appliedGraph: applied,
       persistedBase: persisted,
@@ -400,8 +434,19 @@ describe('mergeAppliedGraphForPersistence — option precedence and base rules',
     });
     expect(merged.goal_node_id).toBe(persisted.goal_node_id);
     expect(JSON.stringify(merged.options)).toBe(JSON.stringify(persisted.options));
-    expect(merged.nodes).toBe(applied.nodes);
-    expect(merged.edges).toBe(applied.edges);
+    // ⚠ VALUE, NOT REFERENCE. `toBe` here was pinning the ALIASING, which
+    // `mergeAppliedGraphForPersistence` now forbids: it clones its result
+    // because two of the three CAS-deriving call sites had no clone and a
+    // prune over the result rewrote the caller's trusted base (see
+    // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+    // The question — "did nodes/edges come from the APPLIED graph, not the
+    // persisted base?" — is unchanged and is now asked by value plus the
+    // explicit opposite, which `toBe` could never distinguish.
+    expect(merged.nodes).toEqual(applied.nodes);
+    expect(merged.nodes).not.toEqual(persisted.nodes);
+    expect(merged.edges).toEqual(applied.edges);
+    // …and the clone contract itself, asserted rather than assumed.
+    expect(merged.nodes).not.toBe(applied.nodes);
   });
 
   it('drops exactly the options[] entry whose option NODE this edit removed; untouched options survive byte-for-byte (no resurrection, no over-drop)', () => {
@@ -458,7 +503,8 @@ describe('mergeAppliedGraphForPersistence — option precedence and base rules',
         ...REQ,
       });
       expect(merged.goal_node_id).toBe(ECHO_GRAPH_STATE.goal_node_id);
-      expect(merged.nodes).toBe(applied.nodes);
+      // Value, not reference — see the merge helper's return contract.
+      expect(merged.nodes).toEqual(applied.nodes);
     }
   });
 

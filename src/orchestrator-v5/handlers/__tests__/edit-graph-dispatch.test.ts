@@ -205,8 +205,13 @@ describe('dispatchEditGraph', () => {
       // the persistence contract; the applied arrays are carried by
       // reference.
       const committedGraph = metadata.graph as { nodes: unknown; edges: unknown };
-      expect(committedGraph.nodes).toBe(editResult.appliedGraph!.nodes);
-      expect(committedGraph.edges).toBe(editResult.appliedGraph!.edges);
+      // ⚠ VALUE, NOT REFERENCE: `mergeAppliedGraphForPersistence` clones its
+      // result (return contract — see
+      // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+      // The R-001 invariant is that the APPLIED graph reaches the commit, which
+      // is a claim about content, not about object identity.
+      expect(committedGraph.nodes).toEqual(editResult.appliedGraph!.nodes);
+      expect(committedGraph.edges).toEqual(editResult.appliedGraph!.edges);
       expect(metadata.scenario_id).toBe(SCENARIO_ID);
       expect(metadata.turn_id).toBe(TURN_ID);
       expect(metadata.handler_id).toBeNull();

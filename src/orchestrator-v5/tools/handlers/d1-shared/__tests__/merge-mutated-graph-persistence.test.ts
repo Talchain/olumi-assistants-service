@@ -107,8 +107,22 @@ describe('mergeMutatedGraphForPersistence — persisted-base precedence', () => 
 
     expect(merged.goal_node_id).toBe(persisted.goal_node_id);
     expect(JSON.stringify(merged.options)).toBe(JSON.stringify(persisted.options));
-    expect(merged.nodes).toBe(mutated.nodes);
-    expect(merged.edges).toBe(mutated.edges);
+    // ⚠ REFERENCE-IDENTITY (`toBe`) ASSERTIONS BELOW WERE PINNING THE ALIASING, NOT
+    // THE PROVENANCE. `mergeMutatedGraphForPersistence` now clones its result (its
+    // return contract: the caller may mutate it freely, because two of its three
+    // CAS-deriving call sites had no clone and a prune over the result rewrote the
+    // caller's trusted base — see
+    // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+    // The question each assertion was asking — "did this field come from the
+    // MUTATED graph or the PERSISTED base?" — is unchanged, so it is now asked by
+    // VALUE plus an explicit opposite: equal to the one source AND not equal to the
+    // other. That is strictly more discriminating than `toBe` was, because `toBe`
+    // could not have failed if both sources happened to hold the same array.
+    expect(merged.nodes).toEqual(mutated.nodes);
+    expect(merged.nodes).not.toEqual(persisted.nodes);
+    expect(merged.edges).toEqual(mutated.edges);
+    // …and the clone contract itself, asserted here rather than assumed.
+    expect(merged.nodes).not.toBe(mutated.nodes);
     const target = (merged.nodes as Array<{ id: string; observed_state?: { value?: number } }>).find(
       (n) => n.id === TARGET_FACTOR,
     );
@@ -214,7 +228,10 @@ describe('mergeMutatedGraphForPersistence — fallback (NOT a degraded read; tha
         persistedBase: empty,
         ...REQ,
       });
-      expect(merged).toBe(mutated);
+      // VALUE, not reference: the fallback still answers "the mutated graph is
+      // the write", but the helper owns a clone of it (return contract).
+      expect(merged).toEqual(mutated);
+      expect(merged).not.toBe(mutated);
     }
   });
 
@@ -226,7 +243,8 @@ describe('mergeMutatedGraphForPersistence — fallback (NOT a degraded read; tha
         persistedBase: badBase,
         ...REQ,
       });
-      expect(merged).toBe(mutated);
+      expect(merged).toEqual(mutated);
+      expect(merged).not.toBe(mutated);
     }
   });
 });

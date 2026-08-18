@@ -95,24 +95,35 @@ function installWriteThroughAppend() {
   });
 }
 
-vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: appendMock,
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    // The writer reads the newest pending set integrity-STRICTLY before any
-    // append, so the carry-forward lifecycle stays canonical. A healthy empty
-    // read is the normal case here.
-    readMostRecentPendingActions: async () => [],
-    loadGraph: async () => persisted,
-    loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// ⚠ THE DOCUMENTED `importOriginal`-SPREAD + `createMockSessionStore` FORM, not a
+// hand-rolled literal. The literal this replaces carried the two defects that
+// helper exists to end (CLAUDE.md trap 12 — a mirror a human must remember to
+// sync):
+//   · it omitted REQUIRED `SessionStore` members, `storeDraftGraph` among them,
+//     so a code path reaching one would have died with "not a function" for a
+//     reason having nothing to do with `structural_delete`; and
+//   · it RE-DECLARED `SessionReadError` locally, which produces a DIFFERENT
+//     class object from the one production imports — so every
+//     `error instanceof SessionReadError` in `build-turn-context.ts` (seven
+//     sites) reads false against a throw from this mock, silently degrading the
+//     error-code branch to `undefined`.
+// `createMockSessionStore` is typed `Required<SessionStore>`, so a new interface
+// member REDs there once, loudly, instead of drifting dark in twenty-two suites.
+vi.mock('../../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: appendMock,
+        loadGraph: async () => persisted,
+        loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 // The ORIENT step is the only thing that reaches the LLM. Asserting it was never
 // called proves the delete stayed on the deterministic path.

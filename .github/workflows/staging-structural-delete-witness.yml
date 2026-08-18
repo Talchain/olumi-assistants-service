@@ -60,8 +60,16 @@ jobs:
     timeout-minutes: 30
     steps:
       # SPARSE on purpose, same as the journey gate: the witness is a
-      # dependency-free .mjs that reads no repository files, so a full checkout
-      # would clone ~160MB for one directory.
+      # dependency-free .mjs, so a full checkout would clone ~160MB for one
+      # directory.
+      #
+      # ⚠ `scripts/ci` IS LOAD-BEARING AS A DIRECTORY. This said "reads no
+      # repository files"; it now imports ONE sibling module,
+      # `scripts/ci/lib/staging-harness.mjs`, shared with the journey gate. The
+      # property that matters is unchanged — no `pnpm install` is needed,
+      # because that module is inside this same sparse checkout and imports
+      # node built-ins only. Narrowing this pattern, or giving the shared module
+      # a package dependency, breaks this job at import time.
       - uses: actions/checkout@v4
         with:
           sparse-checkout: scripts/ci

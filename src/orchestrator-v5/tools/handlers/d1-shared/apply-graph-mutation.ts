@@ -70,6 +70,11 @@ export function cloneGraph(graph: GraphV3T): GraphV3T {
  * The mutator receives a `GraphV3T`-narrowed clone and may throw —
  * typically a `D1HandlerError` for entity-not-found or kind-mismatch —
  * and that error propagates unchanged.
+ *
+ * @returns `mutatedGraph` shares NO object with `ingressGraph`. The merge is a
+ *          shallow spread, so this is enforced by an explicit clone rather than
+ *          being a property of the spread — see the comment at the composer.
+ *          Callers may mutate the result freely.
  */
 export function applyAndValidateMutation<TBefore, TAfter>(
   ingressGraph: unknown,
@@ -123,14 +128,22 @@ export function applyAndValidateMutation<TBefore, TAfter>(
     !Array.isArray(ingressGraph)
       ? (ingressGraph as Record<string, unknown>)
       : {};
-  const mutatedGraph: PersistedGraphV3T = {
+  // ⭐ THE SPREAD IS SHALLOW, SO THE CLONE IS PART OF THE RETURN CONTRACT.
+  // Without it `mutatedGraph.options` / `.meta` / every other top-level object
+  // is THE SAME REFERENCE the caller's `ingressGraph` holds, and any later
+  // in-place pass over the result (a prune does `delete bag[key]` and
+  // `graph.meta[field] = kept`) rewrites the caller's graph underneath it. The
+  // caller then derives a CAS expected-base hash from a graph that was never
+  // persisted. See `mergeMutatedGraphForPersistence` below and the pin in
+  // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`.
+  const mutatedGraph = structuredClone({
     ...ingressShape,
     nodes: postParse.data.nodes,
     edges: postParse.data.edges,
     ...(postParse.data.goal_constraints !== undefined
       ? { goal_constraints: postParse.data.goal_constraints }
       : {}),
-  };
+  }) as PersistedGraphV3T;
 
   return { mutatedGraph, before, after };
 }
@@ -184,9 +197,29 @@ export function applyAndValidateMutation<TBefore, TAfter>(
  *     Heal forward via the mutated graph (commit a valid shape) rather
  *     than fail closed, mirroring #265; logged at WARN, never silent.
  *
+ * ⭐⭐ RETURN CONTRACT — THE RESULT ALIASES NOTHING THE CALLER PASSED IN.
+ *
+ * The composition is a SHALLOW spread, so without an explicit clone
+ * `merged.options` / `merged.meta` and every other top-level object are
+ * THE SAME OBJECT REFERENCES as `persistedBase`'s — and the
+ * `persistedUsable === false` limb returns `mutatedGraph` itself. Any
+ * later pass that mutates the result in place then rewrites the caller's
+ * trusted base, and the three CAS-deriving call sites
+ * (`structural-delete.ts`, `factor-value-edit.ts`, `edge-strength-edit.ts`)
+ * derive their atomic-CAS expected base from exactly that object AFTER
+ * this returns. In `structural_delete` that shipped as a P0: an expected
+ * hash for a graph that was never persisted, so every subsequent delete
+ * was refused permanently. Only ONE of the three call sites had a clone;
+ * ownership therefore lives here, matching `exposeCandidate`
+ * (`graph-management/candidate-graph.ts`). Pinned by
+ * `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`.
+ * Cost measured: ~0.2ms against a ~988ms turn.
+ *
  * @internal Exported for testing and for the turn-executor STEP 7
  * commit site (the single place a D1 `mutated_graph` reaches
  * persistence).
+ * @returns A graph sharing no object with `mutatedGraph` or
+ *          `persistedBase`. Callers may mutate it freely.
  */
 export function mergeMutatedGraphForPersistence(args: {
   /** Handler-emitted post-mutation graph (ingress-shaped, validated). */
@@ -258,7 +291,11 @@ export function mergeMutatedGraphForPersistence(args: {
     );
   }
 
-  return merged;
+  // ⭐ THE CLONE IS PART OF THE RETURN CONTRACT (see the docstring). Note it
+  // covers BOTH limbs: the shallow spread aliases `persistedBase`'s top-level
+  // objects, and the `persistedUsable === false` fallback returns
+  // `mutatedGraph` ITSELF — the limb a reader skims past.
+  return structuredClone(merged);
 }
 
 /**
