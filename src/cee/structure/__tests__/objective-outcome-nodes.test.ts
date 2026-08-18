@@ -918,6 +918,54 @@ describe("⭐ a TRUE DUPLICATE objective is consolidated, not demoted to a secon
     );
   });
 
+  it("the discriminator is the QUOTE, not the label — same label + different quotes stay DISTINCT", () => {
+    // Found by this round's mutant battery: swapping the discriminator to
+    // `label` survived every test, because the governed duplicate happens to
+    // carry an identical label AND quote. The two are not interchangeable, and
+    // the label is the DANGEROUS choice: `deriveGoalObjectiveLabel` AUTHORS
+    // labels, so two genuinely different objectives can normalise to the same
+    // display string ("increase productivity" / "increasing productivity" both
+    // → "Increase Productivity") while stating different things. A label-keyed
+    // guard would silently DELETE one of them — the exact loss A3 exists to fix.
+    const graph: any = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "Increase Productivity",
+          provenance: { provenance_class: "stated", source_quote: "increase productivity" } },
+        { id: "g2", kind: "goal", label: "Increase Productivity",
+          provenance: { provenance_class: "stated", source_quote: "increasing productivity across teams" } },
+        { id: "d1", kind: "decision", label: "D" },
+      ],
+      edges: [],
+    };
+    const merged = enforceSingleGoal(graph)!;
+    const nodes = (merged.graph as any).nodes as AnyNode[];
+
+    // Bound by identity: g2 survives, as an outcome, with its OWN quote intact.
+    const survivor = nodes.find((n) => n.id === "g2");
+    expect(survivor, "a distinct objective was deleted on a mere label collision").toBeDefined();
+    expect(survivor!.kind).toBe("outcome");
+    expect(survivor!.provenance?.source_quote).toBe("increasing productivity across teams");
+  });
+
+  it("the discriminator is the QUOTE, not the label — same quote + different labels ARE duplicates", () => {
+    // The opposite direction of the same rule, so the guard cannot be re-keyed
+    // to "quote AND label" and still pass. The quote is authoritative on its own.
+    const graph: any = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "Cut Cost",
+          provenance: { provenance_class: "stated", source_quote: "reduce operating cost" } },
+        { id: "g2", kind: "goal", label: "Reduce Operating Cost",
+          provenance: { provenance_class: "stated", source_quote: "reduce operating cost" } },
+        { id: "d1", kind: "decision", label: "D" },
+      ],
+      edges: [],
+    };
+    const merged = enforceSingleGoal(graph)!;
+    const nodes = (merged.graph as any).nodes as AnyNode[];
+    expect(nodes.some((n) => n.id === "g2")).toBe(false);
+    expect(nodes.filter((n) => n.kind === "goal")).toHaveLength(1);
+  });
+
   it("TWIN — two goals with no quote at all are treated as DISTINCT, never merged away", () => {
     // Fail-safe direction. `undefined === undefined` must NOT read as duplicate:
     // on the legacy path a goal may carry no provenance, and deleting a real
