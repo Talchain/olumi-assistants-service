@@ -19,8 +19,22 @@ name: Staging Structural-Delete Witness
 # (tests/unit/ci/staging-structural-delete-witness.test.ts), derived from the
 # YAML rather than mirrored, so re-introducing any of them turns the suite red.
 #
-# WHY THIS IS NOT ON PUSH — a deliberate, reversible call, recorded rather than
-# assumed.
+# HOW TO FIRE IT — two deliberate acts, and NEITHER of them is "every push".
+#
+#   A. `workflow_dispatch` from the Actions tab. NOTE: GitHub only offers that
+#      button for workflows present on the repository's DEFAULT branch, and this
+#      workflow is not there. Registering it is currently not possible by the
+#      normal route: a YAML-only PR to the default branch cannot merge, because
+#      two of its six required contexts are PATH-FILTERED and never fire on such
+#      a PR, so it sits blocked with zero failures and admin enforcement leaves
+#      no override. Route B exists because of that, and it is not a workaround
+#      for a policy — it is the same deliberate act by a different door.
+#   B. Commit any change to `.github/witness-trigger` on `staging`. The push
+#      trigger below is PATH-FILTERED to that single file, so firing the witness
+#      is a one-line commit that says so in the history.
+#
+# WHY IT STILL DOES NOT RUN ON EVERY PUSH — a deliberate, reversible call,
+# recorded rather than assumed.
 #   1. It creates a real staging scenario row on every run, and it needs a live
 #      LLM draft (~60s) before it can bind a delete target.
 #   2. The upstream draft/readiness path is measurably unreliable today: the
@@ -30,9 +44,18 @@ name: Staging Structural-Delete Witness
 #      upstream failure rate is a BROKEN ALARM, and an alarm people learn to
 #      ignore is worse than no alarm — that is precisely how the two dead smoke
 #      workflows above got that way.
-# RE-SURFACE TRIGGER: move this to `on: push: branches: [staging]` once the
-# turn-2 goal-node defect behind those failures is closed. The change is one
-# stanza; nothing else here needs to move.
+#
+# WHY THE SENTINEL DOES NOT REOPEN THAT ARGUMENT. The objection in (2) is to an
+# alarm that fires UNATTENDED on work that did not ask for it. A path-filtered
+# sentinel fires only when a human commits to that file, so every run is someone
+# choosing to run it and watching the result — there is no unattended red for
+# anyone to learn to ignore. The header used to read "WHY THIS IS NOT ON PUSH",
+# which the `push:` stanza below would have contradicted; the reasoning is
+# unchanged, its scope is now stated precisely.
+#
+# RE-SURFACE TRIGGER: delete the `paths:` filter, so it runs on every `staging`
+# push, once the turn-2 goal-node defect behind those upstream failures is
+# closed. Nothing else here needs to move.
 #
 # The DELETE journey itself is deterministic once a model exists — DELETE,
 # PERSISTED, RELOAD and the two controls passed on every run that reached them.
@@ -44,6 +67,13 @@ on:
         description: "Commit expected to be serving (blank = the commit this run was dispatched from)"
         required: false
         type: string
+  # Fires ONLY when the sentinel changes — see "HOW TO FIRE IT" above. The
+  # `paths:` filter is the whole safety property: without it this becomes the
+  # every-push gate the header argues against, so it is asserted by the spec.
+  push:
+    branches: [staging]
+    paths:
+      - '.github/witness-trigger'
 
 permissions:
   contents: read
@@ -79,6 +109,12 @@ jobs:
           # exits 2 and the run goes RED — a missing secret must never read as a
           # pass.
           WITNESS_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
+          # On `workflow_dispatch` this is the optional input. On a sentinel
+          # push `github.event.inputs` does not exist, so it falls back to
+          # `github.sha` — the sentinel commit itself, which is the commit
+          # Render then deploys. That fallback is what keeps BUILD a freshness
+          # ASSERTION (PASS/FAIL, polled up to 15 min) instead of degrading to a
+          # RECORDED note, and it is asserted by the spec so it cannot be lost.
           WITNESS_EXPECT_SHA: ${{ github.event.inputs.expect_sha || github.sha }}
           # OPTIONAL. Without both, the CANONICAL-DB leg reports UNKNOWN rather
           # than PASS, and `options[]` / `meta.roots` / `meta.leaves` stay

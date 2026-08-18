@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
 
@@ -630,8 +630,52 @@ describe("the workflow cannot be silenced quietly", () => {
     expect(raw).toContain("shell: bash");
   });
 
-  it("declares why it is dispatch-only, so the choice is visible rather than assumed", () => {
-    expect(raw).toContain("workflow_dispatch");
-    expect(raw.toLowerCase()).toContain("why this is not on push");
+  /**
+   * THE TRIGGER PROPERTIES.
+   *
+   * This block used to assert the header contained the words "why this is not
+   * on push". That check is now RETIRED, and deliberately replaced rather than
+   * loosened: the workflow HAS a `push:` trigger, so the old sentence would
+   * have been a header contradicting its own file, and a prose grep is a weak
+   * proxy for the property anyway. What actually matters is STRUCTURAL and is
+   * asserted directly below — the push trigger is path-filtered to one sentinel
+   * file, that file exists, and the freshness assertion survives the push path.
+   * Each of these fails loudly if the trigger is ever widened by accident.
+   */
+  it("still offers workflow_dispatch, with the expect_sha input", () => {
+    const on = wf.on as { workflow_dispatch?: { inputs?: Record<string, unknown> } };
+    expect(on.workflow_dispatch).toBeDefined();
+    expect(on.workflow_dispatch?.inputs).toHaveProperty("expect_sha");
+  });
+
+  it("the push trigger is PATH-FILTERED to the sentinel — an ordinary code push cannot fire it", () => {
+    // This is the whole reason the header's anti-every-push argument still
+    // holds. Widening `paths` (or dropping it) turns a deliberate act into an
+    // unattended alarm sitting on a measurably flaky upstream.
+    const on = wf.on as { push?: { branches?: string[]; paths?: string[] } };
+    expect(on.push).toBeDefined();
+    expect(on.push?.branches).toEqual(["staging"]);
+    expect(on.push?.paths).toEqual([".github/witness-trigger"]);
+  });
+
+  it("the sentinel it filters on EXISTS — a trigger pointing at nothing is a silently dead workflow", () => {
+    // Two earlier smoke workflows in this repo were dead for months. A path
+    // filter naming a file that does not exist is exactly that failure again,
+    // and it looks perfectly healthy in the YAML.
+    expect(existsSync(resolve(REPO_ROOT, ".github/witness-trigger"))).toBe(true);
+  });
+
+  it("WITNESS_EXPECT_SHA falls back to github.sha, so a PUSH-fired run asserts the build", () => {
+    // Without the fallback the BUILD leg degrades from a PASS/FAIL freshness
+    // assertion to a RECORDED note, and the run would no longer prove it tested
+    // the build it meant to test.
+    const raws = raw.match(/WITNESS_EXPECT_SHA:.*/)?.[0] ?? "";
+    expect(raws).toContain("github.event.inputs.expect_sha");
+    expect(raws).toContain("github.sha");
+  });
+
+  it("explains how it is fired, so the choice stays visible rather than assumed", () => {
+    expect(raw.toLowerCase()).toContain("how to fire it");
+    expect(raw.toLowerCase()).toContain("why it still does not run on every push");
   });
 });
