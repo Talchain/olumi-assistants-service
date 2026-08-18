@@ -221,7 +221,13 @@ describe('ACCEPTANCE 4 — an unbindable request asks, and writes nothing', () =
     if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
     expect(resolution.ambiguity).toBe('option');
     expect(resolution.value).toBe(0.4);
-    expect(resolution.optionLabels.sort()).toEqual([OPTION_LABEL, SIBLING_OPTION_LABEL].sort());
+    // Copied before sorting: `optionLabels` is `readonly string[]`, and
+    // `.sort()` on it is both a type error (caught only by the src+tests
+    // Typecheck Drift ratchet, since `tsconfig.build.json` excludes tests) and
+    // an in-place mutation of the resolver's own returned array.
+    expect([...resolution.optionLabels].sort()).toEqual(
+      [OPTION_LABEL, SIBLING_OPTION_LABEL].sort(),
+    );
     expect(resolution.candidates.map((c) => c.optionId).sort()).toEqual(
       [OPTION_ID, SIBLING_OPTION_ID].sort(),
     );
