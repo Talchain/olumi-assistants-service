@@ -41,6 +41,49 @@
  * reachable outcomes.
  *
  * ─────────────────────────────────────────────────────────────────────────
+ * ⭐ THE GATE'S DOMAIN, ENUMERATED AGAINST EVERY PATH THAT RUNS AN ANALYSIS
+ * ─────────────────────────────────────────────────────────────────────────
+ * "One of six paths is gated" is only reassuring if the other five are named
+ * and their sanction is stated, so here they are, derived at this tip.
+ *
+ * | # | Path                                   | Provenance      | Verdict |
+ * |---|----------------------------------------|-----------------|---------|
+ * | 1 | LLM router election (`routeWithToolUse`)| model-decided  | **GATED — this module** |
+ * | 2 | Chip click, route-v2 branch (b)         | user's click   | SANCTIONED — the user pressed it |
+ * | 3 | `scheduleAutoRunAfterFreshDraft`        | server, post-draft | SANCTIONED — the provisional analysis after initial model generation |
+ * | 4 | Short-confirm resume of a pending run   | user's "yes"   | SANCTIONED — consent to an offer the product made |
+ * | 5 | Imperative re-run pre-route (2.229)     | user's words, deterministic | SANCTIONED — an explicit instruction, matched without an LLM |
+ * | 6 | Pending-action derivation → proposal    | product's own offer | SANCTIONED — the product offered it and the user took it |
+ *
+ * Every one of 2-6 is DETERMINISTIC: a human pressed something, answered
+ * something, or wrote something a regex matched. Only path 1 is decided by a
+ * model, and only path 1 can produce an analysis nobody asked for. Gating it
+ * is not a partial fix — it is the whole of the reachable defect.
+ *
+ * ⭐ AND THE COVERAGE IS CHECKABLE IN ONE GREP, not by reading this table.
+ * Paths 2-3 leave `turn-executor` entirely (`dispatchChipClickRunAnalysis`
+ * builds its own turn context; `chip-click-dispatch.ts` has zero references to
+ * `routeWithToolUse` or `runTurnExecutor`). Paths 4-6 are pre-routes inside
+ * `turn-executor`, and `rg -n "^\s*routingResult = " turn-executor.ts` shows
+ * why they cannot reach this gate: EVERY pre-route assignment sits at a lower
+ * line than the `routeWithToolUse` call, each inside a block gated on
+ * `routingResult === undefined`, and the gate is called immediately after that
+ * call. Line order IS the proof, and it is re-derivable in seconds.
+ *
+ * ⚠ ON THE "MISSING GATE" DIAGNOSIS, which is right about the hole and wrong
+ * about the cause. It is true that `run_analysis` is absent from
+ * `GRAPH_MUTATING_HANDLER_IDS` (`routing/mutation-consent.ts:87-91` —
+ * `{set_factor_value, add_constraint, adjust_edge_strength}`) and therefore
+ * that the action-layer consent gate stands down for it. But that is NOT a
+ * short list to lengthen. That set answers *"may this handler change the
+ * user's graph without consent?"*, and `run_analysis` does not change the
+ * graph, so its absence is CORRECT for that question. Adding it there would
+ * have subjected analysis to mutation-consent semantics it has no business
+ * under. The real gap is trap 21's shape: **no set answered "may this handler
+ * run when the user did not ask for it?"** — a missing CONCEPT, not a missing
+ * row. This module is that concept, kept deliberately separate.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
  * ⭐ WHY THE PREDICATE CANNOT OSCILLATE (CLAUDE.md trap 22f)
  * ─────────────────────────────────────────────────────────────────────────
  * Trap 22f's ruling is that repeated rounds of token-list tuning over natural
