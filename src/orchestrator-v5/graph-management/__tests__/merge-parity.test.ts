@@ -41,9 +41,22 @@ describe('merge parity (pins the REAL mergeMutatedGraphForPersistence by identit
       return { before, after: { label: 'Net Profit' } };
     });
     const merged = mergeMutatedGraphForPersistence({ mutatedGraph, persistedBase: persisted, ...REQ });
-    // Identity pin: the merged structural arrays ARE the mutated arrays (same reference),
-    // not a spy assertion that the function "was called".
-    expect(merged.nodes).toBe(mutatedGraph.nodes);
+    // ⚠ THIS PIN WAS `expect(merged.nodes).toBe(mutatedGraph.nodes)` — a REFERENCE
+    // check, and it only ever held because the merge ALIASED its input. That
+    // aliasing is now forbidden: the helper clones its result, because two of
+    // its three CAS-deriving call sites had no clone and an in-place pass over
+    // the result rewrote the caller's trusted base (see
+    // `system-events/__tests__/persist-merge-helpers-own-their-clone.test.ts`).
+    //
+    // The intent — "the merged structural arrays came from the MUTATION, not
+    // from the base, and this is not a spy assertion that the function was
+    // called" — is preserved and, here, is genuinely discriminating: the
+    // mutation renames `g-profit`, so the two candidate sources differ by value
+    // and the pair below can only pass if the mutated arrays won.
+    expect(merged.nodes).toEqual(mutatedGraph.nodes);
+    expect(merged.nodes).not.toEqual(persisted.nodes);
+    // …and the clone contract itself, asserted rather than assumed.
+    expect(merged.nodes).not.toBe(mutatedGraph.nodes);
     const mergedNodes = merged.nodes as Array<{ id: string; label: string }>;
     expect(mergedNodes.find((n) => n.id === 'g-profit')!.label).toBe('Net Profit');
   });
