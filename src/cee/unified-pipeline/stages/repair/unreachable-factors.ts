@@ -41,8 +41,19 @@ export interface UnreachableFactorRepair {
   /**
    * TRUE when the prior is an admission of ignorance rather than an estimate —
    * the baseline it came from was a system default, so the range was left at
-   * maximal `[0,1]` instead of being narrowed. Read by any surface that must
-   * label the number rather than print it as a measurement.
+   * maximal `[0,1]` instead of being narrowed.
+   *
+   * ⚠ CORRECTED — this said "Read by any surface that must label the number".
+   * NOTHING reads it. It is PIPELINE-INTERNAL and is dropped at the boundary:
+   * it is not a member of `ModelAdjustment` (`schemas/analysis-ready.ts`), and
+   * `stages/boundary.ts:157-179` projects only `code`, `node_id`, `field`,
+   * `reason`, `source` and `before`.
+   *
+   * ⭐ WHAT DOES REACH THE USER is the prose on `action`, which `boundary.ts:168`
+   * copies into `reason` — that is the disclosure, and it is what the tests pin.
+   * This flag is the machine-readable twin, kept for the surface that will label
+   * the range once one exists (quality bar Q5's HARD render rule), and honestly
+   * unread until then.
    */
   prior_is_unquantified?: boolean;
   /** The synthesised prior range (only present when prior_synthesised is true) */
@@ -454,6 +465,20 @@ export function handleUnreachableFactors(
       // `data` is about to lose its value and may be deleted entirely, and the
       // honest fact about WHERE the number came from must outlive the number.
       // Without this the mark dies exactly at the step that laundered it.
+      //
+      // ⚠⚠ SCOPE, CORRECTED — AND THE FIRST VERSION OF THIS COMMENT WAS FALSE.
+      // It said the mark is carried "so the render can label it". It is NOT:
+      // this promotion keeps the stamp alive for IN-PIPELINE readers only, and
+      // the stamp DIES BEFORE THE WIRE. `transformNodeToV3` (`schema-v3.ts`)
+      // does not spread the node — it rebuilds field-by-field and forwards only
+      // named fields, and `value_tier` appears ZERO times in that file
+      // (positive control: `extractionType` IS forwarded, `schema-v3.ts:371`).
+      // The neighbouring line's "NodeV3 passthrough preserves them" is true of
+      // Zod `.passthrough()` at PARSE time and false of the V3 TRANSFORM, and
+      // conflating the two is what produced the wrong claim.
+      // Its only reader today is `factorValueIsFabricated` below. Giving the
+      // render a label requires forwarding it in `transformNodeToV3` — named
+      // here so the gap is visible rather than assumed closed.
       if (data[FACTOR_VALUE_TIER_FIELD] !== undefined) {
         (node as any)[FACTOR_VALUE_TIER_FIELD] = data[FACTOR_VALUE_TIER_FIELD];
       }
@@ -649,7 +674,18 @@ export function handleUnreachableFactors(
       // printing a bare `Range: 0 to 1`. A genuine baseline is untouched: same
       // margin, same clamps, byte-identical output.
       // ═══════════════════════════════════════════════════════════════════════
-      const { range_min, range_max } = baselineIsFabricated
+      // ⚠⚠ CONTAINMENT IS ENFORCED HERE TOO, NOT ASSUMED (adversarial review B1).
+      // `synthesisePriorFromBaseline` declares in bold that a synthesised prior
+      // MUST contain the value it came from, and names the measured cost of
+      // breaking it. The collapse branch sits OUTSIDE that function, so it
+      // inherited none of that protection: any baseline above 1 collapsing to
+      // `[0,1]` re-creates the NRR defect exactly.
+      // The stampers only ever write 0.5, so a stamped node should always be in
+      // range — but "should" is how invariants die. A baseline the ignorance
+      // range cannot contain is NOT collapsed; it is narrowed normally, because
+      // an incoherent distribution is worse than a fabricated one.
+      const collapseContainsBaseline = originalValue >= 0 && originalValue <= 1;
+      const { range_min, range_max } = baselineIsFabricated && collapseContainsBaseline
         ? { range_min: 0.0, range_max: 1.0 }
         : synthesisePriorFromBaseline(originalValue);
       (node as any).prior = {
@@ -659,23 +695,33 @@ export function handleUnreachableFactors(
       };
       repair.prior_synthesised = true;
       repair.synthesised_range = { range_min, range_max };
-      repair.prior_is_unquantified = baselineIsFabricated;
-      repair.action += baselineIsFabricated
-        ? ` with an UNQUANTIFIED prior [${range_min}, ${range_max}] — the baseline`
-          + ` ${originalValue} was a system default carrying no information, so it was not`
-          + ` narrowed into a range that would read as an estimate`
+      const leftUnquantified = baselineIsFabricated && collapseContainsBaseline;
+      repair.prior_is_unquantified = leftUnquantified;
+      // ⚠ THIS SENTENCE REACHES THE USER VERBATIM (adversarial review C1).
+      // `boundary.ts:168` copies `action` into `model_adjustments[].reason`, and
+      // the deployed UI sanitiser only strips the `"with synthesised prior [...]"`
+      // form — so an earlier draft of this string passed through intact and
+      // printed `[0, 1]`, the word UNQUANTIFIED, and the raw defaulted `0.5` to
+      // a user. All three are internal language: the bracket notation is our
+      // prior, and the 0.5 is the very number we are disowning. Plain English,
+      // no notation, no leaked figure — the honest claim is that we have no
+      // estimate, not a description of our own machinery.
+      repair.action += leftUnquantified
+        ? `, and we have no estimate for it yet — its value was left fully open`
+          + ` rather than narrowed to a figure we cannot support`
         : ` with synthesised prior [${range_min}, ${range_max}]`;
 
       log.info({
-        event: baselineIsFabricated
+        event: leftUnquantified
           ? "cee.repair.prior_left_unquantified"
           : "cee.repair.prior_synthesised_from_baseline",
         node_id: node.id,
         original_value: originalValue,
         baseline_is_fabricated: baselineIsFabricated,
+        collapse_contains_baseline: collapseContainsBaseline,
         range_min,
         range_max,
-      }, baselineIsFabricated
+      }, leftUnquantified
         ? `Declined to narrow a prior for "${node.id}": baseline ${originalValue} is a system default`
         : `Synthesised prior for reclassified factor "${node.id}" from baseline ${originalValue}`);
     }

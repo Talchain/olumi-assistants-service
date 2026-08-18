@@ -58,7 +58,19 @@ export type FactorValueTier = "explicit" | "inferred_with_evidence" | "fallback_
  * four members — `explicit | inferred | range | observed` — and no "defaulted"
  * class, so the honest fact cannot be expressed there without a contract
  * change. It rides an additive field on `data` instead, which the graph
- * schemas preserve via `.passthrough()`. The name deliberately contains no
+ * schemas preserve via `.passthrough()`.
+ *
+ * ⚠⚠ AND THE LIMIT OF THAT, STATED because the sentence above invites the wrong
+ * inference: `.passthrough()` preserves the field across ZOD PARSING, which is
+ * NOT the same as reaching the wire. `transformNodeToV3` rebuilds each node
+ * field-by-field rather than spreading it, and `value_tier` appears ZERO times
+ * in `transforms/schema-v3.ts` (positive control: `extractionType` IS forwarded
+ * there, `:371`). **This stamp is pipeline-internal and does not cross the V3
+ * boundary today.** That is sufficient for its purpose — stopping the launderer,
+ * which runs inside the pipeline — and insufficient for labelling the render,
+ * which is named as the remaining work rather than assumed done.
+ *
+ * The name deliberately contains no
  * `"user"`, `"specified"` or `"manual"` substring: `mapToV3ProvenanceSource`
  * (`transforms/schema-v3.ts:863-877`) coerces ANY stamp containing `"user"` to
  * `user_specified`, which would convert an admission of ignorance into a claim
@@ -136,13 +148,43 @@ export function readStampedFactorValueTier(node: unknown): FactorValueTier | und
  *      arbitrary unlabelled number.
  */
 export function factorValueIsFabricated(node: unknown): boolean {
-  if (readStampedFactorValueTier(node) === "fallback_default") return true;
+  const { extractionType } = readFactorValueView(node);
 
-  const { extractionType, value } = readFactorValueView(node);
+  // ── 1. POSITIVE BRIEF-BACKED EVIDENCE WINS OVER EVERYTHING, INCLUDING THE
+  //       STAMP. (Adversarial review B1.)
+  // An earlier version checked the stamp FIRST, so a brief-backed value that
+  // also carried a stamp collapsed. Executed at that tip, `{value: 1.12,
+  // explicit, value_tier: "fallback_default"}` produced `U(0,1)` — which does
+  // not contain 1.12, and is the exact NRR shape `synthesisePriorFromBaseline`'s
+  // docstring calls unbreakable: a stated figure became max-width, topped the
+  // influence ranking, and the product asked the user for a number they had
+  // already given. Two opposite harms had been put under one predicate with the
+  // wrong one on top.
   if (extractionType !== undefined && BRIEF_BACKED_EXTRACTION_TYPES.has(extractionType)) {
     return false;
   }
-  return value === INFERRED_DEFAULT_VALUE;
+
+  // ── 2. THE STAMP. The only remaining ground, and it is positive evidence:
+  // a defaulting site recorded that it invented this number.
+  return readStampedFactorValueTier(node) === "fallback_default";
+
+  // ── 3. THERE IS NO MAGNITUDE LIMB, AND ITS REMOVAL IS THE POINT.
+  // This function previously ended `return value === INFERRED_DEFAULT_VALUE`,
+  // as a "legacy signature" for facts persisted before the stamp existed. It
+  // was a regression and the review measured it: `{value: 0.5, extractionType:
+  // "inferred"}` — a user saying "about half our customers" — was destroyed,
+  // while `0.51` survived. Everything else equal, the DISCRIMINATOR WAS THE
+  // MAGIC NUMBER for anything the model labelled `inferred` or `range`, which is
+  // trap 19 surviving inside the fix written for trap 19. The module's own
+  // quoted contract rule — "a consumer MUST NOT read absence as any particular
+  // class" — disagreed with its implementation by one line.
+  //
+  // Deleting it costs nothing on the path this lane exists to fix: the stamping
+  // sites and the launderer run in the SAME pipeline pass, so the stamp is
+  // always in memory when this is asked. What it gives up is re-detecting a
+  // fabrication on a graph that re-enters the pipeline with no stamp — which
+  // simply restores the pre-existing behaviour for that case, rather than
+  // destroying a real value to catch it. A gap is not a lie.
 }
 
 /**

@@ -315,7 +315,7 @@ describe("D — an unquantified factor is OFFERED, never DEMANDED", () => {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe("E — an unlabelled but real value is NOT treated as an invention", () => {
-  it.each([0.04, 0.6, 0.9])(
+  it.each([0.04, 0.5, 0.6, 0.9])(
     "narrows an unstamped, unlabelled value of %s instead of asserting ignorance",
     (value) => {
       const graph = unreachableFactorGraph({ value });
@@ -335,19 +335,85 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
     },
   );
 
-  it("TWIN — the legacy unstamped 0.5 signature IS still caught", () => {
-    // Facts persisted before the stamp existed have no other signal, and 0.5 is
-    // the one magnitude the defaulting sites actually write. Narrow by design:
-    // it fires on that value only, never on an arbitrary unlabelled number.
-    const graph = unreachableFactorGraph({ value: 0.5 });
+  it("A1 — a USER-STATED 0.5 labelled `inferred` is NOT destroyed", () => {
+    // ⚠ THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, and the replacement is
+    // the point. The earlier version asserted that an unstamped 0.5 was "still
+    // caught" by a legacy magnitude signature. The adversarial review measured
+    // what that cost: "about half our customers" — the most commonly stated
+    // probability in business English — was widened to meaningless, while 0.51
+    // survived. The discriminator WAS the magic number for anything labelled
+    // `inferred` or `range`, i.e. trap 19 alive inside the fix written for it.
+    // The magnitude limb is deleted; only a positive stamp collapses now.
+    const graph = unreachableFactorGraph({ value: 0.5, extractionType: "inferred" });
 
     handleUnreachableFactors(graph, EDGE_FORMAT);
 
     expect(factorNode(graph).prior).toEqual({
       distribution: "uniform",
-      range_min: 0,
-      range_max: 1,
+      ...declaredNarrowedPrior(0.5),
     });
+    expect(factorNode(graph).prior).not.toEqual({
+      distribution: "uniform", range_min: 0, range_max: 1,
+    });
+  });
+
+  it("A1 — the same for `range`, the other non-brief-backed label", () => {
+    const graph = unreachableFactorGraph({ value: 0.5, extractionType: "range" });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    expect(factorNode(graph).prior).toEqual({
+      distribution: "uniform",
+      ...declaredNarrowedPrior(0.5),
+    });
+  });
+
+  it("A1 TWIN — a STAMPED 0.5 still collapses, so the fix is not simply disabled", () => {
+    const graph = unreachableFactorGraph({
+      value: 0.5,
+      extractionType: "inferred",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    expect(factorNode(graph).prior).toEqual({
+      distribution: "uniform", range_min: 0, range_max: 1,
+    });
+  });
+
+  it("B1 — brief-backed evidence OUTRANKS the stamp, so containment cannot break", () => {
+    // Measured regression: with the stamp checked first, this produced U(0,1),
+    // which does NOT contain 1.12 — the exact NRR shape that
+    // `synthesisePriorFromBaseline`'s docstring calls unbreakable.
+    const graph = unreachableFactorGraph({
+      value: 1.12,
+      extractionType: "explicit",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    const prior = factorNode(graph).prior;
+    expect(prior.range_min).toBeLessThanOrEqual(1.12);
+    expect(prior.range_max).toBeGreaterThanOrEqual(1.12);
+    expect(prior).toEqual({ distribution: "uniform", ...declaredNarrowedPrior(1.12) });
+  });
+
+  it("B1 — the collapse itself enforces containment for an out-of-range baseline", () => {
+    // Defence in depth: the stampers only write 0.5, so a stamped node should
+    // always be inside [0,1] — but "should" is how invariants die.
+    const graph = unreachableFactorGraph({
+      value: 1.4,
+      extractionType: "inferred",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    const prior = factorNode(graph).prior;
+    expect(prior.range_max).toBeGreaterThanOrEqual(1.4);
+    expect(prior).not.toEqual({ distribution: "uniform", range_min: 0, range_max: 1 });
   });
 });
 
@@ -385,10 +451,15 @@ describe("F — the user is told, in the repair record that reaches them", () =>
     // Bound by identity to the disclosing repair, and to its CODE — because the
     // code is what decides whether this reaches the user at all.
     expect(repair?.code).toBe("UNREACHABLE_FACTOR_RECLASSIFIED");
-    expect(repair?.action).toContain("system default");
-    expect(repair?.action).toContain("no information");
-    // The user is told what was NOT done, which is the honest part.
-    expect(repair?.action).toContain("not narrowed");
+    // ⚠ C1 — THIS STRING IS PRINTED TO THE USER VERBATIM, so it is asserted as
+    // plain English and asserted NEGATIVELY against the three kinds of internal
+    // language an earlier draft leaked: bracket notation, the word
+    // "unquantified", and the defaulted number itself.
+    expect(repair?.action).toContain("no estimate for it yet");
+    expect(repair?.action).toContain("left fully open");
+    expect(repair?.action).not.toMatch(/\[|\]/);
+    expect(repair?.action).not.toMatch(/unquantified/i);
+    expect(repair?.action).not.toContain("0.5");
   });
 
   it("TWIN — a genuine baseline's disclosure does NOT claim ignorance", () => {
@@ -397,7 +468,8 @@ describe("F — the user is told, in the repair record that reaches them", () =>
     const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const repair = result.repairs.find((r) => r.path.includes("fac_x"));
 
-    expect(repair?.action).not.toContain("system default");
+    expect(repair?.action).not.toContain("no estimate for it yet");
+    // The genuine path keeps the notation form the deployed UI sanitiser strips.
     expect(repair?.action).toContain("synthesised prior");
   });
 });
