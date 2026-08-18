@@ -111,13 +111,51 @@ describe("C-K4: the projector cannot commit false authorship", () => {
     expect(Object.keys(provenance).sort()).toEqual([...ids].sort());
   });
 
+  /**
+   * ⚠ SCOPE NARROWED, AND THE GUARANTEE IS UNCHANGED — quality bar §8 A1.
+   *
+   * This asserted `label === source_quote` for EVERY stated node. The goal node
+   * is now excluded, because its label is an AUTHORED objective: the projector
+   * had been using `source_quote` — a field its own producer declares must be
+   * "copied VERBATIM … do not paraphrase, tidy, translate or summarise"
+   * (`instruction.ts:138-139`) — as a display string, and a brief fragment is
+   * not an objective.
+   *
+   * What this test exists to prevent is FALSE AUTHORSHIP: the projector putting
+   * words in the user's mouth. That is still fully pinned, in two places and
+   * more strongly than a string equality could:
+   *   · every other stated kind keeps the verbatim, asserted below;
+   *   · the goal's label may contain no token the user did not write
+   *     (`labelIsDerivedFrom`, enforced at RUNTIME inside the derivation, which
+   *     refuses and falls back to the verbatim if it ever fails), and the
+   *     verbatim itself is still on `source_quote` — both asserted in
+   *     `authored-node-labels.test.ts`.
+   */
   it("no stated node's label is a paraphrase — it is the canonicalised quote verbatim", () => {
     const { graph, provenance } = project();
+    let checked = 0;
     for (const node of graph.nodes) {
       const prov = provenance[node.id];
       if (prov?.provenance_class !== "stated") continue;
+      if (node.kind === "goal") continue;
       expect(node.label).toBe(prov.source_quote);
+      checked += 1;
     }
+    // The exclusion above must not hollow the test out (trap 13b): assert it
+    // still had stated nodes to check.
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("the goal's label is authored while its verbatim stays retrievable on the provenance", () => {
+    const { graph, provenance } = project();
+    const goal = graph.nodes.find((n) => n.kind === "goal");
+    expect(goal, "this record set states a goal").toBeDefined();
+    const prov = provenance[goal!.id];
+    expect(prov?.provenance_class).toBe("stated");
+    // The user's own words survive — that is what makes authoring the label honest.
+    expect(prov?.source_quote).toBe("cut customer churn");
+    expect(goal!.label).toBe("Cut Customer Churn");
+    expect(prov?.label_authored).toBe(true);
   });
 });
 

@@ -38,6 +38,19 @@ function idOf(graph: { nodes: Array<{ id: string; label: string }> }, label: str
   return hits[0]!.id;
 }
 
+/**
+ * The goal, by KIND — a stronger binding than its label text, and now the only
+ * correct one: the goal's display label is an AUTHORED objective (quality bar
+ * §8 A1) while its verbatim lives on `provenance.source_quote`, so a lookup by
+ * brief fragment matches nothing. A decision has exactly one goal node here, so
+ * kind IS identity.
+ */
+function goalIdOf(graph: { nodes: Array<{ id: string; kind: string }> }): string {
+  const hits = graph.nodes.filter((n) => n.kind === "goal");
+  expect(hits, "expected exactly one goal node").toHaveLength(1);
+  return hits[0]!.id;
+}
+
 const edgesBetween = (
   graph: { edges: Array<{ from: string; to: string; strength_mean?: number }> },
   from: string,
@@ -78,7 +91,7 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
   it("emits ONE edge for the relationship, and it is the least extravagant claim", () => {
     const { graph } = projectRecordsToGraph(PRICING);
     const factor = idOf(graph, "Average Seat Price Achievement");
-    const goal = idOf(graph, "Our aim is to raise our average seat price");
+    const goal = goalIdOf(graph);
 
     const between = edgesBetween(graph, factor, goal);
     expect(between).toHaveLength(1);
@@ -89,7 +102,7 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
   it("discloses the discarded claim by ITS OWN index and label, with a re-derivable signature", () => {
     const { graph, dropped } = projectRecordsToGraph(PRICING);
     const factor = idOf(graph, "Average Seat Price Achievement");
-    const goal = idOf(graph, "Our aim is to raise our average seat price");
+    const goal = goalIdOf(graph);
 
     const conflicts = dropped.filter((d) => d.reason === "parallel_causal_link_conflict");
     expect(conflicts).toHaveLength(1);
@@ -124,7 +137,7 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     const b = projectRecordsToGraph(swapped);
     const pick = (p: typeof a) => {
       const factor = idOf(p.graph, "Average Seat Price Achievement");
-      const goal = idOf(p.graph, "Our aim is to raise our average seat price");
+      const goal = goalIdOf(p.graph);
       return edgesBetween(p.graph, factor, goal).map((e) => e.strength_mean);
     };
     expect(pick(a)).toEqual([0.5]);
@@ -195,7 +208,7 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     };
     const { graph, dropped } = projectRecordsToGraph(RECORDS);
     const from = idOf(graph, "Technical Leadership Capacity");
-    const goal = idOf(graph, "decide the hiring plan");
+    const goal = goalIdOf(graph);
     const between = edgesBetween(graph, from, goal);
     expect(between).toHaveLength(1);
     expect(between[0]!.strength_mean).toBe(0.9);
@@ -337,7 +350,7 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     };
     const { graph, dropped } = projectRecordsToGraph(RECORDS);
     const from = idOf(graph, "Technical Leadership Capacity");
-    const goal = idOf(graph, "decide the hiring plan");
+    const goal = goalIdOf(graph);
     expect(edgesBetween(graph, from, goal)).toHaveLength(1);
     expect(dropped.filter((d) => d.reason === "parallel_causal_link_conflict")).toHaveLength(0);
   });

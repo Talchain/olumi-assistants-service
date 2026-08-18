@@ -75,9 +75,17 @@ function loadBankedEmission(): DraftRecordSet {
   ) as DraftRecordSet;
 }
 
-/** Locate a projected node by the EXACT quote the projector uses as its label. */
+/**
+ * Locate a projected node by the EXACT quote the user stated.
+ *
+ * ⚠ BOUND ON `provenance.source_quote`, NOT ON THE LABEL. It read the label
+ * until the goal's display label became an AUTHORED objective (quality bar §8
+ * A1); `source_quote` is where the verbatim now lives, and it is the stronger
+ * binding in any case — a label is a display string and can be re-cased or
+ * re-worded, while the quote is the record's identity.
+ */
 function nodeByQuote(nodes: readonly ProjectedNode[], quote: string): ProjectedNode | undefined {
-  return nodes.find((n) => n.label === quote);
+  return nodes.find((n) => n.provenance?.source_quote === quote || n.label === quote);
 }
 
 // ───────────────────────────────────────────────────────────────────────────

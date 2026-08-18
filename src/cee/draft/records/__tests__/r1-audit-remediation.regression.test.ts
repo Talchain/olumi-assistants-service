@@ -463,7 +463,11 @@ describe("ROOT 2(b) — a stated target is not silently an observed value", () =
       },
       brief,
     );
-    const goal = projection.graph.nodes.find((n) => n.label === "cut customer churn to 8%")!;
+    // Bound on the QUOTE, not the label: the display label is now an authored
+    // objective while the verbatim stays on the provenance (quality bar §8 A1).
+    const goal = projection.graph.nodes.find(
+      (n) => n.provenance?.source_quote === "cut customer churn to 8%",
+    )!;
     // The precondition that makes this a real finding: the number reached NOTHING.
     expect(goal.observed_state, "the projector has no value branch for a goal").toBeUndefined();
     expect((goal.data as { value?: number } | undefined)?.value).toBeUndefined();

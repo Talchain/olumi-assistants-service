@@ -83,6 +83,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
@@ -268,6 +269,26 @@ export interface RecordProvenance {
    * The WIRE badge is what moves — only `verified` earns `from_brief`.
    */
   readonly brief_binding?: BriefBinding;
+  /**
+   * ⭐⭐ PRESENT IFF THE DISPLAY LABEL IS OURS RATHER THAN THE USER'S VERBATIM.
+   *
+   * `provenance_class: "stated"` means *the user stated this thing*. It has
+   * never meant *this text is the user's text*, and the two were indistinguishable
+   * while the label WAS the quote. Now that a goal's label is an authored
+   * objective and the decision node's label is derived from the user's decision
+   * sentence, the difference is visible and must be said out loud rather than
+   * inferred — a reader who wants the user's own words reads `source_quote`.
+   *
+   * ⚠ NOT A NEW PROVENANCE CLASS, deliberately. Three live readers key on
+   * `stated` (`projector.ts:1077`, `:2046`, `transforms/schema-v3.ts:1124`) and
+   * minting a fourth class would silently re-route all three. This field is
+   * additive and every existing reader is unaffected.
+   *
+   * DERIVED, never asserted (trap 12): it holds exactly when the label differs
+   * from the quote, so a hand-set `true` beside an unchanged label is impossible
+   * — `deriveGoalObjectiveLabel` returns the two together from one computation.
+   */
+  readonly label_authored?: boolean;
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -1329,20 +1350,51 @@ function projectOnce(
       unit: item.unit,
       brief,
     });
+    // ⭐⭐ THE GOAL'S DISPLAY LABEL IS AN AUTHORED OBJECTIVE (quality bar §8 A1).
+    //
+    // ── THE ARGUMENT THIS REPLACES, AND WHY IT IS ANSWERED RATHER THAN IGNORED
+    // These lines used to read `label: quote`, with the rationale: *"The label
+    // IS the user's own words. Nothing is paraphrased: a paraphrase badged
+    // `stated` would be a misrepresentation of the user to themselves."* That
+    // reasoning is CORRECT and it is preserved in full:
+    //   · nothing here paraphrases — `deriveGoalObjectiveLabel` cannot emit a
+    //     token the user did not write (`labelIsDerivedFrom` rejects the
+    //     derivation if it ever does), so no wording is put in the user's mouth;
+    //   · the verbatim is not lost — it stays on `source_quote`, which is what
+    //     the inspector/hover surface reads;
+    //   · and the badge stops being ambiguous: `label_authored` says the
+    //     DISPLAY STRING is ours while `provenance_class: "stated"` keeps
+    //     saying, as it always has, that the USER STATED THIS.
+    // What was actually wrong was reading `source_quote` as a display field.
+    // Its producer declares the opposite (`instruction.ts:138-139`: "copied
+    // VERBATIM … do not paraphrase, tidy, translate or summarise"), and a
+    // `stated_item` has no `label` field at all — the model authors labels for
+    // its own `claims` and had no channel to author one for the user's goal.
+    // That asymmetry is the whole defect: every inferred node read "Monthly
+    // Recurring Revenue" while the user's objective read like a pasted fragment.
+    //
+    // ⚠ SCOPED TO `goal`. Option labels are NOT touched: `transforms/schema-v3.ts:1130`
+    // binds an option's provenance on its LABEL, so authoring one flips
+    // `from_brief` → `ai_inferred`. Breaking that coupling is a separate,
+    // named prerequisite and this lane does not own it. A goal node is safe
+    // because it carries a TYPED record provenance, and `:1121-1128` returns on
+    // that path before any label match is reached — derived at those bytes, and
+    // pinned by `authored-node-labels.test.ts`.
+    const authoredGoalLabel =
+      kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
+
     const prov: RecordProvenance = {
       provenance_class: "stated",
       source_quote: quote,
       brief_binding: briefBinding,
+      ...(authoredGoalLabel.authored ? { label_authored: true } : {}),
     };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
       id,
       kind,
-      // The label IS the user's own words. Nothing is paraphrased: a paraphrase
-      // badged `stated` would be a misrepresentation of the user to themselves,
-      // so the projector never rewrites a quote it attributes.
-      label: quote,
+      label: authoredGoalLabel.label,
       provenance: prov,
     };
 
@@ -2271,12 +2323,52 @@ function projectOnce(
     // stable across runs and distinct across different option sets.
     const decisionId = mintUnique(sha8("decision", ...optionNodes.map((n) => n.id)), usedIds);
     provenance[decisionId] = structuralProv;
+
+    // ⭐⭐ A REAL LABEL FOR THE DECISION, NOT ITS OWN CATEGORY WORD.
+    //
+    // This was the literal `"Decision"` — the node labelled with its own kind,
+    // which tells the reader nothing about the choice they are making. The
+    // records grammar has no `decision` stated kind and no decision claim, so
+    // the model never had a channel to author one; the label has to be derived
+    // here or not exist.
+    //
+    // ⚠ NOT A JOIN OF THE OPTION LABELS. Q3's TWIN forbids programmatic
+    // string-joining of options and permits an authored contrastive framing.
+    // `deriveDecisionLabel` does neither: it reads the sentence in which the
+    // USER framed the decision ("deciding whether to build our own fleet or
+    // partner with third-party couriers"), strips the deliberation frame, and
+    // bounds it. Their own "A or B" survives when they wrote one; nothing
+    // concatenates two node labels.
+    //
+    // Stated goal quotes come first because the model already judged those
+    // sentences decision-bearing — and this is where the two halves of the
+    // defect solve each other: a goal quote in deliberation frame is REFUSED as
+    // an objective precisely because it is the decision, and it is used here.
+    // When nothing yields a short faithful statement the literal is kept and
+    // `label_authored` is absent: an honest generic in preference to a
+    // confident wrong one, the same rule the quality bar applies to numbers.
+    const authoredDecision = deriveDecisionLabel({
+      brief,
+      goalQuotes: nodes
+        .filter((n) => n.kind === "goal")
+        .map((n) => provenance[n.id]?.source_quote)
+        .filter((q): q is string => typeof q === "string" && q.length > 0),
+    });
+    // ⚠ A DISTINCT OBJECT, not `structuralProv`. That one is SHARED with every
+    // structural edge below (`provenance[edgeId] = structuralProv`), so writing
+    // `label_authored` onto it would stamp the edges with a claim about a label
+    // they do not have.
+    const decisionProv: RecordProvenance = {
+      ...structuralProv,
+      ...(authoredDecision.authored ? { label_authored: true } : {}),
+    };
+    provenance[decisionId] = decisionProv;
     // Unshifted so the decision precedes its options in emission order.
     nodes.unshift({
       id: decisionId,
       kind: "decision",
-      label: "Decision",
-      provenance: structuralProv,
+      label: authoredDecision.label,
+      provenance: decisionProv,
     });
     for (const opt of optionNodes) {
       const edgeId = mintUnique(sha8("edge", "structural", decisionId, opt.id), usedIds);
