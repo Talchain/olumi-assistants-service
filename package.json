@@ -76,6 +76,8 @@
     "eval:decision-review:promotion-report": "tsx tools/orchestrator-eval/decision-review-promotion-report-cli.ts",
     "eval:promotion-gate": "tsx tools/orchestrator-eval/src/promotion-gate/cli.ts",
     "eval:promotion-gate:shrink-guard": "tsx tools/orchestrator-eval/src/promotion-gate/shrink-guard-cli.ts",
+    "eval:draft-quality": "tsx tools/draft-quality-eval/cli.ts --baseline",
+    "eval:draft-quality:test": "vitest run tools/draft-quality-eval",
     "preharness:typecheck": "pnpm openapi:generate",
     "harness:typecheck": "tsc -p tools/conversation-harness/tsconfig.json --noEmit",
     "harness:test": "vitest run --config tools/conversation-harness/vitest.config.ts"
