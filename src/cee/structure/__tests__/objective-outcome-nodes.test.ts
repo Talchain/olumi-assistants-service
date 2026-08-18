@@ -631,6 +631,34 @@ describe("⭐ the user's stated causality survives — a driver of objective B r
     expect(inbound.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("an existing demoted→primary edge is PRESERVED as outcome→goal, never a self-loop", () => {
+    // The self-loop exception in the outbound redirect (`to !== primaryId`).
+    // Without it, a user-stated "objective B contributes to objective A" edge is
+    // rewritten to `primary → primary` — a self-loop that asserts nothing and
+    // that the dedup would happily keep — while the mint then adds a SECOND
+    // `B → A` edge beside it. Bound by identity to the specific edge.
+    const graph: any = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "A" },
+        { id: "g2", kind: "goal", label: "B" },
+        { id: "d1", kind: "decision", label: "Decision" },
+      ],
+      edges: [{ id: "e_contrib", from: "g2", to: "g1", belief_exists: 0.6 }],
+    };
+    const merged = enforceSingleGoal(graph)!;
+    const edges = (merged.graph as any).edges as Array<Record<string, unknown>>;
+
+    // No self-loop was manufactured.
+    expect(edges.some((e) => e.from === "g1" && e.to === "g1")).toBe(false);
+    // The user's own contribution edge survived, by id, and is now outcome→goal.
+    const contrib = edges.filter((e) => e.from === "g2" && e.to === "g1");
+    expect(contrib).toHaveLength(1);
+    expect(contrib[0].id).toBe("e_contrib");
+    // …and it was NOT replaced by a freshly minted synthetic duplicate.
+    expect(contrib[0].provenance_source).not.toBe("synthetic");
+    expect(contrib[0].belief_exists).toBe(0.6);
+  });
+
   it("TWIN — an OUTBOUND edge from a demoted goal is still redirected (it has no legal shape)", () => {
     // `ALLOWED_EDGES` has no rule with `goal` as a source, so a `goal → factor`
     // or `goal → decision` edge cannot legally survive the conversion as
