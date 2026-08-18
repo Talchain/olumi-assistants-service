@@ -1113,3 +1113,77 @@ describe('W5 — the residual is STATED, not papered over', () => {
     ).toContain(J18.ids.option_label);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — THE FACTOR AXIS OF "NEVER GUESS BETWEEN AMBIGUOUS ENTITIES"
+//
+// ⚠ ADDED FROM A SURVIVING MUTANT, not from imagination. The battery mutated
+// rule 3b's `factorMatches.length !== 1` to `< 1` and the whole 132-test slice
+// stayed GREEN — so nothing pinned what happens when the message names TWO
+// factors the product is currently asking about. Under that mutant rule 3b
+// silently takes `factorMatches[0]`: the product PICKS one of two entities the
+// user might have meant, which is the wrong-entity class this seam exists to
+// remove, arriving on the factor axis instead of the option axis.
+//
+// The option axis was already covered — two outstanding options on one factor
+// ASK. This is its opposite-direction twin on the other half of the pair.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('W5 — rule 3b never picks between two factors the product is asking about', () => {
+  it('two ASKED-ABOUT factors and no option named → declines, and picks NEITHER', () => {
+    // Both factors are genuinely outstanding on this graph — the positive
+    // control, so a decline cannot pass by the factors being absent.
+    const pairs = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(j18Graph()));
+    const asked = new Set(pairs.map((p) => p.factorId));
+    expect(asked.has(J18.ids.factor_id)).toBe(true);
+    expect(asked.has(J18.ids.sibling_factor_id)).toBe(true);
+
+    const message =
+      `I meant the option's effect — set ${J18.ids.factor_label} and `
+      + `${J18.ids.sibling_factor_label} to 0.8.`;
+    // The trigger gate still says yes, so the decline is rule 3b's own decision
+    // and not an intent miss (trap 13b — pin the precondition in-test).
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes)).matched,
+    ).toBe(true);
+
+    const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+    // BY IDENTITY, both halves: no write at all, and specifically not a write
+    // to either candidate factor.
+    expect(resolution).toEqual({ matched: false, reason: 'no_outstanding_ask_for_factor' });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W5 — THE OTHER SURVIVING MUTANT, DEMONSTRATED EQUIVALENT RATHER THAN PINNED.
+//
+// `messageCarriesOptionCue`'s `optionLabels.length === 0 → false` was mutated
+// to `true` and survived. It is EQUIVALENT, and this is the demonstration
+// rather than the assertion (trap 13c: a survivor is a claim either way).
+// Caller 1, `impliesOptionInterventionEdit`, short-circuits on the same
+// condition before it can call. Caller 2 is rule 3b, and on an option-less
+// graph BOTH readings decline `option_not_named` — the mutant directly, the
+// original because the outstanding-ask set is necessarily empty.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('W5 — an option-less graph declines by BOTH routes (equivalence demonstration)', () => {
+  it('no options ⇒ no outstanding pairs ⇒ `option_not_named`, whichever branch is taken', () => {
+    const optionless = GraphV3.parse(j18Graph()) as GraphV3T;
+    const optionIds = new Set(
+      optionless.nodes.filter((n) => n.kind === 'option').map((n) => n.id),
+    );
+    expect(optionIds.size).toBe(4);
+    const stripped = {
+      ...optionless,
+      nodes: optionless.nodes.filter((n) => !optionIds.has(n.id)),
+      edges: optionless.edges.filter((e) => !optionIds.has(e.from) && !optionIds.has(e.to)),
+    };
+    // The second branch's premise, measured: with no options there is nothing
+    // for the product to be asking about.
+    expect(
+      deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(stripped)),
+    ).toEqual([]);
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t5_user_message, graph: stripped }),
+    ).toEqual({ matched: false, reason: 'option_not_named' });
+  });
+});
