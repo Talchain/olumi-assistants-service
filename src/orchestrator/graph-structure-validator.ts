@@ -6,14 +6,51 @@
  *
  * Checks run exhaustively (no short-circuit) — all violations are reported.
  *
- * Limits: configurable via CEE_GRAPH_MAX_NODES / CEE_GRAPH_MAX_EDGES env vars
- * (defaults: 20 nodes, 30 edges). These are AI mutation safety limits, deliberately
- * stricter than PLoT's platform limits (50/100). They constrain per-turn graph
- * mutations to keep patches reviewable. PLoT remains the canonical validation
- * authority for absolute graph size.
+ * ⚠ ABSOLUTE GRAPH SIZE IS NOT THIS VALIDATOR'S AUTHORITY, and never was.
+ *
+ * This file used to carry a `checkLimits` clause refusing any graph with more
+ * than `CEE_GRAPH_MAX_NODES` (20) nodes or `CEE_GRAPH_MAX_EDGES` (30) edges,
+ * while this very header declared *"PLoT remains the canonical validation
+ * authority for absolute graph size"*. The clause tested `graph.nodes.length`
+ * — the size of the WHOLE MODEL — on the Run-admission path, including on the
+ * first draft, before any mutation existed. Its documented purpose (keeping a
+ * per-turn PATCH reviewable) and its implementation (an absolute whole-model
+ * ceiling) were two different questions under one name.
+ *
+ * Removed 2026-08-18. The evidence, all measured, is in
+ * `olumi-docs/feedback-2026-08-16/GRAPH-SIZE-AUTHORITY-DERIVATION.md`:
+ *   - 20/30 had NO recorded rationale. Minted as 12/20 on 9 Mar 2026
+ *     (`2720f626`) with a stated justification — "match
+ *     graph-validator.types.ts" — that was FALSE when written (that file held
+ *     50/200 at the same SHA), then changed to 20/30 hours later (`89b89aaf`)
+ *     inside a commit headlined about a different number, with no reason given
+ *     for either value.
+ *   - Compute is not the constraint. Running ISL's own `compute_weighted_cost`,
+ *     a 24-node/46-edge draft prices at 5,903,760 of 24,000,000 units — 24.6%
+ *     of budget. Even the 50-node platform wall is only 63.1%.
+ *   - ISL deletes decision/option/constraint nodes from every graph it
+ *     computes (`filter_inference_graph`). 20 of 21 real captured drafts that
+ *     this clause refused land INSIDE 20/30 after that projection — CEE was
+ *     refusing models for a size nothing downstream ever sees.
+ *   - CEE's own draft prompt asks the model for up to 50 nodes / 100 edges
+ *     (`prompts/defaults-v22.ts` ← `config/graphCaps.ts`) and then refused the
+ *     output it had asked for.
+ *
+ * CEE's single size authority is now `src/config/graphCaps.ts`
+ * (`GRAPH_MAX_NODES` 50 / `GRAPH_MAX_EDGES` 100), which matches PLoT's
+ * canonical limits and the shared contract, and which is enforced on ingress
+ * (`routes/assist.v1.scenario-graph-register.ts` → `GRAPH_TOO_LARGE`), on
+ * draft output (`adapters/llm/*` trim), and on merge (`cee/dual-draft/merge.ts`).
+ * PLoT (`GRAPH_TOO_LARGE`, 50/100) and ISL (pydantic `max_length`, 50/200)
+ * enforce it again downstream.
+ *
+ * What this validator DOES own is unchanged: required node kinds, orphans,
+ * option→factor and decision→option connectivity, reachability to the goal,
+ * and acyclicity.
  */
 
 import type { GraphV3T } from "../schemas/cee-v3.js";
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
 // ============================================================================
 // Types
@@ -45,22 +82,11 @@ export interface StructuralValidationResult {
 // Constants
 // ============================================================================
 
-// AI mutation safety limits — deliberately stricter than PLoT's platform limits (50/100).
-// They constrain per-turn graph mutations to keep patches reviewable.
-// PLoT remains the canonical validation authority for absolute graph size.
-const DEFAULT_MAX_NODES = 20;
-const DEFAULT_MAX_EDGES = 30;
-
-function parseEnvInt(envVar: string | undefined, fallback: number): number {
-  if (!envVar) return fallback;
-  const parsed = parseInt(envVar, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
-const MAX_NODES = parseEnvInt(process.env.CEE_GRAPH_MAX_NODES, DEFAULT_MAX_NODES);
-// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
-const MAX_EDGES = parseEnvInt(process.env.CEE_GRAPH_MAX_EDGES, DEFAULT_MAX_EDGES);
+// ⚠ There is deliberately no local node/edge ceiling here, and no
+// `CEE_GRAPH_MAX_NODES` / `CEE_GRAPH_MAX_EDGES` read. A second pair of size
+// constants in this file is what let a 20/30 ceiling act as the absolute
+// authority while `graphCaps.ts` advertised 50/100 to the drafting prompt and
+// to `/v1/limits`. Size questions resolve against `graphCaps` and nowhere else.
 const MIN_OPTIONS = 2;
 
 // ============================================================================
@@ -76,8 +102,21 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
   // this code; "cannot reach the goal" reads correctly for both.
   NO_PATH_TO_GOAL: 'This change would leave a node that cannot reach the goal.',
   CYCLE_DETECTED: 'This change would create a circular dependency in the model.',
-  NODE_LIMIT_EXCEEDED: 'The model has reached its maximum size. Try simplifying before adding more.',
-  EDGE_LIMIT_EXCEEDED: 'Adding this would make the model too complex to analyse reliably. Try simplifying first.',
+  // ⚠ These two are no longer produced by `validateGraphStructure` — see the
+  // file header. They remain in the catalogue because `StructuralViolationCode`
+  // is shared vocabulary and the add-risk preflight below still classifies
+  // against them.
+  //
+  // The previous EDGE copy — "Adding this would make the model too complex to
+  // analyse reliably" — was a compute claim this codebase could not support and
+  // measurement refutes: at the 50-node/100-edge ceiling a full analysis costs
+  // 63.1% of ISL's budget, and at a typical refused draft (24/46) it costs
+  // 24.6%. Nothing about a model this size is unreliable to analyse. The copy
+  // now states the one thing that IS true — the size Olumi accepts — and names
+  // the number, derived from the authority rather than mirroring it, so a
+  // refused user knows what they have to work to.
+  NODE_LIMIT_EXCEEDED: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
+  EDGE_LIMIT_EXCEEDED: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
   NO_GOAL: 'The model would have no goal node.',
   NO_DECISION: 'The model would have no decision node.',
   FEWER_THAN_TWO_OPTIONS: 'The model would have fewer than two options.',
@@ -99,7 +138,7 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
  */
 /**
  * Pre-LLM preflight for add-risk: would adding one risk node plus the
- * minimal connecting edges push the graph past MAX_NODES / MAX_EDGES?
+ * minimal connecting edges push the graph past CEE's size authority?
  *
  * Conservative edge projection: the deterministic add-risk path creates
  * one risk node plus typically TWO edges (factor → risk inbound; risk
@@ -107,11 +146,17 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
  * +2 edges as the floor — matches what the deterministic path actually
  * emits and avoids false positives that would block valid adds.
  *
- * Pure synchronous arithmetic over the same MAX_NODES / MAX_EDGES
- * constants the post-mutation validator uses, so a positive preflight
- * here implies the post-mutation validator would also reject. Used by
- * `edit-graph-dispatch.ts` to skip the 16–18s LLM call when the request
- * is guaranteed to fail at validation time.
+ * ⚠ REBOUND 2026-08-18, and the rebinding is load-bearing. This used to read
+ * the same local 20/30 constants as `checkLimits`, and its contract was
+ * *"a positive preflight here implies the post-mutation validator would also
+ * reject"*. `checkLimits` is gone, so left alone this would have refused an
+ * add that the rest of CEE — and PLoT, and ISL — would happily have accepted:
+ * the product declining an action it could honour, which is the same defect as
+ * asking a question it cannot accept an answer to. It now anticipates the
+ * authority that genuinely still refuses: `graphCaps` (50/100), re-enforced at
+ * the graph-register ingress, at PLoT's preflight (`GRAPH_TOO_LARGE`) and at
+ * ISL's parse wall. Used by `edit-graph-dispatch.ts` to skip the 16–18s LLM
+ * call when the request is guaranteed to fail downstream anyway.
  */
 export interface AddRiskPreflight {
   readonly over_node_limit: boolean;
@@ -132,14 +177,14 @@ export function wouldExceedAddRiskLimits(graph: GraphV3T): AddRiskPreflight {
   const projected_nodes = current_nodes + 1;
   const projected_edges = current_edges + PROJECTED_EDGES_FOR_ADD_RISK;
   return {
-    over_node_limit: projected_nodes > MAX_NODES,
-    over_edge_limit: projected_edges > MAX_EDGES,
+    over_node_limit: projected_nodes > GRAPH_MAX_NODES,
+    over_edge_limit: projected_edges > GRAPH_MAX_EDGES,
     current_nodes,
     projected_nodes,
     current_edges,
     projected_edges,
-    node_limit: MAX_NODES,
-    edge_limit: MAX_EDGES,
+    node_limit: GRAPH_MAX_NODES,
+    edge_limit: GRAPH_MAX_EDGES,
   };
 }
 
@@ -147,7 +192,8 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
   const violations: StructuralViolation[] = [];
 
   checkRequiredNodeKinds(graph, violations);
-  checkLimits(graph, violations);
+  // No size check. Absolute graph size is `graphCaps`' question, not this
+  // validator's — see the file header for the measurement that settled it.
   checkOrphanNodes(graph, violations);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
@@ -179,21 +225,6 @@ function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation
     violations.push({
       code: 'FEWER_THAN_TWO_OPTIONS',
       detail: `Only ${optionCount} option node(s) — minimum is ${MIN_OPTIONS}`,
-    });
-  }
-}
-
-function checkLimits(graph: GraphV3T, violations: StructuralViolation[]): void {
-  if (graph.nodes.length > MAX_NODES) {
-    violations.push({
-      code: 'NODE_LIMIT_EXCEEDED',
-      detail: `${graph.nodes.length} nodes exceeds limit of ${MAX_NODES}`,
-    });
-  }
-  if (graph.edges.length > MAX_EDGES) {
-    violations.push({
-      code: 'EDGE_LIMIT_EXCEEDED',
-      detail: `${graph.edges.length} edges exceeds limit of ${MAX_EDGES}`,
     });
   }
 }
