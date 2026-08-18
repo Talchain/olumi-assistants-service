@@ -78,6 +78,11 @@
  *   WITNESS_TURN_TIMEOUT_MS      (default 300000)
  *   WITNESS_FRESHNESS_TIMEOUT_MS (default 900000)
  *
+ * This script reads and writes NO repository files, and writes nothing to disk
+ * at all — which is what makes the workflow's sparse checkout honest. The
+ * committed spec fixtures were produced by a throwaway wrapper around these same
+ * exports, not by a capture mode living in the CI path.
+ *
  * COST: exactly ONE staging scenario row per run.
  */
 
@@ -155,6 +160,9 @@ const BASE_HASH_DIVERGED = "BASE_HASH_DIVERGED";
  * in a log it would read as if the witness thought it held a real hash.
  */
 export const CANONICAL_READ_SENTINEL = "witness-canonical-read-not-a-hash";
+
+/** The production host this witness must never touch. Compared as a parsed hostname. */
+const PRODUCTION_HOST = "olumi-assistants-service.onrender.com";
 
 /** A node id that cannot exist, for the read-only probe's required non-empty array. */
 const CANONICAL_READ_PROBE_NODE = "witness-canonical-read-probe-node";
@@ -726,29 +734,6 @@ const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}
 const uuid = () => globalThis.crypto.randomUUID();
 const log = (msg) => process.stdout.write(`${msg}\n`);
 
-/**
- * Optionally write each response body to `WITNESS_CAPTURE_DIR`.
- *
- * Not decoration. The committed spec's fixtures MUST be real wire captures: a
- * hand-written mock only proves the assertions agree with the author's idea of
- * the shape, which is the one thing an author cannot check. This is how the
- * pre-delete control fixture and the post-delete healthy fixture are produced
- * from the same run, so the control is the SAME scenario one step earlier rather
- * than an invented contrast. Off unless the env var is set; the import is lazy so
- * the CI path stays dependency-free and reads no repository files.
- */
-async function capture(name, body) {
-  const dir = process.env.WITNESS_CAPTURE_DIR;
-  if (!dir) return;
-  try {
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(`${dir}/${name}.json`, JSON.stringify(body, null, 2));
-  } catch (e) {
-    log(`  note: capture of ${name} failed (${e?.name ?? e}) — the run itself is unaffected`);
-  }
-}
-
 /** Leg results, in order, each with its own verdict. Never collapsed into one boolean. */
 const legs = [];
 /** The scenario this run created, echoed in the report so the row stays findable. */
@@ -993,8 +978,21 @@ async function main() {
     log("FATAL: WITNESS_BASE_URL and WITNESS_API_KEY are required.");
     process.exit(2); // fail closed — a missing secret must never read as a pass
   }
-  if (/olumi-assistants-service\.onrender\.com/.test(base)) {
-    log(`FATAL: refusing to run against production (${base}). This witness targets staging.`);
+  // ⚠ ANCHORED ON THE PARSED HOSTNAME, not a substring of the URL.
+  // An unanchored regex over a URL matches anywhere — `https://evil.test/
+  // ?x=olumi-assistants-service.onrender.com` would trip it while a genuine
+  // production host reached via a redirect would not. Parse, then compare the
+  // host exactly (and its subdomains). An unparseable base fails CLOSED: a
+  // witness that cannot tell which environment it is pointed at must not run.
+  let host;
+  try {
+    host = new URL(base).hostname.toLowerCase();
+  } catch {
+    log(`FATAL: WITNESS_BASE_URL is not a valid URL (${base}).`);
+    process.exit(2);
+  }
+  if (host === PRODUCTION_HOST || host.endsWith(`.${PRODUCTION_HOST}`)) {
+    log(`FATAL: refusing to run against production (${host}). This witness targets staging.`);
     process.exit(2);
   }
 
@@ -1085,7 +1083,6 @@ async function main() {
     if (carriedCommittedGraph(t2.body)) drafting = t2.body;
   }
 
-  await capture("drafting-turn", drafting);
   const picked = pickDeleteTargets(drafting);
   if (picked.error) {
     recordLeg(
@@ -1222,7 +1219,6 @@ async function main() {
     return report();
   }
   buildShas.add(buildShaOf(del.body));
-  await capture("delete-response", del.body);
   noteCasConflicts("DELETE", deleted);
   {
     const f = [
@@ -1283,14 +1279,13 @@ async function main() {
     twin: { interventions: Object.fromEntries(picked.twin.interventionKeys.map((k) => [k, 0])), id: picked.twin.id },
     excludeIds: [picked.target.id],
   });
+  // Defaults to UNKNOWN on purpose: if no branch below can measure the property,
+  // the leg must report "not measured", never a pass.
   let orphanVerdict = "UNKNOWN";
-  let orphanDetail = "";
+  let orphanDetail = `NOT EXERCISED — ${orphanPick.why ?? "no reason recorded"}. A scan with nothing to find is not a pass.`;
   let orphanFindings = [];
 
-  if (orphanPick.id === null) {
-    orphanVerdict = "UNKNOWN";
-    orphanDetail = `NOT EXERCISED — ${orphanPick.why}. A scan with nothing to find is not a pass.`;
-  } else {
+  if (orphanPick.id !== null) {
     // Non-vacuity, measured BEFORE the delete, on every surface available.
     const preRefsWire = countReferencesTo(wireGraphOf(del.body), [orphanPick.id]);
     const preRefsDb = preDeleteRow.graph ? countReferencesTo(preDeleteRow.graph, [orphanPick.id]) : null;
@@ -1327,7 +1322,6 @@ async function main() {
         `readable surface before the delete, so the scan could not have failed`;
     } else {
       buildShas.add(buildShaOf(fdel.body));
-      await capture("orphan-delete-response", fdel.body);
       removedIds.push(orphanPick.id);
       orphanFindings = [
         ...assertNoOrphanedReferences("ORPHAN(wire: draft_graph.nodes only)", wireGraphOf(fdel.body), removedIds),
@@ -1375,7 +1369,6 @@ async function main() {
     turnTimeout,
   );
   buildShas.add(buildShaOf(rerun.body));
-  await capture("rerun-response", rerun.body);
   {
     const seen = assertModelWithout("RERUN", rerun.body, { absentIds: removedIds, presentIds: [picked.twin.id] });
     const f = [...seen.findings];
@@ -1423,7 +1416,6 @@ async function main() {
     turnTimeout,
   );
   buildShas.add(buildShaOf(reload.body));
-  await capture("reload-response", reload.body);
   const reloadHash = await readCanonicalHash(ctx);
   {
     const seen = assertModelWithout("RELOAD", reload.body, { absentIds: removedIds, presentIds: [picked.twin.id] });

@@ -63,8 +63,37 @@ const REPO_ROOT = resolve(__dirname, "../../..");
 const FIXTURES = resolve(REPO_ROOT, "tests/unit/ci/fixtures");
 const WORKFLOW_PATH = resolve(REPO_ROOT, ".github/workflows/staging-structural-delete-witness.yml");
 
-function readJson(p: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
+/**
+ * The slice of a turn body these tests touch.
+ *
+ * Narrow on purpose: `tsc --noEmit` over the WHOLE tree (the Typecheck Drift
+ * ratchet) type-checks this file even though `tsconfig.build.json` excludes
+ * tests, and reaching through an `unknown` fixture is exactly how a spec adds
+ * silent drift. Typing only what is read keeps the fixtures honest without
+ * mirroring the whole wire contract here.
+ */
+interface CaptureNode {
+  id: string;
+  kind?: string;
+  label?: string;
+  interventions?: Record<string, unknown>;
+}
+interface Capture {
+  assistant_text?: string;
+  draft_graph?: { nodes: CaptureNode[]; edges: Array<{ from: string; to: string }> };
+  analysis_ready?: { options?: Array<{ option_id?: string }> };
+  [key: string]: unknown;
+}
+
+function readJson(p: string): Capture {
+  return JSON.parse(readFileSync(p, "utf8")) as Capture;
+}
+
+/** The exact label the base graph held for a node — what the acknowledgement must name. */
+function labelOf(capture: Capture, id: string): string {
+  const node = capture.draft_graph?.nodes.find((n) => n.id === id);
+  if (node?.label === undefined) throw new Error(`fixture has no label for '${id}' — the ack test would be vacuous`);
+  return node.label;
 }
 
 /** The world in which the delete DID NOT happen. Every absence check must fail on it. */
@@ -140,7 +169,7 @@ describe("assertModelWithout — absence paired with presence", () => {
   });
 
   it("reports a turn that names NOTHING as UNMEASURED, not as loss (the defect this witness shipped once)", () => {
-    const bare = { ...RELOAD_REFUSAL, analysis_ready: { options: [] } };
+    const bare: Capture = { ...RELOAD_REFUSAL, analysis_ready: { options: [] } };
     const r = assertModelWithout("t", bare, { absentIds: [DELETED_ID], presentIds: [SURVIVOR_ID] });
     expect(r.observable).toBe(false);
     expect(r.findings).toEqual([]); // no verdict either way
@@ -158,7 +187,7 @@ describe("assertModelWithout — absence paired with presence", () => {
 });
 
 describe("assertTruthfulAcknowledgement — no silent 200, and the magnitude must be right", () => {
-  const expected = { id: DELETED_ID, label: PRE_DELETE.draft_graph.nodes.find((n: { id: string }) => n.id === DELETED_ID).label, incidentEdgeCount: INCIDENT_EDGE_COUNT };
+  const expected = { id: DELETED_ID, label: labelOf(PRE_DELETE, DELETED_ID), incidentEdgeCount: INCIDENT_EDGE_COUNT };
 
   it("is SILENT on the real receipt", () => {
     expect(assertTruthfulAcknowledgement("t", 200, COMMITTED, expected)).toEqual([]);
@@ -178,14 +207,14 @@ describe("assertTruthfulAcknowledgement — no silent 200, and the magnitude mus
   });
 
   it("POSITIVE CONTROL: a committed delete that says NOTHING is a silent 200", () => {
-    const silent = { ...COMMITTED, assistant_text: "" };
+    const silent: Capture = { ...COMMITTED, assistant_text: "" };
     expect(assertTruthfulAcknowledgement("t", 200, silent, expected).join("\n")).toContain(
       "the product said NOTHING — a silent HTTP 200",
     );
   });
 
   it("POSITIVE CONTROL: an acknowledgement that does not NAME what went", () => {
-    const vague = { ...COMMITTED, assistant_text: "Done. That change is saved." };
+    const vague: Capture = { ...COMMITTED, assistant_text: "Done. That change is saved." };
     expect(assertTruthfulAcknowledgement("t", 200, vague, expected).join("\n")).toContain(
       "does not name what was removed",
     );
@@ -226,11 +255,11 @@ describe("assertBatchAtomicity — the cascade took its edges, and nothing else"
   });
 
   it("POSITIVE CONTROL: a surviving edge whose endpoint is gone is caught as dangling", () => {
-    const dangling = {
+    const dangling: Capture = {
       ...COMMITTED,
       draft_graph: {
-        ...COMMITTED.draft_graph,
-        edges: [...COMMITTED.draft_graph.edges, { from: DELETED_ID, to: SURVIVOR_ID }],
+        nodes: COMMITTED.draft_graph?.nodes ?? [],
+        edges: [...(COMMITTED.draft_graph?.edges ?? []), { from: DELETED_ID, to: SURVIVOR_ID }],
       },
     };
     const f = assertBatchAtomicity("t", dangling, baseEdges, [DELETED_ID]);
@@ -348,8 +377,8 @@ describe("classifyRerun — a refusal that names something you deleted is THIS d
 describe("pickDeleteTargets / pickOrphanTarget — deterministic, and they refuse rather than guess", () => {
   it("binds a target and a twin from the real drafted model, sorted by id", () => {
     const p = pickDeleteTargets(PRE_DELETE);
-    expect("error" in p && p.error).toBeFalsy();
-    if ("error" in p && p.error) return;
+    expect(p.error).toBeUndefined();
+    if (p.error !== undefined) return;
     expect(p.target.id).toBe(DELETED_ID);
     expect(p.twin.id).toBe(SURVIVOR_ID);
     expect(p.incidentEdgePairs).toHaveLength(INCIDENT_EDGE_COUNT);
@@ -360,7 +389,7 @@ describe("pickDeleteTargets / pickOrphanTarget — deterministic, and they refus
   it("REFUSES a model with fewer than two options instead of weakening its own precondition", () => {
     const thin = { draft_graph: { nodes: [{ id: "a", kind: "option" }], edges: [] } };
     const p = pickDeleteTargets(thin);
-    expect("error" in p && p.error).toContain("the acceptance needs 2");
+    expect(p.error).toContain("the acceptance needs 2");
   });
 
   it("prefers FACTOR mode when the survivor names two intervention targets", () => {

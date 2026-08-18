@@ -52,7 +52,13 @@ export declare function wireGraphOf(body: unknown): { nodes: unknown[]; edges: u
 
 /** Deterministic target selection; returns `{ error }` rather than guessing. */
 export declare function pickDeleteTargets(body: unknown):
-  | { error: string }
+  | {
+      error: string;
+      target?: undefined;
+      twin?: undefined;
+      incidentEdgePairs?: undefined;
+      namedEdge?: undefined;
+    }
   | {
       error?: undefined;
       target: { id: string; label: string | null };
