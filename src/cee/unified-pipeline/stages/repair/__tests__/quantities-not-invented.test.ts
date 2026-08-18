@@ -341,3 +341,54 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
     });
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// F — THE CHANGE IS DISCLOSED TO THE USER, NOT ONLY LOGGED
+//
+// Standing rule (coordinator, 2026-08-18): a projection that RE-EXPRESSES the
+// model without losing a causal claim is Class A and acceptable; one that DROPS
+// a factor, edge, risk or uncertainty is Class B and must never be built. If
+// anything changes what the analysis sees, it must be disclosed to the user —
+// never a bare log line.
+//
+// This fix is Class A and then some: it drops nothing (the factor and its prior
+// both survive) and it WIDENS declared uncertainty rather than narrowing it.
+// But it does change what the analysis sees, so the disclosure obligation
+// applies, and this block pins it instead of trusting the log.
+//
+// THE ONE HOP, verified at the bytes: `UNREACHABLE_FACTOR_RECLASSIFIED` is in
+// `REPAIR_CODE_TO_ADJUSTMENT` (`stages/boundary.ts:44`), so these repairs become
+// user-reviewable `analysis_ready.model_adjustments` rows, and `boundary.ts:168`
+// populates each row's `reason` from `r.action` — the exact string asserted here.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("F — the user is told, in the repair record that reaches them", () => {
+  it("states the cause in the action string that becomes model_adjustments.reason", () => {
+    const graph = unreachableFactorGraph({
+      value: 0.5,
+      extractionType: "inferred",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    const result = handleUnreachableFactors(graph, "causal");
+    const repair = result.repairs.find((r) => r.path.includes("fac_x"));
+
+    // Bound by identity to the disclosing repair, and to its CODE — because the
+    // code is what decides whether this reaches the user at all.
+    expect(repair?.code).toBe("UNREACHABLE_FACTOR_RECLASSIFIED");
+    expect(repair?.action).toContain("system default");
+    expect(repair?.action).toContain("no information");
+    // The user is told what was NOT done, which is the honest part.
+    expect(repair?.action).toContain("not narrowed");
+  });
+
+  it("TWIN — a genuine baseline's disclosure does NOT claim ignorance", () => {
+    const graph = unreachableFactorGraph({ value: 0.42, extractionType: "inferred" });
+
+    const result = handleUnreachableFactors(graph, "causal");
+    const repair = result.repairs.find((r) => r.path.includes("fac_x"));
+
+    expect(repair?.action).not.toContain("system default");
+    expect(repair?.action).toContain("synthesised prior");
+  });
+});
