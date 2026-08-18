@@ -333,35 +333,79 @@ export function messageCarriesOptionCue(
   optionLabels: readonly string[],
   nonOptionLabels: readonly string[],
 ): boolean {
-  if (optionLabels.length === 0) return false;
+  // ⭐ DERIVED FROM `optionCueMatches`, NOT RE-SPELLED. "Does this name an
+  // option?" and "WHICH options does this name?" are the same question asked at
+  // two resolutions, and two implementations of it would be the pair this estate
+  // keeps paying for — a REFUSAL and a WRITE disagreeing about one sentence
+  // (trap 12 / trap 21). Non-empty ⇔ the previous boolean, exactly: every cue in
+  // the derived set comes from some option's own label, so a token that matched
+  // any cue necessarily matches that option's slice of it.
+  return optionCueMatches(message, optionLabels, nonOptionLabels).length > 0;
+}
+
+/**
+ * ⭐⭐ WHICH options this message points at, as INDICES into `optionLabels`.
+ *
+ * Same two triggers as before, unchanged and in the same order: a full
+ * word-bounded label, or a distinctive token (or an inflection of one) belonging
+ * to THAT option's label. Indices rather than ids so no caller has to restate
+ * the label list in a second shape — the caller already holds the array it
+ * passed in.
+ *
+ * ⚠ AN INDEX APPEARS AT MOST ONCE, and two indices are a genuine AMBIGUITY, not
+ * a tie to break. Distinctive tokens are derived by subtracting every other
+ * entity's vocabulary, so a cue shared by two option labels ("self-serve" across
+ * a self-serve option and a hybrid that pilots it) genuinely fails to identify
+ * either — and the estate's ruling for that state is to ask, never to pick
+ * (CLAUDE.md trap 22f).
+ */
+export function optionCueMatches(
+  message: string,
+  optionLabels: readonly string[],
+  nonOptionLabels: readonly string[],
+): readonly number[] {
+  if (optionLabels.length === 0) return [];
   const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
   const padded = ` ${normalised} `;
+  const matched = new Set<number>();
 
-  for (const raw of optionLabels) {
-    if (typeof raw !== 'string') continue;
+  optionLabels.forEach((raw, index) => {
+    if (typeof raw !== 'string') return;
     const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (label.length >= 3 && containsPhrase(padded, label)) return true;
-  }
+    if (label.length >= 3 && containsPhrase(padded, label)) matched.add(index);
+  });
 
   const { cues, claimedElsewhere } = deriveOptionDistinctiveTokens(
     optionLabels,
     nonOptionLabels,
   );
-  if (cues.size === 0) return false;
-  for (const token of tokenise(normalised)) {
-    if (token.length < MIN_DISTINCTIVE_TOKEN_LENGTH) continue;
-    // A word that names another entity is evidence for THAT entity, never
-    // for an option — even if it happens to share a stem with an option
-    // cue. Without this the exclusion is one-sided and the inflection rule
-    // leaks: the live fixture "Hire Two Senior Engineers Locally" (option)
-    // and "Local Senior Hire Indicator" (factor) let the factor's own word
-    // "local" match the option's "locally", refusing a perfectly ordinary
-    // factor edit. Subtraction has to apply to BOTH sides of the match.
-    if (claimedElsewhere.has(token)) continue;
-    for (const cue of cues) {
-      if (tokensShareLexeme(cue, token)) return true;
-    }
+  if (cues.size > 0) {
+    const messageTokens = tokenise(normalised).filter(
+      // A word that names another entity is evidence for THAT entity, never
+      // for an option — even if it happens to share a stem with an option
+      // cue. Without this the exclusion is one-sided and the inflection rule
+      // leaks: the live fixture "Hire Two Senior Engineers Locally" (option)
+      // and "Local Senior Hire Indicator" (factor) let the factor's own word
+      // "local" match the option's "locally", refusing a perfectly ordinary
+      // factor edit. Subtraction has to apply to BOTH sides of the match.
+      (token) => token.length >= MIN_DISTINCTIVE_TOKEN_LENGTH && !claimedElsewhere.has(token),
+    );
+    optionLabels.forEach((raw, index) => {
+      if (typeof raw !== 'string' || matched.has(index)) return;
+      // THIS option's slice of the derived cue set — the subtraction is not
+      // re-run per option, only projected, so the guard's meaning is identical.
+      const ownCues = tokenise(raw).filter((token) => cues.has(token));
+      if (ownCues.length === 0) return;
+      for (const token of messageTokens) {
+        for (const cue of ownCues) {
+          if (tokensShareLexeme(cue, token)) {
+            matched.add(index);
+            return;
+          }
+        }
+      }
+    });
   }
 
-  return false;
+  return [...matched].sort((a, b) => a - b);
 }

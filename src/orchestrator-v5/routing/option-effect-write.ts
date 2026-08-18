@@ -205,10 +205,16 @@ import {
 } from './configure-option-intent.js';
 import {
   messageCarriesOptionCue,
+  optionCueMatches,
   phraseOccurrences,
   type PhraseOccurrence,
 } from './option-intervention-guard.js';
-import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value-binding.js';
+import { readMissingValueAnswer } from './missing-value-answer.js';
+import {
+  deriveAskedEffectPair,
+  deriveMissingEffectPairs,
+  type MissingEffectPair,
+} from './repair-value-binding.js';
 
 /**
  * The triggers that mean "this sentence is explicitly about an OPTION'S
@@ -277,6 +283,45 @@ export const OPTION_EFFECT_WRITE_KNOWN_DROPPED: readonly string[] = Object.freez
   // Qualitative: choosing a number would invent the user's judgement (P5).
   "Set the {option} option's effect on {factor} to high",
 ]);
+
+/**
+ * ⭐ RULE 3c's honest-gap protocol (trap 22f) — ordinary answers to the
+ * product's own ask that this seam KNOWINGLY DOES NOT CLAIM, each with the
+ * reason, pinned as data so the suite REDs if the claim widens or narrows.
+ *
+ * `{option}` / `{factor}` are substituted with REAL labels from the graph under
+ * test, so the set exercises the live resolver rather than a near-miss.
+ */
+export const ANSWERED_ASK_KNOWN_DROPPED: readonly { readonly message: string; readonly why: string }[] =
+  Object.freeze([
+    Object.freeze({
+      message: 'For the hybrid option, set it to 0.8.',
+      why:
+        'a COMMA continues a clause, so the bare referent binds to what that clause introduced — '
+        + 'reading "for the hybrid option" as mere context would be a wrong-entity write. Only a '
+        + 'sentence-level break makes the preceding words context',
+    }),
+    Object.freeze({
+      message: 'The numbers are all guesses at this point - use 0.8.',
+      why:
+        'no bare referent. "Use 0.8" alone is unmistakably an answer because nothing else is in '
+        + 'the message; after a clause it might belong to that clause instead',
+    }),
+    Object.freeze({
+      message: 'The team disagrees about this - set the {factor} baseline to 0.8.',
+      why: 'the `baseline` suppressor — the sentence names two different entities (W1 class)',
+    }),
+    Object.freeze({
+      message: 'That seems about right - set it to 80%.',
+      why: 'not a model-unit value; this writer performs no conversion',
+    }),
+    Object.freeze({
+      message: 'It would push it up a lot - set it to 0.8 for the {option} option.',
+      why:
+        'a NAMED TARGET inside the answering clause: the clause is no longer the closed bare-referent '
+        + 'form, so the edit lane owns it exactly as it does today',
+    }),
+  ]);
 
 /** The word that means "the factor's own observed value", never an effect. */
 const BASELINE_FRAMING = /\bbaselines?\b/;
@@ -432,6 +477,21 @@ export type OptionEffectWriteDeclineReason =
    * never asking about this" from "the option reference was unreadable".
    */
   | 'no_outstanding_ask_for_factor'
+  /**
+   * RULE 3c reached and there is no question to answer: the product's own
+   * recovery copy is not currently asking for an effect value (the head blocker
+   * is a mapping/encoding issue, or there are no blockers). Distinct from
+   * `no_outstanding_ask_for_factor`, which means the ask exists and the message
+   * does not land on it.
+   */
+  | 'no_answered_ask'
+  /**
+   * RULE 3c reached and the prose names an entity OUTSIDE the pair the product
+   * asked about — a different option, or a different factor. The answer is not
+   * an answer to THIS question, so the ask is not the authority on it and the
+   * turn keeps today's route.
+   */
+  | 'answer_points_elsewhere'
   | 'factor_not_named'
   | 'value_already_set';
 
@@ -608,6 +668,179 @@ function resolveFromOutstandingAsk(
 }
 
 /**
+ * ⭐⭐ RULE 3c — THE USER ANSWERED THE QUESTION THE PRODUCT ASKED.
+ *
+ * WITNESSED (18 Aug 2026 composed model-compiler journey, deployed CEE
+ * `585f8dce` / UI `dd089a50`, fresh guest, governed-corpus brief). Olumi asked,
+ * on screen:
+ *
+ *   "Next, choose the missing effect value for "double down on enterprise
+ *    sales (higher…" on "Sales Headcount - Hybrid Maintained" so the
+ *    comparison can be prepared."
+ *
+ * The user answered it in ordinary English (turn 4, verbatim):
+ *
+ *   "Doubling down on enterprise sales would push sales headcount up a lot -
+ *    set it to 0.8."
+ *
+ * `detectConfigureOptionIntent` does not match that sentence AT ALL — it frames
+ * itself as nothing in particular, which is exactly what an answer does — so
+ * rule 3b (#1034) could not reach it, the turn fell to the value-update path,
+ * and the product refused the direct answer to its own question. That is P8, and
+ * the founder's invariant states it without hedging: **if Olumi asks for X, a
+ * natural answer must modify X and nothing else.**
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠⚠ WHY THIS IS NOT "MORE PATTERNS", WHICH IS THE FAILURE MODE ON THIS SEAM.
+ *
+ * Four rounds oscillated on a neighbouring natural-language predicate
+ * (CLAUDE.md trap 22f) and the ruling out of it was to stop discriminating by
+ * sentence shape. So the IDENTITY here is not read from the sentence at all:
+ * it is `deriveAskedEffectPair` — literally the blocker the product's own
+ * recovery copy composed the question from (`readiness-recovery.ts:194`, P7).
+ * The sentence is consulted for exactly three things, all by SHIPPED readers,
+ * none of them new:
+ *
+ *   · is it an ANSWER?      `readMissingValueAnswer` — one closed referent set,
+ *                           one number grammar, one owner shared with the
+ *                           clarify composer.
+ *   · what VALUE?           `readOptionEffectValue` — the same model-unit
+ *                           grammar path (3) uses, untouched.
+ *   · does it point ELSEWHERE?  `optionCueMatches` (the misroute guard's own
+ *                           distinctive-token subtraction) and `matchLabels`
+ *                           (the same word-bounded matcher).
+ *
+ * No content word is matched anywhere in this rule. It can only ever decline.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE CONJUNCTS, each load-bearing:
+ *
+ *   (a) The shipped intent classifier DECLINED. Rule 3c is unreachable for any
+ *       sentence the classifier claims, so the `option_value_set` and
+ *       `chip_prefix` exclusions — and with them the whole W1 ambiguity class —
+ *       are preserved BY CONSTRUCTION rather than by a second check that could
+ *       drift. (Enforced at the call site.)
+ *   (b) The message carries LEADING CONTEXT. A whole-message bare answer
+ *       ("Set it to 0.8.") already has an owner in `resolveRepairValueBinding`,
+ *       whose slot rule is "exactly one pair missing, else ask". Two owners for
+ *       one shape is the trap-21 defect this estate keeps paying for, so this
+ *       rule declines it and leaves it where it is.
+ *   (c) The product IS asking for an effect value — `deriveAskedEffectPair`
+ *       returns the head blocker's pair, or null when the recovery copy is
+ *       rendering some other sentence entirely.
+ *   (d) The prose points at NO entity outside that pair. A named option that is
+ *       not the asked one, or any non-option entity named in full that is not
+ *       the asked factor, withdraws the claim. TWO named options that are both
+ *       outstanding on the asked factor become an ASK — the ambiguity is the
+ *       product, never a guess.
+ *
+ * ⚠ THE STATED RESIDUAL, pinned rather than papered over. A PARTIAL reference to
+ * an entity this graph does not make distinctive — "the burn rate is what worries
+ * me - set it to 0.8", where "burn"/"rate" are claimed by several labels — is
+ * invisible to both readers, so the answer binds to the asked pair. Closing it
+ * needs a partial/synonym entity reader, which is the oscillating predicate the
+ * ruling above forbids. It is BOUNDED and VISIBLE rather than silent:
+ * `formatOptionEffectWriteAck` names the option and factor it wrote, so the user
+ * reads which entity moved — and the asked pair is, by construction, the one the
+ * product just put on screen. Pinned as `ANSWERED_ASK_RESOLVED_LIMIT`.
+ */
+export const ANSWERED_ASK_RESOLVED_LIMIT = Object.freeze({
+  shape:
+    'an entity referred to only by words this graph does not make distinctive — e.g. "the burn rate '
+    + 'is what worries me - set it to 0.8" where "burn" and "rate" are claimed by several labels',
+  behaviour: 'binds to the pair the product asked about, and names it in the acknowledgement',
+  why_not_closed:
+    'closing it needs a partial/synonym entity reader over natural language; four rounds of that '
+    + 'oscillated on a neighbouring seam (CLAUDE.md trap 22f), and the exit named there is to resolve '
+    + 'from the product\'s own outstanding question rather than from sentence shape — which is what '
+    + 'this rule does',
+});
+
+function resolveFromAnsweredAsk(
+  paddedMessage: string,
+  normalisedMessage: string,
+  graph: GraphV3T,
+  rawGraph: unknown,
+  value: number,
+): OptionEffectWriteResolution {
+  const readiness = buildCanonicalAnalysisReadyFromGraph(rawGraph);
+  const asked = deriveAskedEffectPair(readiness);
+  if (asked === null) return decline('no_answered_ask');
+
+  const optionNodes = graph.nodes.filter((n) => n.kind === 'option');
+  const nonOptionNodes = graph.nodes.filter((n) => n.kind !== 'option');
+  const optionLabels = optionNodes.map((n) => (typeof n.label === 'string' ? n.label : ''));
+  const nonOptionLabels = nonOptionNodes
+    .map((n) => (typeof n.label === 'string' ? n.label : ''))
+    .filter((label) => label.trim().length > 0);
+
+  // ── (d) THE FACTOR AXIS. Any NON-OPTION entity named in full that is not the
+  // asked factor means the sentence is about something else. Checked over every
+  // non-option node — a goal or an outcome named in full is just as much a
+  // different target as a sibling factor is.
+  const namedEntities = matchLabels(
+    paddedMessage,
+    nonOptionNodes.map((n) => ({ id: n.id, label: n.label })),
+  );
+  if (namedEntities.some((m) => m.id !== asked.factorId)) {
+    return decline('answer_points_elsewhere');
+  }
+
+  // ── (d) THE OPTION AXIS, through the misroute guard's own reader.
+  const pointedOptionIds = optionCueMatches(normalisedMessage, optionLabels, nonOptionLabels)
+    .map((index) => optionNodes[index]!.id);
+
+  if (pointedOptionIds.length > 1) {
+    // TWO OR MORE OPTIONS GENUINELY NAMED. Offer only those the product is
+    // actually waiting on for the ASKED factor, so every chip is a complete,
+    // routable sentence about the question on screen. Fewer than two such
+    // candidates is not an offerable ambiguity — decline and change nothing.
+    const outstanding = deriveMissingEffectPairs(readiness);
+    const candidates = pointedOptionIds
+      .map((optionId) =>
+        outstanding.find((p) => p.optionId === optionId && p.factorId === asked.factorId),
+      )
+      .filter((pair): pair is MissingEffectPair => pair !== undefined);
+    if (candidates.length < 2) return decline('answer_points_elsewhere');
+    return {
+      matched: true,
+      kind: 'ask',
+      ambiguity: 'option',
+      // The message named them, but it did NOT name them in a form path (3)
+      // could resolve; the candidate SET came from the product's own ask, and
+      // the copy contract turns on where the candidates came from, not on
+      // whether the user typed something option-shaped (P5).
+      optionSource: 'outstanding_ask',
+      value,
+      candidates: candidates.map((pair) => ({
+        optionId: pair.optionId,
+        optionLabel: pair.optionLabel,
+        factorId: pair.factorId,
+        factorLabel: pair.factorLabel,
+      })),
+      optionLabels: candidates.map((pair) => pair.optionLabel),
+    };
+  }
+
+  if (pointedOptionIds.length === 1 && pointedOptionIds[0] !== asked.optionId) {
+    return decline('answer_points_elsewhere');
+  }
+
+  // ⚠ NO `value_already_set` CHECK HERE, deliberately: the asked pair is BY
+  // CONSTRUCTION one the product is saying has no value, so the branch would be
+  // unreachable — and an unreachable guard is a mutant that cannot be killed.
+  return {
+    matched: true,
+    kind: 'write',
+    optionId: asked.optionId,
+    optionLabel: asked.optionLabel,
+    factorId: asked.factorId,
+    factorLabel: asked.factorLabel,
+    value,
+  };
+}
+
+/**
  * Resolve an explicit option-effect write request against the persisted graph.
  *
  * Pure: no I/O, no LLM, no telemetry. `graph` is the graph the caller is about
@@ -632,7 +865,20 @@ export function resolveOptionEffectWrite(params: {
     params.message,
     projectOptionLabels(graph.nodes),
   );
-  if (!detection.matched || !EFFECT_FRAMED_TRIGGERS.has(detection.trigger)) {
+  // ⭐⭐ RULE 3c's CONJUNCT (a), and it is structural rather than a check: the
+  // fallback is reached ONLY where the shipped classifier claimed NOTHING. A
+  // sentence it classified — including every `option_value_set` W1 shape and
+  // the bare configure chip — takes the line below exactly as it does today.
+  const answeredAsk = !detection.matched;
+  if (answeredAsk) {
+    // CONJUNCT (b): an ANSWER, read by the one owner, carrying leading context.
+    // Whole-message bare answers belong to `resolveRepairValueBinding` and are
+    // declined here so the two seams cannot both claim one shape (trap 21).
+    const answer = readMissingValueAnswer(params.message);
+    if (answer === null || answer.kind !== 'numeric' || answer.leadingContext === '') {
+      return decline('not_effect_framed_intent');
+    }
+  } else if (!EFFECT_FRAMED_TRIGGERS.has(detection.trigger)) {
     return decline('not_effect_framed_intent');
   }
 
@@ -640,6 +886,9 @@ export function resolveOptionEffectWrite(params: {
   if (value === null) return decline('no_single_unit_scale_value');
 
   const padded = ` ${normalised} `;
+  if (answeredAsk) {
+    return resolveFromAnsweredAsk(padded, normalised, graph, params.graph, value);
+  }
   const optionMatches = matchLabels(
     padded,
     graph.nodes.filter((n) => n.kind === 'option').map((n) => ({ id: n.id, label: n.label })),

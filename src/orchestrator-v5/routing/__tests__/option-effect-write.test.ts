@@ -36,6 +36,8 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 import {
+  ANSWERED_ASK_KNOWN_DROPPED,
+  ANSWERED_ASK_RESOLVED_LIMIT,
   OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT,
   OPTION_EFFECT_WRITE_EXCLUDED_TRIGGERS,
   OPTION_EFFECT_WRITE_KNOWN_DROPPED,
@@ -47,7 +49,9 @@ import {
   resolveOptionEffectWrite,
 } from '../option-effect-write.js';
 import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
-import { deriveMissingEffectPairs } from '../repair-value-binding.js';
+import { deriveAskedEffectPair, deriveMissingEffectPairs } from '../repair-value-binding.js';
+import { readMissingValueAnswer } from '../missing-value-answer.js';
+import { projectReadinessRecovery } from '../../coaching/readiness-recovery.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 
@@ -1077,19 +1081,337 @@ describe('W5 — OPPOSITE-DIRECTION TWINS: what must NOT change', () => {
   });
 });
 
-describe('W5 — the residual is STATED, not papered over', () => {
-  it('turn 4 (the prose answer) is STILL not claimed — and the record says why', () => {
-    // ⚠ HONEST GAP, reported rather than fixed. The witnessed turn 4 names
-    // neither entity in full: `detectConfigureOptionIntent` does not match it
-    // at all, so no change to THIS module can bind it. Its P8 refusal is
-    // composed by the turn-executor's `set_factor_value` misroute guard, a
-    // different seam with a different blast radius. Pinned here so the gap is
-    // visible in the suite (trap 22f's honest-gap protocol) and REDs if
-    // something later starts claiming it silently.
-    expect(resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: j18Graph() })).toEqual(
-      { matched: false, reason: 'not_effect_framed_intent' },
+// ═══════════════════════════════════════════════════════════════════════════
+// A2 — RULE 3c: THE USER ANSWERED THE QUESTION THE PRODUCT ASKED
+//
+// ⚠⚠ THE PIN BELOW IS A FLIP, AND THE HONEST RECORD OF WHAT IT USED TO SAY IS
+// PART OF THE EVIDENCE. Until this change the suite carried:
+//
+//   it('turn 4 (the prose answer) is STILL not claimed — and the record says why')
+//     expect(resolveOptionEffectWrite({ message: t4, graph })).toEqual(
+//       { matched: false, reason: 'not_effect_framed_intent' })
+//
+// It was true, it was measured, and it was the honest-gap protocol working as
+// designed: the gap could not be claimed silently. Measured at pristine
+// `3e15752e` it is still exactly what the resolver returns, and this block is
+// the RED-first signature — the ONLY test in the 161-test routing slice that
+// changes verdict.
+//
+// ⭐ WHY THE OLD PIN'S STATED REASON ("no change to THIS module can bind it")
+// WAS RIGHT AND STILL IS. It could not be bound by widening rule 3b, because
+// rule 3b runs only after `detectConfigureOptionIntent` has CLAIMED the
+// sentence, and it never claims this one. Rule 3c does not widen the classifier
+// — it is reached exactly where the classifier claimed NOTHING, which is what
+// keeps every trigger exclusion intact by construction.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('A2 — the fixture is what it claims to be (positive control)', () => {
+  it('the product IS asking about the captured pair, and t4 names NEITHER entity in full', () => {
+    // Without this, the acceptance below could pass on a graph where the pair
+    // was resolvable by ordinary label matching (trap 13: prove the presence
+    // before believing the absence).
+    const readiness = buildCanonicalAnalysisReadyFromGraph(j18Graph());
+    expect(deriveAskedEffectPair(readiness)).toEqual({
+      optionId: J18.ids.option_id,
+      optionLabel: J18.ids.option_label,
+      factorId: J18.ids.factor_id,
+      factorLabel: J18.ids.factor_label,
+    });
+    // NEITHER label appears in the answer — so nothing in it could have been
+    // resolved by the word-bounded matcher that path (3) and rule 3b use.
+    const t4 = J18.wire.t4_user_message.toLowerCase();
+    expect(t4).not.toContain(J18.ids.option_label.toLowerCase());
+    expect(t4).not.toContain(J18.ids.factor_label.toLowerCase());
+    // …and the classifier genuinely declines it, so rule 3c's conjunct (a) is
+    // a fact about this sentence and not an assumption (trap 13b).
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(J18.wire.t4_user_message, projectOptionLabels(parsed.nodes))
+        .matched,
+    ).toBe(false);
+  });
+
+  it("the asked pair is the PRODUCER's, not this suite's — the recovery copy names it", () => {
+    // P7. `readiness-recovery.ts` composes the on-screen question from
+    // `blockers[0]`; `deriveAskedEffectPair` reads the same element. Driven
+    // through the real composer so the agreement is executed, not asserted.
+    //
+    // ⚠ THE FIXTURE'S OWN STATUS IS `blocked`, NOT `needs_user_input` — an
+    // artefact of its RECONSTRUCTED edges, which its `__provenance__` warns
+    // about. So the payload handed to the composer carries the fixture's
+    // CAPTURED blockers with the status the live turn had. The blockers are the
+    // captured half; the status is stated, not smuggled.
+    const readiness = buildCanonicalAnalysisReadyFromGraph(j18Graph()) as {
+      readonly blockers?: unknown;
+    };
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    const projected = projectReadinessRecovery(
+      { status: 'needs_user_input', blockers: readiness.blockers } as never,
+      parsed.nodes as never,
+    );
+    expect(projected.kind).toBe('provide_value');
+    const asked = deriveAskedEffectPair(readiness)!;
+    // BY IDENTITY on both halves of the pair, through the composer's own
+    // (truncating) label projection.
+    expect(projected.nextStep).toContain(`"${projected.optionLabel}"`);
+    expect(asked.optionLabel.startsWith(projected.optionLabel!.replace(/…$/, ''))).toBe(true);
+    expect(projected.factorLabel).toBe(asked.factorLabel);
+  });
+});
+
+describe('A2 — ACCEPTANCE: an ordinary answer binds the pair the product asked about', () => {
+  it('the witnessed prose answer resolves the EXACT outstanding pair, BY IDENTITY', () => {
+    // ⭐ RED AT PRISTINE `3e15752e`, measured:
+    //   AssertionError: expected { matched: false, reason: 'not_effect_framed_intent' }
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: j18Graph() }),
+    ).toEqual({
+      matched: true,
+      kind: 'write',
+      optionId: J18.ids.option_id,
+      optionLabel: J18.ids.option_label,
+      factorId: J18.ids.factor_id,
+      factorLabel: J18.ids.factor_label,
+      value: 0.8,
+    });
+  });
+
+  it('the answer reading carries the CONTEXT, and the bare form keeps its own owner', () => {
+    // The two shapes, and the field that tells them apart (trap 21).
+    expect(readMissingValueAnswer(J18.wire.t4_user_message)).toEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
+    });
+    // A whole-message bare answer is NOT claimed by this module: it already has
+    // an owner in `resolveRepairValueBinding`, and two owners for one shape is
+    // the defect, not the coverage.
+    expect(resolveOptionEffectWrite({ message: 'Set it to 0.8.', graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
+  it('DISCRIMINATING PAIR — the write follows the ASK, not the sentence', () => {
+    // RED HALF: make the product ask about a DIFFERENT pair (satisfy the head
+    // blocker) and the SAME sentence binds the pair the product now asks about.
+    const moved = GraphV3.parse(j18Graph()) as GraphV3T;
+    const option = moved.nodes.find((n) => n.id === J18.ids.option_id) as Record<string, unknown>;
+    option.interventions = { [J18.ids.factor_id]: 0.4 };
+    const after = resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: moved });
+    expect(after.matched && after.kind === 'write' && after.factorId).toBe(
+      J18.ids.sibling_factor_id,
+    );
+
+    // GREEN HALF: satisfying an UNRELATED option's pair leaves the verdict
+    // byte-identical. Neither half alone shows the binding; the pair does.
+    const bystander = GraphV3.parse(j18Graph()) as GraphV3T;
+    const other = bystander.nodes.find((n) => n.id === 'e755ec33') as Record<string, unknown>;
+    other.interventions = { '16f4cf02': 0.4 };
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: bystander }),
+    ).toEqual(resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: j18Graph() }));
+  });
+
+  it('no outstanding effect-value ask ⇒ nothing to answer, and nothing is written', () => {
+    // Every option satisfied on every linked factor: the recovery copy is no
+    // longer asking for an effect value, so the answer has no antecedent.
+    const satisfied = GraphV3.parse(j18Graph()) as GraphV3T;
+    for (const node of satisfied.nodes) {
+      if (node.kind !== 'option') continue;
+      const targets = satisfied.edges.filter((e) => e.from === node.id).map((e) => e.to);
+      (node as Record<string, unknown>).interventions = Object.fromEntries(
+        targets.map((t) => [t, 0.4]),
+      );
+    }
+    expect(deriveAskedEffectPair(buildCanonicalAnalysisReadyFromGraph(satisfied))).toBeNull();
+    expect(
+      resolveOptionEffectWrite({ message: J18.wire.t4_user_message, graph: satisfied }),
+    ).toEqual({ matched: false, reason: 'no_answered_ask' });
+  });
+});
+
+describe('A2 — NEVER GUESS BETWEEN ENTITIES: pointing elsewhere withdraws the claim', () => {
+  it('prose naming a DIFFERENT option declines — the ask is not the authority on it', () => {
+    // "invest heavily in a self-serve product…" is option e755ec33; the product
+    // is asking about 4abad64d. Bound by identity: not a write, and specifically
+    // not a write to the asked pair.
+    const resolution = resolveOptionEffectWrite({
+      message: 'Investing heavily in self-serve is the real driver here - set it to 0.4.',
+      graph: j18Graph(),
+    });
+    expect(resolution).toEqual({ matched: false, reason: 'answer_points_elsewhere' });
+  });
+
+  it('prose naming a DIFFERENT factor IN FULL declines', () => {
+    const resolution = resolveOptionEffectWrite({
+      message: `${J18.ids.sibling_factor_label} is the one that matters - set it to 0.4.`,
+      graph: j18Graph(),
+    });
+    expect(resolution).toEqual({ matched: false, reason: 'answer_points_elsewhere' });
+  });
+
+  it('OPPOSITE-DIRECTION TWIN — naming the ASKED factor in full still binds', () => {
+    // The twin that stops the guard above being written as "any label at all
+    // declines", which would make the whole rule unreachable in prose that
+    // happens to be precise.
+    const resolution = resolveOptionEffectWrite({
+      message: `${J18.ids.factor_label} is what I mean - set it to 0.4.`,
+      graph: j18Graph(),
+    });
+    expect(resolution.matched && resolution.kind === 'write' && resolution.factorId).toBe(
+      J18.ids.factor_id,
     );
   });
+
+  it('TWO options both outstanding on the asked factor ASK, and pick NEITHER', () => {
+    // The ambiguity is made the product (trap 22f). Built by giving a SECOND
+    // option an unvalued edge to the asked factor, so both are genuinely
+    // outstanding on it — the precondition is pinned in-test (trap 13b).
+    const twoWay = GraphV3.parse(j18Graph()) as GraphV3T;
+    twoWay.edges.push({
+      from: '939d4630',
+      to: J18.ids.factor_id,
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    } as never);
+    const outstanding = deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(twoWay));
+    expect(outstanding.filter((p) => p.factorId === J18.ids.factor_id)).toHaveLength(2);
+
+    const resolution = resolveOptionEffectWrite({
+      message: 'Doubling down, or the phased approach - set it to 0.4.',
+      graph: twoWay,
+    });
+    expect(resolution.matched && resolution.kind).toBe('ask');
+    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('unreachable');
+    expect(resolution.ambiguity).toBe('option');
+    expect(resolution.optionSource).toBe('outstanding_ask');
+    expect(new Set(resolution.candidates.map((c) => c.optionId))).toEqual(
+      new Set([J18.ids.option_id, '939d4630']),
+    );
+    expect(new Set(resolution.candidates.map((c) => c.factorId))).toEqual(
+      new Set([J18.ids.factor_id]),
+    );
+  });
+});
+
+describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', () => {
+  it('TWIN — the `option_value_set` exclusion is untouched (W1 class still declines)', () => {
+    // Requirement 4. A sentence the classifier CLAIMS never reaches rule 3c, so
+    // this decline is the pre-existing one, unchanged.
+    const message =
+      `It would push it up a lot - set it to 0.8 for the ${J18.ids.option_label} option.`;
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes)),
+    ).toEqual({ matched: true, trigger: 'option_value_set' });
+    expect(resolveOptionEffectWrite({ message, graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
+  it('⭐ TWIN — a CONTEXT-BEARING answer that the classifier CLAIMS still declines', () => {
+    // ⚠ ADDED FROM A SURVIVING MUTANT, not from imagination (trap 22). The
+    // battery mutated conjunct (a) to admit `option_value_set` into rule 3c and
+    // all 215 tests stayed GREEN — because the W1 twin below ends in a trailing
+    // clause, so the answer reading refused it for an unrelated reason and the
+    // conjunct was never exercised. This sentence IS a well-formed
+    // context-bearing answer AND classifies `option_value_set`, so it reaches
+    // conjunct (a) and nothing else. Under the mutant it BINDS.
+    const message = `For the ${J18.ids.option_label} option this matters - set it to 0.8.`;
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    // Both preconditions pinned in-test, or the decline could be either gate's
+    // (trap 13b — a guard must pin its own precondition).
+    expect(detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes))).toEqual({
+      matched: true,
+      trigger: 'option_value_set',
+    });
+    expect(readMissingValueAnswer(message)?.kind).toBe('numeric');
+    expect(resolveOptionEffectWrite({ message, graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
+  it('TWIN — the `baseline` suppressor still fires on a context-bearing answer', () => {
+    expect(
+      resolveOptionEffectWrite({
+        message: `The team disagrees - set the ${J18.ids.factor_label} baseline to 0.8.`,
+        graph: j18Graph(),
+      }),
+    ).toEqual({ matched: false, reason: 'baseline_framing' });
+  });
+
+  it('TWIN — a genuine factor-BASELINE request still writes the factor baseline', () => {
+    // The opposite-direction requirement, at its own seam: this sentence must
+    // stay OUT of the option-effect writer entirely so `set_factor_value` keeps
+    // it, exactly as at pristine.
+    const message = `Set ${J18.ids.sibling_factor_label} to 0.3`;
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    expect(
+      detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes)).matched,
+    ).toBe(false);
+    expect(resolveOptionEffectWrite({ message, graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
+  it('⭐ the pinned known-dropped set declines, each for its stated reason', () => {
+    // Trap 22f's honest-gap protocol: REDs if the claim widens to swallow one.
+    expect(ANSWERED_ASK_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(5);
+    for (const dropped of ANSWERED_ASK_KNOWN_DROPPED) {
+      const message = dropped.message
+        .replace('{option}', J18.ids.option_label)
+        .replace('{factor}', J18.ids.factor_label);
+      const resolution = resolveOptionEffectWrite({ message, graph: j18Graph() });
+      expect(resolution.matched, `${message} :: ${dropped.why}`).toBe(false);
+      expect(dropped.why.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('a context-bearing answer reads the WHOLE value, and reads it as numeric', () => {
+    // ⚠ ASSERTED AS A WHOLE OBJECT, not through `?.valueText`. The reading is a
+    // UNION and only its numeric arm carries a value, so a field access narrows
+    // nothing and does not typecheck under the full `tsc --noEmit` the drift
+    // ratchet runs (the named local gate excludes tests and cannot see it).
+    // Asserting the object also binds the KIND, which the field access did not:
+    // a qualitative reading with no value at all would have satisfied it.
+    //
+    // ⚠ AND THE TITLE CHANGED WITH IT. It used to say "the value is 0.8, never
+    // 8", crediting the digit lookarounds; measured, the `\s+` requirement
+    // already prevents a split inside a decimal. The lookarounds' real killing
+    // case lives in `missing-value-answer.test.ts`.
+    expect(readMissingValueAnswer('It matters a lot - set it to 0.8.')).toStrictEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'it matters a lot',
+    });
+  });
+
+  it('the stated residual is real behaviour, and the ack makes it VISIBLE', () => {
+    expect(ANSWERED_ASK_RESOLVED_LIMIT.behaviour).toContain('names it in the acknowledgement');
+    const resolution = resolveOptionEffectWrite({
+      message: 'The burn rate is what worries me - set it to 0.4.',
+      graph: j18Graph(),
+    });
+    if (!resolution.matched || resolution.kind !== 'write') throw new Error('unreachable');
+    expect(resolution.optionId).toBe(J18.ids.option_id);
+    expect(
+      formatOptionEffectWriteAck({
+        optionLabel: resolution.optionLabel,
+        factorLabel: resolution.factorLabel,
+        committedValue: resolution.value,
+      }),
+    ).toContain(J18.ids.factor_label);
+  });
+});
+
+describe('W5 — the residual is STATED, not papered over', () => {
 
   it('the stated limit is real behaviour, and the acknowledgement makes it VISIBLE', () => {
     // An option reference this reader cannot resolve, next to a factor the

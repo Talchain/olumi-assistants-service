@@ -265,3 +265,133 @@ describe('the terminating predicate is WIDER than the bindable one (trap 21)', (
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A2 — THE CLAUSE ANCHOR: an answer may carry context, and the difference is
+// RECORDED rather than lost.
+//
+// ⚠ THE WITNESSED SENTENCE IS A VERBATIM WIRE CAPTURE (18 Aug composed
+// model-compiler journey, deployed CEE `585f8dce` / UI `dd089a50`, fresh
+// guest), not one composed here (trap 16-inverse). RED at pristine
+// `3e15752e`: `readMissingValueAnswer` returned `null` for it.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
+  const WITNESSED =
+    'Doubling down on enterprise sales would push sales headcount up a lot - set it to 0.8.';
+
+  it('the witnessed prose answer reads as numeric, with its context recorded', () => {
+    expect(readMissingValueAnswer(WITNESSED)).toStrictEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
+    });
+  });
+
+  it('⭐ EVERY whole-message form still reads with leadingContext EMPTY', () => {
+    // The additive claim, measured rather than asserted. `Yes. Set it to 0.12.`
+    // is the case that would break under a split-FIRST reading: its affirmative
+    // lead ends in a full stop, so splitting before matching would demote a
+    // whole-message answer to a context-bearing one and `matchBareRepairValue`
+    // would stop claiming it.
+    for (const message of [
+      'Set it to 0.12.',
+      'Change the value to 0.5',
+      'Make it 0.12.',
+      'Use 0.12.',
+      'Set it to .12.',
+      'Yes, set it to 0.12.',
+      'Yes. Set it to 0.12.',
+      'Okay. Make the effect value 0.4',
+    ]) {
+      const answer = readMissingValueAnswer(message);
+      expect(answer?.kind, message).toBe('numeric');
+      expect(answer?.kind === 'numeric' && answer.leadingContext, message).toBe('');
+      // …and the bare binder still claims every one of them.
+      expect(matchBareRepairValue(message), message).not.toBeNull();
+    }
+  });
+
+  it('a decimal point is NOT a clause break — the value is never truncated', () => {
+    // ⚠ THE STATED REASON HERE USED TO BE WRONG AND A MUTANT CAUGHT IT. It said
+    // the digit lookarounds stop "0.8" splitting into "0" and "8."; measured,
+    // the `\s+` requirement already does that, and deleting the lookarounds left
+    // the whole battery green. The assertion is still worth keeping — it pins
+    // the value the reading returns — but it is NOT what makes the lookarounds
+    // load-bearing. The case below is.
+    expect(readMissingValueAnswer('The costs are fixed - set it to 0.8.')).toStrictEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'the costs are fixed',
+    });
+  });
+
+  it('⭐ a number that ENDS a clause is not a break either — the killing case for the lookbehind', () => {
+    // "We agreed 0.5." — the stop IS followed by whitespace, so without
+    // `(?<!\d)` this becomes a break and the message binds while carrying a
+    // second figure the reader cannot account for. Declining is the safe
+    // direction and this is the case that pins it.
+    expect(readMissingValueAnswer('We agreed 0.5. Set it to 0.8.')).toBeNull();
+    // Opposite-direction twin: the same shape with a NON-numeric lead binds, so
+    // the guard is narrow rather than a blanket refusal of leading stops.
+    expect(readMissingValueAnswer('We agreed on this. Set it to 0.8.')?.kind).toBe('numeric');
+  });
+
+  it('every closed referent works after context too — no second vocabulary', () => {
+    for (const referent of BARE_REFERENTS) {
+      const answer = readMissingValueAnswer(`The team agrees on this - set ${referent} to 0.4.`);
+      expect(answer?.kind, referent).toBe('numeric');
+      expect(answer?.kind === 'numeric' && answer.referent, referent).toBe(referent);
+    }
+  });
+
+  it('OPPOSITE DIRECTION — a bare referent is REQUIRED once context is present', () => {
+    // "Use 0.8." alone is unmistakably an answer because nothing else is in the
+    // message. After a clause it might belong to that clause instead, so the
+    // referent-free forms are refused. The twin above proves they still bind
+    // whole-message.
+    for (const message of [
+      'The numbers are all guesses - use 0.8.',
+      'The numbers are all guesses - make 0.8.',
+    ]) {
+      expect(readMissingValueAnswer(message)?.kind, message).not.toBe('numeric');
+    }
+  });
+
+  it('OPPOSITE DIRECTION — a COMMA is not a clause break', () => {
+    // A comma continues a clause, so the referent binds to what that clause
+    // introduced. Reading the lead as context here would be a wrong-entity
+    // write, which is why the break set is sentence-level only.
+    expect(readMissingValueAnswer('For the hybrid option, set it to 0.8.')).toBeNull();
+  });
+
+  it('OPPOSITE DIRECTION — a TRAILING clause still refuses, context or not', () => {
+    for (const message of [
+      'The costs are fixed - set it to 0.12 and rerun the analysis.',
+      'The costs are fixed - set it to 0.12, then tell me what changed.',
+      'The costs are fixed - should I set it to 0.12?',
+      'The costs are fixed - set it to 12%.',
+      'The costs are fixed - set it to £5000.',
+    ]) {
+      expect(matchBareRepairValue(message), message).toBeNull();
+      const answer = readMissingValueAnswer(message);
+      expect(answer === null || answer.kind !== 'numeric', message).toBe(true);
+    }
+  });
+
+  it('⭐ `matchBareRepairValue` keeps its ENTIRELY-bare contract — one shape, one owner', () => {
+    // The field is what keeps the two consumers apart (trap 21). Without this
+    // guard the widened reading would silently hand context-bearing answers to
+    // a binder whose slot rule is "exactly one pair missing" and which has no
+    // reader for what the prose points at.
+    expect(readMissingValueAnswer(WITNESSED)?.kind).toBe('numeric');
+    expect(matchBareRepairValue(WITNESSED)).toBeNull();
+  });
+
+  it('never throws on hostile input, with or without breaks', () => {
+    for (const message of ['-', ' - ', '. - .', ';;;', 'set it to - 0.8', '0.8 - set it to']) {
+      expect(() => readMissingValueAnswer(message), message).not.toThrow();
+    }
+  });
+});

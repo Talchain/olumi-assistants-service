@@ -286,6 +286,64 @@ describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', (
     expect(repairEvents()[0]!.payload).toMatchObject({ outcome: 'bind', pair_count: 1 });
   });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // A2 — THE ANSWERED-ASK CLAIM (ROADMAP 2.1266 / rule 3c).
+  //
+  // ⚠⚠ THIS BLOCK EXISTS BECAUSE THE RESOLVER ALONE WOULD HAVE BEEN DARK CODE
+  // (CLAUDE.md trap 16). Measured at pristine `3e15752e` for the witnessed
+  // sentence: `shouldSuppressEditDispatchForValueUpdate` = TRUE (so
+  // `editVerbCandidate` is false) and `detectConfigureOptionIntent` does not
+  // match (so `configureOptionIntent` is false) — `editIntentDetected` is
+  // FALSE and the turn never reaches `resolveOptionEffectWrite` at all.
+  //
+  // What this site decides is ONLY whether the turn is an edit-lane turn.
+  // WHICH pair binds stays with the resolver, and the assertion below proves
+  // it: no `editInstructionOverride` is composed here, because the resolver
+  // binds the user's own bytes at the dispatch site.
+  // ══════════════════════════════════════════════════════════════════════
+
+  it('an ordinary answer with CONTEXT reaches the edit lane — the user\'s own bytes, no override', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+
+    const message = 'The green courier quote came in lower than we expected - set it to 0.12.';
+    const res = await send(app, message);
+
+    expect(res.statusCode).toBe(200);
+    // THE CLAIM. At pristine this was zero calls and a routing-LLM turn.
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]![0] as {
+      payload: { message: string };
+      editInstructionOverride?: string;
+    };
+    expect(dispatchArgs.payload.message).toBe(message);
+    // ⭐ NO OVERRIDE: 2.1261's bind rewrites the instruction because its slot
+    // comes from "exactly one pair missing"; rule 3c does not, because the
+    // resolver re-binds the same sentence against the graph it applies to.
+    // A composed override here would be a SECOND writer.
+    expect(dispatchArgs.editInstructionOverride).toBeUndefined();
+    // …and it is not the bare-value binder that claimed it.
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('TWIN — the same shape naming the OTHER option is NOT claimed', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    // Positive control on the discriminator: the ONLY difference from the case
+    // above is which option the prose points at. Both are value-update phrasing,
+    // both carry the identical answering clause.
+    await send(app, 'Passing the daily charges to customers is the plan - set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('TWIN — with NOTHING missing there is no ask to answer, and no claim', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_sub', 'opt_pass']));
+    await send(app, 'The green courier quote came in lower than we expected - set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
   // ── OPPOSITE-DIRECTION TWINS: every one must keep today's route ───────────
 
   it('the witnessed turn-2 unit message is NEVER claimed — its honest refusal path stays reachable', async () => {
