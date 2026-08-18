@@ -503,6 +503,165 @@ describe("opposite twins — the demotion fires ONLY where there is a second obj
 });
 
 // ---------------------------------------------------------------------------
+// ⭐⭐ THE MISATTRIBUTION RULING, IN EXECUTABLE FORM.
+//
+// Technical-architect ruling, 18 Aug 2026: PRESERVE THE USER'S STATED CAUSALITY.
+// The inbound edges of a demoted goal are NOT redirected to the primary — they
+// stay on the node through its conversion to an outcome.
+//
+// WHY. The redirect was built for a world where the secondary goal was DELETED
+// and its edges had to go somewhere. Once the node SURVIVES, the redirect
+// misattributes the user's own causal claims: "marketing spend drives
+// productivity" silently becomes "marketing spend drives cost reduction". That
+// is a fabricated causal claim wearing the user's provenance — the class the
+// scientific ruling forbids, and strictly worse than the deletion it replaced,
+// because a deleted objective is visibly absent while a misattributed edge
+// looks like the user said it.
+//
+// The demoted objective receives its OWN stated drivers, and contributes to the
+// overarching goal through the minted `outcome → goal` edge.
+// ---------------------------------------------------------------------------
+describe("⭐ the user's stated causality survives — a driver of objective B reaches B", () => {
+  const MISATTRIB_BRIEF =
+    "We want to cut cost. We also want to raise productivity. " +
+    "Marketing spend drives productivity. We could restructure, or hold.";
+  const OBJ_A = "cut cost";
+  const OBJ_B = "raise productivity";
+
+  /** `Marketing Spend` is stated to drive OBJECTIVE B, and nothing else. */
+  function misattributionRecords(): DraftRecordSet {
+    return {
+      stated_items: [
+        { kind: "goal", source_quote: OBJ_A },
+        { kind: "goal", source_quote: OBJ_B },
+        { kind: "option", source_quote: "restructure" },
+        { kind: "option", source_quote: "hold" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Marketing Spend", basis: [2] },
+        {
+          claim_kind: "causal_link",
+          label: "restructuring moves marketing spend",
+          from_stated: 2,
+          to_claim: 0,
+          effect: "negative",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "holding moves marketing spend",
+          from_stated: 3,
+          to_claim: 0,
+          effect: "positive",
+        },
+        // ⭐ THE LOAD-BEARING CLAIM: the factor drives objective B, not A.
+        {
+          claim_kind: "causal_link",
+          label: "marketing spend drives productivity",
+          from_claim: 0,
+          to_stated: 1,
+          effect: "positive",
+        },
+      ],
+    } as unknown as DraftRecordSet;
+  }
+
+  it("the edge the user stated into objective B still ends at objective B's node", () => {
+    const projected = projectRecordsToGraph(misattributionRecords(), MISATTRIB_BRIEF).graph;
+
+    // Positive control: the stated edge really does target objective B pre-merge.
+    const goalsIn = (projected.nodes as unknown as AnyNode[]).filter((n) => n.kind === "goal");
+    const bIn = goalsIn.find((n) => canonical(n.provenance?.source_quote) === canonical(OBJ_B))!;
+    const factorIn = (projected.nodes as unknown as AnyNode[]).find(
+      (n) => n.label === "Marketing Spend",
+    )!;
+    expect(
+      (projected.edges as Array<Record<string, unknown>>).some(
+        (e) => e.from === factorIn.id && e.to === bIn.id,
+      ),
+      "instrument: the stated factor→objective-B edge is not in the projection",
+    ).toBe(true);
+
+    const merged = enforceSingleGoal({
+      nodes: projected.nodes,
+      edges: projected.edges,
+    } as never)!;
+    const graph = merged.graph as unknown as {
+      nodes: AnyNode[];
+      edges: Array<Record<string, unknown>>;
+    };
+
+    // Bound by IDENTITY: objective B's own node, found by its own quote.
+    const bNode = graph.nodes.find(
+      (n) => canonical(n.provenance?.source_quote) === canonical(OBJ_B),
+    )!;
+    expect(bNode.kind).toBe("outcome");
+
+    // THE RULING: the factor still points at B, and NOT at the primary goal.
+    const aNode = graph.nodes.find(
+      (n) => canonical(n.provenance?.source_quote) === canonical(OBJ_A),
+    )!;
+    expect(
+      graph.edges.some((e) => e.from === factorIn.id && e.to === bNode.id),
+      "the user's stated driver of objective B was taken off objective B",
+    ).toBe(true);
+    expect(
+      graph.edges.some((e) => e.from === factorIn.id && e.to === aNode.id),
+      "the user's driver of objective B was MISATTRIBUTED to objective A",
+    ).toBe(false);
+  });
+
+  it("F2 — the demoted objective is NOT a parentless root: it keeps ≥1 inbound edge", () => {
+    // ISL's `robustness_analyzer_v2.py:1905-1918` defaults a root that carries no
+    // observed_state. A demoted objective that kept its stated drivers is not a
+    // root, so that condition cannot fire on it. This asserts the CEE-side half
+    // by execution; live ISL confirmation rides the composed journey witness.
+    const projected = projectRecordsToGraph(misattributionRecords(), MISATTRIB_BRIEF).graph;
+    const merged = enforceSingleGoal({
+      nodes: projected.nodes,
+      edges: projected.edges,
+    } as never)!;
+    const graph = merged.graph as unknown as {
+      nodes: AnyNode[];
+      edges: Array<Record<string, unknown>>;
+    };
+    const bNode = graph.nodes.find(
+      (n) => canonical(n.provenance?.source_quote) === canonical(OBJ_B),
+    )!;
+    const inbound = graph.edges.filter((e) => e.to === bNode.id);
+    expect(inbound.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("TWIN — an OUTBOUND edge from a demoted goal is still redirected (it has no legal shape)", () => {
+    // `ALLOWED_EDGES` has no rule with `goal` as a source, so a `goal → factor`
+    // or `goal → decision` edge cannot legally survive the conversion as
+    // `outcome → factor`. Only the INBOUND redirect is dropped; the outbound one
+    // stays, and this pins that the ruling was read narrowly rather than as
+    // "stop redirecting".
+    const graph: any = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "A" },
+        { id: "g2", kind: "goal", label: "B" },
+        { id: "d1", kind: "decision", label: "Decision" },
+        { id: "f1", kind: "factor", label: "F" },
+      ],
+      edges: [
+        { id: "e_out", from: "g2", to: "d1" },
+        { id: "e_in", from: "f1", to: "g2" },
+      ],
+    };
+    const merged = enforceSingleGoal(graph)!;
+    const edges = (merged.graph as any).edges as Array<Record<string, unknown>>;
+
+    // Outbound moved to the primary…
+    expect(edges.some((e) => e.from === "g1" && e.to === "d1")).toBe(true);
+    expect(edges.some((e) => e.from === "g2" && e.to === "d1")).toBe(false);
+    // …inbound stayed on the demoted node.
+    expect(edges.some((e) => e.from === "f1" && e.to === "g2")).toBe(true);
+    expect(edges.some((e) => e.from === "f1" && e.to === "g1")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // P6 — system-inferred structure must not manufacture a user obligation.
 //
 // The demoted objective is structure the SYSTEM placed (the user stated the
@@ -605,6 +764,115 @@ describe("P6 — demoting an objective adds no blocker and does not change run a
     const blockers = (g: unknown) =>
       ((assessRouteAdmission(g) as unknown as { blockers?: unknown[] }).blockers ?? []).length;
     expect(blockers(graph)).toBe(blockers(without));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F1 — the demoted outcome must behave like an ORGANIC outcome, not like a
+// missing bridge layer. Parity with organic is the acceptance bar; equality
+// with the 1-goal control is NOT (a graph that has a bridge should not get a
+// second, synthetic one minted on top).
+// ---------------------------------------------------------------------------
+describe("F1 — terminal-bridge behaviour reaches parity with an organic outcome", () => {
+  const factor = (id: string) => ({ id, kind: "factor", label: id });
+
+  /** goal + factors, no bridge layer at all — the bridge SHOULD fire. */
+  const oneGoalControl = () => ({
+    nodes: [{ id: "g1", kind: "goal", label: "A" }, factor("f1"), factor("f2"), { id: "d1", kind: "decision", label: "D" }],
+    edges: [{ from: "f1", to: "g1" }, { from: "f2", to: "g1" }],
+  });
+
+  /** goal + a real outcome carrying inbound edges — the parity REFERENCE. */
+  const organicOutcome = () => ({
+    nodes: [
+      { id: "g1", kind: "goal", label: "A" },
+      { id: "out1", kind: "outcome", label: "Organic" },
+      factor("f1"), factor("f2"), { id: "d1", kind: "decision", label: "D" },
+    ],
+    edges: [{ from: "f1", to: "out1" }, { from: "f2", to: "out1" }, { from: "out1", to: "g1" }],
+  });
+
+  /** three objectives, each with its own stated driver, through the REAL merge. */
+  const threeGoalMerged = () => {
+    const raw = {
+      nodes: [
+        { id: "g1", kind: "goal", label: "A" },
+        { id: "g2", kind: "goal", label: "B" },
+        { id: "g3", kind: "goal", label: "C" },
+        factor("f1"), factor("f2"), { id: "d1", kind: "decision", label: "D" },
+      ],
+      edges: [{ from: "f1", to: "g2" }, { from: "f2", to: "g3" }],
+    };
+    return (enforceSingleGoal(raw as never)!).graph as unknown as {
+      nodes: AnyNode[]; edges: Array<Record<string, unknown>>;
+    };
+  };
+
+  it("the control really does need a bridge (positive control — else parity is vacuous)", async () => {
+    const { needsTerminalBridge } = await import(
+      "../../unified-pipeline/stages/repair/terminal-bridge.js"
+    );
+    expect(needsTerminalBridge(oneGoalControl() as never)).toBe(true);
+  });
+
+  it("PARITY — the 3-goal target and an organic outcome give the SAME verdict", async () => {
+    const { needsTerminalBridge } = await import(
+      "../../unified-pipeline/stages/repair/terminal-bridge.js"
+    );
+    const target = needsTerminalBridge(threeGoalMerged() as never);
+    const organic = needsTerminalBridge(organicOutcome() as never);
+    expect(target).toBe(organic);
+    // …and the shared verdict is "no synthetic bridge", because one now exists.
+    expect(target).toBe(false);
+  });
+
+  it("the suppression is EARNED — every factor reaches the goal through a demoted outcome", () => {
+    // This is the substantive half of F1. Suppressing the synthetic bridge is
+    // only correct if the demoted outcome IS a bridge. Asserted structurally,
+    // not inferred from the predicate agreeing with itself.
+    const g = threeGoalMerged();
+    const goalId = g.nodes.find((n) => n.kind === "goal")!.id;
+    const outcomeIds = new Set(g.nodes.filter((n) => n.kind === "outcome").map((n) => n.id));
+    const factors = g.nodes.filter((n) => n.kind === "factor");
+    expect(factors.length).toBeGreaterThan(0);
+    for (const f of factors) {
+      const bridged = g.edges.some(
+        (e) =>
+          e.from === f.id &&
+          outcomeIds.has(e.to as string) &&
+          g.edges.some((e2) => e2.from === e.to && e2.to === goalId),
+      );
+      expect(bridged, `factor ${f.id} reaches the goal through no outcome`).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 — the ONE wire exception, pinned so the comment cannot quietly become false.
+// ---------------------------------------------------------------------------
+describe("F4 — goal_baseline is dropped for a demoted node, and that is parity not harm", () => {
+  it("goal_baseline does not reach the wire, while the threshold quad does", () => {
+    const projected = projectRecordsToGraph(founderRecords(), FOUNDER_BRIEF).graph;
+    const secondary = (projected.nodes as unknown as AnyNode[]).filter((n) => n.kind === "goal")[1]!;
+    Object.assign(secondary, { goal_baseline: 0.42, goal_threshold_raw: 7, goal_threshold_unit: "pts" });
+
+    const merged = enforceSingleGoal({
+      nodes: projected.nodes, edges: projected.edges,
+    } as never)!;
+    const nodes = wireNodes(merged.graph, FOUNDER_BRIEF);
+    const node = nodes.find(
+      (n) => canonical(n.source_quote) === canonical(FOUNDER_OBJECTIVES[1]),
+    )!;
+    const wire = node as unknown as Record<string, unknown>;
+
+    // The kind-gated observed_state limb did not run: no baseline projection…
+    expect(wire.observed_state).toBeUndefined();
+    // …which is exactly what an ORGANIC outcome looks like (the parity control).
+    const organic = nodes.find((n) => n.kind === "outcome" && n.label === "Delivery Throughput")!;
+    expect((organic as unknown as Record<string, unknown>).observed_state).toBeUndefined();
+    // …while the kind-INDEPENDENT quad copy did run.
+    expect(wire.goal_threshold_raw).toBe(7);
+    expect(wire.goal_threshold_unit).toBe("pts");
   });
 });
 

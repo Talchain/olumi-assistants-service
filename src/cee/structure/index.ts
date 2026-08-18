@@ -247,7 +247,35 @@ export interface SingleGoalResult {
   hadMultipleGoals: boolean;
   originalGoalCount: number;
   mergedGoalIds?: string[];
-  /** Maps each merged-away goal ID to the primary goal ID it was merged into. */
+  /**
+   * Maps each DEMOTED goal id to the primary goal id.
+   *
+   * ⚠ THE NAME AND THE OLD WORDING BOTH PREDATE THE §8 A3 RULING. This said
+   * "merged-away goal ID", and those nodes are no longer merged away — they
+   * survive as `outcome` nodes under their ORIGINAL ids. Nothing is renamed and
+   * nothing disappears; what the map now records is *"this id's KIND changed,
+   * and some of its edges moved"*.
+   *
+   * ⭐ THE ENTRIES ARE KEPT DELIBERATELY, and the derivation is the reason, not
+   * caution. Both consumers were read at the bytes:
+   *
+   *  1. `edge-identity.ts:131` `restoreEdgeFields` STRATEGY 3 — reverses this
+   *     map to recover a stash key when the current `from::to` misses. Still
+   *     REACHABLE and still NEEDED: the OUTBOUND limb of the merge is still
+   *     redirected (`demoted → decision` becomes `primary → decision`), so the
+   *     stash holds `demoted::decision` while the edge now reads
+   *     `primary::decision`, and only the reversal closes that gap. It is no
+   *     longer needed for INBOUND edges — those are not redirected any more, so
+   *     strategy 2 hits them directly — but "needed for one limb" is why the
+   *     entries stay rather than being dropped.
+   *  2. `threshold-sweep.ts:85` — attestation transfer: the surviving primary
+   *     INHERITS the enricher-minted attestation of anything demoted into it.
+   *     Additive only; it never clears the demoted id.
+   *
+   * ⚠ A separate lane is pinning this map's CONTENT on staging. If that lane
+   * lands first, re-read this: the correct content for demoted ids is decided
+   * by consumer 1's outbound limb above, not by the map's name.
+   */
   nodeRenames?: Map<string, string>;
 }
 
@@ -282,12 +310,29 @@ const canonicalLabelText = (text: unknown): string =>
  *     keeps the user's exact words. Refusal falls back to verbatim, never to a
  *     guess — the deriver cannot emit a token the user did not write.
  *
- * ⚠ EVERY OTHER FIELD IS CARRIED THROUGH UNTOUCHED, and that is load-bearing
- * for A2 conservation: the `goal_threshold` quad rides along, so a demoted
- * objective's numerals survive in `label ∪ goal_threshold*` — the union the
- * conservation rule is asserted over once `source_quote` is excluded from it.
- * The quality bar's HARD rule is that no repair may discard a `goal_threshold`
- * quad; before this it was discarded at the wire in every case.
+ * ⚠ EVERY OTHER FIELD IS CARRIED THROUGH UNTOUCHED ON THE V1 NODE, and that is
+ * load-bearing for A2 conservation: the `goal_threshold` quad rides along, so a
+ * demoted objective's numerals survive in `label ∪ goal_threshold*` — the union
+ * the conservation rule is asserted over once `source_quote` is excluded from
+ * it. The quality bar's HARD rule is that no repair may discard a
+ * `goal_threshold` quad; before this it was discarded at the wire in every case.
+ *
+ * ⚠⚠ BUT "UNTOUCHED" IS A CLAIM ABOUT THIS FUNCTION, NOT ABOUT THE WIRE — AND
+ * THERE IS EXACTLY ONE EXCEPTION, NAMED HERE RATHER THAN LEFT TO BE DISCOVERED.
+ * `goal_baseline` is NOT a declared `NodeV3` field; it reaches V3 only through
+ * the `observed_state` limb at `transforms/schema-v3.ts:276`, and that limb is
+ * KIND-GATED: `node.kind === "goal" && node.goal_baseline != null`. A demoted
+ * node is `outcome`, so it does not take the limb and its `goal_baseline` is
+ * dropped at the transform even though this function preserved it. (The four
+ * `goal_threshold*` fields are copied by a separate, kind-INDEPENDENT block at
+ * `:246-249`, which is why the quad does survive — verified by execution, not
+ * by reading the neighbouring comment, whose "for goal nodes" wording describes
+ * intent rather than the gate.)
+ *
+ * That drop is not a harm: `observed_state` absence is the NORMAL state for an
+ * outcome node — organic outcomes carry none — and ISL's `missing_goal_baseline`
+ * refusal is raised against GOALS, which this node no longer is. Parity with an
+ * organic outcome, which is the acceptance bar for every other property here.
  *
  * `provenance_class` stays `stated`: the user DID state this objective, and A1
  * is explicit that the class means *the user stated this*, not *this text is the
@@ -422,7 +467,9 @@ export function enforceSingleGoal(
   const primaryId = goalIds[0];
   const otherGoalIds = new Set(goalIds.slice(1));
 
-  // Build nodeRenames map: each merged-away goal → primary goal
+  // Build nodeRenames map: each DEMOTED goal id → primary goal id. The node
+  // itself survives under this id as an outcome (§8 A3) — see the field's
+  // contract on `SingleGoalResult` for why the entries are still required.
   const nodeRenames = new Map<string, string>();
   for (const otherId of otherGoalIds) {
     nodeRenames.set(otherId, primaryId);
@@ -483,18 +530,40 @@ export function enforceSingleGoal(
     return node;
   });
 
-  // Redirect edges from other goals to primary goal
+  // ⭐⭐ THE INBOUND REDIRECT IS GONE. THE USER'S STATED CAUSALITY IS PRESERVED.
+  //
+  // Technical-architect ruling, 18 Aug 2026. This block used to move BOTH ends
+  // of any edge touching a non-primary goal onto the primary. That was correct
+  // for a world where the secondary goal was DELETED and its edges had nowhere
+  // else to go. Once the node SURVIVES as an outcome, redirecting its INBOUND
+  // edges MISATTRIBUTES the user's own causal claims: the factor the user said
+  // drives "raise productivity" silently starts driving "cut cost", carrying the
+  // user's provenance while saying something the user never said.
+  //
+  // That is strictly worse than the loss it replaced. A deleted objective is
+  // visibly absent; a misattributed edge looks like the user's own claim, and
+  // nothing downstream can tell the difference. It is also exactly the
+  // fabricated-causality class the scientific ruling forbids.
+  //
+  // ⚠ ONLY THE INBOUND HALF GOES, AND THE ASYMMETRY IS DERIVED, NOT STYLISTIC.
+  // `ALLOWED_EDGES` (`validators/graph-validator.types.ts:293-302`) has NO rule
+  // with `goal` as a source, so an OUTBOUND `goal → decision` / `goal → factor`
+  // edge has no legal shape to survive into as `outcome → …`; those still move
+  // to the primary, exactly as before. The one exception is an edge that already
+  // pointed at the primary goal: preserving it yields `outcome → goal`, the one
+  // legal shape and precisely the contribution link this merge wants — whereas
+  // redirecting it would manufacture a `primary → primary` SELF-LOOP.
   const updatedEdges = edges.map((edge) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
     const newEdge = { ...(edge as any) };
 
-    if (typeof from === "string" && otherGoalIds.has(from)) {
+    // Outbound from a demoted objective: redirected, UNLESS it already lands on
+    // the primary goal, where it is the legal `outcome → goal` contribution.
+    if (typeof from === "string" && otherGoalIds.has(from) && to !== primaryId) {
       newEdge.from = primaryId;
     }
-    if (typeof to === "string" && otherGoalIds.has(to)) {
-      newEdge.to = primaryId;
-    }
+    // Inbound to a demoted objective: NEVER redirected. This is the ruling.
 
     return newEdge;
   });
