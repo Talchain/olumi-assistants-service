@@ -201,6 +201,34 @@ describe('graph-structure-validator — absolute size is NOT this gate\'s author
   // The env gate is GONE, not merely widened. This is the anti-resurrection
   // pin: re-adding a `CEE_GRAPH_MAX_*`-driven clause turns this RED.
   // -------------------------------------------------------------------------
+  // ⭐ POSITIVE CONTROL for the anti-resurrection test below, and it is not
+  // optional. That test asserts an ABSENCE (no refusal) after re-importing with
+  // a stubbed env — and an absence probe whose instrument is dead passes by
+  // testing nothing. Review proved the point: the test would have passed
+  // IDENTICALLY had `vi.resetModules()` been a no-op, because the module under
+  // test no longer reads any env var at all.
+  //
+  // So prove the mechanism against a module that DOES read env at module scope.
+  // `graphCaps.ts` resolves `GRAPH_MAX_NODES` from `process.env` on first
+  // evaluation, and it is the sibling the validator itself imports — if
+  // `resetModules` + `stubEnv` can move THIS value, it could equally have
+  // observed a resurrected `CEE_GRAPH_MAX_*` clause in the validator.
+  it('POSITIVE CONTROL: vi.resetModules() + vi.stubEnv genuinely re-evaluate module-level env reads', async () => {
+    expect(GRAPH_MAX_NODES).toBe(50); // the un-stubbed default, for contrast
+    vi.resetModules();
+    vi.stubEnv('LIMIT_MAX_NODES', '7');
+    try {
+      const freshCaps = await import('../../../src/config/graphCaps.js');
+      // If this reads 50, the instrument is blind and the absence test below
+      // proves nothing.
+      expect(freshCaps.GRAPH_MAX_NODES).toBe(7);
+      expect(freshCaps.GRAPH_MAX_NODES).not.toBe(GRAPH_MAX_NODES);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
   it('CEE_GRAPH_MAX_NODES / CEE_GRAPH_MAX_EDGES no longer reintroduce a size refusal', async () => {
     // `vi.resetModules()` + a PLAIN dynamic import, deliberately not the
     // `?query-string` cache-buster the deleted env tests used: that pattern is
