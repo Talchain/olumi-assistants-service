@@ -38,6 +38,10 @@ import {
   isBriefAuditQuestion,
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
+import {
+  isStructureOriginQuestion,
+  tryStructureOriginAnswer,
+} from '../../cee/context-integrity/structure-origin-answer.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { SuggestedAction } from '../compose/types.js';
@@ -67,6 +71,22 @@ export type StateQueryGuardOutcome =
   | {
       readonly matched: true;
       readonly dispatch: 'brief_audit';
+      readonly assistant_text: string;
+    }
+  /**
+   * ⭐⭐ THE USER CHALLENGED A STRUCTURAL ELEMENT — *"why did you add a hybrid
+   * option?"* — which is a question about ORIGIN, not about OCCURRENCE.
+   *
+   * Witnessed live on `585f8dce` being answered by `no_recent_changes` with
+   * `llm_calls: 0`: the message matched `did you …add` and the guard returned an
+   * edit-history deflection to a provenance challenge. Answered here from the
+   * element's own persisted provenance record; see
+   * `cee/context-integrity/structure-origin-answer.ts` for why the two questions
+   * must not share an answer.
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'structure_origin';
       readonly assistant_text: string;
     };
 
@@ -289,8 +309,18 @@ export function isStateQueryQuestionShape(message: string): boolean {
   // So the audit classification is now AUTHORITATIVE over the edit-verb gate.
   // For every non-audit message this function is byte-identical to before: the
   // same gate, the same allowlist, the same bail-out, in the same order.
+  //
+  // ⭐ THE SAME RULE, WIDENED ONCE MORE FOR THE ORIGIN CLASS (journey witness,
+  // 18 Aug 2026). *"Why did you add a hybrid phased option?"* is a QUESTION about
+  // structure, and a question must never be granted a mutation warrant. It
+  // already reached here via `did you …add`, but the phrasings that do NOT carry
+  // a change-word — *"why is there a hybrid option?"*, *"where did that come
+  // from?"* — did not, and nothing else was denying them a warrant. Classifying
+  // them here is strictly protective: the caller either answers from provenance
+  // or falls through to the reasoning layer, and neither path mutates.
   const briefAudit = isBriefAuditQuestion(message);
-  if (!briefAudit) {
+  const originQuestion = isStructureOriginQuestion(message);
+  if (!briefAudit && !originQuestion) {
     if (EDIT_VERB_PATTERN.test(message)) return false;
     if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
   }
@@ -351,6 +381,46 @@ export function tryStateQueryGuard(
     // the grounded conversational path rather than asserting a zero.
     if (answer === null) return { matched: false };
     return { matched: true, dispatch: 'brief_audit', assistant_text: answer };
+  }
+
+  // ⭐⭐ THE ORIGIN ARM — RUNS BEFORE EVERY SESSION-EDIT ARM AND RETURNS
+  // UNCONDITIONALLY, so a provenance challenge can never reach
+  // `no_recent_changes`. That ordering IS the fix, and it is the same ordering
+  // ROADMAP 2.975 established for the brief-audit question: the measured defect
+  // was never bad copy, it was the edit-history arm answering a question that
+  // was not about edit history.
+  //
+  // ⚠ NOTE WHAT IS DELIBERATELY *NOT* HERE: there is no fallback sentence. When
+  // the provenance answer is `null` — the element cannot be resolved, or carries
+  // no stamp — the guard DECLINES and the turn proceeds to the reasoning layer.
+  // Substituting boilerplate at this point would rebuild the exact defect the
+  // arm exists to remove, one layer further in.
+  //
+  // ⚠ AND WHY IT DEFERS WHEN A SESSION MUTATION IS ON RECORD: with a recorded
+  // change in hand, *"why did you change the cost constraint?"* is genuinely
+  // ambiguous between "why did you make that edit" and "why does this exist",
+  // and trap 22f is explicit that where direction cannot be determined we do not
+  // guess. The `with_recent_change` arm quotes a REAL persisted mutation, so
+  // deferring to it leaves the user with grounded copy rather than a coin toss.
+  // This mirrors `isBriefAuditQuestion`, which keeps the ambiguous phrasings on
+  // the session-edit side for the same reason.
+  if (isStructureOriginQuestion(input.message)) {
+    if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
+      return { matched: false };
+    }
+    if (input.contextPack.recent_changes.length > 0) {
+      // Fall through to the session-edit arms, which are grounded in the
+      // recorded mutation.
+    } else if (input.briefAudit === undefined) {
+      return { matched: false };
+    } else {
+      const answer = tryStructureOriginAnswer(input.message, input.briefAudit.graph);
+      // `null` = we cannot ground an answer. Declining hands the turn to the
+      // reasoning layer; it must never become a canned reply.
+      return answer === null
+        ? { matched: false }
+        : { matched: true, dispatch: 'structure_origin', assistant_text: answer };
+    }
   }
 
   // Negative gate — cheapest of the session-edit arms. A message with an
