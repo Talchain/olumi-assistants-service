@@ -1373,10 +1373,24 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
     }
   });
 
-  it('a decimal point is NOT a clause break — the value is 0.8, never 8', () => {
-    // Without the digit lookarounds the split lands inside the number and the
-    // reading binds the wrong value. This is the case that pins them.
-    expect(readMissingValueAnswer('It matters a lot - set it to 0.8.')?.valueText).toBe('0.8');
+  it('a context-bearing answer reads the WHOLE value, and reads it as numeric', () => {
+    // ⚠ ASSERTED AS A WHOLE OBJECT, not through `?.valueText`. The reading is a
+    // UNION and only its numeric arm carries a value, so a field access narrows
+    // nothing and does not typecheck under the full `tsc --noEmit` the drift
+    // ratchet runs (the named local gate excludes tests and cannot see it).
+    // Asserting the object also binds the KIND, which the field access did not:
+    // a qualitative reading with no value at all would have satisfied it.
+    //
+    // ⚠ AND THE TITLE CHANGED WITH IT. It used to say "the value is 0.8, never
+    // 8", crediting the digit lookarounds; measured, the `\s+` requirement
+    // already prevents a split inside a decimal. The lookarounds' real killing
+    // case lives in `missing-value-answer.test.ts`.
+    expect(readMissingValueAnswer('It matters a lot - set it to 0.8.')).toStrictEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'it matters a lot',
+    });
   });
 
   it('the stated residual is real behaviour, and the ack makes it VISIBLE', () => {

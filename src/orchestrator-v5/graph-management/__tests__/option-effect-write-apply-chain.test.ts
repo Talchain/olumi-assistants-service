@@ -299,14 +299,27 @@ describe('2.1266 — deterministic option-effect write, full apply chain', () =>
 //   `Error: expected a write, got {"matched":false,"reason":"option_not_named"}`
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * ⚠ WIDENED, NOT CAST AROUND. Every field below is one the fixture JSON
+ * genuinely carries (see its `__provenance__`); the original projection named
+ * only the subset the W5 block read. The A2 block reads `t4_user_message` and
+ * the sibling factor, so the TYPE has to say so — a `as any` at the call site
+ * would have silenced the same four errors while removing the one thing that
+ * catches a fixture field being renamed underneath these specs.
+ */
 interface JourneyFixture {
   readonly ids: {
     readonly option_id: string;
     readonly option_label: string;
     readonly factor_id: string;
     readonly factor_label: string;
+    readonly sibling_factor_id: string;
+    readonly sibling_factor_label: string;
   };
-  readonly wire: { readonly t5_user_message: string };
+  readonly wire: {
+    readonly t4_user_message: string;
+    readonly t5_user_message: string;
+  };
   readonly draft_graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
 }
 
