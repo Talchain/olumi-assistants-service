@@ -146,15 +146,71 @@ const NUMERIC_ANSWER_PATTERNS: readonly RegExp[] = [
  * `^` anchor refused it for carrying context, the turn fell to the value-update
  * path, and the product refused the answer to its own question (P8).
  *
- * ⚠ WHY A SENTENCE-LEVEL BREAK AND NOT A COMMA, stated as a rule rather than
- * tuned to a corpus (P7). A comma CONTINUES a clause, so a bare referent after
- * one routinely binds to something that clause just introduced — *"For the
- * hybrid option, set it to 0.8"* means the hybrid option's effect, and reading
- * the prose as mere context there would be the wrong-entity write in a new
- * costume. A full stop, `!`, `?`, `;` or a spaced dash ENDS one, after which the
- * preceding words are context and the referent's only antecedent is the question
- * the product asked. The comma form is pinned in
- * `ANSWERED_ASK_KNOWN_DROPPED`, not silently absent.
+ * ⚠⚠ THE COMMA WAS EXCLUDED, AND THAT EXCLUSION WAS THE WHOLE JOURNEY'S
+ * FAILURE ON THE VERY NEXT RUN. THE ORIGINAL RULE IS QUOTED HERE VERBATIM
+ * BECAUSE IT WAS RIGHT ABOUT THE HARM AND WRONG ABOUT WHERE THE GUARD LIVES:
+ *
+ *   "WHY A SENTENCE-LEVEL BREAK AND NOT A COMMA, stated as a rule rather than
+ *    tuned to a corpus (P7). A comma CONTINUES a clause, so a bare referent
+ *    after one routinely binds to something that clause just introduced —
+ *    *"For the hybrid option, set it to 0.8"* means the hybrid option's
+ *    effect, and reading the prose as mere context there would be the
+ *    wrong-entity write in a new costume."
+ *
+ * WITNESSED AGAIN on the COMPOSED journey of 18 Aug 2026, **deployed CEE
+ * `4a513781` — i.e. with #1034 AND #1035 already merged and live** — fresh
+ * guest, 22:19:00Z (`olumi-docs/feedback-2026-08-16/
+ * COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md`, LINK 4). Olumi asked for the
+ * effect of option `4abad64d` on factor `3a75cabd`. The user answered:
+ *
+ *   "That would push sales headcount up a lot, set it to 0.8."
+ *
+ * ONE CHARACTER of difference from the sentence #1035 was built for — a comma
+ * where the previous run's user happened to type a dash. This reader returned
+ * `null`, so route-v2's answered-ask pre-route never opened and rule 3c was
+ * unreachable however correct it was; the turn fell to the FACTOR-BASELINE
+ * pre-route, which emitted a factor clarify, whose pending then wrote
+ * `3a75cabd.observed_state.value` `0.5 → 0.8` — the one value that had to stay
+ * untouched — while `interventions` stayed empty and the blocker survived by
+ * identity. **A punctuation mark decided which ENTITY got written.** Measured
+ * at pristine `877affe2` before this change:
+ * `readMissingValueAnswer("That would push sales headcount up a lot, set it to
+ * 0.8.")` → `null`; `resolveOptionEffectWrite(...)` → `not_effect_framed_intent`.
+ *
+ * ⭐⭐ THE COMMA IS NOW A BREAK, AND THE HARM THE OLD RULE NAMED IS GUARDED
+ * WHERE IT WAS ALWAYS ACTUALLY GUARDED — AT THE GRAPH, NOT AT THE PUNCTUATION.
+ * This is the trap-22f exit applied to its own earlier ruling: the estate does
+ * not settle "does this clause introduce the referent's antecedent?" with a
+ * better punctuation rule. It settles it by asking the GRAPH whether the prose
+ * points at any entity outside the pair the product is asking about — which is
+ * `resolveOptionEffectWrite`'s conjunct (d), and which already ran on the whole
+ * message, comma or no comma. MEASURED, not argued (see the specs):
+ *
+ *   "For the hybrid option, set it to 0.8."      → still DECLINES. Conjunct (a):
+ *       the message carries the word "option", so the SHIPPED classifier claims
+ *       it (`option_value_set`, the W1 class) and rule 3c is unreachable. The
+ *       old rule's own canonical example is refused by a guard that predates it.
+ *   "<sibling factor named in full> …, set it to 0.2."  → DECLINES,
+ *       `answer_points_elsewhere` (conjunct (d), factor axis).
+ *   "<the goal named in full> …, set it to 0.8."        → DECLINES,
+ *       `answer_points_elsewhere` — every NON-OPTION node is checked, not just
+ *       sibling factors.
+ *   "The team disagrees, set the <factor> baseline to 0.8." → DECLINES,
+ *       `baseline_framing`.
+ *
+ * ⚠ WHAT THIS GENUINELY WIDENS, stated rather than papered over. Conjunct (d)
+ * matches labels WORD-BOUNDED AND IN FULL, so a leading clause that refers to
+ * an entity only PARTIALLY ("burn rate is the worry, set it to 0.2", where the
+ * label is "Burn rate level") is invisible to it and the answer binds to the
+ * asked pair. That residual already existed for sentence breaks and is pinned
+ * as `ANSWERED_ASK_RESOLVED_LIMIT`; admitting commas enlarges its reach. It is
+ * bounded and VISIBLE rather than silent — `formatOptionEffectWriteAck` names
+ * the option and factor that moved — and closing it needs the partial/synonym
+ * entity reader that CLAUDE.md trap 22f forbids adding.
+ *
+ * A full stop, `!`, `?`, `;`, a comma or a spaced dash all END a clause for this
+ * reader; the preceding words are context and the referent's only antecedent is
+ * the question the product asked.
  *
  * ⚠⚠ `(?<!\d)[.!?;](?!\d)` — AND THE FIRST VERSION OF THIS COMMENT WAS WRONG,
  * WHICH IS WHY THE MUTANT FOR IT SURVIVED. It claimed that without the
@@ -182,7 +238,7 @@ const NUMERIC_ANSWER_PATTERNS: readonly RegExp[] = [
  * split-first reading would have demoted to context-bearing. This relaxation is
  * strictly ADDITIVE by construction, not by inspection.
  */
-const CLAUSE_BREAK = /(?<!\d)[.!?;](?!\d)\s+|\s+[\u2014\u2013-]\s+/g;
+const CLAUSE_BREAK = /(?<!\d)[.!?;,](?!\d)\s+|\s+[\u2014\u2013-]\s+/g;
 
 function splitTrailingClause(text: string): {
   readonly leadingContext: string;
@@ -242,6 +298,11 @@ const QUALITATIVE_ANSWER_PATTERN =
  *     capability gap and its enabling change is named below.
  *   · "Set it to 0.12 for the subcontracting option." — NAMES A TARGET, so the
  *     edit lane owns it. Correctly refused, and it must stay refused.
+ *
+ * ⚠ THE COMMA-LED ANSWER IS NO LONGER IN THIS SET and never was in it by name;
+ * it was excluded by CLAUSE_BREAK instead. See the CLAUSE_BREAK header for the
+ * 18 Aug RUN-B witness that forced the change and for the four twins that prove
+ * the harm is still guarded — at the graph, not at the punctuation.
  *
  * ⭐ THE ENABLING CHANGE for the bare-number case, reported rather than
  * attempted: an outstanding-ask record carrying the option and factor ids, so an

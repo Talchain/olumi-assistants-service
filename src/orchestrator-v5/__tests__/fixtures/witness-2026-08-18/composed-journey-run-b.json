@@ -1,0 +1,253 @@
+{
+  "__provenance__": "MIXED PROVENANCE — READ BEFORE TRUSTING A NUMBER FROM IT (CLAUDE.md trap 16-inverse: a fixture you wrote yourself is not evidence about the wire).\n\nSOURCE: olumi-docs/feedback-2026-08-16/COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md — deployed CEE 4a513781 (healthz build \"4a51378\") / UI 4d1e650b, FRESH GUEST journey 2026-08-18 22:09-22:29Z. This is the run in which #1034 and #1035 were ALREADY MERGED AND DEPLOYED and the defect still reproduced.\n\nVERBATIM CAPTURES — historic record, APPEND ONLY, NEVER EDIT (trap 14b):\n  - wire.on_screen_ask ................ the product's own ask, verbatim (witness LINK 4 header).\n  - wire.r1/r2/r3_user_message ........ the three ordinary-prose repair turns, verbatim from the witness's repair transcript table.\n  - wire.r1_reply / r1_chip_message / r2_reply / r3_reply / r3_reissued_demand ... Olimi's replies and the chip, verbatim.\n  - wire.llm_calls_by_turn ............ recorded per turn by the witness (R1 0, R2 1, R3 0).\n  - ids.* ............................. node ids and labels quoted verbatim from the witness (LINK 2 node table, LINK 4 pre-state, LINK 5 identity table).\n  - wire.pre_state / wire.post_state .. the measured identity comparison (3a75cabd.observed_state.value 0.5 -> 0.8; a94749f9 unchanged; edge e-6 unchanged; both blockers survive; interventions empty).\n\nRECONSTRUCTED, NOT CAPTURED — say so rather than let a later reader assume otherwise:\n  - draft_graph is NOT the captured graph. The witness recorded 15 nodes / 21 edges but preserved neither the raw graph JSON nor the ids/labels of the decision node, the third outcome, two of the four factors' identities, or any of the three risks.\n  - THIS FIXTURE CARRIES ONLY NODES WHOSE LABEL WAS CAPTURED. Uncaptured labels are OMITTED rather than invented, because LABELS are the load-bearing input to every predicate under test and an invented label would be the author's model of the wire rather than the wire.\n  - Ids not captured carry an explicit `rb-` prefix so no reader can mistake them for captured identities.\n  - edges are the MINIMUM set consistent with the two captured MISSING_OPTION_VALUE blockers plus the factor->outcome->goal wiring needed for structural validity.\n\n⭐ THE DIRECTION OF THE RECONSTRUCTION'S BIAS, stated because one claim rests on it. `deriveOptionDistinctiveTokens` subtracts the vocabulary of every NON-OPTION entity from the option labels' vocabulary. This fixture omits risks and two factors, so it makes FEWER subtractions than the real graph, which leaves MORE words counted as option cues and makes `impliesOptionInterventionEdit` fire MORE often here than on the wire. A measurement of FALSE on this fixture therefore implies FALSE on the real graph; a measurement of TRUE implies nothing. Every claim below that depends on the guard uses only the FALSE direction.\n\n  - A BLOCKER COUNT from this fixture is not a wire figure. The pair IDENTITIES are.\n",
+  "ids": {
+    "asked_option_id": "4abad64d",
+    "asked_option_label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+    "asked_factor_id": "3a75cabd",
+    "asked_factor_label": "Enterprise sales headcount and spend",
+    "sibling_option_id": "e755ec33",
+    "sibling_option_label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+    "sibling_factor_id": "a94749f9",
+    "sibling_factor_label": "Engineering investment in self-serve product",
+    "status_quo_option_id": "e405d56a",
+    "status_quo_option_label": "Status Quo: Hold current strategy",
+    "goal_node_id": "666659b7"
+  },
+  "wire": {
+    "on_screen_ask": "Next, choose the missing effect value for \"double down on enterprise sales (higher…\" on \"Enterprise sales headcount and spend\" so the comparison can be prepared.",
+    "r1_user_message": "That would push sales headcount up a lot, set it to 0.8.",
+    "r1_reply": "I wasn't sure which factor you meant. Did you mean Enterprise sales headcount and spend?",
+    "r1_chip_message": "Set Enterprise sales headcount and spend to 0.8.",
+    "r2_user_message": "Yes, that one — under the enterprise sales option.",
+    "r2_reply": "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    "r3_user_message": "0.8 — that's what the enterprise sales option should set Enterprise sales headcount and spend to.",
+    "r3_reply": "Updated Enterprise sales headcount and spend",
+    "r3_reissued_demand": "Factor \"Enterprise sales headcount and spend\" is currently 0.8. What should option \"double down on enterprise sales (…)\" set it to?",
+    "llm_calls_by_turn": {
+      "r1": 0,
+      "r2": 1,
+      "r3": 0
+    },
+    "pre_state": {
+      "graph_hash": "00911f11f1a57652",
+      "interventions": "empty on all three options",
+      "factor_3a75cabd_observed_value": 0.5,
+      "blockers_by_identity": [
+        [
+          "4abad64d",
+          "3a75cabd"
+        ],
+        [
+          "e755ec33",
+          "a94749f9"
+        ]
+      ]
+    },
+    "post_state": {
+      "graph_hash": "97285a72848128a3",
+      "factor_3a75cabd_observed_value": 0.8,
+      "factor_a94749f9_observed_value": 0.5,
+      "interventions": "still empty on all three options",
+      "blockers_by_identity": [
+        [
+          "4abad64d",
+          "3a75cabd"
+        ],
+        [
+          "e755ec33",
+          "a94749f9"
+        ]
+      ]
+    }
+  },
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "666659b7",
+        "kind": "goal",
+        "label": "Cut Burn Rate by 30%",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "rb-decision",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "793be10e",
+        "kind": "outcome",
+        "label": "Achieve 3x User Growth This Year",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "6d178dfd",
+        "kind": "outcome",
+        "label": "NHS data regulation outcome",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "4abad64d",
+        "kind": "option",
+        "label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "e755ec33",
+        "kind": "option",
+        "label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "e405d56a",
+        "kind": "option",
+        "label": "Status Quo: Hold current strategy",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "3a75cabd",
+        "kind": "factor",
+        "label": "Enterprise sales headcount and spend",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "value": 0.5,
+          "confidence": 0.5
+        }
+      },
+      {
+        "id": "a94749f9",
+        "kind": "factor",
+        "label": "Engineering investment in self-serve product",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "value": 0.5,
+          "confidence": 0.5
+        }
+      },
+      {
+        "id": "rb-burn-rate",
+        "kind": "factor",
+        "label": "Burn rate level",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "value": 0.3,
+          "confidence": 0.5
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "4abad64d",
+        "to": "3a75cabd",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "e755ec33",
+        "to": "a94749f9",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "3a75cabd",
+        "to": "793be10e",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "a94749f9",
+        "to": "793be10e",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "rb-burn-rate",
+        "to": "666659b7",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "793be10e",
+        "to": "666659b7",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "6d178dfd",
+        "to": "666659b7",
+        "strength": {
+          "mean": 1.0,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      }
+    ]
+  }
+}

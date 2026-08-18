@@ -113,6 +113,11 @@ import {
   EDIT_VERB_PATTERN as CALIBRATION_EDIT_VERB_PATTERN,
 } from './routing/deterministic-value-update.js';
 import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
+import {
+  resolveOutstandingAskClarifyRedirect,
+  buildOutstandingAskChipMessage,
+  buildOutstandingAskClarifyText,
+} from './routing/outstanding-ask-clarify.js';
 // ⭐ CALIBRATION + CONSENT (5 Aug 2026). See the two gates below —
 // `consentDirective` near `commitTurn`, and the STEP 2 action-layer refusal.
 import {
@@ -6625,17 +6630,51 @@ export async function runTurnExecutor(
         // Dispatch a clarify-shape direct_answer. No LLM call, no handler
         // fact persisted — the user's chip click on the next turn is what
         // produces a real factor reference for the LLM to act on.
-        const clarifyChips: SuggestedAction[] = deterministicValueUpdate.candidates.map(
-          (cand, idx) => ({
-            id: `chip_clarify_factor_${idx}`,
-            label: cand.label,
-            message: buildClarifyChipMessage(
-              payload.message,
-              cand,
-              deterministicValueUpdate.quantity,
-            ),
-          }),
-        );
+        // ⭐⭐ ROADMAP 2.1266 / A3 — THE FACTOR-BASELINE CLARIFY MUST NOT ANSWER
+        // AN OPTION-EFFECT QUESTION. See `routing/outstanding-ask-clarify.ts`
+        // for the 18 Aug RUN-B witness (deployed CEE `4a513781`, with #1034 AND
+        // #1035 already live) in which this exact branch asked
+        // *"Did you mean <factor>?"*, offered a chip that would write the
+        // FACTOR BASELINE, and persisted a `set_factor_value` pending that two
+        // turns later moved `3a75cabd.observed_state.value` 0.5 → 0.8 while the
+        // option's `interventions` stayed empty and the blocker survived.
+        //
+        // The redirect writes NOTHING. It changes which question is asked and
+        // what its chip replays, and the pair it names comes from
+        // `deriveAskedEffectPair` — the head blocker the on-screen question was
+        // itself composed from (P7) — never from the user's sentence.
+        const outstandingAskRedirect = resolveOutstandingAskClarifyRedirect({
+          message: payload.message,
+          candidates: deterministicValueUpdate.candidates,
+          readiness: analysisReadyForTurn,
+          quantity: deterministicValueUpdate.quantity,
+        });
+        const clarifyChips: SuggestedAction[] =
+          outstandingAskRedirect !== null
+            ? outstandingAskRedirect.modelUnitValueText === null
+              // The user's number is not already a model-unit effect value, and
+              // this seam performs no unit conversion — so there is no honest
+              // chip to offer. The copy asks for a 0-1 number instead.
+              ? []
+              : [
+                  {
+                    id: 'chip_prompt_option_effect_bind_1',
+                    label: `Apply ${outstandingAskRedirect.modelUnitValueText} to "${outstandingAskRedirect.pair.optionLabel}"`,
+                    message: buildOutstandingAskChipMessage(
+                      outstandingAskRedirect.pair,
+                      outstandingAskRedirect.modelUnitValueText,
+                    ),
+                  },
+                ]
+            : deterministicValueUpdate.candidates.map((cand, idx) => ({
+                id: `chip_clarify_factor_${idx}`,
+                label: cand.label,
+                message: buildClarifyChipMessage(
+                  payload.message,
+                  cand,
+                  deterministicValueUpdate.quantity,
+                ),
+              }));
         // Persist set_factor_value pending actions (one per candidate)
         // carrying the parsed quantity + operator from this turn so the
         // clarification-resume pre-route on the next turn can
@@ -6660,7 +6699,21 @@ export async function runTurnExecutor(
         );
         const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
         const clarifyEmitGraphHash = freshness?.current_graph_hash;
-        const clarifyPendingActions = deterministicValueUpdate.candidates.map(
+        // ⭐ NO FACTOR-BASELINE PENDING ON THE REDIRECT PATH, and this is the
+        // half that actually stopped the witnessed wrong write. In the witness
+        // the chip and the pending AGREED WITH EACH OTHER and both named the
+        // factor baseline; the user never clicked the chip, and it was the
+        // PENDING that the clarification resumer applied two turns later
+        // (`llm_calls: 0`, ack "Updated Enterprise sales headcount and spend").
+        // A pending that contradicts its own chip is a second writer for one
+        // question (trap 21) — so when the chip is redirected to the option
+        // effect, no factor-baseline proposal is held at all. The chip's own
+        // advised-format replay is the acceptance path, and it routes through
+        // `resolveOptionEffectWrite` exactly as #1034 built it to.
+        const clarifyPendingActions = (outstandingAskRedirect !== null
+          ? []
+          : deterministicValueUpdate.candidates
+        ).map(
           (cand, idx): PendingAction => ({
             id: randomUUID(),
             scenario_id: context.session_id,
@@ -6685,7 +6738,17 @@ export async function runTurnExecutor(
         );
         const clarifyResponse = composeAnswer({
           answerKind: 'functional',
-          assistant_text: buildClarifyAssistantText(deterministicValueUpdate.candidates),
+          assistant_text:
+            outstandingAskRedirect !== null
+              // P8 at its most literal: the sentence this replaces was a yes/no
+              // question whose only acceptance path was a numeral, and the
+              // witnessed user's correct "Yes, that one" was refused while the
+              // 0.8 they had already given was dropped. There is nothing to
+              // disambiguate — the sole candidate IS the factor the product is
+              // asking about — so the copy states the pair and carries the
+              // user's own number forward in the chip.
+              ? buildOutstandingAskClarifyText(outstandingAskRedirect)
+              : buildClarifyAssistantText(deterministicValueUpdate.candidates),
           stage: context.stage,
           suggested_actions: clarifyChips,
         });
