@@ -290,6 +290,20 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     expect(labelIsDerivedFrom(derived.label, quote)).toBe(true);
   });
 
+  /**
+   * ⭐ THE NO-INVENTION GUARD, PINNED IN BOTH DIRECTIONS. It is a fail-closed
+   * belt on a transform that should never introduce a token, so an
+   * always-true mutant is invisible from the outside — the negative case is
+   * what makes it observable at all (trap 13b).
+   */
+  it("labelIsDerivedFrom accepts a re-cased/base-form derivation and REJECTS an introduced word", () => {
+    expect(labelIsDerivedFrom("Cut Burn Rate by 30%", "cutting our burn rate by 30%")).toBe(true);
+    expect(labelIsDerivedFrom("Reach £25M GMV Within 18 Months", "reach £25M GMV within 18 months")).toBe(true);
+    // "Drastically" and "Costs" are nowhere in the source. A derivation that
+    // produced them would be a paraphrase badged as the user's own statement.
+    expect(labelIsDerivedFrom("Reduce Costs Drastically", "cut spending")).toBe(false);
+  });
+
   it("every token of every authored governed label is derived from that node's own quote", () => {
     for (const c of corpusCases()) {
       for (const node of (c.graph?.nodes ?? []).filter((n) => n.kind === "goal")) {
