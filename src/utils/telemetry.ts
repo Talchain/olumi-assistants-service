@@ -2012,6 +2012,21 @@ export const TelemetryEvents = {
   // Payload: request_id, scenario_id, outcome ('bind' | 'ask'), pair_count.
   V5RepairValueBindingResolved: "v5.edit_graph.repair_value_binding_resolved",
 
+  // ⭐⭐ ROADMAP 2.1266 — the deterministic OPTION-EFFECT WRITE bound a turn:
+  // one option, one of its linked factors and one model-unit value, all
+  // resolved by identity against the graph the edit is applied to. The
+  // operation is composed server-side instead of asked of the edit LLM, so
+  // the product's own advised phrasing has an acceptance path (P8).
+  // Payload: request_id, scenario_id, option_id, factor_id.
+  V5OptionEffectWriteResolved: "v5.edit_graph.option_effect_write_resolved",
+
+  // ⭐ ROADMAP 2.1266 — the same sentence, with the ENTITY ambiguous (two
+  // options named, or two of one option's linked factors). The product asks
+  // instead of guessing and writes nothing (trap 22f: the ambiguity is the
+  // product). Payload: request_id, scenario_id, ambiguity ('option' |
+  // 'factor'), candidate_count.
+  V5OptionEffectAskEmitted: "v5.edit_graph.option_effect_ask_emitted",
+
   // ⭐⭐ ROADMAP 2.427 — the configure-option OUTCOME did not honour the turn's
   // INTENT: the message named an option, the edit lane ran, and the applied
   // graph carries NO interventions write for THAT option id. Emitted where the
