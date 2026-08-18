@@ -32,6 +32,7 @@ import type {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { isRecoverableHandlerCause } from '../compose/recoverable-handler-causes.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 let appendShouldThrow: Error | null = null;
@@ -448,5 +449,131 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the routed analyse arm must not repor
     expect(result.analysisReady).toBeDefined();
     expect(result.analysisReady!.status).not.toBe('blocked');
     expect((result.analysisReady as { blocked_reason?: string }).blocked_reason).toBeUndefined();
+  });
+});
+
+/**
+ * THE P0 MEASURED ON STAGING, 18 Aug 2026 — and the seam ONE PAST the helper.
+ *
+ * The core two-turn journey failed on 4 of 13 runs. Turn 1 drafted a healthy
+ * model (`goal:1`, `option:4`, `goal_node_id: "378f195a"`); turn 2 routed to the
+ * analyse handler, the handler correctly refused (`MISSING_OPTION_VALUE` — a
+ * fresh draft's options carry no effect values), and the refusal REPLACED the
+ * turn's structural readiness with the present-but-empty carrier. The user's
+ * goal and every option identity vanished, on a turn whose own `graph_hash` was
+ * IDENTICAL to the drafting turn's.
+ *
+ * The FENCE above pins the reviewers' case and uses `READY_GRAPH`, where the
+ * empty carrier is correct. This block pins the OTHER half, on a graph whose
+ * structural readiness is NOT ready — the journey's real shape.
+ *
+ * ⭐ WHY THIS LIVES HERE AND NOT ONLY BESIDE THE HELPER. The helper's own unit
+ * spec proves the RULE; it cannot prove the rule is WIRED. Measured: a mutant
+ * that deletes the `analysisReadyForTurn` argument at the call site
+ * (turn-executor.ts, the `ANALYSE_HANDLER_ID` branch) restores the P0 exactly,
+ * typechecks clean, and leaves the helper's 7-spec suite fully GREEN. That
+ * survivor is the whole reason for this block — a guard is correct at the seam
+ * it guards and the defect lives one seam past it (P1).
+ */
+describe('the P0 — a refused analyse turn must not erase a model the same turn just read', () => {
+  /**
+   * The journey's real shape: a complete, connected model whose options carry
+   * NO effect values, so structural readiness is non-`ready` while the model
+   * itself is entirely legible. Same skeleton as `READY_GRAPH` with the
+   * interventions removed, so the ONLY difference between this fixture and the
+   * FENCE's is the one the rule turns on.
+   */
+  const NOT_READY_GRAPH: GraphStateIngress = {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Profit' },
+      { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
+      { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' },
+      { id: 'opt_a', kind: 'option', label: 'A' },
+      { id: 'opt_b', kind: 'option', label: 'B' },
+    ],
+    edges: [
+      { from: 'dec_1', to: 'opt_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'dec_1', to: 'opt_b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_a', to: 'fac_licence', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_b', to: 'fac_licence', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'fac_licence', to: 'goal_1', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ],
+  } as unknown as GraphStateIngress;
+
+  it('PRECONDITION: the fixture really is structurally NOT ready and really does name the model', () => {
+    // Pinned IN-TEST (trap 13b). Without this the assertions below could pass
+    // because the projection found nothing rather than because the rule fired,
+    // and the fixture — not the code — would be doing the discriminating.
+    const structural = buildCanonicalAnalysisReadyFromGraph(NOT_READY_GRAPH);
+    expect(structural).toBeDefined();
+    expect(structural!.status).not.toBe('ready');
+    expect(structural!.goal_node_id).toBe('goal_1');
+    expect(structural!.options.map((o) => o.option_id).sort()).toEqual(['opt_a', 'opt_b']);
+    // And the FENCE's fixture really is the opposite, or the two blocks are
+    // pinning the same case twice.
+    expect(buildCanonicalAnalysisReadyFromGraph(READY_GRAPH)!.status).toBe('ready');
+  });
+
+  it('RED: the refusal KEEPS goal_node_id and the option identities when the model is not ready', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-p0-identity-kept', {
+      routingAdapter,
+      handlerRegistry: mixedScaleRegistry(),
+      graphState: NOT_READY_GRAPH,
+    });
+
+    // Preconditions: this really is the recoverable analyse-refusal branch.
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.analysisReady).toBeDefined();
+    expect(result.analysisReady!.status).toBe('blocked');
+
+    const ar = result.analysisReady!;
+    // BOUND BY IDENTITY, never by a count: `options.length === 2` is satisfied
+    // by any two objects, and "a different pair of options" is precisely the
+    // fabrication the journey gate's continuity check exists to catch.
+    expect(ar.goal_node_id).toBe('goal_1');
+    expect(ar.options.map((o) => o.option_id).sort()).toEqual(['opt_a', 'opt_b']);
+  });
+
+  it('the verdict is STILL withdrawn — identity is kept, the refusal is not softened', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-p0-verdict-kept', {
+      routingAdapter,
+      handlerRegistry: mixedScaleRegistry(),
+      graphState: NOT_READY_GRAPH,
+    });
+
+    const ar = result.analysisReady!;
+    expect(ar.status).toBe('blocked');
+    expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
+    // The structural projection said `needs_*`; the wire must not report that,
+    // or the refusal would have been silently downgraded to a pass.
+    expect(ar.status).not.toBe(buildCanonicalAnalysisReadyFromGraph(NOT_READY_GRAPH)!.status);
+  });
+
+  it('OPPOSITE-DIRECTION TWIN: the READY graph still gets the empty carrier, through the real executor', async () => {
+    // The FENCE above asserts this too, and deliberately so: this block must be
+    // able to fail on its own if the rule is widened to "always carry", without
+    // depending on a sibling describe to notice.
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-p0-ready-twin', {
+      routingAdapter,
+      handlerRegistry: mixedScaleRegistry(),
+      graphState: READY_GRAPH,
+    });
+
+    const ar = result.analysisReady!;
+    expect(ar.status).toBe('blocked');
+    expect(ar.goal_node_id).toBe('');
+    expect(ar.options).toEqual([]);
   });
 });
