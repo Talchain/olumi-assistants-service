@@ -60,6 +60,20 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../../../config/graphCaps.js';
+
+// ⚠ 2026-08-18: these fixtures were sized to a 20-node / 30-edge ceiling that
+// lived in `graph-structure-validator.ts` and has been removed — absolute
+// graph size is `config/graphCaps.ts`' question now. Only the SIZES below
+// changed; every behavioural assertion is untouched. They are derived from the
+// caps rather than retyped, so the fixture cannot drift from the authority the
+// preflight actually reads.
+const BASE_NODES = 4; // goal + decision + 2 options
+const BASE_EDGES = 4; // decision→option ×2, option→goal ×2
+/** Factors needed to sit the graph exactly ON the node cap. */
+const FACTORS_AT_NODE_CAP = GRAPH_MAX_NODES - BASE_NODES;
+/** Pad edges needed to sit one BELOW the edge cap (+2 projected ⇒ over). */
+const PAD_EDGES_AT_EDGE_CAP = GRAPH_MAX_EDGES - 1 - BASE_EDGES;
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -129,8 +143,8 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
   afterEach(() => setTestSink(null));
 
   it('at node-limit, "add X as a risk" returns a preflight rejection without calling handleEditGraph', async () => {
-    // 20-node graph: 4 base + 16 factors → next add would be 21 > 20 limit.
-    const graph = makeAtLimitGraph(16, 5);
+    // Exactly ON the node cap: next add would be cap+1.
+    const graph = makeAtLimitGraph(FACTORS_AT_NODE_CAP, 5);
     const result = await dispatchEditGraph({
       payload: makePayload('Add cultural cohesion as a risk'),
       requestId: 'req-preflight-node',
@@ -152,8 +166,8 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
   });
 
   it('at edge-limit, "add X as a risk" returns a preflight rejection without calling handleEditGraph', async () => {
-    // 5 factors + 4 base + 25 pad edges = 29 edges; +2 projected = 31 > 30 limit.
-    const graph = makeAtLimitGraph(5, 25);
+    // One below the edge cap; the +2 add-risk projection puts it over.
+    const graph = makeAtLimitGraph(5, PAD_EDGES_AT_EDGE_CAP);
     await dispatchEditGraph({
       payload: makePayload('Please add team dynamics as a risk'),
       requestId: 'req-preflight-edge',
@@ -165,7 +179,7 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
   });
 
   it('under both limits, deterministic clarification is emitted (handler still NOT called for add_risk)', async () => {
-    // 7-node graph — well under the 20 node and 30 edge limits.
+    // 7-node graph — well under both caps.
     const graph = makeAtLimitGraph(3, 3);
     const result = await dispatchEditGraph({
       payload: makePayload('Add cultural cohesion as a risk'),
@@ -193,7 +207,7 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
       appliedGraph: null,
       wasRejected: false,
     } satisfies EditGraphResult);
-    const graph = makeAtLimitGraph(16, 5);
+    const graph = makeAtLimitGraph(FACTORS_AT_NODE_CAP, 5);
     await dispatchEditGraph({
       payload: makePayload('Increase the budget to £50,000'),
       requestId: 'req-non-add-risk',
@@ -212,7 +226,7 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
       payload: makePayload('Please add team dynamics as a risk'),
       requestId: 'req-ev-edge',
       request: STUB_REQUEST,
-      graphState: makeAtLimitGraph(5, 25),
+      graphState: makeAtLimitGraph(5, PAD_EDGES_AT_EDGE_CAP),
       analysisState: null,
     });
     const te = editGraphTurnEvents();

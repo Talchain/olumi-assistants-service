@@ -3577,7 +3577,11 @@ export async function dispatchEditGraph(
         // no call site can forget. See the `message` field's doc.
         message: payload.message,
         analysisWillProceed: admissionNow.willProceed,
-        blockedNextStep: admissionNow.willProceed ? null : admissionNow.strict.nextStep,
+        // Was `admissionNow.willProceed ? null : admissionNow.strict.nextStep`
+        // inlined here — correct, but the only hand-kept copy of a coherence
+        // rule every future consumer would have had to rediscover. Derived once
+        // on the admission now; see `RunAdmission.blockedNextStep`.
+        blockedNextStep: admissionNow.blockedNextStep,
       }).assistant_text,
     };
   }

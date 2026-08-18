@@ -285,6 +285,35 @@ export interface RunAdmission {
    * {@link computeScaffoldPlan}'s two-option minimum survives.
    */
   readonly willProceed: boolean;
+  /**
+   * The next step to PUT TO THE USER, or `null` when the run will proceed.
+   *
+   * ⚠⚠ THIS EXISTS BECAUSE `strict.nextStep` ANSWERS A DIFFERENT QUESTION AND
+   * THE TWO WERE BEING TOLD APART BY HAND, AT ONE CALL SITE.
+   *
+   * `strict.nextStep` is the STRICT term's prescription — "what would the user
+   * have to fix for the WHOLE model to be analysable". It is legitimately
+   * non-null while {@link willProceed} is true, because the two terms answer
+   * different questions (that is the entire point of a two-term gate). But it
+   * reads as an obligation, and rendering it while the run proceeds tells the
+   * user to "review all N readiness issues together BEFORE ANALYSIS" about an
+   * analysis that is about to run anyway — a demand the system does not impose.
+   * That is the manufactured-obligation defect, one level up from the blockers
+   * `stampWaiver` already qualifies.
+   *
+   * Until now the rule `willProceed ? null : strict.nextStep` was written out by
+   * hand at `edit-graph-dispatch.ts`, the single consumer that needed it. One
+   * hand-kept copy of a coherence rule is a mirror waiting to drift, and the
+   * next consumer to read `strict.nextStep` directly would have shipped the
+   * incoherence with nothing to catch it. Derived here, once, so no consumer can
+   * get it wrong: if you want the sentence to show a user, this is the field.
+   *
+   * Surfaced by the graph-size lane, which removed a spurious structural blocker
+   * and thereby moved a real witness fixture from `willProceed:false` to
+   * `willProceed:true` for the first time — the state in which the two fields
+   * disagree.
+   */
+  readonly blockedNextStep: string | null;
   /** Options whose blockers are answered by exclusion/hold, not by the user. */
   readonly waivedOptionIds: readonly string[];
   /**
@@ -382,6 +411,23 @@ function isWaivableByExclusion(
  * Resolve the two-term admission for a graph. Pure and total.
  */
 export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
+  // ⭐ ONE DERIVATION OF THE COHERENCE RULE, wrapping the seven return sites
+  // below rather than adding an eighth thing each of them must remember. Every
+  // one of those returns already sets `willProceed`; deriving
+  // `blockedNextStep` from it here makes the two structurally incapable of
+  // disagreeing. Same reasoning as `readinessResultFrom`'s single-assessment
+  // rule directly above: a module whose purpose is "one authority, one answer"
+  // must not contain two places where that answer is computed.
+  const admission = resolveRunAdmissionTerms(rawGraph);
+  return {
+    ...admission,
+    blockedNextStep: admission.willProceed ? null : admission.strict.nextStep,
+  };
+}
+
+function resolveRunAdmissionTerms(
+  rawGraph: unknown,
+): Omit<RunAdmission, 'blockedNextStep'> {
   const empty: ScaffoldPlan = {
     will_scaffold_options: false,
     option_count: 0,

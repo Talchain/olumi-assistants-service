@@ -58,6 +58,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { parsePendingAction } from '../../session/pending-action.js';
+import { GRAPH_MAX_NODES } from '../../../config/graphCaps.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -143,8 +144,11 @@ describe('dispatchEditGraph — add-risk clarify persists the edit_graph_add_ris
   });
 
   it('does NOT emit the pending on the preflight-rejection path (nothing to resume)', async () => {
-    // 20-node graph: 4 base + 16 factors → next add would exceed the limit.
-    const factors = Array.from({ length: 16 }, (_, i) => ({
+    // ⚠ 2026-08-18: sized to the node cap rather than to the 20-node ceiling
+    // that used to live in `graph-structure-validator.ts` (removed — absolute
+    // graph size is `config/graphCaps.ts`' question now). Behaviour asserted is
+    // unchanged: sit exactly ON the cap so the next add would exceed it.
+    const factors = Array.from({ length: GRAPH_MAX_NODES - 4 }, (_, i) => ({
       id: `fac_${i}`,
       kind: 'factor' as const,
       label: `Factor ${i}`,
