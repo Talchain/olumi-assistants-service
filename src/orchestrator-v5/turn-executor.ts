@@ -7778,15 +7778,18 @@ export async function runTurnExecutor(
         // synthesised CONVERSE proposal carrying its own deterministic
         // `answer_text`, which is the same idiom the deterministic pre-routes
         // use in reverse (synthesise a `RoutingToolCallResult` and let the
-        // unchanged lifecycle own the turn). The outcome's `suggested_actions`
-        // are stashed in `analysisElectionOffer` and merged into the converse
-        // branch's chips further down — a proposal has no chip channel, and
-        // leaving the offer to `generateChips` is what made the module's
-        // "costs one click" justification false in two of three measured
-        // states. `rawResult` and `llmCallCount`
+        // unchanged lifecycle own the turn). `rawResult` and `llmCallCount`
         // are carried through untouched so token accounting, the context
         // -budget event and `capturedReasoning` all still describe the real
-        // call. The router's `orientationText` is DISCARDED, deliberately: the
+        // call.
+        //
+        // A proposal has no chip channel, so the outcome's `suggested_actions`
+        // are stashed in `analysisElectionOffer` and merged into the converse
+        // branch's chips further down. Leaving that offer to `generateChips` is
+        // precisely what made the gate module's "costs one click on the offered
+        // chip" justification false in two of three measured states.
+        //
+        // The router's `orientationText` is DISCARDED, deliberately: the
         // served prompt scopes it to "pre-action orientation … say what the
         // simulation will test", so on a demoted election it describes a
         // simulation that will not run.

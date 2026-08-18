@@ -278,6 +278,48 @@ describe('MUST-ADMIT (P8) — the product can accept the sentences it prints', (
 });
 
 // ---------------------------------------------------------------------------
+// 2b. The merge: the offer reaches the turn's chips without eating them
+// ---------------------------------------------------------------------------
+
+describe('withAnalysisElectionOffer — how the offer joins the turn’s chips', () => {
+  const other = (id: string) => ({ id, label: id, message: `${id}.` });
+
+  it('is an identity pass-through when there is no offer (every non-demoted turn)', () => {
+    const base = [other('chip_prompt_a'), other('chip_prompt_b')];
+    // Same REFERENCE, not merely equal: a turn the gate did not touch must be
+    // byte-identical to before this change.
+    expect(withAnalysisElectionOffer([], base, 3)).toBe(base);
+  });
+
+  it('prepends the offer and keeps the turn’s other chips', () => {
+    const base = [other('chip_prompt_a')];
+    expect(withAnalysisElectionOffer([ANALYSIS_ELECTION_RUN_CHIP], base, 3)).toEqual([
+      ANALYSIS_ELECTION_RUN_CHIP,
+      base[0],
+    ]);
+  });
+
+  it('does not ship the same chip twice when the generator already produced it', () => {
+    // The generator emits a byte-identical Run chip on several states; a
+    // missing dedupe would put it on screen twice.
+    const base = [{ ...ANALYSIS_ELECTION_RUN_CHIP }, other('chip_prompt_a')];
+    expect(withAnalysisElectionOffer([ANALYSIS_ELECTION_RUN_CHIP], base, 3)).toEqual([
+      ANALYSIS_ELECTION_RUN_CHIP,
+      other('chip_prompt_a'),
+    ]);
+  });
+
+  it('respects the caller’s chip budget, and the offer survives the cap', () => {
+    const base = [other('chip_prompt_a'), other('chip_prompt_b'), other('chip_prompt_c')];
+    const merged = withAnalysisElectionOffer([ANALYSIS_ELECTION_RUN_CHIP], base, 3);
+    expect(merged).toHaveLength(3);
+    // Bound by identity: the affordance the copy names is the one that must not
+    // be the chip squeezed out.
+    expect(merged[0]).toEqual(ANALYSIS_ELECTION_RUN_CHIP);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. The four discriminating twins, at predicate level
 // ---------------------------------------------------------------------------
 
@@ -430,8 +472,11 @@ describe('KNOWN-DROPPED — pinned exactly so the gap cannot drift unobserved', 
    * These are genuine analysis requests the gate DEMOTES, because it reuses
    * `analytical-intent.ts`'s verb-position allowlist unchanged rather than
    * forking a second hand-maintained mirror of English (CLAUDE.md trap 12).
-   * Each costs the user one click on the offered chip; none causes a wrong
-   * action. The set is asserted with `toEqual`, so it REDs if it GROWS (a
+   * Each costs the user one click on the chip the demotion now emits — or,
+   * where the model could not be analysed anyway, costs nothing that was
+   * available. None causes a wrong action. (⚠ Before the offer was bound to the
+   * demotion, "one click on the offered chip" was a claim about a chip the
+   * demoted turn did not emit; see THE OFFER in `analysis-election-gate.ts`.) The set is asserted with `toEqual`, so it REDs if it GROWS (a
    * regression) or SHRINKS (someone widened the allowlist and must re-read
    * the ⚠ notes in analytical-intent.ts, which explain why the sibling
    * predicate cannot afford that).
