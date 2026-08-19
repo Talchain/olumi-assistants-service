@@ -1,0 +1,2884 @@
+{
+ "draw-4": {
+  "captured_at": "2026-08-19",
+  "draft_graph": {
+   "edge_count": 27,
+   "edges": [
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "24931e51",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.23750000000000002,
+      "std": 0.056999999999999995
+     },
+     "to": "ac22dc25"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "24931e51",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.16799999999999995
+     },
+     "to": "b1a31be0"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "4aaec38f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.34305555555555556,
+      "std": 0.08233333333333333
+     },
+     "to": "ac22dc25"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "4aaec38f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.3454545454545454,
+      "std": 0.08290909090909089
+     },
+     "to": "c4ff4190"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "4aaec38f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.16799999999999995
+     },
+     "to": "d6452a9b"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "4abad64d",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4aaec38f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "4abad64d",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7aec7ab9"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "550c34b2",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5,
+      "std": 0.11999999999999998
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "76c12e70",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7aec7ab9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.55,
+      "std": 0.132
+     },
+     "to": "550c34b2"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7aec7ab9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.6,
+      "std": 0.144
+     },
+     "to": "76c12e70"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7aec7ab9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.28787878787878785,
+      "std": 0.06909090909090906
+     },
+     "to": "c4ff4190"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "939d4630",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4aaec38f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "939d4630",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7aec7ab9"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "ac22dc25",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "b1a31be0",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.8,
+     "from": "c4ff4190",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.11999999999999998
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "d24307c3",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4abad64d"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "d24307c3",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "939d4630"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "d24307c3",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "e5dc21d6"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "d24307c3",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "e755ec33"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "d6452a9b",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.3694444444444444,
+      "std": 0.08866666666666664
+     },
+     "to": "ac22dc25"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e5dc21d6",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "fe8e1773"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e755ec33",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4aaec38f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e755ec33",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7aec7ab9"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "fe8e1773",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.31666666666666665,
+      "std": 0.07599999999999998
+     },
+     "to": "c4ff4190"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "793be10e",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Wired outcome to goal (synthetic edge)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    }
+   ],
+   "goal_constraints": [
+    {
+     "confidence": 0.85,
+     "constraint_id": "constraint_fe8e1773_max",
+     "label": "Reduce burn rate by at least 30%",
+     "node_id": "fe8e1773",
+     "operator": "<=",
+     "provenance": "explicit",
+     "source_quote": "cutting our burn rate by 30%",
+     "unit": "fraction",
+     "value": -0.3,
+     "value_frame": "delta"
+    }
+   ],
+   "node_count": 17,
+   "nodes": [
+    {
+     "category": "external",
+     "display_value": "0.25 to 0.75",
+     "extractionType": "inferred",
+     "id": "24931e51",
+     "kind": "factor",
+     "label": "NHS Data Regulation Outcome",
+     "prior": {
+      "distribution": "uniform",
+      "range_max": 0.75,
+      "range_min": 0.25
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "4aaec38f",
+     "kind": "factor",
+     "label": "Engineering Spend (Upfront)",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "4abad64d",
+     "interventions": {
+      "4aaec38f": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "4aaec38f"
+       },
+       "value": 0,
+       "value_confidence": "low"
+      },
+      "7aec7ab9": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "7aec7ab9"
+       },
+       "value": 1,
+       "value_confidence": "low"
+      }
+     },
+     "is_baseline": false,
+     "kind": "option",
+     "label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+     "provenance": "from_brief",
+     "source_quote": "double down on enterprise sales (higher margins but longer cycles and more headcount)"
+    },
+    {
+     "id": "550c34b2",
+     "kind": "outcome",
+     "label": "Revenue Margin Improvement",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "666659b7",
+     "kind": "goal",
+     "label": "Cut Burn Rate by 30%",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "cutting our burn rate by 30%"
+    },
+    {
+     "id": "76c12e70",
+     "kind": "risk",
+     "label": "Enterprise Pipeline Delay",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "793be10e",
+     "kind": "outcome",
+     "label": "Achieve 3x User Growth This Year",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "achieve 3x user growth this year"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.3)",
+     "id": "7aec7ab9",
+     "kind": "factor",
+     "label": "Enterprise Sales Headcount",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.3
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "939d4630",
+     "interventions": {
+      "4aaec38f": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "4aaec38f"
+       },
+       "value": 0,
+       "value_confidence": "low"
+      },
+      "7aec7ab9": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "7aec7ab9"
+       },
+       "value": 0,
+       "value_confidence": "low"
+      }
+     },
+     "kind": "option",
+     "label": "Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "ac22dc25",
+     "kind": "outcome",
+     "label": "User Growth",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "b1a31be0",
+     "kind": "risk",
+     "label": "Data Access Restriction",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "c4ff4190",
+     "kind": "risk",
+     "label": "Burn Rate Overshoot",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "d24307c3",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "observable",
+     "display_value": "0.5",
+     "id": "d6452a9b",
+     "kind": "factor",
+     "label": "Customer Acquisition Cost Efficiency",
+     "observed_state": {
+      "extractionType": "inferred",
+      "source": "cee_inference",
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e5dc21d6",
+     "interventions": {},
+     "is_baseline": true,
+     "kind": "option",
+     "label": "Continue Current Mix (Status Quo)",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e755ec33",
+     "interventions": {
+      "4aaec38f": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "4aaec38f"
+       },
+       "value": 1,
+       "value_confidence": "low"
+      },
+      "7aec7ab9": {
+       "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+       "source": "cee_hypothesis",
+       "target_match": {
+        "confidence": "high",
+        "match_type": "exact_id",
+        "node_id": "7aec7ab9"
+       },
+       "value": 0,
+       "value_confidence": "low"
+      }
+     },
+     "is_baseline": false,
+     "kind": "option",
+     "label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+     "provenance": "from_brief",
+     "source_quote": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "fe8e1773",
+     "kind": "factor",
+     "label": "Burn Rate",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    }
+   ]
+  },
+  "endpoint": "POST https://cee-staging.onrender.com/proxy/v5/turn",
+  "observed_analysis_ready": {
+   "options": [
+    {
+     "intervention_count": 2,
+     "option_id": "4abad64d",
+     "status": "ready",
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "intervention_count": 2,
+     "option_id": "939d4630",
+     "status": "ready",
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "e5dc21d6",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 2,
+     "option_id": "e755ec33",
+     "status": "ready",
+     "status_reason": "2 intervention(s) ready for analysis"
+    }
+   ],
+   "status": "needs_user_input"
+  }
+ },
+ "draw-5": {
+  "captured_at": "2026-08-19",
+  "draft_graph": {
+   "edge_count": 22,
+   "edges": [
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "0ebb6657",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.8000000000000002,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "reasoning": "Overruns in engineering spend directly increase costs, making it harder to cut burn by 30%.",
+       "strength_mean": -0.13333333333333336,
+       "strength_std": 0.1
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": -0.4000000000000001,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": -0.13333333333333336,
+        "before": -0.3,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "0ebb6657->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "28e61e4b",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666667,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0.6,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "reasoning": "If patient data is restricted, compliance increases costs making burn cut harder.",
+       "strength_mean": -0.06666666666666668,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.6,
+       "strength_mean": -0.33333333333333337,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": -0.06666666666666668,
+        "before": -0.15,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "28e61e4b->666659b7"
+       },
+       {
+        "after": 0.053333333333333344,
+        "before": 0.15,
+        "code": "LINT_STD_CLAMPED",
+        "edge_key": "28e61e4b->666659b7"
+       },
+       {
+        "after": 0.15,
+        "before": 0.053333333333333344,
+        "code": "LINT_STD_FLOORED_WEAK_GUESS",
+        "edge_key": "28e61e4b->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "2a5df7c6",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.7555555555555558,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.85,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "reasoning": "Delays in enterprise sales slow revenue inflows making it harder to reduce burn.",
+       "strength_mean": -0.11111111111111113,
+       "strength_std": 0.0888888888888889
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.85,
+       "strength_mean": -0.3777777777777779,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": -0.11111111111111113,
+        "before": -0.25,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "2a5df7c6->666659b7"
+       },
+       {
+        "after": 0.0888888888888889,
+        "before": 0.15,
+        "code": "LINT_STD_CLAMPED",
+        "edge_key": "2a5df7c6->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "35a28812",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.8,
+      "std": 0.19199999999999995
+     },
+     "to": "4900a5fd",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.3333333333333333,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0.5,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "A longer runway often reduces urgency leading to slightly higher burn rate.",
+       "strength_mean": 0.15,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.5,
+       "strength_mean": -0.11666666666666672,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "3a75cabd",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.55,
+      "std": 0.132
+     },
+     "to": "2a5df7c6",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 1,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "Increasing enterprise sales headcount accelerates deal cycles reducing delays.",
+       "strength_mean": -0.6,
+       "strength_std": 0.1
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": -0.8666666666666667,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "3a75cabd",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.6,
+      "std": 0.144
+     },
+     "to": "4900a5fd",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666666,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "Higher enterprise headcount and spend directly raise the burn rate.",
+       "strength_mean": 0.5,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0.23333333333333328,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "3a75cabd",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.3886363636363636,
+      "std": 0.09327272727272726
+     },
+     "to": "732544c4",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666666,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "More enterprise sales resources directly drive user growth through deals.",
+       "strength_mean": 0.5,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0.23333333333333328,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "4900a5fd",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.16799999999999995
+     },
+     "to": "aeb3f5b9",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 1,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "exists_probability": 0.95,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "A higher existing burn rate mechanically makes achieving reductions much harder.",
+       "strength_mean": -0.8,
+       "strength_std": 0.1
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.95,
+       "strength_mean": -1.0666666666666669,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "4abad64d",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "3a75cabd",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "6d178dfd",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.6,
+      "std": 0.144
+     },
+     "to": "28e61e4b",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 1,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "brief_explicit",
+       "exists_probability": 0.95,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "An unfavorable NHS regulation outcome directly increases the chance of data access being restricted.",
+       "strength_mean": 0.8,
+       "strength_std": 0.1
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.95,
+       "strength_mean": 0.5333333333333333,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "732544c4",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666666,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "reasoning": "Achieved user growth increases revenue helping to cut the burn rate.",
+       "strength_mean": 0.2666666666666667,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": 0.2666666666666667,
+        "before": 0.6,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "732544c4->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "a94749f9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5,
+      "std": 0.11999999999999998
+     },
+     "to": "0ebb6657",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.8666666666666665,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "Heavy engineering spend raises the risk of overrunning budgets.",
+       "strength_mean": 0.7,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0.43333333333333324,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "a94749f9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.55,
+      "std": 0.132
+     },
+     "to": "4900a5fd",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666666,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "Investing in self-serve engineering upfront temporarily increases the burn rate.",
+       "strength_mean": 0.35,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0.08333333333333326,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "a94749f9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5613636363636363,
+      "std": 0.1347272727272727
+     },
+     "to": "732544c4",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 1,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666666,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "exists_probability": 0.9,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "reasoning": "Engineering investment in a self-serve product directly improves user growth via lower CAC.",
+       "strength_mean": 0.5,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.9,
+       "strength_mean": 0.23333333333333328,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "aeb3f5b9",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.75,
+      "std": 0.17999999999999997
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 1,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "exists_probability": 0.95,
+       "lint_corrected": true,
+       "needs_user_input": false,
+       "reasoning": "Successfully reducing the burn rate directly achieves the target cut of 30%.",
+       "strength_mean": 0.3555555555555556,
+       "strength_std": 0.1
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.95,
+       "strength_mean": 0.0888888888888889,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": 0.3555555555555556,
+        "before": 0.8,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "aeb3f5b9->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e405d56a",
+     "origin": "repair",
+     "provenance": {
+      "reasoning": "Status-quo option wired to factor",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "3a75cabd",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e405d56a",
+     "origin": "repair",
+     "provenance": {
+      "reasoning": "Status-quo option wired to factor",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "a94749f9",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e4e919d4",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4abad64d",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 3,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e4e919d4",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "e405d56a",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 3,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e4e919d4",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "e755ec33",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 3,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e755ec33",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "a94749f9",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": 0,
+       "strength_std_offset": 0
+      },
+      "contested_reasons": [],
+      "distance_to_goal": 2,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "reasoning": "",
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2_missing": true,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "agreed",
+      "user_action": "pending",
+      "validation_lint_log": [],
+      "was_shown": false
+     }
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "793be10e",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Wired outcome to goal (synthetic edge)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7",
+     "validation": {
+      "bias_correction": {
+       "exists_probability_offset": 0,
+       "strength_mean_offset": -0.2666666666666667,
+       "strength_std_offset": -0.15
+      },
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "distance_to_goal": 0,
+      "evoi_impact": null,
+      "evoi_rank": null,
+      "max_divergence": 0.6666666666666667,
+      "pass1": {
+       "exists_probability": 0,
+       "strength_mean": 0,
+       "strength_std": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "exists_probability": 0.6,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "reasoning": "Focusing resources on growth may temporarily hinder burn reductions.",
+       "strength_mean": -0.06666666666666668,
+       "strength_std": 0.15
+      },
+      "pass2_adjusted": {
+       "exists_probability": 0.6,
+       "strength_mean": -0.33333333333333337,
+       "strength_std": 0
+      },
+      "pass2_missing": false,
+      "resolved_by": "default",
+      "resolved_value": null,
+      "sign_unstable": false,
+      "status": "contested",
+      "user_action": "pending",
+      "validation_lint_log": [
+       {
+        "after": -0.06666666666666668,
+        "before": -0.15,
+        "code": "LINT_BUDGET_RESCALE",
+        "edge_key": "793be10e->666659b7"
+       },
+       {
+        "after": 0.053333333333333344,
+        "before": 0.15,
+        "code": "LINT_STD_CLAMPED",
+        "edge_key": "793be10e->666659b7"
+       },
+       {
+        "after": 0.15,
+        "before": 0.053333333333333344,
+        "code": "LINT_STD_FLOORED_WEAK_GUESS",
+        "edge_key": "793be10e->666659b7"
+       }
+      ],
+      "was_shown": false
+     }
+    }
+   ],
+   "node_count": 16,
+   "nodes": [
+    {
+     "id": "0ebb6657",
+     "kind": "risk",
+     "label": "Engineering spend overrun",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "28e61e4b",
+     "kind": "risk",
+     "label": "Patient data access restricted",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "2a5df7c6",
+     "kind": "risk",
+     "label": "Enterprise sales cycle delay",
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "external",
+     "display_value": "0.45 to 1 months",
+     "extractionType": "inferred",
+     "id": "35a28812",
+     "kind": "factor",
+     "label": "18 months of runway",
+     "prior": {
+      "distribution": "uniform",
+      "range_max": 1,
+      "range_min": 0.45
+     },
+     "provenance": "from_brief",
+     "source_quote": "18 months of runway"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "3a75cabd",
+     "kind": "factor",
+     "label": "Enterprise sales headcount and spend",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "observable",
+     "display_value": "30%",
+     "id": "4900a5fd",
+     "kind": "factor",
+     "label": "Burn rate level",
+     "observed_state": {
+      "extractionType": "inferred",
+      "source": "cee_inference",
+      "unit": "%",
+      "value": 0.3
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "4abad64d",
+     "interventions": {},
+     "is_baseline": false,
+     "kind": "option",
+     "label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+     "provenance": "from_brief",
+     "source_quote": "double down on enterprise sales (higher margins but longer cycles and more headcount)"
+    },
+    {
+     "id": "666659b7",
+     "kind": "goal",
+     "label": "Cut Burn Rate by 30%",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "cutting our burn rate by 30%"
+    },
+    {
+     "category": "external",
+     "id": "6d178dfd",
+     "kind": "factor",
+     "label": "NHS data regulation outcome",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "732544c4",
+     "kind": "outcome",
+     "label": "User growth achieved",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "793be10e",
+     "kind": "outcome",
+     "label": "Achieve 3x User Growth This Year",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "achieve 3x user growth this year"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "a94749f9",
+     "kind": "factor",
+     "label": "Engineering investment in self-serve product",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "aeb3f5b9",
+     "kind": "outcome",
+     "label": "Burn rate reduction achieved",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e405d56a",
+     "interventions": {},
+     "is_baseline": true,
+     "kind": "option",
+     "label": "Status Quo: Hold current strategy",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e4e919d4",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e755ec33",
+     "interventions": {},
+     "is_baseline": false,
+     "kind": "option",
+     "label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+     "provenance": "from_brief",
+     "source_quote": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)"
+    }
+   ]
+  },
+  "endpoint": "POST https://cee-staging.onrender.com/proxy/v5/turn",
+  "observed_analysis_ready": {
+   "options": [
+    {
+     "intervention_count": 0,
+     "option_id": "4abad64d",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "e405d56a",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "e755ec33",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    }
+   ],
+   "status": "needs_user_input"
+  }
+ },
+ "draw-9": {
+  "captured_at": "2026-08-19",
+  "draft_graph": {
+   "edge_count": 28,
+   "edges": [
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "0d537983",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5428571428571428,
+      "std": 0.13028571428571425
+     },
+     "to": "732544c4"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "1354ac5c",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.55,
+      "std": 0.132
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "209d2359",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.4071428571428571,
+      "std": 0.0977142857142857
+     },
+     "to": "732544c4"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "209d2359",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5,
+      "std": 0.11999999999999998
+     },
+     "to": "b85c5cd3"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "2a5df7c6",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "4abad64d",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7e848c3f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "529dc43f",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "4abad64d"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "529dc43f",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "c94b4086"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "529dc43f",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "cbf30a46"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "529dc43f",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Decision-to-option scaffold minted by the projector",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "e755ec33"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "732544c4",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7e848c3f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.55,
+      "std": 0.132
+     },
+     "to": "1354ac5c"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7e848c3f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.6,
+      "std": 0.144
+     },
+     "to": "2a5df7c6"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7e848c3f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.41304347826086957,
+      "std": 0.09913043478260869
+     },
+     "to": "8e1ccc82"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "7e848c3f",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.8,
+      "std": 0.19199999999999995
+     },
+     "to": "d35f4cb4"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "83abb310",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5369565217391304,
+      "std": 0.1288695652173913
+     },
+     "to": "8e1ccc82"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "from": "83abb310",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.8,
+      "std": 0.19199999999999995
+     },
+     "to": "d35f4cb4"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.8,
+     "from": "8e1ccc82",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.65,
+      "std": 0.15599999999999997
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "negative",
+     "exists_probability": 0.9,
+     "from": "b85c5cd3",
+     "origin": "repair",
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": -0.5,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "c94b4086",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7e848c3f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "c94b4086",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "83abb310"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "cbf30a46",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "7e848c3f"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "cbf30a46",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "83abb310"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "d35f4cb4",
+     "origin": "repair",
+     "provenance": {
+      "reasoning": "Split factor\u2192goal into factor\u2192outcome\u2192goal",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.9,
+      "std": 0.15
+     },
+     "to": "out_d35f4cb4_impact"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e755ec33",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "0d537983"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "from": "e755ec33",
+     "origin": "ai",
+     "provenance": {
+      "reasoning": "Model-inferred causal link (records projector)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 1,
+      "std": 0.01
+     },
+     "to": "83abb310"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "out_d35f4cb4_impact",
+     "origin": "repair",
+     "provenance": {
+      "reasoning": "Split factor\u2192goal into factor\u2192outcome\u2192goal",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.5,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    },
+    {
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "from": "793be10e",
+     "origin": "default",
+     "provenance": {
+      "reasoning": "Wired outcome to goal (synthetic edge)",
+      "source": "cee_hypothesis"
+     },
+     "provenance_display": "ai_inferred",
+     "strength": {
+      "mean": 0.7,
+      "std": 0.15
+     },
+     "to": "666659b7"
+    }
+   ],
+   "goal_constraints": [
+    {
+     "confidence": 0.85,
+     "constraint_id": "constraint_d35f4cb4_max",
+     "label": "Reduce burn rate by at least 30%",
+     "node_id": "d35f4cb4",
+     "operator": "<=",
+     "provenance": "explicit",
+     "source_quote": "cutting our burn rate by 30%",
+     "unit": "fraction",
+     "value": -0.3,
+     "value_frame": "delta"
+    }
+   ],
+   "node_count": 18,
+   "nodes": [
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "0d537983",
+     "kind": "factor",
+     "label": "Customer acquisition cost",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "1354ac5c",
+     "kind": "outcome",
+     "label": "Margin improvement",
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "external",
+     "id": "209d2359",
+     "kind": "factor",
+     "label": "NHS regulatory outcome",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "2a5df7c6",
+     "kind": "risk",
+     "label": "Enterprise sales cycle delay",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "4abad64d",
+     "interventions": {},
+     "is_baseline": false,
+     "kind": "option",
+     "label": "double down on enterprise sales (higher margins but longer cycles and more headcount)",
+     "provenance": "from_brief",
+     "source_quote": "double down on enterprise sales (higher margins but longer cycles and more headcount)"
+    },
+    {
+     "id": "529dc43f",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "666659b7",
+     "kind": "goal",
+     "label": "Cut Burn Rate by 30%",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "cutting our burn rate by 30%"
+    },
+    {
+     "id": "732544c4",
+     "kind": "outcome",
+     "label": "User growth achieved",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "793be10e",
+     "kind": "outcome",
+     "label": "Achieve 3x User Growth This Year",
+     "label_authored": true,
+     "provenance": "from_brief",
+     "source_quote": "achieve 3x user growth this year"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "7e848c3f",
+     "kind": "factor",
+     "label": "Enterprise sales headcount",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "controllable",
+     "display_value": "Moderate (0.5)",
+     "id": "83abb310",
+     "kind": "factor",
+     "label": "Engineering investment level",
+     "observed_state": {
+      "extractionType": "inferred",
+      "factor_type": "other",
+      "source": "cee_inference",
+      "uncertainty_drivers": [
+       "Not provided"
+      ],
+      "value": 0.5
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "8e1ccc82",
+     "kind": "risk",
+     "label": "Burn rate exceeds target",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "b85c5cd3",
+     "kind": "risk",
+     "label": "Regulatory access restriction",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "c94b4086",
+     "interventions": {},
+     "is_baseline": false,
+     "kind": "option",
+     "label": "Phased hybrid: self-serve pilot then enterprise scale",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "cbf30a46",
+     "interventions": {},
+     "is_baseline": true,
+     "kind": "option",
+     "label": "Status Quo: Hold current strategy mix",
+     "provenance": "ai_inferred"
+    },
+    {
+     "category": "observable",
+     "display_value": "1",
+     "id": "d35f4cb4",
+     "kind": "factor",
+     "label": "Burn rate",
+     "observed_state": {
+      "extractionType": "inferred",
+      "source": "cee_inference",
+      "value": 1
+     },
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e755ec33",
+     "interventions": {},
+     "is_baseline": false,
+     "kind": "option",
+     "label": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)",
+     "provenance": "from_brief",
+     "source_quote": "invest heavily in a self-serve product (lower CAC but requires significant engineering spend upfront)"
+    },
+    {
+     "id": "out_d35f4cb4_impact",
+     "kind": "outcome",
+     "label": "Burn rate Impact",
+     "provenance": "ai_inferred"
+    }
+   ]
+  },
+  "endpoint": "POST https://cee-staging.onrender.com/proxy/v5/turn",
+  "observed_analysis_ready": {
+   "options": [
+    {
+     "intervention_count": 0,
+     "option_id": "4abad64d",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "c94b4086",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "cbf30a46",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    },
+    {
+     "intervention_count": 0,
+     "option_id": "e755ec33",
+     "status": "needs_user_mapping",
+     "status_reason": "No interventions extracted"
+    }
+   ],
+   "status": "needs_user_input"
+  }
+ }
+}

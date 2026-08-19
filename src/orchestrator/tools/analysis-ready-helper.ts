@@ -27,7 +27,6 @@ import { stableStringify } from "../context/stable-stringify.js";
 // `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
 // discriminator is `origin` and not `provenance.source` (measured: the V3
 // transform coerces `"synthetic"` to `"cee_hypothesis"`).
-import { isRepairAuthoredOrigin } from "../../graph/repair-authored-edge.js";
 // ⭐ INV-P6 — the SOLE derivation of "may this gap be demanded of the user?".
 // Type-only for the vocabulary, value import for the classifier; the classifier
 // module imports `CanonicalReadinessIssue` back as a TYPE, so there is no runtime
@@ -397,7 +396,6 @@ function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | 
 function projectOptionForCanonicalBuilder(
   candidate: unknown,
   factorIds: ReadonlySet<string>,
-  connectedFactorIds: ReadonlySet<string> = new Set<string>(),
 ): OptionV3T | null {
   if (!isPlainObject(candidate)) return null;
   const id = readNonEmptyString(candidate.id);
@@ -428,14 +426,26 @@ function projectOptionForCanonicalBuilder(
 
   const rawInterventions = readRawInterventions(candidate.raw_interventions);
   const explicitStatus = readOptionStatus(candidate.status);
+  // ⚠ CONNECTIVITY IS DELIBERATELY NOT CONSULTED HERE ANY MORE — SUPERSEDED.
+  //
+  // This fallback used to carry `connectedFactorIds.size > 0 ? 'needs_encoding'`,
+  // making it a SECOND producer of the same field. It was reachable only from
+  // this persisted-graph path, so the draft path (a fresh user's first turn)
+  // decided the same question with no connectivity input and disagreed on
+  // identical graph shapes — measured `needs_user_mapping` on 9/9 captured draws
+  // where every non-ready option was in fact connected.
+  //
+  // `computeAnalysisReadyStatusWithReason` (`cee/transforms/option-status.ts`)
+  // is the single owner now, and `buildAnalysisReadyPayload` — which every
+  // readiness path funnels through, and which holds the graph — feeds it the
+  // repair-excluded connected-factor count. Re-adding a limb here would restore
+  // the divergence, not defend against it.
   const status: OptionV3T['status'] = explicitStatus
     ?? (rawInterventions && Object.values(rawInterventions).some((value) => typeof value !== 'number')
       ? 'needs_encoding'
       : Object.keys(interventions).length > 0
         ? 'ready'
-        : connectedFactorIds.size > 0
-          ? 'needs_encoding'
-          : 'needs_user_mapping');
+        : 'needs_user_mapping');
 
   return {
     id,
@@ -799,36 +809,17 @@ function projectSemanticAnalysisReadyFromGraph(
       .map((node) => readNonEmptyString(node.id))
       .filter((id): id is string => id !== null),
   );
-  // ⛔ REPAIR-AUTHORED EDGES ARE EXCLUDED — ROADMAP 2.1266, the SAME authority
-  // the draft-path builder uses (`transforms/analysis-ready.ts`). This set is
-  // `projectOptionForCanonicalBuilder`'s `connectedFactorIds`, and its only
-  // reader is the status fallback at :374 — where a non-empty set means
-  // `needs_encoding` ("Choose how \"X\" should be represented on the effect
-  // scale") rather than `needs_user_mapping` ("Choose which factor \"X\" changes
-  // and by how much"). Counting the repair's own wiring here therefore did not
-  // merely add asks, it swapped the QUESTION for one the user cannot answer:
-  // there is no representation to choose for a lever nobody stated. Both paths
-  // resolve to one predicate on purpose — two readiness surfaces deciding
-  // independently which edges the repair invented is trap 21's shape.
-  const optionConnectedFactorIds = new Map<string, Set<string>>();
-  for (const edge of parsed.data.edges) {
-    if (!optionNodeIds.has(edge.from) || !factorIds.has(edge.to)) continue;
-    if (isRepairAuthoredOrigin(edge)) continue;
-    const connected = optionConnectedFactorIds.get(edge.from) ?? new Set<string>();
-    connected.add(edge.to);
-    optionConnectedFactorIds.set(edge.from, connected);
-  }
+  // The repair-excluded option→factor adjacency this function used to build for
+  // `projectOptionForCanonicalBuilder` is GONE, with the status limb that read
+  // it — see the note there. `buildAnalysisReadyPayload` (called below) derives
+  // the identical set from the same graph, through the same
+  // `isRepairAuthoredOptionFactorEdge` authority, and is the single owner of the
+  // status decision for BOTH readiness paths. Two surfaces deciding
+  // independently which edges the repair invented was trap 21's shape.
 
   const projectedTopLevel = Array.isArray(rawGraph.options)
     ? rawGraph.options
-        .map((option) => {
-          const id = isPlainObject(option) ? readNonEmptyString(option.id) : null;
-          return projectOptionForCanonicalBuilder(
-            option,
-            factorIds,
-            id ? optionConnectedFactorIds.get(id) : undefined,
-          );
-        })
+        .map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter(
           (option): option is OptionV3T => option !== null && optionNodeIds.has(option.id),
         )
@@ -868,7 +859,7 @@ function projectSemanticAnalysisReadyFromGraph(
           const id = readNonEmptyString(node.id);
           return id
             ? topLevelById.get(id)
-              ?? projectOptionForCanonicalBuilder(node, factorIds, optionConnectedFactorIds.get(id))
+              ?? projectOptionForCanonicalBuilder(node, factorIds)
             : null;
         })
         .filter((option): option is OptionV3T => option !== null);

@@ -80,7 +80,18 @@ export interface AnalysisReadyValidationResult {
  * - Extracts raw_value from InterventionV3 to build raw_interventions
  * - Status logic: needs_encoding when raw values exist but aren't fully encoded
  */
-export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnalysisT {
+export function transformOptionToAnalysisReady(
+  option: OptionV3T,
+  /**
+   * How many factors this option is connected to by a NON-repair-authored
+   * option→factor edge. Supplied by `buildAnalysisReadyPayload`, the only
+   * producer that holds the graph. Defaults to 0 for the standalone
+   * single-option callers (which have no graph and therefore cannot know);
+   * every production path goes through `buildAnalysisReadyPayload` and passes
+   * the real count.
+   */
+  connectedFactorCount = 0,
+): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
   // Build raw_interventions from raw_value fields (Raw+Encoded pattern)
@@ -151,11 +162,15 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   // Status rules:
   // - "ready": has interventions, no non-numeric raw values needing encoding
   // - "needs_encoding": has non-numeric raw values awaiting user encoding
-  // - "needs_user_mapping": no interventions or option explicitly needs mapping
+  // - "needs_user_mapping": no interventions AND no connected factor — the
+  //   product genuinely does not know which factor this option moves
+  // - "needs_encoding": no interventions but a connected factor — the mapping
+  //   exists; only the magnitude is outstanding
   const { status, reason: statusReason } = computeAnalysisReadyStatusWithReason(
     Object.keys(interventions).length,
     option.status,
-    hasNonNumericRaw
+    hasNonNumericRaw,
+    connectedFactorCount
   );
 
   const result: OptionForAnalysisT = {
@@ -558,27 +573,6 @@ export function buildAnalysisReadyPayload(
   graph: GraphV3T,
   context: AnalysisReadyContext = {}
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
-  // Transform all options
-  const analysisOptions = options.map(transformOptionToAnalysisReady);
-
-  // === is_baseline detection (CEE-2) ===
-  // Mark exactly one option as the status-quo baseline, based on LLM flag or
-  // label keyword matching. This is additive — no existing field is modified.
-  const baselineIdx = detectBaselineOptionIndex(options);
-  if (baselineIdx !== null) {
-    analysisOptions[baselineIdx].is_baseline = true;
-  }
-
-  // === Task 2A+2B: Factor value fallback + blocker emission ===
-  // For qualitative briefs, V3 options may have empty interventions because
-  // enrichment didn't set data.value on factor nodes. We recover values from
-  // the V3 factor node's observed_state or V1 data field (preserved via passthrough).
-  const blockers: AnalysisBlockerT[] = [];
-  // What we DECLINED to substitute, and from where. Recorded for the trace so
-  // the refusal is observable — an operator can see how often a current level
-  // was available and deliberately not used as an option's lever.
-  const declinedFallbacks: Array<{ optionId: string; factorId: string; source: string }> = [];
-
   // Build factor node lookup and node kind map
   const factorNodeMap = new Map<string, NodeV3T>();
   const nodeKindLookup = new Map<string, string>();
@@ -633,6 +627,43 @@ export function buildAnalysisReadyPayload(
       optionFactorAdj.set(edge.from, list);
     }
   }
+
+  // Transform all options.
+  //
+  // ⭐ THE OPTION→FACTOR ADJACENCY IS BUILT ABOVE THIS LINE ON PURPOSE, AND
+  // THAT ORDERING IS THE FIX. It used to be built ~70 lines BELOW, so every
+  // option's status was decided before this function — the only producer that
+  // holds the graph — knew whether the option was connected to anything. An
+  // option with a genuine option→factor edge and no magnitude therefore went
+  // out as `needs_user_mapping` ("choose which factor X changes and by how
+  // much"), asking the user to redo a mapping the product had already made,
+  // when the outstanding question was only the value. Measured on 9/9 captured
+  // draws (19 Aug 2026): every non-ready option was connected, and every one
+  // was mislabelled.
+  //
+  // `optionFactorAdj` already excludes repair-authored edges, so a lever the
+  // product wired for itself never counts as a mapping the user made.
+  const analysisOptions = options.map((option) =>
+    transformOptionToAnalysisReady(option, (optionFactorAdj.get(option.id) ?? []).length),
+  );
+
+  // === is_baseline detection (CEE-2) ===
+  // Mark exactly one option as the status-quo baseline, based on LLM flag or
+  // label keyword matching. This is additive — no existing field is modified.
+  const baselineIdx = detectBaselineOptionIndex(options);
+  if (baselineIdx !== null) {
+    analysisOptions[baselineIdx].is_baseline = true;
+  }
+
+  // === Task 2A+2B: Factor value fallback + blocker emission ===
+  // For qualitative briefs, V3 options may have empty interventions because
+  // enrichment didn't set data.value on factor nodes. We recover values from
+  // the V3 factor node's observed_state or V1 data field (preserved via passthrough).
+  const blockers: AnalysisBlockerT[] = [];
+  // What we DECLINED to substitute, and from where. Recorded for the trace so
+  // the refusal is observable — an operator can see how often a current level
+  // was available and deliberately not used as an option's lever.
+  const declinedFallbacks: Array<{ optionId: string; factorId: string; source: string }> = [];
 
   // For each analysis option, fill missing interventions from factor node values
   for (let i = 0; i < analysisOptions.length; i++) {
@@ -1229,8 +1260,24 @@ export function validateAnalysisReadyPayload(
   }
 
   // Rule 7: Option-level status consistency with raw_interventions
+  //
+  // ⚠ SCOPED TO THE RAW+ENCODED CASE ONLY, and that bound is load-bearing.
+  // `needs_encoding` now has TWO legitimate causes (`option-status.ts`):
+  //   (a) a raw categorical/boolean value awaiting numeric encoding — this rule;
+  //   (b) a connected-but-numberless option, where the mapping exists and only
+  //       the magnitude is outstanding. (b) has NOTHING to encode yet, so
+  //       demanding `raw_interventions` of it fires on a correct payload.
+  // An alarm that reds on the healthy state is the broken alarm every lane
+  // learns to ignore, and this one emits telemetry
+  // (`AnalysisReadyValidationFailed`) plus a warn log on every draft. The
+  // discriminator is whether the option carries anything to encode at all: case
+  // (b) has neither interventions nor raws.
   for (const option of payload.options) {
     if (option.status === "needs_encoding") {
+      const hasNothingToEncode =
+        Object.keys(option.interventions ?? {}).length === 0
+        && (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0);
+      if (hasNothingToEncode) continue;
       // Option claims to need encoding, should have raw_interventions
       if (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0) {
         errors.push({
