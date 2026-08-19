@@ -272,3 +272,60 @@ export const CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE = buildConfigureOptionAdvi
   '<factor>',
   '0.6',
 );
+
+/**
+ * ⭐⭐ THE ONE SENTENCE THAT TELLS A USER WHERE TO SET AN OPTION'S EFFECT BY
+ * HAND — and the estate's only spelling of that locus.
+ *
+ * ## What it supersedes, and why the old spelling was FALSE
+ *
+ * `compose/configure-option-clarify-response.ts` used to end its terminating
+ * branch with its own inline sentence:
+ *
+ *   "…open "<option>" on the canvas and enter the value on its LINK to <factor>."
+ *
+ * Derived at the UI tip `3f59325a` (`DecisionGuideAI`, staging): an
+ * option→factor edge is `isIntervention` (`inspector-v2/panels/EdgePanel.tsx:180`)
+ * and its branch (`:305-311`, testid `intervention-edge-notice`) renders TWO
+ * `<p>` tags and NO CONTROLS AT ALL. Contrast control, same file: the causal
+ * branch at `:313-472` carries the strength/existence/std sliders — so the
+ * absence is real, not a blind read. A witness followed that sentence to a
+ * dead end on 2026-08-19.
+ *
+ * ## Why the OPTION is the true locus
+ *
+ * The field CEE writes for this slot is `data/interventions/<factorId>` on the
+ * OPTION node (`op: 'update_node'`, pinned by
+ * `graph-management/__tests__/option-effect-write-apply-chain.test.ts`). The
+ * canvas edits THAT SAME FIELD, and only from the option panel:
+ * `inspector-v2/panels/OptionPanel.tsx` — "Primary editing surface: intervention
+ * inputs MUST remain editable" — renders an editable `InterventionRow` per
+ * intervention plus an always-rendered "+ Add a change" dropdown calling
+ * `mutations.setIntervention(factorId, …)`, which is precisely the add path for
+ * the state this reply describes (linked, no value yet). Mounted via
+ * `InspectorModal` ← `ReactFlowGraph.tsx:47`.
+ *
+ * The UI already says the same thing in its own words on that panel
+ * (`inspectorStrings.ts:409`): "…no change values are set yet — set one to give
+ * this option an effect in the analysis." And CEE's own served prompt already
+ * says it too (`prompts/orchestrator-cf-v19.ts:1331`: "click each option on the
+ * canvas and set …"). The clarify composer was the ESTATE'S ONLY SPELLING that
+ * named the link, so this is a convergence, not a new rule: one owner here, the
+ * divergent inline spelling deleted rather than left beside it.
+ *
+ * ## Deliberately coarse
+ *
+ * It names the OPTION and the OUTCOME ("what it changes" — the same vocabulary
+ * as the panel's own `What this option changes` group and as this product's
+ * "Tell me what it changes"), and it does NOT name a section, a button or a
+ * click path. A sentence that spelled the UI's furniture would be a
+ * cross-service hand-maintained mirror (CLAUDE.md trap 12) that goes silently
+ * false on the next rename — which is exactly how the sentence it replaces
+ * became false.
+ */
+export function buildConfigureOptionDirectSetSentence(
+  optionRef: string,
+  factorRef: string,
+): string {
+  return `To set it directly, open "${optionRef}" on the canvas and add ${factorRef} to what it changes.`;
+}

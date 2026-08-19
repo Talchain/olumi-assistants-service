@@ -38,7 +38,10 @@ import {
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 
 import { composeDirectAnswerResponse } from '../compose.js';
-import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  buildConfigureOptionDirectSetSentence,
+} from '../configure-option-chip-text.js';
 
 export interface ComposeConfigureOptionClarifyInput {
   readonly optionLabel: string;
@@ -220,7 +223,14 @@ export function composeConfigureOptionClarifyResponse(
     ? [
         `"${optionLabel}" still has no effect value on ${primaryFactor}, so that link is not carrying anything yet.`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
-        `To set it directly, open "${optionLabel}" on the canvas and enter the value on its link to ${primaryFactor}.`,
+        // ⚠ THE LOCUS, NOT THE COPY, WAS THE DEFECT. This sentence used to be
+        // spelled inline here and sent the user to the option→factor LINK —
+        // `EdgePanel`'s intervention branch, which renders two `<p>` tags and
+        // no controls. A witness followed it to a dead end (2026-08-19). It is
+        // now built by the single owner beside the chip/advised-format
+        // builders, which carries the derivation for why the OPTION is the
+        // locus the canvas actually edits.
+        buildConfigureOptionDirectSetSentence(optionLabel, primaryFactor),
       ].join(' ')
     : [
         `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,
