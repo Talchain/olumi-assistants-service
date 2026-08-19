@@ -297,9 +297,15 @@ export const ANSWERED_ASK_KNOWN_DROPPED: readonly { readonly message: string; re
     Object.freeze({
       message: 'For the hybrid option, set it to 0.8.',
       why:
-        'a COMMA continues a clause, so the bare referent binds to what that clause introduced — '
-        + 'reading "for the hybrid option" as mere context would be a wrong-entity write. Only a '
-        + 'sentence-level break makes the preceding words context',
+        '⚠ THE REASON CHANGED AND THE MEMBER DID NOT — the honest-gap protocol working as intended. '
+        + 'It was refused because a COMMA was not a clause break; the 18 Aug RUN-B witness (deployed '
+        + 'CEE 4a513781, with #1034 AND #1035 already live) proved that punctuation rule was deciding '
+        + 'WHICH ENTITY got written, so the comma is now a break. This member still declines, at '
+        + 'conjunct (a): the word "option" makes the SHIPPED classifier claim the sentence '
+        + '(`option_value_set`, the W1 ambiguity class), and rule 3c is unreachable for anything the '
+        + 'classifier claims. The old rule\'s own canonical example is refused by a guard that '
+        + 'predates it — which is the evidence that the punctuation rule was never the load-bearing '
+        + 'one. Measured, not argued.',
     }),
     Object.freeze({
       message: 'The numbers are all guesses at this point - use 0.8.',
@@ -323,8 +329,17 @@ export const ANSWERED_ASK_KNOWN_DROPPED: readonly { readonly message: string; re
     }),
   ]);
 
-/** The word that means "the factor's own observed value", never an effect. */
-const BASELINE_FRAMING = /\bbaselines?\b/;
+/**
+ * The word that means "the factor's own observed value", never an effect.
+ *
+ * ⭐ EXPORTED so the outstanding-ask clarify redirect applies the SAME closed
+ * single-token suppressor rather than re-spelling it. Two spellings of
+ * "this sentence is about the baseline" is the hand-maintained mirror this
+ * estate keeps paying for (CLAUDE.md trap 12); the second copy is the one that
+ * rots, and here the two readers would disagree about exactly the sentence
+ * under dispute.
+ */
+export const BASELINE_FRAMING = /\bbaselines?\b/;
 
 /**
  * ONE plain-number value assignment, on the model's own 0-1 scale.
@@ -747,7 +762,11 @@ function resolveFromOutstandingAsk(
 export const ANSWERED_ASK_RESOLVED_LIMIT = Object.freeze({
   shape:
     'an entity referred to only by words this graph does not make distinctive — e.g. "the burn rate '
-    + 'is what worries me - set it to 0.8" where "burn" and "rate" are claimed by several labels',
+    + 'is what worries me - set it to 0.8" where "burn" and "rate" are claimed by several labels. '
+    + '⚠ WIDENED by the RUN-B fix: a COMMA is now a clause break, so the leading context this '
+    + 'residual applies to includes comma-led prose ("burn rate is the worry, set it to 0.2"). '
+    + 'Conjunct (d) matches labels WORD-BOUNDED AND IN FULL, so a PARTIAL reference stays invisible '
+    + 'to it either way — the widening enlarges the residual\'s reach, it does not create it.',
   behaviour: 'binds to the pair the product asked about, and names it in the acknowledgement',
   why_not_closed:
     'closing it needs a partial/synonym entity reader over natural language; four rounds of that '

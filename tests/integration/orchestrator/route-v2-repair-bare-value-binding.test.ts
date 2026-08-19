@@ -328,6 +328,57 @@ describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', (
     expect(repairEvents()).toHaveLength(0);
   });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // A3 — THE SAME SENTENCE WITH A COMMA (ROADMAP 2.1266, RUN-B witness).
+  //
+  // ⚠⚠ THE POINT OF THIS TEST: the case above shipped in #1035 and was LIVE on
+  // deployed CEE `4a513781`. The composed journey of 18 Aug then answered the
+  // product's own ask with the IDENTICAL SHAPE punctuated with a COMMA —
+  //   "That would push sales headcount up a lot, set it to 0.8."
+  // — and the whole journey failed on it: `readMissingValueAnswer` returned
+  // null, THIS PRE-ROUTE NEVER OPENED, the turn fell to the factor-baseline
+  // pre-route, and a factor's own `observed_state` was written 0.5 -> 0.8 while
+  // `interventions` stayed empty.
+  //
+  // The resolver fix alone would have been dark here for exactly the reason
+  // the A2 block above records. This is the route-level proof that it is not.
+  // ══════════════════════════════════════════════════════════════════════
+
+  it('⭐ A3 — the SAME ordinary answer punctuated with a COMMA reaches the edit lane', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+
+    // Byte-for-byte the A2 sentence with its dash replaced by a comma, so the
+    // ONLY difference between this case and the one above is the punctuation
+    // mark — which is precisely what was deciding the entity.
+    const message = 'The green courier quote came in lower than we expected, set it to 0.12.';
+    const res = await send(app, message);
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]![0] as {
+      payload: { message: string };
+      editInstructionOverride?: string;
+    };
+    expect(dispatchArgs.payload.message).toBe(message);
+    // Still no override — rule 3c re-binds the user's own bytes at the dispatch
+    // site. A composed override here would be a SECOND writer (trap 21).
+    expect(dispatchArgs.editInstructionOverride).toBeUndefined();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('⭐ A3 TWIN — a COMMA-led answer naming the OTHER option is still NOT claimed', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    // The discriminator survives the widening: the ONLY difference from the
+    // case above is which option the prose points at. If admitting the comma
+    // had cost the entity check, this would dispatch.
+    await send(app, 'Passing the daily charges to customers is the plan, set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
   it('TWIN — the same shape naming the OTHER option is NOT claimed', async () => {
     loadGraphMock.mockResolvedValue(buildGraph());
     // Positive control on the discriminator: the ONLY difference from the case

@@ -106,12 +106,20 @@ describe('ordinary human answers are ACCEPTED and bound (the four forms that loo
 });
 
 describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
-  it('⭐ the pinned known-dropped set is EXACTLY these four (REDs if it grows OR shrinks)', () => {
+  it('⭐ the pinned known-dropped set is EXACTLY these five (REDs if it grows OR shrinks)', () => {
+    // ⭐ FIFTH MEMBER ADDED 19 Aug 2026 (ROADMAP 2.1266/A3) — BY A SURVIVING
+    // MUTANT, not by a design decision. Deleting `CLAUSE_BREAK`'s trailing
+    // `\s+` requirement left the whole battery green; measured, the only thing
+    // it discriminates is punctuation with NO FOLLOWING SPACE, and it
+    // discriminates identically at pristine on the `.` form — a PRE-EXISTING
+    // gap on a conjunct that change never touched. Pinned in the DECLINING
+    // direction rather than widened: "while we're here" work is prohibited.
     expect([...MISSING_VALUE_ANSWER_KNOWN_DROPPED]).toStrictEqual([
       'Set it to about 0.12.',
       'Set it to a third.',
       '0.12',
       'Set it to 0.12 for the subcontracting option.',
+      'It went up a lot,set it to 0.12.',
     ]);
     // The repair module re-exports the same set — one owner, not two lists.
     expect([...REPAIR_BARE_VALUE_KNOWN_DROPPED]).toStrictEqual([
@@ -359,11 +367,51 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     }
   });
 
-  it('OPPOSITE DIRECTION — a COMMA is not a clause break', () => {
-    // A comma continues a clause, so the referent binds to what that clause
-    // introduced. Reading the lead as context here would be a wrong-entity
-    // write, which is why the break set is sentence-level only.
-    expect(readMissingValueAnswer('For the hybrid option, set it to 0.8.')).toBeNull();
+  it('⭐ THE PIN THAT FLIPPED — a COMMA IS now a clause break (RUN-B, 18 Aug 2026)', () => {
+    // ⚠ THIS TEST'S OLD BODY IS QUOTED HERE VERBATIM, beside the flip, because
+    // a pin that changes silently is worse than no pin (trap 22f):
+    //
+    //   it('OPPOSITE DIRECTION — a COMMA is not a clause break', () => {
+    //     // A comma continues a clause, so the referent binds to what that
+    //     // clause introduced. Reading the lead as context here would be a
+    //     // wrong-entity write, which is why the break set is sentence-level
+    //     // only.
+    //     expect(readMissingValueAnswer('For the hybrid option, set it to 0.8.'))
+    //       .toBeNull();
+    //   });
+    //
+    // WHY IT FLIPPED. On the composed journey of 18 Aug 2026 — deployed CEE
+    // `4a513781`, with #1034 AND #1035 already live — a fresh guest answered
+    // the product's own option-effect ask with
+    //   "That would push sales headcount up a lot, set it to 0.8."
+    // ONE COMMA where the previous run's user happened to type a dash. This
+    // reader returned null, route-v2's answered-ask pre-route never opened,
+    // and the turn fell to the FACTOR-BASELINE pre-route, which wrote
+    // `3a75cabd.observed_state.value` 0.5 → 0.8 while `interventions` stayed
+    // empty. A punctuation mark decided which ENTITY got written.
+    //
+    // The harm the old rule named is REAL and is now guarded where it was
+    // always actually guarded — at the graph, not at the punctuation. The old
+    // body's own canonical example still declines end to end, at
+    // `resolveOptionEffectWrite`'s conjunct (a): the word "option" makes the
+    // shipped classifier claim the sentence (the W1 class), and rule 3c is
+    // unreachable for anything the classifier claims. That is asserted, by
+    // execution on a real graph, in
+    // `composed-journey-run-b-option-effect.test.ts`.
+    const witnessed = 'That would push sales headcount up a lot, set it to 0.8.';
+    expect(readMissingValueAnswer(witnessed)).toEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'that would push sales headcount up a lot',
+    });
+    // The old member now READS as an answer here — this module is pure text and
+    // has no graph — and the entity check that refuses it lives one seam on.
+    expect(readMissingValueAnswer('For the hybrid option, set it to 0.8.')?.kind).toBe('numeric');
+    // ⭐ THE OWNER BOUNDARY IS UNCHANGED, which is what keeps the flip additive:
+    // a context-bearing answer still never reaches the sole-missing-pair binder.
+    expect(matchBareRepairValue('For the hybrid option, set it to 0.8.')).toBeNull();
+    expect(matchBareRepairValue(witnessed)).toBeNull();
   });
 
   it('OPPOSITE DIRECTION — a TRAILING clause still refuses, context or not', () => {
