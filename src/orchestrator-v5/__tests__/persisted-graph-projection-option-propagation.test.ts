@@ -22,9 +22,41 @@ import { describe, expect, it } from 'vitest';
 
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 
+/**
+ * Explicitly typed so the fixture is a single uniform node shape. Without it,
+ * TS infers a UNION of three object literals and `node.value` is unreachable on
+ * it — and the honest fix is a real type, not a double cast (`as unknown as` is
+ * held at an exact baseline by the forbidden-boundary gate).
+ */
+interface FixtureIntervention {
+  readonly value?: number;
+  readonly source?: string;
+}
+interface FixtureNode {
+  readonly id: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly category?: string;
+  readonly interventions?: Record<string, FixtureIntervention>;
+  /** Never set by the fixture — the inversion assert reads it. */
+  readonly value?: unknown;
+}
+interface FixtureOption {
+  readonly id: string;
+  readonly label: string;
+  status: string;
+  interventions: Record<string, FixtureIntervention>;
+}
+interface FixtureGraph {
+  readonly goal_node_id?: string;
+  readonly nodes: FixtureNode[];
+  readonly edges: { readonly from: string; readonly to: string }[];
+  readonly options: FixtureOption[];
+}
+
 describe('projectGraphForPersistence — option intervention propagation (composition)', () => {
   /** The post-merge persist candidate: fresh nodes + the pre-edit options[]. */
-  function mergedPersistCandidate() {
+  function mergedPersistCandidate(): FixtureGraph {
     return {
       goal_node_id: 'goal',
       nodes: [
@@ -35,9 +67,7 @@ describe('projectGraphForPersistence — option intervention propagation (compos
           kind: 'option',
           label: 'Outsource the second-line support desk to a managed provider',
           // The user's write — landed on the NODE by encode-option-interventions.
-          interventions: {
-            fac_cost: { value: 0.75, source: 'user_specified' },
-          },
+          interventions: { fac_cost: { value: 0.75, source: 'user_specified' } },
         },
       ],
       edges: [{ from: 'opt_outsource', to: 'fac_cost' }],
@@ -54,36 +84,31 @@ describe('projectGraphForPersistence — option intervention propagation (compos
   }
 
   it("the user's value reaches options[] — the surface the analysis reads", () => {
-    const out = projectGraphForPersistence(mergedPersistCandidate()) as ReturnType<
-      typeof mergedPersistCandidate
-    >;
-    // BIND BY IDENTITY: (option_id, factor_id).
+    const out: FixtureGraph = projectGraphForPersistence(mergedPersistCandidate());
+    // BIND BY IDENTITY: the (option_id, factor_id) pair.
     const entry = out.options.find((o) => o.id === 'opt_outsource');
     expect(entry).toBeDefined();
-    expect(
-      (entry!.interventions as Record<string, { value: number }>).fac_cost.value,
-    ).toBe(0.75);
+    expect(entry!.interventions.fac_cost.value).toBe(0.75);
   });
 
   it('THE INVERSION ASSERT: the OPTION gains the value and the FACTOR is untouched', () => {
-    const out = projectGraphForPersistence(mergedPersistCandidate()) as ReturnType<
-      typeof mergedPersistCandidate
-    > & { nodes: { id: string; value?: unknown }[] };
+    const out: FixtureGraph = projectGraphForPersistence(mergedPersistCandidate());
 
-    const entry = out.options.find((o) => o.id === 'opt_outsource')!;
-    expect((entry.interventions as Record<string, { value: number }>).fac_cost.value).toBe(0.75);
+    const entry = out.options.find((o) => o.id === 'opt_outsource');
+    expect(entry!.interventions.fac_cost.value).toBe(0.75);
 
     // The measured defect wrote the user's number onto the FACTOR's observed
     // state instead of the option's intervention. Assert BOTH halves — the
     // right entity moved AND the wrong one did not.
-    const factor = out.nodes.find((n) => n.id === 'fac_cost')!;
-    expect(factor.value).toBeUndefined();
+    const factor = out.nodes.find((n) => n.id === 'fac_cost');
+    expect(factor).toBeDefined();
+    expect(factor!.value).toBeUndefined();
   });
 
-  it('POSITIVE CONTROL: an unrelated already-consistent graph projects to itself', () => {
+  it('POSITIVE CONTROL: an already-consistent graph projects to itself', () => {
     // Proves the two assertions above are real propagation, not a function that
     // rewrites everything it touches.
-    const consistent = {
+    const consistent: FixtureGraph = {
       nodes: [
         { id: 'goal', kind: 'goal', label: 'G' },
         {
