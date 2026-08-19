@@ -286,7 +286,18 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
     // No invention: the option is left exactly as empty as it truly is.
     expect(payload.options[0].interventions["fac_price"]).toBeUndefined();
     expect(Object.keys(payload.options[0].interventions).length).toBe(0);
-    expect(payload.options[0].status).toBe("needs_user_mapping");
+
+    // ⚠ STATUS UPDATED — `needs_user_mapping` → `needs_encoding`. The subject of
+    // this test (refuse to invent a lever, and say why) is UNCHANGED and every
+    // assertion around it still holds. What changed is which QUESTION the
+    // refusal puts to the user. `opt_1` carries a real `opt_1 → fac_price`
+    // edge, so its mapping is already established; `needs_user_mapping` asked
+    // the user to "choose which factor Option A changes and by how much",
+    // i.e. to redo that mapping. The outstanding question is only the
+    // magnitude — which is exactly what the blocker below asks for, so the
+    // status and the blocker now agree instead of contradicting each other.
+    expect(payload.options[0].status).toBe("needs_encoding");
+    expect(payload.options[0].status_reason).toMatch(/awaiting effect value/i);
 
     // The refusal is honest about WHY, and useful: it names the factor, reports
     // the current level as context, and asks the question we could not answer.

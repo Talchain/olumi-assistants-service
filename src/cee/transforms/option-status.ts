@@ -10,7 +10,8 @@
  * Status values:
  * - "ready": Has resolved interventions (exact_id OR exact_label matches)
  * - "needs_encoding": Has categorical/boolean values awaiting numeric encoding
- * - "needs_user_mapping": No interventions, or only semantic/unresolved matches
+ * - "needs_user_mapping": No interventions AND no connected factor, or only
+ *   semantic/unresolved matches
  *
  * KEY RULE: Both exact_id AND exact_label matches count as "resolved".
  * Only semantic matches or unmatched targets are considered "unresolved".
@@ -220,14 +221,21 @@ export interface AnalysisReadyStatusResult {
  * @param interventionCount - Number of interventions
  * @param originalStatus - Status from V3 option
  * @param hasNonNumericRaw - Whether any raw values are non-numeric
+ * @param connectedFactorCount - Non-repair-authored option→factor edge count
  * @returns Computed status
  */
 export function computeAnalysisReadyStatus(
   interventionCount: number,
   originalStatus: "ready" | "needs_user_mapping" | "needs_encoding" | undefined,
-  hasNonNumericRaw: boolean
+  hasNonNumericRaw: boolean,
+  connectedFactorCount: number
 ): "ready" | "needs_user_mapping" | "needs_encoding" {
-  return computeAnalysisReadyStatusWithReason(interventionCount, originalStatus, hasNonNumericRaw).status;
+  return computeAnalysisReadyStatusWithReason(
+    interventionCount,
+    originalStatus,
+    hasNonNumericRaw,
+    connectedFactorCount
+  ).status;
 }
 
 /**
@@ -237,19 +245,47 @@ export function computeAnalysisReadyStatus(
  * @param interventionCount - Number of interventions
  * @param originalStatus - Status from V3 option
  * @param hasNonNumericRaw - Whether any raw values are non-numeric
+ * @param connectedFactorCount - Non-repair-authored option→factor edge count
  * @returns Computed status and reason
  */
 export function computeAnalysisReadyStatusWithReason(
   interventionCount: number,
   originalStatus: "ready" | "needs_user_mapping" | "needs_encoding" | undefined,
-  hasNonNumericRaw: boolean
+  hasNonNumericRaw: boolean,
+  connectedFactorCount: number
 ): AnalysisReadyStatusResult {
-  // No interventions - needs mapping
+  // ⭐ THE SINGLE ADJUDICATION OF "this option has no effect value yet".
+  //
+  // It decides WHICH QUESTION the repair flow puts to the user, and the two
+  // questions are not interchangeable:
+  //   · needs_user_mapping → "Choose which factor X changes and by how much."
+  //   · needs_encoding     → "Choose how X should be represented on the effect
+  //                           scale."
+  // (both spellings: `orchestrator/tools/analysis-ready-helper.ts`.)
+  //
+  // The connected-factor limb below SUPERSEDES the duplicate rule that used to
+  // live in `projectOptionForCanonicalBuilder`'s status fallback. That rule was
+  // reachable only from the PERSISTED-graph readiness path, so the draft path —
+  // which is what a fresh user's first turn takes — had no connectivity input at
+  // all and fell through to `needs_user_mapping` every time. Two producers, one
+  // field, and they disagreed on identical graph shapes. One owner now.
   if (interventionCount === 0) {
     if (originalStatus === "needs_encoding") {
       return {
         status: "needs_encoding",
         reason: "No interventions extracted; original status preserved",
+      };
+    }
+    // CONNECTED BUT NUMBERLESS. A surviving option→factor edge IS the mapping:
+    // the product has already established which factor this option moves.
+    // Repair-authored edges are excluded upstream by the caller, so the product
+    // can never count its own wiring as the user's mapping — without that
+    // exclusion this limb would swap the question for one nobody can answer
+    // (there is no representation to choose for a lever nobody stated).
+    if (connectedFactorCount > 0) {
+      return {
+        status: "needs_encoding",
+        reason: `Connected to ${connectedFactorCount} factor(s); awaiting effect value(s)`,
       };
     }
     return {
