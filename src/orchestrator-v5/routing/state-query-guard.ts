@@ -15,7 +15,7 @@
  *      `direct_answer` dispatch with deterministic copy that quotes the
  *      most recent change's summary verbatim (so the answer is grounded
  *      in the persisted handler fact, not a fabricated summary),
- *      ATTRIBUTED TO THE RECORD ("Earlier in this session: …") so that a
+ *      ATTRIBUTED TO THE RECORD ("Earlier in this conversation: …") so that a
  *      past receipt can never read as a claim about the current turn.
  *   3. If matched AND `recent_changes` is empty, return a "no recent
  *      changes" dispatch that owns the state-query without falling to
@@ -596,14 +596,24 @@ export function tryStateQueryGuard(
  * before any handler and never mutates. There is therefore no reachable state in
  * which the quoted change belongs to the turn being answered.
  *
+ * ⭐⭐ "CONVERSATION", NOT "SESSION" — AND THE SOURCE IS WHAT BOUNDS THE RECORD.
+ * `recent_changes` <- `prior_facts` <- `readRecent`, whose query is
+ * `WHERE scenario_id = ? ORDER BY created_at DESC LIMIT 20`
+ * (`session/supabase-store.ts`) — bounded by SCENARIO and by COUNT, and by
+ * NEITHER time nor sitting. A user returning to the same scenario next week is
+ * handed a receipt from a previous sitting, so "earlier in this session" is
+ * false for a reachable and entirely ordinary case. This guard's own sibling
+ * copy 20-odd lines below (`NO_RECENT_CHANGES_TEXT`) already says "in this
+ * conversation" for the same reason; the two now agree.
+ *
  * British English; no em dashes; no internal terms.
  */
-export const RECENT_CHANGE_RECORD_PREFIX = 'Earlier in this session: ';
+export const RECENT_CHANGE_RECORD_PREFIX = 'Earlier in this conversation: ';
 
 function composeRecentChangeAnswer(head: RecentMutation, totalCount: number): string {
   const tail =
     totalCount > 1
-      ? ' If you want to see the earlier changes from this session, just ask.'
+      ? ' If you want to see the earlier changes from this conversation, just ask.'
       : '';
   // Terminate the receipt so the multi-change tail is a separate sentence rather
   // than being welded onto it ("…and spend If you want…"). `cap()` closes a

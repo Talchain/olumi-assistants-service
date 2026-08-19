@@ -424,21 +424,42 @@ function resolveElement(message: string, graph: unknown): GraphNodeView | null {
  * resolver and compares it against the persisted `RecentMutation.target_label`
  * the handler itself wrote. Phrasing decides nothing.
  *
- * ── THE THRESHOLD IS TWO TOKENS, NOT ONE, AND THAT TOO WAS MEASURED ─────────
- * Round 1 matched on ANY single identifying-token overlap and argued it was safe
- * to "err towards deferring". An independent corpus (15 shapes, each with its
- * opposite-direction twin, built outside this author's head) refuted the premise
- * that the error was free:
+ * ── THE MATCH BINDS BY NODE IDENTITY, NOT BY A TOKEN COUNT (trap 19) ────────
+ * ⚠⚠ ROUNDS 1 AND 2 BOTH ANSWERED THIS WITH A COUNTING PREDICATE, AND A COUNTING
+ * PREDICATE IS SATISFIABLE BY AN OBJECT THAT IS NOT THE SUBJECT. Round 1 matched
+ * on ANY single shared identifying token; round 2 raised the bar to two. Raising
+ * a threshold does not change the KIND of predicate — it only moves the label
+ * length at which the wrong element clears it. Round 2 minted a SECOND element-
+ * identity rule (`hits >= required`) competing with `resolveElement`'s strict-
+ * maximum binding ~90 lines above, and the two demonstrably disagreed
+ * (adversarial review, PR #1036, reproduced by execution):
  *
- *   "Why did you add Enterprise partnerships?"  ·  recent = [Enterprise sales
- *   headcount and spend]  ->  deferred on the single incidental token
- *   "enterprise", and answered about the wrong element.
+ *   "Why did you add Enterprise sales partnerships?"
+ *   recent = [target: "Enterprise sales headcount and spend"]   <- a DIFFERENT node
+ *   -> "Earlier in this conversation: Updated Enterprise sales headcount and spend."
  *
- * `Math.min(2, …)` keeps single-token subjects ("Churn") matchable on their one
- * token, so nothing that previously matched by identity stops matching. **The
- * next round was run in advance (trap 22f's exit): the tightening closes that
- * case and changes NOTHING else across the corpus.** It is a strictly safer
- * setting at zero measured cost, so "err towards true" is not adopted as doctrine.
+ * Two incidentally-shared tokens cleared the threshold. Round 2's own
+ * `INCIDENTAL-TOKEN` guard passed only because its fixture label was "Enterprise
+ * partnerships" — ONE shared token — while the same graph already carried
+ * "Enterprise sales headcount and spend"; a sibling label one word longer
+ * re-opened it. Same class for an option against its twin factor.
+ *
+ * **So the recorded `target_label` is resolved through the SAME `resolveElement`
+ * that resolved the subject, and must land on the SAME node `id`.** There is now
+ * ONE identity authority in this module, and a shape that defeats it defeats both
+ * ends symmetrically rather than opening a gap between them.
+ *
+ * The token floor is KEPT as a secondary filter, not as the binding: a recorded
+ * label that resolves here on a single shared token is a weaker reference than
+ * one that spells the element out, and `Math.min(2, …)` keeps single-token
+ * subjects ("Churn") matchable on their one token. It is constrained at its own
+ * boundary by the `BOUNDARY-HITS-2` pair — without those, `Math.min(3, …)`
+ * survives the whole corpus (measured).
+ *
+ * **The tightening was run in advance (trap 22f's exit): it declines all three
+ * wrong-subject cases and returns BYTE-IDENTICAL matches on every must-match
+ * case, including `SINGLE-TOKEN-SUBJECT` and `MATCH-NOT-HEAD`.** Strictly safer
+ * at zero measured cost.
  *
  * ── FAILURE DIRECTION, STATED PRECISELY ─────────────────────────────────────
  * ⚠ AT THE ONLY CALL SITE, `null` IN THE `recent_changes.length > 0` BRANCH
@@ -467,16 +488,26 @@ export function findRecentChangeAboutOriginSubject(
   if (subject === null) return null;
   const subjectTokens = identifyingTokens(subject.label);
   if (subjectTokens.size === 0) return null;
+  // An empty id identifies nothing, so the comparison below would become a
+  // predicate every node satisfies — the exact shape this function removes.
+  if (subject.id.length === 0) return null;
 
-  // A single shared token is an incidental collision ("Enterprise partnerships"
-  // vs "Enterprise sales headcount"); two is a reference. Single-token subjects
-  // keep their one token, so identity matching is never weakened.
+  // SECONDARY filter, never the binding (see the header). Single-token subjects
+  // keep their one token, so nothing that matched by identity stops matching.
   const required = Math.min(2, subjectTokens.size);
 
   let best: OriginSubjectChangeMatch | null = null;
   for (let i = 0; i < recentTargetLabels.length; i += 1) {
     const raw = recentTargetLabels[i];
     if (typeof raw !== 'string' || raw.length === 0) continue;
+
+    // ⭐⭐ THE BINDING: the recorded label is resolved by the SAME resolver as
+    // the subject and must land on the SAME node. `resolveElement` declines on
+    // a tie and on a zero score, so an unresolvable or ambiguous `target_label`
+    // fails closed here rather than matching on incidental overlap.
+    const recorded = resolveElement(raw, graph);
+    if (recorded === null || recorded.id !== subject.id) continue;
+
     let hits = 0;
     for (const token of identifyingTokens(raw)) {
       if (subjectTokens.has(token)) hits += 1;

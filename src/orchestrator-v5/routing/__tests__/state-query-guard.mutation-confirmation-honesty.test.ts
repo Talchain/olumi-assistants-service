@@ -81,7 +81,10 @@ import { describe, expect, it } from 'vitest';
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
 import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { tryStructureOriginAnswer } from '../../../cee/context-integrity/structure-origin-answer.js';
+import {
+  findRecentChangeAboutOriginSubject,
+  tryStructureOriginAnswer,
+} from '../../../cee/context-integrity/structure-origin-answer.js';
 import {
   RECENT_CHANGE_RECORD_PREFIX,
   isStateQueryQuestionShape,
@@ -566,7 +569,12 @@ describe('the record attribution is pinned by SEMANTICS, not only by identity', 
   });
 
   it('SEM-LITERAL the constant is exactly the agreed string', () => {
-    expect(RECENT_CHANGE_RECORD_PREFIX).toBe('Earlier in this session: ');
+    // ⚠ "conversation", not "session": the record behind it is bounded by
+    // scenario and by COUNT (`readRecent`: `WHERE scenario_id = ? ORDER BY
+    // created_at DESC LIMIT 20`), never by time or by sitting, so a user
+    // returning to the same scenario next week would be told "this session"
+    // about a change from a previous one.
+    expect(RECENT_CHANGE_RECORD_PREFIX).toBe('Earlier in this conversation: ');
   });
 
   it('SEM-PROPERTY any replacement must still be a past-time attribution and never a commit claim', () => {
@@ -655,6 +663,141 @@ describe('a deferred origin question is answered from the MATCHED change, never 
       briefAudit: { briefText: null, graph },
     });
     expect(outcome.matched).toBe(false);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ THE MATCH BINDS BY NODE IDENTITY, NOT BY A TOKEN COUNT (trap 19).
+  //
+  // Round 2 answered "is this recorded change about the element the user named?"
+  // with `hits >= Math.min(2, …)` — a SECOND element-identity rule competing with
+  // `resolveElement`'s strict-maximum binding in the same module. The two
+  // disagreed, and the corpus below is the disagreement, reproduced by execution
+  // against the real guard before the fix:
+  //
+  //   "Why did you add Enterprise sales partnerships?"
+  //   recent = [target: "Enterprise sales headcount and spend"]  <- ANOTHER node
+  //   -> "Earlier in this conversation: Updated Enterprise sales headcount and spend."
+  //
+  // `INCIDENTAL-TOKEN` above passes only because its fixture label is "Enterprise
+  // partnerships" — ONE shared token. The same graph already carries "Enterprise
+  // sales headcount and spend", so a sibling label ONE WORD LONGER re-opens it.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // The witness graph plus the one-word-longer sibling. `p2` is the element the
+  // question names; `3a75cabd` is the element the record is about.
+  const SIBLING_GRAPH = {
+    nodes: [
+      ...WITNESS_GRAPH_NO_QUOTE.nodes,
+      {
+        id: 'p2',
+        kind: 'option',
+        label: 'Enterprise sales partnerships',
+        provenance: 'ai_inferred',
+      },
+    ],
+    edges: [],
+  };
+  const SIBLING_MESSAGE = 'Why did you add Enterprise sales partnerships?';
+
+  it('BOUNDARY-HITS-2-DECLINE two shared tokens on a DIFFERENT node is still the wrong element', () => {
+    // ⭐ PINS ITS OWN PRECONDITION BY DISCRIMINATION, NOT BY A RE-IMPLEMENTED
+    // TOKENISER (trap 12 — a hand-rolled copy of the production tokeniser is a
+    // mirror). Strip the record's true owner from the graph and the SAME
+    // (message, target_label) pair resolves onto the subject itself and MATCHES,
+    // reporting `hits === 2`. So the overlap is exactly two, the floor is
+    // cleared, and the decline below is caused by IDENTITY and by nothing else.
+    const withoutOwner = {
+      nodes: SIBLING_GRAPH.nodes.filter((n) => n.id !== '3a75cabd' && n.id !== '4abad64d'),
+      edges: [],
+    };
+    const control = findRecentChangeAboutOriginSubject(SIBLING_MESSAGE, withoutOwner, [
+      WITNESSED_CHANGE.target_label,
+    ]);
+    expect(control).not.toBeNull();
+    expect(control?.hits).toBe(2);
+
+    // …and with the true owner present, the token count still says yes and the
+    // identity says no. The identity wins.
+    const outcome = tryStateQueryGuard({
+      message: SIBLING_MESSAGE,
+      contextPack: ctx([WITNESSED_CHANGE]),
+      briefAudit: { briefText: null, graph: SIBLING_GRAPH },
+    });
+    expect(outcome.matched).toBe(false);
+  });
+
+  it('BOUNDARY-HITS-2-MATCH two shared tokens on the SAME node is a genuine reference', () => {
+    // ⭐ THE OPPOSITE-DIRECTION TWIN, AND THE ONE THAT CONSTRAINS THE CONSTANT.
+    // Before this pair the corpus had must-declines at `hits === 1` and
+    // must-matches at `hits === 5` / `hits === 1`, and NOTHING at `hits === 2` —
+    // so `Math.min(2, …)` was unconstrained at its own boundary and the mutant
+    // `Math.min(3, …)` survived the entire suite (measured).
+    const graph = {
+      nodes: [
+        { id: 'cr1', kind: 'factor', label: 'Customer churn rate', provenance: 'ai_inferred' },
+        { id: 'ca1', kind: 'factor', label: 'Customer acquisition cost', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const message = 'Why did you add the Customer churn rate?';
+    // A handler recorded the element under its shorter everyday name.
+    const recorded: RecentMutation = {
+      action: 'factor_value_updated',
+      summary: 'Updated Customer churn from 0.1 to 0.2.',
+      target_label: 'Customer churn',
+    };
+
+    // Precondition, in production code: this pair sits EXACTLY on the boundary.
+    const match = findRecentChangeAboutOriginSubject(message, graph, [recorded.target_label]);
+    expect(match).not.toBeNull();
+    expect(match?.hits).toBe(2);
+
+    const outcome = tryStateQueryGuard({
+      message,
+      contextPack: ctx([recorded]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+      throw new Error('precondition failed: the deferral did not fire');
+    }
+    expect(outcome.recent_change.target_label).toBe('Customer churn');
+  });
+
+  it('WRONG-SUBJECT-TWIN-FACTOR an option is never answered from its twin factor’s receipt', () => {
+    // ⭐ THE SAME CLASS ONE SHAPE OVER: every token of the option's label is also
+    // in the factor's, so NO token threshold can separate them. Only identity can.
+    const graph = {
+      nodes: [
+        { id: 'o1', kind: 'option', label: 'Hybrid Phased Approach', provenance: 'ai_inferred' },
+        { id: 'f1', kind: 'factor', label: 'Hybrid Phased Approach cost', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const recorded: RecentMutation = {
+      action: 'graph_edited',
+      summary: 'Updated Hybrid Phased Approach cost from 1 to 2.',
+      target_label: 'Hybrid Phased Approach cost',
+    };
+    const outcome = tryStateQueryGuard({
+      message: 'Why did you add the Hybrid Phased Approach option?',
+      contextPack: ctx([recorded]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched).toBe(false);
+
+    // ⭐ DISCRIMINATING TWIN: the factor's OWN question still gets its receipt, so
+    // the decline above is the identity binding working, not the arm going dark.
+    const own = tryStateQueryGuard({
+      message: 'Why did you add the Hybrid Phased Approach cost factor?',
+      contextPack: ctx([recorded]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(own.matched).toBe(true);
+    if (!own.matched || own.dispatch !== 'with_recent_change') {
+      throw new Error('precondition failed: the twin control did not defer');
+    }
+    expect(own.recent_change.target_label).toBe('Hybrid Phased Approach cost');
   });
 
   it('SINGLE-TOKEN-SUBJECT a one-word element is still matchable on its one token', () => {
