@@ -529,6 +529,102 @@ describe('⭐⭐ RUN-B — the disambiguation chip must propose the OPTION EFFEC
     }
   });
 
+  it('⭐ A HEDGE IS NOT A FIGURE — and its NON-HEDGED TWIN still binds exactly', () => {
+    // ⚠⚠ THIS CLOSED A P5 PROVENANCE LIE FOUND BY ADVERSARIAL REVIEW, and the
+    // mechanism is CLAUDE.md trap 12: `OutstandingAskQuantity` is a
+    // HAND-DECLARED MIRROR of `QuantityExtractionResult`, and it had OMITTED
+    // `approximate`. So `readModelUnitEffectValue` could not see the hedge and
+    // "Set sales headcount to about 0.8." reached the chip as "Apply 0.8" —
+    // an approximation recorded as an exact user-stated figure.
+    //
+    // ⭐ REACHABLE IN ONE TURN, AND THE PIN NEXT DOOR IS WHY. A hedge is
+    // deliberately refused by `readMissingValueAnswer`
+    // (`MISSING_VALUE_ANSWER_KNOWN_DROPPED`: *"Set it to about 0.12." — a
+    // HEDGE… would record an approximation as an exact user-stated figure*),
+    // which is exactly what drops the turn through to THIS clarify.
+    //
+    // ⚠ THE QUANTITIES ARE DERIVED FROM CQE, NEVER HAND-AUTHORED (trap
+    // 16-inverse: a fixture you wrote yourself is not evidence about the
+    // producer). The two messages differ by ONE hedge word, so `approximate`
+    // is the only field that may differ — asserted, not assumed.
+    const HEDGED = 'Set sales headcount to about 0.8.';
+    const EXACT = 'Set sales headcount to 0.8.';
+    const quantityOf = (message: string) => {
+      const [q] = extractQuantities(message);
+      if (q === undefined) throw new Error(`CQE extracted nothing from ${message}`);
+      return q;
+    };
+    const hedged = quantityOf(HEDGED);
+    const exact = quantityOf(EXACT);
+
+    // PRECONDITION, PINNED IN-TEST (trap 13b): the producer's own verdict is
+    // what discriminates, and the two readings agree on everything else.
+    expect(hedged.approximate).toBe(true);
+    expect(exact.approximate).toBe(false);
+    expect([hedged.value, hedged.unit, hedged.operator]).toEqual([0.8, null, 'set']);
+    expect([exact.value, exact.unit, exact.operator]).toEqual([0.8, null, 'set']);
+    // …and the hedged turn really does fall through to this clarify, on the
+    // asked factor alone — the redirect's own conjunct (b).
+    expect(readMissingValueAnswer(HEDGED)).toBeNull();
+    expect(
+      MISSING_VALUE_ANSWER_KNOWN_DROPPED.some((m) => /\babout\b/i.test(m)),
+      'the hedge must stay pinned as a refusal next door',
+    ).toBe(true);
+    const factorIds = new Set(
+      graph().nodes.filter((n) => n.kind === 'factor').map((n) => n.id as string),
+    );
+    const dispatch = tryDeterministicValueUpdate(
+      HEDGED,
+      extractQuantities(HEDGED),
+      lookupOrThrow(),
+      [],
+      factorIds,
+      false,
+    );
+    expect(dispatch.matched && dispatch.dispatch).toBe('clarify');
+    expect(
+      dispatch.matched && dispatch.dispatch === 'clarify'
+        ? dispatch.candidates.map((c) => c.id)
+        : null,
+    ).toEqual([FACTOR_ID]);
+
+    // DIRECTION 1 — the hedge puts NO number in the user's mouth. The redirect
+    // still fires: the wrong QUESTION is still not asked.
+    const hedgedRedirect = resolveOutstandingAskClarifyRedirect({
+      message: HEDGED,
+      candidates: askedCandidate,
+      readiness: readiness(),
+      quantity: hedged,
+    });
+    expect(hedgedRedirect).not.toBeNull();
+    expect(hedgedRedirect!.modelUnitValueText).toBeNull();
+    const hedgedText = buildOutstandingAskClarifyText(hedgedRedirect!);
+    expect(hedgedText).toContain('Effect values run from 0 to 1');
+    expect(hedgedText).not.toContain('0.8');
+
+    // DIRECTION 2 — THE INVERSE-FAILURE CHECK. The non-hedged twin must bind
+    // EXACTLY as before; a fix that closes a lie by dropping the honest case
+    // has traded one silent failure for another (trap 22b).
+    const exactRedirect = resolveOutstandingAskClarifyRedirect({
+      message: EXACT,
+      candidates: askedCandidate,
+      readiness: readiness(),
+      quantity: exact,
+    });
+    expect(exactRedirect).not.toBeNull();
+    expect(exactRedirect!.modelUnitValueText).toBe('0.8');
+    expect(buildOutstandingAskClarifyText(exactRedirect!)).toContain('apply 0.8 to that pair');
+    // …and the witnessed R1 reading, which carries no hedge, is untouched.
+    expect(
+      resolveOutstandingAskClarifyRedirect({
+        message: R1,
+        candidates: askedCandidate,
+        readiness: readiness(),
+        quantity: quantityOf(R1),
+      })!.modelUnitValueText,
+    ).toBe('0.8');
+  });
+
   it('⭐ OPPOSITE-DIRECTION TWINS — every conjunct withdraws the redirect', () => {
     // (c) the baseline suppressor, imported from the writer rather than
     //     re-spelled, so the two cannot disagree about one sentence.

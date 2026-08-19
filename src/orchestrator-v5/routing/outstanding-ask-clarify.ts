@@ -91,6 +91,15 @@
  * the operator is a delta rather than a set, the redirect still fires — the
  * product still stops asking the wrong question — but it asks for a 0–1 number
  * instead of putting one in the user's mouth.
+ *
+ * ⭐ THE SAME RESTRAINT ON THE HEDGE AXIS, added after an adversarial review
+ * found this module's hand-declared quantity mirror had OMITTED `approximate`
+ * (see the interface note below). `"…to about 0.8"` is not a figure the user
+ * stated; replaying it as *"Apply 0.8"* launders an approximation into an exact
+ * user-stated number. `missing-value-answer.ts` already refuses that shape BY
+ * NAME (`MISSING_VALUE_ANSWER_KNOWN_DROPPED`: *"Set it to about 0.12." — a
+ * HEDGE… would record an approximation as an exact user-stated figure*), and
+ * that refusal is precisely WHY a hedged turn reaches this clarify at all.
  */
 
 import { BASELINE_FRAMING } from './option-effect-write.js';
@@ -143,11 +152,28 @@ export interface OutstandingAskClarifyRedirect {
   readonly modelUnitValueText: string | null;
 }
 
-/** The quantity fields this module reads. Structural, so the CQE type is not a dependency. */
+/**
+ * The quantity fields this module reads. Structural, so the CQE type is not a
+ * dependency.
+ *
+ * ⚠ THIS INTERFACE IS A HAND-DECLARED MIRROR OF `QuantityExtractionResult`
+ * (`context/cqe/schema-types.ts`), AND A FIELD IT OMITS IS A FIELD THIS MODULE
+ * CANNOT SEE (CLAUDE.md trap 12). `approximate` was omitted on the first cut
+ * and the omission was NOT inert: CQE sets it for
+ * `roughly|about|approximately|around|nearly|circa` (`context/cqe/rules.ts`),
+ * so *"Set sales headcount to about 0.8."* reached the chip as **"Apply 0.8"**
+ * — an approximation replayed as an exact user-stated figure, which is the
+ * provenance lie `MISSING_VALUE_ANSWER_KNOWN_DROPPED` already refuses BY NAME
+ * one module over (*"Set it to about 0.12." — a HEDGE*). Reachable in one turn:
+ * a hedge is pinned-dropped by `readMissingValueAnswer`, so the turn falls
+ * through to exactly this clarify.
+ */
 export interface OutstandingAskQuantity {
   readonly value: number | null;
   readonly unit: string | null;
   readonly operator?: string | null;
+  /** CQE's hedge flag — see the interface note above. */
+  readonly approximate?: boolean;
 }
 
 /**
@@ -187,6 +213,13 @@ function readModelUnitEffectValue(quantity: OutstandingAskQuantity): string | nu
   // A unit means the user gave a user-scale figure (`80%`, `£25,000`). This
   // module performs no conversion, so it may not put a number in the chip.
   if (quantity.unit !== null && quantity.unit !== undefined) return null;
+  // ⭐ A HEDGE IS NOT A FIGURE. CQE flags `roughly|about|approximately|around|
+  // nearly|circa`; replaying `about 0.8` as "Apply 0.8" would record an
+  // approximation as an exact user-stated figure — the same refusal
+  // `MISSING_VALUE_ANSWER_KNOWN_DROPPED` states by name for "Set it to about
+  // 0.12.". The redirect still fires (the wrong question still is not asked);
+  // it asks for a 0-1 number instead of asserting one.
+  if (quantity.approximate === true) return null;
   // A delta ("increase it by 0.1") is not an effect value.
   if (quantity.operator !== undefined && quantity.operator !== null && quantity.operator !== 'set') {
     return null;
