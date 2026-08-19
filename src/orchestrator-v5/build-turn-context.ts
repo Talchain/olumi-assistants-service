@@ -57,6 +57,7 @@ import {
   EMPTY_COACHING_LIFECYCLE,
   type CoachingLifecycle,
 } from './coaching/coaching-lifecycle.js';
+import { deriveAuthoritativeStage } from './context/derive-stage.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
@@ -725,6 +726,29 @@ export async function buildTurnContext(
     // derivation_failed`, which maps to an `unavailable` signal instead.
     priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
   );
+  // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
+  // holds, rather than echoing the client's guess back at it. See
+  // `context/derive-stage.ts` for the full rationale; the short version is that
+  // the stage was a CLOSED CLIENT LOOP (UI derives → CEE echoes → UI paints),
+  // so `decide` could never be ORIGINATED by either end and the `decide`
+  // coaching rules at `compose/chip-generator.ts:906,923` were unreachable.
+  //
+  // Derived HERE and nowhere else, because this is the one place that holds the
+  // persisted graph and the analysis-fact chain together, and because
+  // `context.stage` is the single value that BOTH the response's
+  // `stage_indicator` (the pill) and all five `generateChips` call sites read —
+  // so the pill and the chips cannot disagree about which stage the user is in.
+  //
+  // Reuses `coachingFreshness` rather than deriving freshness again: a second
+  // derivation of the same fact is the hand-maintained-mirror defect, and
+  // `'fresh'` already encodes "a successful run_analysis fact matches the
+  // current persisted graph".
+  const derivedStage = deriveAuthoritativeStage({
+    requestedStage: payload.stage,
+    freshness: coachingFreshness.freshness,
+    optionCount: extractGraphOptionIds(scenarioState.graph)?.length ?? null,
+    hasGraph: scenarioState.graph != null,
+  });
   const coachingState = deriveCoachingState({
     decisionContext,
     freshness: coachingFreshness,
@@ -868,6 +892,9 @@ export async function buildTurnContext(
 
   return {
     ...baseContext,
+    // Overrides `baseContext.stage` (the raw request echo). Placed immediately
+    // after the spread so the authority is visible at the point of return.
+    stage: derivedStage,
     prior_turns: priorTurns,
     prior_turns_total: priorTurnsTotal,
     newest_analysis_fact: newestAnalysisFactRead.fact,
