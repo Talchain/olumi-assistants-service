@@ -106,18 +106,21 @@ describe('ordinary human answers are ACCEPTED and bound (the four forms that loo
 });
 
 describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
-  it('⭐ the pinned known-dropped set is EXACTLY these five (REDs if it grows OR shrinks)', () => {
-    // ⭐ FIFTH MEMBER ADDED 19 Aug 2026 (ROADMAP 2.1266/A3) — BY A SURVIVING
-    // MUTANT, not by a design decision. Deleting `CLAUSE_BREAK`'s trailing
-    // `\s+` requirement left the whole battery green; measured, the only thing
-    // it discriminates is punctuation with NO FOLLOWING SPACE, and it
-    // discriminates identically at pristine on the `.` form — a PRE-EXISTING
-    // gap on a conjunct that change never touched. Pinned in the DECLINING
-    // direction rather than widened: "while we're here" work is prohibited.
+  it('⭐ the pinned known-dropped set is EXACTLY these four (REDs if it grows OR shrinks)', () => {
+    // ⚠⚠ THE SET SHRANK AGAIN — '0.12', THE BARE NUMBER, HAS LEFT IT, and the
+    // reason it was ever in it was FALSE. It was pinned on the ground that
+    // "nothing in CEE records which slot the previous turn asked about"; measured
+    // at this tip, `deriveAskedEffectPair` records exactly that, off the
+    // PERSISTED graph's head blocker. The pin was correct to make the gap
+    // visible and wrong about why it was open — which is the case for keeping
+    // pins: this one survived precisely because it was written down.
+    //
+    // The four that REMAIN are refusals about PROVENANCE, not about slots: a
+    // hedge and a word-number would record a figure the user never gave, and a
+    // named target belongs to the edit lane. No antecedent record closes those.
     expect([...MISSING_VALUE_ANSWER_KNOWN_DROPPED]).toStrictEqual([
       'Set it to about 0.12.',
       'Set it to a third.',
-      '0.12',
       'Set it to 0.12 for the subcontracting option.',
       'It went up a lot,set it to 0.12.',
     ]);
@@ -210,25 +213,67 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
       'Set it to .12.',
       'Yes, set it to 0.12.',
       'Set it to 0.12.',
+      // ⭐ SPELLED EXPLICITLY BECAUSE IT LEFT THE KNOWN-DROPPED SET. It used to
+      // reach this list through the spread above; keeping it by name means the
+      // coverage does not silently SHRINK by the same edit that closed the gap.
+      '0.12',
       ADVISED,
     ];
     const looped = everyAnswer.filter((m) => clarify(m) === DEMAND);
-    // ⚠ THE ONE EXCEPTION IS NAMED, NOT EXCLUDED. A bare "0.12" carries no verb
-    // and no referent, and nothing records which slot was asked about, so it
-    // still gets the demand. Asserting the exact set rather than `[]` means the
-    // residue is VISIBLE here and this test REDs if anything else joins it — the
-    // next assertion states why it is not closed.
-    expect(looped).toStrictEqual(['0.12']);
+    // ⚠⚠ THE RESIDUE IS NOW EMPTY, AND THE EXCEPTION THAT USED TO SIT HERE WAS
+    // CLOSED BY A READ, NOT BY A NEW RECORD. The comment this replaces said a
+    // bare "0.12" "still gets the demand" because "nothing records which slot
+    // was asked about". That premise was false at the time it was written:
+    // `deriveAskedEffectPair` reads the asked pair off the head of the canonical
+    // blocker list, which is a fact about the PERSISTED GRAPH and therefore
+    // still present on the answering turn — precisely BECAUSE the answer has not
+    // been written yet. The gap was pinned behind a reason nobody re-derived.
+    expect(looped).toStrictEqual([]);
   });
 
-  it('⭐ THE DECLARED RESIDUE, pinned rather than hidden: a bare number', () => {
-    // "0.12" alone terminates NOTHING, because nothing in CEE records which slot
-    // the previous turn asked about — the ask turn is not even committed to
-    // `v5_conversation_turns`. Binding it would be a guess. This assertion is
-    // here so the gap is visible in the suite and REDs if it silently changes in
-    // either direction.
-    expect(messageAnswersMissingValueAsk('0.12')).toBe(false);
-    expect(clarify('0.12')).toBe(DEMAND);
+  it('⭐⭐ THE DECLARED RESIDUE IS CLOSED — a bare number is an answer and terminates', () => {
+    // ⚠ THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, AND THE FLIP IS
+    // THE DELIVERABLE. It previously read `toBe(false)` / `toBe(DEMAND)`, on the
+    // stated ground that "nothing in CEE records which slot the previous turn
+    // asked about". Measured: `deriveAskedEffectPair` records exactly that, off
+    // the persisted graph's head blocker, and has done since 2.1266. The turn
+    // being uncommitted was never the obstacle — the SLOT is graph state, not
+    // turn state.
+    //
+    // A bare number is the plainest answer a human gives to "what value?", and
+    // returning the identical demand to it was the witnessed dead end
+    // (deployed `a7ee21e`: chip → "0.6" → `exit_path: turn_executor`,
+    // `GAINED_PAIR []`, blockers 8 → 8, hash unchanged).
+    expect(messageAnswersMissingValueAsk('0.12')).toBe(true);
+    expect(clarify('0.12')).not.toBe(DEMAND);
+  });
+
+  it('⭐ a bare number reads as ELLIPTICAL — it carries no antecedent of its own', () => {
+    // The distinction that keeps the claim safe: the reading is numeric, and it
+    // is marked as carrying NO referent, so a consumer that resolves its slot
+    // from the sentence must refuse it. `matchBareRepairValue` does exactly that
+    // — the slot for this shape comes from the product's outstanding ask or from
+    // nowhere.
+    const reading = readMissingValueAnswer('0.12');
+    expect(reading).toEqual({
+      kind: 'numeric',
+      elliptical: true,
+      valueText: '0.12',
+      referent: null,
+      leadingContext: '',
+    });
+    expect(matchBareRepairValue('0.12')).toBeNull();
+  });
+
+  it('the bare-number claim is WHOLE-MESSAGE anchored — it cannot creep', () => {
+    // ⭐ The anchor is the entire guard, so this reading can only ever DECLINE.
+    // Anything carrying a unit, a word, a second figure or a trailing clause is
+    // refused, and each of these is a shape a looser numeric grab would claim.
+    for (const message of ['12%', '£5000', '0.12 for the option', 'about 0.12', '0.12 and 0.5']) {
+      const reading = readMissingValueAnswer(message);
+      const isBare = reading !== null && reading.kind === 'numeric' && reading.elliptical;
+      expect(isBare).toBe(false);
+    }
   });
 
   it('the CHANGED ASK quotes the user back, names the slot, and invents no number', () => {
@@ -268,7 +313,10 @@ describe('the terminating predicate is WIDER than the bindable one (trap 21)', (
   });
 
   it('does not terminate on messages that answer nothing', () => {
-    for (const message of ['Run the analysis.', 'What is missing?', '0.12', '']) {
+    // ⚠ '0.12' LEFT THIS LIST. A bare number is now recognised as an answer
+    // (see the DECLARED RESIDUE case above); it never belonged with messages
+    // that answer nothing, and keeping it here would re-assert the loop.
+    for (const message of ['Run the analysis.', 'What is missing?', '']) {
       expect(messageAnswersMissingValueAsk(message)).toBe(false);
     }
   });
@@ -290,6 +338,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
   it('the witnessed prose answer reads as numeric, with its context recorded', () => {
     expect(readMissingValueAnswer(WITNESSED)).toStrictEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
@@ -329,6 +378,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     // load-bearing. The case below is.
     expect(readMissingValueAnswer('The costs are fixed - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'the costs are fixed',
@@ -401,6 +451,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     const witnessed = 'That would push sales headcount up a lot, set it to 0.8.';
     expect(readMissingValueAnswer(witnessed)).toEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'that would push sales headcount up a lot',

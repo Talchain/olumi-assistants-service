@@ -4803,9 +4803,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       try {
         const pendings = await loadMostRecentPendingActionsStrict(ingress.scenario_id, requestId);
         const nowMs = Date.now();
-        repairClaimBlocked = pendings.some(
-          (pa) => pa.action.kind === 'set_factor_value' && !isPendingActionExpired(pa, nowMs),
-        );
+        const live = pendings.filter((pa) => !isPendingActionExpired(pa, nowMs));
+        repairClaimBlocked = live.some((pa) => pa.action.kind === 'set_factor_value');
+        // ⭐⭐ THE ELLIPTICAL (BARE-NUMBER) CLAIM STANDS DOWN FOR **ANY** LIVE
+        // PENDING, not just a `set_factor_value` one — and that asymmetry is the
+        // point rather than caution.
+        //
+        // A bare number is the ONE answer shape that collides with the offered-
+        // proposal vocabulary: the label/ordinal pre-route resolves "1" / "2"
+        // against the chips a previous turn offered (`public_label`, the numbered
+        // ambiguous-clarification copy). A verb-bearing "set it to 1" cannot be an
+        // ordinal; a naked "1" can be either, and the two readings write to
+        // different entities. Where the reading is genuinely undecidable the
+        // estate's rule is to decline, not to pick (trap 22f) — so a live pending
+        // of ANY kind means an offer is outstanding and this pre-route keeps its
+        // hands off the turn, which falls through to today's routing byte-for-byte.
+        //
+        // ⚠ THE NARROWER GATE WOULD HAVE BEEN A SILENT WRONG-ENTITY WRITE, which
+        // is the exact class `outstanding-ask-clarify.ts` was built to close: it
+        // would have let a bare "1" selecting the first of two offered proposals
+        // be written instead as an effect value of 1 on the asked pair.
+        if (repairAnswerReading.elliptical && live.length > 0) repairClaimBlocked = true;
       } catch {
         // A pendings read must never fail the turn; it only withdraws this
         // claim (the turn proceeds exactly as before this pre-route existed).

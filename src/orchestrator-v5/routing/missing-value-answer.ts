@@ -116,6 +116,18 @@ const AFFIRMATIVE_LEAD = `(?:(?:yes|yeah|yep|sure|ok|okay)[,!.]?\\s+)?(?:please\
 const NUMBER = `(\\d[\\d,]*(?:\\.\\d+)?|\\.\\d+)`;
 
 /**
+ * The BARE NUMBER — the whole message is the figure and nothing else.
+ *
+ * ⭐ THE SAME `NUMBER` TOKEN, ANCHORED, NOT A SECOND NUMERIC GRAMMAR. A second
+ * spelling of "what counts as a number" is the copy that rots (trap 12); this
+ * one is built from the token the verb-bearing arms already use, so a change to
+ * either reaches both. A trailing full stop is admitted because people type one;
+ * NOTHING else is — no unit, no percent sign, no currency symbol, no word. The
+ * `^…$` anchor is the whole guard, and it can only ever decline.
+ */
+const BARE_NUMBER_PATTERN = new RegExp(`^${NUMBER}\\s*[.!]*$`);
+
+/**
  * The bindable forms. `^…$` anchoring is load-bearing: a named target, a
  * trailing clause, a question lead or a compound sentence all fail the claim
  * with no vocabulary list to maintain.
@@ -291,11 +303,18 @@ const QUALITATIVE_ANSWER_PATTERN =
  *     this wave is closing one level up.
  *   · "Set it to a third."     — a word number. Parsing it means choosing
  *     between 0.33 and 0.333…, i.e. inventing precision the user did not give.
- *   · "0.12"                   — a bare number with NO verb and NO referent.
- *     Nothing in CEE records which slot the previous turn asked about (the ask
- *     turn is not even committed to `v5_conversation_turns`), so a bare number
- *     cannot be attributed to a slot without a guess. This one is a GENUINE
- *     capability gap and its enabling change is named below.
+ *   · ⚠⚠ "0.12" — A BARE NUMBER — HAS LEFT THIS SET, AND THE REASON IT WAS HERE
+ *     WAS FALSE. The stated reason was *"Nothing in CEE records which slot the
+ *     previous turn asked about (the ask turn is not even committed to
+ *     `v5_conversation_turns`)"*, and the enabling change was reported as an
+ *     outstanding-ask RECORD. **Measured at this tip: the record already exists
+ *     and no persistence change was needed.** `deriveAskedEffectPair` reads the
+ *     asked pair off the HEAD of the canonical blocker list. The premise
+ *     conflated the ask TURN (uncommitted, and irrelevant) with the asked SLOT
+ *     (a fact about the PERSISTED GRAPH, still present on the next turn exactly
+ *     BECAUSE the answer has not been written yet). A gap can be pinned for
+ *     years behind a reason nobody re-derived; this one was pinned behind a
+ *     premise that a sibling module had already refuted in code.
  *   · "Set it to 0.12 for the subcontracting option." — NAMES A TARGET, so the
  *     edit lane owns it. Correctly refused, and it must stay refused.
  *
@@ -304,18 +323,15 @@ const QUALITATIVE_ANSWER_PATTERN =
  * 18 Aug RUN-B witness that forced the change and for the four twins that prove
  * the harm is still guarded — at the graph, not at the punctuation.
  *
- * ⭐ THE ENABLING CHANGE for the bare-number case, reported rather than
- * attempted: an outstanding-ask record carrying the option and factor ids, so an
- * elliptical answer has an antecedent. Two typed precedents already exist
- * (`pending-action.ts`'s `clarify_v2_round.asked_dimensions` and
- * `elicit_target_baseline.target_id` — the latter's own comment says "no pending
- * question, no elliptical binding, fail closed"). It is a persistence-seam
- * change and is out of this lane's scope per the scope-expansion rule.
+ * ⭐ THE BARE-NUMBER CASE IS NOW CLOSED, and the enabling change turned out to
+ * be a READ, not a write: `deriveAskedEffectPair` over the persisted graph's
+ * head blocker. `elliptical: true` marks the reading so no consumer can bind it
+ * without that antecedent. The refusal that remains for its NEIGHBOURS — hedges
+ * and word-numbers — is unchanged and is about PROVENANCE, not about slots.
  */
 export const MISSING_VALUE_ANSWER_KNOWN_DROPPED: readonly string[] = [
   'Set it to about 0.12.',
   'Set it to a third.',
-  '0.12',
   'Set it to 0.12 for the subcontracting option.',
   // ⭐ ADDED 19 Aug 2026 BECAUSE A MUTANT SURVIVED AND HAD TO BE SETTLED BY
   // EXECUTION, NOT ARGUED (trap 13c). Deleting `CLAUSE_BREAK`'s trailing
@@ -339,6 +355,25 @@ export type MissingValueAnswer =
       /** The value exactly as the user wrote it — never reformatted. */
       readonly valueText: string;
       readonly referent: string | null;
+      /**
+       * ⭐⭐ THE MESSAGE IS A BARE NUMBER — no verb, no referent, nothing else.
+       *
+       * `true` means this reading carries NO antecedent of its own: the slot
+       * cannot come from the sentence, because there is no sentence. A consumer
+       * that resolves its slot FROM THE MESSAGE must refuse an elliptical
+       * reading outright; only a consumer holding the product's own outstanding
+       * ask may bind it. `matchBareRepairValue` refuses it for exactly that
+       * reason, and `resolveRepairValueBinding` routes it to
+       * `deriveAskedEffectPair` instead of to the sole-missing-pair rule.
+       *
+       * ⚠ THE FIELD EXISTS SO THE DISTINCTION CANNOT BE LOST AT A CALL SITE.
+       * A second predicate ("is this message just a number?") in a second module
+       * is how this estate loses seams (trap 12); one reading with the
+       * distinction recorded ON it cannot drift, and a consumer that ignores the
+       * field is choosing to bind without an antecedent VISIBLY rather than
+       * silently.
+       */
+      readonly elliptical: boolean;
       /**
        * ⭐ THE PROSE THAT PRECEDED THE ANSWERING CLAUSE, normalised — `''` when
        * the message is, in its entirety, the answer.
@@ -403,7 +438,36 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
   // (1) TODAY'S READING, UNCHANGED AND FIRST. Anything that binds at this tip
   // binds identically, with `leadingContext: ''`.
   const whole = readNumericClause(text);
-  if (whole !== null) return { kind: 'numeric', ...whole, leadingContext: '' };
+  if (whole !== null) return { kind: 'numeric', ...whole, leadingContext: '', elliptical: false };
+
+  // (1b) ⭐⭐ THE BARE NUMBER — "0.6", and nothing else in the message.
+  //
+  // PINNED-DROPPED UNTIL NOW, BY NAME ('0.12'), with the stated reason
+  // "Nothing in CEE records which slot the previous turn asked about … This one
+  // is a GENUINE capability gap and its enabling change is named below", and the
+  // named enabling change was "an outstanding-ask record carrying the option and
+  // factor ids". ⚠ THAT PREMISE IS REFUTED AT THIS TIP AND THE RECORD ALREADY
+  // EXISTS: `deriveAskedEffectPair` (`repair-value-binding.ts`) reads the pair
+  // the product is asking about off the HEAD of the canonical blocker list —
+  // the SAME element `coaching/readiness-recovery.ts:194,242` composes the
+  // on-screen question from. The antecedent never needed the ask TURN, which is
+  // indeed uncommitted; it needed the asked SLOT, which is a fact about the
+  // PERSISTED GRAPH and is therefore still there on the next turn precisely
+  // BECAUSE nothing was written. No persistence-seam change is required.
+  //
+  // ⚠ THIS READING CARRIES NO ANTECEDENT AND MUST NEVER BE BOUND WITHOUT ONE.
+  // It is anchored to the WHOLE message, so it cannot creep: a verb, a unit, a
+  // referent, a second clause or any other word all fail the claim. That is why
+  // it is marked `elliptical` rather than being returned as an ordinary numeric
+  // answer — the slot is the CALLER's problem, and a caller that resolves slots
+  // from the sentence has nothing to resolve from.
+  const bare = BARE_NUMBER_PATTERN.exec(text);
+  if (bare !== null) {
+    const valueText = bare[1];
+    if (valueText !== undefined) {
+      return { kind: 'numeric', valueText, referent: null, leadingContext: '', elliptical: true };
+    }
+  }
 
   // (2) THE ANSWER CARRIED CONTEXT. The final sentence-level clause is the
   // SAME grammar — no new patterns, no widened vocabulary (see CLAUSE_BREAK).
@@ -420,7 +484,7 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
   if (leadingContext.length > 0 && clause.length > 0) {
     const trailing = readNumericClause(clause);
     if (trailing !== null && trailing.referent !== null) {
-      return { kind: 'numeric', ...trailing, leadingContext };
+      return { kind: 'numeric', ...trailing, leadingContext, elliptical: false };
     }
   }
 

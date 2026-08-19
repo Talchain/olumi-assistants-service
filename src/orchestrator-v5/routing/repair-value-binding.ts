@@ -127,6 +127,15 @@ export function matchBareRepairValue(message: string): BareRepairValueMatch | nu
   // `resolveOptionEffectWrite`'s rule 3c, which checks the prose against the
   // graph's own entities first. Trap 21: two questions, named apart.
   if (answer.leadingContext !== '') return null;
+  // ⭐ AND NEITHER MAY AN ELLIPTICAL (BARE-NUMBER) ANSWER, for the SAME reason
+  // stated one paragraph up, arriving from the opposite direction. This
+  // function's consumers resolve the slot from "exactly one pair is missing";
+  // a bare number's only antecedent is the question the product asked, which is
+  // `deriveAskedEffectPair`, and this function has no reader for it. Admitting
+  // one here would bind a number to whichever pair happened to be sole-missing
+  // rather than to the pair on screen. Trap 21: two questions, named apart —
+  // `resolveRepairValueBinding` owns the elliptical route.
+  if (answer.elliptical) return null;
   return { valueText: answer.valueText, referent: answer.referent };
 }
 
@@ -260,10 +269,38 @@ export function buildRepairBindingInstruction(
   return `${buildConfigureOptionAdvisedFormat(pair.optionLabel, pair.factorLabel, valueText)}.`;
 }
 
+/**
+ * Is this bare figure ALREADY an effect value in the model's own units?
+ *
+ * ⭐ THE 0-1 SCALE IS THE PRODUCER'S, NOT THIS MODULE'S: `src/prompts/edit-graph-v6.ts`
+ * states "effect values are on the 0-1 scale" (P7 — derive the bound from the
+ * producer, never pick one here). `routing/outstanding-ask-clarify.ts` applies
+ * the identical restraint to the identical question one seam over, and its
+ * reason is this one's: a figure outside the scale is a USER-SCALE number, and
+ * converting it is a rescale this estate's writer explicitly refuses to perform
+ * silently. Declining costs the user one turn; converting would write a number
+ * they never gave.
+ *
+ * ⚠ ONLY REACHED FOR THE ELLIPTICAL (bare) FORM, which by construction carries
+ * no unit token at all — so this is a RANGE check, and it is not, and must not
+ * become, a substitute for the unit handling the verb-bearing paths already own.
+ */
+function isModelUnitEffectValueText(valueText: string): boolean {
+  const parsed = Number(valueText.replace(/,/g, ''));
+  if (!Number.isFinite(parsed)) return false;
+  return parsed >= 0 && parsed <= 1;
+}
+
 export type RepairValueBindingResolution =
   | {
       readonly matched: false;
-      readonly reason: 'not_bare_value_shape' | 'no_missing_effect_values';
+      readonly reason:
+        | 'not_bare_value_shape'
+        | 'no_missing_effect_values'
+        /** A bare number arrived while the product was asking no effect-value question. */
+        | 'no_outstanding_ask'
+        /** A bare number outside the 0-1 effect scale. Declined, never converted. */
+        | 'bare_value_not_model_unit';
     }
   | {
       readonly matched: true;
@@ -289,6 +326,48 @@ export function resolveRepairValueBinding(params: {
   readonly message: string;
   readonly readiness: AnalysisReadyPayload | null | undefined;
 }): RepairValueBindingResolution {
+  // ⭐⭐ THE ELLIPTICAL ROUTE — a BARE NUMBER, bound to THE PAIR THE PRODUCT
+  // ASKED ABOUT, and to nothing else.
+  //
+  // WHY THIS DOES NOT GO THROUGH THE SOLE-MISSING-PAIR RULE BELOW, stated as a
+  // rule rather than tuned to the witness: the two arms resolve their slot from
+  // DIFFERENT AUTHORITIES because they have different antecedents available.
+  //   · "Set it to 0.6."  carries a referent whose antecedent is the CONVERSATION,
+  //     so with two or more pairs outstanding the referent is genuinely
+  //     ambiguous and the product must ASK (trap 22f).
+  //   · "0.6"             carries no referent at all. Its ONLY possible
+  //     antecedent is the question the product put on screen — `blockers[0]`,
+  //     via `deriveAskedEffectPair`, the SAME element
+  //     `coaching/readiness-recovery.ts:194,242` composed that question from and
+  //     the SAME element `buildReadinessRecoveryChip`'s `provide_value` branch
+  //     mints its chip from. So the number binds to the slot the user was
+  //     looking at when they typed it, however many other slots are outstanding.
+  //
+  // ⚠ IT DECLINES RATHER THAN GUESSING IN BOTH DIRECTIONS THAT MATTER: no
+  // outstanding effect-value ask ⇒ no antecedent ⇒ no bind; a figure outside the
+  // model's own 0-1 effect scale ⇒ no bind and NO CONVERSION (the same refusal
+  // `outstanding-ask-clarify.ts` states for `80%` — this estate's writer does not
+  // silently rescale a user's number).
+  const ellipticalReading = readMissingValueAnswer(params.message);
+  if (
+    ellipticalReading !== null
+    && ellipticalReading.kind === 'numeric'
+    && ellipticalReading.elliptical
+  ) {
+    const asked = deriveAskedEffectPair(params.readiness);
+    if (asked === null) return { matched: false, reason: 'no_outstanding_ask' };
+    if (!isModelUnitEffectValueText(ellipticalReading.valueText)) {
+      return { matched: false, reason: 'bare_value_not_model_unit' };
+    }
+    return {
+      matched: true,
+      kind: 'bind',
+      pair: asked,
+      valueText: ellipticalReading.valueText,
+      instruction: buildRepairBindingInstruction(asked, ellipticalReading.valueText),
+    };
+  }
+
   const match = matchBareRepairValue(params.message);
   if (match === null) return { matched: false, reason: 'not_bare_value_shape' };
   const pairs = deriveMissingEffectPairs(params.readiness);

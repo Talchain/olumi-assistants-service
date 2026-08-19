@@ -1180,6 +1180,7 @@ describe('A2 — ACCEPTANCE: an ordinary answer binds the pair the product asked
     // The two shapes, and the field that tells them apart (trap 21).
     expect(readMissingValueAnswer(J18.wire.t4_user_message)).toEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
@@ -1387,6 +1388,7 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
     // case lives in `missing-value-answer.test.ts`.
     expect(readMissingValueAnswer('It matters a lot - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'it matters a lot',
