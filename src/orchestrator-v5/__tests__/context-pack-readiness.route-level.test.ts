@@ -115,7 +115,11 @@ function payload(message: string): MessageTurnPayload {
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message,
-    turn_class: 'converse',
+    // ⚠ NOT 'converse' — that is not a member of the boundary enum
+    // ('clarify' | 'decide' | 'frame' | 'review' | 'propose'). `pnpm typecheck`
+    // is BLIND to this file (tsconfig.build.json excludes tests); only the
+    // separate `Typecheck Drift (ratchet)` CI job sees it, and it did.
+    turn_class: 'decide',
     stage: 'analyse',
   };
 }
