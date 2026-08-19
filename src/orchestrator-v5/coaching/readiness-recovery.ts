@@ -430,7 +430,18 @@ export function buildReadinessRecoveryChip(
       };
     case 'provide_value': {
       const asked = deriveAskedEffectPair(analysisReady);
-      if (asked !== null) return buildRepairPairChip(asked.optionLabel, asked.factorLabel);
+      if (asked !== null) {
+        // FULL labels for the replayed message (it must name real entities);
+        // the display form for the chip LABEL is the SAME string cut with the
+        // SAME budget and the SAME canonical elider this module already uses
+        // for its prose — so the chip and the sentence beneath it cannot cut
+        // one label two ways (F4). No second budget is introduced anywhere.
+        return buildRepairPairChip(
+          asked.optionLabel,
+          asked.factorLabel,
+          elideLabelAtWordBoundary(asked.factorLabel, MAX_LABEL_CHARS),
+        );
+      }
       return recovery.optionLabelFull && recovery.optionLabel
         ? buildConfigureOptionChipWithDisplay(recovery.optionLabelFull, recovery.optionLabel)
         : { ...CONFIGURE_OPTION_GENERIC_CHIP };

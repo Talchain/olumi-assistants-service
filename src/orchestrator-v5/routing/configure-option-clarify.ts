@@ -74,7 +74,18 @@ export type ConfigureOptionClarifyDeclineReason =
   | 'no_readiness'
   | 'no_unconfigured_option'
   | 'option_not_identified'
-  | 'no_candidate_factor';
+  | 'no_candidate_factor'
+  /**
+   * ⭐ THE OPTION WAS IDENTIFIED — the RECOVERY COPY's domain excludes it.
+   *
+   * Distinct from `option_not_identified`, which this branch used to borrow and
+   * which said the opposite of what happened (CLAUDE.md trap 14: an honest
+   * label overwritten by a convenient one is how a reader stops looking).
+   * Nothing branches on these reasons outside tests — swept at this tip, zero
+   * non-test reads of `.reason` from either predicate, contrast control: 7 in
+   * the companion spec — so this is honesty in the record, not behaviour.
+   */
+  | 'option_already_partially_configured';
 
 export type ConfigureOptionClarifyResult =
   | { readonly matched: false; readonly reason: ConfigureOptionClarifyDeclineReason }
@@ -223,12 +234,38 @@ function resolveConfigureOptionFacts(params: {
  * later lane: the identity-carrying chip this change ships would have routed
  * into it.
  *
- * ⚠ THE DECLINE REASONS ARE UNCHANGED, and so is every path that was already
- * correct: an option with no linked factors, one linked only to non-factor
- * nodes, and one whose factors are all set have NO outstanding slot and still
- * decline `no_unconfigured_option`; two candidates with none named still
- * declines `option_not_identified`. The behaviour that changes is exactly the
- * partially-configured option — from wrong or absent, to right.
+ * ⚠⚠ THIS ALSO NARROWS `sole_unconfigured`, AND AN EARLIER VERSION OF THIS
+ * COMMENT DENIED IT. It read *"THE DECLINE REASONS ARE UNCHANGED, and so is
+ * every path that was already correct"* — **false as stated**, and a false
+ * comment about a predicate's breadth is how the next lane inherits a wrong
+ * model. An adversarial review caught it; the numbers below are this lane's own
+ * re-measurement at BOTH tips, not the review's, on the fixture named above
+ * using the product's shipped `SET_OPTION_VALUES_CHIP.message` (which names no
+ * option, so it is exactly the message the tie-break serves).
+ *
+ * WIDENING THE CANDIDATE SET MAKES THE ONE-CANDIDATE TIE-BREAK AT `:174`
+ * STRICTLY HARDER TO REACH. At mid-repair — `needs_encoding = 1` but TWO
+ * options still holding an outstanding slot:
+ *
+ *   base a61fe7ff : matched(`e75f367a`, `sole_unconfigured`)   ← both predicates
+ *   head          : decline(`option_not_identified`)            ← both predicates
+ *
+ * So on that turn the deterministic clarify prose is replaced by the edit
+ * lane's generic refusal. That is a real cost and it is disclosed here rather
+ * than argued away.
+ *
+ * ⚠ IT IS NOT AN AFFORDANCE LOSS — measured on the same turn, the identity
+ * chip `chip_prompt_repair_effect_value` is still offered, so the user keeps a
+ * concrete next step. And the prose that was lost was answering about the
+ * WRONG ENTITY: at base the "sole" candidate was `e75f367a` while the product's
+ * own blocker was asking about `d8d2df15 × be01ab27`. A tie-break that calls
+ * itself "sole" while two options genuinely have outstanding slots is a guess,
+ * not a resolution. Both halves are true; neither cancels the other.
+ *
+ * UNCHANGED, and re-measured: an option with no linked factors, one linked only
+ * to non-factor nodes, and one whose factors are all set have NO outstanding
+ * slot and still decline `no_unconfigured_option`; two candidates with none
+ * named still declines `option_not_identified`.
  */
 interface OutstandingOptionSlots {
   readonly optionId: string;
@@ -339,6 +376,6 @@ export function buildConfigureOptionRecoveryCopy(params: {
   // The residual (a wrong-entity write against a partially configured option
   // raises no notice) is unchanged by this lane, and still rowed.
   const option = facts.readiness.options.find((o) => o.option_id === facts.optionId);
-  if (option?.status !== 'needs_encoding') return decline('option_not_identified');
+  if (option?.status !== 'needs_encoding') return decline('option_already_partially_configured');
   return facts;
 }

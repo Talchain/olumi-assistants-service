@@ -17,7 +17,6 @@
  * cycle risk.
  */
 
-import { elideLabelAtWordBoundary } from '../utils/label-elision.js';
 
 /**
  * The load-bearing prefix. `detectConfigureOptionIntent` treats any message
@@ -215,19 +214,42 @@ export function buildRepairPairChipMessage(optionRef: string, factorRef: string)
 }
 
 /**
- * Display cap for the repair chip's LABEL only. The MESSAGE always carries the
- * full labels — it is replayed as user text and must name real entities.
+ * ⚠⚠ THIS MODULE OWNS NO DISPLAY BUDGET, AND THAT IS THE POINT.
+ *
+ * The first cut of this function declared `REPAIR_PAIR_CHIP_LABEL_MAX = 48` and
+ * elided the factor itself. An adversarial review named it correctly: ONE
+ * ELIDER AUTHORITY (right — #1041/N26) and TWO BUDGETS FOR ONE SEAM (wrong).
+ * The same factor rendered one cut in the prose at 40 and a different cut on
+ * the chip at 48 — both honest, of the same label, on the same turn,
+ * disagreeing. 48 had no measured justification; I picked it.
+ *
+ * THE FIX IS NOT A FOURTH CONSTANT. `MAX_LABEL_CHARS = 40` is already declared
+ * privately in `coaching/readiness-recovery.ts` AND
+ * `coaching/post-draft-narrative.ts`, and mirrored as a literal in N26's
+ * acceptance spec; a fifth name for the same number here would deepen the
+ * accretion it is meant to remove. Instead the CALLER passes the display form,
+ * cut from the SAME string the message carries with the SAME budget it uses for
+ * its own prose — so the chip label and the sentence beneath it cannot
+ * disagree. This module goes back to being dependency-free.
+ *
+ * ⚠ ROWED, NOT DONE: unifying the three private `MAX_LABEL_CHARS` declarations
+ * behind one exported budget is real work in #1041's files and needs its pinned
+ * spec literals moved first. Out of scope here, and named so the next reader
+ * does not mistake "not converted" for "does not exist".
+ *
+ * `factorDisplayRef` is REQUIRED, not optional: an optional display argument is
+ * a hand-maintained mirror of the caller's diligence, and this estate has
+ * watched exactly that shape drift (trap 12 — the `valueAlreadySupplied?:
+ * boolean` note in `compose/configure-option-clarify-response.ts`).
  */
-const REPAIR_PAIR_CHIP_LABEL_MAX = 48;
-
-export function buildRepairPairChip(optionRef: string, factorRef: string): ConfigureOptionChip {
+export function buildRepairPairChip(
+  optionRef: string,
+  factorRef: string,
+  factorDisplayRef: string,
+): ConfigureOptionChip {
   return {
     id: 'chip_prompt_repair_effect_value',
-    // ⭐ THE CANONICAL ELIDER (#1041 / N26), not a local truncator. A private
-    // `slice`-and-ellipsis here would be the third instance of exactly the
-    // helper that PR deleted two of, and it is bracket-unaware — the witnessed
-    // `…enterprise sales (higher…` is what that costs.
-    label: `Set effect on ${elideLabelAtWordBoundary(factorRef, REPAIR_PAIR_CHIP_LABEL_MAX)}`,
+    label: `Set effect on ${factorDisplayRef}`,
     message: buildRepairPairChipMessage(optionRef, factorRef),
   };
 }

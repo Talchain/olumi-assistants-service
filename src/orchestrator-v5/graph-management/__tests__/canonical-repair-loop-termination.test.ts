@@ -75,7 +75,10 @@ import {
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
-import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
+import {
+  buildReadinessRecoveryChip,
+  projectReadinessRecovery,
+} from '../../coaching/readiness-recovery.js';
 import { buildRepairPairChipMessage } from '../../configure-option-chip-text.js';
 import { detectConfigureOptionIntent } from '../../routing/configure-option-intent.js';
 import { shouldInterceptBeforeEditLane } from '../../routing/configure-option-clarify.js';
@@ -129,6 +132,45 @@ function recoveryChip(graph: unknown) {
     readiness as never,
     (graph as { nodes: { id?: string; kind?: string; label?: string }[] }).nodes,
   );
+}
+
+/**
+ * ⭐⭐ THE INDEPENDENT ORACLE — a RAW read of `blockers[0]` off the payload,
+ * touching none of the code under test.
+ *
+ * ⚠ THIS EXISTS BECAUSE THE FIRST VERSION OF ACCEPTANCE 2 WAS A GUARD AGREEING
+ * WITH ITSELF, and an adversarial review proved it by execution rather than by
+ * argument. The assertion took `pair` from `deriveAskedEffectPair` and then
+ * checked the chip against `buildRepairPairChipMessage(pair.optionLabel,
+ * pair.factorLabel)` — but the CHIP IS MINTED FROM THAT SAME CALL, so both
+ * sides moved together. MUT-B (make `deriveAskedEffectPair` return `all[1]`
+ * instead of the head blocker; applied-check 1 file / 2 insertions) left the
+ * spec **7/7 GREEN**. A genuine survivor.
+ *
+ * That is not a cosmetic gap: naming a slot the prose is NOT asking about is
+ * precisely the witnessed defect this PR exists to close, so the headline
+ * property was the one thing the spec could not observe. The M1/M2/M3 battery
+ * aims at the candidate-set FILTER — a different property — and could never
+ * have caught it. (CLAUDE.md trap 13b: for every guard, ask what would have to
+ * be true for it to pass while the property fails, then write THAT case.)
+ *
+ * Two independent oracles are used below, deliberately:
+ *   · `projectReadinessRecovery` — the composer of the ON-SCREEN sentence, so
+ *     "the chip names what the prose asks about" is asserted between the two
+ *     surfaces rather than within one derivation; and
+ *   · `askedBlocker` — this raw read, for the option IDENTITY, which the
+ *     projection does not expose.
+ */
+function askedBlocker(readiness: unknown): { option_id: string; factor_id: string } {
+  const blockers = (readiness as { blockers?: unknown[] } | undefined)?.blockers;
+  if (!Array.isArray(blockers) || blockers.length === 0) {
+    throw new Error('fixture invariant: the payload must carry a head blocker');
+  }
+  const head = blockers[0] as { option_id?: unknown; factor_id?: unknown };
+  if (typeof head.option_id !== 'string' || typeof head.factor_id !== 'string') {
+    throw new Error(`head blocker carries no identity: ${JSON.stringify(head)}`);
+  }
+  return { option_id: head.option_id, factor_id: head.factor_id };
 }
 
 function optionLabels(graph: unknown): readonly string[] {
@@ -239,17 +281,28 @@ describe('canonical repair loop — ACCEPTANCE 2: the affordance carries identit
       const chip = recoveryChip(graph);
       expect(chip).not.toBeNull();
 
-      // IDENTITY: the chip is exactly the one this pair mints. `optionLabel` /
-      // `factorLabel` are read off the canonical blocker keyed by
-      // `optionId`/`factorId`, so this binds to the entity, not to a string a
-      // neighbouring entity could also produce.
+      // ⭐ IDENTITY, AGAINST AN INDEPENDENT RESOLUTION — never against the
+      // derivation that minted the chip (see `askedBlocker` above; the earlier
+      // form survived MUT-B).
+      //
+      // `projectReadinessRecovery` composes the sentence the user is READING.
+      // Asserting the chip's message against ITS labels states the property
+      // that actually matters and that staging violated: THE CHIP NAMES THE
+      // SLOT THE PROSE IS ASKING ABOUT. Under MUT-B the chip moves to
+      // `blockers[1]` while the prose stays on `blockers[0]`, and this REDs.
+      const recovery = projectReadinessRecovery(
+        readiness as never,
+        (graph as { nodes: { id?: string; kind?: string; label?: string }[] }).nodes,
+      );
+      expect(recovery.kind).toBe('provide_value');
       expect(chip!.id).toBe('chip_prompt_repair_effect_value');
       expect(chip!.message).toBe(
-        buildRepairPairChipMessage(pair!.optionLabel, pair!.factorLabel),
+        buildRepairPairChipMessage(recovery.optionLabelFull!, recovery.factorLabelFull!),
       );
-      // The message names BOTH entities in full — no ellipsis, no truncation.
-      expect(chip!.message).toContain(pair!.optionLabel);
-      expect(chip!.message).toContain(pair!.factorLabel);
+      // The message names BOTH entities in FULL — the display forms are elided
+      // (that is #1041's job) and must NOT be what a replayed message carries.
+      expect(chip!.message).toContain(recovery.optionLabelFull!);
+      expect(chip!.message).toContain(recovery.factorLabelFull!);
       expect(chip!.message).not.toContain('…');
 
       // …and it routes back into the lane that offered it. Derived by running
@@ -262,7 +315,8 @@ describe('canonical repair loop — ACCEPTANCE 2: the affordance carries identit
         graph,
       });
       expect(intercept.matched).toBe(true);
-      expect(intercept.matched && intercept.optionId).toBe(pair!.optionId);
+      // Bound to the RAW head blocker, not to `pair` — same reason as above.
+      expect(intercept.matched && intercept.optionId).toBe(askedBlocker(readiness).option_id);
 
       graph = applyUserAnswer(graph, pair!, USER_VALUE);
     }
@@ -299,7 +353,11 @@ describe('canonical repair loop — ACCEPTANCE 3: never an already-resolved pair
         graph,
       });
       expect(resolved.matched).toBe(true);
-      expect(resolved.matched && resolved.optionId).toBe(pair!.optionId);
+      // Independent oracle again (see `askedBlocker`): the raw head blocker,
+      // not the derivation that minted the chip.
+      expect(resolved.matched && resolved.optionId).toBe(
+        askedBlocker(buildCanonicalAnalysisReadyFromGraph(graph)).option_id,
+      );
       const offered = unresolvedPairs(graph);
       for (const factorLabel of resolved.matched ? resolved.factorLabels : []) {
         const slot = offered.find(
@@ -317,6 +375,31 @@ describe('canonical repair loop — ACCEPTANCE 3: never an already-resolved pair
     // Vacuity guard: the loop above asserts nothing if no slot was ever offered.
     expect(slotsChecked).toBeGreaterThanOrEqual(6);
     expect(unresolvedPairs(graph)).toHaveLength(0);
+  });
+
+  it('POSITIVE CONTROL — `readCommittedOptionEffect` can SEE a committed value, so the absence assertions above are not vacuous', () => {
+    // ⚠ Every `toBeUndefined()` above is an ABSENCE claim, and an absence probe
+    // that cannot observe a PRESENCE proves nothing (CLAUDE.md trap 13). This
+    // pins that the same reader, on the same graphs, returns the user's number
+    // for a slot that HAS one — before, and after, the write.
+    const before = startGraph();
+    const pair = deriveAskedEffectPair(buildCanonicalAnalysisReadyFromGraph(before))!;
+    expect(readCommittedOptionEffect(before, pair.optionId, pair.factorId)).toBeUndefined();
+
+    const after = applyUserAnswer(before, pair, USER_VALUE);
+    expect(readCommittedOptionEffect(after, pair.optionId, pair.factorId))
+      .toBeCloseTo(Number(USER_VALUE));
+
+    // …and the probe DISCRIMINATES: a sibling slot on the same option, still
+    // unset, still reads undefined on the very graph where the first one reads
+    // a number. A reader that returned a value for everything would pass the
+    // line above and be useless to the assertions it backs.
+    const sibling = unresolvedPairs(after).find(
+      (p) => p.optionId === pair.optionId && p.factorId !== pair.factorId,
+    );
+    expect(sibling).toBeDefined();
+    expect(readCommittedOptionEffect(after, sibling!.optionId, sibling!.factorId))
+      .toBeUndefined();
   });
 
   it('DISCRIMINATING PAIR — writing a value removes THAT pair from the offer while a named contrast pair stays offered', () => {
