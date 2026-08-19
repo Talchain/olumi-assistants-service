@@ -14,7 +14,9 @@
  *   2. If matched AND `recent_changes` is non-empty, return a
  *      `direct_answer` dispatch with deterministic copy that quotes the
  *      most recent change's summary verbatim (so the answer is grounded
- *      in the persisted handler fact, not a fabricated summary).
+ *      in the persisted handler fact, not a fabricated summary),
+ *      ATTRIBUTED TO THE RECORD ("Earlier in this conversation: …") so that a
+ *      past receipt can never read as a claim about the current turn.
  *   3. If matched AND `recent_changes` is empty, return a "no recent
  *      changes" dispatch that owns the state-query without falling to
  *      `edit_graph`. The user gets honest copy — "I haven't applied
@@ -39,6 +41,7 @@ import {
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
 import {
+  findRecentChangeAboutOriginSubject,
   isStructureOriginQuestion,
   tryStructureOriginAnswer,
 } from '../../cee/context-integrity/structure-origin-answer.js';
@@ -358,6 +361,11 @@ export interface TryStateQueryGuardInput {
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
+  // Set by the origin arm when it defers: the recorded change that is actually
+  // ABOUT the element the question named. `null` everywhere else, so the ordinary
+  // readback arms keep quoting the head, which is what "what changed?" means.
+  let originSubjectChange: RecentMutation | null = null;
+
   // ROADMAP 2.975 — SEPARATE THE TWO QUESTIONS BEFORE EITHER ARM CLAIMS ONE.
   //
   // This runs BEFORE the session-edit arms, and returns unconditionally, so a
@@ -408,12 +416,45 @@ export function tryStateQueryGuard(
     if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
       return { matched: false };
     }
-    if (input.contextPack.recent_changes.length > 0) {
-      // Fall through to the session-edit arms, which are grounded in the
-      // recorded mutation.
-    } else if (input.briefAudit === undefined) {
-      return { matched: false };
-    } else {
+    // ⭐⭐ THE DEFERRAL IS NARROWED TO THE CASE IT WAS WRITTEN FOR — measured on
+    // the deployed build, 18 Aug 2026 (`4a513781`), LINK 6 of the composed
+    // journey witness, VERBATIM:
+    //
+    //   user:  "Why did you add a status quo option? I never mentioned one —
+    //           where did that come from?"
+    //   Olumi: "Updated Enterprise sales headcount and spend"   (`llm_calls: 0`)
+    //
+    // The blanket `recent_changes.length > 0` test sent a provenance challenge to
+    // the readback arm, which answered it with the PREVIOUS turn's receipt. The
+    // ambiguity the deferral respects is real, but it is SUBJECT-BOUND: *"why did
+    // you add the cost constraint?"* is ambiguous when the cost constraint is what
+    // was just changed, and is not ambiguous at all when the recorded change was
+    // to something else. Deferring on no subject overlap is not caution, it is the
+    // origin arm's own defect class reproduced one branch further in.
+    //
+    // ⚠ NOTHING IS ADDED TO A PHRASE LIST (trap 22f). The new conjunct is derived
+    // from persisted state: the element the question resolves to, against the
+    // `target_label` the handler itself wrote. See
+    // `originSubjectIsRecentlyChanged` for the failure direction.
+    //
+    // ⭐⭐ AND THE SCOPE IS THE ONE BROKEN CELL, NOTHING WIDER. Measured by
+    // execution at pristine (`4a513781` + this clone), the 2x2 over the two
+    // witnessed phrasings is:
+    //
+    //   |          | recent = EMPTY     | recent = 1, DIFFERENT element        |
+    //   |----------|--------------------|--------------------------------------|
+    //   | synonym  | structure_origin   | matched:false -> reasoning layer      |
+    //   | captured | structure_origin   | with_recent_change  <-- THE ONLY HARM |
+    //
+    // The reasoning-layer cell is the one the witness graded "the best provenance
+    // answer witnessed on either build". So this change makes the broken cell
+    // MATCH ITS OWN ROW — it declines — and touches nothing else. It deliberately
+    // does NOT extend the deterministic arm rightwards into the reasoning layer's
+    // cell: that would substitute a thin canned sentence for a witnessed-good
+    // answer, which is the very defect class this lane was sent to remove.
+    if (input.contextPack.recent_changes.length === 0) {
+      // ROADMAP 2.975 / #1033's path, UNTOUCHED.
+      if (input.briefAudit === undefined) return { matched: false };
       const answer = tryStructureOriginAnswer(input.message, input.briefAudit.graph);
       // `null` = we cannot ground an answer. Declining hands the turn to the
       // reasoning layer; it must never become a canned reply.
@@ -421,6 +462,56 @@ export function tryStateQueryGuard(
         ? { matched: false }
         : { matched: true, dispatch: 'structure_origin', assistant_text: answer };
     }
+
+    // A mutation IS on record. Defer to the grounded session-edit arms only when
+    // that mutation concerns the element this question names.
+    //
+    // ⚠ WITH NO GRAPH IN HAND (`briefAudit` omitted, or a degraded read that left
+    // `persistedGraph` null) THE SUBJECT CANNOT BE RESOLVED, SO THE DEFERRAL
+    // CANNOT BE JUSTIFIED — and the unjustified fall-through is exactly what
+    // emitted the false claim. Fail-closed: decline.
+    const subjectMatch =
+      input.briefAudit === undefined
+        ? null
+        : findRecentChangeAboutOriginSubject(
+            input.message,
+            input.briefAudit.graph,
+            input.contextPack.recent_changes.map((change) => change.target_label),
+          );
+    // ⭐⭐ ANSWER FROM THE MATCHED CHANGE, NEVER FROM THE HEAD. Measured defect
+    // (adversarial review of this PR): with recent = [{Total cost}, {Hybrid
+    // Phased Approach}], *"Why did you add the Hybrid Phased Approach?"* deferred
+    // correctly and was then answered with the receipt for **Total cost** —
+    // because the deferral test returned a boolean and threw away WHICH change
+    // matched. Honest, and still an answer about the wrong element.
+    originSubjectChange =
+      subjectMatch === null
+        ? null
+        : (input.contextPack.recent_changes[subjectMatch.index] ?? null);
+    if (subjectMatch === null) {
+      // The recorded change is not what was asked about. The session-edit arms
+      // must not claim this turn. Hand it to the reasoning layer, which sees
+      // `recent_changes` AND the graph in its ContextPack — the same destination
+      // the neighbouring phrasing already reaches, and the one that produced the
+      // best provenance answer on the witness.
+      return { matched: false };
+    }
+    // Ambiguous: a recorded mutation targets the very element being asked about.
+    // Fall through to the session-edit arms, which are grounded in it (trap 22f —
+    // where direction cannot be determined, do not guess).
+    //
+    // ⚠⚠ AND NOTE WHICH AUTHORITY IS CANONICAL HERE, BECAUSE THE OBVIOUS SENTENCE
+    // IS WRONG (adversarial review, PR #1036). It is tempting to say "the node's
+    // persisted provenance record is THE authority for a provenance question".
+    // It is not, and `structure-origin-answer.ts`'s own header concedes it: the
+    // V3 enum is canonical for **whose words the content is**, NOT for **why the
+    // element is there**. Derived disagreement case: a user says "add an option
+    // for partnerships", the handler mints it, and because `provenance` is
+    // response-only and referee-denied to the editor it recomputes to
+    // `ai_inferred` with no `source_quote` — so the provenance arm would answer
+    // *"that was my suggestion, not something you wrote"*, which is false about
+    // why it is there. `recent_changes` is the RIGHT authority whenever it holds
+    // a record for the subject, which is exactly what this deferral routes to.
   }
 
   // Negative gate — cheapest of the session-edit arms. A message with an
@@ -471,7 +562,9 @@ export function tryStateQueryGuard(
     };
   }
 
-  const head = recent[0]!;
+  // The head is what a bare readback ("what changed?") means. An origin question
+  // that deferred names a specific element, and is answered from THAT change.
+  const head = originSubjectChange ?? recent[0]!;
   return {
     matched: true,
     dispatch: 'with_recent_change',
@@ -482,20 +575,52 @@ export function tryStateQueryGuard(
 }
 
 /**
- * Deterministic answer copy. The leading sentence quotes the most
- * recent mutation's summary verbatim so the response is grounded in the
- * persisted handler fact (i.e. the answer references the actual £50k
- * value, not a generic safe phrase). Suffix is short and asks the user
- * to confirm whether they want to follow up with an analysis run.
+ * Deterministic answer copy. The persisted mutation summary is quoted VERBATIM
+ * so the response is grounded in the handler fact (i.e. the answer references
+ * the actual £50k value, not a generic safe phrase). Suffix is short and asks
+ * the user to confirm whether they want to follow up with an analysis run.
+ *
+ * ⭐⭐ AND IT IS ATTRIBUTED TO THE RECORD RATHER THAN TO THIS TURN, WHICH IS THE
+ * WHOLE POINT OF THE PREFIX. Emitted BARE, the summary is a perfective mutation
+ * receipt ("Updated Enterprise sales headcount and spend") written by a handler
+ * at the time of a PAST mutation — so as a whole reply on a turn that wrote
+ * nothing it reads as a claim about THIS turn, and it is false. Measured live:
+ * composed journey witness 18 Aug 2026, deployed `4a513781`, LINK 6, where a
+ * provenance challenge received exactly that sentence at `llm_calls: 0` with the
+ * graph hash unchanged.
+ *
+ * ⚠ THE ATTRIBUTION IS TRUE BY CONSTRUCTION, NOT BY INSPECTION — which is why it
+ * is unconditional rather than gated on anything. `TryStateQueryGuardInput`
+ * takes `Pick<ContextPack, 'recent_changes'>`, and `recent_changes` is BY TYPE
+ * the projection of `prior_facts` (`context/recent-changes.ts`); this guard runs
+ * before any handler and never mutates. There is therefore no reachable state in
+ * which the quoted change belongs to the turn being answered.
+ *
+ * ⭐⭐ "CONVERSATION", NOT "SESSION" — AND THE SOURCE IS WHAT BOUNDS THE RECORD.
+ * `recent_changes` <- `prior_facts` <- `readRecent`, whose query is
+ * `WHERE scenario_id = ? ORDER BY created_at DESC LIMIT 20`
+ * (`session/supabase-store.ts`) — bounded by SCENARIO and by COUNT, and by
+ * NEITHER time nor sitting. A user returning to the same scenario next week is
+ * handed a receipt from a previous sitting, so "earlier in this session" is
+ * false for a reachable and entirely ordinary case. This guard's own sibling
+ * copy 20-odd lines below (`NO_RECENT_CHANGES_TEXT`) already says "in this
+ * conversation" for the same reason; the two now agree.
  *
  * British English; no em dashes; no internal terms.
  */
+export const RECENT_CHANGE_RECORD_PREFIX = 'Earlier in this conversation: ';
+
 function composeRecentChangeAnswer(head: RecentMutation, totalCount: number): string {
   const tail =
     totalCount > 1
-      ? ' If you want to see the earlier changes from this session, just ask.'
+      ? ' If you want to see the earlier changes from this conversation, just ask.'
       : '';
-  return `${head.summary}${tail}`;
+  // Terminate the receipt so the multi-change tail is a separate sentence rather
+  // than being welded onto it ("…and spend If you want…"). `cap()` closes a
+  // truncated summary with `…`, which is already terminal.
+  const receipt = head.summary.trimEnd();
+  const terminated = /[.!?…]$/u.test(receipt) ? receipt : `${receipt}.`;
+  return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${tail}`;
 }
 
 // V5 stale-aware explain recovery — neutral honest copy that contains

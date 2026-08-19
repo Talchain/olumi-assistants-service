@@ -364,7 +364,159 @@ function resolveElement(message: string, graph: unknown): GraphNodeView | null {
 
   // A strict maximum, or nothing. Ties are ambiguity, and the honest response to
   // ambiguity is to let the reasoning layer ask (trap 22f), not to pick.
+  //
+  // ⚠ THE REVERSE DIRECTION FAILS SAFE, AND IT WAS MEASURED RATHER THAN ASSUMED
+  // (adversarial review, PR #1036). Three real shapes make a genuine change fail
+  // to be recognised here: a generic `target_label` ("the decision model", "a
+  // link in the decision model"), and a genuine tie between two equally-matching
+  // nodes. **All three DECLINE to the reasoning layer; none produces a false
+  // claim.** That asymmetry is deliberate — a missed match costs an LLM turn, a
+  // wrong match costs the user a statement about their model that is not true.
   if (best === null || bestScore === 0 || bestScore === runnerUp) return null;
+  return best;
+}
+
+/**
+ * ⭐⭐ WHICH RECORDED SESSION MUTATION, IF ANY, IS ABOUT THE ELEMENT THIS QUESTION
+ * NAMES?
+ *
+ * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+ * Composed journey witness, 18 Aug 2026, deployed CEE `4a513781`, LINK 6, VERBATIM:
+ *
+ *   user:  "Why did you add a status quo option? I never mentioned one —
+ *           where did that come from?"
+ *   Olumi: "Updated Enterprise sales headcount and spend"   (`llm_calls: 0`)
+ *
+ * The caller's origin arm deferred to the session-edit arms on the blanket test
+ * `recent_changes.length > 0`, and the readback arm then answered a provenance
+ * challenge with the PREVIOUS turn's mutation receipt. **The product asserted a
+ * change on a turn that made none** — worse in kind than the deflection it
+ * replaced, because a deflection declines and this one states a falsehood about
+ * the user's own model.
+ *
+ * ── THE QUESTION THIS ANSWERS (trap 21, written down first) ─────────────────
+ * NOT "is this an origin question?" (that is `isStructureOriginQuestion`) and NOT
+ * "can we answer it?" (that is `tryStructureOriginAnswer`). It answers exactly
+ * one thing: **which recorded mutation, if any, makes the session-edit reading of
+ * this question available?**
+ *
+ * ⚠⚠ IT RETURNS THE MATCH, NOT A BOOLEAN, AND THAT IS A CORRECTION — trap 21
+ * caught INSIDE the fix written to close a trap-21 defect (adversarial review of
+ * PR #1036, measured). Round 1 returned `boolean`, which **discarded which label
+ * matched**. The predicate answered *"is the session-edit reading available?"*
+ * while the caller consumed it as *"may the HEAD receipt answer this?"* — two
+ * questions under one boolean. Measured consequence, reproduced by execution:
+ *
+ *   "Why did you add the Hybrid Phased Approach?"
+ *   recent = [ {target: Total cost}  <-- head, {target: Hybrid Phased Approach} ]
+ *   -> "Earlier in this session: Updated Total cost from 1 to 2."
+ *
+ * A named-element question answered with a receipt about a DIFFERENT element at
+ * `llm_calls: 0` — honest now (the attribution fix), but still the substitution
+ * class. Returning the match lets the caller answer from the change the user
+ * actually asked about.
+ *
+ * ── WHY THIS IS NOT ANOTHER PHRASE-LIST ROUND ───────────────────────────────
+ * CEE #888 burned four rounds oscillating on one natural-language predicate, and
+ * the ruling (trap 22f) was that no further punctuation-or-phrasing rule settles
+ * such a thing. **Nothing is added to any phrase list here.** This is a fact about
+ * STATE: it resolves the subject with the module's existing identity-binding
+ * resolver and compares it against the persisted `RecentMutation.target_label`
+ * the handler itself wrote. Phrasing decides nothing.
+ *
+ * ── THE MATCH BINDS BY NODE IDENTITY, NOT BY A TOKEN COUNT (trap 19) ────────
+ * ⚠⚠ ROUNDS 1 AND 2 BOTH ANSWERED THIS WITH A COUNTING PREDICATE, AND A COUNTING
+ * PREDICATE IS SATISFIABLE BY AN OBJECT THAT IS NOT THE SUBJECT. Round 1 matched
+ * on ANY single shared identifying token; round 2 raised the bar to two. Raising
+ * a threshold does not change the KIND of predicate — it only moves the label
+ * length at which the wrong element clears it. Round 2 minted a SECOND element-
+ * identity rule (`hits >= required`) competing with `resolveElement`'s strict-
+ * maximum binding ~90 lines above, and the two demonstrably disagreed
+ * (adversarial review, PR #1036, reproduced by execution):
+ *
+ *   "Why did you add Enterprise sales partnerships?"
+ *   recent = [target: "Enterprise sales headcount and spend"]   <- a DIFFERENT node
+ *   -> "Earlier in this conversation: Updated Enterprise sales headcount and spend."
+ *
+ * Two incidentally-shared tokens cleared the threshold. Round 2's own
+ * `INCIDENTAL-TOKEN` guard passed only because its fixture label was "Enterprise
+ * partnerships" — ONE shared token — while the same graph already carried
+ * "Enterprise sales headcount and spend"; a sibling label one word longer
+ * re-opened it. Same class for an option against its twin factor.
+ *
+ * **So the recorded `target_label` is resolved through the SAME `resolveElement`
+ * that resolved the subject, and must land on the SAME node `id`.** There is now
+ * ONE identity authority in this module, and a shape that defeats it defeats both
+ * ends symmetrically rather than opening a gap between them.
+ *
+ * The token floor is KEPT as a secondary filter, not as the binding: a recorded
+ * label that resolves here on a single shared token is a weaker reference than
+ * one that spells the element out, and `Math.min(2, …)` keeps single-token
+ * subjects ("Churn") matchable on their one token. It is constrained at its own
+ * boundary by the `BOUNDARY-HITS-2` pair — without those, `Math.min(3, …)`
+ * survives the whole corpus (measured).
+ *
+ * **The tightening was run in advance (trap 22f's exit): it declines all three
+ * wrong-subject cases and returns BYTE-IDENTICAL matches on every must-match
+ * case, including `SINGLE-TOKEN-SUBJECT` and `MATCH-NOT-HEAD`.** Strictly safer
+ * at zero measured cost.
+ *
+ * ── FAILURE DIRECTION, STATED PRECISELY ─────────────────────────────────────
+ * ⚠ AT THE ONLY CALL SITE, `null` IN THE `recent_changes.length > 0` BRANCH
+ * ALWAYS DECLINES TO THE REASONING LAYER. (Round 1's docblock said the caller
+ * "answers from provenance or declines" — **measurably wrong**: the provenance
+ * path is unreachable from that branch, and it was the clause setting the whole
+ * design's risk direction. Corrected by the same review.) Declining is the
+ * permissive, safe direction: it can never assert a change.
+ *
+ * `null` when the subject cannot be resolved — an unresolvable subject is not
+ * evidence of ambiguity, and the caller's next step declines on the same failure.
+ */
+export interface OriginSubjectChangeMatch {
+  /** Index into the `recentTargetLabels` array the caller passed, in its order. */
+  readonly index: number;
+  /** Overlapping identifying tokens. Exposed so a caller can rank or log. */
+  readonly hits: number;
+}
+
+export function findRecentChangeAboutOriginSubject(
+  message: string,
+  graph: unknown,
+  recentTargetLabels: readonly string[],
+): OriginSubjectChangeMatch | null {
+  const subject = resolveElement(message, graph);
+  if (subject === null) return null;
+  const subjectTokens = identifyingTokens(subject.label);
+  if (subjectTokens.size === 0) return null;
+  // An empty id identifies nothing, so the comparison below would become a
+  // predicate every node satisfies — the exact shape this function removes.
+  if (subject.id.length === 0) return null;
+
+  // SECONDARY filter, never the binding (see the header). Single-token subjects
+  // keep their one token, so nothing that matched by identity stops matching.
+  const required = Math.min(2, subjectTokens.size);
+
+  let best: OriginSubjectChangeMatch | null = null;
+  for (let i = 0; i < recentTargetLabels.length; i += 1) {
+    const raw = recentTargetLabels[i];
+    if (typeof raw !== 'string' || raw.length === 0) continue;
+
+    // ⭐⭐ THE BINDING: the recorded label is resolved by the SAME resolver as
+    // the subject and must land on the SAME node. `resolveElement` declines on
+    // a tie and on a zero score, so an unresolvable or ambiguous `target_label`
+    // fails closed here rather than matching on incidental overlap.
+    const recorded = resolveElement(raw, graph);
+    if (recorded === null || recorded.id !== subject.id) continue;
+
+    let hits = 0;
+    for (const token of identifyingTokens(raw)) {
+      if (subjectTokens.has(token)) hits += 1;
+    }
+    // Strictly greater, so ties keep the EARLIER (more recent) change.
+    if (hits >= required && (best === null || hits > best.hits)) {
+      best = { index: i, hits };
+    }
+  }
   return best;
 }
 
