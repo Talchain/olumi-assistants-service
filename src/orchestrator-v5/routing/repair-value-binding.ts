@@ -245,6 +245,19 @@ function nonEmpty(value: unknown): string | null {
  * blocker is a mapping or encoding issue, the recovery copy renders a DIFFERENT
  * sentence and the product is not asking for an effect value at all — binding an
  * answer to `pairs[0]` there would be answering a question nobody asked.
+ *
+ * ⚠⚠ THIS FUNCTION ANSWERS **"WHICH PAIR IS THE READINESS AUTHORITY OUTSTANDING
+ * ON?"** — NOT "what is on screen". The two differ, and conflating them breaks
+ * something in whichever direction you collapse them. See
+ * {@link deriveOnScreenEffectAsk} directly below for the other question and for
+ * the measurement that forced them apart.
+ *
+ * ⚠ IT IS DELIBERATELY **NOT** STATUS-GATED, and that was MEASURED rather than
+ * assumed. Its consumers — `option-effect-write.ts`'s rule 3c (which WRITES) and
+ * `outstanding-ask-clarify.ts` — resolve their antecedent from the USER'S OWN
+ * PROSE, which names or points at entities and is checked against the graph.
+ * Their claim does not rest on what the recovery projection is rendering, so a
+ * structurally messy graph must not silence them.
  */
 export function deriveAskedEffectPair(
   readiness: { readonly blockers?: unknown } | null | undefined,
@@ -253,6 +266,65 @@ export function deriveAskedEffectPair(
   if (!Array.isArray(blockers) || blockers.length === 0) return null;
   const head = deriveMissingEffectPairs({ blockers: blockers.slice(0, 1) });
   return head.length === 1 ? head[0]! : null;
+}
+
+/**
+ * ⭐⭐ **WHICH PAIR IS THE PRODUCT ASKING ABOUT ON SCREEN?** — a DIFFERENT
+ * QUESTION from {@link deriveAskedEffectPair}, and the difference is a
+ * wrong-entity WRITE.
+ *
+ * THE DEFECT, measured at the real producer with a contrast control.
+ * `assessCanonicalAnalysisReadiness` overwrites the status but carries the
+ * blockers through UNTOUCHED (`analysis-ready-helper.ts:1113-1119`), and
+ * `hardBlocked` fires on any `graph_structure` / `numeric_integrity` /
+ * `internal` issue (`:1109-1112`). So a graph with an orphan node AND a missing
+ * effect value yields `status: 'blocked'` with a FULL-IDENTITY `missing_value`
+ * blocker still at `blockers[0]`:
+ *
+ *   STATUS   = blocked   blocked_reason = ORPHAN_NODE
+ *   CHIP     = chip_prompt_resolve_model_issue  "Resolve model issue"
+ *   NEXTSTEP = "Next, resolve the model issue shown before comparing the options."
+ *
+ * **The screen says resolve the model issue. The user types `0.6`.** Without
+ * this reader the product wrote 0.6 onto a pair they never named — answering a
+ * question nobody asked, with a write, silently.
+ *
+ * `projectReadinessRecovery` short-circuits on STATUS (`readiness-recovery.ts:
+ * 243-247`) and `needs_user_input` is the ONLY status under which it renders an
+ * effect-value question (`:294-311`), so that is the gate.
+ *
+ * ⚠⚠ WHY THIS IS A SECOND READER AND **NOT** A CONJUNCT ON THE OWNER, which is
+ * what the review prescribed — OVERTURNED BY EXECUTION, NOT BY ARGUMENT. Gating
+ * the owner reddened **16** tests across the RUN-B journey acceptance and the
+ * full apply chain, because **the REAL captured 18 Aug witness graph is itself
+ * `status: 'blocked'` / `ORPHAN_NODE`**. Real drafted graphs are structurally
+ * messy; that is the normal case, not the exception. A gate on the owner would
+ * therefore have silenced the shipped answered-ask WRITE path (#1034/#1035/#1036)
+ * on almost every genuine draw — a far larger and quieter regression than the one
+ * it closed, and one that would have looked like "fixtures need a status field".
+ *
+ * ⭐ The two questions are genuinely different and are now named apart (trap 21):
+ *   · OUTSTANDING (owner)   — "does the authority still lack this value?" Used
+ *     where the antecedent is the USER'S PROSE, which stands on its own.
+ *   · ON SCREEN (this)      — "is this the question the product just rendered?"
+ *     Used ONLY by the elliptical arm, whose entire and only antecedent IS the
+ *     rendered question, because a bare number says nothing else.
+ *
+ * The blocker logic is NOT re-implemented here — it delegates to the owner and
+ * adds one conjunct, so the two cannot drift about what a missing-effect blocker
+ * is (trap 12).
+ *
+ * ⚠ The status is compared as a string rather than by importing
+ * `projectReadinessRecovery`, which would be cleaner: `readiness-recovery.ts:25`
+ * already imports FROM this module, so that would be an import cycle. The
+ * coupling is stated here and pinned by a PRODUCER-DERIVED spec rather than by
+ * the type system — a hand-maintained edge, named as one.
+ */
+export function deriveOnScreenEffectAsk(
+  readiness: { readonly blockers?: unknown; readonly status?: unknown } | null | undefined,
+): MissingEffectPair | null {
+  if (readiness?.status !== 'needs_user_input') return null;
+  return deriveAskedEffectPair(readiness);
 }
 
 /**
@@ -288,7 +360,37 @@ export function buildRepairBindingInstruction(
 function isModelUnitEffectValueText(valueText: string): boolean {
   const parsed = Number(valueText.replace(/,/g, ''));
   if (!Number.isFinite(parsed)) return false;
-  return parsed >= 0 && parsed <= 1;
+  if (parsed < 0 || parsed > 1) return false;
+  // ⭐⭐ AND A BARE **INTEGER** IS REFUSED, BECAUSE IT IS AN ORDINAL IN DISGUISE.
+  //
+  // The estate's label/ordinal pre-route resolves a naked "1" / "2" against the
+  // chips a previous turn offered. This lane's own sibling ask arm
+  // (`composeRepairValueAskResponse`) offers up to three numbered pair chips and
+  // exits through `sendFinalised200` — persisting NO pending — so the next turn
+  // has no live record that an offer is outstanding. Measured: a bare "1" bound
+  // as an effect value of 1.0 while the user meant "the first one".
+  //
+  // Two readings, different entities written, and nothing on the wire
+  // distinguishes them — so the estate declines rather than picks (trap 22f).
+  // The refusal is SHAPE-BASED and therefore cannot go stale the way a
+  // state-based guard does: `2` and `3` were already out of scale, `0` is not an
+  // ordinal, and the only figure this costs is exactly 1, still reachable as
+  // "1.0" or "Set it to 1".
+  //
+  // ⭐ THIS REPLACES A BLUNTER GUARD AT THE ROUTE. Standing down on ANY live
+  // pending closed the same collision but also blocked a legitimate bare answer
+  // for a whole TTL window whenever any unrelated offer was outstanding —
+  // over-declining a capability to fix an over-acceptance. Refusing the ambiguous
+  // SHAPE removes the collision at its source, so the route keeps only the
+  // narrow `set_factor_value` check it had before this lane.
+  // ⚠ THE TEST IS ON THE TEXT, NOT THE PARSED VALUE, and the difference is real:
+  // `Number.isInteger(Number('1.0'))` is TRUE, so a value-based check would also
+  // refuse "1.0" — a figure that is unambiguously a decimal the user typed and
+  // could never be an ordinal. Ambiguity with an ordinal is a property of how the
+  // message is WRITTEN, so that is what is inspected.
+  const bareInteger = /^\d+$/.test(valueText.replace(/,/g, ''));
+  if (bareInteger && parsed !== 0) return false;
+  return true;
 }
 
 export type RepairValueBindingResolution =
@@ -354,7 +456,10 @@ export function resolveRepairValueBinding(params: {
     && ellipticalReading.kind === 'numeric'
     && ellipticalReading.elliptical
   ) {
-    const asked = deriveAskedEffectPair(params.readiness);
+    // ⭐ THE ON-SCREEN READER, NOT THE OUTSTANDING ONE. A bare number's ONLY
+    // antecedent is the question the product just rendered, so if the screen is
+    // saying "resolve the model issue" there is nothing here to answer.
+    const asked = deriveOnScreenEffectAsk(params.readiness);
     if (asked === null) return { matched: false, reason: 'no_outstanding_ask' };
     if (!isModelUnitEffectValueText(ellipticalReading.valueText)) {
       return { matched: false, reason: 'bare_value_not_model_unit' };
