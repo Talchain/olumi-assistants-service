@@ -110,7 +110,7 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
       affected_option_ids: ['opt_offshore'],
     });
     expect(out).toBe(
-      "Option 'Engage Offshore Partner' refers to something that is not currently in the model.",
+      "Option 'Engage Offshore Partner' refers to something that is not currently in the model. Point it at a factor that is in the model, or add that factor first.",
     );
   });
 
@@ -119,7 +119,7 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
       affected_option_ids: ['opt_hire_local'],
     });
     expect(out).toBe(
-      "Option 'Hire Two Senior Engineers Locally' does not currently connect to your goal.",
+      "Option 'Hire Two Senior Engineers Locally' does not currently connect to your goal. Link what it changes through to your goal, or point it at a factor that already leads there.",
     );
   });
 
@@ -128,13 +128,15 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
       affected_option_ids: ['opt_hire_local', 'opt_offshore'],
     });
     expect(out).toBe(
-      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent.",
+      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent. Change what one of them does, or drop it.",
     );
   });
 
   it('GRAPH_DISCONNECTED', () => {
     const out = S_BUCKET_REPLACEMENTS.GRAPH_DISCONNECTED!(CTX, {});
-    expect(out).toBe('Some parts of the model are not connected to your goal.');
+    expect(out).toBe(
+      'Some parts of the model are not connected to your goal. Link them through to your goal, or remove them.',
+    );
   });
 
   it('OPTION_NO_INTERVENTIONS', () => {
@@ -167,7 +169,11 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
     const out = S_BUCKET_REPLACEMENTS.DEGENERATE_OPTION_ZERO_VARIANCE!(CTX, {
       affected_option_ids: ['opt_hire_local'],
     });
-    expect(out).toBe("Option 'Hire Two Senior Engineers Locally' does not currently affect the goal.");
+    expect(out).toBe(
+      "Option 'Hire Two Senior Engineers Locally' produces the same result in every simulation, " +
+        'so nothing in your model makes its outcome uncertain. If you expected it to move, ' +
+        'review the factors it changes and the ranges set on them.',
+    );
   });
 
   it('HIGH_TIE_RATE', () => {
@@ -532,7 +538,7 @@ describe('partitionCritiques — bucket routing + structural preservation', () =
     ];
     const r = partitionCritiques(critiques, CTX);
     expect(r.user[0]?.message).toBe(
-      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent.",
+      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent. Change what one of them does, or drop it.",
     );
   });
 

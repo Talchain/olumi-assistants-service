@@ -137,16 +137,16 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
     `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not change anything yet. Specify what makes this option different.`,
 
   INVALID_INTERVENTION_TARGET: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' refers to something that is not currently in the model.`,
+    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' refers to something that is not currently in the model. Point it at a factor that is in the model, or add that factor first.`,
 
   NO_EFFECTIVE_PATH_TO_GOAL: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not currently connect to your goal.`,
+    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not currently connect to your goal. Link what it changes through to your goal, or point it at a factor that already leads there.`,
 
   IDENTICAL_OPTIONS: (ctx, vars) =>
-    `Options '${resolveLabelOrFallback(pickOptionId(vars, 0), ctx)}' and '${resolveLabelOrFallback(pickOptionId(vars, 1), ctx)}' currently make the same changes, so the analysis treats them as equivalent.`,
+    `Options '${resolveLabelOrFallback(pickOptionId(vars, 0), ctx)}' and '${resolveLabelOrFallback(pickOptionId(vars, 1), ctx)}' currently make the same changes, so the analysis treats them as equivalent. Change what one of them does, or drop it.`,
 
   GRAPH_DISCONNECTED: (_ctx, _vars) =>
-    `Some parts of the model are not connected to your goal.`,
+    `Some parts of the model are not connected to your goal. Link them through to your goal, or remove them.`,
 
   // V5 stale-aware explain recovery: "no changes" is on the brief's
   // forbidden-phrase list (see FORBIDDEN_USER_FACING_PHRASES). The
@@ -161,8 +161,32 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
   LOW_EFFECTIVE_SAMPLES: (_ctx, _vars) =>
     `This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer.`,
 
+  // ⚠ RE-AUTHORED 2026-08-19 (SENDABLE trust defect, witnessed on the deployed
+  // build). The previous copy — "does not currently affect the goal." — was a
+  // MISTRANSLATION of the producer condition, and it contradicted the same
+  // run's own leading-option claim on screen: the strip read "does not
+  // currently affect the goal" directly above "…is slightly ahead".
+  //
+  // ISL's condition is `outcome_distribution.std < ZERO_VARIANCE_TOLERANCE`
+  // (services/robustness_analyzer_v2.py:2305-2312) and its own template
+  // HEDGES — "intervention MAY have no causal path to goal". The unhedged
+  // reading is not merely unsupported, it is refuted by the run that carries
+  // it: every disconnection code (EMPTY_INTERVENTIONS,
+  // INVALID_INTERVENTION_TARGET, NO_EFFECTIVE_PATH_TO_GOAL,
+  // INTERVENTION_VALUE_INVALID) is severity `blocker`, and `has_blockers`
+  // returns 422 with no results (api/robustness.py:818-834). The effective-path
+  // test is run over `effective_adjacency`, built with `check_strength=True`
+  // against `DEFAULT_STRENGTH_THRESHOLD = 1e-6` — literally "connected to the
+  // goal with non-zero edge strengths". A user only ever sees this row on a run
+  // where ISL already checked that and found it satisfied.
+  //
+  // CLAIM OWNERSHIP (Paul's convergence rule). `NO_EFFECTIVE_PATH_TO_GOAL` owns
+  // "does not connect to your goal" — it is a blocker, so that user never gets
+  // a result to be contradicted by. This entry owns the narrower, always-true
+  // claim: the outcome does not move. A constant outcome CAN be ahead, so the
+  // pair can no longer contradict itself.
   DEGENERATE_OPTION_ZERO_VARIANCE: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not currently affect the goal.`,
+    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them.`,
 
   HIGH_TIE_RATE: (_ctx, _vars) =>
     `The options are very close in this analysis. Treat the current lead as finely balanced.`,
@@ -750,7 +774,22 @@ export function projectCritiquesForTransport(
     if (raw.affected_option_ids !== undefined) {
       projected.affected_option_ids = raw.affected_option_ids;
     }
-    if (typeof raw.suggestion === 'string') {
+    // THE S-BUCKET CATALOGUE OWNS EVERY USER-FACING STRING ON AN S ROW,
+    // REMEDY INCLUDED (2026-08-19). Replacing `message` and then forwarding the
+    // producer's own `suggestion` beside it contradicted the premise of the
+    // bucket — that the producer's wording is unsafe for users — at the very
+    // seam that exists to enforce it. It shipped: "Check that intervention
+    // targets are connected to the goal with non-zero edge strengths", live, to
+    // a first-time user. `intervention targets` is a WARNING pattern, not a
+    // hard ban (forbidden-tokens.ts:189-190), so the scrub below let it past;
+    // the other S codes carry "node IDs", "causal edges" and "intervention
+    // mappings" in the same field, so this was systemic, not one string.
+    //
+    // Bucket U is untouched: its declared contract IS to keep the producer's
+    // prose after scrubbing, and the route it carries is honest copy the
+    // estate deliberately keeps. The remedy for every S row now lives in
+    // `S_BUCKET_REPLACEMENTS`, so no user is left at a dead end.
+    if (bucket !== 'S' && typeof raw.suggestion === 'string') {
       const s = sanitiseEnrichmentText(raw.suggestion, ctx);
       if (!s.suppress) projected.suggestion = s.text;
     }
