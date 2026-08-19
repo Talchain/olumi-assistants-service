@@ -64,6 +64,7 @@ import {
   type ConfigureOptionIntentDetection,
 } from './configure-option-intent.js';
 import { containsPhrase } from './option-intervention-guard.js';
+import { deriveMissingEffectPairs } from './repair-value-binding.js';
 
 /** Why the intercept declined. Every value keeps the pre-existing route. */
 export type ConfigureOptionClarifyDeclineReason =
@@ -144,7 +145,6 @@ function resolveConfigureOptionFacts(params: {
 
   const parsed = GraphV3.safeParse(params.graph);
   if (!parsed.success) return decline('graph_unparseable');
-  const graph = parsed.data;
 
   // DERIVED (trap 12): "which options are unconfigured" is not re-implemented
   // here — it is read off the SAME canonical readiness payload that
@@ -153,14 +153,14 @@ function resolveConfigureOptionFacts(params: {
   const readiness = buildCanonicalAnalysisReadyFromGraph(params.graph);
   if (readiness === undefined) return decline('no_readiness');
 
-  const unconfigured = readiness.options.filter((o) => o.status === 'needs_encoding');
-  if (unconfigured.length === 0) return decline('no_unconfigured_option');
+  const candidates = outstandingSlotsByOption(readiness);
+  if (candidates.length === 0) return decline('no_unconfigured_option');
 
   const normalisedMessage = ` ${params.message.toLowerCase().replace(/\s+/g, ' ').trim()} `;
 
   // 1. The option the user named, when they named one.
-  let target = unconfigured.find((o) => {
-    const label = typeof o.label === 'string' ? o.label.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+  let target = candidates.find((o) => {
+    const label = o.optionLabel.toLowerCase().replace(/\s+/g, ' ').trim();
     return label.length >= 3 && containsPhrase(normalisedMessage, label);
   });
   let optionSource: 'named_in_message' | 'sole_unconfigured' = 'named_in_message';
@@ -171,22 +171,92 @@ function resolveConfigureOptionFacts(params: {
   //    blocked options and no name, guessing which one the user meant is the
   //    kind of confident wrong answer this lane exists to remove.
   if (target === undefined) {
-    if (unconfigured.length !== 1) return decline('option_not_identified');
-    target = unconfigured[0];
+    if (candidates.length !== 1) return decline('option_not_identified');
+    target = candidates[0]!;
     optionSource = 'sole_unconfigured';
   }
 
-  const factorLabels = collectCandidateFactorLabels(graph, target.option_id, target.interventions);
+  const factorLabels = target.factorLabels;
   if (factorLabels.length === 0) return decline('no_candidate_factor');
 
   return {
     matched: true,
-    optionId: target.option_id,
-    optionLabel: target.label,
+    optionId: target.optionId,
+    optionLabel: target.optionLabel,
     factorLabels,
     readiness,
     optionSource,
   };
+}
+
+/**
+ * ⭐⭐ THE CANDIDATE SET IS THE OUTSTANDING SLOT, NOT THE OPTION'S STATUS — and
+ * this replaced a genuine WRONG-ENTITY path, measured rather than reasoned.
+ *
+ * WHAT WAS HERE: `readiness.options.filter((o) => o.status === 'needs_encoding')`,
+ * plus a private `collectCandidateFactorLabels` that re-walked the graph's edges
+ * and subtracted the option's existing interventions — a SECOND derivation of
+ * "which option × factor slots are still unset", beside the estate's declared
+ * owner of that question (`deriveMissingEffectPairs`). Both are now gone; this
+ * module reads the owner.
+ *
+ * WHY IT HAD TO GO, measured at pristine `7abed98e` by driving the six-step
+ * repair loop on the live-journey capture
+ * (`tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json`, see
+ * `graph-management/__tests__/canonical-repair-loop-termination.test.ts`):
+ * option-level status is COARSER than the slot. As soon as an option has ONE
+ * numeric intervention its status is `ready`, even while another of its linked
+ * factors still has no value. So a partially-configured option dropped out of
+ * `unconfigured`, and the message that NAMED it stopped matching:
+ *
+ *   step 1 — asked about `1bf99178 × be01ab27`; the named option was not a
+ *            candidate, three others were → `option_not_identified`, i.e. the
+ *            dead end the witness recorded as "no affordance".
+ *   step 4 — asked about `d8d2df15 × be01ab27`; the named option was not a
+ *            candidate and exactly one other was, so the `sole_unconfigured`
+ *            fallback fired ON A MESSAGE THAT NAMED AN OPTION and resolved to
+ *            **`e75f367a`** — a different option entirely. The product would
+ *            have answered about an entity the user had not named.
+ *
+ * That second one is the wrong-entity class (#1034/#1035) surviving in the
+ * QUESTION rather than the writer, and it is why this could not be left for a
+ * later lane: the identity-carrying chip this change ships would have routed
+ * into it.
+ *
+ * ⚠ THE DECLINE REASONS ARE UNCHANGED, and so is every path that was already
+ * correct: an option with no linked factors, one linked only to non-factor
+ * nodes, and one whose factors are all set have NO outstanding slot and still
+ * decline `no_unconfigured_option`; two candidates with none named still
+ * declines `option_not_identified`. The behaviour that changes is exactly the
+ * partially-configured option — from wrong or absent, to right.
+ */
+interface OutstandingOptionSlots {
+  readonly optionId: string;
+  readonly optionLabel: string;
+  /** Capped for copy; the full set stays in the readiness payload. */
+  readonly factorLabels: readonly string[];
+}
+
+function outstandingSlotsByOption(
+  readiness: AnalysisReadyPayload,
+): readonly OutstandingOptionSlots[] {
+  const byOption = new Map<string, { optionLabel: string; factorLabels: string[] }>();
+  for (const pair of deriveMissingEffectPairs(readiness)) {
+    const entry = byOption.get(pair.optionId)
+      ?? { optionLabel: pair.optionLabel, factorLabels: [] };
+    if (
+      entry.factorLabels.length < MAX_FACTOR_SUGGESTIONS
+      && !entry.factorLabels.includes(pair.factorLabel)
+    ) {
+      entry.factorLabels.push(pair.factorLabel);
+    }
+    byOption.set(pair.optionId, entry);
+  }
+  return [...byOption].map(([optionId, entry]) => ({
+    optionId,
+    optionLabel: entry.optionLabel,
+    factorLabels: entry.factorLabels,
+  }));
 }
 
 /**
@@ -245,36 +315,30 @@ export function buildConfigureOptionRecoveryCopy(params: {
   readonly detection: ConfigureOptionIntentDetection;
   readonly graph: unknown;
 }): ConfigureOptionClarifyResult {
-  return resolveConfigureOptionFacts(params);
-}
+  const facts = resolveConfigureOptionFacts(params);
+  if (!facts.matched) return facts;
 
-/**
- * The factors this option is actually wired to and has not yet set a value
- * for. Read straight off the graph's edges — every name offered to the user is
- * a node the product itself created (the add-option transaction links the
- * option to its factor). Nothing here is generated.
- */
-function collectCandidateFactorLabels(
-  graph: { nodes: readonly { id: string; kind: string; label: string }[]; edges: readonly { from: string; to: string }[] },
-  optionId: string,
-  existingInterventions: Readonly<Record<string, number>> | undefined,
-): readonly string[] {
-  const already = new Set(Object.keys(existingInterventions ?? {}));
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const labels: string[] = [];
-  const seen = new Set<string>();
-
-  for (const edge of graph.edges) {
-    if (edge.from !== optionId) continue;
-    if (already.has(edge.to)) continue;
-    const node = byId.get(edge.to);
-    if (node === undefined || node.kind !== 'factor') continue;
-    const label = typeof node.label === 'string' ? node.label.trim() : '';
-    if (label.length === 0 || seen.has(label)) continue;
-    seen.add(label);
-    labels.push(label);
-    if (labels.length === MAX_FACTOR_SUGGESTIONS) break;
-  }
-
-  return labels;
+  // ⭐⭐ THE DOMAIN BOUND, UNCHANGED — and now stated at the question that owns
+  // it rather than smuggled in through the shared candidate set.
+  //
+  // It used to be implicit: the resolver only ever considered `needs_encoding`
+  // options, so this predicate inherited the bound for free. Correcting the
+  // resolver's candidate set (see `outstandingSlotsByOption` — a partially
+  // configured option IS a legitimate intercept target) would have removed the
+  // bound from HERE too, silently, and
+  // `configure-option-outcome.test.ts`'s `DOMAIN BOUND` pin went RED and said
+  // so. That pin is right and it stays.
+  //
+  // WHY THE TWO QUESTIONS DIFFER (trap 21 again, and it is the same split this
+  // file already documents): the intercept asks *"can I name a slot the user
+  // should fill?"* — true of a partially configured option. The recovery copy
+  // asserts *"this option has no effect values yet, so the analysis cannot
+  // compare it"* — FALSE of an option already carrying one value and being
+  // given a second. Widening the predicate without a second copy variant would
+  // trade a false success for a false NOTICE: the same harm, opposite sign.
+  // The residual (a wrong-entity write against a partially configured option
+  // raises no notice) is unchanged by this lane, and still rowed.
+  const option = facts.readiness.options.find((o) => o.option_id === facts.optionId);
+  if (option?.status !== 'needs_encoding') return decline('option_not_identified');
+  return facts;
 }
