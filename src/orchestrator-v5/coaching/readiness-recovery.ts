@@ -18,9 +18,11 @@
 import {
   CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX,
   CONFIGURE_OPTION_GENERIC_CHIP,
-  buildConfigureOptionChip,
+  buildConfigureOptionChipWithDisplay,
+  buildRepairPairChip,
 } from '../configure-option-chip-text.js';
 import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
+import { deriveAskedEffectPair } from '../routing/repair-value-binding.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -51,8 +53,22 @@ export type ReadinessRecoveryKind =
 export interface ReadinessRecoveryProjection {
   readonly kind: ReadinessRecoveryKind;
   readonly status: string | null;
+  /** DISPLAY form — capped at `MAX_LABEL_CHARS`, as the on-screen sentence needs. */
   readonly optionLabel: string | null;
+  /** DISPLAY form — capped at `MAX_LABEL_CHARS`, as the on-screen sentence needs. */
   readonly factorLabel: string | null;
+  /**
+   * ⭐ THE SAME RESOLUTION, UNCAPPED — a graph FACT rather than a presentation.
+   *
+   * Not a second lookup: `resolveLabel` produces both at once, so nothing can
+   * choose a different entity for the full form than it chose for the display
+   * form (CLAUDE.md trap 12 — a second resolution is the thing that drifts).
+   * It exists because a chip's MESSAGE is replayed as user text and must name
+   * an entity that actually exists; the ellipsis-truncated form does not, and
+   * shipping it made the product's own repair chip unroutable.
+   */
+  readonly optionLabelFull: string | null;
+  readonly factorLabelFull: string | null;
   readonly nextStep: string;
 }
 
@@ -132,19 +148,56 @@ function asOption(value: unknown): ReadinessOptionLite | null {
   };
 }
 
+/**
+ * ONE resolution, both forms. `display` is what the on-screen sentence uses;
+ * `full` is the entity's real label, which is what any replayed message must
+ * carry. Returning them together is what makes it structurally impossible for
+ * a chip to name a different entity than the prose does.
+ */
+interface ResolvedLabel {
+  readonly full: string;
+  readonly display: string;
+}
+
 function resolveLabel(
   nodes: readonly ReadinessRecoveryNode[],
   kind: 'option' | 'factor',
   id: string | undefined,
   suppliedLabel: string | undefined,
-): string | null {
+): ResolvedLabel | null {
   if (id) {
     const graphLabel = nodes.find(
       (node) => node.id === id && node.kind === kind && typeof node.label === 'string',
     )?.label;
-    if (graphLabel?.trim()) return elideLabelAtWordBoundary(graphLabel.trim(), MAX_LABEL_CHARS);
+    if (graphLabel?.trim()) return asResolvedLabel(graphLabel.trim());
   }
-  return suppliedLabel?.trim() ? elideLabelAtWordBoundary(suppliedLabel.trim(), MAX_LABEL_CHARS) : null;
+  return suppliedLabel?.trim() ? asResolvedLabel(suppliedLabel.trim()) : null;
+}
+
+/**
+ * ⭐ BOTH FIXES, COMPOSED — #1041 (N26) and this lane close the SAME defect
+ * class from opposite ends and neither supersedes the other.
+ *
+ * #1041 made the DISPLAY cut honest: `elideLabelAtWordBoundary` is CEE's one
+ * owner of "which prefix of a user label may we show", and it is bracket-aware,
+ * so the on-screen sentence no longer reads `…enterprise sales (higher…`.
+ * This lane makes the MESSAGE honest: a chip's message is replayed as user text
+ * and must name an entity that EXISTS, so it carries `full` — no elision at all.
+ *
+ * Taking either side wholesale would have re-opened the other's defect: #1041's
+ * elider alone still feeds a cut label into a replayed message, and this lane's
+ * `full` alone leaves the display cut mid-bracket. One resolution, two forms.
+ */
+function asResolvedLabel(full: string): ResolvedLabel {
+  return { full, display: elideLabelAtWordBoundary(full, MAX_LABEL_CHARS) };
+}
+
+function display(label: ResolvedLabel | null): string | null {
+  return label === null ? null : label.display;
+}
+
+function full(label: ResolvedLabel | null): string | null {
+  return label === null ? null : label.full;
 }
 
 function optionFactorPair(option: string, factor: string): string {
@@ -160,24 +213,37 @@ export function projectReadinessRecovery(
   nodes: readonly ReadinessRecoveryNode[] = [],
 ): ReadinessRecoveryProjection {
   const status = readString(analysisReady?.status) ?? null;
+  const project = (
+    kind: ReadinessRecoveryKind,
+    optionLabel: ResolvedLabel | null,
+    factorLabel: ResolvedLabel | null,
+    nextStep: string,
+  ): ReadinessRecoveryProjection => ({
+    kind,
+    status,
+    optionLabel: display(optionLabel),
+    factorLabel: display(factorLabel),
+    optionLabelFull: full(optionLabel),
+    factorLabelFull: full(factorLabel),
+    nextStep,
+  });
+
   if (status === 'ready') {
-    return {
-      kind: 'run',
-      status,
-      optionLabel: null,
-      factorLabel: null,
-      nextStep: 'Next, run the analysis to see how the options compare and what could shift the outcome.',
-    };
+    return project(
+      'run',
+      null,
+      null,
+      'Next, run the analysis to see how the options compare and what could shift the outcome.',
+    );
   }
 
   if (status === 'blocked') {
-    return {
-      kind: 'resolve_model_issue',
-      status,
-      optionLabel: null,
-      factorLabel: null,
-      nextStep: 'Next, resolve the model issue shown before comparing the options.',
-    };
+    return project(
+      'resolve_model_issue',
+      null,
+      null,
+      'Next, resolve the model issue shown before comparing the options.',
+    );
   }
 
   const nonReadyOptions = analysisReady?.options
@@ -205,27 +271,25 @@ export function projectReadinessRecovery(
   // unreachable-factor blocker is factor-only `missing_value`, but its payload
   // status is mapping and therefore stays mapping here.
   if (status === 'needs_user_mapping') {
-    return {
-      kind: 'map_option',
-      status,
+    return project(
+      'map_option',
       optionLabel,
-      factorLabel: blockerFactorLabel,
-      nextStep: optionLabel
-        ? `Next, configure "${optionLabel}" by choosing which factor it changes and by how much.`
+      blockerFactorLabel,
+      optionLabel
+        ? `Next, configure "${optionLabel.display}" by choosing which factor it changes and by how much.`
         : 'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.',
-    };
+    );
   }
 
   if (status === 'needs_encoding') {
-    return {
-      kind: 'encode_option',
-      status,
+    return project(
+      'encode_option',
       optionLabel,
-      factorLabel: blockerFactorLabel,
-      nextStep: optionLabel
-        ? `Next, choose how "${optionLabel}" should be represented on the effect scale before comparing the options.`
+      blockerFactorLabel,
+      optionLabel
+        ? `Next, choose how "${optionLabel.display}" should be represented on the effect scale before comparing the options.`
         : 'Next, choose how the unresolved option should be represented on the effect scale.',
-    };
+    );
   }
 
   if (status === 'needs_user_input') {
@@ -239,68 +303,62 @@ export function projectReadinessRecovery(
       const factorLabel = blockerFactorLabel;
       const action = firstBlocker.blocker_type ?? firstBlocker.suggested_action;
       if ((action === 'missing_value' || action === 'add_value') && blockerOptionLabel && factorLabel) {
-        return {
-          kind: 'provide_value',
-          status,
-          optionLabel: blockerOptionLabel,
+        return project(
+          'provide_value',
+          blockerOptionLabel,
           factorLabel,
-          nextStep: `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel, factorLabel)} so the comparison can be prepared.`,
-        };
+          `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared.`,
+        );
       }
       if ((action === 'ambiguous_value' || action === 'confirm_value') && blockerOptionLabel && factorLabel) {
-        return {
-          kind: 'confirm_value',
-          status,
-          optionLabel: blockerOptionLabel,
+        return project(
+          'confirm_value',
+          blockerOptionLabel,
           factorLabel,
-          nextStep: `Next, confirm the effect value${optionFactorPair(blockerOptionLabel, factorLabel)} so the comparison can be prepared.`,
-        };
+          `Next, confirm the effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared.`,
+        );
       }
       if ((action === 'missing_connection' || action === 'add_edge') && blockerOptionLabel && factorLabel) {
-        return {
-          kind: 'connect_option',
-          status,
-          optionLabel: blockerOptionLabel,
+        return project(
+          'connect_option',
+          blockerOptionLabel,
           factorLabel,
-          nextStep: `Next, connect "${blockerOptionLabel}" to "${factorLabel}" so the comparison can be prepared.`,
-        };
+          `Next, connect "${blockerOptionLabel.display}" to "${factorLabel.display}" so the comparison can be prepared.`,
+        );
       }
       if (action === 'constraint_dropped' || action === 'review_constraint') {
         const context = blockerOptionLabel && factorLabel
-          ? ` for "${blockerOptionLabel}" involving "${factorLabel}"`
+          ? ` for "${blockerOptionLabel.display}" involving "${factorLabel.display}"`
           : blockerOptionLabel
-            ? ` for "${blockerOptionLabel}"`
+            ? ` for "${blockerOptionLabel.display}"`
             : factorLabel
-              ? ` involving "${factorLabel}"`
+              ? ` involving "${factorLabel.display}"`
               : '';
-        return {
-          kind: 'review_constraint',
-          status,
-          optionLabel: blockerOptionLabel,
+        return project(
+          'review_constraint',
+          blockerOptionLabel,
           factorLabel,
-          nextStep: `Next, review the constraint${context} before comparing the options.`,
-        };
+          `Next, review the constraint${context} before comparing the options.`,
+        );
       }
     }
 
-    return {
-      kind: 'configure_option',
-      status,
+    return project(
+      'configure_option',
       optionLabel,
-      factorLabel: blockerFactorLabel,
-      nextStep: optionLabel
-        ? `Next, configure "${optionLabel}" by choosing which factor it changes and by how much.`
+      blockerFactorLabel,
+      optionLabel
+        ? `Next, configure "${optionLabel.display}" by choosing which factor it changes and by how much.`
         : 'Next, configure the unresolved option by choosing its factor and effect.',
-    };
+    );
   }
 
-  return {
-    kind: 'review_model',
-    status,
+  return project(
+    'review_model',
     optionLabel,
-    factorLabel: blockerFactorLabel,
-    nextStep: 'Next, review the model and fill any gaps before comparing the options.',
-  };
+    blockerFactorLabel,
+    'Next, review the model and fill any gaps before comparing the options.',
+  );
 }
 
 export function buildReadinessNextStep(
@@ -314,6 +372,31 @@ export function buildReadinessNextStep(
  * Build the sole conversational recovery chip for a non-ready state. Run is
  * deliberately returned as `null`; executable Run chips stay at their
  * registry-aware call sites and must check exact `status === 'ready'`.
+ *
+ * ⭐⭐ THE `provide_value` BRANCH IS THE REPAIR LOOP'S AFFORDANCE, AND IT IS
+ * MINTED FROM IDENTITY, NOT FROM A LABEL.
+ *
+ * It used to return `buildConfigureOptionChip(recovery.optionLabel)` — an
+ * option name and nothing else, and (before this change) an ellipsis-truncated
+ * one. Witnessed 19 Aug 2026 on deployed UI `aa916511` / CEE `7abed98`: the
+ * product offered `chip_prompt_configure_option` for a pair the user had
+ * ALREADY set, the click made no progress, and the following turn carried no
+ * affordance at all. A chip naming one option leaves the model to pick which of
+ * that option's factors was meant — and it picked a resolved one.
+ *
+ * `deriveAskedEffectPair` is the estate's one owner of "which slot is the
+ * product asking about" (`routing/repair-value-binding.ts`), read off the head
+ * of the SAME blocker list `projectReadinessRecovery` composes `nextStep` from
+ * — line for line the element at `:194`/`:242` above. So the chip and the
+ * sentence beneath it cannot name different slots, and the chip inherits the
+ * candidate set's three guarantees rather than re-checking them: a resolved
+ * pair has no blocker, an edgeless pair is never given one, and a pair the
+ * product is not asking about is not in the list.
+ *
+ * ⚠ SAFE-BIASED FALLBACK. `deriveAskedEffectPair` requires the head blocker to
+ * carry FULL identity (option and factor, id and label); `provide_value` only
+ * requires resolvable labels. Where they disagree the pre-existing chip is
+ * returned unchanged, so this can add identity but never remove an affordance.
  */
 export function buildReadinessRecoveryChip(
   analysisReady: ReadinessRecoveryInput | null | undefined,
@@ -330,12 +413,14 @@ export function buildReadinessRecoveryChip(
         message: 'Help me resolve the model issue that is blocking analysis.',
       };
     case 'map_option':
-      if (recovery.optionLabel) return buildConfigureOptionChip(recovery.optionLabel);
-      if (recovery.factorLabel) {
+      if (recovery.optionLabelFull && recovery.optionLabel) {
+        return buildConfigureOptionChipWithDisplay(recovery.optionLabelFull, recovery.optionLabel);
+      }
+      if (recovery.factorLabelFull && recovery.factorLabel) {
         return {
           id: 'chip_prompt_map_factor_to_option',
           label: `Map "${recovery.factorLabel}" to an option`,
-          message: `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}which option should affect "${recovery.factorLabel}".`,
+          message: `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}which option should affect "${recovery.factorLabelFull}".`,
         };
       }
       return {
@@ -343,13 +428,30 @@ export function buildReadinessRecoveryChip(
         label: 'Map an option to factors',
         message: `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}which options should affect the unresolved factors.`,
       };
+    case 'provide_value': {
+      const asked = deriveAskedEffectPair(analysisReady);
+      if (asked !== null) {
+        // FULL labels for the replayed message (it must name real entities);
+        // the display form for the chip LABEL is the SAME string cut with the
+        // SAME budget and the SAME canonical elider this module already uses
+        // for its prose — so the chip and the sentence beneath it cannot cut
+        // one label two ways (F4). No second budget is introduced anywhere.
+        return buildRepairPairChip(
+          asked.optionLabel,
+          asked.factorLabel,
+          elideLabelAtWordBoundary(asked.factorLabel, MAX_LABEL_CHARS),
+        );
+      }
+      return recovery.optionLabelFull && recovery.optionLabel
+        ? buildConfigureOptionChipWithDisplay(recovery.optionLabelFull, recovery.optionLabel)
+        : { ...CONFIGURE_OPTION_GENERIC_CHIP };
+    }
     case 'encode_option':
-    case 'provide_value':
     case 'confirm_value':
     case 'connect_option':
     case 'configure_option':
-      return recovery.optionLabel
-        ? buildConfigureOptionChip(recovery.optionLabel)
+      return recovery.optionLabelFull && recovery.optionLabel
+        ? buildConfigureOptionChipWithDisplay(recovery.optionLabelFull, recovery.optionLabel)
         : { ...CONFIGURE_OPTION_GENERIC_CHIP };
     case 'review_constraint':
       return {

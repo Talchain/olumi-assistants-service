@@ -17,6 +17,7 @@
  * cycle risk.
  */
 
+
 /**
  * The load-bearing prefix. `detectConfigureOptionIntent` treats any message
  * starting with this as configure-option intent (chips replay their message
@@ -41,9 +42,46 @@ export interface ConfigureOptionChip {
  * label; GM held-apply receipt for a needs-encoding option).
  */
 export function buildConfigureOptionChip(entityRef: string): ConfigureOptionChip {
+  return buildConfigureOptionChipWithDisplay(entityRef, entityRef);
+}
+
+/**
+ * ⭐⭐ THE SAME CHIP WHEN THE CALLER HOLDS A SHORTENED DISPLAY FORM — one
+ * implementation, two entry points, and NO optional flag.
+ *
+ * WHY IT EXISTS, measured at pristine `7abed98e` on the live-journey capture
+ * `tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json`:
+ * `coaching/readiness-recovery.ts` elides every label it resolves to 40
+ * characters (`MAX_LABEL_CHARS`, for the on-screen sentence) and then handed
+ * THAT string to `buildConfigureOptionChip` — so the chip's MESSAGE read
+ *
+ *   "Help me configure open a second bakery location in Leeds…."
+ *
+ * naming an entity that exists in no graph. `detectConfigureOptionIntent`'s
+ * label anchor cannot match it and `resolveOptionEffectWrite` returns
+ * `not_effect_framed_intent`: the product's own repair chip could not route
+ * back into the lane that offered it — ROADMAP 2.11's closed loop, re-minted by
+ * a display cut.
+ *
+ * ⚠ #1041 (N26) DOES NOT CLOSE THIS, and the distinction is the whole point.
+ * That change made the CUT honest — `elideLabelAtWordBoundary` is bracket-aware,
+ * so the on-screen sentence no longer breaks mid-parenthesis. An honest cut is
+ * still a cut: `…in Leeds…` names no node either. The two fixes compose —
+ * #1041 owns what the user READS, this owns what the product REPLAYS.
+ *
+ * The split is the fix and it belongs HERE rather than at the call site: a
+ * caller that rebuilt `Configure ${label}` itself would be a second spelling of
+ * this chip's copy, which is the drift this module exists to make impossible
+ * (CLAUDE.md trap 12). The MESSAGE is always the full entity reference; only
+ * the LABEL may be shortened, because only the label is display.
+ */
+export function buildConfigureOptionChipWithDisplay(
+  entityRef: string,
+  displayRef: string,
+): ConfigureOptionChip {
   return {
     id: 'chip_prompt_configure_option',
-    label: `Configure ${entityRef}`,
+    label: `Configure ${displayRef}`,
     message: buildConfigureOptionChipMessage(entityRef),
   };
 }
@@ -121,7 +159,99 @@ export function buildConfigureOptionAdvisedFormat(
   factorRef: string,
   value: string,
 ): string {
-  return `Set the ${optionRef} option's effect on ${factorRef} to ${value}`;
+  return `Set ${buildOptionEffectReference(optionRef, factorRef)} to ${value}`;
+}
+
+/**
+ * ⭐ THE NOUN PHRASE THAT NAMES ONE option × factor SLOT, and the estate's only
+ * spelling of it.
+ *
+ * It was inlined in `buildConfigureOptionAdvisedFormat` above. Extracted —
+ * byte-identically — because the identity-carrying repair chip below needs the
+ * SAME phrase without a value, and a chip that spelled the phrase itself would
+ * drift from the one the router's `effect_vocab` trigger is calibrated against
+ * the first time either is edited (CLAUDE.md trap 12: the second spelling is
+ * the one that rots). One phrase, two sentences.
+ */
+export function buildOptionEffectReference(optionRef: string, factorRef: string): string {
+  return `the ${optionRef} option's effect on ${factorRef}`;
+}
+
+/**
+ * ⭐⭐ THE IDENTITY-CARRYING REPAIR AFFORDANCE — the chip the product offers
+ * when its own readiness blocker says one option × factor slot has no value.
+ *
+ * WHAT IT SUPERSEDES. The `provide_value` recovery class used to mint
+ * `chip_prompt_configure_option` from an OPTION LABEL ALONE — no factor, and
+ * (see `buildConfigureOptionChipWithDisplay`) an ellipsis-truncated one at
+ * that. Witnessed on deployed UI `aa916511` / CEE `7abed98` (19 Aug 2026, fresh
+ * guest, brief `04-conflicting-constraints`): a chip was offered for a pair the
+ * user had ALREADY set, clicking it made zero progress — *"was already set to
+ * 0.8 in the previous turn"* — and the turn that followed carried no chips at
+ * all. A chip that names only an option leaves the model to choose WHICH of
+ * that option's factors it meant, and it chose one that was already resolved.
+ *
+ * WHY NAMING THE PAIR IS THE FIX AND NOT MERELY BETTER COPY: the pair comes
+ * from `deriveAskedEffectPair` — the estate's one owner of "which slot is the
+ * product currently asking about" — so the chip cannot name a slot the product
+ * is not asking about, cannot name a slot that already has a value (a resolved
+ * slot has no blocker), and cannot name a slot with no option→factor edge (the
+ * producer derives `missing_value` blockers strictly from the option→factor
+ * adjacency, `cee/transforms/analysis-ready.ts`). All three of those are
+ * properties of the CANDIDATE SET, inherited rather than re-checked here.
+ *
+ * ⚠ WHAT IT DELIBERATELY DOES NOT DO: carry a value. The value is the one thing
+ * in this slot that is not a derivable fact about the graph, and a chip bearing
+ * a plausible number would put a fabricated intervention one click away behind
+ * a control that reads as the product's recommendation (the posture
+ * `configure-option-clarify.ts` states at length). So this chip completes the
+ * IDENTIFICATION and leaves the number to the user; the value-bearing siblings
+ * (`chip_prompt_repair_value_bind_*`, the outstanding-ask chip) fire only once
+ * the user has supplied one.
+ */
+export function buildRepairPairChipMessage(optionRef: string, factorRef: string): string {
+  return `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}${buildOptionEffectReference(optionRef, factorRef)}.`;
+}
+
+/**
+ * ⚠⚠ THIS MODULE OWNS NO DISPLAY BUDGET, AND THAT IS THE POINT.
+ *
+ * The first cut of this function declared `REPAIR_PAIR_CHIP_LABEL_MAX = 48` and
+ * elided the factor itself. An adversarial review named it correctly: ONE
+ * ELIDER AUTHORITY (right — #1041/N26) and TWO BUDGETS FOR ONE SEAM (wrong).
+ * The same factor rendered one cut in the prose at 40 and a different cut on
+ * the chip at 48 — both honest, of the same label, on the same turn,
+ * disagreeing. 48 had no measured justification; I picked it.
+ *
+ * THE FIX IS NOT A FOURTH CONSTANT. `MAX_LABEL_CHARS = 40` is already declared
+ * privately in `coaching/readiness-recovery.ts` AND
+ * `coaching/post-draft-narrative.ts`, and mirrored as a literal in N26's
+ * acceptance spec; a fifth name for the same number here would deepen the
+ * accretion it is meant to remove. Instead the CALLER passes the display form,
+ * cut from the SAME string the message carries with the SAME budget it uses for
+ * its own prose — so the chip label and the sentence beneath it cannot
+ * disagree. This module goes back to being dependency-free.
+ *
+ * ⚠ ROWED, NOT DONE: unifying the three private `MAX_LABEL_CHARS` declarations
+ * behind one exported budget is real work in #1041's files and needs its pinned
+ * spec literals moved first. Out of scope here, and named so the next reader
+ * does not mistake "not converted" for "does not exist".
+ *
+ * `factorDisplayRef` is REQUIRED, not optional: an optional display argument is
+ * a hand-maintained mirror of the caller's diligence, and this estate has
+ * watched exactly that shape drift (trap 12 — the `valueAlreadySupplied?:
+ * boolean` note in `compose/configure-option-clarify-response.ts`).
+ */
+export function buildRepairPairChip(
+  optionRef: string,
+  factorRef: string,
+  factorDisplayRef: string,
+): ConfigureOptionChip {
+  return {
+    id: 'chip_prompt_repair_effect_value',
+    label: `Set effect on ${factorDisplayRef}`,
+    message: buildRepairPairChipMessage(optionRef, factorRef),
+  };
 }
 
 /**
