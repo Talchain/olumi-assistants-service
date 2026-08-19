@@ -138,7 +138,9 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     expect(REPAIR_BARE_VALUE_KNOWN_DROPPED).toEqual([
       'Set it to about 0.12.',
       'Set it to a third.',
-      '0.12',
+      // ⚠ '0.12' REMOVED — the bare-number gap is closed; it now binds to the
+      // pair the product is asking about (`deriveAskedEffectPair`). See the
+      // header of `missing-value-answer.ts` for why its stated reason was false.
       'Set it to 0.12 for the subcontracting option.',
       'It went up a lot,set it to 0.12.',
     ]);

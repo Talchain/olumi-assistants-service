@@ -352,6 +352,7 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
     // `scripts/ci/typecheck-ratchet.sh` could see it.)
     expect(readMissingValueAnswer(R1)).toEqual({
       kind: 'numeric',
+      elliptical: false,
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'that would push sales headcount up a lot',

@@ -4806,6 +4806,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         repairClaimBlocked = pendings.some(
           (pa) => pa.action.kind === 'set_factor_value' && !isPendingActionExpired(pa, nowMs),
         );
+        // ⚠ NO WIDER GATE HERE, AND THAT IS A CORRECTION TO THIS LANE'S OWN FIRST
+        // CUT. It briefly stood down for ANY live pending, to cover a naked "1"
+        // colliding with ordinal selection of an offered proposal. That
+        // over-declined — it withheld a legitimate bare answer for a full TTL
+        // window whenever any unrelated offer was outstanding — and it also
+        // under-covered, because this lane's own ask arm persists no pending at
+        // all. The collision is now refused by SHAPE in
+        // `isModelUnitEffectValueText` (a bare integer is never claimed), which
+        // is where it cannot go stale.
       } catch {
         // A pendings read must never fail the turn; it only withdraws this
         // claim (the turn proceeds exactly as before this pre-route existed).

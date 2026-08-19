@@ -131,6 +131,7 @@ import {
   findProposedConceptAction,
   resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
+import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import {
   buildHeldSupersessionNotice,
   evaluateEditGraphMutations,
@@ -3964,6 +3965,72 @@ export async function dispatchEditGraph(
     : (!successfulAppliedMutation || optionInterventionWriteWithheld) && graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
+
+  // ⭐⭐ THE REPAIR AFFORDANCE IS RE-ISSUED WHILE THE MODEL IS STILL BLOCKED.
+  //
+  // WITNESSED on deployed `a7ee21e`: the product's own prescribed sentence wrote
+  // correctly (blockers 8 → 7, graph hash moved, the option flipped to `ready`)
+  // and the reply came back with `suggested_actions: []` — no affordance, with
+  // SEVEN blockers outstanding. Driven by hand the loop converges (7 → 6, hash
+  // moves again, strictly decreasing), so the MECHANISM terminates and only the
+  // USER's route to it disappears. **The product rewarded a correct action by
+  // withdrawing the means to repeat it.**
+  //
+  // MECHANISM, derived at the bytes rather than assumed: nothing sets `[]` here.
+  // `buildBoundarySuggestedActions` (:1322) merges exactly two sources —
+  // `result.suggestedActions` (clarification / "Try a simpler change" / "Start
+  // fresh" / rerun chips) and `result.pendingClarification` — and BOTH are
+  // failure-shaped. A SUCCESS populates neither, so the empty array is the
+  // absence of a success-path composer, not a decision to suppress one.
+  //
+  // ⭐ SUCCESS ON ONE SLOT IS NOT SUCCESS ON THE MODEL. The turn genuinely
+  // succeeded, which is precisely why the failure-shaped sources stayed silent;
+  // the question the response failed to answer is "what now?", and canonical
+  // readiness — recomputed above from the POST-EDIT graph — already holds it.
+  //
+  // ⚠ NO NEW CHIP LOGIC, AND DELIBERATELY SO (Paul's convergence rule). This
+  // calls `buildReadinessRecoveryChip`, the estate's declared "sole
+  // conversational recovery chip for a non-ready state", on the POST-WRITE
+  // readiness. Three consequences follow from reusing the owner rather than
+  // composing a sibling:
+  //   · The chip names the NEXT head blocker, because `deriveAskedEffectPair`
+  //     reads `blockers[0]` of the recomputed payload — the same element the
+  //     next turn's on-screen question is composed from, so the affordance and
+  //     the prose cannot name different slots.
+  //   · TERMINATION IS STRUCTURAL, not a condition written here: the owner
+  //     returns `null` on its `'run'` branch, i.e. exactly when readiness stops
+  //     blocking. There is no "stop after N" to drift, and no second predicate
+  //     for "is the model ready" (trap 12).
+  //   · A future change to the repair chip reaches this seam automatically.
+  //
+  // ⚠ APPEND-ONLY AND ID-DEDUPED: an existing chip always wins, so this can only
+  // ever ADD an affordance to a turn that had none for that id — it can never
+  // replace or reorder what another composer decided to show.
+  //
+  // ⚠⚠ GATED ON `effectiveAppliedMutation` — A WRITE THAT ACTUALLY LANDED — AND
+  // THE NON-APPLY BRANCHES ARE DELIBERATELY LEFT ALONE. On a rejected / no-op /
+  // zero-ops turn `analysisReady` is recomputed from the UNCHANGED graph, so the
+  // head blocker is still THE PAIR THE USER JUST TRIED TO ANSWER, and re-issuing
+  // there would re-offer the demand they have already responded to — the exact
+  // loop `messageAnswersMissingValueAsk` exists to make structurally impossible,
+  // and a shape `guardLoopingChipsAtEgress` logs as `v5.invariant_violation`.
+  // Those branches already have their own composers and their own pinned specs.
+  // Widening to them is "while we're here" work and is prohibited.
+  //
+  // ⭐ THE CONVERSE IS WHAT MAKES THE SUCCESS PATH SAFE: because the readiness is
+  // recomputed from the POST-EDIT graph, the pair just repaired NO LONGER CARRIES
+  // A BLOCKER, so the head blocker — and therefore the chip — necessarily names a
+  // DIFFERENT slot. The affordance cannot repeat itself, by construction rather
+  // than by a comparison someone has to remember to write.
+  if (effectiveAppliedMutation && analysisReady !== undefined) {
+    const reissued = buildReadinessRecoveryChip(analysisReady);
+    if (reissued !== null && !response.suggested_actions.some((a) => a.id === reissued.id)) {
+      response = {
+        ...response,
+        suggested_actions: [...response.suggested_actions, reissued],
+      };
+    }
+  }
 
   // V5 state-trust freshness derivation moved earlier in this function
   // (just after `successfulAppliedMutation` is computed) so the no-op
