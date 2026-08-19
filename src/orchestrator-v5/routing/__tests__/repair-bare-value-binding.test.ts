@@ -122,6 +122,32 @@ describe('the bare-number answer binds to the asked pair', () => {
     expect(resolved).toEqual({ matched: false, reason: 'no_outstanding_ask' });
   });
 
+  it('⭐⭐ declines when the HEAD is not an effect-value ask even though OTHER pairs are missing', () => {
+    // ⚠⚠ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED, and it was settled by
+    // execution rather than argued (trap 13c). Replacing the `asked === null`
+    // refusal with a fall-back to "any missing pair" left the whole battery
+    // GREEN — because every fixture here had a missing-value blocker AT THE HEAD,
+    // so `deriveAskedEffectPair` and `deriveMissingEffectPairs[0]` could not
+    // disagree. A corpus that omits the class where two authorities differ cannot
+    // certify the choice between them.
+    //
+    // THE DISTINCTION IS THE WHOLE POINT OF `deriveAskedEffectPair`, in its own
+    // words: `pairs[0]` is NOT the same thing as the head blocker. When the head
+    // is a mapping issue the recovery copy on screen renders a DIFFERENT
+    // sentence, the product is not asking for an effect value at all, and binding
+    // a bare number to some other pair further down the list would be answering a
+    // question nobody asked — with a WRITE.
+    const headIsNotAnAsk = {
+      blockers: [
+        { blocker_type: 'missing_connection', option_id: 'opt-x', factor_id: 'fac-y' },
+        ASKED,
+      ],
+    } as never;
+    const resolved = resolveRepairValueBinding({ message: '0.6', readiness: headIsNotAnAsk });
+
+    expect(resolved).toEqual({ matched: false, reason: 'no_outstanding_ask' });
+  });
+
   it('declines a figure outside the model 0-1 scale — and NEVER converts it', () => {
     // ⭐ P5. `80` is a user-scale number; the writer does not silently rescale.
     // Declining costs one turn, converting would write a figure never given.
