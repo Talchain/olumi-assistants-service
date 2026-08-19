@@ -57,14 +57,47 @@
  * CEE #830 is what happens when "the id exists" is answered instead of "does
  * this id name the exercise this card performs". So the citation is attached
  * ONLY when the bundle's OWN `stage_applicability` contains the turn's stage
- * token, compared by EXACT IDENTITY. The DSK vocabulary
+ * token, compared by EXACT IDENTITY.
+ *
+ * ⚠⚠ CORRECTED BEFORE MERGE, AND THE CORRECTION IS THE INTERESTING PART. The
+ * first version of this docblock asserted that the DSK vocabulary
  * (frame/ideate/evaluate/decide) and the turn vocabulary
- * (frame/analyse/decide/review) are DIFFERENT SETS that overlap on some
- * tokens; no mapping between them is defined anywhere in this estate, and
- * inventing one here would be a hand-maintained mirror (trap 12) whose drift
- * would read as a science badge. Exact-token matching needs no mirror and
- * fails closed on every token it does not recognise: a non-overlapping
- * vocabulary simply yields no citation, never a wrong one.
+ * (frame/analyse/decide/review) are different sets and that "no mapping
+ * between them is defined anywhere in this estate". THAT CLAIM IS FALSE — a
+ * mapping exists and is live: `mapStageToDecisionStage`
+ * (`handlers/edit-graph-dispatch.ts:754-767`) maps
+ * `frame→frame, analyse→evaluate, decide→decide, review→optimise`. It was
+ * missed because it is a PRIVATE function with exactly ONE caller
+ * (`:1944`), invisible to a symbol sweep for the vocabularies themselves.
+ * A false claim about our own estate, written into a code comment, is the
+ * hand-maintained-mirror defect occurring inside the paragraph warning about
+ * it (trap 12); it is corrected here rather than quietly dropped.
+ *
+ * The BEHAVIOUR still uses exact-token matching, now as a deliberate choice
+ * with a named cost rather than a claim of necessity:
+ *   - Reusing `mapStageToDecisionStage` would require EXPORTING it from
+ *     `edit-graph-dispatch.ts`, which is under a live three-way conflict
+ *     (#1029/#1007/#987). This lane does not touch it.
+ *   - Copying the map here would be a second authority for one question —
+ *     the genuine trap-12 mirror, and the thing that later drifts.
+ *   - Exact-token matching agrees with the live map on every cell either can
+ *     reach EXCEPT ONE, and that one cell is pinned by a test so it cannot
+ *     change silently: `challenge_assumption` at turn stage `analyse`, which
+ *     the live map would send to `evaluate` (in DSK-P-003's applicability)
+ *     and which this arm instead leaves uncited. It UNDER-serves, never
+ *     over-claims — a missing badge, never a wrong one.
+ * Whoever exports the shared mapper should delete the exact-token gate and
+ * that test together.
+ *
+ * ⭐ AND THE REACHABILITY QUESTION, DERIVED RATHER THAN ASSUMED. ROADMAP 2.616
+ * records DSK-P-004 as blocked because "no live stage maps to `ideate`". That
+ * is true of `ideate` and IRRELEVANT here: DSK-P-004 is
+ * `stage_applicability: ["frame","ideate"]`, and `frame` IS a live turn stage
+ * that maps to itself under both this gate and the live mapper. The citation
+ * this arm emits is reachable; the blocked cell is only the `ideate`-ONLY
+ * protocols (e.g. DSK-TR-004). Confirming the distinction matters, because
+ * inheriting "DSK-P-004 is blocked" would have deleted the one honest badge
+ * in this slice (trap 16's inverse — a live path wrongly believed dead).
  *
  * ── WHAT IT DELIBERATELY DOES NOT DO IN THIS SLICE ──────────────────────────
  *   - It emits NO `ExerciseBlock`. The exercise carrier is honest only where a
@@ -161,10 +194,18 @@ const INTENT_METHOD: Record<
   elicit_options: {
     clicked: 'widen the set of options under consideration',
     method: [
+      // ⭐ THE ANALOGICAL STEP IS ADOPTED, NOT INVENTED. It is P-G2's own
+      // METHOD STEP in `parallel-briefs/GENERATION-AND-CHALLENGE-POLICY-DESIGN-2026-08-07.md`
+      // §A.2, which braids analogical transfer (Gick & Holyoak; Dahl & Moreau
+      // 2002, medium) into the alternative-generation protocol rather than
+      // giving it a trigger of its own. Writing a different widening prompt
+      // here would have been coaching invented in this file while a graded,
+      // reviewed one already existed.
+      'First ask the user to name a decision structurally like this one, and what options THAT decision had which this one lacks.',
       'Propose options that work through a DIFFERENT MECHANISM from the ones already in the model, not variations on them.',
       'Include the alternatives people routinely omit: doing nothing, deferring the decision, and redirecting the same resources elsewhere.',
       'For each option, say in one line what it gives up — the resources it commits and what those resources could otherwise buy.',
-      'Ask which of these the user wants added to the model.',
+      'Ask which of these the user wants added to the model. The user\'s own options are theirs — never present one you generated as something they said.',
     ],
   },
   challenge_assumption: {

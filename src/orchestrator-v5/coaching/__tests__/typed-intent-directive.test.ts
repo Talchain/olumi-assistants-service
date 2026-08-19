@@ -113,6 +113,41 @@ describe('resolveApplicableProtocol — cites science ONLY where the bundle says
     expect(resolveApplicableProtocol('challenge_assumption', 'frame')).toBeNull();
   });
 
+  it('pins the ONE cell where exact-token matching under-serves the live stage mapper', () => {
+    // ⭐ AN HONEST KNOWN GAP, PINNED SO IT CANNOT MOVE SILENTLY.
+    //
+    // `mapStageToDecisionStage` (handlers/edit-graph-dispatch.ts:754-767) maps
+    // `analyse → evaluate`, and DSK-P-003 is stage_applicability
+    // ["evaluate","decide"] — so under the live mapper, `challenge_assumption`
+    // on an ANALYSE turn WOULD be citable. This arm's exact-token gate does
+    // not see it, and deliberately so: reusing the mapper needs an export from
+    // a file under a live three-way conflict, and copying it would create a
+    // second authority for one question.
+    //
+    // The gap is recorded here as an EXACT SET rather than left invisible, so
+    // the suite REDs if it grows OR shrinks (the known-dropped-set discipline).
+    // Whoever exports the shared mapper deletes this test with the gate.
+    const KNOWN_UNDER_SERVED: ReadonlyArray<readonly [string, string]> = [
+      ['challenge_assumption', 'analyse'],
+    ];
+
+    // Every recorded cell is genuinely uncited today...
+    for (const [intent, stage] of KNOWN_UNDER_SERVED) {
+      expect(
+        resolveApplicableProtocol(intent as 'challenge_assumption', stage),
+      ).toBeNull();
+    }
+
+    // ...and the SET does not grow: the only other cell the live mapper could
+    // add is `elicit_options` at a stage mapping into ["frame","ideate"], and
+    // `frame` already maps to itself, so this arm already serves it. If that
+    // stops being true, this assertion goes red rather than the gap widening
+    // unobserved.
+    expect(resolveApplicableProtocol('elicit_options', 'frame')).not.toBeNull();
+    expect(resolveApplicableProtocol('challenge_assumption', 'decide')).not.toBeNull();
+    expect(KNOWN_UNDER_SERVED).toHaveLength(1);
+  });
+
   it.each(['frame', 'analyse', 'decide', 'review'])(
     'NEVER cites a protocol for challenge_frame at stage %s',
     stage => {
