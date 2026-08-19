@@ -108,6 +108,31 @@ const READY_GRAPH: { nodes: unknown[]; edges: unknown[] } = {
   ],
 };
 
+/**
+ * A model whose canonical readiness genuinely emits BYTE-IDENTICAL issues: two
+ * options carrying interventions but NO factor edges yields two identical
+ * ORPHAN_NODE messages and two identical OPTION_NO_FACTOR_EDGES messages.
+ *
+ * ⚠ THIS FIXTURE EXISTS BECAUSE THE DEDUPE ASSERTION WAS VACUOUS WITHOUT IT.
+ * Pointed at BLOCKED_GRAPH (which emits no duplicates) the assertion passed
+ * while the dedupe was DELETED — caught by mutant D, not by inspection. A test
+ * that cannot observe the thing it names is trap #13.
+ */
+const DUPES_GRAPH: { nodes: unknown[]; edges: unknown[] } = {
+  nodes: [
+    { id: 'goal_rev', kind: 'goal', label: 'Revenue growth over the next year' },
+    {
+      id: 'factor_salary',
+      kind: 'factor',
+      label: 'Engineer salary in the local market',
+      observed_state: { value: 95000, unit: 'GBP', source: 'user_edited' },
+    },
+    { id: 'opt_local', kind: 'option', label: 'Hire locally', interventions: { factor_salary: { value: 95000 } } },
+    { id: 'opt_off', kind: 'option', label: 'Offshore partner', interventions: { factor_salary: { value: 55000 } } },
+  ],
+  edges: [edge('factor_salary', 'goal_rev')],
+};
+
 vi.mock('../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
     loadSummary: async () => null,
@@ -291,7 +316,9 @@ describe('ContextPack readiness — the wire', () => {
   });
 
   it('open items are DEDUPED — byte-identical copies never reach the prompt', async () => {
-    CURRENT_GRAPH = BLOCKED_GRAPH;
+    // DUPES_GRAPH, not BLOCKED_GRAPH: the canonical authority must actually
+    // EMIT duplicates here or this assertion observes nothing.
+    CURRENT_GRAPH = DUPES_GRAPH;
     const readiness = readinessSection(await runTurn('What is open?'))!;
     const identities = readiness.open_items.map(
       (i) => `${i.kind}|${i.description}|${i.option_label ?? ''}`,
