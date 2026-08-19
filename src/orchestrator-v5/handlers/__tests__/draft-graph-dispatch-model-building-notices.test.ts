@@ -115,11 +115,29 @@ describe('draftResultToOlumiResponse — model_building_notices reach the user',
     );
     const parsed = OlumiResponseSchema.safeParse(res);
     expect(parsed.success).toBe(true);
+    // ⚠ ASSERT ON THE PARSE OUTPUT, NOT JUST ITS SUCCESS. `success: true` is
+    // satisfied whether the field SURVIVES or is STRIPPED — it passes today
+    // only because the schema is `.strict()`. Were that ever relaxed to strip
+    // rather than reject, this test would stay green while the user stopped
+    // receiving the notices. Bind to the parsed value so the guard fails on the
+    // thing it exists to protect.
+    if (!parsed.success) throw new Error('unreachable: asserted above');
+    expect(parsed.data.model_building_notices).toEqual({
+      total_count: 5,
+      groups: [
+        { kind: 'detail_not_connected', count: 1 },
+        { kind: 'relationship_not_used', count: 2 },
+        { kind: 'conflict_resolved_conservatively', count: 1 },
+        { kind: 'target_not_modelled_as_threshold', count: 1 },
+      ],
+      details_redacted: true,
+    });
   });
 
   it('carries no notices key when the projector refused nothing', () => {
-    // Absence is a first-class state — a clean draft must be distinguishable
-    // from one whose producer never looked, so no zeroed object is stamped.
+    // Absence is the ONLY legal representation of "nothing was refused": the
+    // contract's `total_count` is positive and `groups` requires >= 1 entry, so
+    // a zeroed object would be an INVALID carrier, not a quieter one.
     const res = draftResultToOlumiResponse(
       makeResult({ modelBuildingNotices: buildModelBuildingNotices([]) }),
       PAYLOAD,

@@ -181,10 +181,13 @@ const KIND_ORDER: readonly ModelBuildingNoticeKind[] = [
  *                     channel that quietly loses part of its payload reads
  *                     exactly like one that had nothing to say.
  *
- * @returns `undefined` when nothing was refused. Absence is a first-class
- *          state: emitting `total_count: 0` on every clean draft would make a
- *          turn that refused nothing indistinguishable from one whose producer
- *          never looked.
+ * @returns `undefined` when nothing was refused — the ONLY legal representation
+ *          of that, not a stylistic choice. The contract cannot encode zero:
+ *          `total_count` is a positive integer and `groups` requires at least
+ *          one entry, so a zeroed object is not a weaker signal but an INVALID
+ *          carrier. In the contract's own words: *"Omission means no notice
+ *          attestation was supplied (including every legacy producer), never
+ *          zero."* Consumers fail closed on absence and render nothing.
  */
 export function buildModelBuildingNotices(
   disclosures: unknown,
