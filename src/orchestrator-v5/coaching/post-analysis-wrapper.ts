@@ -41,6 +41,7 @@ import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import type { AnalysisFreshness } from '../context/freshness.js';
 import { sanitiseChipProse } from './chip-prose-sanitiser.js';
+import { elideAtWordBoundary } from '../prose-elision.js';
 
 const MAX_CHIPS = 3;
 
@@ -593,9 +594,15 @@ function pickConversationalMessage(card: ReviewCard): string | null {
   return null;
 }
 
+/**
+ * ⭐ SHARED ELISION RULE. This builds a CHIP LABEL (`:439`), and a chip label
+ * cut mid-token or inside a bracket is the witnessed `Configure … (higher…`
+ * defect in another surface. Found by the derived sibling guard in
+ * `chip-label-elision-parity.test.ts`, NOT by the hand-written survey that
+ * preceded it — which had enumerated five copies and missed this one.
+ */
 function truncateLabel(text: string, max = 32): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1).trimEnd()}…`;
+  return elideAtWordBoundary(text, max);
 }
 
 function chipIdForText(text: string): string {

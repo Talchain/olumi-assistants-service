@@ -53,6 +53,8 @@
  * Exits 2 and 3 remain the disclosed residual — see the consumer.
  */
 
+import { elideWithinBudget } from '../prose-elision.js';
+
 /**
  * The card-body character ceiling for the flip card. Seeded from phase3-blocks'
  * `BODY_MAX` (300) at extraction time and now the SOLE authority for this one
@@ -70,8 +72,11 @@ export const FLIP_THRESHOLD_CARD_BODY_MAX = 300;
  * private truncate that later drifts goes RED.
  */
 export function truncateCardProse(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1).trimEnd()}…`;
+  // ⭐ SHARED ELISION RULE. This module's own docstring requires it to stay
+  // byte-identical to the `truncate` that `phase3-blocks` applies — both now
+  // delegate to the one definition, so that parity is structural rather than
+  // maintained by hand, and the conformance test keeps its meaning.
+  return elideWithinBudget(s, max);
 }
 
 /**
@@ -186,6 +191,7 @@ export function flipThresholdFallbackBody(
  * narrative: a 400-character narrative whose flip value sits at character 380
  * is cut out of the card, so the user never saw it.
  */
+
 export function flipThresholdCardBody(narrative: string): string {
   return truncateCardProse(narrative, FLIP_THRESHOLD_CARD_BODY_MAX);
 }

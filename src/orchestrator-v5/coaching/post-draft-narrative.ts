@@ -703,7 +703,23 @@ function buildConfirmSentence(goalLabel: string | null): string {
  */
 function buildOptionsBlock(options: readonly string[]): string | null {
   if (options.length === 0) return null;
-  const trimmed = options.map((label) => truncate(label, MAX_LABEL_CHARS));
+  // ⭐⭐ BULLETS CARRY THE WHOLE LABEL — measured, and it is the only thing that
+  // closes the collision class.
+  //
+  // These were elided to `MAX_LABEL_CHARS`. On a 1,197-label capture corpus that
+  // produced **90 groups of 2–5 DIFFERENT options rendering as the SAME bullet**
+  // — five distinct alternatives all reading `Surface integration and
+  // data-migration…`. The magnitude floor added alongside this only recovers 4
+  // of those 90 groups, because the collision is not a magnitude problem:
+  // **those five labels share their first 39 characters, so NO prefix-based
+  // elision can distinguish them, by construction.** Proof, not observation.
+  //
+  // A bullet occupies its own line, so the cap was relieving no width pressure
+  // that the surface could not absorb; it was only destroying the distinguishing
+  // tail. The narrative's own `MAX_WORDS` budget still bounds the whole block,
+  // which is where a length concern belongs — on the passage, not on the name of
+  // one alternative the user has to tell apart from four others.
+  const trimmed = [...options];
 
   if (trimmed.length === 1) {
     return `The model so far includes one route: ${trimmed[0]}.`;
@@ -1222,111 +1238,31 @@ function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
 // ----- text utilities -------------------------------------------------------
 
 /**
- * ⭐⭐ THE OPENING SENTENCE CUT A LABEL MID-PHRASE ON AN UNCLOSED BRACKET, AND
- * THIS FUNCTION IS WHERE IT HAPPENED — DERIVED, NOT INFERRED.
+ * ⭐ THE ELISION RULE NOW LIVES IN A DEPENDENCY-FREE LEAF MODULE.
  *
- * ── WHAT WAS WITNESSED, AND WHAT REPRODUCES IT ─────────────────────────────
- * Two independent 18 Aug 2026 witnesses caught the same shape on the deployed
- * build. Run against the old body, this function reproduced all three strings
- * BYTE FOR BYTE:
+ * It was defined here when only this composer needed it. A reviewer then found
+ * the SAME turn shipping a chip built by `coaching/readiness-recovery.ts` that
+ * still cut on the old rule — `Configure double down on enterprise sales
+ * (higher…` — so a user read corrected prose and a mangled chip in one payload.
  *
- *   `truncate(<the 85-char option>, 40)`
- *      → "double down on enterprise sales (higher"     ← composed-journey
- *   `truncate(<the 90-char goal>,   80)`
- *      → "…are asking for a self-hosted"               ← UX gate point 4a
- *   `truncate("hold the line on cloud-only for another year", 40)`
- *      → "hold the line on cloud-only for another"     ← UX gate point 4a
+ * ⚠ IT COULD NOT SIMPLY BE IMPORTED FROM HERE. This file ALREADY imports
+ * `buildReadinessNextStep` from `./readiness-recovery.js` (`:80`), so the
+ * reverse edge would close a cycle — and `readiness-recovery` had exactly ONE
+ * import before this change, so it would have been its first intra-coaching
+ * edge. Verified at the static import edges, not inferred.
  *
- * A UI lane independently refuted the theory that this was a rendering defect:
- * the strings arrive ALREADY TRUNCATED ON THE WIRE, while the SAME payload
- * carries the full label intact at five other sites. So the label the user
- * reads in prose was not the label on their node, and nothing downstream could
- * repair it without inventing text — which is the defect class itself.
+ * The shape follows the in-repo precedent set by `configure-option-chip-text.ts`
+ * — *"Dependency-free on purpose: imported by both routing and compose without
+ * cycle risk"* — rather than inventing one.
  *
- * ── THE THREE FAULTS OF THE OLD BODY ───────────────────────────────────────
- *  1. `cut.trim()` on the `else` branch cut MID-TOKEN whenever the last space
- *     fell in the first half of the window;
- *  2. it never looked at DELIMITERS, so a cut inside `(…)` shipped an unclosed
- *     bracket — which is what makes it read as broken English rather than as
- *     abbreviation;
- *  3. it appended NO ellipsis, so nothing on screen said the text was elided.
- *
- * ── THE RULE NOW, AND WHY IT REFUSES ───────────────────────────────────────
- * A cut is taken only at a WORD BOUNDARY, only where it leaves every delimiter
- * closed, and it is always marked with `…`. Where no such point exists the
- * label is returned WHOLE — a long honest label beats a mangled one, and
- * returning the whole label can never misrepresent it.
- *
- * ⚠ THE RESULT IS ALWAYS A WORD-BOUNDED PREFIX OF THE INPUT (plus `…`), NEVER A
- * SUBSTITUTE STRING. That is the property the conformance test binds to, by
- * identity against the node's own label rather than by any length predicate —
- * so a future composer that "helpfully" swaps in a shorter phrase goes RED.
- *
- * ⚠ `'` IS DELIBERATELY NOT TREATED AS A DELIMITER: in ordinary British prose it
- * is an apostrophe far more often than a quote ("don't", "the team's"), and
- * treating it as an opener would refuse cuts on perfectly safe labels.
- *
- * ⚠ SIBLINGS NOT TOUCHED, AND NAMED SO THEY ARE NOT FORGOTTEN: four other
- * `truncate` helpers exist (`compose/phase3-blocks.ts`, `compose/helpers.ts`,
- * `coaching/readiness-recovery.ts`, `cee/observability/collector.ts`). All four
- * append an ellipsis, so none produces the witnessed unclosed-bracket string,
- * but all four still cut mid-token and inside brackets. Consolidating them onto
- * this rule is a separate change with its own blast radius; this lane fixes the
- * seam the witnesses actually caught.
+ * Re-exported so this module stays the composer-facing name; the conformance
+ * suite asserts the re-export is the SAME FUNCTION OBJECT as the leaf's, so a
+ * future private copy here cannot drift back in unseen.
  */
-export function elideAtWordBoundary(label: string, max: number): string {
-  const trimmed = label.trim();
-  if (trimmed.length <= max) return trimmed;
+import { elideAtWordBoundary } from '../prose-elision.js';
+export { elideAtWordBoundary };
 
-  // One character is reserved for the ellipsis: the mark is what turns a cut
-  // into an abbreviation the reader can recognise as one.
-  let end = trimmed.lastIndexOf(' ', max - 1);
-
-  // Back the cut up until nothing is left open. Each pass moves strictly
-  // leftwards, so this terminates.
-  while (end > 0) {
-    const opener = firstUnclosedDelimiter(trimmed.slice(0, end));
-    if (opener < 0) break;
-    end = trimmed.lastIndexOf(' ', opener - 1);
-  }
-
-  // No honest cut point — keep the user's label whole rather than mangle it.
-  if (end <= 0) return trimmed;
-
-  const head = trimmed.slice(0, end).replace(/[\s,;:—–-]+$/u, '');
-  if (head.length === 0) return trimmed;
-  return `${head}…`;
-}
-
-/**
- * The index of the earliest delimiter that `text` opens and never closes, or
- * `-1` when every one of them is closed. Brackets nest; the double quote is a
- * toggle, which is why an odd count of them reports the first as still open.
- */
-function firstUnclosedDelimiter(text: string): number {
-  const PAIRS: Readonly<Record<string, string>> = { '(': ')', '[': ']', '{': '}', '\u201c': '\u201d' };
-  const CLOSERS = new Set(Object.values(PAIRS));
-  const open: number[] = [];
-  let doubleQuoteAt = -1;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]!;
-    if (ch === '"') {
-      doubleQuoteAt = doubleQuoteAt < 0 ? i : -1;
-      continue;
-    }
-    if (PAIRS[ch] !== undefined) {
-      open.push(i);
-      continue;
-    }
-    if (CLOSERS.has(ch)) open.pop();
-  }
-  const first = open.length > 0 ? open[0]! : -1;
-  if (first < 0) return doubleQuoteAt;
-  if (doubleQuoteAt < 0) return first;
-  return Math.min(first, doubleQuoteAt);
-}
-
-/** The composer's own name for the rule above. */
+/** The composer's own name for the shared rule. */
 function truncate(label: string, max: number): string {
   return elideAtWordBoundary(label, max);
 }

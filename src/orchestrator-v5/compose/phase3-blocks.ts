@@ -1585,6 +1585,7 @@ export {
   composeFragileEdgeNaming,
   composeFragileEdgeBody,
 } from '../coaching/fragile-edge-offer-text.js';
+import { elideWithinBudget } from '../prose-elision.js';
 
 function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | null {
   if (selection.lens !== 'fragile_edge_resolution') return null;
@@ -3293,9 +3294,17 @@ function sentenceCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * ⭐ SHARED ELISION RULE. This body was `s.slice(0, max - 1).trimEnd() + '…'`,
+ * which at 40 emits the SAME string as the readiness-recovery helper did —
+ * a formula collision, not a second path to the witnessed chip (`phase3-blocks`
+ * never calls `buildConfigureOptionChip`). It is consolidated here because it
+ * is independently user-reachable: card `title`, `body`, `action_label` and
+ * `action_prompt` are all read on screen, and all could be cut mid-token or
+ * inside a bracket.
+ */
 function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1).trimEnd()}…`;
+  return elideWithinBudget(s, max);
 }
 
 function stableSignalId(

@@ -54,6 +54,7 @@ import {
   type ClarifyDimension,
 } from './rubric.js';
 import { composeClarifyQuestions, type ClarifyQuestion } from './questions.js';
+import { elideWithinBudget } from '../prose-elision.js';
 
 export const CLARIFY_V2_MAX_QUESTIONS_PER_ROUND = 3;
 export const CLARIFY_V2_MAX_ROUNDS = 2;
@@ -352,9 +353,10 @@ export function renderDecisionTopic(brief: string): string {
   const firstSentence = /^[^.?!]*[.?!]/.exec(flattened)?.[0] ?? flattened;
   const base = firstSentence.trim();
   if (base.length <= CLARIFY_V2_TOPIC_MAX_LENGTH) return base;
-  const cut = base.slice(0, CLARIFY_V2_TOPIC_MAX_LENGTH);
-  const lastSpace = cut.lastIndexOf(' ');
-  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+  // ⭐ SHARED ELISION RULE (bounded). This hand-rolled a word-boundary cut with
+  // a magic `> 40` floor and no delimiter awareness — the same rule, spelled
+  // differently, which is how five copies drifted apart in the first place.
+  return elideWithinBudget(base, CLARIFY_V2_TOPIC_MAX_LENGTH);
 }
 
 /**

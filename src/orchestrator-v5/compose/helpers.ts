@@ -12,6 +12,7 @@
 import type { z } from 'zod';
 
 import type { HandlerValidationRegistry } from '../routing/validator.js';
+import { elideWithinBudget } from '../prose-elision.js';
 
 // ---------------------------------------------------------------------------
 // safeLabel
@@ -137,8 +138,19 @@ export function sanitiseForUser(value: unknown): string {
   return truncate(s, MAX_USER_STRING);
 }
 
+/**
+ * ⭐ SHARED ELISION RULE. `safeLabel` feeds `handler-failure-responses.ts:345`
+ * → `buildConfigureOptionChip(entityRef)`, so this helper is one of the five
+ * production producers of a user-facing configure chip — the same surface whose
+ * sibling produced `Configure … (higher…` on the deployed build. It cut
+ * mid-token and inside brackets exactly as that one did; it differed only in
+ * spelling the mark `...` rather than `…`.
+ */
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 3).trimEnd()}...`;
+  // ⚠ BOUNDED, and the ASCII mark is deliberate: this path sanitises hostile
+  // input and its test asserts `...` as defence-in-depth. The readable cut is
+  // taken when it fits; the cap always holds.
+  return elideWithinBudget(s, max, '...');
 }
 
 // ---------------------------------------------------------------------------

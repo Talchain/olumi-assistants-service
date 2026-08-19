@@ -25,9 +25,27 @@
  */
 export const CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX = 'Help me configure ';
 
-/** Build the chip MESSAGE for a (render-safe) option reference. */
+/**
+ * Build the chip MESSAGE for a (render-safe) option reference.
+ *
+ * ⚠ THE FULL STOP IS CONDITIONAL, AND THAT IS NOT A STYLE CHOICE. A chip
+ * REPLAYS ITS MESSAGE AS USER TEXT when clicked, so whatever this returns is
+ * attributed to the user. An elided reference already ends in `…`, and
+ * appending `.` to it produced `…​.` on the deployed build:
+ *
+ *   `Help me configure double down on enterprise sales (higher….`
+ *
+ * Two terminators is not a typo the user made; it is the product writing
+ * malformed text into their own turn. A reference that already ends in
+ * terminal punctuation supplies its own, so nothing is appended.
+ *
+ * ⭐ The load-bearing PREFIX is untouched, so `detectConfigureOptionIntent`
+ * routes exactly as before — this changes only the tail.
+ */
 export function buildConfigureOptionChipMessage(entityRef: string): string {
-  return `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}${entityRef}.`;
+  const ref = entityRef.trimEnd();
+  const alreadyTerminated = /[.!?…]$/u.test(ref);
+  return `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}${ref}${alreadyTerminated ? '' : '.'}`;
 }
 
 export interface ConfigureOptionChip {

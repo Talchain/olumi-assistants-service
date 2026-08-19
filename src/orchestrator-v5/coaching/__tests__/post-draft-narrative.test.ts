@@ -192,7 +192,27 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('truncates over-long option labels at a word boundary', () => {
+  /**
+   * ⚠⚠ POLICY CHANGE, NOT A RELAXED ASSERTION — and it is measured.
+   *
+   * This asserted that an over-long OPTION label is elided in the bullet list.
+   * It no longer is, and the reason is a proof rather than a preference: on a
+   * 1,197-label capture corpus, eliding option bullets at 40 characters made
+   * **90 groups of 2-5 DIFFERENT options render as the SAME bullet** — five
+   * distinct alternatives all reading `Surface integration and data-migration…`.
+   * Those five share their first 39 characters, so **no prefix-based elision
+   * can tell them apart, by construction.** Carrying the whole label takes that
+   * figure to **zero**; the magnitude floor alone only reached 86.
+   *
+   * A bullet occupies its own line, so nothing is gained by the cap and the
+   * user's ability to tell their own options apart is what was lost.
+   *
+   * What still holds, and is asserted below: the INLINE goal quote — which sits
+   * mid-sentence and cannot wrap — is still elided, at a word boundary, with a
+   * mark. The two surfaces get different treatment because they are different
+   * questions (trap 21), and this test now pins both halves rather than one.
+   */
+  it('carries a whole option label in a bullet, while still eliding the inline goal quote', () => {
     const longOpt = {
       id: 'o_long',
       kind: 'option' as const,
@@ -201,9 +221,20 @@ describe('buildPostDraftNarrative', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, longOpt, OPTION_B]),
     });
-    // The truncated label should fit within ~40 chars and should not chop mid-word.
-    expect(text).toContain('Hire a tech lead');
-    expect(text).not.toContain('engineering organisation top-to-bottom');
+    // The bullet carries the option's own words, whole and distinguishable.
+    expect(text).toContain(longOpt.label);
+    expect(text).toMatch(/^• Hire a tech lead and rebuild the entire engineering organisation top-to-bottom this quarter$/m);
+    // …and the sibling option is still distinguishable beside it — the property
+    // the elision destroyed.
+    expect(text).toContain(OPTION_B.label);
+
+    // The INLINE goal quote is a different surface and is still bounded: it is
+    // elided at a word boundary and says so with a mark.
+    const opening = text.split('\n')[0]!;
+    expect(opening.startsWith("I've built a first decision model")).toBe(true);
+    if (opening.includes('…')) {
+      expect(opening).not.toMatch(/\p{L}…/u); // never mid-token
+    }
     assertCleanCopy(text);
   });
 

@@ -20,6 +20,9 @@ import {
   CONFIGURE_OPTION_GENERIC_CHIP,
   buildConfigureOptionChip,
 } from '../configure-option-chip-text.js';
+// ⚠ FROM THE LEAF, NOT FROM `post-draft-narrative`: that file imports
+// `buildReadinessNextStep` from THIS one, so the reverse edge would be a cycle.
+import { elideAtWordBoundary } from '../prose-elision.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -77,8 +80,26 @@ interface ReadinessOptionLite {
   readonly status?: 'ready' | 'needs_user_mapping' | 'needs_encoding';
 }
 
+/**
+ * ⭐⭐ THE CHIP'S LABEL IS ELIDED BY THE SAME RULE AS THE PROSE BESIDE IT.
+ *
+ * This body used to be `value.slice(0, max - 1).trimEnd() + '…'`, and at
+ * `MAX_LABEL_CHARS = 40` it produced, byte-exactly, the string a reviewer
+ * caught on the deployed build:
+ *
+ *   `Configure double down on enterprise sales (higher…`   ← unclosed `(`
+ *
+ * Worse than prose, because a chip REPLAYS ITS MESSAGE AS USER TEXT when
+ * clicked: `Help me configure double down on enterprise sales (higher….`
+ * — a mangled label the user never wrote, sent back as if they had.
+ *
+ * It shipped in the SAME TURN as the corrected prose:
+ * `handlers/draft-graph-dispatch.ts:258` builds the narrative and `:380` builds
+ * the chips, from one response object. Fixing one copy of a rule and leaving
+ * the other is how a user reads a corrected sentence and a broken chip together.
+ */
 function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+  return elideAtWordBoundary(value, max);
 }
 
 function readString(value: unknown): string | null {

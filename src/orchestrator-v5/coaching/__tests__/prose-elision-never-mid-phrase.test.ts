@@ -51,24 +51,48 @@ const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 
 // ── THE WITNESSED INPUTS, VERBATIM ──────────────────────────────────────────
-const WITNESSED: ReadonlyArray<readonly [name: string, input: string, max: number, wasEmitted: string]> = [
+/**
+ * ⚠⚠ EACH ROW CARRIES ITS EXACT EXPECTED OUTPUT, and that is a correction.
+ *
+ * The suite previously asserted only `out !== wasEmitted`. A reviewer showed
+ * that on one case the new output was literally the witnessed string PLUS `…`,
+ * so the assertion could not tell "fixed the cut" from "added a mark".
+ *
+ * The honest repair is NOT to demand the cut always move — on two of these
+ * three the old cut was ALREADY word-bounded and balanced, so the mark IS the
+ * whole fix and demanding movement would be asserting a change that should not
+ * happen. It is to state per case what the output must be, by identity, so the
+ * two outcomes are distinguishable and each is pinned to the right one.
+ *
+ * `fixKind` records which repair each case exercises, so the set cannot quietly
+ * become all-marks — the very degeneration the reviewer was pointing at.
+ */
+const WITNESSED: ReadonlyArray<
+  readonly [name: string, input: string, max: number, wasEmitted: string, expected: string, fixKind: 'cut moved' | 'mark added']
+> = [
   [
     'composed-journey link 2(c): the unclosed bracket',
     'double down on enterprise sales (higher margins but longer cycles and more headcount)',
     MAX_LABEL_CHARS,
     'double down on enterprise sales (higher',
+    'double down on enterprise sales…',
+    'cut moved',
   ],
   [
     "UX gate 4a: Olumi's opening sentence",
     'Several of our largest enterprise customers are asking for a self-hosted deployment option',
     MAX_GOAL_CHARS,
     'Several of our largest enterprise customers are asking for a self-hosted',
+    'Several of our largest enterprise customers are asking for a self-hosted…',
+    'mark added',
   ],
   [
     'UX gate 4a: the option list beneath it',
     'hold the line on cloud-only for another year',
     MAX_LABEL_CHARS,
     'hold the line on cloud-only for another',
+    'hold the line on cloud-only for another…',
+    'mark added',
   ],
 ];
 
@@ -91,14 +115,22 @@ function hasUnclosedDelimiter(text: string): boolean {
 /** The identity relation the whole suite rests on: what came out is what went
  *  in, up to a word-boundary elision. */
 function isWordBoundedPrefixOf(output: string, input: string): boolean {
-  if (output === input.trim()) return true;
+  // ⚠ AGAINST THE TRIMMED INPUT. This compared `output` to raw `input`, and the
+  // function under test trims first — so any leading-whitespace input that
+  // elided would have produced a FALSE RED. 134 fuzz inputs carried leading
+  // whitespace and none tripped it purely by luck; a latent false red in the
+  // guard is still a defect in the guard.
+  const source = input.trim();
+  if (output === source) return true;
   if (!output.endsWith('…')) return false;
   const head = output.slice(0, -1);
-  if (!input.startsWith(head)) return false;
-  const next = input.charAt(head.length);
+  if (!source.startsWith(head)) return false;
+  const next = source.charAt(head.length);
   // Either the input ends there, or the very next character is whitespace or
   // the punctuation the elision trimmed — never the middle of a word.
-  return next === '' || /[\s,;:—–-]/u.test(next);
+  // ⚠ `.` and `…` belong here: they are in the strip class, and omitting them
+  // was how `"…soon...…"` and `"phase one ……"` passed unnoticed.
+  return next === '' || /[\s,;:—–.…-]/u.test(next);
 }
 
 describe('the instrument: the witnessed strings really were produced by this seam', () => {
@@ -129,12 +161,32 @@ describe('the instrument: the witnessed strings really were produced by this sea
 });
 
 describe('no label is ever cut mid-phrase, and none of the witnessed strings can recur', () => {
-  it.each(WITNESSED)('%s', (name, input, max, wasEmitted) => {
+  it('the corpus exercises BOTH repairs, so it cannot degenerate into all-marks', () => {
+    const kinds = new Set(WITNESSED.map(([, , , , , kind]) => kind));
+    expect([...kinds].sort()).toEqual(['cut moved', 'mark added']);
+  });
+
+  it.each(WITNESSED)('%s', (name, input, max, wasEmitted, expected, fixKind) => {
     const out = elideAtWordBoundary(input, max);
 
     // The exact string the deployed build put on a customer's screen, by
     // identity. This is the RED: at pristine, `out` IS `wasEmitted`.
     expect(out, `${name}: the witnessed string must not recur`).not.toBe(wasEmitted);
+
+    // ⭐ BY IDENTITY, so "fixed the cut" and "added a mark" are distinguishable.
+    expect(out, `${name}: exact output`).toBe(expected);
+    const survivingNow = out.endsWith('…') ? out.slice(0, -1) : out;
+    if (fixKind === 'cut moved') {
+      expect(
+        survivingNow.length < wasEmitted.length,
+        `${name}: claimed the cut moved, but the surviving text is unchanged`,
+      ).toBe(true);
+    } else {
+      expect(
+        survivingNow,
+        `${name}: claimed only a mark was added, but the cut also moved`,
+      ).toBe(wasEmitted);
+    }
 
     expect(hasUnclosedDelimiter(out), `${name}: left a delimiter open`).toBe(false);
     expect(isWordBoundedPrefixOf(out, input), `${name}: not a word-bounded prefix of the label`).toBe(
@@ -174,15 +226,27 @@ describe('the opposite direction: what must be left exactly as it is', () => {
     expect(isWordBoundedPrefixOf(out, bracketFromTheStart)).toBe(true);
   });
 
+  /**
+   * ⚠⚠ THIS TEST DID NOT BITE, AND THE TWEAK IT WARNS AGAINST PROVED IT.
+   *
+   * It asserted only "ends with `…`" and "is a word-bounded prefix". Treating
+   * `'` as a delimiter — the exact change the module's docstring forbids —
+   * collapses this fixture from `"the team's own view of what…"` (28 chars) to
+   * `"the…"` (4), and **both assertions still hold**, so the suite stayed GREEN
+   * while the behaviour it exists to protect was destroyed. A guard whose
+   * fixture can collapse to nothing while it applauds is a guard agreeing with
+   * itself (trap 13b).
+   *
+   * Bound by IDENTITY to the expected surviving text, so the collapse REDs.
+   */
   it("an apostrophe is not a delimiter — it must not block an otherwise honest cut", () => {
-    const out = elideAtWordBoundary(
-      "the team's own view of what the next two quarters should look like",
-      30,
-    );
+    const input = "the team's own view of what the next two quarters should look like";
+    const out = elideAtWordBoundary(input, 30);
     expect(out.endsWith('…')).toBe(true);
-    expect(isWordBoundedPrefixOf(out, "the team's own view of what the next two quarters should look like")).toBe(
-      true,
-    );
+    expect(isWordBoundedPrefixOf(out, input)).toBe(true);
+    // The apostrophe-bearing token must SURVIVE the cut — that is the property.
+    expect(out).toContain("team's");
+    expect(out).toBe("the team's own view of what…");
   });
 });
 
@@ -222,22 +286,52 @@ describe('the delimiter back-off always terminates', () => {
   });
 
   it('terminates, and never invents, across a delimiter-dense fuzz', () => {
-    const alphabet = ['a', 'b', 'c', ' ', '(', ')', '[', ']', '{', '}', DQ, '\u201c', '\u201d', '-', ','];
+    // ⚠ `.` and `…` ADDED (finding 6): they are in the strip class and 25 real
+    // corpus strings already end in an elision mark, so a `…`-bearing input was
+    // exactly the class the alphabet could not generate — which is how the
+    // double-ellipsis outputs `"…soon...…"` and `"phase one ……"` went unseen.
+    // ⚠⚠ WORD-LIKE TOKENS, NOT PURE DELIMITER SOUP — and this is a correction the
+    // elision counter forced. The alphabet was single characters including
+    // brackets and quotes at a frequency no brief produces; with the magnitude
+    // floor in place **every single one of the 2,000 cases was returned WHOLE**,
+    // so the fuzz exercised the elision path ZERO times while reporting 2,000
+    // checked. That is the tautology this counter exists to expose, and it
+    // exposed it on its first run. Real tokens interleaved with delimiters
+    // produce strings the rule actually cuts.
+    const tokens = ['alpha', 'be', 'gamma', 'delta-two', 'epsilon', 'zeta', 'eta', 'theta'];
+    const punct = ['(', ')', '[', ']', '{', '}', DQ, '\u201c', '\u201d', '-', ',', '.', '…', "'"];
     let checked = 0;
+    let elisions = 0;
     for (let i = 0; i < 2000; i += 1) {
-      const length = 1 + ((i * 7) % 60);
-      let label = '';
-      for (let j = 0; j < length; j += 1) {
-        label += alphabet[(i * 31 + j * 17) % alphabet.length]!;
+      const words = 2 + ((i * 7) % 12);
+      const parts: string[] = [];
+      for (let j = 0; j < words; j += 1) {
+        let w = tokens[(i * 31 + j * 17) % tokens.length]!;
+        // Sprinkle delimiters so the bracket and mark classes are still hit.
+        if ((i + j) % 5 === 0) w = `${punct[(i + j) % punct.length]!}${w}`;
+        if ((i + j) % 7 === 0) w = `${w}${punct[(i * 3 + j) % punct.length]!}`;
+        parts.push(w);
       }
-      const max = 1 + ((i * 13) % 50);
+      const label = parts.join(' ');
+      const max = 10 + ((i * 13) % 45);
       const out = elideAtWordBoundary(label, max);
       // The invariant holds over the whole fuzz, not just the readable corpus:
       // whatever comes out is the input, or a word-bounded prefix of it.
       expect(isWordBoundedPrefixOf(out, label), JSON.stringify({ label, max, out })).toBe(true);
+      // No output the rule PRODUCED may carry a doubled mark. Scoped to real
+      // elisions: an input returned whole may legitimately contain `……` already,
+      // and convicting the rule for the caller's own bytes would be a false red.
+      if (out !== label.trim()) {
+        expect(out, JSON.stringify({ label, max, out })).not.toMatch(/(\.\.\.…|……|…\.)$/u);
+      }
       checked += 1;
+      if (out !== label.trim()) elisions += 1;
     }
-    // Non-vacuity: the loop really ran the number of cases it claims.
+    // ⚠⚠ THE OLD PIN WAS A TAUTOLOGY: `checked += 1` is unconditional, so
+    // `expect(checked).toBe(2000)` restated the loop bound and would have held
+    // if every single case had passed through untouched. What matters is how
+    // many cases actually ELIDED — the only ones that exercise the rule.
     expect(checked).toBe(2000);
+    expect(elisions, 'the fuzz must actually exercise the elision path').toBeGreaterThan(100);
   });
 });

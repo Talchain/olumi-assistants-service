@@ -32,6 +32,7 @@ import {
   buildRepairBindingInstruction,
   type MissingEffectPair,
 } from '../routing/repair-value-binding.js';
+import { elideWithinBudget } from '../prose-elision.js';
 
 /**
  * At most this many pair chips. Mirrors the L16 composer's judgement that
@@ -43,7 +44,10 @@ export const MAX_REPAIR_PAIR_CHIPS = 3;
 /** Truncate a label for chip copy; the full labels appear in the prose. */
 function chipLabel(pair: MissingEffectPair, cap = 56): string {
   const label = pair.factorLabel.trim();
-  return label.length <= cap ? label : `${label.slice(0, cap - 1)}…`;
+  // ⭐ SHARED ELISION RULE (bounded): this caps a LABEL the user reads in a
+  // repair ask. It cut mid-token and inside brackets exactly as the witnessed
+  // chip did.
+  return elideWithinBudget(label, cap);
 }
 
 function describePair(pair: MissingEffectPair): string {

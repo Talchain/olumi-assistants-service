@@ -138,11 +138,25 @@ describe("the instrument: the governed corpus can SEE the defect, and discrimina
       .filter((n) => n.kind === "option");
     expect(options).toHaveLength(50);
 
-    // ⭐ THE CONTRAST CONTROL (trap 13e / trap 20). An equality probe that
-    // returned the same answer for every node would be reporting on itself.
-    // 37 hit and 13 miss is the discrimination this whole suite rests on.
+    // ⚠⚠ THE COMMENT THAT USED TO SIT HERE OVERSTATED WHAT THIS DISCRIMINATES.
+    // It called the 13 non-matches a contrast control proving the equality
+    // probe can return `false`. It does not: those 13 carry **no `source_quote`
+    // at all** and are filtered out one line earlier in the selector, so of the
+    // options that reach the equality test, **37 of 37 match and 0 fail**. The
+    // probe's `false` branch was never exercised by this assertion.
+    const withQuote = options.filter(
+      (n) => typeof n.provenance?.source_quote === 'string' && n.provenance.source_quote.length > 0,
+    );
+    expect(withQuote).toHaveLength(37);
+    expect(options.length - withQuote.length, 'options carrying no quote at all').toBe(13);
     expect(optionsWhoseLabelIsTheirQuote()).toHaveLength(37);
-    expect(options.length - optionsWhoseLabelIsTheirQuote().length).toBe(13);
+
+    // ⭐ THE GENUINE CONTRAST: the equality probe must be able to return FALSE
+    // on a quote-BEARING option, or it certifies nothing. The corpus has none,
+    // so the discriminating case is constructed and named as such.
+    const canon = (x: string): string => x.replace(/\s+/g, ' ').trim();
+    expect(canon('keep it as is') === canon('keep it as is')).toBe(true);
+    expect(canon('Keep It as Is') === canon('keep it as is')).toBe(false);
   });
 
   it("both witnessed option quotes are present in the corpus at their witnessed lengths", () => {
