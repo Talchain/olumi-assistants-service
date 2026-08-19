@@ -41,8 +41,8 @@ import {
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
 import {
+  findRecentChangeAboutOriginSubject,
   isStructureOriginQuestion,
-  originSubjectIsRecentlyChanged,
   tryStructureOriginAnswer,
 } from '../../cee/context-integrity/structure-origin-answer.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
@@ -361,6 +361,11 @@ export interface TryStateQueryGuardInput {
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
+  // Set by the origin arm when it defers: the recorded change that is actually
+  // ABOUT the element the question named. `null` everywhere else, so the ordinary
+  // readback arms keep quoting the head, which is what "what changed?" means.
+  let originSubjectChange: RecentMutation | null = null;
+
   // ROADMAP 2.975 — SEPARATE THE TWO QUESTIONS BEFORE EITHER ARM CLAIMS ONE.
   //
   // This runs BEFORE the session-edit arms, and returns unconditionally, so a
@@ -465,14 +470,25 @@ export function tryStateQueryGuard(
     // `persistedGraph` null) THE SUBJECT CANNOT BE RESOLVED, SO THE DEFERRAL
     // CANNOT BE JUSTIFIED — and the unjustified fall-through is exactly what
     // emitted the false claim. Fail-closed: decline.
-    const recordedChangeIsAboutTheSubject =
-      input.briefAudit !== undefined &&
-      originSubjectIsRecentlyChanged(
-        input.message,
-        input.briefAudit.graph,
-        input.contextPack.recent_changes.map((change) => change.target_label),
-      );
-    if (!recordedChangeIsAboutTheSubject) {
+    const subjectMatch =
+      input.briefAudit === undefined
+        ? null
+        : findRecentChangeAboutOriginSubject(
+            input.message,
+            input.briefAudit.graph,
+            input.contextPack.recent_changes.map((change) => change.target_label),
+          );
+    // ⭐⭐ ANSWER FROM THE MATCHED CHANGE, NEVER FROM THE HEAD. Measured defect
+    // (adversarial review of this PR): with recent = [{Total cost}, {Hybrid
+    // Phased Approach}], *"Why did you add the Hybrid Phased Approach?"* deferred
+    // correctly and was then answered with the receipt for **Total cost** —
+    // because the deferral test returned a boolean and threw away WHICH change
+    // matched. Honest, and still an answer about the wrong element.
+    originSubjectChange =
+      subjectMatch === null
+        ? null
+        : (input.contextPack.recent_changes[subjectMatch.index] ?? null);
+    if (subjectMatch === null) {
       // The recorded change is not what was asked about. The session-edit arms
       // must not claim this turn. Hand it to the reasoning layer, which sees
       // `recent_changes` AND the graph in its ContextPack — the same destination
@@ -483,6 +499,19 @@ export function tryStateQueryGuard(
     // Ambiguous: a recorded mutation targets the very element being asked about.
     // Fall through to the session-edit arms, which are grounded in it (trap 22f —
     // where direction cannot be determined, do not guess).
+    //
+    // ⚠⚠ AND NOTE WHICH AUTHORITY IS CANONICAL HERE, BECAUSE THE OBVIOUS SENTENCE
+    // IS WRONG (adversarial review, PR #1036). It is tempting to say "the node's
+    // persisted provenance record is THE authority for a provenance question".
+    // It is not, and `structure-origin-answer.ts`'s own header concedes it: the
+    // V3 enum is canonical for **whose words the content is**, NOT for **why the
+    // element is there**. Derived disagreement case: a user says "add an option
+    // for partnerships", the handler mints it, and because `provenance` is
+    // response-only and referee-denied to the editor it recomputes to
+    // `ai_inferred` with no `source_quote` — so the provenance arm would answer
+    // *"that was my suggestion, not something you wrote"*, which is false about
+    // why it is there. `recent_changes` is the RIGHT authority whenever it holds
+    // a record for the subject, which is exactly what this deferral routes to.
   }
 
   // Negative gate — cheapest of the session-edit arms. A message with an
@@ -533,7 +562,9 @@ export function tryStateQueryGuard(
     };
   }
 
-  const head = recent[0]!;
+  // The head is what a bare readback ("what changed?") means. An origin question
+  // that deferred names a specific element, and is answered from THAT change.
+  const head = originSubjectChange ?? recent[0]!;
   return {
     matched: true,
     dispatch: 'with_recent_change',

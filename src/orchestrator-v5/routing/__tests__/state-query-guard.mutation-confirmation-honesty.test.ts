@@ -80,6 +80,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
+import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
 import { tryStructureOriginAnswer } from '../../../cee/context-integrity/structure-origin-answer.js';
 import {
   RECENT_CHANGE_RECORD_PREFIX,
@@ -508,5 +509,169 @@ describe('TWIN: what must keep working, unchanged', () => {
       briefAudit: { briefText: null, graph: WITNESS_GRAPH_NO_QUOTE },
     });
     expect(outcome.matched).toBe(false);
+  });
+});
+
+// ============================================================================
+// ⛔ THE PREFIX'S SEMANTICS, NOT JUST ITS IDENTITY.
+// ============================================================================
+/**
+ * ⭐⭐ THE BLOCKING FINDING OF THE ADVERSARIAL REVIEW, AND IT WAS THIS AUTHOR'S
+ * OWN RULE TURNED BACK ON HIM: **A SURVIVING MUTANT IS A CLAIM, AND AN EQUIVALENT
+ * MUTANT MUST BE DEMONSTRATED, NEVER ASSERTED** (trap 13c). Round 1's mutant M5
+ * changed the prefix's WORDING, saw the suite stay green, and recorded that as
+ * proof the tests "bind to the exported constant rather than a copy literal".
+ * True — and that was the hole, not the proof.
+ *
+ * **Measured by the reviewer:** setting the prefix to `'Updated: '` — which fully
+ * restores the P5 defect, rendering `"Updated: Updated Enterprise sales headcount
+ * and spend"` — left **688/688 GREEN across all 11 spec files in this seam**,
+ * including the forbidden-phrases guard and the compose-site drift guard.
+ * Positive control in the same harness: prefix `''` reds 20 tests. **So the kit
+ * bit on the prefix's EXISTENCE and was blind to its SEMANTICS**, and the whole
+ * P5 property rested on an identity to a constant nothing constrained.
+ *
+ * ⚠ AND THE ESTATE'S OWN EGRESS AUTHORITY DOES NOT CLOSE IT — measured here, and
+ * it is why `OPENS_WITH_COMMIT_CLAIM` exists rather than a bare reuse:
+ * `SUCCESS_CLAIM_PATTERNS`' sentence-leading rule is
+ * `/^\s*(?:Updated|Set|Added|…)\s+\S/m`, which requires WHITESPACE after the
+ * verb — so `findSuccessClaimHit('Updated: Updated …')` returns **null** while
+ * `findSuccessClaimHit('Updated …')` returns `"Updated E"`. A colon-separated
+ * commit verb walks straight through a shared honesty guard. That gap is rowed,
+ * not widened here (scope rule): widening a guard eleven other seams depend on is
+ * not this lane's change to make.
+ *
+ * Both instruments ship, because they answer different questions and neither
+ * supersedes the other (trap 12d): the literal pin asks *"is this the string we
+ * agreed?"*, the property asks *"is any replacement still an attribution?"*.
+ */
+const OPENS_WITH_COMMIT_CLAIM =
+  /^\s*(?:Updated|Set|Added|Removed|Changed|Edited|Applied|Adjusted|Modified|Created|Strengthened|Weakened|Done)\b/i;
+const CARRIES_PAST_ATTRIBUTION = /\b(?:earlier|previously|already|on record|so far)\b/i;
+
+describe('the record attribution is pinned by SEMANTICS, not only by identity', () => {
+  it('SEM-CONTROL the property instrument SEES the exact mutant that slipped the round-1 kit', () => {
+    // ⭐ POSITIVE CONTROL FIRST (trap 13: an absence assertion is vacuous until it
+    // has proven it can see a presence). If these three do not hold, every
+    // assertion below is decoration.
+    expect(OPENS_WITH_COMMIT_CLAIM.test('Updated: Updated Enterprise sales headcount and spend')).toBe(true);
+    expect(OPENS_WITH_COMMIT_CLAIM.test('Updated Enterprise sales headcount and spend')).toBe(true);
+    // …and does NOT fire on a genuine attribution — the contrast control, so the
+    // instrument is shown to DISCRIMINATE rather than merely to fire.
+    expect(OPENS_WITH_COMMIT_CLAIM.test('Earlier in this session: Updated Enterprise sales headcount and spend')).toBe(false);
+    // The estate's shared authority, measured, for the record: it catches the
+    // space-separated form and MISSES the colon-separated one.
+    expect(findSuccessClaimHit('Updated Enterprise sales headcount and spend.')).not.toBeNull();
+    expect(findSuccessClaimHit('Updated: Updated Enterprise sales headcount and spend.')).toBeNull();
+  });
+
+  it('SEM-LITERAL the constant is exactly the agreed string', () => {
+    expect(RECENT_CHANGE_RECORD_PREFIX).toBe('Earlier in this session: ');
+  });
+
+  it('SEM-PROPERTY any replacement must still be a past-time attribution and never a commit claim', () => {
+    expect(OPENS_WITH_COMMIT_CLAIM.test(RECENT_CHANGE_RECORD_PREFIX)).toBe(false);
+    expect(CARRIES_PAST_ATTRIBUTION.test(RECENT_CHANGE_RECORD_PREFIX)).toBe(true);
+  });
+
+  it('SEM-COMPOSED no reply this arm can emit opens with a perfective commit claim', () => {
+    // Derived over every summary shape AND every readback message, so the
+    // property is asserted over the arm's whole output space, not one string.
+    for (const change of SUMMARY_SHAPES) {
+      for (const message of READBACK_MESSAGES) {
+        const outcome = tryStateQueryGuard({ message, contextPack: ctx([change]) });
+        if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+          throw new Error(`precondition failed: ${change.action} / ${message}`);
+        }
+        expect(OPENS_WITH_COMMIT_CLAIM.test(outcome.assistant_text)).toBe(false);
+        expect(CARRIES_PAST_ATTRIBUTION.test(outcome.assistant_text)).toBe(true);
+        // Bind to the estate's existing authority too, where it can see.
+        expect(findSuccessClaimHit(outcome.assistant_text)).toBeNull();
+      }
+    }
+  });
+});
+
+// ============================================================================
+// THE MATCH IS CARRIED — an origin question is answered about ITS OWN element.
+// ============================================================================
+describe('a deferred origin question is answered from the MATCHED change, never the head', () => {
+  const TOTAL_COST: RecentMutation = {
+    action: 'graph_edited',
+    summary: 'Updated Total cost from 1 to 2.',
+    target_label: 'Total cost',
+  };
+  const STATUS_QUO: RecentMutation = {
+    action: 'graph_edited',
+    summary: 'Updated Status Quo: Hold current strategy',
+    target_label: 'Status Quo: Hold current strategy',
+  };
+
+  it('MATCH-NOT-HEAD the receipt quoted is the one about the element the user named', () => {
+    // ⭐ THE REVIEWER'S C4, REPRODUCED BEFORE IT WAS FIXED: the head was quoted
+    // because the deferral test returned a boolean and discarded WHICH change
+    // matched — trap 21 inside the fix written to close a trap-21 defect.
+    const outcome = tryStateQueryGuard({
+      message: WITNESS_MESSAGE_EM_DASH,
+      contextPack: ctx([TOTAL_COST, STATUS_QUO]), // head is the WRONG element
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH_NO_QUOTE },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+      throw new Error('precondition failed: the deferral did not fire');
+    }
+    expect(outcome.recent_change.target_label).toBe('Status Quo: Hold current strategy');
+    expect(outcome.assistant_text).toContain('Status Quo');
+    expect(outcome.assistant_text).not.toContain('Total cost');
+  });
+
+  it('HEAD-STILL-HEAD a bare readback is still answered from the most recent change', () => {
+    // ⭐ OPPOSITE DIRECTION. "What changed?" means the head; carrying the match
+    // must not have redefined that.
+    const outcome = tryStateQueryGuard({
+      message: 'What changed?',
+      contextPack: ctx([TOTAL_COST, STATUS_QUO]),
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH_NO_QUOTE },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched || outcome.dispatch !== 'with_recent_change') return;
+    expect(outcome.recent_change.target_label).toBe('Total cost');
+  });
+
+  it('INCIDENTAL-TOKEN a single shared word is a collision, not a reference', () => {
+    // ⭐ THE REVIEWER'S C2. "Enterprise partnerships" vs "Enterprise sales
+    // headcount and spend" share exactly one identifying token. Round 1 deferred
+    // and answered about the wrong element; the two-token threshold declines.
+    const graph = {
+      nodes: [
+        ...WITNESS_GRAPH_NO_QUOTE.nodes,
+        { id: 'p1', kind: 'option', label: 'Enterprise partnerships', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const outcome = tryStateQueryGuard({
+      message: 'Why did you add Enterprise partnerships?',
+      contextPack: ctx([WITNESSED_CHANGE]), // target: Enterprise sales headcount and spend
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched).toBe(false);
+  });
+
+  it('SINGLE-TOKEN-SUBJECT a one-word element is still matchable on its one token', () => {
+    // ⭐ The threshold is `min(2, subjectTokens.size)`, so tightening to two
+    // tokens must not make single-token subjects unmatchable — that would be the
+    // opposite-direction regression the tightening could have bought.
+    const graph = {
+      nodes: [{ id: 'c1', kind: 'factor', label: 'Churn', provenance: 'ai_inferred' }],
+      edges: [],
+    };
+    const outcome = tryStateQueryGuard({
+      message: 'Why did you add Churn?',
+      contextPack: ctx([{ action: 'factor_value_updated', summary: 'Updated Churn from 1 to 2.', target_label: 'Churn' }]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched || outcome.dispatch !== 'with_recent_change') return;
+    expect(outcome.recent_change.target_label).toBe('Churn');
   });
 });

@@ -224,11 +224,11 @@ describe('TWIN: the readback class the guard exists for is unchanged', () => {
       contextPack: ctx([ADD_CONSTRAINT_50K]), // target_label: 'Total cost'
       briefAudit: { briefText: null, graph: WITNESS_GRAPH },
     });
-    // The receipt about "Total cost" must never be offered as the answer.
-    if (outcome.matched) {
-      expect(outcome.dispatch).not.toBe('with_recent_change');
-      expect(outcome.assistant_text).not.toContain('Total cost');
-    }
+    // ⚠ ASSERTED POSITIVELY. The first version wrapped both assertions in
+    // `if (outcome.matched)`, so it made NO claim at all on the decline path —
+    // the same vacuity shape TWIN-6 itself was twice repaired for. The measured
+    // outcome is a decline to the reasoning layer; assert exactly that.
+    expect(outcome.matched).toBe(false);
   });
 });
 

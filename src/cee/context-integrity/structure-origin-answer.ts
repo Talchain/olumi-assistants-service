@@ -364,12 +364,21 @@ function resolveElement(message: string, graph: unknown): GraphNodeView | null {
 
   // A strict maximum, or nothing. Ties are ambiguity, and the honest response to
   // ambiguity is to let the reasoning layer ask (trap 22f), not to pick.
+  //
+  // ⚠ THE REVERSE DIRECTION FAILS SAFE, AND IT WAS MEASURED RATHER THAN ASSUMED
+  // (adversarial review, PR #1036). Three real shapes make a genuine change fail
+  // to be recognised here: a generic `target_label` ("the decision model", "a
+  // link in the decision model"), and a genuine tie between two equally-matching
+  // nodes. **All three DECLINE to the reasoning layer; none produces a false
+  // claim.** That asymmetry is deliberate — a missed match costs an LLM turn, a
+  // wrong match costs the user a statement about their model that is not true.
   if (best === null || bestScore === 0 || bestScore === runnerUp) return null;
   return best;
 }
 
 /**
- * ⭐⭐ IS A RECORDED SESSION MUTATION ABOUT THE ELEMENT THIS QUESTION NAMES?
+ * ⭐⭐ WHICH RECORDED SESSION MUTATION, IF ANY, IS ABOUT THE ELEMENT THIS QUESTION
+ * NAMES?
  *
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
  * Composed journey witness, 18 Aug 2026, deployed CEE `4a513781`, LINK 6, VERBATIM:
@@ -385,58 +394,99 @@ function resolveElement(message: string, graph: unknown): GraphNodeView | null {
  * replaced, because a deflection declines and this one states a falsehood about
  * the user's own model.
  *
- * ── THE QUESTION THIS PREDICATE ANSWERS (trap 21, written down first) ────────
+ * ── THE QUESTION THIS ANSWERS (trap 21, written down first) ─────────────────
  * NOT "is this an origin question?" (that is `isStructureOriginQuestion`) and NOT
  * "can we answer it?" (that is `tryStructureOriginAnswer`). It answers exactly
- * one thing: **is the session-edit reading of this question even available?**
+ * one thing: **which recorded mutation, if any, makes the session-edit reading of
+ * this question available?**
  *
- * The deferral it gates is genuinely right in one case and only one: *"why did
- * you add the cost constraint?"* when the cost constraint is precisely what was
- * just changed. There, "why did you make that edit" and "why does this exist"
- * are indistinguishable, and trap 22f is explicit that we do not guess — the
- * readback arm quotes a REAL persisted mutation, so deferring leaves the user
- * with grounded copy. When the recorded change concerns a DIFFERENT element the
- * ambiguity does not exist at all: nothing about a question naming the status quo
- * option can be a request for a receipt about enterprise sales headcount.
+ * ⚠⚠ IT RETURNS THE MATCH, NOT A BOOLEAN, AND THAT IS A CORRECTION — trap 21
+ * caught INSIDE the fix written to close a trap-21 defect (adversarial review of
+ * PR #1036, measured). Round 1 returned `boolean`, which **discarded which label
+ * matched**. The predicate answered *"is the session-edit reading available?"*
+ * while the caller consumed it as *"may the HEAD receipt answer this?"* — two
+ * questions under one boolean. Measured consequence, reproduced by execution:
+ *
+ *   "Why did you add the Hybrid Phased Approach?"
+ *   recent = [ {target: Total cost}  <-- head, {target: Hybrid Phased Approach} ]
+ *   -> "Earlier in this session: Updated Total cost from 1 to 2."
+ *
+ * A named-element question answered with a receipt about a DIFFERENT element at
+ * `llm_calls: 0` — honest now (the attribution fix), but still the substitution
+ * class. Returning the match lets the caller answer from the change the user
+ * actually asked about.
  *
  * ── WHY THIS IS NOT ANOTHER PHRASE-LIST ROUND ───────────────────────────────
  * CEE #888 burned four rounds oscillating on one natural-language predicate, and
  * the ruling (trap 22f) was that no further punctuation-or-phrasing rule settles
- * such a thing. **Nothing is added to any phrase list here.** This conjunct is a
- * fact about STATE: it resolves the subject with the module's existing
- * identity-binding resolver and compares it against the persisted
- * `RecentMutation.target_label` the handler itself wrote. Phrasing decides
- * nothing.
+ * such a thing. **Nothing is added to any phrase list here.** This is a fact about
+ * STATE: it resolves the subject with the module's existing identity-binding
+ * resolver and compares it against the persisted `RecentMutation.target_label`
+ * the handler itself wrote. Phrasing decides nothing.
  *
- * ── FAILURE DIRECTION, STATED ───────────────────────────────────────────────
- * `false` is the permissive answer here (the caller then answers from provenance
- * or declines to the reasoning layer); `true` preserves today's behaviour. So it
- * is written to err TOWARDS `true`: any identifying-token overlap defers. An
- * incidental overlap ("Enterprise partnerships" vs "Enterprise sales headcount")
- * therefore costs only the status quo, which the caller's own copy fix has
- * already made truthful. What it must never do is defer on NO overlap, which is
- * the witnessed harm.
+ * ── THE THRESHOLD IS TWO TOKENS, NOT ONE, AND THAT TOO WAS MEASURED ─────────
+ * Round 1 matched on ANY single identifying-token overlap and argued it was safe
+ * to "err towards deferring". An independent corpus (15 shapes, each with its
+ * opposite-direction twin, built outside this author's head) refuted the premise
+ * that the error was free:
  *
- * Returns `false` when the subject cannot be resolved — an unresolvable subject
- * is not evidence of ambiguity, and the caller's next step (`tryStructureOriginAnswer`)
- * declines on exactly the same resolution failure.
+ *   "Why did you add Enterprise partnerships?"  ·  recent = [Enterprise sales
+ *   headcount and spend]  ->  deferred on the single incidental token
+ *   "enterprise", and answered about the wrong element.
+ *
+ * `Math.min(2, …)` keeps single-token subjects ("Churn") matchable on their one
+ * token, so nothing that previously matched by identity stops matching. **The
+ * next round was run in advance (trap 22f's exit): the tightening closes that
+ * case and changes NOTHING else across the corpus.** It is a strictly safer
+ * setting at zero measured cost, so "err towards true" is not adopted as doctrine.
+ *
+ * ── FAILURE DIRECTION, STATED PRECISELY ─────────────────────────────────────
+ * ⚠ AT THE ONLY CALL SITE, `null` IN THE `recent_changes.length > 0` BRANCH
+ * ALWAYS DECLINES TO THE REASONING LAYER. (Round 1's docblock said the caller
+ * "answers from provenance or declines" — **measurably wrong**: the provenance
+ * path is unreachable from that branch, and it was the clause setting the whole
+ * design's risk direction. Corrected by the same review.) Declining is the
+ * permissive, safe direction: it can never assert a change.
+ *
+ * `null` when the subject cannot be resolved — an unresolvable subject is not
+ * evidence of ambiguity, and the caller's next step declines on the same failure.
  */
-export function originSubjectIsRecentlyChanged(
+export interface OriginSubjectChangeMatch {
+  /** Index into the `recentTargetLabels` array the caller passed, in its order. */
+  readonly index: number;
+  /** Overlapping identifying tokens. Exposed so a caller can rank or log. */
+  readonly hits: number;
+}
+
+export function findRecentChangeAboutOriginSubject(
   message: string,
   graph: unknown,
   recentTargetLabels: readonly string[],
-): boolean {
+): OriginSubjectChangeMatch | null {
   const subject = resolveElement(message, graph);
-  if (subject === null) return false;
+  if (subject === null) return null;
   const subjectTokens = identifyingTokens(subject.label);
-  if (subjectTokens.size === 0) return false;
-  for (const raw of recentTargetLabels) {
+  if (subjectTokens.size === 0) return null;
+
+  // A single shared token is an incidental collision ("Enterprise partnerships"
+  // vs "Enterprise sales headcount"); two is a reference. Single-token subjects
+  // keep their one token, so identity matching is never weakened.
+  const required = Math.min(2, subjectTokens.size);
+
+  let best: OriginSubjectChangeMatch | null = null;
+  for (let i = 0; i < recentTargetLabels.length; i += 1) {
+    const raw = recentTargetLabels[i];
     if (typeof raw !== 'string' || raw.length === 0) continue;
+    let hits = 0;
     for (const token of identifyingTokens(raw)) {
-      if (subjectTokens.has(token)) return true;
+      if (subjectTokens.has(token)) hits += 1;
+    }
+    // Strictly greater, so ties keep the EARLIER (more recent) change.
+    if (hits >= required && (best === null || hits > best.hits)) {
+      best = { index: i, hits };
     }
   }
-  return false;
+  return best;
 }
 
 // ============================================================================
