@@ -345,3 +345,65 @@ describe('a label carrying an exception seam cannot self-protect either', () => 
     expect(found.map((e) => e.nodeId)).toContain(COST_ID);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 7. THE FACTOR SLOT IS THE SAME DOOR — and nothing else in this file opens it
+// ---------------------------------------------------------------------------
+
+/**
+ * The witness arrived through the OPTION slot, so every case above is satisfied
+ * by masking `"<name> option"` alone: deleting the `"effect on <name>"` arm left
+ * all 66 GREEN. That surviving mutant was a gap in this corpus, not an
+ * equivalent mutation — the advised sentence puts a name in BOTH slots, and a
+ * FACTOR whose own label carries a cue self-protects identically. `skip`,
+ * `ignore`, `retain`, `preserve` and `never` are all in `PROTECTION_CUE` and all
+ * ordinary metric names.
+ */
+describe('a FACTOR whose own label carries a cue does not self-protect either', () => {
+  const OPTION_LABEL = 'expand to Germany'; // deliberately cue-free
+  const CUE_BEARING_FACTOR_LABELS = [
+    'Skip rate',
+    'Ignore rate',
+    'Retain rate',
+    'Preserve ratio',
+    'Never-events count',
+  ] as const;
+
+  const factorGraph = (factorLabel: string) => ({
+    nodes: [
+      { id: OPTION_ID, label: OPTION_LABEL },
+      { id: CHURN_ID, label: factorLabel },
+    ],
+  });
+
+  for (const factorLabel of CUE_BEARING_FACTOR_LABELS) {
+    it(`"${factorLabel}" — the advised sentence applies`, () => {
+      // PRECONDITION PINNED IN-TEST: the label really is cue-bearing, so a
+      // green here is the masking's doing and not a label that never had a cue.
+      expect(
+        extractProtectedEntities(
+          `Update things. Please ${factorLabel} as it stands.`,
+          factorGraph(factorLabel),
+        ).map((e) => e.nodeId),
+      ).toContain(CHURN_ID);
+
+      const result = demote(
+        buildConfigureOptionAdvisedFormat(OPTION_LABEL, factorLabel, '0.4'),
+        configureOptionEffect(OPTION_ID, CHURN_ID),
+        factorGraph(factorLabel),
+      );
+      expect(result.demotedIndices).toEqual([]);
+      expect(result.verdicts[0]!.verdict).toBe('would_apply');
+    });
+  }
+
+  it('FAIL-CLOSED — the same factor named protectively elsewhere still holds', () => {
+    const result = demote(
+      'Update the model. Do not touch Skip rate.',
+      configureOptionEffect(OPTION_ID, CHURN_ID),
+      factorGraph('Skip rate'),
+    );
+    expect(result.demotedIndices).toEqual([0]);
+    expect(result.demotedEntityLabels).toContain('Skip rate');
+  });
+});
