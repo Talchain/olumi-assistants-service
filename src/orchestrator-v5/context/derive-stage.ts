@@ -145,6 +145,68 @@ export interface StageDerivationInput {
  * coaching chips together — they cannot disagree about which stage the user is
  * in, which is the two-authorities defect this estate has shipped before.
  */
+/**
+ * ⭐ THE STAGES IN WHICH AN ANALYSIS HAS ALREADY RUN — the inverse fact this
+ * module owes the estate, and the reason it lives HERE rather than at each
+ * consumer.
+ *
+ * ── WHY IT EXISTS ────────────────────────────────────────────────────────────
+ * Before {@link deriveAuthoritativeStage}, `'analyse'` was the ONLY stage a
+ * post-analysis turn could carry, so consumers asking "has an analysis run?"
+ * spelled it `stage === 'analyse'` and were right. The promotion breaks that
+ * spelling — and it breaks it SILENTLY, in the direction that costs the user an
+ * affordance: `coaching/post-analysis-wrapper.ts` returned a silent skip and the
+ * review-card chips a user had after every analysis simply stopped appearing.
+ * That is not a hypothetical. It reddened `Lint, TypeCheck, Unit Tests` on
+ * CEE #1039 at `6cbf5308` (`turn-executor-post-analysis-chip-sameness.test.ts`,
+ * "turn 1 sanity: the wrapper must offer its review-card chip") and is the
+ * reason that PR could not merge.
+ *
+ * ── WHY IT IS NOT A SECOND RULE ──────────────────────────────────────────────
+ * The tempting fix is `stage === 'analyse' || stage === 'decide'` at the
+ * wrapper. That is a SECOND authority on the same question, in a different file
+ * from the one that decides when `decide` is reachable — the differently-spelled
+ * twins this codebase keeps paying for. The next stage the derivation learns to
+ * emit would have to be remembered at every such site, and a forgotten site
+ * fails the same silent way.
+ *
+ * So the module that PROMOTES the stage also publishes what the promotion means.
+ * One authority; a consumer asks it rather than restating it.
+ *
+ * ── WHY `decide` AND NOT `review` ────────────────────────────────────────────
+ * Derived from {@link deriveAuthoritativeStage}, not chosen: `decide` is
+ * returned ONLY when `freshness === 'fresh'`, and `'fresh'` already means a
+ * SUCCESSFUL `run_analysis` fact matches the current persisted graph. So every
+ * `decide` turn is by construction a turn on which an analysis has run —
+ * `decide` is a strict REFINEMENT of the old `'analyse'` condition, never a
+ * widening of it. `'review'` is excluded because nothing can emit it (see the
+ * module docblock), so including it would be a claim about an unreachable state.
+ * `'frame'` is excluded because it carries no analysis.
+ *
+ * The equality "every stage this predicate admits, other than `analyse`, is a
+ * stage `deriveAuthoritativeStage` can only return under `fresh`" is pinned by
+ * a test, so a future promotion added to the derivation without adding it here
+ * REDs instead of quietly withdrawing an affordance.
+ */
+export const POST_ANALYSIS_STAGES: ReadonlySet<StageType> = new Set<StageType>([
+  'analyse',
+  'decide',
+]);
+
+/**
+ * True when the turn's stage means an analysis has already run.
+ *
+ * Consumers MUST ask this rather than comparing to a stage literal. Total over
+ * `StageType`; no side effects.
+ */
+export function isPostAnalysisStage(stage: string): boolean {
+  // The SET is typed to `StageType`, so a member that is not a canonical stage
+  // fails the build; the PARAMETER is `string`, so the predicate is total and a
+  // consumer holding a not-yet-narrowed value cannot be forced into a cast that
+  // would silently admit anything.
+  return POST_ANALYSIS_STAGES.has(stage as StageType);
+}
+
 export function deriveAuthoritativeStage(input: StageDerivationInput): StageType {
   const { requestedStage, freshness, optionCount, hasGraph } = input;
 

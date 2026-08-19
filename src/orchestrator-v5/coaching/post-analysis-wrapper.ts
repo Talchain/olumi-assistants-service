@@ -35,9 +35,11 @@
 
 import { createHash } from 'node:crypto';
 
+import type { StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { SuggestedAction } from '../compose/types.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { isPostAnalysisStage } from '../context/derive-stage.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import type { AnalysisFreshness } from '../context/freshness.js';
 import { sanitiseChipProse } from './chip-prose-sanitiser.js';
@@ -86,11 +88,18 @@ export type SkipReason =
   | 'stale_analysis'
   | 'no_review_cards'
   | 'unsupported_chip_actions'
-  | 'non_analyse_stage'
+  | 'non_post_analysis_stage'
   | 'freshness_unknown';
 
 export interface PostAnalysisWrapperInput {
-  readonly stage: string;
+  /**
+   * The canonical wire stage (`@talchain/schemas` `Stage`). Was `string`; a
+   * stringly-typed stage is a fourth vocabulary in all but name — it accepts
+   * `'evaluate'`, `'ideate'` or a typo without complaint and defers the error
+   * to a silent non-match at runtime, which is exactly how the affordance
+   * described on the gate below went missing.
+   */
+  readonly stage: StageType;
   readonly priorFacts: readonly HandlerFact[];
   readonly freshness: AnalysisFreshness;
   readonly requestId: string;
@@ -165,7 +174,8 @@ const STALE_RERUN_CHIP: SuggestedAction = {
  * Generate post-analysis coaching chips.
  *
  * Trigger conditions:
- *   - stage must be 'analyse'
+ *   - stage must be a POST-ANALYSIS stage (`isPostAnalysisStage`), not the
+ *     literal 'analyse' — see the gate below
  *   - latest successful run_analysis fact must exist
  *   - freshness 'fresh' → mine review_cards for coaching chips
  *   - freshness 'stale' → emit single rerun chip (no coaching mix)
@@ -174,7 +184,7 @@ const STALE_RERUN_CHIP: SuggestedAction = {
  * Telemetry policy: skip events only fire when the wrapper was
  * EXPECTED to fire and was blocked by something diagnostic
  * (no_run_fact, no_review_cards, unsupported_chip_actions). Trivial
- * non-trigger paths (non_analyse_stage, freshness_unknown) are silent
+ * non-trigger paths (non_post_analysis_stage, freshness_unknown) are silent
  * — every direct_answer turn passes through here, so noise on those
  * paths would dwarf the signal.
  *
@@ -185,8 +195,19 @@ export function generatePostAnalysisCoaching(
   input: PostAnalysisWrapperInput,
 ): PostAnalysisWrapperResult {
   // Silent non-trigger paths — the wrapper was never expected to fire.
-  if (input.stage !== 'analyse') {
-    return silentSkip('non_analyse_stage');
+  //
+  // ⚠ THE QUESTION THIS ASKS IS "HAS AN ANALYSIS RUN?", NOT "IS THE STAGE THE
+  // STRING `analyse`?" — and until CEE could derive its own stage those were
+  // the same question, which is why this was a literal comparison. They are no
+  // longer the same: `context/derive-stage.ts` promotes a fresh, multi-option
+  // turn to `decide`, and a literal comparison here answered "no" and SILENTLY
+  // WITHDREW the review-card chips a user gets after every analysis.
+  //
+  // Asking the stage authority instead of restating its vocabulary is the whole
+  // point: when the derivation learns to emit another post-analysis stage, this
+  // site does not have to be remembered.
+  if (!isPostAnalysisStage(input.stage)) {
+    return silentSkip('non_post_analysis_stage');
   }
   if (input.freshness === 'none' || input.freshness === 'unknown') {
     return silentSkip('freshness_unknown');
@@ -304,7 +325,7 @@ export function generatePostAnalysisCoaching(
 // ─── helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Silent skip for trivial non-trigger paths (non_analyse_stage,
+ * Silent skip for trivial non-trigger paths (non_post_analysis_stage,
  * freshness_unknown). Every direct_answer turn passes through here,
  * so emitting a skip event on these paths would generate per-turn
  * noise with no diagnostic value.

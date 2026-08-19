@@ -13,10 +13,42 @@
 import type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T } from "../schemas/cee-v3.js";
 
 // ============================================================================
-// Decision Stage
+// Decision Stage — RE-EXPORT, NOT A DECLARATION
 // ============================================================================
 
-export type DecisionStage = 'frame' | 'ideate' | 'evaluate' | 'decide' | 'optimise';
+/**
+ * ⭐ THE DUPLICATE IS REMOVED, NOT TRANSLATED (Paul's convergence rule).
+ *
+ * This line USED to be a second, independent declaration:
+ * `export type DecisionStage = 'frame' | 'ideate' | 'evaluate' | 'decide' | 'optimise';`
+ * — character-for-character the same union already declared at
+ * `src/dsk/types.ts:8`. Two same-named types with no link between them is this
+ * codebase's chronic defect (the two `generateGraphHash` twins), and it is worse
+ * for a VOCABULARY than for a function: the two could drift by one member and
+ * every consumer would still compile, because each file's own union is
+ * internally consistent.
+ *
+ * ── WHY `src/dsk/types.ts` IS THE OWNER, AND NOT THIS FILE ───────────────────
+ * The five-member vocabulary is the DSK bundle's. Its values are what
+ * `data/dsk/v1.json` writes in `stage_applicability`, and `src/dsk/linter.ts`
+ * VALIDATES the bundle against `DECISION_STAGES` from that module. So the DSK
+ * module is where the union has an enforced relationship with real data;
+ * everything here merely consumes it. `src/dsk/types.ts` imports nothing, so
+ * this direction cannot cycle.
+ *
+ * ── ⚠ THIS IS NOT THE CANONICAL STAGE VOCABULARY ─────────────────────────────
+ * The CANONICAL one is `Stage` / `StageType` from `@talchain/schemas`
+ * (`frame | analyse | decide | review`) — the wire enum, which declares itself
+ * canonical and instructs consumers to derive from it rather than re-declare it.
+ * `DecisionStage` is a legacy V4 + DSK-bundle vocabulary that survives ONLY
+ * behind a named edge: `mapStageToDecisionStage`
+ * (`orchestrator-v5/handlers/edit-graph-dispatch.ts:754`) is the single
+ * translation point, and `stage-vocabulary-convergence.test.ts` pins that it
+ * stays the only one and that no fourth vocabulary is minted.
+ */
+import type { DecisionStage } from '../dsk/types.js';
+
+export type { DecisionStage };
 
 // ============================================================================
 // Request Types

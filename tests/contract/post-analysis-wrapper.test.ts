@@ -86,14 +86,46 @@ function makeInput(overrides: Partial<PostAnalysisWrapperInput>): PostAnalysisWr
 // ─── trigger conditions + telemetry policy ────────────────────────────────
 
 describe('generatePostAnalysisCoaching — silent non-trigger paths', () => {
-  it('skips silently when stage is not analyse (no telemetry noise)', () => {
+  it('skips silently when the stage is not a post-analysis stage (no telemetry noise)', () => {
     const result = generatePostAnalysisCoaching(makeInput({ stage: 'frame' }));
     expect(result.fired).toBe(false);
     expect(result.chips).toEqual([]);
-    expect(result.skipReason).toBe('non_analyse_stage');
+    expect(result.skipReason).toBe('non_post_analysis_stage');
     // Every direct_answer turn passes through here — telemetry would
     // dwarf the diagnostic signal. Silent.
     expect(skippedEvents()).toHaveLength(0);
+  });
+
+  // ⭐ THE OPPOSITE-DIRECTION TWIN of the case above, and the one that was
+  // MISSING when the stage derivation shipped. The case above pins that a
+  // non-analysis stage skips; on its own it is satisfied by a wrapper that
+  // skips on EVERYTHING, which is precisely the failure `decide` produced.
+  // `decide` is only ever derived on a FRESH analysis, so a `decide` turn is a
+  // post-analysis turn and the wrapper owes it the same chips.
+  it('FIRES on the `decide` stage — the promotion must not withdraw the chips', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{ card_id: 'rc_decide', card_type: 'evidence_priority', items: [{ factor_label: 'Capacity' }] }],
+    });
+    const args = { priorFacts: [fact], freshness: 'fresh' as const, answerText: 'Coaching prose here.' };
+
+    // ⭐ THE DISCRIMINATING PAIR. The `analyse` arm establishes that this exact
+    // input DOES produce chips; the `decide` arm asserts the promotion did not
+    // take them away. Either alone proves nothing — the first is just the
+    // pre-existing behaviour, and the second would pass on a fixture that
+    // produces no chips in either stage.
+    const onAnalyse = generatePostAnalysisCoaching(makeInput({ ...args, stage: 'analyse' }));
+    expect(onAnalyse.fired, 'baseline: this input must fire on `analyse`').toBe(true);
+
+    const onDecide = generatePostAnalysisCoaching(makeInput({ ...args, stage: 'decide' }));
+    expect(
+      onDecide.skipReason,
+      'a fresh-analysis turn promoted to `decide` must not be skipped as a non-trigger',
+    ).not.toBe('non_post_analysis_stage');
+    expect(
+      onDecide.fired,
+      'the review-card chips a user gets after an analysis must survive the `decide` promotion',
+    ).toBe(true);
+    expect(onDecide.chips.map(c => c.id)).toEqual(onAnalyse.chips.map(c => c.id));
   });
 
   it('skips silently when freshness is "none" (pre-analysis turn)', () => {
