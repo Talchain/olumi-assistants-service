@@ -53,6 +53,7 @@ import {
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
   FOCUS_INSTRUCTION,
+  READINESS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -116,6 +117,11 @@ const MODEL_FACING_CORPUS = [
   // `focus` on the pack, so a field sanctioned only here is genuinely
   // sanctioned — the same reasoning as its two siblings above.
   FOCUS_INSTRUCTION,
+  // Readiness. Emitted by the SAME condition that puts `readiness` on the pack
+  // — same reasoning as its three siblings above. The served PMS prompt cannot
+  // sanction it (it is operator-managed and not editable from this repo), which
+  // is precisely why the instruction is code-owned.
+  READINESS_INSTRUCTION,
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -305,6 +311,27 @@ function assembleMaximalPack(
       usable_for_chips: true,
       blocked: false,
       actionable_blocker_count: 0,
+    } as never,
+    // FIXTURE_COMPLETENESS: `readiness` is a schema-declared key, so the
+    // maximal fixture must populate it or this gate narrows its own scope.
+    // REALISTIC, not maximal-in-the-abstract: the shape of the deployed defect
+    // — a non-ready status with two human-input blockers, each carrying the
+    // recovery authority's next step as genuine prose the gate must see
+    // sanctioned.
+    readiness: {
+      status: 'needs_user_input',
+      open_items: [
+        {
+          kind: 'option_needs_encoding',
+          description: 'give "Churn rate" a value so the model can run',
+          option_label: 'Churn rate',
+        },
+        {
+          kind: 'option_needs_encoding',
+          description: 'give "Onboarding time" a value so the model can run',
+          option_label: 'Onboarding time',
+        },
+      ],
     } as never,
     // A LARGE COMPACT graph — production supplies `compactedGraph`, and it is
     // the input the context-budget module actually trims, so this is what makes

@@ -1221,6 +1221,20 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.coaching_context) {
     parts.push('', COACHING_CONTEXT_INSTRUCTION);
   }
+  // READINESS — CODE-OWNED, a sibling of the instructions around it, appended by
+  // the SAME condition that puts `readiness` on the pack (co-located conditional
+  // sanctioning). Absent verdict → no section → no instruction → byte-identity.
+  //
+  // ⚠ THIS IS THE HALF THAT REACHES THE SERVED PROMPT. The V5 orchestrator
+  // system prompt is an operator-managed PMS store row resolved via the
+  // `routing → orchestrator` alias (see routing/prompt-loader.ts), so it is NOT
+  // editable from this repo. A code-owned instruction block is the only way to
+  // tell the model about a new pack field without an operator prompt edit —
+  // which is exactly why `model_health` (instructed in the legacy V4 prompts,
+  // produced by nothing) never governed anything on this path.
+  if (contextPack.readiness !== undefined) {
+    parts.push('', READINESS_INSTRUCTION);
+  }
   // Context v2 S4-INJECT [R2]: the facts-beat-summary precedence instruction
   // — CODE-OWNED (not PMS-served), a sibling of COACHING_CONTEXT_INSTRUCTION
   // appended the same way, gated by the same condition that put the section
@@ -1329,6 +1343,33 @@ export function applyForcedExplanationHandler(
  * rather than giving confident advice; never invent freshness / confidence /
  * evidence / values / units / mutation / science; never quote internal fields.
  */
+/**
+ * Readiness instruction. British English. Appended by the SAME condition that
+ * puts `readiness` on the pack.
+ *
+ * DEFECT IT CLOSES: on deployed staging the assistant told a user *"so nothing
+ * there is blocking analysis"* while two factors were the only blockers. The
+ * pack carried a readiness status and a blocker COUNT but never the blocker
+ * IDENTITY, and no instruction constrained the claim — so the model spoke
+ * freely about a fact it did not hold.
+ *
+ * The third clause is the load-bearing one: an EMPTY list of open items is not
+ * permission to run. The canonical projection filters auto-repairable issues
+ * out, so `open_items: []` co-exists with a non-ready status — reading emptiness
+ * as "nothing is blocking" is the original defect one level down.
+ *
+ * Paul's standing rule is why the second clause exists: always leave the user a
+ * useful next route, never an honest dead end.
+ */
+export const READINESS_INSTRUCTION = [
+  '## Readiness (deterministic — authoritative)',
+  'The `readiness` block above is the system’s verified answer to "can this model be analysed yet?". Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
+  '- If anything is still open, say plainly that the analysis cannot run yet, name what is open, and give the user the next step it carries. Never leave them with only a refusal.',
+  '- An EMPTY list of open items does NOT mean the model is ready. Judge readiness by the status alone; when the status is anything other than ready, do not tell the user that nothing is blocking analysis.',
+  '- Never claim that nothing is blocking, that the model is ready, or that an analysis can run, unless this block says so. If you have not been given this block, you do not know — say what you can see and offer to check, rather than asserting the model is clear.',
+  '- Never invent a blocker, a count, or a remedy that this block does not contain.',
+].join('\n');
+
 export const COACHING_CONTEXT_INSTRUCTION = [
   '## Coaching state (deterministic — authoritative)',
   'The `coaching_context` block above is the system’s verified state of the analysis. Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',

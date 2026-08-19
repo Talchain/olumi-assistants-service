@@ -27,6 +27,7 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { SessionTurnWithContent } from '../session/conversation-content.js';
+import type { ContextPackReadinessProjection } from '../routing/readiness-summary.js';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
@@ -439,6 +440,31 @@ export interface ContextPack {
    */
   readonly display_analysis: DisplaySafeAnalysis | null;
   /**
+   * READINESS — can this model be analysed, and if not, WHAT is still open and
+   * what is the user's route out of it.
+   *
+   * Projected VERBATIM from the canonical `analysis_ready` payload by
+   * `projectContextPackReadiness` (routing/readiness-summary.ts), which
+   * delegates to `summariseReadiness` → `projectReadinessRecovery`. The
+   * assembler classifies nothing and re-derives nothing: this is a
+   * passthrough, and it must stay one.
+   *
+   * WHY IT EXISTS. The pack already carried a readiness STATUS and a blocker
+   * COUNT (`coaching_context.readiness_status` / `.actionable_blocker_count`),
+   * so the model could know that SOMETHING was blocking while being unable to
+   * name WHAT. That is how the assistant came to tell a user *"so nothing
+   * there is blocking analysis"* while two factors were the only blockers.
+   * `open_items[].description` carries the recovery authority's next step, so
+   * the model can now name the blocker AND the route.
+   *
+   * ⚠ ABSENT (key missing, never `readiness: null`) when the turn derived no
+   * canonical readiness payload — absence means UNKNOWN, never "nothing is
+   * blocking". The code-owned `READINESS_INSTRUCTION`
+   * (routing/route-with-tool-use.ts) says so to the model and is appended by
+   * the SAME condition that puts this key on the pack.
+   */
+  readonly readiness?: ContextPackReadinessProjection;
+  /**
    * LLM-facing graph projection. Edges carry decision-language `relationship`
    * phrases ("moderate positive link") instead of raw `strength` floats; raw
    * `exists` probabilities and `plain_interpretation` strings are stripped;
@@ -713,6 +739,18 @@ export interface AssembleContextPackInput {
    * LLM routing prompt). Omitted when no freshness was derived.
    */
   readonly coachingContext?: CoachingStatePack;
+  /**
+   * The turn's readiness projection, built by `projectContextPackReadiness`
+   * (routing/readiness-summary.ts) from the canonical `analysis_ready` payload
+   * the turn-executor already derived this turn. Surfaced verbatim as
+   * `ContextPack.readiness`.
+   *
+   * PRE-PROJECTED UPSTREAM ON PURPOSE — the same shape as `coachingContext`.
+   * The canonical readiness verdict has one owner; the assembler must never
+   * become a second one. Omitted (undefined) when no canonical payload was
+   * derived → the pack key is ABSENT → byte-identity with pre-change packs.
+   */
+  readonly readiness?: ContextPackReadinessProjection;
   /**
    * Context v2 S4-INJECT: the pre-projected rolling-summary section, built
    * by `loadConversationSummaryForInjection` (rolling-summary/inject.ts) in
@@ -1445,6 +1483,13 @@ export function assembleContextPackWithSummary(
     // are dropped; node numeric fields stripped. Raw `graph` above is
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
+    // READINESS — placed with the HARD STRUCTURED STATE. Conditional spread:
+    // the key is ABSENT when the turn derived no canonical readiness payload,
+    // never `readiness: null`. That distinction is load-bearing — an absent
+    // verdict is UNKNOWN, and a consumer that reads absence (or an empty
+    // `open_items`) as "nothing is blocking" re-creates the exact defect this
+    // field exists to close. Verbatim passthrough; no derivation here.
+    ...(input.readiness !== undefined ? { readiness: input.readiness } : {}),
     // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
     // above `conversation`, so the model reads the user's focus as part of the
     // model rather than as conversational colour. ⚠ In the SERIALISED prompt

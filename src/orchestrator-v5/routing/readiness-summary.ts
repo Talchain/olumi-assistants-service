@@ -44,6 +44,17 @@ export interface ReadinessOpenItem {
   readonly option_label?: string;
 }
 
+/**
+ * What the ContextPack carries. `status` is the canonical
+ * `analysis_ready.status` VERBATIM (never re-derived); `open_items` is
+ * {@link summariseReadiness}'s projection, which carries both the blocker
+ * identity and the user's route out of it.
+ */
+export interface ContextPackReadinessProjection {
+  readonly status: string;
+  readonly open_items: readonly ReadinessOpenItem[];
+}
+
 export interface ReadinessSummary {
   readonly open_items: readonly ReadinessOpenItem[];
   /**
@@ -138,6 +149,45 @@ export function summariseReadiness(
     ...(recovery.optionLabel ? { option_label: recovery.optionLabel } : {}),
   }];
   return { open_items: openItems, prose: composeReadinessProse(openItems) };
+}
+
+/**
+ * The ContextPack's readiness projection — status + the OPEN ITEMS behind it.
+ *
+ * WHY THIS EXISTS. The ContextPack already carried a readiness STATUS and a
+ * blocker COUNT (`coaching_context.readiness_status` /
+ * `.actionable_blocker_count`). It never carried the blocker IDENTITY, so the
+ * model could know that something was blocking and still be unable to name
+ * WHAT — which is how the assistant came to tell a user *"so nothing there is
+ * blocking analysis"* while two factors were the only blockers.
+ *
+ * NOT A SECOND AUTHORITY. Every value here is taken VERBATIM from the
+ * canonical readiness payload and from {@link summariseReadiness} (which
+ * itself delegates to `projectReadinessRecovery`). This function classifies
+ * nothing, counts nothing, and re-derives nothing — it is a projection, and
+ * the moment it starts deciding readiness it becomes the drift this estate
+ * keeps paying for.
+ *
+ * ⚠ `open_items: []` DOES NOT MEAN "MAY RUN". The canonical projection filters
+ * out auto-repairable issues, so an empty list co-exists with a non-ready
+ * `status`. That is exactly why `status` is carried ALONGSIDE the items rather
+ * than a derived boolean: a consumer that reads emptiness as permission
+ * re-creates the defect one level down.
+ *
+ * Returns `null` when there is no canonical payload to project — the caller
+ * omits the pack key entirely, so an unknown readiness stays UNKNOWN instead
+ * of serialising as an absence of blockers.
+ */
+export function projectContextPackReadiness(
+  analysisReady: AnalysisReadyPayload | null | undefined,
+): ContextPackReadinessProjection | null {
+  if (!analysisReady) return null;
+  const status = analysisReady.status;
+  if (typeof status !== 'string' || status.trim().length === 0) return null;
+  return {
+    status,
+    open_items: summariseReadiness(analysisReady).open_items,
+  };
 }
 
 function composeReadinessProse(items: readonly ReadinessOpenItem[]): string {

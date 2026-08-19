@@ -540,6 +540,43 @@ const ContextPackFocusSchema = z
   })
   .strict();
 
+/**
+ * One still-open readiness item. `kind` is the canonical low-cardinality
+ * presentation tag from `summariseReadiness`; `description` is the recovery
+ * authority's user-safe next step (the ROUTE, not just the fact of a
+ * blocker). `.strict()` so no raw value/hash can join a prompt-facing item.
+ */
+const ContextPackReadinessOpenItemSchema = z
+  .object({
+    kind: z.enum([
+      'too_few_options',
+      'goal_node_missing',
+      'option_needs_mapping',
+      'option_needs_encoding',
+      'goal_threshold_missing',
+      'model_needs_review',
+    ]),
+    description: z.string().min(1),
+    option_label: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * The readiness verdict projected onto the pack. `status` is the canonical
+ * `analysis_ready.status` VERBATIM.
+ *
+ * ⚠ `open_items` MAY BE EMPTY ON A NON-READY STATUS — the canonical projection
+ * filters auto-repairable issues out. `status` is therefore carried alongside,
+ * and `.min(1)` is deliberately NOT applied: an empty list is a legitimate,
+ * honest state and must not be conflated with "may run".
+ */
+const ContextPackReadinessSchema = z
+  .object({
+    status: z.string().min(1),
+    open_items: z.array(ContextPackReadinessOpenItemSchema).readonly(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -561,6 +598,13 @@ export const ContextPackSchema = z
     analysis: ContextPackAnalysisSchema.nullable(),
     display_analysis: DisplaySafeAnalysisSchema,
     display_graph: DisplaySafeGraphSchema,
+    /**
+     * READINESS: can this model be analysed, and if not, WHAT is open and what
+     * is the route out. Present ONLY when the turn derived a canonical
+     * `analysis_ready` payload (key absent otherwise — byte-identity for every
+     * turn that derived none). Absence means UNKNOWN, never "unblocked".
+     */
+    readiness: ContextPackReadinessSchema.optional(),
     /**
      * SELECTION-AWARE ANSWERING (hop 4): the user's canvas selection, resolved
      * against canonical state and projected display-safe by `projectFocus`.
