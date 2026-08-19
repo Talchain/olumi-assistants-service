@@ -41,6 +41,10 @@ import {
   sendRefusal,
 } from '../collab/route-support.js';
 import type { CollabStore, PacketTarget } from '../collab/types.js';
+import {
+  listWorkspacePeople,
+  resolveClaimedPersonId,
+} from '../collab/workspace-people.js';
 import { verifySupabaseUserJwt } from '../utils/supabase-user-jwt.js';
 import { emit, TelemetryEvents } from '../utils/telemetry.js';
 
@@ -154,21 +158,44 @@ export default async function route(
         // who is about to hand out the links. Nothing persists them and there is
         // no read-back route: a lost link is re-minted, never recovered.
         const names = Array.isArray(body.participants) ? body.participants : [];
-        const panel: Array<{ participant_id: string; display_name: string; token: string }> = [];
+        const panel: Array<{
+          participant_id: string;
+          display_name: string;
+          person_id: string;
+          token: string;
+        }> = [];
         for (const entry of names) {
           const p = asRecord(entry);
           const displayName = typeof p.display_name === 'string' ? p.display_name : '';
+          /**
+           * ⭐ THE OWNER'S CLAIM THAT THIS PANELLIST IS SOMEONE THEY HAVE ASKED
+           * BEFORE — validated against THIS scenario before it is honoured.
+           *
+           * ⚠ An ABSENT `person_id` means "someone new" and mints a fresh
+           * durable identity. It does NOT mean "look them up by name": the
+           * server never infers that two people are one, because a wrong merge
+           * silently puts one person's stated position under another person's
+           * name and nothing downstream can detect it.
+           */
+          const personId = await resolveClaimedPersonId(store, {
+            scenario_id: scenarioId,
+            claimed_person_id: typeof p.person_id === 'string' ? p.person_id : null,
+          });
           const minted = await mintParticipantToken(store, {
             round_id: round.round_id,
             scenario_id: scenarioId,
             display_name: displayName,
             supabase_user_id:
               typeof p.supabase_user_id === 'string' ? p.supabase_user_id : null,
+            person_id: personId,
             actor,
           });
           panel.push({
             participant_id: minted.participant.participant_id,
             display_name: minted.participant.display_name,
+            // Returned so the owner's client can offer this person for reuse on
+            // the NEXT round without a second round trip.
+            person_id: minted.participant.person_id ?? minted.participant.participant_id,
             token: minted.token,
           });
         }
@@ -210,6 +237,44 @@ export default async function route(
           code: (err as { code?: string })?.code ?? 'unknown',
           surface: 'round_close',
         });
+        return replyForRefusal(reply, req, err);
+      }
+    });
+  }
+
+  /**
+   * ── WORKSPACE PEOPLE (owner-only) ────────────────────────────────────────
+   * Who has been on a panel in this scenario, so the owner can invite the SAME
+   * colleague to a second round rather than creating a stranger who happens to
+   * share a name.
+   *
+   * ⚠ SCENARIO-SCOPED, OWNER-CHECKED, AND ON THE OWNER ROUTE MODULE — never the
+   * packet module. This is the only collab read that crosses a round boundary,
+   * so it is deliberately unreachable from any participant-token surface: a
+   * participant must not learn who else the owner has ever asked, which is a
+   * membership disclosure the blind round exists to prevent.
+   *
+   * ⚠ NO BELIEFS, NO ROUND IDS, NO TOKENS — four keys per person, projected
+   * explicitly in `listWorkspacePeople`.
+   */
+  for (const path of collabPaths('/scenarios/:scenario_id/people')) {
+    app.get(path, async (req, reply) => {
+      const userId = await requireOwnerUser(req, reply);
+      if (userId === null) return reply;
+      const params = asRecord(req.params);
+      const scenarioId =
+        typeof params.scenario_id === 'string' ? params.scenario_id.trim() : '';
+      if (scenarioId === '') {
+        return sendRefusal(reply, req, 400, 'invalid_scenario_id', 'scenario_id is required.');
+      }
+      const store = resolveStore();
+      try {
+        const people = await listWorkspacePeople(store, {
+          scenario_id: scenarioId,
+          actor: { kind: 'owner', user_id: userId },
+        });
+        return reply.code(200).send({ scenario_id: scenarioId, people });
+      } catch (err) {
         return replyForRefusal(reply, req, err);
       }
     });

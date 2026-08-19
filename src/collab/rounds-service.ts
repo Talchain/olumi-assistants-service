@@ -19,7 +19,9 @@
  */
 
 import {
+  identityScopeOf,
   refuse,
+  resolvePersonId,
   type CollabActor,
   type CollabRound,
   type CollabStore,
@@ -216,6 +218,10 @@ export async function ownerPreview(
       participant_id: p.participant_id,
       display_name: p.pseudonym ?? p.display_name,
       status: p.status,
+      // Still an EXPLICIT projection — these two are DERIVED from the row, not
+      // copied off it, so widening the row cannot widen this payload.
+      person_id: resolvePersonId(p),
+      identity_scope: identityScopeOf(p),
     })),
   };
 }

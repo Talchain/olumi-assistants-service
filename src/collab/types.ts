@@ -227,12 +227,95 @@ export interface CollabParticipant {
   display_name: string;
   /** Nullable BY DESIGN: binds to a real account later with no migration. */
   supabase_user_id: string | null;
+  /**
+   * ⭐ WORKSPACE(SCENARIO)-SCOPED DURABLE IDENTITY. Shared by one person's
+   * participant rows across every round on this scenario.
+   *
+   * ⚠ NULLABLE, PERMANENTLY, AND NOT A DEFECT. Null means "identity is
+   * round-scoped for this row" and arises in exactly three ways: a row written
+   * before the 20260819 migration, a deploy reaching a database where that
+   * migration has not run, or a participant whose identity has been detached by
+   * R-1 redaction. NEVER read this field directly — call `resolvePersonId`,
+   * which is the one place the fallback lives.
+   *
+   * ⚠ NEVER INFERRED FROM `display_name`. Two rows are one person only because
+   * the OWNER said so. See `resolvePersonId` and the migration header.
+   */
+  person_id: string | null;
   /** NEVER the raw token. */
   token_hash: string;
   status: ParticipantStatus;
   /** Set by redaction only. Null until redacted. */
   pseudonym: string | null;
   created_at: string;
+}
+
+/**
+ * ⭐⭐ THE ONE PLACE THE ROUND→WORKSPACE FALLBACK LIVES.
+ *
+ * A person id resolves to the durable `person_id` when there is one, and
+ * otherwise to `participant_id` — which is exactly today's round-scoped
+ * behaviour. Every reader goes through here, so there is a single answer to
+ * "who is this?" rather than one per call site.
+ *
+ * ⚠ WHY A FALLBACK RATHER THAN A HARD REQUIREMENT. The column arrives by
+ * migration, and migrations here are applied out of band. A reader that
+ * demanded `person_id` would turn "the migration has not run yet" into a total
+ * outage of a journey-witnessed feature; this turns it into round-scoped
+ * identity, which is the behaviour that shipped and was witnessed. The
+ * degradation is NOT silent — `identityScopeOf` below reports it, and the
+ * owner-facing surfaces state which guarantee is in force.
+ *
+ * ⚠ AND WHY THE FALLBACK IS SAFE FOR ATTRIBUTION. `participant_id` is a PK, so
+ * falling back can only ever SPLIT one person into several — never MERGE two
+ * people into one. A wrong split under-claims ("we cannot tell these are the
+ * same person"); a wrong merge would put words in someone's mouth. Only one of
+ * those is survivable, and the fallback is on the survivable side by
+ * construction.
+ */
+export function resolvePersonId(
+  participant: Pick<CollabParticipant, 'participant_id' | 'person_id'>,
+): string {
+  const personId = participant.person_id;
+  if (typeof personId === 'string' && personId.trim() !== '') return personId;
+  return participant.participant_id;
+}
+
+/**
+ * Which identity guarantee is actually in force for a row.
+ *
+ * This exists so the product can SAY so rather than quietly behaving one way or
+ * the other. A surface that shows cross-round history when it has it, and shows
+ * nothing when it does not, is indistinguishable from a surface that is broken —
+ * and the estate's characteristic defect is exactly that kind of invisible
+ * degradation.
+ */
+export type IdentityScope = 'workspace' | 'round';
+
+export function identityScopeOf(
+  participant: Pick<CollabParticipant, 'participant_id' | 'person_id'>,
+): IdentityScope {
+  const personId = participant.person_id;
+  return typeof personId === 'string' && personId.trim() !== '' ? 'workspace' : 'round';
+}
+
+/**
+ * One person the owner has had on a panel in this scenario, DERIVED by grouping
+ * participant rows on `person_id` — there is no `people` table, and deliberately
+ * so (see the migration header: two homes for one person's name is the
+ * hand-maintained-mirror defect, and redaction is where it would go wrong).
+ *
+ * This is what the owner picks from when they invite the same colleague to a
+ * second round, and picking is the ONLY way two rows become one person.
+ */
+export interface WorkspacePerson {
+  person_id: string;
+  /** Latest known label — `pseudonym ?? display_name`, newest row wins. */
+  display_name: string;
+  /** How many rounds in this scenario this person has been on a panel for. */
+  round_count: number;
+  /** ISO timestamp of their most recent participation. */
+  last_seen_at: string;
 }
 
 export interface ElicitationBelief {
@@ -398,11 +481,27 @@ export interface OpenPacketLikePreview {
     participant_id: string;
     display_name: string;
     status: ParticipantStatus;
+    /** Durable workspace identity, resolved (see `resolvePersonId`). */
+    person_id: string;
+    /** Which guarantee that id carries. Reported, never assumed. */
+    identity_scope: IdentityScope;
   }>;
 }
 
 export interface RevealPerTargetRow {
   participant_id: string;
+  /**
+   * ⭐ The durable person behind this position, resolved via `resolvePersonId`.
+   *
+   * ⚠ THIS DOES NOT REPLACE `participant_id`, AND MUST NOT. `participant_id` is
+   * the attribution grain: it is what `provenance.authored_by` holds, what
+   * `verifyAppliedFrom` binds against, and what the append-only event log
+   * references by foreign key. Historic events keep exactly the author they
+   * were written with. `person_id` is an ADDITIONAL, coarser identity that lets
+   * a reader ask "is this the same person who answered last round?" — a
+   * question the record could not previously express at all.
+   */
+  person_id: string;
   /** display_name, or the pseudonym after redaction. */
   display_label: string;
   value: number | null;
@@ -477,6 +576,21 @@ export interface CollabStore {
     token_hash: string,
   ): Promise<CollabParticipant | null>;
   listParticipants(round_id: string): Promise<CollabParticipant[]>;
+  /**
+   * Every participant row in a SCENARIO, across all its rounds — the read that
+   * makes the workspace roster derivable.
+   *
+   * ⚠ OWNER-PATH ONLY. This crosses the round boundary by design and therefore
+   * must never be reachable while assembling a participant-facing packet: it
+   * would hand a participant the roster of rounds they were not on. INV-A is a
+   * property of the QUERY SHAPE, so a read that CAN see siblings must be absent
+   * from the blind path entirely, not filtered inside it.
+   *
+   * ⚠ It returns PARTICIPANT ROWS, not people. Grouping is the service's job
+   * (`workspace-people.ts`), so the store stays a dumb port and the grouping
+   * rule — including the refusal to group by name — lives in one testable place.
+   */
+  listScenarioParticipants(scenario_id: string): Promise<CollabParticipant[]>;
   appendParticipantStatusEvent(args: {
     participant_id: string;
     status: ParticipantStatus;

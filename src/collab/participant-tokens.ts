@@ -76,6 +76,19 @@ export async function mintParticipantToken(
     scenario_id: string;
     display_name: string;
     supabase_user_id?: string | null;
+    /**
+     * ⭐ An EXISTING workspace person this panellist IS, or null/undefined for
+     * someone new.
+     *
+     * ⚠ THE CALLER MUST HAVE VALIDATED IT AGAINST THIS SCENARIO ALREADY — see
+     * `resolveClaimedPersonId`. This function does not re-check, because it has
+     * no scenario-wide read on its port and a second, weaker check here would
+     * be worse than none: it would read like a guard while proving less than
+     * the real one.
+     *
+     * ⚠ NEVER DERIVED FROM `display_name`. A name match is not a person match.
+     */
+    person_id?: string | null;
     actor: CollabActor;
   },
 ): Promise<{ participant: CollabParticipant; token: string }> {
@@ -86,6 +99,21 @@ export async function mintParticipantToken(
     refuse('collab_payload_invalid', 'A participant needs a display name to attribute to.');
   }
 
+  /**
+   * Reuse the owner's asserted person, or mint a NEW durable identity.
+   *
+   * ⚠ A FRESH UUID, NOT `participant_id`. The two id spaces stay separate so
+   * that no reader can come to depend on them being equal — they are equal for
+   * rows the migration backfilled and unequal for every row minted after, and
+   * code that assumed either would be right half the time. `resolvePersonId` is
+   * the only thing allowed to relate them.
+   */
+  const claimedPersonId =
+    typeof args.person_id === 'string' && args.person_id.trim() !== ''
+      ? args.person_id.trim()
+      : null;
+  const personId = claimedPersonId ?? crypto.randomUUID();
+
   const token = generateParticipantToken();
   const nowIso = new Date().toISOString();
   const participant: CollabParticipant = {
@@ -94,6 +122,7 @@ export async function mintParticipantToken(
     round_id: args.round_id,
     display_name: displayName,
     supabase_user_id: args.supabase_user_id ?? null,
+    person_id: personId,
     token_hash: hashParticipantToken(token),
     status: 'active',
     pseudonym: null,

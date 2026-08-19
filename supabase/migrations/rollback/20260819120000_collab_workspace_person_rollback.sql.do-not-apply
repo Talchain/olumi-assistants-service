@@ -1,0 +1,75 @@
+-- ROLLBACK for 20260819120000_collab_workspace_person.sql.
+--
+-- `.do-not-apply` by convention (see the two sibling rollbacks): this file is
+-- reference, never executed by any pipeline.
+--
+-- ⚠ READ BEFORE RUNNING. Dropping `person_id` DESTROYS every cross-round person
+-- link an owner has asserted since the migration ran, and those assertions are
+-- not recoverable from anything else in the schema — `display_name` cannot
+-- reconstruct them, which is the whole reason the column exists. Contributions
+-- themselves are untouched and keep their `participant_id` author, so the
+-- record stays honest; what is lost is the statement that two rows are one
+-- person. Prefer leaving the column in place and ignoring it.
+--
+-- The application already tolerates the column's absence (`person_id ??
+-- participant_id` at every read), so a rollback degrades identity to
+-- round-scoped rather than breaking the feature.
+
+-- 1. Restore the pre-migration redaction routine (drops the `person_id = NULL`
+--    limb, which would otherwise reference a column that no longer exists).
+CREATE OR REPLACE FUNCTION public.collab_redact_participant(
+  p_participant_id UUID,
+  p_pseudonym      TEXT,
+  p_requested_by   TEXT
+) RETURNS TABLE (pseudonym TEXT, already_redacted BOOLEAN)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_existing TEXT;
+BEGIN
+  IF p_pseudonym IS NULL OR btrim(p_pseudonym) = '' THEN
+    RAISE EXCEPTION 'collab_redact_participant: a pseudonym is required'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT ep.pseudonym INTO v_existing
+  FROM public.elicitation_participants ep
+  WHERE ep.participant_id = p_participant_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'collab_redact_participant: no such participant'
+      USING ERRCODE = 'CR404';
+  END IF;
+
+  IF v_existing IS NOT NULL AND btrim(v_existing) <> '' THEN
+    RETURN QUERY SELECT v_existing, TRUE;
+    RETURN;
+  END IF;
+
+  UPDATE public.elicitation_participants
+  SET display_name     = p_pseudonym,
+      pseudonym        = p_pseudonym,
+      supabase_user_id = NULL
+  WHERE participant_id = p_participant_id;
+
+  INSERT INTO public.collab_redaction_audit (participant_id, requested_by)
+  VALUES (p_participant_id, COALESCE(NULLIF(btrim(p_requested_by), ''), 'service'))
+  ON CONFLICT (participant_id) DO NOTHING;
+
+  RETURN QUERY SELECT p_pseudonym, FALSE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.collab_redact_participant(UUID, TEXT, TEXT)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.collab_redact_participant(UUID, TEXT, TEXT)
+  TO service_role;
+
+-- 2. Drop the index, then the column.
+DROP INDEX IF EXISTS public.elicitation_participants_scenario_person_idx;
+
+ALTER TABLE public.elicitation_participants
+  DROP COLUMN IF EXISTS person_id;

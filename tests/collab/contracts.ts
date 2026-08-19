@@ -203,6 +203,12 @@ export interface CollabParticipant {
   round_id: string;
   display_name: string; // owner-entered PII (R-1/R-2 surface)
   supabase_user_id: string | null;
+  /**
+   * Workspace(scenario)-scoped durable identity, shared across rounds.
+   * Nullable: null = round-scoped (pre-migration row, or redacted).
+   * Readers call `resolvePersonId`, never this field directly.
+   */
+  person_id: string | null;
   token_hash: string; // NEVER the raw token
   status: ParticipantStatus;
   /** Set by redaction only (R-1 pseudonymise). Null until redacted. */
@@ -425,6 +431,12 @@ export interface CollabStore {
   /** Any-status lookup, for distinguishing revoked (service grain). */
   findParticipantByTokenHash(round_id: string, token_hash: string): Promise<CollabParticipant | null>;
   listParticipants(round_id: string): Promise<CollabParticipant[]>;
+  /**
+   * Scenario-wide participant read — the ONLY port method that crosses a round
+   * boundary. Owner path only; must be unreachable from the blind packet path,
+   * because INV-A is a property of the query shape.
+   */
+  listScenarioParticipants(scenario_id: string): Promise<CollabParticipant[]>;
   appendParticipantStatusEvent(args: {
     participant_id: string;
     status: ParticipantStatus;
@@ -471,6 +483,13 @@ export const SENTINELS = {
   B_DISPLAY_NAME: "Beatrix-Zenobia-COLLAB-SENTINEL",
   B_PARTICIPANT_ID: "b-sentinel-participant-0000-0000",
   B_SUPABASE_USER_ID: "b-sentinel-supabase-user-0000",
+  /**
+   * B's DURABLE workspace identity — deliberately a different string from
+   * `B_PARTICIPANT_ID`. A fixture where the person id equalled the participant
+   * id would let a reader that confuses the two id spaces pass every assertion,
+   * which is the "test passes on the wrong object" defect at the id grain.
+   */
+  B_PERSON_ID: "b-sentinel-person-0000-0000-0000",
   /** The model's current value for the elicited target (anchor — must be hidden). */
   MODEL_VALUE: 0.2718281828,
   MODEL_VALUE_STR: "0.2718281828",
@@ -478,6 +497,8 @@ export const SENTINELS = {
   OWNER_USER_ID: "owner-sentinel-user-id-0000-0000",
   A_DISPLAY_NAME: "Alfred-Quillworth-COLLAB-SENTINEL",
   A_PARTICIPANT_ID: "a-sentinel-participant-0000-0000",
+  /** A's durable workspace identity. Distinct from A_PARTICIPANT_ID, as B's is. */
+  A_PERSON_ID: "a-sentinel-person-0000-0000-0000",
 } as const;
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -567,6 +588,12 @@ export function createFixtureStore(seed?: {
     async listParticipants(round_id) {
       calls.push(`listParticipants:${round_id}`);
       return [...state.participants.values()].filter((p) => p.round_id === round_id);
+    },
+    async listScenarioParticipants(scenario_id) {
+      // Recorded in `calls` like every other read, so a blindness test can
+      // assert this cross-round query is NEVER reached on the packet path.
+      calls.push(`listScenarioParticipants:${scenario_id}`);
+      return [...state.participants.values()].filter((p) => p.scenario_id === scenario_id);
     },
     async appendParticipantStatusEvent(args) {
       calls.push(`appendParticipantStatusEvent:${args.participant_id}:${args.status}`);
@@ -666,6 +693,9 @@ export function fixtureParticipantA(overrides?: Partial<CollabParticipant>): Col
     round_id: FIXTURE_ROUND_ID,
     display_name: SENTINELS.A_DISPLAY_NAME,
     supabase_user_id: null,
+    // A distinct id space from `participant_id`, deliberately: a fixture where
+    // the two were equal would let a reader that confused them pass.
+    person_id: SENTINELS.A_PERSON_ID,
     token_hash: "hash-of-a-token-fixture",
     status: "active",
     pseudonym: null,
@@ -681,6 +711,7 @@ export function fixtureParticipantB(overrides?: Partial<CollabParticipant>): Col
     round_id: FIXTURE_ROUND_ID,
     display_name: SENTINELS.B_DISPLAY_NAME,
     supabase_user_id: SENTINELS.B_SUPABASE_USER_ID,
+    person_id: SENTINELS.B_PERSON_ID,
     token_hash: "hash-of-b-token-fixture",
     status: "active",
     pseudonym: null,

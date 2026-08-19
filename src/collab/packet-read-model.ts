@@ -35,6 +35,7 @@
 import {
   isAnswerKind,
   refuse,
+  resolvePersonId,
   type CollabStore,
   type ElicitationEventRow,
   type ElicitationTarget,
@@ -237,6 +238,12 @@ export async function assembleRevealView(
   const labelById = new Map(
     roster.map((p) => [p.participant_id, p.pseudonym ?? p.display_name] as const),
   );
+  // The durable person behind each round-scoped participant. Resolved through
+  // the one authority so a pre-migration row degrades to round identity rather
+  // than reading as "belongs to nobody".
+  const personById = new Map(
+    roster.map((p) => [p.participant_id, resolvePersonId(p)] as const),
+  );
 
   const targets = projectTargets(round.target_manifest);
   const modelValues = await store.getModelValuesAtVersion(
@@ -269,6 +276,11 @@ export async function assembleRevealView(
           const belief = row.belief;
           return {
             participant_id: row.participant_id,
+            // ⚠ Falls back to `participant_id`, NEVER to a shared sentinel. A
+            // constant here would make every roster-less contributor look like
+            // ONE person — a merge invented by a default value, which is the
+            // exact harm the whole feature refuses to commit.
+            person_id: personById.get(row.participant_id) ?? row.participant_id,
             display_label: labelById.get(row.participant_id) ?? 'Removed participant',
             value: belief === null ? null : belief.value,
             // The person's OWN WORDS, verbatim. This is what makes the reveal a

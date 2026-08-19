@@ -84,6 +84,9 @@ function participant(overrides: Partial<CollabParticipant> = {}): CollabParticip
     round_id: ROUND_ID,
     display_name: 'Grace',
     supabase_user_id: null,
+    // Distinct from `participant_id` on purpose: the two id spaces must never
+    // be interchangeable in a fixture, or a reader that confuses them passes.
+    person_id: 'person-grace',
     token_hash: 'hash-grace',
     status: 'active',
     pseudonym: null,

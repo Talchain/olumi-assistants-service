@@ -165,6 +165,7 @@ function closedRoundStore(): CollabStore {
     round_id: ROUND_ID,
     display_name: name,
     supabase_user_id: null,
+    person_id: `person-${name}`,
     token_hash: `hash-${name}`,
     status: 'active',
     pseudonym: null,

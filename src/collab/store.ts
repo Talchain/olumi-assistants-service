@@ -144,6 +144,14 @@ export class SupabaseCollabStore implements CollabStore {
         owner_user_id: round?.created_by ?? null,
         display_name: row.display_name,
         supabase_user_id: row.supabase_user_id,
+        // ⚠ DEPLOY ORDER: this key requires `20260819120000_collab_workspace_person.sql`.
+        // PostgREST rejects an unknown column outright, so a deploy that reaches
+        // a database without that migration fails LOUDLY at mint — which is the
+        // intended behaviour and the reason the migration is a merge gate rather
+        // than a follow-up. Reads are tolerant (`resolvePersonId`); writes are
+        // not, because a write that silently dropped the person link would
+        // produce rows that look linked to the owner and are not.
+        person_id: row.person_id,
         token_hash: row.token_hash,
         status: row.status,
         pseudonym: row.pseudonym,
@@ -194,6 +202,28 @@ export class SupabaseCollabStore implements CollabStore {
       .eq('round_id', round_id)
       .order('created_at', { ascending: true });
     if (error !== null) throw new Error(`collab store: listParticipants failed: ${error.message}`);
+    return (data ?? []) as CollabParticipant[];
+  }
+
+  /**
+   * Every participant row in a scenario, across all rounds.
+   *
+   * ⚠ THE ONLY READ ON THIS PORT THAT CROSSES A ROUND BOUNDARY. It exists for
+   * the owner's workspace roster and must never be reached from the blind
+   * packet path — INV-A is a property of the query shape, so the guarantee is
+   * that `assembleOpenPacket` cannot call this, not that it filters what it
+   * returns. Uses the `(scenario_id, person_id)` index added by the 20260819
+   * migration.
+   */
+  async listScenarioParticipants(scenario_id: string): Promise<CollabParticipant[]> {
+    const { data, error } = await this.db
+      .from('elicitation_participants')
+      .select('*')
+      .eq('scenario_id', scenario_id)
+      .order('created_at', { ascending: true });
+    if (error !== null) {
+      throw new Error(`collab store: listScenarioParticipants failed: ${error.message}`);
+    }
     return (data ?? []) as CollabParticipant[];
   }
 
