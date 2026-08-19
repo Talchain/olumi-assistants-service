@@ -388,7 +388,7 @@ describe('Decision Review Fallback Prompt (v11.1)', () => {
   });
 });
 
-describe('Orchestrator Prompt (cf-v26)', () => {
+describe('Orchestrator Prompt (cf-v28)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
@@ -430,7 +430,7 @@ describe('Orchestrator Prompt (cf-v26)', () => {
 
   it('orchestrator prompt is within expected length range', () => {
     const prompt = loadPromptSync('orchestrator');
-    // cf-v26: ~58k chars (~14k tokens)
+    // cf-v28: ~57k chars (~14k tokens)
     expect(prompt.length).toBeGreaterThan(40000);
     expect(prompt.length).toBeLessThan(70000);
   });
@@ -491,9 +491,9 @@ describe('Prompt version alignment invariants', () => {
     expect(REPAIR_GRAPH_PROMPT_VERSION).toBe('v6');
   });
 
-  it('orchestrator fallback contains cf-v26 structural markers', () => {
+  it('orchestrator fallback contains cf-v28 structural markers', () => {
     const prompt = loadPromptSync('orchestrator');
-    // cf-v26 specific sections not present in earlier versions
+    // cf-v28 specific sections not present in earlier versions
     expect(prompt).toContain('<PRIMARY_RULES>');
     expect(prompt).toContain('<OUTPUT_CONTRACT>');
     expect(prompt).toContain('<COACHING_PLAYS>');
