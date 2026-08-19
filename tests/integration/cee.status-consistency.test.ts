@@ -58,7 +58,23 @@ describe("CEE Status Consistency", () => {
 
       // Record the draft-graph status
       const draftStatus = analysisReady.status;
+      // ⚠ STRICT, AND THAT IS THE POINT. This used to count
+      // `ready || needs_encoding`, while the graph-readiness endpoint's
+      // `options_ready` numerator is strictly `status === "ready"`
+      // (`cee/graph-readiness/canonical-readiness.ts`). The two agreed only
+      // for as long as the draft path never emitted `needs_encoding` on these
+      // briefs — i.e. the "KEY ASSERTION" below was comparing a loose count to
+      // a strict one and passing by coincidence. It broke the moment the draft
+      // path started labelling connected-but-numberless options honestly, which
+      // is exactly the class of change this test exists to catch. Comparing the
+      // same predicate on both sides makes the claim mean what it says.
       const draftOptionsReady = analysisReady.options.filter(
+        (o) => o.status === "ready"
+      ).length;
+      // Kept as a distinct quantity because it answers a DIFFERENT question —
+      // "how many options are analysable or one value away" — and must never be
+      // silently equated with the readiness endpoint's numerator again.
+      const draftOptionsReadyOrEncodable = analysisReady.options.filter(
         (o) => o.status === "ready" || o.status === "needs_encoding"
       ).length;
 
@@ -136,6 +152,9 @@ describe("CEE Status Consistency", () => {
       // KEY ASSERTION: Both endpoints should agree on options_ready count
       expect(readinessOptionsReady).toBe(draftOptionsReady);
       expect(readinessOptionsTotal).toBe(analysisReady.options.length);
+      // The looser count can only ever be >= the strict one; if it ever drops
+      // below, a `needs_encoding` option has gone missing between the two.
+      expect(draftOptionsReadyOrEncodable).toBeGreaterThanOrEqual(draftOptionsReady);
 
       // Log for debugging
       console.log({
@@ -279,8 +298,16 @@ describe("CEE Status Consistency", () => {
         (o) => o.status === "needs_encoding"
       );
       if (hasEncodingNeeded) {
-        // Payload status should be needs_encoding (unless blocked by needs_user_mapping)
-        expect(["needs_encoding", "needs_user_mapping"]).toContain(analysisReady.status);
+        // The payload-status ladder is
+        // `needs_user_input > needs_user_mapping > needs_encoding > ready`
+        // (`cee/transforms/analysis-ready.ts`). `needs_user_input` — the rung
+        // taken whenever per-option blockers exist — was missing from this set,
+        // so the assertion was unreachable until an option actually reached
+        // `needs_encoding` on this brief, and then rejected the CORRECT answer.
+        // A statuses-allowed list that omits the TOP of the producer's own
+        // priority order is a broken alarm, not a tighter check.
+        expect(["needs_user_input", "needs_encoding", "needs_user_mapping"])
+          .toContain(analysisReady.status);
       }
     });
 
