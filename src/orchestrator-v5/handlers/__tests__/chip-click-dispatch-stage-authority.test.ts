@@ -246,7 +246,7 @@ describe('chip-click run_analysis — the response carries the DERIVED stage, no
     const out = await dispatchChipClickRunAnalysis({
       payload: payloadWithStage('decide'),
       requestId: 'req-stage-fatal',
-      handlerRegistry: registryThrowing('fatal'),
+      handlerRegistry: registryThrowing('plot_error'),
     });
 
     expect(out.outcome, 'this must be the fatal floor, not a recovery').toBe('handler_failure');
