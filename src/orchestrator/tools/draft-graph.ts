@@ -20,6 +20,8 @@ import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+import { buildModelBuildingNotices } from "../../cee/draft/records/model-building-notices.js";
+import type { ModelBuildingNotices } from "@talchain/schemas/boundary";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
 
 /**
@@ -96,6 +98,24 @@ export interface DraftGraphResult {
   graphOutput: GraphV3T | null;
   /** Analysis-ready payload from the pipeline boundary stage. Threaded to V5 for OlumiResponse. */
   analysisReady?: GraphPatchBlockData['analysis_ready'];
+  /**
+   * ⭐ THE R1 REFUSALS, AGGREGATED FOR THE TURN THE USER RENDERS.
+   *
+   * The record projector's refusals reach the CEE V3 wire as
+   * `record_disclosures` and STOPPED THERE: this interface is a DIFFERENT type
+   * from the adapter's same-named `DraftGraphResult`
+   * (`adapters/llm/types.ts:80`), only the adapter's declared the field, and the
+   * return literal below names its keys — so the channel died at this boundary
+   * with nothing to catch it. Measured cost, from the R1 e2e file's own header:
+   * **56 → 0** on this path.
+   *
+   * Carried as the published `model_building_notices` contract shape rather
+   * than as raw disclosures, because that is the field
+   * `OlumiResponseSchema` already exposes for exactly this and it pins
+   * `details_redacted: true` — the user's own words stay on the V3 detail
+   * channel. Absent when the projector refused nothing.
+   */
+  modelBuildingNotices?: ModelBuildingNotices;
   /** Tool-level LLM telemetry extracted from the pipeline response. */
   toolLLMTelemetry?: {
     tool: string;
@@ -477,6 +497,17 @@ export async function handleDraftGraph(
     ? (timingsField.draft_graph as DraftGraphResult['draftGraphTimings'] | undefined)
     : undefined;
 
+  // ⭐⭐ THIRD SILENT-DROP POINT, CLOSED. `package.ts` labels itself the SECOND;
+  // this return literal was the third and the only one downstream of the V3
+  // wire, so it is the one that decided whether a user ever hears about a
+  // refusal. Read off the SAME `body` the V3 response ships — one source
+  // (`projection.dropped[]`), aggregated, never re-derived — so the turn and the
+  // V3 detail channel cannot drift into disagreeing about what was refused.
+  const modelBuildingNotices = buildModelBuildingNotices(
+    body.record_disclosures,
+    body.record_disclosures_omitted,
+  );
+
   return {
     blocks: [block],
     assistantText,
@@ -492,6 +523,7 @@ export async function handleDraftGraph(
     analysisReady,
     toolLLMTelemetry,
     pipelineOutcome,
+    ...(modelBuildingNotices !== undefined ? { modelBuildingNotices } : {}),
     ...(draftGraphTimings !== undefined ? { draftGraphTimings } : {}),
   };
 }
