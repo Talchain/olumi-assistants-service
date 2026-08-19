@@ -560,6 +560,27 @@ export interface RouteWithToolUseOptions {
    * place downstream when the authored `answer_text` is invalid.
    */
   readonly forcedExplanationHandlerId?: ForcedPillHandlerId;
+  /**
+   * TYPED COACHING-INTENT ARM — the method directive for a routed coaching
+   * chip (`coaching/typed-intent-directive.ts`). Set by TurnExecutor when the
+   * turn carries `source ∈ {chip, chip_click}` and a routed `chip.intent`
+   * (`challenge_frame`, `define_success`, `elicit_options`,
+   * `challenge_assumption`).
+   *
+   * ⭐ UNLIKE `forcedExplanationHandlerId`, THIS PINS NOTHING. These are
+   * conversational coaching intents with no handler to force, so the arm
+   * changes exactly one thing: it appends a method directive to the user turn.
+   * Thinking is not disabled, the full `buildOlumiActionTool()` advert is
+   * unchanged, no `tool_choice` force, and no interpret-time handler pin. The
+   * coach routes the turn exactly as it does today and authors the answer with
+   * the named method in front of it — so the floor is the current free-prose
+   * answer BY CONSTRUCTION, which is the whole point of steering rather than
+   * substituting.
+   *
+   * The two options are INDEPENDENT and may in principle both be set; the
+   * directives are appended in a fixed order and neither overwrites the other.
+   */
+  readonly coachingMethodDirective?: string;
 }
 
 export async function routeWithToolUse(
@@ -592,11 +613,20 @@ export async function routeWithToolUse(
   // the budget re-measurement and the byte-golden tests are unaffected) and only
   // when a forced handler is set, so every non-pill routing turn is byte-
   // identical to today.
+  // The TYPED COACHING-INTENT directive rides the SAME append seam, for the
+  // same reason: `buildUserMessage` stays pure so the budget re-measurement and
+  // the byte-golden tests are unaffected, and a turn carrying neither directive
+  // is byte-identical to today. Order is fixed (forced-intent, then coaching)
+  // so the composed message is deterministic when both are somehow present.
   const forcedHandlerId = options.forcedExplanationHandlerId;
   const base = buildUserMessage(contextPack, message);
-  const userMessage = forcedHandlerId
-    ? `${base}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
-    : base;
+  const userMessage = [
+    base,
+    forcedHandlerId ? buildForcedIntentDirective(forcedHandlerId) : null,
+    options.coachingMethodDirective ?? null,
+  ]
+    .filter((part): part is string => part !== null && part.length > 0)
+    .join('\n\n');
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
   // a cheap cached read on every routing turn after boot. The snapshot's

@@ -145,6 +145,10 @@ import {
   recogniseReferenceClass,
 } from './belief-elicitation/index.js';
 import {
+  buildCoachingMethodDirective,
+  resolveCoachingIntent,
+} from './coaching/typed-intent-directive.js';
+import {
   buildStructuralRemainderNotice,
   buildUnmappedPartsNotice,
   decomposeEditMessage,
@@ -7716,6 +7720,39 @@ export async function runTurnExecutor(
           recent_changes_field_present: recentChangesEvidence.field_present,
           recent_changes_hash: recentChangesEvidence.hash,
         });
+        // ⭐ TYPED COACHING-INTENT ARM (coaching/typed-intent-directive.ts).
+        //
+        // Four MOUNTED sparks (`pressure_test_frame`, `define_success`,
+        // `widen_options`, `reflect_bias`) declare a typed `chip.intent` and,
+        // until this arm existed, silently degraded to generic free prose
+        // because CEE routed none of them and the UI's two-signal send gate
+        // (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly failed closed.
+        //
+        // ⚠ THE POSITION IS DELIBERATE, and it is the OPPOSITE of every
+        // deterministic pre-route above. Those claim the turn and skip the LLM.
+        // This one runs at the LLM call because it must NOT claim the turn: the
+        // free-prose path reaches the reasoning layer and often answers well,
+        // so a deterministic responder here would replace a good answer with a
+        // canned one. The arm appends a method directive and lets the coach
+        // author, which makes today's prose answer the FLOOR by construction.
+        //
+        // No handler is pinned, no tool forced, thinking untouched — see
+        // `coachingMethodDirective` on RouteWithToolUseOptions.
+        const coachingIntent = resolveCoachingIntent(payload);
+        const coachingDirective =
+          coachingIntent === undefined
+            ? undefined
+            : buildCoachingMethodDirective(coachingIntent, context.stage);
+        if (coachingIntent !== undefined && coachingDirective !== undefined) {
+          emit(TelemetryEvents.V5TypedCoachingIntentRoute, {
+            request_id: requestId,
+            session_id: context.session_id,
+            intent: coachingIntent,
+            stage: context.stage,
+            dsk_protocol_id: coachingDirective.dskProtocolId,
+          });
+        }
+
         const routingStartedAt = timingsEnabled ? Date.now() : 0;
         routingResult = await routeWithToolUse(contextPack, payload.message, {
           requestId,
@@ -7731,6 +7768,9 @@ export async function runTurnExecutor(
           ...(options.chipClickForcedIntent === 'explain_results' ||
           options.chipClickForcedIntent === 'what_would_flip'
             ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
+            : {}),
+          ...(coachingDirective
+            ? { coachingMethodDirective: coachingDirective.directive }
             : {}),
         });
 
