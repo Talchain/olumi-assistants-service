@@ -1092,7 +1092,23 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     expect(result.response.assistant_text).toContain('Phased price rise');
     expect(result.response.assistant_text).toContain('Monthly Subscription Price');
     expect(result.response.suggested_actions).toHaveLength(1);
-    expect(result.response.suggested_actions[0]?.label).toBe('Configure Phased price rise');
+    // ⭐ THE AFFORDANCE CARRIES THE PAIR, NOT JUST THE OPTION.
+    //
+    // This assertion used to read `'Configure Phased price rise'` — the
+    // option-only chip. That is not this test's subject (which is that an
+    // accepted Run summary cannot bypass typed non-ready status), and the
+    // readiness payload above is a `provide_value` case whose head blocker
+    // carries FULL identity: `opt_phased × fac_price`. The chip is now minted
+    // from that pair, so it names both entities and its message routes back to
+    // the option it was minted for. Pinned by identity — id, and both entity
+    // labels in the replayed message — rather than by one label literal.
+    expect(result.response.suggested_actions[0]?.id).toBe('chip_prompt_repair_effect_value');
+    expect(result.response.suggested_actions[0]?.label).toBe(
+      'Set effect on Monthly Subscription Price',
+    );
+    expect(result.response.suggested_actions[0]?.message).toBe(
+      "Help me configure the Phased price rise option's effect on Monthly Subscription Price.",
+    );
     const sourceEvent = (emit as unknown as MockedFunction<typeof emit>).mock.calls
       .find((call) => call[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
     expect((sourceEvent?.[1] as Record<string, unknown>).coaching_summary_passed_gate).toBe(false);
