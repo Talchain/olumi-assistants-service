@@ -43,6 +43,29 @@
  * - 7 AFTER all topology changes: restoration is the last edge mutation
  * - 9b BEFORE 10: structural parse validates final graph state
  *
+ * ⚠⚠ 5 → 6 IS STRONGER THAN AN ORDERING CONSTRAINT, AND IT IS USER-FACING.
+ * "Do not reorder" understates it. `runCompoundGoals` (5) and `runLateStrp` (6)
+ * must stay ADJACENT, and two further things must remain true:
+ *     (a) NOTHING MAY RUN BETWEEN THEM that changes the graph's node set, and
+ *     (b) NOTHING UPSTREAM MAY SEED `ctx.goalConstraints`.
+ * Substep 5 filters every constraint row to an EXACT existing node id (a
+ * hallucinated id is dropped there and logged `cee.compound_goal.llm_dropped`,
+ * never surfaced). Substep 6's Rule 3 then resolves those rows by exact match.
+ * Because nothing runs between them, the node set cannot move underneath the
+ * rows, so the match always hits and `dropped` stays 0.
+ *
+ * Weaken (a) or (b) and Rule 3 starts emitting `CONSTRAINT_DROPPED`, which
+ * `extractConstraintDropBlockers` (`cee/transforms/analysis-ready.ts`) turns
+ * into the ONLY ADVISORY member of `AnalysisBlockerType`. That blocker is
+ * injected onto an ALREADY-`ready` payload WITHOUT recomputing status
+ * (`stages/boundary.ts`) and reaches the wire unfiltered, where consumers gate
+ * on it. So this is a PRODUCT-VISIBLE constraint, not an internal tidiness one.
+ *
+ * ⭐ THE ALARM, so you find out where you broke it:
+ *    `__tests__/strp-constraint-resolution-adjacency.invariant.test.ts`
+ *    asserts all three — I1 adjacency, I2 no node-set change across the 5→6
+ *    boundary (insertion-proof), I3 `goalConstraints` unseeded on entry to 5.
+ *
  * EARLY RETURN RULES:
  * Substeps 1b, 9b, and 10 can set ctx.earlyReturn.
  * Substep 2 normalises via simpleRepair (never early-returns).
