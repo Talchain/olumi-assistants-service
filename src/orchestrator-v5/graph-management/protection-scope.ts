@@ -337,16 +337,69 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Word-boundary-ish, whitespace-flexible, case-insensitive mention test. */
-function mentionPattern(name: string): RegExp | null {
+/** Word-boundary-ish, whitespace-flexible, case-insensitive name pattern. */
+function buildNamePattern(name: string, flags: string): RegExp | null {
   const trimmed = name.trim();
   if (trimmed.length < MIN_LABEL_LENGTH) return null;
   const flexible = trimmed.split(/\s+/).map(escapeRegExp).join('\\s+');
   try {
-    return new RegExp(`(?<![A-Za-z0-9])${flexible}(?![A-Za-z0-9])`, 'i');
+    return new RegExp(`(?<![A-Za-z0-9])${flexible}(?![A-Za-z0-9])`, flags);
   } catch {
     return null;
   }
+}
+
+/** Word-boundary-ish, whitespace-flexible, case-insensitive mention test. */
+function mentionPattern(name: string): RegExp | null {
+  return buildNamePattern(name, 'i');
+}
+
+/**
+ * ⭐⭐ A NAME IS NOT AN INSTRUCTION — the cue-domain correction.
+ *
+ * `PROTECTION_CUE` asks *"did the USER ask for this to be left as it is?"*, but
+ * it was tested against the raw clause, and a clause contains the graph's OWN
+ * LABELS. So an entity whose name happens to carry a cue word MANUFACTURED ITS
+ * OWN PROTECTION. Measured on the deployed build (golden journey
+ * 20260819T221620Z): the drafter produced an option labelled
+ * `"keep what we have"`, the product advised
+ * `"Set the keep what we have option's effect on Customer churn to 0.4"`
+ * — a sentence CEE composes itself (`buildConfigureOptionAdvisedFormat`, which
+ * also rides as a chip whose message replays as user text) — and `keep`,
+ * contributed entirely by the option's NAME, held the turn. The co-mentioned
+ * FACTOR went with it, because bare commas are not clause boundaries. The user
+ * wrote no protection cue at all, and the hold then asserted *"You asked for
+ * 'keep what we have' … to stay as it is"* about a sentence that says SET.
+ * 9 of the 18 canonical status-quo labels in
+ * `cee/structure/status-quo-patterns.ts` — the very list
+ * `detectMissingCounterfactual` coaches users toward — reproduce it.
+ *
+ * ⚠ SCOPED TO THE OP'S OWN TARGETS, AND THAT SCOPE IS THE FAIL-CLOSED HALF
+ * (CLAUDE.md trap 22b — two opposite harms need two parameters, not a widened
+ * window). Only the names of the entities the op under judgement would CHANGE
+ * are masked: you cannot ask me to leave a thing alone by calling it what it is
+ * called, but a cue carried by some OTHER entity's name still protects. So
+ * `"Update Customer churn to 0.4, keep current CRM Platform Cost"` — in a graph
+ * that really does hold a status-quo option labelled `"keep current"` — still
+ * HOLDS a write to CRM Platform Cost. A false positive still costs one confirm
+ * tap; a false negative still costs a silent wrong write; neither direction was
+ * traded for the other.
+ *
+ * ⚠ NOT COVERED, deliberately: `EXCEPTION_TAIL` is untouched, so a label
+ * containing an exception seam ("all except Germany") can still self-protect
+ * through that path. No such label has been observed and closing it needs
+ * clause offsets — recorded rather than left silent.
+ *
+ * Total: an unbuildable pattern masks nothing (degrades to today's behaviour).
+ */
+function maskReferentNames(clause: string, referentNames: readonly string[]): string {
+  if (referentNames.length === 0) return clause;
+  let out = clause;
+  for (const name of referentNames) {
+    const pattern = buildNamePattern(name, 'gi');
+    if (pattern !== null) out = out.replace(pattern, ' ');
+  }
+  return out;
 }
 
 interface GraphNodeLike {
@@ -383,6 +436,7 @@ function readGraphNodes(graph: unknown): GraphNodeLike[] {
 export function extractProtectedEntities(
   userMessage: string | null | undefined,
   currentGraph: unknown,
+  referentNames: readonly string[] = [],
 ): readonly ProtectedEntity[] {
   try {
     if (typeof userMessage !== 'string' || userMessage.trim().length === 0) return [];
@@ -391,7 +445,13 @@ export function extractProtectedEntities(
 
     const protectiveTexts: string[] = [];
     for (const clause of splitIntoClauses(userMessage)) {
-      if (clauseIsProtective(clause)) protectiveTexts.push(clause);
+      // The cue must survive masking the names of the entities this op is
+      // ADDRESSED TO (see maskReferentNames); MENTIONS are still matched
+      // against the ORIGINAL clause, so a masked name is still protectable
+      // by a cue the user actually wrote.
+      if (clauseIsProtective(maskReferentNames(clause, referentNames))) {
+        protectiveTexts.push(clause);
+      }
     }
     const capped = userMessage.slice(0, MESSAGE_SCAN_CAP);
     EXCEPTION_TAIL.lastIndex = 0;
@@ -606,9 +666,35 @@ export function demoteProtectedEntityTargets(
     // so every would_apply is demoted regardless of the (partial) protected
     // set extracted from the scanned prefix. See MESSAGE_SCAN_CAP.
     const overflow = messageExceedsScanCap(userMessage);
-    const protectedEntities = extractProtectedEntities(userMessage, currentGraph);
-    if (!overflow && protectedEntities.length === 0) return NO_DEMOTION(verdicts);
-    const byId = new Map(protectedEntities.map((p) => [p.nodeId, p] as const));
+    // FAST PATH / SUPERSET PRE-CHECK: masking only ever REMOVES cues, so the
+    // unmasked extraction is a superset of every per-op extraction below. If it
+    // is empty, no op can be protected and we exit without scanning per op.
+    if (!overflow && extractProtectedEntities(userMessage, currentGraph).length === 0) {
+      return NO_DEMOTION(verdicts);
+    }
+    const labelById = new Map(readGraphNodes(currentGraph).map((n) => [n.id, n.label] as const));
+    // Protection is resolved PER OP, because the names to mask are that op's
+    // own targets (see maskReferentNames). Memoised on the target-id set so a
+    // batch of same-target ops scans once.
+    const perOpCache = new Map<string, Map<string, ProtectedEntity>>();
+    const protectedForOp = (targetIds: readonly string[]): Map<string, ProtectedEntity> => {
+      const key = [...targetIds].sort().join('\u0000');
+      const cached = perOpCache.get(key);
+      if (cached !== undefined) return cached;
+      const referentNames: string[] = [];
+      for (const id of targetIds) {
+        referentNames.push(id);
+        const label = labelById.get(id);
+        if (label !== undefined) referentNames.push(label);
+      }
+      const resolved = new Map(
+        extractProtectedEntities(userMessage, currentGraph, referentNames).map(
+          (p) => [p.nodeId, p] as const,
+        ),
+      );
+      perOpCache.set(key, resolved);
+      return resolved;
+    };
 
     const out: RefereeVerdict[] = [];
     const demotedIndices: number[] = [];
@@ -623,7 +709,9 @@ export function demoteProtectedEntityTargets(
         out.push(v);
         continue;
       }
-      const hits = envelopeTargetNodeIds(env).filter((id) => byId.has(id));
+      const targetIds = envelopeTargetNodeIds(env);
+      const byId = protectedForOp(targetIds);
+      const hits = targetIds.filter((id) => byId.has(id));
       // On overflow, demote even ops with no scanned-prefix hit — the tail we
       // could not read may protect this target. Prefix hits still contribute
       // their names to the copy (the fail-closed default names nothing).
