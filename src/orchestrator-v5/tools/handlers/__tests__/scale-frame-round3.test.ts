@@ -261,16 +261,42 @@ describe("the baseline gate is the WITHIN-FACTOR scale-coherence test — all fo
     expect(findScaleIncoherentBaselineFactorIds([nodes[4]], [{ framed: 0.74 }])).toEqual([]);
   });
 
-  it("OUT-baseline / NO interventions → the ASK (no self-frame evidence either way — the add-node class; corpus-derived default: the 13 real captures contain ZERO capless out-of-unit baselines, so no legitimate shape is known to occupy this quadrant)", () => {
+  it("OUT-baseline / NO interventions / NO frame encoded in its own pair → the ASK (the add-node class)", () => {
     // 'astride' has no interventions in THIS request either, so here it
     // genuinely occupies out/none too — the quadrant is decided per request,
     // not per node identity.
+    //
+    // ⚠ 'over-frame' LEFT THIS LIST on 2026-08-20 and the reason is the point,
+    // not the bookkeeping. The old expectation was justified by the corpus
+    // premise "the 13 real captures contain ZERO capless out-of-unit baselines,
+    // so no legitimate shape is known to occupy this quadrant". That premise
+    // held only for the PRE-CUTOVER captures: CEE's OWN canonical writer
+    // manufactures `{1.5, 150000}` by design on every over-frame edit
+    // (`normalise-factor-value.ts`; pinned in scale-frame-preserving-edit.ts),
+    // and the gate was therefore refusing the product's own edits — WIRE-
+    // WITNESSED on a fresh guest journey, 2026-08-19, on the frozen quartet,
+    // twice, on two different factors. A pair that encodes a frame has a
+    // RESOLVED scale, read through the one owner of that question
+    // (`recoverScaleFrame`), so the gate and the two writers now give one
+    // answer instead of two (trap 21).
     expect(findScaleIncoherentBaselineFactorIds(nodes, [{ framed: 0.74 }])).toEqual([
       "raw-baseline",
-      "over-frame",
       "negative",
       "astride",
     ]);
+  });
+
+  it("OUT-baseline / NO interventions / FRAME ENCODED in its own pair → computes (the over-frame edit class)", () => {
+    // Pin the precondition in-test, so this exemption is provably the code's
+    // doing and not a fixture that quietly stopped discriminating (trap 13b).
+    expect(recoverScaleFrame({ value: 1.5, raw_value: 150000 })).toBe(100000);
+    // Bound BY IDENTITY. The discriminating twin sits in the assertion above:
+    // 'raw-baseline' carries the SAME magnitude class with raw === value, so
+    // no frame is encoded and it must keep blocking in the same call.
+    expect(findScaleIncoherentBaselineFactorIds(nodes, [{ framed: 0.74 }])).not.toContain(
+      "over-frame",
+    );
+    expect(recoverScaleFrame({ value: 74000, raw_value: 74000 })).toBeUndefined();
   });
 
   it("user-authored is bound by PROVENANCE, not value shape: a SYNTHESISED out-of-unit intervention grants no self-frame", () => {
