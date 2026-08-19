@@ -186,6 +186,25 @@ export const TelemetryEvents = {
   // See src/orchestrator-v5/coaching/typed-intent-directive.ts.
   V5TypedCoachingIntentRoute: "v5.typed_coaching_intent_route",
 
+  // TYPED COACHING-INTENT ARM — THE DROP. Fires once per turn that CARRIES a
+  // non-empty `chip.intent` which `resolveCoachingIntent` DECLINED (not one of
+  // the four routed intents, or a source the arm does not accept). The routed
+  // sibling directly above records what CEE steered; this records what it
+  // silently did not.
+  //
+  // ⭐ WHY IT EXISTS AT ALL. Before it, a published-but-unrouted intent hit
+  // `resolveCoachingIntent` → `undefined` and the arm simply skipped: no
+  // telemetry, no log, no trace anywhere. That silent drop is the exact
+  // mechanism that let four MOUNTED sparks degrade to anonymous prose for as
+  // long as they did — the product could not tell an intent nobody clicked
+  // from an intent it threw away. `intent` is the declined token; `stage` is
+  // the derived turn stage. Content-free — never user text.
+  //
+  // It deliberately does NOT fire on a turn with no `chip.intent` at all: that
+  // is every ordinary turn in the service, and the signal would drown.
+  // See src/orchestrator-v5/turn-executor.ts (the typed coaching-intent arm).
+  V5TypedCoachingIntentUnrouted: "v5.typed_coaching_intent_unrouted",
+
   // S3 §5 / Lane C3 — add-option compound transaction. Fires once per typed
   // `add_option` intent turn (`chip.intent='add_option'`). `outcome`: held
   // (the atomic option+edges+values batch was refereed to a held proposal) or

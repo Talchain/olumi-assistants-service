@@ -459,3 +459,102 @@ describe('THE WITNESSED HARM — accepting the coaching chip must not cost the R
     ).toBe(true);
   });
 });
+
+/**
+ * ⭐ F2 — A NON-ROUTED `chip.intent` MUST NOT BE SILENTLY DROPPED.
+ *
+ * `resolveCoachingIntent` answers `undefined` for an intent CEE does not route,
+ * and the arm above then simply skips — no telemetry, no log, no trace. A
+ * silently-dropped intent is the exact mechanism that kept the four mounted
+ * sparks degrading to anonymous prose for as long as they did: nothing anywhere
+ * recorded that a typed click had arrived and been ignored.
+ *
+ * ── THE EVENT'S JOB, STATED PRECISELY ────────────────────────────────────────
+ * It fires when a turn CARRIES a `chip.intent` and the router DECLINED it. It
+ * must NOT fire on an ordinary turn — every composer turn in the product has no
+ * `chip.intent` at all, and an event that fired on those would bury its own
+ * signal under the entire traffic of the service.
+ *
+ * Content-free by construction: the intent token, the request id, the session
+ * id and the stage. Never user text.
+ */
+describe('F2 — an unrouted typed intent is OBSERVABLE, not silently dropped', () => {
+  // Bound to the literal, not to the enum member: at the pristine commit the
+  // member does not exist, so a constant-bound filter would read `undefined`
+  // and match nothing — a test that could not go red for the right reason.
+  const UNROUTED_EVENT = 'v5.typed_coaching_intent_unrouted';
+
+  it('the event name is registered in the frozen TelemetryEvents registry', () => {
+    expect(
+      (TelemetryEvents as Record<string, string>).V5TypedCoachingIntentUnrouted,
+      'the emit is not registered in the frozen enum — `validate-event-names` CI ' +
+        'would red on the raw string',
+    ).toBe(UNROUTED_EVENT);
+  });
+
+  it('a PUBLISHED-but-unrouted intent emits the drop, naming the exact token', async () => {
+    const { adapter, seen } = makeCapturingAdapter();
+    await runTurnExecutor(chipPayload('pre_mortem', 'frame'), 'req-f2-unrouted', {
+      routingAdapter: adapter as never,
+      graphState: READY_GRAPH as never,
+    });
+
+    // Sanity: the turn must actually have reached the router, or the arm's
+    // whole neighbourhood never executed and this asserts nothing.
+    expect(seen.length, 'the turn never reached the router').toBeGreaterThan(0);
+
+    const dropped = events.filter(e => e.event === UNROUTED_EVENT);
+    expect(
+      dropped,
+      'a typed `chip.intent` CEE does not route left no trace at all — the silent ' +
+        'drop is the mechanism that made this whole defect class invisible',
+    ).toHaveLength(1);
+    expect(dropped[0]!.data.intent).toBe('pre_mortem');
+    expect(dropped[0]!.data.stage).toBe('frame');
+    // Content-free: the user's message must never ride this event.
+    expect(JSON.stringify(dropped[0]!.data)).not.toContain(SPARK_MESSAGE);
+  });
+
+  it('CONTRAST CONTROL — a turn with NO chip.intent does NOT emit it', async () => {
+    // ⭐ The absence claim below is worthless without proof the sink was live
+    // and the turn ran, so both are asserted first (CLAUDE.md trap 13).
+    const { adapter, seen } = makeCapturingAdapter();
+    await runTurnExecutor(composerPayload('frame'), 'req-f2-composer', {
+      routingAdapter: adapter as never,
+      graphState: READY_GRAPH as never,
+    });
+
+    expect(seen.length, 'the control turn never reached the router').toBeGreaterThan(0);
+    expect(
+      events.length,
+      'the telemetry sink captured nothing at all — the absence below is about the ' +
+        'sink, not about the arm',
+    ).toBeGreaterThan(0);
+    expect(
+      events.filter(e => e.event === UNROUTED_EVENT),
+      'the drop event fired on an ordinary turn with no typed intent — it would ' +
+        'drown its own signal under the whole traffic of the service',
+    ).toEqual([]);
+  });
+
+  it('CONTRAST CONTROL — a ROUTED intent emits the route event and NOT the drop', async () => {
+    // The two events are mutually exclusive by construction. Asserting the pair
+    // in one run is what proves the new emit discriminates on the ROUTING
+    // decision rather than on the mere presence of a chip.
+    const { adapter } = makeCapturingAdapter();
+    await runTurnExecutor(chipPayload('challenge_frame', 'frame'), 'req-f2-routed', {
+      routingAdapter: adapter as never,
+      graphState: READY_GRAPH as never,
+    });
+
+    expect(
+      events.filter(e => e.event === TelemetryEvents.V5TypedCoachingIntentRoute),
+      'positive control: the routed arm must have fired on this turn',
+    ).toHaveLength(1);
+    expect(
+      events.filter(e => e.event === UNROUTED_EVENT),
+      'a ROUTED intent was also reported as dropped — the emit is firing on the ' +
+        'presence of a chip, not on the routing decision',
+    ).toEqual([]);
+  });
+});

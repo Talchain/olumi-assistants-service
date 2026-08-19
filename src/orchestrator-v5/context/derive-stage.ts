@@ -140,10 +140,58 @@ export interface StageDerivationInput {
 /**
  * Pure and total. Returns the stage this turn should carry.
  *
- * Both the response's `stage_indicator` (the pill) and the chip generator read
- * the SAME `context.stage`, so a single return value moves the pill and the
- * coaching chips together — they cannot disagree about which stage the user is
- * in, which is the two-authorities defect this estate has shipped before.
+ * ─── ⚠ EXACTLY WHAT THIS GOVERNS, AND WHAT IT DOES NOT ───────────────────────
+ *
+ * ⚠⚠ THE PREVIOUS VERSION OF THIS PARAGRAPH WAS A COMPLETENESS CLAIM AND IT WAS
+ * FALSE. It said the response's `stage_indicator` and the chip generator read
+ * "the SAME `context.stage`", full stop — which reads as *this module is the
+ * stage authority for the wire*. It is not, and was not: over twenty non-test
+ * sites stamp `stage_indicator` from a client echo or a hardcoded literal, and
+ * `handlers/chip-click-dispatch.ts` was itself reading `payload.stage` at the
+ * time the sentence was written. A docblock that overstates its own reach is
+ * exactly how the next session ships a stage lie on a path nobody checked, so
+ * the reach is now enumerated instead of asserted. Derive it at YOUR tip before
+ * relying on it — including on this list.
+ *
+ * GOVERNED (derived 2026-08-19, complete for non-test `stage_indicator:`
+ * writers, scope = `src/**` excluding `*.test.ts`):
+ *   · ROUTED MESSAGE TURNS — `build-turn-context.ts` overrides `context.stage`
+ *     with this derivation, and all five `generateChips` call sites read it
+ *     (`turn-executor.ts:10198,10562,10652,10827` +
+ *     `chip-click-dispatch.ts:1164`), as do the turn-executor's composers.
+ *   · THE SYSTEM-EVENT FAMILY — corrected at ONE application point, the single
+ *     `dispatchSystemEvent` call site in `orchestrator/route-v2.ts`, which is
+ *     the only place holding the requested stage, the freshness derivation and
+ *     the committed graph together. That covers every writer and floor beneath
+ *     it: `system-events/dispatch.ts:385,418`, `factor-value-edit.ts:163`,
+ *     `edge-strength-edit.ts:117`, `structural-delete.ts:156,924` — all of
+ *     which still stamp `payload.stage` locally and are corrected downstream.
+ *   · CHIP-CLICK — `handlers/chip-click-dispatch.ts` reads `context.stage` at
+ *     its four live stamping sites plus the `generateChips` call. ⚠ Its
+ *     recoverable-cause floor is NOT governed: that composer is passed the
+ *     stage and `void`s it, stamping the literal `analyse` deliberately
+ *     (ROADMAP 2.1085 — a non-analyse refusal carrying no `analysis_result`
+ *     block makes the deployed UI clear ten fields of user state).
+ *
+ * NOT GOVERNED (each verified at this tip; these still echo the client or
+ * hardcode a literal, and this module has no say over any of them):
+ *   · `handlers/edit-graph-dispatch.ts:1600` — `payload.stage`. DELIBERATELY
+ *     UNTOUCHED: that file is under a live three-way conflict (#1029 / #1007 /
+ *     #987) and a stage edit there would collide with all three.
+ *   · hardcoded `'frame'`: `orchestrator/route-v2.ts:2365,3669,5462`,
+ *     `clarify-v2/preflight.ts:1130,1208,1249`, `src/validators/b1.ts:133`
+ *     (⚠ `src/validators/`, NOT `src/orchestrator-v5/validators/` — the second
+ *     path does not exist), `routing/process-meta-intake.ts:190`.
+ *   · `orchestrator/route-v2.ts:3747` — `ingress.stage`, a raw client echo on
+ *     the explicit-generate decline.
+ *   · `handlers/draft-graph-dispatch.ts:444` (a locally-computed
+ *     `stageIndicator`) and `:843` (`payload.stage`).
+ *   · `turn-executor.ts:9651` — the hardcoded `ANALYSE_STAGE_INDICATOR`.
+ *
+ * Within the governed set the original point still holds and is the reason the
+ * derivation returns ONE value: the pill and the coaching chips read the same
+ * `context.stage`, so they cannot disagree about which stage the user is in —
+ * the two-authorities defect this estate has shipped before.
  */
 /**
  * ⭐ THE STAGES IN WHICH AN ANALYSIS HAS ALREADY RUN — the inverse fact this

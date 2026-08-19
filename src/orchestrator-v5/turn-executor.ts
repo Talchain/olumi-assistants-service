@@ -7851,6 +7851,43 @@ export async function runTurnExecutor(
             dsk_protocol_id: coachingDirective.dskProtocolId,
           });
         }
+        // ⭐ F2 — THE DROP IS OBSERVABLE. `resolveCoachingIntent` answers
+        // `undefined` for an intent CEE does not route, and the arm above then
+        // simply skipped: no telemetry, no log, nothing. THAT SILENCE IS THE
+        // MECHANISM that let four mounted sparks degrade to anonymous prose for
+        // as long as they did — nothing anywhere could distinguish an intent
+        // nobody clicked from one the product threw away.
+        //
+        // The condition is the presence of a typed intent ON THE PAYLOAD, not
+        // the resolver's `undefined` alone: `resolveCoachingIntent` also
+        // answers `undefined` for every ordinary composer turn, which is the
+        // whole traffic of the service. Firing there would bury this signal
+        // under its own noise, so the guard reads `payload.chip?.intent`
+        // directly and requires a NON-EMPTY string.
+        //
+        // Content-free: the declined token, the ids and the stage. Never user
+        // text. Guarded like its neighbours — an observability fault must not
+        // fail a turn.
+        const declinedChipIntent = payload.chip?.intent;
+        if (
+          coachingIntent === undefined &&
+          typeof declinedChipIntent === 'string' &&
+          declinedChipIntent.length > 0
+        ) {
+          try {
+            emit(TelemetryEvents.V5TypedCoachingIntentUnrouted, {
+              request_id: requestId,
+              session_id: context.session_id,
+              intent: declinedChipIntent,
+              stage: context.stage,
+            });
+          } catch {
+            log.warn(
+              { request_id: requestId, session_id: context.session_id },
+              'V5 turn-executor — v5.typed_coaching_intent_unrouted emit failed; continuing',
+            );
+          }
+        }
 
         // Composed once so the value handed to the router and the value a test
         // asserts are the same expression, not two spellings of one intent.

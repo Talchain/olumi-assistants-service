@@ -733,11 +733,24 @@ export async function buildTurnContext(
   // so `decide` could never be ORIGINATED by either end and the `decide`
   // coaching rules at `compose/chip-generator.ts:906,923` were unreachable.
   //
-  // Derived HERE and nowhere else, because this is the one place that holds the
-  // persisted graph and the analysis-fact chain together, and because
-  // `context.stage` is the single value that BOTH the response's
-  // `stage_indicator` (the pill) and all five `generateChips` call sites read —
+  // Derived HERE for the ROUTED-TURN family, because this is the one place that
+  // holds the persisted graph and the analysis-fact chain together. Within that
+  // family `context.stage` is the single value that both the response's
+  // `stage_indicator` (the pill) and all five `generateChips` call sites read,
   // so the pill and the chips cannot disagree about which stage the user is in.
+  //
+  // ⚠ THIS IS NOT THE WHOLE WIRE, AND THE EARLIER WORDING SAID IT WAS. It read
+  // "derived HERE and nowhere else" — which is true of the DERIVATION and false
+  // of the STAMP, and the difference is a user-visible lie. `buildTurnContext`
+  // is typed `MessageTurnPayload`, so the SYSTEM-EVENT family cannot reach it at
+  // all; those writers echoed `payload.stage` raw until the correction at the
+  // single `dispatchSystemEvent` call site in `orchestrator/route-v2.ts`. Over
+  // twenty further non-test sites still stamp `stage_indicator` from a client
+  // echo or a hardcoded literal and are governed by nothing.
+  //
+  // The complete, verified reach lives in ONE place — the
+  // `deriveAuthoritativeStage` docblock in `context/derive-stage.ts` — so this
+  // comment does not become a second list to keep in sync (CLAUDE.md trap 12).
   //
   // Reuses `coachingFreshness` rather than deriving freshness again: a second
   // derivation of the same fact is the hand-maintained-mirror defect, and
