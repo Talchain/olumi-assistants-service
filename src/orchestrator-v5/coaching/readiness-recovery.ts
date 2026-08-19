@@ -20,6 +20,7 @@ import {
   CONFIGURE_OPTION_GENERIC_CHIP,
   buildConfigureOptionChip,
 } from '../configure-option-chip-text.js';
+import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -77,9 +78,13 @@ interface ReadinessOptionLite {
   readonly status?: 'ready' | 'needs_user_mapping' | 'needs_encoding';
 }
 
-function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-}
+// N26: the local label truncator that used to live here is DELETED. It
+// appended an ellipsis but was bracket-unaware, so on the 18 Aug witness it
+// emitted `double down on enterprise sales (higher…`, which
+// `configure-option-chip-text.ts` chipped into
+// `Configure double down on enterprise sales (higher…`. An ellipsis does not
+// close a bracket. Label elision has exactly one owner in CEE —
+// `src/utils/label-elision.ts`.
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -137,9 +142,9 @@ function resolveLabel(
     const graphLabel = nodes.find(
       (node) => node.id === id && node.kind === kind && typeof node.label === 'string',
     )?.label;
-    if (graphLabel?.trim()) return truncate(graphLabel.trim(), MAX_LABEL_CHARS);
+    if (graphLabel?.trim()) return elideLabelAtWordBoundary(graphLabel.trim(), MAX_LABEL_CHARS);
   }
-  return suppliedLabel?.trim() ? truncate(suppliedLabel.trim(), MAX_LABEL_CHARS) : null;
+  return suppliedLabel?.trim() ? elideLabelAtWordBoundary(suppliedLabel.trim(), MAX_LABEL_CHARS) : null;
 }
 
 function optionFactorPair(option: string, factor: string): string {
