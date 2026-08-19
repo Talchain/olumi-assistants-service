@@ -22,7 +22,8 @@
  * object could satisfy):
  *   (a) the commit carries `pending_actions: []` — NO factor-baseline proposal
  *       is held at all, so there is nothing for the resumer to apply;
- *   (b) the emitted chip is `chip_prompt_option_effect_bind_1`, carrying the
+ *   (b) the emitted chip is `buildOptionEffectBindChipId(0)` — today's bytes
+ *       `chip_prompt_option_effect_bind_1`, asserted through its owner — carrying the
  *       product's own advised-format message for the ASKED pair.
  *
  * ⚠ THE FIXTURE INPUTS ARE DERIVED BY RUNNING THE PRODUCER, NEVER HAND-WRITTEN
@@ -78,6 +79,14 @@ const { buildCanonicalAnalysisReadyFromGraph } = await import(
 const { deriveAskedEffectPair } = await import('../routing/repair-value-binding.js');
 const { buildConfigureOptionAdvisedFormat } = await import(
   '../configure-option-chip-text.js'
+);
+// The chip id comes from its CANONICAL OWNER, not from a literal copied out of
+// the executor. Pinning today's string here would make a legitimate format
+// change RED this file while both emit paths moved together correctly — the
+// hand-maintained mirror one level up. See
+// `compose/__tests__/option-effect-bind-chip-id-single-owner.test.ts`.
+const { buildOptionEffectBindChipId } = await import(
+  '../compose/option-effect-ask-response.js'
 );
 
 interface RunBFixture {
@@ -196,7 +205,7 @@ describe('2.1266 / A3 — the outstanding-ask redirect AT ITS MOUNT (turn-execut
       label: string;
       message: string;
     }>;
-    expect(chips.map((c) => c.id)).toEqual(['chip_prompt_option_effect_bind_1']);
+    expect(chips.map((c) => c.id)).toEqual([buildOptionEffectBindChipId(0)]);
     expect(chips[0]!.message).toBe(
       `${buildConfigureOptionAdvisedFormat(OPTION_LABEL, FACTOR_LABEL, '0.8')}.`,
     );

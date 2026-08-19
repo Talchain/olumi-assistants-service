@@ -40,6 +40,38 @@ import type { OptionEffectCandidate } from '../routing/option-effect-write.js';
  */
 export const MAX_OPTION_EFFECT_ASK_CHIPS = 3;
 
+/**
+ * ⭐⭐ THE CANONICAL OWNER OF THE `chip_prompt_option_effect_bind_*` CHIP ID.
+ * Every mint of this id, in every service module, goes through this function.
+ *
+ * ⚠ WHY IT IS A FUNCTION AND NOT A CONSTANT. The id is ORDINAL — the ask path
+ * offers up to `MAX_OPTION_EFFECT_ASK_CHIPS` of them and numbers them from 1 —
+ * so a constant could only ever name the first, which is exactly how the
+ * second spelling got written by hand.
+ *
+ * ⚠⚠ WHAT THIS REPLACES, stated as the defect rather than as a tidy-up
+ * (CLAUDE.md trap 12, the hand-maintained mirror). This id was minted at TWO
+ * sites: this file's template, and a bare string literal
+ * `'chip_prompt_option_effect_bind_1'` in `turn-executor.ts`'s
+ * `dispatch === 'clarify'` outstanding-ask redirect branch. A chip id is a
+ * JOIN KEY — pending-action `chip_id`, the two-turn chip-suppression window
+ * (`last_chip_ids_shown` / `chip_ids_clicked`), and the `proposal_ref`
+ * identity bridge all match on the emitted string. Had this file's format ever
+ * changed, the literal would have kept emitting the old id SILENTLY and one of
+ * the two emit paths would have stopped matching, with no test going red.
+ *
+ * ⚠ DO NOT ADD A PARALLEL CONSTANT OR A SECOND SPELLING. Import this.
+ * `option-effect-bind-chip-id-single-owner.test.ts` REDs if any non-test module
+ * outside this file writes the id as a quoted literal again.
+ *
+ * @param index ZERO-BASED offer position — the same `index` an `Array.map` over
+ *              the offered candidates hands you. The user-facing ordinal in the
+ *              id is `index + 1`.
+ */
+export function buildOptionEffectBindChipId(index: number): string {
+  return `chip_prompt_option_effect_bind_${index + 1}`;
+}
+
 /** Join as readable English: "A", "A and B", "A, B and C". */
 function joinQuoted(labels: readonly string[]): string {
   const quoted = labels.map((l) => `"${l}"`);
@@ -117,7 +149,7 @@ export function composeOptionEffectAskResponse(
     assistant_text,
     stage: input.stage,
     suggested_actions: offered.map((candidate, index) => ({
-      id: `chip_prompt_option_effect_bind_${index + 1}`,
+      id: buildOptionEffectBindChipId(index),
       label:
         input.ambiguity === 'option'
           ? `Apply ${input.value} to ${candidate.optionLabel}`

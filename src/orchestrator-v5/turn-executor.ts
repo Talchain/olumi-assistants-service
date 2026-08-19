@@ -242,6 +242,7 @@ import { composeReadinessIntakeResponse } from './routing/readiness-intake.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
+import { buildOptionEffectBindChipId } from './compose/option-effect-ask-response.js';
 import {
   RENDER_SAFE_LABEL_FALLBACK,
   resolveProposalRenderCopy,
@@ -6658,7 +6659,9 @@ export async function runTurnExecutor(
               ? []
               : [
                   {
-                    id: 'chip_prompt_option_effect_bind_1',
+                    // The id comes from its canonical owner, never a literal:
+                    // this branch offers exactly one chip, so offer index 0.
+                    id: buildOptionEffectBindChipId(0),
                     label: `Apply ${outstandingAskRedirect.modelUnitValueText} to "${outstandingAskRedirect.pair.optionLabel}"`,
                     message: buildOutstandingAskChipMessage(
                       outstandingAskRedirect.pair,
