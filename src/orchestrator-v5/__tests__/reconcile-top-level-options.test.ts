@@ -320,7 +320,7 @@ describe('reconcileTopLevelOptionsFromNodes — propagation into EXISTING entrie
     expect(reconcileTopLevelOptionsFromNodes(graph)).toBe(graph);
   });
 
-  it('KNOWN-DROPPED SET, asserted EXACTLY: an intervention the user REMOVED from the node is not un-mirrored', () => {
+  it('KNOWN-DROPPED SET member (1), asserted EXACTLY: an intervention the user REMOVED from the node is not un-mirrored', () => {
     // Honest gap, pinned so the suite REDs if the set grows OR shrinks. A key
     // deleted from the node bundle is indistinguishable here from a key the
     // PASS-1 containment sweep emptied, and destroying a real value is the
@@ -339,6 +339,43 @@ describe('reconcileTopLevelOptionsFromNodes — propagation into EXISTING entrie
     const out = reconcileTopLevelOptionsFromNodes(graph) as typeof graph;
     const ivs = out.options.find((o) => o.id === 'opt_a')!.interventions as Record<string, unknown>;
     expect(Object.keys(ivs)).toEqual(['fac_removed']);
+  });
+
+  it('KNOWN-DROPPED SET member (2), asserted EXACTLY: a raw carrier for an UNENCODED factor is preserved', () => {
+    // ⚠ The docstring previously named member (1) ALONE while claiming the set
+    // was exact — a FALSE COMPLETENESS CLAIM. Member (2) is pinned here so the
+    // pair is genuinely exact. A raw carrier whose factor the node has NOT
+    // encoded is a real outstanding question, not staleness: clearing it would
+    // silently drop a blocker the user still needs to answer.
+    const graph = {
+      nodes: [
+        {
+          id: 'opt_a',
+          kind: 'option',
+          label: 'A',
+          // fac_encoded is answered; fac_open is NOT.
+          interventions: { fac_encoded: { value: 0.4, source: 'user_specified' } },
+        },
+      ],
+      options: [
+        {
+          id: 'opt_a',
+          label: 'A',
+          status: 'needs_encoding',
+          interventions: {},
+          raw_interventions: { fac_encoded: 'HubSpot', fac_open: 'Enterprise' },
+        },
+      ],
+    };
+    const out = reconcileTopLevelOptionsFromNodes(graph) as typeof graph;
+    const entry = out.options.find((o) => o.id === 'opt_a')!;
+    const raw = entry.raw_interventions as Record<string, unknown>;
+    // EXACTLY the unencoded one survives — encoded cleared, open preserved.
+    expect(Object.keys(raw)).toEqual(['fac_open']);
+    // And the status is NOT promoted while a genuine raw carrier remains —
+    // that would be the over-optimistic `ready` this module forbids, and
+    // `graph-hash.ts:293` stops hashing raw_interventions once status is ready.
+    expect(entry.status).toBe('needs_encoding');
   });
 
   it('still NEVER INVENTS the array while propagating (decision ③ half that stands)', () => {

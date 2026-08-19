@@ -31,7 +31,9 @@
  *   (1) APPENDS a canonical OptionV3 entry — DERIVED from the node (id, label,
  *       status, interventions, is_baseline) — for every option-KIND node NOT
  *       already in it; and
- *   (2) PROPAGATES the node's `interventions` into an EXISTING entry.
+ *   (2) PROPAGATES the node's `interventions` into an EXISTING entry, and
+ *       CLEARS the entry's now-encoded `raw_interventions` keys (refresh by
+ *       REMOVAL — the node never carries that field).
  * An ABSENT `options[]` (undefined) or a malformed (non-array) one is left
  * exactly as found (never invented, never clobbered). It never REMOVES an
  * entry: deletion of a removed option's entry stays owned by
@@ -66,9 +68,14 @@
  *     error, so removal stays owned by whoever can tell the two apart.
  *   - NEVER DEGRADE. A node key with no usable numeric value does not clobber a
  *     numeric value already in the entry.
- * KNOWN-DROPPED, pinned by an exact-set test: an intervention the user REMOVED
- * from the node is not un-mirrored from `options[]`. Recorded here so the suite
- * REDs if that set grows OR shrinks.
+ * KNOWN-DROPPED, pinned by an exact-set test — TWO members, not one:
+ *   (1) an intervention the user REMOVED from the node is not un-mirrored; and
+ *   (2) a `raw_interventions` carrier for a factor the node has NOT encoded is
+ *       preserved (it is a genuinely outstanding question, not staleness).
+ * Recorded here so the suite REDs if that set grows OR shrinks. ⚠ This list
+ * previously named only (1) while the code also dropped (2) — a FALSE
+ * COMPLETENESS CLAIM, which is the kind of sentence a later session inherits as
+ * fact. Both members are now named and both are asserted.
  *
  * ORDERING (once wired) — runs AFTER `normaliseOptionInterventionContract` so the
  * interventions bundle a mirrored entry copies is already the canonical
@@ -153,6 +160,50 @@ function mergeEntryInterventions(existing: unknown, node: unknown): Dict {
 }
 
 /**
+ * `raw_interventions` is the OPTION-ENTRY-ONLY pre-encoding carrier (OptionV3
+ * :437, `Record<string, number|string|boolean>`). **The NODE never carries it**
+ * — zero `raw_interventions` writes onto a node exist in `src/`, against a
+ * contrast of four `node.interventions =` writes. So it cannot be refreshed by
+ * COPYING from the node the way `interventions` is; the only correct refresh is
+ * REMOVAL.
+ *
+ * WHY IT MUST BE CLEARED. `transformOptionToAnalysisReady`
+ * (`cee/transforms/analysis-ready.ts:129-139`) carries option-level
+ * `raw_interventions` into the analysis-ready payload, and any NON-NUMERIC raw
+ * sets `hasNonNumericRaw` → `computeAnalysisReadyStatusWithReason` returns
+ * `needs_encoding` → `analysis-ready-helper.ts:919` mints
+ * `OPTION_NEEDS_ENCODING` ("Choose how <option> should be represented on the
+ * effect scale"). A stale raw carrier therefore keeps RE-ASKING the very
+ * question the user just answered, even once the encoded value has propagated.
+ * It is a SECOND stale field on the same mirror entry, read by the same
+ * consumer — propagating `interventions` alone does not unblock the gate.
+ *
+ * Only keys the node has now ENCODED (a usable numeric) are cleared; a raw
+ * carrier for a factor the user has not encoded is genuinely outstanding and is
+ * preserved. Returns the ORIGINAL reference when nothing is cleared, so an
+ * absent or malformed field is left exactly as found and the by-reference
+ * no-op is preserved.
+ */
+function clearEncodedRawInterventions(
+  entryRaw: unknown,
+  nodeInterventions: unknown,
+): { next: Dict | undefined; changed: boolean } {
+  if (!isPlainObject(entryRaw)) return { next: undefined, changed: false };
+  const node = isPlainObject(nodeInterventions) ? nodeInterventions : {};
+  const next: Dict = {};
+  let changed = false;
+  for (const [factorId, rawValue] of Object.entries(entryRaw)) {
+    if (usableInterventionValue(node[factorId])) {
+      changed = true;
+      continue;
+    }
+    next[factorId] = rawValue;
+  }
+  if (!changed) return { next: entryRaw, changed: false };
+  return { next: Object.keys(next).length > 0 ? next : undefined, changed: true };
+}
+
+/**
  * Key-order-INSENSITIVE structural digest, so a bundle that differs only in key
  * order is not misread as stale (which would destroy the byte-identical-no-op
  * guarantee this module promises).
@@ -234,7 +285,14 @@ function planOptionsReconcile(graph: unknown): ReconcilePlan {
     // DUPLICATE_OPTION_ID; this pass declines rather than guesses.
     if (duplicateIds.has(node.id)) continue;
     const merged = mergeEntryInterventions(entry.interventions, node.interventions);
-    if (stableDigest(merged) !== stableDigest(entry.interventions)) stale.push(node.id);
+    // `raw_interventions` is part of the STALENESS DECISION, not a tidy-up: if
+    // it were excluded, the pass would either stop no-opping on an
+    // already-consistent graph (destroying the by-reference idempotence
+    // `projectGraphForPersistence` relies on) or no-op BEFORE clearing it.
+    const rawPlan = clearEncodedRawInterventions(entry.raw_interventions, node.interventions);
+    const interventionsStale =
+      stableDigest(merged) !== stableDigest(entry.interventions);
+    if (interventionsStale || rawPlan.changed) stale.push(node.id);
   }
   return { missing, stale };
 }
@@ -309,10 +367,28 @@ export function reconcileTopLevelOptionsFromNodes<T>(
         const entry = entryById.get(node.id);
         if (entry === undefined) continue;
         entry.interventions = mergeEntryInterventions(entry.interventions, node.interventions);
+        // Refresh-by-REMOVAL for the second stale field on this same entry.
+        const raw = clearEncodedRawInterventions(entry.raw_interventions, node.interventions);
+        if (raw.changed) {
+          if (raw.next === undefined) delete entry.raw_interventions;
+          else entry.raw_interventions = raw.next;
+        }
         // Status is a DERIVED mirror field. Promote only the value this module
         // itself mints, and only upwards — never downgrade, and never overwrite
-        // a status vocabulary this module does not own.
-        if (entry.status === 'needs_encoding' && hasNumericIntervention(entry.interventions)) {
+        // a status vocabulary this module does not own. A RESIDUAL raw carrier
+        // means a factor is still genuinely unencoded, so promoting there would
+        // mint exactly the over-optimistic `ready` this module forbids — and
+        // `context/graph-hash.ts:293` hashes `raw_interventions` ONLY while
+        // status !== 'ready', so an over-eager promotion would also drop it
+        // from the identity digest.
+        const residualRaw =
+          isPlainObject(entry.raw_interventions)
+          && Object.keys(entry.raw_interventions).length > 0;
+        if (
+          entry.status === 'needs_encoding'
+          && !residualRaw
+          && hasNumericIntervention(entry.interventions)
+        ) {
           entry.status = 'ready';
         }
       }
