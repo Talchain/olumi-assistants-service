@@ -78,6 +78,7 @@ import {
   type GateRejectReason,
 } from './copy-quality-gate.js';
 import { buildReadinessNextStep } from './readiness-recovery.js';
+import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
 
 /**
  * RC4 proportionate remedies: run a candidate through
@@ -689,7 +690,7 @@ function buildConfirmSentence(goalLabel: string | null): string {
   if (!goalLabel) {
     return "I've built a first decision model from your brief.";
   }
-  const safe = truncate(goalLabel, MAX_GOAL_CHARS);
+  const safe = elideLabelAtWordBoundary(goalLabel, MAX_GOAL_CHARS);
   return `I've built a first decision model for "${safe}".`;
 }
 
@@ -703,7 +704,7 @@ function buildConfirmSentence(goalLabel: string | null): string {
  */
 function buildOptionsBlock(options: readonly string[]): string | null {
   if (options.length === 0) return null;
-  const trimmed = options.map((label) => truncate(label, MAX_LABEL_CHARS));
+  const trimmed = options.map((label) => elideLabelAtWordBoundary(label, MAX_LABEL_CHARS));
 
   if (trimmed.length === 1) {
     return `The model so far includes one route: ${trimmed[0]}.`;
@@ -729,19 +730,19 @@ function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
 ): string | null {
-  const trimmedFactors = factors.map((l) => truncate(l, MAX_LABEL_CHARS));
+  const trimmedFactors = factors.map((l) => elideLabelAtWordBoundary(l, MAX_LABEL_CHARS));
   if (trimmedFactors.length >= 2) {
     return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
-    const risk = truncate(risks[0], MAX_LABEL_CHARS);
+    const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
     return `Main trade-off: ${trimmedFactors[0]} against the risk of ${risk}`;
   }
   if (trimmedFactors.length === 1) {
     return `Key consideration: ${trimmedFactors[0]}`;
   }
   if (risks.length >= 1) {
-    const risk = truncate(risks[0], MAX_LABEL_CHARS);
+    const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
     return `Key consideration: the risk of ${risk}`;
   }
   return null;
@@ -1221,13 +1222,11 @@ function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
 
 // ----- text utilities -------------------------------------------------------
 
-function truncate(label: string, max: number): string {
-  const trimmed = label.trim();
-  if (trimmed.length <= max) return trimmed;
-  const cut = trimmed.slice(0, max);
-  const lastSpace = cut.lastIndexOf(' ');
-  return lastSpace > Math.floor(max / 2) ? cut.slice(0, lastSpace).trim() : cut.trim();
-}
+// N26: the local label truncator that used to live here is DELETED. It cut
+// user labels mid-token and appended no ellipsis, producing witnessed strings
+// such as `double down on enterprise sales (higher`. Label elision now has
+// exactly one owner in CEE — `src/utils/label-elision.ts`. Do not reintroduce
+// a local copy here; add the case to the canonical module instead.
 
 function cleanLeadIn(s: string): string {
   // Strip leading bullet / dash glyph the pipeline may have left in
