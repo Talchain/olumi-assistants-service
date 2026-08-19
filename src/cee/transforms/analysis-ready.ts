@@ -914,8 +914,24 @@ export function buildAnalysisReadyPayload(
   const optionsNeedingEncoding = analysisOptions.filter(
     (o) => o.status === "needs_encoding"
   ).length;
+  // ⭐ STRICT, TO MATCH ITS SIBLING — AND THE REASON IS OBSERVABILITY, NOT TIDINESS.
+  //
+  // This counter kept a LOOSE predicate while `optionsNeedingEncoding` above is
+  // strict, so once a connected-but-numberless option became `needs_encoding` the
+  // SAME option was counted in BOTH: four counted on two options. Worse, an
+  // operator watching `optionsNeedingMapping` to confirm this change landed would
+  // have seen NO MOVEMENT AT ALL, because the `interventions` limb pins the count
+  // regardless of the status. A change justified by a 9/9 measurement would have
+  // shipped un-observable.
+  //
+  // ⛔ DO NOT propagate this edit to `hasIncompleteOptions` (:874-876). That
+  // predicate's loose limb is LOAD-BEARING: it is precisely what holds
+  // `payloadStatus` still for this class (their `interventions` is provably `{}`
+  // there), and the payload status is a user-visible gate input. These two look
+  // like the same predicate and answer different questions — telemetry counts a
+  // STATUS, admission counts an EMPTINESS.
   const optionsNeedingMapping = analysisOptions.filter(
-    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+    (o) => o.status === "needs_user_mapping"
   ).length;
 
   // === Unreachable controllable factor check ===

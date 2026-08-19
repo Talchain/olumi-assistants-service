@@ -45,6 +45,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 
+import { assessCanonicalAnalysisReadiness } from "../../../orchestrator/tools/analysis-ready-helper.js";
 import type { GraphV3T, NodeV3T, OptionV3T, InterventionV3T } from "../../../schemas/cee-v3.js";
 import { buildAnalysisReadyPayload } from "../analysis-ready.js";
 import { computeOptionStatus } from "../option-status.js";
@@ -244,5 +245,82 @@ describe("BOUNDARIES", () => {
     const target = options.find((o) => o.id === "e755ec33");
     expect(Object.keys(target?.interventions ?? {}).length).toBeGreaterThan(0);
     expect(draftPathStatusById(DRAW_4).get("e755ec33")).toBe("ready");
+  });
+});
+
+describe("THE USER-FACING COPY — the semantic-issue branch, reached uncovered", () => {
+  // ⭐ WHY THIS BLOCK EXISTS. `appendSemanticIssues`
+  // (`orchestrator/tools/analysis-ready-helper.ts`) is where the status becomes
+  // a SENTENCE — `OPTION_NEEDS_ENCODING` / "Choose how X should be represented
+  // on the effect scale" vs `OPTION_NEEDS_MAPPING` / "Choose which factor X
+  // changes and by how much". It is also SUPPRESSED for any option a blocker
+  // has already named (`coveredOptionIds`).
+  //
+  // Measured on the captures above: EVERY affected option carries a
+  // `MISSING_OPTION_VALUE` blocker, so all seven instances are suppressed and
+  // the copy branch is never reached by that corpus. A corpus that cannot reach
+  // a branch cannot certify it — so this block reaches it deliberately.
+  //
+  // HOW, without leaving real data: an option→factor edge to an EXTERNAL factor
+  // still counts as a mapping (the edge is the product's established link), but
+  // the blocker loop skips non-controllable factors — so the option is
+  // `needs_encoding` with no covering blocker. Derived from the real draw-9
+  // graph by re-categorising exactly the factors `cbf30a46` targets.
+  function draw9WithCbfTargetsExternal(): GraphV3T {
+    const graph = JSON.parse(JSON.stringify(DRAW_9.draft_graph)) as GraphV3T;
+    const kind = new Map((graph.nodes as NodeV3T[]).map((n) => [n.id, n.kind]));
+    const targets = new Set(
+      (graph.edges as Array<{ from: string; to: string }>)
+        .filter((e) => e.from === "cbf30a46" && kind.get(e.to) === "factor")
+        .map((e) => e.to),
+    );
+    expect(targets.size).toBeGreaterThan(0);
+    for (const node of graph.nodes as Array<NodeV3T & { category?: string }>) {
+      if (targets.has(node.id)) node.category = "external";
+    }
+    return graph;
+  }
+
+  it("an uncovered connected-but-numberless option is asked for the VALUE", () => {
+    const assessment = assessCanonicalAnalysisReadiness(draw9WithCbfTargetsExternal());
+    const issues = assessment.blockingIssues;
+
+    // PRECONDITION, PINNED IN-TEST (trap 13b): this option must genuinely reach
+    // the semantic branch UNCOVERED. If a blocker ever starts naming it, the
+    // assertions below would be testing the suppression path instead and would
+    // still pass for the wrong reason.
+    expect(
+      issues.some((i) => i.code === "MISSING_OPTION_VALUE" && i.option_id === "cbf30a46"),
+    ).toBe(false);
+    expect(assessment.analysisReady?.options.find((o) => o.option_id === "cbf30a46")?.status)
+      .toBe("needs_encoding");
+
+    const issue = issues.find((i) => i.option_id === "cbf30a46" && i.code === "OPTION_NEEDS_ENCODING");
+    expect(issue).toBeDefined();
+    expect(issue!.category).toBe("option_values");
+    expect(issue!.message).toMatch(/should be represented on the effect scale/i);
+
+    // And NOT the question this PR exists to stop asking.
+    expect(issues.some((i) => i.option_id === "cbf30a46" && i.code === "OPTION_NEEDS_MAPPING"))
+      .toBe(false);
+    expect(issues.every((i) => !(i.option_id === "cbf30a46" && /which factor/i.test(i.message ?? ""))))
+      .toBe(true);
+  });
+
+  it("SUPPRESSION STILL WORKS — an option a blocker already named gets no semantic duplicate", () => {
+    // The GREEN half of the pair. `e755ec33` keeps a controllable target, so it
+    // keeps its `MISSING_OPTION_VALUE` blocker and must NOT also receive a
+    // semantic option issue — otherwise the fix would have doubled the asks.
+    const issues = assessCanonicalAnalysisReadiness(draw9WithCbfTargetsExternal()).blockingIssues;
+    expect(
+      issues.some((i) => i.code === "MISSING_OPTION_VALUE" && i.option_id === "e755ec33"),
+    ).toBe(true);
+    expect(
+      issues.some(
+        (i) =>
+          i.option_id === "e755ec33"
+          && (i.code === "OPTION_NEEDS_ENCODING" || i.code === "OPTION_NEEDS_MAPPING"),
+      ),
+    ).toBe(false);
   });
 });
