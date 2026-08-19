@@ -164,6 +164,82 @@ describe('raw_interventions — the second stale field on the same mirror entry'
     expect(transformOptionToAnalysisReady(OptionV3.parse(entry), 1).status).toBe('ready');
   });
 
+  /**
+   * OPPOSITE-DIRECTION PAIR for the promotion guard's residual predicate.
+   *
+   * The guard must be VALUE-TYPED, not key-count. The consumer's own rule is
+   * `typeof rawValue !== "number"` (`cee/transforms/analysis-ready.ts:135`), and
+   * the estate writes the identical predicate sixty lines from that consumer
+   * (`analysis-ready-helper.ts:444`). A key-count predicate over-refuses: a
+   * NUMERIC residual is contract-admissible (`RawInterventionValue` is
+   * `z.union([number, string, boolean])`, `cee-v3.ts:340-344`) and reachable via
+   * the LLM draft passthrough (`draft-graph.ts:887-889` carries
+   * `o.raw_interventions` with no value-type filter), so counting keys turns a
+   * correct `ready` into a blocking, human-input-only refusal that names no
+   * factor — the state `analysis-ready.ts:1268-1274` (`NEEDS_ENCODING_ALL_NUMERIC`)
+   * declares invalid.
+   *
+   * Both halves are required: without the PROMOTE half the guard silently
+   * over-refuses; without the REFUSE half it silently over-promotes. Neither
+   * alone pins the predicate.
+   */
+  function graphWithResidual(residual: Record<string, unknown>) {
+    const encoded = {
+      value: 0.75,
+      source: 'user_specified',
+      target_match: {
+        node_id: 'fac_technology',
+        match_type: 'exact_id',
+        confidence: 'high',
+      },
+    };
+    return {
+      nodes: [
+        { id: 'fac_technology', kind: 'factor', label: 'Technology' },
+        { id: 'fac_open', kind: 'factor', label: 'Seat tier' },
+        {
+          id: 'opt_hubspot',
+          kind: 'option',
+          label: 'Migrate to HubSpot',
+          // Only fac_technology is encoded; fac_open is untouched by the node.
+          interventions: { fac_technology: { ...encoded } },
+        },
+      ],
+      edges: [{ from: 'opt_hubspot', to: 'fac_technology' }],
+      options: [
+        {
+          id: 'opt_hubspot',
+          label: 'Migrate to HubSpot',
+          status: 'needs_encoding',
+          interventions: {},
+          raw_interventions: { fac_technology: 'HubSpot', ...residual },
+        },
+      ],
+    };
+  }
+
+  it('PAIR (promote half): a NUMERIC residual raw does NOT block promotion', () => {
+    const out = reconcileTopLevelOptionsFromNodes(graphWithResidual({ fac_open: 5 }));
+    const entry = out.options.find((o) => o.id === 'opt_hubspot');
+    // The answered carrier is cleared; the numeric one survives untouched...
+    expect((entry!.raw_interventions as Record<string, unknown>)).toEqual({ fac_open: 5 });
+    // ...and it must NOT hold the option back.
+    expect(entry!.status).toBe('ready');
+    // VERDICT FROM THE LIVE CONSUMER, not a restatement of its rule.
+    expect(transformOptionToAnalysisReady(OptionV3.parse(entry), 1).status).toBe('ready');
+  });
+
+  it('PAIR (refuse half): a NON-NUMERIC residual raw still REFUSES promotion', () => {
+    const out = reconcileTopLevelOptionsFromNodes(graphWithResidual({ fac_open: 'high' }));
+    const entry = out.options.find((o) => o.id === 'opt_hubspot');
+    expect((entry!.raw_interventions as Record<string, unknown>)).toEqual({ fac_open: 'high' });
+    // Still genuinely unencoded — promoting here would be the over-optimistic
+    // `ready`, and `graph-hash.ts:293` would then drop the field from the
+    // identity digest for exactly the entry where it still decides readiness.
+    expect(entry!.status).toBe('needs_encoding');
+    expect(transformOptionToAnalysisReady(OptionV3.parse(entry), 1).status).toBe('needs_encoding');
+  });
+
   it('BYTE-IDENTICAL NO-OP: a graph with nothing left to clear returns the ORIGINAL reference', () => {
     // Idempotence by REFERENCE is what `projectGraphForPersistence` relies on;
     // it is why raw_interventions had to join the staleness digest rather than

@@ -381,9 +381,22 @@ export function reconcileTopLevelOptionsFromNodes<T>(
         // `context/graph-hash.ts:293` hashes `raw_interventions` ONLY while
         // status !== 'ready', so an over-eager promotion would also drop it
         // from the identity digest.
+        //
+        // ⭐ VALUE-TYPED, NOT KEY-COUNT — this must mirror the CONSUMER's own
+        // rule (`cee/transforms/analysis-ready.ts:135`,
+        // `typeof rawValue !== "number"`), which is also how the estate writes
+        // it sixty lines from that consumer (`analysis-ready-helper.ts:444`).
+        // A NUMERIC raw value is contract-admissible (`RawInterventionValue` =
+        // `z.union([number, string, boolean])`, `cee-v3.ts:340-344`) and is
+        // reachable through the LLM draft passthrough (`draft-graph.ts:887-889`
+        // carries `o.raw_interventions` with no value-type filter). Counting
+        // KEYS therefore over-refuses: it turns a correct `ready` into a
+        // blocking, human-input-only refusal that names no factor — the state
+        // `analysis-ready.ts:1268-1274` (`NEEDS_ENCODING_ALL_NUMERIC`) declares
+        // invalid. Only a NON-NUMERIC residual is a real outstanding question.
         const residualRaw =
           isPlainObject(entry.raw_interventions)
-          && Object.keys(entry.raw_interventions).length > 0;
+          && Object.values(entry.raw_interventions).some((v) => typeof v !== 'number');
         if (
           entry.status === 'needs_encoding'
           && !residualRaw
