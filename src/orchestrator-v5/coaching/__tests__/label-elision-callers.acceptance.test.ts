@@ -59,6 +59,30 @@ const USER_GOAL_90 =
 const NESTED_PARENTHETICAL =
   'Migrate (everything except the payments platform … which is a lot)';
 
+/**
+ * The "too permissive" inverse, AT THE CALLERS — the branch every existing
+ * cap assertion in this file is structurally blind to.
+ *
+ * Both of these are labels whose only word boundaries sit BELOW the retention
+ * floor (the first has none at all; the second has one, at index 1). They
+ * therefore reach the elider's last-resort branch, which is the one branch no
+ * other case here exercises: the caps asserted at the tests above only ever
+ * run on labels that elide normally, so a last-resort overrun stays invisible
+ * to all of them. Recorded here as CALLER-level cases, by exact string, so the
+ * budget the user's screen actually has is pinned at the seam that renders it.
+ */
+const UNBREAKABLE_LABEL_76 =
+  'Self-hosted/on-premise-deployment-for-regulated-financial-services-customers';
+
+/** The goal-cap twin of the same class, exercised at `MAX_GOAL_CHARS`. */
+const UNBREAKABLE_GOAL_94 =
+  'A comprehensive-restructuring-of-the-entire-commercial-organisation-across-every-single-region';
+
+/** What each one must render as, once cut to its cap and marked. */
+const UNBREAKABLE_LABEL_76_ELIDED = 'Self-hosted/on-premise-deployment-for-r…';
+const UNBREAKABLE_GOAL_94_ELIDED =
+  'A comprehensive-restructuring-of-the-entire-commercial-organisation-across-ever…';
+
 // --- the exact strings a user was shown, which must never reappear ---------
 const WITNESSED_1 = 'double down on enterprise sales (higher';
 const WITNESSED_2 =
@@ -83,6 +107,7 @@ const OPT_85_ID = 'opt_n26_85';
 const OPT_101_ID = 'opt_n26_101';
 const OPT_44_ID = 'opt_n26_44';
 const OPT_NESTED_ID = 'opt_n26_nested';
+const OPT_UNBREAKABLE_ID = 'opt_n26_unbreakable';
 
 function narrativeLines(nodes: unknown[]): string[] {
   const result = buildPostDraftNarrative({
@@ -188,6 +213,36 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
     // Still a genuine prefix of what the user wrote.
     expect(NESTED_PARENTHETICAL.startsWith(rendered.slice(0, -1))).toBe(true);
   });
+
+  it('INVERSE (b) — too permissive: a label whose only boundaries sit below the floor is still cut to the cap and marked, at BOTH caps', () => {
+    const lines = narrativeLines([
+      { id: GOAL_ID, kind: 'goal', label: UNBREAKABLE_GOAL_94 },
+      { id: OPT_UNBREAKABLE_ID, kind: 'option', label: UNBREAKABLE_LABEL_76 },
+      { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
+    ]);
+
+    // Identity: the bullet for THIS option, matched as a whole line, by exact
+    // string — not a length predicate another bullet could satisfy.
+    expect(bulletFor(lines, UNBREAKABLE_LABEL_76_ELIDED)).toBe(
+      `• ${UNBREAKABLE_LABEL_76_ELIDED}`,
+    );
+    // The un-clipped overrun this branch used to hand the caller is absent.
+    expect(bulletFor(lines, UNBREAKABLE_LABEL_76)).toBeUndefined();
+    expect(lines.join('\n')).not.toContain(UNBREAKABLE_LABEL_76);
+    expect(UNBREAKABLE_LABEL_76_ELIDED.length).toBeLessThanOrEqual(MAX_LABEL_CHARS);
+    expect(UNBREAKABLE_LABEL_76_ELIDED.endsWith('…')).toBe(true);
+
+    // Goal-cap twin, same class, at MAX_GOAL_CHARS — exact confirm sentence.
+    expect(lines[0]).toBe(
+      `I've built a first decision model for "${UNBREAKABLE_GOAL_94_ELIDED}".`,
+    );
+    expect(UNBREAKABLE_GOAL_94_ELIDED.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
+    expect(lines[0]).not.toContain(UNBREAKABLE_GOAL_94);
+
+    // Both are still honest prefixes of what the user wrote.
+    expect(UNBREAKABLE_LABEL_76.startsWith(UNBREAKABLE_LABEL_76_ELIDED.slice(0, -1))).toBe(true);
+    expect(UNBREAKABLE_GOAL_94.startsWith(UNBREAKABLE_GOAL_94_ELIDED.slice(0, -1))).toBe(true);
+  });
 });
 
 describe('N26 — the readiness-recovery chip elides the same label the same way', () => {
@@ -230,6 +285,27 @@ describe('N26 — the readiness-recovery chip elides the same label the same way
     expect((chip as { label: string }).label).toBe(
       'Configure Status Quo: Hold current strategy',
     );
+  });
+
+  it('INVERSE (b) — too permissive: the chip cuts a below-floor-boundary label to the cap and marks it', () => {
+    const chip = buildReadinessRecoveryChip(
+      { status: 'needs_encoding', options: [{ id: OPT_UNBREAKABLE_ID, status: 'needs_encoding' }] },
+      [{ id: OPT_UNBREAKABLE_ID, kind: 'option', label: UNBREAKABLE_LABEL_76 }],
+    );
+    expect(chip, 'a non-ready status must produce a chip').not.toBeNull();
+    // Identity: the configure chip for THIS option id.
+    expect((chip as { id: string }).id).toBe('chip_prompt_configure_option');
+    expect((chip as { label: string }).label).toBe(
+      `Configure ${UNBREAKABLE_LABEL_76_ELIDED}`,
+    );
+    // The un-clipped overrun the chip used to ship is absent.
+    expect((chip as { label: string }).label).not.toBe(`Configure ${UNBREAKABLE_LABEL_76}`);
+    expect((chip as { label: string }).label).not.toContain(UNBREAKABLE_LABEL_76);
+
+    const rendered = (chip as { label: string }).label.slice('Configure '.length);
+    expect(rendered.length).toBeLessThanOrEqual(MAX_LABEL_CHARS);
+    expect(rendered.endsWith('…')).toBe(true);
+    expect(UNBREAKABLE_LABEL_76.startsWith(rendered.slice(0, -1))).toBe(true);
   });
 });
 

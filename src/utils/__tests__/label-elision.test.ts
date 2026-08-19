@@ -98,21 +98,24 @@ describe('the elider and the predicate agree — the same discipline drives both
   });
 });
 
-describe('INVERSE (b) — too permissive: the whole-label branch, bounded', () => {
-  it('returns the whole label BY IDENTITY when a single token exceeds the budget', () => {
+describe('INVERSE (b) — too permissive: the LAST-RESORT branch stays inside the budget', () => {
+  it('cuts a single over-budget token to the cap and MARKS it, by exact string', () => {
     const token = 'a'.repeat(49);
     expect(token.length).toBe(49);
     const out = elideLabelAtWordBoundary(token, 10);
     // Identity, not a length predicate another string could satisfy.
-    expect(out).toBe(token);
-    // Bounded overrun: it returns the label, never more than the label.
-    expect(out.length).toBe(token.length);
-    expect(out.length).toBeLessThanOrEqual(token.length);
-    // And it does NOT claim to have elided.
-    expect(out.endsWith(LABEL_ELISION_MARKER)).toBe(false);
+    expect(out).toBe(`${'a'.repeat(9)}${LABEL_ELISION_MARKER}`);
+    // ⚠ This assertion used to read `toBe(token)`: the whole 49-character
+    // label through a 10-character budget, unmarked, on the promise that the
+    // caller would clip afterwards. None of the seven callers did.
+    expect(out).not.toBe(token);
+    expect(out.length).toBeLessThanOrEqual(10);
+    // It admits the cut, and stays a genuine prefix of what the user wrote.
+    expect(out.endsWith(LABEL_ELISION_MARKER)).toBe(true);
+    expect(token.startsWith(out.slice(0, -1))).toBe(true);
   });
 
-  it('does NOT take the whole-label branch when a boundary above the floor exists', () => {
+  it('does NOT take the last-resort branch when a boundary above the floor exists', () => {
     const label = `${'a'.repeat(30)} ${'b'.repeat(40)}`;
     const out = elideLabelAtWordBoundary(label, 40);
     expect(out).not.toBe(label);
@@ -120,8 +123,12 @@ describe('INVERSE (b) — too permissive: the whole-label branch, bounded', () =
   });
 
   it('returns the trimmed label for a budget too small to hold text plus a marker', () => {
+    // The documented exception to `<= max`: there is no honest elision at a
+    // budget with no room for text AND a marker, and the return carries no
+    // marker, so it does not claim to have elided.
     expect(elideLabelAtWordBoundary('alpha beta', 1)).toBe('alpha beta');
     expect(elideLabelAtWordBoundary('alpha beta', 0)).toBe('alpha beta');
+    expect(elideLabelAtWordBoundary('alpha beta', 1).endsWith(LABEL_ELISION_MARKER)).toBe(false);
   });
 });
 
@@ -166,6 +173,7 @@ describe('TERMINATION — the back-off runs on user text every draft turn', () =
     const CASES = 20000;
     let checked = 0;
     let elided = 0;
+    let wholeLabel = 0;
     const started = Date.now();
 
     for (let n = 0; n < CASES; n += 1) {
@@ -183,7 +191,36 @@ describe('TERMINATION — the back-off runs on user text every draft turn', () =
         expect(out).toBe(trimmed);
         continue;
       }
-      if (out === trimmed) continue; // documented whole-label branch
+      // ⚠ NO BARE `continue` HERE, and the reason is measured. This line used
+      // to read `if (out === trimmed) continue;` — sitting ABOVE the `<= max`
+      // assertion, so every over-budget label taking that branch (~44% of the
+      // over-budget corpus) was exempted from the budget check AND from every
+      // count, leaving the sweep green while the elider returned 56–76-char
+      // labels through a 40-char budget. An exemption that shrinks its own
+      // sample without saying so is the same defect as a spec that collects
+      // zero tests.
+      //
+      // The branch is now COUNTED, SHAPE-CHECKED and BOUNDED. Under the
+      // restored guarantee it is unreachable for an integer `max >= 2`, so
+      // `wholeLabel` must be exactly 0 — and if the branch is ever reopened
+      // this sweep REDs here and on the bound below, instead of quietly
+      // measuring less.
+      if (out === trimmed) {
+        wholeLabel += 1;
+        // Shape, so nothing else can inflate the counter: identity with the
+        // trimmed label, and no claim to have elided.
+        expect(out, `whole-label return at max=${max}`).toBe(trimmed);
+        expect(
+          out.endsWith(LABEL_ELISION_MARKER),
+          `whole-label return must not claim an elision: ${JSON.stringify(out)}`,
+        ).toBe(false);
+        // The budget check the old `continue` skipped, applied here too.
+        expect(
+          out.length,
+          `whole-label return overran max=${max}: ${JSON.stringify(out)}`,
+        ).toBeLessThanOrEqual(max);
+        continue;
+      }
       elided += 1;
       expect(out.endsWith(LABEL_ELISION_MARKER), `no marker on ${JSON.stringify(out)}`).toBe(true);
       expect(out.length, `overran max=${max}: ${JSON.stringify(out)}`).toBeLessThanOrEqual(max);
@@ -194,18 +231,39 @@ describe('TERMINATION — the back-off runs on user text every draft turn', () =
     // Non-empty inputs: an assertion that ran on nothing proves nothing.
     expect(checked).toBe(CASES);
     expect(elided, 'the sweep must actually exercise the elision path').toBeGreaterThan(1000);
+    // EXPLICIT BOUND. `<= max` is unconditional for an integer `max >= 2`, so
+    // no over-budget label may come back whole. A widening of that branch REDs
+    // this line by name rather than silently exempting part of the corpus.
+    expect(
+      wholeLabel,
+      'no over-budget label may be returned whole — the <= max guarantee is unconditional',
+    ).toBe(0);
+    // And the two counters must account for the WHOLE over-budget corpus.
+    expect(elided + wholeLabel, 'every over-budget case must be classified').toBeGreaterThan(1000);
     expect(elapsed, `sweep took ${elapsed}ms`).toBeLessThan(10000);
   });
 
-  it('terminates on pathological all-opener and all-space inputs', () => {
+  it('terminates on pathological all-opener and all-space inputs, INSIDE the budget', () => {
+    // ⚠ All three assertions here used to pin the whole input as the intended
+    // return — the first pinned a 500-character overrun through a 40-character
+    // budget as correct behaviour. Under the restored `<= max` guarantee they
+    // RED, and that red is the point, not a failure.
     const openers = '('.repeat(500);
-    expect(elideLabelAtWordBoundary(openers, 40)).toBe(openers);
-    const spaced = `${'x'.repeat(60)} ${'y'.repeat(60)}`;
-    expect(elideLabelAtWordBoundary(spaced, 40)).toBe(spaced);
-    const manySpaces = `a${' '.repeat(200)}b${' '.repeat(200)}c`;
-    expect(elideLabelAtWordBoundary(manySpaces, 40).length).toBeLessThanOrEqual(
-      manySpaces.trim().length,
+    expect(elideLabelAtWordBoundary(openers, 40)).toBe(
+      `${'('.repeat(39)}${LABEL_ELISION_MARKER}`,
     );
+    expect(elideLabelAtWordBoundary(openers, 40).length).toBe(40);
+
+    // Same class: the only word boundary sits at index 60, outside the budget.
+    const spaced = `${'x'.repeat(60)} ${'y'.repeat(60)}`;
+    expect(elideLabelAtWordBoundary(spaced, 40)).toBe(
+      `${'x'.repeat(39)}${LABEL_ELISION_MARKER}`,
+    );
+
+    // Boundaries exist but every one of them is below the floor.
+    const manySpaces = `a${' '.repeat(200)}b${' '.repeat(200)}c`;
+    expect(elideLabelAtWordBoundary(manySpaces, 40)).toBe(`a${LABEL_ELISION_MARKER}`);
+    expect(elideLabelAtWordBoundary(manySpaces, 40).length).toBeLessThanOrEqual(40);
   });
 });
 

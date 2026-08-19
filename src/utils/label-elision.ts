@@ -6,8 +6,17 @@
  * One question, and only this one: *given a user-authored SHORT LABEL (an
  * option / goal / factor / risk name) that does not fit a display budget,
  * which prefix of it may the product show, and how does the product admit
- * that it cut?* Every producer of an elided LABEL must call
- * {@link elideLabelAtWordBoundary}. Nothing else in this module is a policy.
+ * that it cut?* Nothing else in this module is a policy.
+ *
+ * ⚠ WHAT THIS DOES *NOT* CLAIM. It owns that question for the TWO SEAMS
+ * CONVERTED IN N26 — `orchestrator-v5/coaching/post-draft-narrative.ts` and
+ * `orchestrator-v5/coaching/readiness-recovery.ts` — and for nothing else.
+ * This header previously read "every producer of an elided LABEL must call
+ * {@link elideLabelAtWordBoundary}", which was already false at the commit
+ * that wrote it: label cuts survive elsewhere in the tree, unconverted and
+ * deliberately out of scope, and they are NAMED under NOT IN SCOPE below. A
+ * NEW label producer should call this. The claim that every existing one
+ * already does was an aspiration written in the present tense.
  *
  * WHAT IT SUPERSEDED (N26, 2026-08-19)
  * ------------------------------------
@@ -40,10 +49,32 @@
  *
  * NOT IN SCOPE — deliberately, and these are DIFFERENT budget questions that
  * must not be folded in here: prose-body truncation
- * (`phase3-blocks.ts` / `flip-threshold-card-row.ts`, which an existing
- * conformance test pins byte-identical to each other), evidence-pack field
- * clipping (`utils/evidence-pack.ts`), and the several sentence-level clippers
- * in the compose layer. This module says nothing about any of them.
+ * (`orchestrator-v5/compose/phase3-blocks.ts` / `flip-threshold-card-row.ts`,
+ * which an existing conformance test pins byte-identical to each other),
+ * evidence-pack field clipping (`utils/evidence-pack.ts`), and the several
+ * sentence-level clippers in the compose layer. This module says nothing
+ * about any of them.
+ *
+ * ⚠ AND THE SURVIVING *LABEL* CUTS, NAMED — because "not in scope" is read as
+ * "does not exist" within a week, and an unnamed survivor is how the next
+ * session concludes this seam is closed:
+ *
+ *   • `orchestrator-v5/compose/phase3-blocks.ts:2932` —
+ *     `What would flip the result on ${ref.label}` at `TITLE_MAX`; and
+ *   • `orchestrator-v5/compose/phase3-blocks.ts:3085` —
+ *     `Evidence to strengthen first: ${guidance.factorLabel}` at `TITLE_MAX`.
+ *     Both interpolate a USER LABEL at the END of a review-card TITLE and cut
+ *     it with the bracket-unaware local `truncate` at
+ *     `orchestrator-v5/compose/phase3-blocks.ts:3296`, so the very class N26
+ *     closed on the narrative and the chip remains reachable on a card title.
+ *     ⛔ DO NOT convert them from here: that `truncate` is pinned
+ *     BYTE-IDENTICAL to `flip-threshold-card-row.ts` by an existing
+ *     conformance test, and touching either half breaks the pin. Converting
+ *     them is separate, rowed work that must move the pin first.
+ *   • `routes/assist.draft-graph.ts:310` — a mid-token 80-char label cut in
+ *     `buildRefinementBrief`. Its consumer is the MODEL PROMPT, not a screen,
+ *     which is why it is a different budget question rather than a display
+ *     defect — but it is a user-label cut and it is not this module's.
  *
  * Pure, dependency-free, and deliberately NOT hosted inside a prose composer:
  * `readiness-recovery.ts` and `post-draft-narrative.ts` both import it, and a
@@ -65,8 +96,20 @@ const ELLIPSIS = '…';
  * rather than destroying the label. It never invents a closing bracket: the
  * appended marker is exactly one U+2026 and nothing else, so the product
  * cannot put characters into a user's label that the user did not write.
- * Labels whose delimiters are *already* unbalanced in the source (the user
- * wrote `"Ship [the (nested"`) are unfixable by any cut and land here too.
+ * ⚠ CORRECTED AT THIS TIP, BY EXECUTION. This paragraph used to end: "labels
+ * whose delimiters are *already* unbalanced in the source … land here too."
+ * That is FALSE as a general statement. An already-unbalanced source is
+ * normally backed off PAST THE USER'S OWN OPENER and returned BALANCED and
+ * SHORTER — measured: `"Ship the new pricing (model for enterprise and
+ * mid-market accounts"` @40 → `"Ship the new pricing…"` (21 chars, balanced),
+ * which is the closed-boundary branch, not this one.
+ *
+ * That behaviour is DELIBERATE and the predicate must NOT be changed to stop
+ * it: the only alternative is to accept a head that reopens an unclosed
+ * delimiter on screen, which is the exact defect N26 exists to close. Such a
+ * source reaches the floor branch only when EVERY above-floor head is itself
+ * unclosed — e.g. `"Ship [the (nested {thing} here] and more words after it
+ * all"` @40, the case `label-elision.test.ts` pins.
  */
 const RETENTION_FLOOR_RATIO = 0.5;
 
@@ -81,13 +124,23 @@ const RETENTION_FLOOR_RATIO = 0.5;
  * Why ignore stray closers: an elision can only ever ORPHAN AN OPENER — it
  * cuts from the right. A closer left dangling on the left was already in the
  * user's own text, so backing off for it would delete content to atone for a
- * defect this module did not create. Worked example, and the reason this
- * paragraph exists: `"we will ship the thing) and then celebrate loudly"` @40.
- * A stack whose `pop()` on empty is a silent no-op calls the 32-char head
- * BALANCED and keeps `"we will ship the thing) and then…"`. A counter that
- * goes negative calls it unbalanced FOREVER, backs off past the floor, and
- * returns a stub. Both are self-consistent; they are not the same function.
- * This module is the first; `label-elision.test.ts` pins that case.
+ * defect this module did not create.
+ *
+ * ⚠ THE WORKED EXAMPLE THAT USED TO SIT HERE IS WITHDRAWN — refuted by
+ * execution at this tip. It claimed that on
+ * `"we will ship the thing) and then celebrate loudly"` @40 a stack keeps
+ * `"we will ship the thing) and then…"` while a counter "backs off past the
+ * floor and returns a stub". Measured: the two disciplines do disagree on the
+ * PREDICATE — `hasUnclosedDelimiter("we will ship the thing) and then")` is
+ * `false` under the stack and `true` under a counter — but they produce
+ * BYTE-IDENTICAL ELIDER OUTPUT on that exact string, `"we will ship the
+ * thing) and then…"` either way, because the counter rejects every above-floor
+ * head and the floor branch then returns the very head the stack had chosen.
+ *
+ * The claim is kept only where it is true AND pinned: the two disciplines are
+ * genuinely different functions at {@link hasUnclosedDelimiter}, which is
+ * exported for exactly that reason, and `label-elision.test.ts` pins the
+ * predicate's answer on that string.
  *
  * `"` toggles parity (there is no directional pair to match). `'` and the
  * curly `’` are NOT delimiters here — they are the English apostrophe far
@@ -172,22 +225,35 @@ function wordBoundaryHeads(text: string, budget: number): string[] {
  *  - backs off further while the head leaves a delimiter open, under the one
  *    discipline documented on {@link DELIMITER_PAIRS};
  *  - appends exactly one U+2026 whenever it elided;
- *  - total output length ≤ `max` whenever any word boundary survives inside
- *    the budget;
+ *  - total output length is ALWAYS ≤ `max`, for every input, whenever `max`
+ *    is an integer ≥ 2 — there is no branch that overruns the budget it was
+ *    handed (the two non-eliding inputs at the end of this comment are the
+ *    only outputs that can exceed it, and neither claims to have elided);
  *  - honours the {@link RETENTION_FLOOR_RATIO}, and prefers an open delimiter
  *    to a stub when the two conflict.
  *
- * THE WHOLE-LABEL BRANCH. `elide` returns the label untouched, overrunning
- * `max`, in exactly one situation: **no word-boundary prefix inside the
- * budget retains at least the floor** — i.e. the label is one token longer
- * than the budget, or its only boundaries sit in the first few characters.
- * Returning nothing usable is worse than returning something long, and this
- * function will not fabricate a break inside a word the user wrote. Callers
- * that need a hard character ceiling must clip AFTER this, and own that
- * decision themselves.
+ * THE LAST-RESORT BRANCH. When **no word-boundary prefix inside the budget
+ * retains at least the floor** — the label is one token longer than the
+ * budget, or its only boundaries sit in the first few characters — there is
+ * no word boundary to cut at, and this function cuts at `max - 1` characters
+ * anyway and marks it. That is the one MID-TOKEN cut this module makes, and
+ * it is deliberate.
  *
- * `max < 2` (no room for text plus a marker) also returns the trimmed label:
- * there is no honest elision at that budget.
+ * ⚠ It replaces a measured REGRESSION. This branch previously returned the
+ * whole label untouched, telling callers to "clip AFTER this" — and NONE of
+ * the seven call sites did, so labels of 56–76 characters reached the screen
+ * through a 40-character budget, unmarked, where the two truncators this
+ * module superseded had both cut to exactly 40. Handing a caller a string
+ * longer than the budget it asked for is not a kinder failure than a
+ * mid-token cut: the mid-token cut is still a genuine prefix of what the user
+ * wrote and still admits that it cut, while the overrun is neither. The word
+ * boundary is a PREFERENCE, ranked above the floor and above delimiter
+ * closure; the budget is the GUARANTEE.
+ *
+ * The two inputs that return the trimmed label unchanged, and so may exceed
+ * `max`: `max < 2` (no room for text plus a marker) and a non-integer `max`.
+ * There is no honest elision at either, and neither appends a marker, so
+ * neither claims to have elided.
  */
 export function elideLabelAtWordBoundary(label: string, max: number): string {
   const trimmed = typeof label === 'string' ? label.trim() : '';
@@ -206,7 +272,10 @@ export function elideLabelAtWordBoundary(label: string, max: number): string {
   }
 
   if (longestAboveFloor !== null) return `${longestAboveFloor}${ELLIPSIS}`;
-  return trimmed;
+  // LAST RESORT: no word boundary above the floor exists. Cut mid-token to the
+  // budget and mark it — see THE LAST-RESORT BRANCH above. `trimmed` starts
+  // with a non-space and `max >= 2`, so the `trimEnd()` can never empty this.
+  return `${trimmed.slice(0, max - 1).trimEnd()}${ELLIPSIS}`;
 }
 
 /** The marker this module appends, exported so tests cannot mirror it wrong. */
