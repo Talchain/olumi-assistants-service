@@ -574,6 +574,12 @@ const ContextPackReadinessSchema = z
   .object({
     status: z.string().min(1),
     open_items: z.array(ContextPackReadinessOpenItemSchema).readonly(),
+    /**
+     * Disclosed truncation — present ONLY when the cap dropped DISTINCT items.
+     * `positive()` because the projector OMITS the key at zero: a marker that
+     * discloses nothing is noise (same posture as `focus.elements_omitted`).
+     */
+    items_omitted: z.number().int().positive().optional(),
   })
   .strict();
 

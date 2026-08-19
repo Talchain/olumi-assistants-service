@@ -53,7 +53,25 @@ export interface ReadinessOpenItem {
 export interface ContextPackReadinessProjection {
   readonly status: string;
   readonly open_items: readonly ReadinessOpenItem[];
+  /**
+   * Disclosed truncation — present ONLY when the cap dropped DISTINCT items
+   * (never for deduplicated copies, which lose no fact). Same key-absence
+   * discipline as `focus.elements_omitted`.
+   */
+  readonly items_omitted?: number;
 }
+
+/**
+ * Prompt-budget cap on DISTINCT open items.
+ *
+ * A judgement, stated as one: the sibling `rest` slot the pack budgets against
+ * is capped at 2,500 chars, and the measured worst case ran ~310 chars per
+ * item, so 12 keeps this section inside a comparable envelope while still
+ * covering roughly two options per blocker kind (the `kind` enum has six
+ * members). It is also more items than a user can act on at once, which is the
+ * point of the field. Truncation is DISCLOSED, never silent.
+ */
+export const READINESS_MAX_OPEN_ITEMS = 12;
 
 export interface ReadinessSummary {
   readonly open_items: readonly ReadinessOpenItem[];
@@ -184,9 +202,43 @@ export function projectContextPackReadiness(
   if (!analysisReady) return null;
   const status = analysisReady.status;
   if (typeof status !== 'string' || status.trim().length === 0) return null;
+
+  // DEDUPE FIRST, THEN CAP — in that order, so the cap spends its budget on
+  // DISTINCT items rather than on copies. Measured on a 25-node graph in
+  // exactly the state this field exists to describe: 49 items / 7,745 chars,
+  // of which 24 were exact byte-duplicates carrying no identity at all (12x
+  // "…leave a node with no connections", 12x "An option has no factor
+  // connections…"). Un-deduped and uncapped that was 51% of the whole pack, on
+  // every turn regardless of what the user asked — and the only
+  // ceiling-cuttable section is `conversation`, so unbounded readiness growth
+  // silently EVICTS THE USER'S CONVERSATION HISTORY.
+  //
+  // The identity is the whole triple: two items of the same `kind` about
+  // DIFFERENT options are different facts and both survive. Canonical order is
+  // preserved (first occurrence wins) — this filters, it never reorders.
+  //
+  // Precedent: `coaching-state.ts` (the estate's only other presenter of this
+  // same array) already dedupes it for the same reason. The canonical owner is
+  // NOT changed — `summariseReadiness` still returns everything; this is a
+  // prompt-budget projection over its output.
+  const seen = new Set<string>();
+  const distinct: ReadinessOpenItem[] = [];
+  for (const item of summariseReadiness(analysisReady).open_items) {
+    const identity = JSON.stringify([item.kind, item.description, item.option_label ?? null]);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    distinct.push(item);
+  }
+  const open_items = distinct.slice(0, READINESS_MAX_OPEN_ITEMS);
+  const omitted = distinct.length - open_items.length;
   return {
     status,
-    open_items: summariseReadiness(analysisReady).open_items,
+    open_items,
+    // DISCLOSED truncation, and it counts CAP-DROPPED items only. Deduplicated
+    // copies are deliberately NOT counted as omissions: they carried no
+    // distinct fact, so reporting them as withheld would overstate the loss —
+    // and the instruction forbids the model stating a blocker COUNT anyway.
+    ...(omitted > 0 ? { items_omitted: omitted } : {}),
   };
 }
 

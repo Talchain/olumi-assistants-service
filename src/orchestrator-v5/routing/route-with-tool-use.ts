@@ -1368,6 +1368,17 @@ export const READINESS_INSTRUCTION = [
   '- An EMPTY list of open items does NOT mean the model is ready. Judge readiness by the status alone; when the status is anything other than ready, do not tell the user that nothing is blocking analysis.',
   '- Never claim that nothing is blocking, that the model is ready, or that an analysis can run, unless this block says so. If you have not been given this block, you do not know — say what you can see and offer to check, rather than asserting the model is clear.',
   '- Never invent a blocker, a count, or a remedy that this block does not contain.',
+  // ⚠ TWO COUNTS DISAGREE ON EVERY TURN, AND BOTH BLOCKS SAY "SOURCE OF TRUTH".
+  // `coaching_context.actionable_blocker_count` counts `analysis_ready.blockers[]`
+  // filtered on blocker_type ∈ {missing_value, ambiguous_value, missing_connection};
+  // `readiness.open_items` projects `analysis_ready.readiness_issues[]` filtered on
+  // repairability === 'human_input_required'. DIFFERENT ARRAYS, DIFFERENT FILTERS —
+  // measured 6 vs 1, 3 vs 2, and 49 vs 12 on the live chain. `buildUserMessage`
+  // appends BOTH instructions, so any count-bearing sentence contradicts one of
+  // them. The STATUS cannot disagree (both read the same `analysisReadyForTurn`),
+  // so the resolution is to suppress the count and give this block precedence —
+  // rather than reconcile two authorities that answer different questions.
+  '- Do not state a number of blockers; name what is open. Where the coaching state reports a different blocker count, this block governs.',
 ].join('\n');
 
 export const COACHING_CONTEXT_INSTRUCTION = [
