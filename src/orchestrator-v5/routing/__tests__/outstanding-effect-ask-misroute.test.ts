@@ -627,3 +627,82 @@ describe('the correction chip is offered for EXACTLY the shapes that work', () =
     }
   });
 });
+
+describe('the verified replay binds THE PAIR IT NAMES — the precondition the identity check defends', () => {
+  /**
+   * ⚠ DEMONSTRATED EQUIVALENT, NOT ASSERTED (trap 13c). Deleting
+   * `buildVerifiedCorrectionReplay`'s
+   * `resolved.optionId !== pair.optionId || resolved.factorId !== pair.factorId`
+   * line leaves the battery GREEN, because the replay is CONSTRUCTED FROM the
+   * pair and the resolver binds it correctly. Three hostile graph shapes were
+   * run to try to break that, and all three behave:
+   *
+   *   short label nested in a longer twin -> write, the SHORT option (positions,
+   *                                          not spellings)
+   *   two options with an IDENTICAL label -> `ask` (caught by the kind check
+   *                                          that precedes the identity check)
+   *   option label nested in the FACTOR   -> write, the intended pair
+   *
+   * So the identity check is defence-in-depth against a future resolver change,
+   * and this block pins the PRECONDITION that makes it currently redundant —
+   * which is what turns an invisible equivalence into a visible one.
+   */
+  function replayFor(mutate: (g: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }) => string) {
+    const g = JSON.parse(JSON.stringify(CAPTURED_GRAPH.draft_graph)) as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    const label = mutate(g);
+    return buildVerifiedCorrectionReplay(
+      {
+        refusedField: 'factor_value',
+        userValue: 0.8,
+        pairs: [
+          {
+            optionId: OPT_CAPTURED,
+            optionLabel: label,
+            factorId: FAC_CAPTURED,
+            factorLabel: FAC_LABEL_CAPTURED,
+          },
+        ],
+      },
+      g,
+    );
+  }
+  const OTHER_OPT = '939d4630';
+
+  it('a label NESTED inside a longer option label still offers (binds by position)', () => {
+    expect(
+      replayFor((g) => {
+        (g.nodes.find((n) => n.id === OPT_CAPTURED) as Record<string, unknown>).label = 'Hire';
+        (g.nodes.find((n) => n.id === OTHER_OPT) as Record<string, unknown>).label =
+          'Hire two engineers';
+        const tmpl = g.edges.find((e) => e.from === OPT_CAPTURED && e.to === FAC_CAPTURED)!;
+        g.edges.push({ ...tmpl, from: OTHER_OPT, to: FAC_CAPTURED });
+        return 'Hire';
+      }),
+    ).not.toBeNull();
+  });
+
+  it('two options with the IDENTICAL label offer NOTHING — the resolver asks, so no chip', () => {
+    expect(
+      replayFor((g) => {
+        const a = g.nodes.find((n) => n.id === OPT_CAPTURED) as Record<string, unknown>;
+        (g.nodes.find((n) => n.id === OTHER_OPT) as Record<string, unknown>).label = a.label;
+        const tmpl = g.edges.find((e) => e.from === OPT_CAPTURED && e.to === FAC_CAPTURED)!;
+        g.edges.push({ ...tmpl, from: OTHER_OPT, to: FAC_CAPTURED });
+        return a.label as string;
+      }),
+    ).toBeNull();
+  });
+
+  it('an option label nested inside the FACTOR label still offers', () => {
+    expect(
+      replayFor((g) => {
+        (g.nodes.find((n) => n.id === OPT_CAPTURED) as Record<string, unknown>).label =
+          'Sales Headcount';
+        return 'Sales Headcount';
+      }),
+    ).not.toBeNull();
+  });
+});

@@ -8545,23 +8545,25 @@ export async function runTurnExecutor(
       // route) and a chip whose message was matched back to its pending by the
       // short-confirm / ordinal / label resumes (all of which assign
       // `consumedPendingAction` upstream of this line).
-      // ⭐⭐ WAS THIS TURN'S MESSAGE AUTHORED BY THE PRODUCT?
+      // ⭐⭐ IS THIS TURN THE RESUME OF AN OFFER THE PRODUCT ITSELF MADE?
       //
-      // ⚠⚠ NOT `payload.source`. THAT FIELD DOES NOT MEAN WHAT ITS NAME SUGGESTS,
-      // AND MEASURING IT REFUTED THIS GUARD'S FIRST JUSTIFICATION. `chip_click`
-      // is a ROUTING signal, not provenance: the UI PROMOTES any turn carrying a
-      // CEE-routable `action_type` to `chip_click` regardless of what the caller
-      // said (`DecisionGuideAI/src/v5/buildPayload.ts:155` —
+      // ⚠⚠ DELIBERATELY **NOT** `payload.source`, AND THAT IS A CORRECTION TO
+      // THIS GUARD'S OWN FIRST CUT. The contract union is exactly four —
+      // `composer | chip | chip_click | retry` (`@talchain/schemas` 0.48.0,
+      // `dist/boundary/enums.d.ts:24`). `chip_click` does NOT mean "the product
+      // wrote this copy". It means **"this turn carries one of the 11
+      // CEE-routable `action_type`s"**, and the UI PROMOTES it, overriding
+      // whatever source the caller passed
+      // (`DecisionGuideAI/src/v5/buildPayload.ts:154-164` —
       // `hasBoundAction = Boolean(wireActionType) || rawSource === 'chip_click'`).
-      // Exactly ONE production call site in the whole UI sets the literal
-      // (the payload builder itself); the contrast control `source: 'chip'`
-      // reads 21. So user-authored text ships as `chip_click` every day — a
-      // free-text constraint box, a success-target field dispatched `hidden`,
-      // and user-editable node and edge labels interpolated into chip messages.
+      // Exactly ONE production call site in the whole UI sets the literal — the
+      // payload builder itself — against a contrast control of 21 for
+      // `source: 'chip'`.
       //
-      // MEASURED HARM, end to end at this tip. A user clicks "Calibrate <factor>"
-      // (`MessageBubble.tsx:616` — the ONLY production sender of a
-      // `set_factor_value` chip, and it carries NO value). Gated on `source`:
+      // MEASURED HARM from reading it as provenance, end to end at this tip.
+      // `MessageBubble.tsx:616` is the ONLY production UI sender of a
+      // `set_factor_value` chip: "Calibrate <X>" / "Help me calibrate <X>",
+      // CARRYING NO VALUE. Gated on source:
       //
       //   chip_click + outstanding factor -> "I haven't changed anything …
       //                                       would have moved <factor>'s own
@@ -8569,23 +8571,35 @@ export async function runTurnExecutor(
       //   same message, source composer   -> the helpful warrant demotion
       //
       // The product answered a plain request for HELP with a refusal about
-      // writing to the wrong field, and the only difference was the transport
-      // flag. That is this PR's own defect one level up: TWO QUESTIONS UNDER ONE
-      // NAME. `chip_click` answers "does this carry a routable action_type?";
-      // this guard needs "did the product author this copy?".
+      // writing to the wrong field, and the only difference was a transport
+      // flag. That is this guard's own defect one level up: TWO QUESTIONS UNDER
+      // ONE NAME.
       //
-      // ⭐ SO THE GATE IS THE PENDING ACTION, WHICH IS GENUINE PROVENANCE: the
-      // product minted `apply_proposed_change` itself, and consuming it is proof
-      // this turn is the resume of an offer the product made. DERIVED, not
-      // assumed — a full round trip at this tip emitted
-      // `{label:'Set this value', message:'Set that value in my model.'}` with
-      // pending `{kind:'apply_proposed_change', chip_id:'prop_0865246bcd44'}`,
-      // and replaying that copy consumed the pending and applied the write. The
+      // ⚠ THE MISREAD IS AN ESTABLISHED CLASS, NOT A NEW ONE: of 15 production
+      // readers of this field in CEE, FOUR already treat it as provenance and
+      // are on `staging` today, and three of those name `'chip_click'` only —
+      // wrong in BOTH directions at once, since `'chip'` is also canned chip
+      // copy. The contract's own reader holds the standard
+      // (`turn-payload.js:720`: `isChipSource` names both). This gate does not
+      // join that class; it reads a field that cannot have a second spelling.
+      // (The three worst instances all sit on the DRAFT path and are ROWED —
+      // deliberately untouched here.)
+      //
+      // ⭐ SO THE GATE IS THE CONSUMED PENDING ACTION, which is genuine
+      // provenance: the product minted `apply_proposed_change` itself, and
+      // consuming it is proof this turn resumes an offer the product made.
+      // DERIVED BY ROUND TRIP, not assumed — a real demotion emitted
+      // `{message:'Set that value in my model.'}` with pending
+      // `{kind:'apply_proposed_change', chip_id:'prop_0865246bcd44'}`, and
+      // replaying that copy consumed the pending and applied the write. The
       // demotion chips — the whole N=2 — arrive exactly this way.
       //
-      // This is NARROWER than the `source` reading and it is the honest one. It
-      // also makes the `chip`/`chip_click` spelling question moot rather than
-      // answered: the field is not read at all.
+      // ⚠ RESIDUAL, STATED RATHER THAN PAPERED OVER: a chip whose pending has
+      // EXPIRED consumes nothing, so its canned copy is read as free-typed prose
+      // and the prose gate applies. Covering that by ALSO reading `source` would
+      // trade a measured harm for an unmeasured one, which is the wrong
+      // direction; the honest fix is upstream, where routing and provenance stop
+      // sharing a field.
       const turnIsChipOriginated =
         consumedPendingAction?.action.kind === 'apply_proposed_change';
       const outstandingEffectAskOptionLabels = (): readonly string[] =>

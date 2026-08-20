@@ -149,11 +149,14 @@ function payload(message: string): MessageTurnPayload {
  * literal, against a contrast control of 21 for `source: 'chip'`. User-authored
  * text ships under it every day.
  */
-function routingFlagPayload(message: string): MessageTurnPayload {
+function routingFlagPayload(
+  message: string,
+  source: 'chip' | 'chip_click' = 'chip_click',
+): MessageTurnPayload {
   return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
-    source: 'chip_click',
+    source,
     message,
   });
 }
@@ -573,14 +576,40 @@ describe('REGRESSION — the guard must NOT read the ROUTING flag', () => {
    * plain request for HELP with a refusal about writing to the wrong field,
    * differing from the composer-sourced turn only by a transport flag.
    */
-  it('the Calibrate affordance on an OUTSTANDING factor is not refused by this guard', async () => {
+  // BOTH spellings of the routing flag. The contract union is exactly four —
+  // `composer | chip | chip_click | retry` (schemas 0.48.0,
+  // `dist/boundary/enums.d.ts:24`) — and the contract's own reader,
+  // `turn-payload.js:720`'s `isChipSource`, names BOTH. A regression that named
+  // only one would leave half the question untested.
+  it.each(['chip', 'chip_click'] as const)(
+    'the Calibrate affordance on an OUTSTANDING factor is not refused (source: %s)',
+    async (source) => {
+      const { response } = await runTurnExecutor(
+        routingFlagPayload(`Help me calibrate ${J18.ids.factor_label}`, source),
+        `req-calibrate-not-refused-${source}`,
+        { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+      );
+      expect(response.assistant_text).not.toContain("I haven't changed anything");
+      expect(response.assistant_text).not.toContain("'s own value instead");
+    },
+  );
+
+  it('⭐ AND THE DERIVATION IS EXERCISED, NOT INJECTED — the same turn WITH a pending refuses', async () => {
+    // ⚠ A PARAMETER PASSED AS A LITERAL CAN NEVER TEST HOW IT IS DERIVED. The
+    // module spec hands `chipOriginated` in by hand; this case and its twin
+    // above reach the arm through the REAL `turnIsChipOriginated` expression in
+    // the turn executor, so a change to what that reads is visible here.
+    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
+    pendingActionsForRead = pendings;
+    appendCalls.length = 0;
+    persistedGraph = null;
     const { response } = await runTurnExecutor(
-      routingFlagPayload(`Help me calibrate ${J18.ids.factor_label}`),
-      'req-calibrate-not-refused',
+      routingFlagPayload(chipMessage, 'chip'),
+      'req-derivation-exercised',
       { routingAdapter: setFactorValueAdapter(), graphState: graph() },
     );
-    expect(response.assistant_text).not.toContain("I haven't changed anything");
-    expect(response.assistant_text).not.toContain("'s own value instead");
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain("I haven't changed anything");
   });
 });
 
