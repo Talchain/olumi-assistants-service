@@ -8,6 +8,21 @@
  * Measured on deployed staging: ~43.8% of turn-2 follow-ups (the drafting
  * request "Use your best guess for the rest and draft the model now.") were
  * routed by the LLM router to `run_analysis` — an analysis nobody asked for.
+ *
+ * ⭐ RE-MEASURED 19 Aug 2026 — READ THIS BEFORE QUOTING THE 43.8% AGAIN.
+ * The figure above is the LLM's ELECTION rate and this gate did not change it
+ * (no prompt changed). What changed is whether an election is HONOURED. Against
+ * 20 REAL captured wire turns (`__tests__/fixtures/n3-captured-turns.json`,
+ * provenance per row) the honoured-without-a-request rate is **0/18**, with both
+ * genuine requests still admitted — pinned in
+ * `__tests__/n3-captured-turn-corpus.test.ts`, which REDs in either direction.
+ * ⚠ THE RESIDUAL IS NOT CLOSED AND IS NOT WHAT THE LEDGER ROW SAYS. A demoted
+ * turn is answered with {@link ANALYSIS_ELECTION_DEMOTION_TEXT} and NO further
+ * model call, so the user's actual message is never answered. The harm changed
+ * SHAPE (an unrequested analysis became an unrequested statement about
+ * analysis) at an unchanged RATE. Closing it needs the demoted turn to be
+ * answered, which is a turn-lifecycle change, not a predicate change — see the
+ * REJECTED ALTERNATIVE at the foot of this comment.
  * Both outcomes are user-visible harms and they are opposites, which is why a
  * copy fix cannot reach either:
  *
@@ -60,10 +75,19 @@
  * model, and only path 1 can produce an analysis nobody asked for. Gating it
  * is not a partial fix — it is the whole of the reachable defect.
  *
- * ⭐ AND THE COVERAGE IS CHECKABLE IN ONE GREP, not by reading this table.
- * Paths 2-3 leave `turn-executor` entirely (`dispatchChipClickRunAnalysis`
- * builds its own turn context; `chip-click-dispatch.ts` has zero references to
- * `routeWithToolUse` or `runTurnExecutor`). Paths 4-6 are pre-routes inside
+ * ⭐ AND THE COVERAGE IS CHECKABLE IN ONE GREP, not by reading this table —
+ * BUT THE GREP MUST BE CALL-SITE SCOPED, and an earlier draft of this comment
+ * got that wrong in a way that would mislead the next reader (re-derived
+ * 19 Aug 2026, N-3 re-measurement lane). It said `chip-click-dispatch.ts` "has
+ * zero references to `routeWithToolUse` or `runTurnExecutor`". A plain
+ * `grep -c routeWithToolUse` on that file returns **3, not 0** — all three are
+ * PROSE inside comments, so the structural claim survives, but the check this
+ * comment invites returns a number that contradicts the sentence beside it.
+ * The honest form: paths 2-3 leave `turn-executor` entirely
+ * (`dispatchChipClickRunAnalysis` builds its own turn context), and
+ * `chip-click-dispatch.ts` has zero CALL SITES of either — derive with
+ * `rg -n 'routeWithToolUse\(|runTurnExecutor\(' src/orchestrator-v5/handlers/chip-click-dispatch.ts`,
+ * which must return nothing. Paths 4-6 are pre-routes inside
  * `turn-executor`, and `rg -n "^\s*routingResult = " turn-executor.ts` shows
  * why they cannot reach this gate: EVERY pre-route assignment sits at a lower
  * line than the `routeWithToolUse` call, each inside a block gated on
