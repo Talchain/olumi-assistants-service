@@ -211,6 +211,10 @@ import {
   impliesOptionInterventionEdit,
 } from './routing/option-intervention-guard.js';
 import { detectConfigureOptionIntent } from './routing/configure-option-intent.js';
+import {
+  buildOutstandingEffectAskDetails,
+  findOutstandingEffectAskCollision,
+} from './routing/outstanding-effect-ask-misroute.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
@@ -8508,6 +8512,42 @@ export async function runTurnExecutor(
         );
       }
 
+      // ⭐⭐ THE OUTSTANDING-EFFECT-ASK COLLISION, shared by both misroute
+      // guards below. Fresh-guest browser witness, 20 Aug 2026: the product
+      // OFFERED an edge-strength write, and separately APPLIED a factor-value
+      // write, on the very option × factor pairs it was asking effect values
+      // for — badging both "Applied" while readiness did not move.
+      //
+      // Derived from the turn's OWN graph (the same `graphStateForTurn` the
+      // validation above ran against), never from `analysisReadyForTurn`, which
+      // several branches overwrite. Memoised and lazy: the readiness build only
+      // runs on a turn that reaches one of the two guards with a valid
+      // mutating proposal. See `routing/outstanding-effect-ask-misroute.ts`.
+      let outstandingEffectAskReadiness:
+        | ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        | null
+        | undefined;
+      const readOutstandingEffectAskReadiness = ():
+        | ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        | null => {
+        if (outstandingEffectAskReadiness === undefined) {
+          outstandingEffectAskReadiness = graphStateForTurn
+            ? buildCanonicalAnalysisReadyFromGraph(graphStateForTurn)
+            : null;
+        }
+        return outstandingEffectAskReadiness;
+      };
+      const outstandingEffectAskOptionLabels = (): readonly string[] =>
+        graphLookupForValidate
+          ? graphLookupForValidate
+              .listEntitiesByKind('option')
+              .map((entity) => entity.label)
+              .filter(
+                (label): label is string =>
+                  typeof label === 'string' && label.trim().length > 0,
+              )
+          : [];
+
       // V5 edit_graph P0 containment (task_99f83f0d) — option-intervention
       // misroute guard. A request that implies editing an OPTION's
       // intervention ("revise the Outsource option's Annual Support Cost
@@ -8523,18 +8563,41 @@ export async function runTurnExecutor(
       // edits — we refuse ONLY this case, re-using the existing recoverable-
       // validator path so the turn composes a clarify and commits a
       // direct_answer with the graph UNCHANGED (no handler executes).
+      //
+      // ⚠ SECOND TRIGGER (20 Aug 2026 witness, defect B). The predicate above
+      // is anchored on an option LABEL or the word "option", and its own header
+      // declares the residual: *"an option referred to only by a pronoun … is
+      // still not caught"* (`option-intervention-guard.ts:282-285`). Witnessed
+      // live: *"Set its effect on Enterprise sales investment to 0.7"* wrote the
+      // FACTOR's own value 0.5 → 0.7 under an "Applied" receipt. The collision
+      // check closes exactly that case WITHOUT widening the label predicate —
+      // it requires the shipped classifier's own report that the sentence was
+      // effect-framed and merely unanchored, AND an identity match against a
+      // pair the product itself put on screen. An ordinary baseline edit on the
+      // same factor is untouched (its twin is pinned in the module's spec).
+      const setFactorValueEffectAskCollision =
+        validationResult.valid && proposedHandlerId === 'set_factor_value'
+          ? findOutstandingEffectAskCollision({
+              handlerId: 'set_factor_value',
+              entityId: action.entity.id,
+              message: userMessageForTurn ?? '',
+              optionLabels: outstandingEffectAskOptionLabels(),
+              readiness: readOutstandingEffectAskReadiness(),
+            })
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
-        ((): boolean => {
-          if (!graphLookupForValidate) return false;
-          const guardLabels = collectOptionGuardLabels(graphLookupForValidate);
-          return impliesOptionInterventionEdit(
-            userMessageForTurn ?? '',
-            guardLabels.optionLabels,
-            guardLabels.nonOptionLabels,
-          );
-        })()
+        (setFactorValueEffectAskCollision !== null ||
+          ((): boolean => {
+            if (!graphLookupForValidate) return false;
+            const guardLabels = collectOptionGuardLabels(graphLookupForValidate);
+            return impliesOptionInterventionEdit(
+              userMessageForTurn ?? '',
+              guardLabels.optionLabels,
+              guardLabels.nonOptionLabels,
+            );
+          })())
       ) {
         validationResult = {
           valid: false,
@@ -8545,6 +8608,7 @@ export async function runTurnExecutor(
             details: {
               handler_id: 'set_factor_value',
               ...(action.entity.label ? { factor_label: action.entity.label } : {}),
+              ...buildOutstandingEffectAskDetails(setFactorValueEffectAskCollision),
             },
           },
         };
@@ -8564,20 +8628,40 @@ export async function runTurnExecutor(
       // set_factor_value misroute guard above: refuse into the recoverable
       // clarify path, graph unchanged; a false positive costs one clarify
       // turn, a false negative writes the wrong field forever.
+      //
+      // ⚠ SECOND TRIGGER (20 Aug 2026 witness, defect A) — AND THE PROSE
+      // PREDICATE COULD NOT HAVE CAUGHT IT. The witnessed sentence carried no
+      // assignment verb and no effect noun ("I would say it drives self-serve
+      // product investment fairly strongly, about 0.6."), so
+      // `detectConfigureOptionIntent` correctly returns false — measured at
+      // pristine `65445df`, and it returns false EVEN WITH the option named in
+      // full. What made the proposal wrong was not the prose: it was that the
+      // edge it targets, `15637f46→0ebfde36`, IS the option × factor pair the
+      // product had just asked an effect value for. That is an IDENTITY fact,
+      // so the second trigger reads identity and no prose at all.
+      //
+      // Placement matters: this validate chokepoint runs BEFORE the INV-1
+      // warrant gate, so refusing here also means the warrantless case never
+      // reaches `buildWarrantDemotion` and the "Adjust this link" chip is never
+      // minted. The witnessed harm was the OFFER as much as the write.
+      const edgeStrengthEffectAskCollision =
+        validationResult.valid && proposedHandlerId === 'adjust_edge_strength'
+          ? findOutstandingEffectAskCollision({
+              handlerId: 'adjust_edge_strength',
+              entityId: action.entity.id,
+              message: userMessageForTurn ?? '',
+              optionLabels: outstandingEffectAskOptionLabels(),
+              readiness: readOutstandingEffectAskReadiness(),
+            })
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'adjust_edge_strength' &&
-        detectConfigureOptionIntent(
-          userMessageForTurn ?? '',
-          graphLookupForValidate
-            ? graphLookupForValidate
-                .listEntitiesByKind('option')
-                .map((entity) => entity.label)
-                .filter((label): label is string =>
-                  typeof label === 'string' && label.trim().length > 0,
-                )
-            : [],
-        ).matched
+        (edgeStrengthEffectAskCollision !== null ||
+          detectConfigureOptionIntent(
+            userMessageForTurn ?? '',
+            outstandingEffectAskOptionLabels(),
+          ).matched)
       ) {
         validationResult = {
           valid: false,
@@ -8587,6 +8671,7 @@ export async function runTurnExecutor(
               'adjust_edge_strength refused — the request implies configuring an option\'s interventions, not tuning a link strength',
             details: {
               handler_id: 'adjust_edge_strength',
+              ...buildOutstandingEffectAskDetails(edgeStrengthEffectAskCollision),
             },
           },
         };

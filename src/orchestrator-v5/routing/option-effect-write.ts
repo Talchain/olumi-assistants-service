@@ -224,7 +224,7 @@ import {
  * a new trigger cannot be silently admitted or silently forgotten: the type
  * below forces this set to name every member it excludes.
  */
-const EFFECT_FRAMED_TRIGGERS: ReadonlySet<ConfigureOptionIntentTrigger> = new Set<
+export const EFFECT_FRAMED_TRIGGERS: ReadonlySet<ConfigureOptionIntentTrigger> = new Set<
   ConfigureOptionIntentTrigger
 >(['effect_vocab', 'intervention_vocab', 'configure_vocab']);
 

@@ -69,11 +69,30 @@ export type ConfigureOptionIntentDetection =
        * i.e. it is the guard that keeps the read off turns it cannot help.
        */
       readonly labelAnchorWouldDecide: boolean;
+      /**
+       * ⭐ WHICH trigger the anchor would have unlocked — the same classifier
+       * call `labelAnchorWouldDecide` is derived from, no longer thrown away.
+       *
+       * `labelAnchorWouldDecide` alone cannot separate an EFFECT-framed
+       * sentence ("set its effect on X to 0.7" → `effect_vocab`) from a plain
+       * value assignment ("set X to 0.7" → `option_value_set`), and those two
+       * are the W1 ambiguity class this estate deliberately refuses to
+       * conflate (`option-effect-write.ts`'s
+       * `OPTION_EFFECT_WRITE_EXCLUDED_TRIGGERS`). A consumer that needs the
+       * distinction must not re-derive it from the text — that is the second
+       * spelling that rots (trap 12). It reads the trigger the classifier
+       * already computed.
+       *
+       * `null` whenever `labelAnchorWouldDecide` is false, and the two are
+       * computed from ONE call so they cannot disagree.
+       */
+      readonly labelAnchorWouldDecideTrigger: ConfigureOptionIntentTrigger | null;
     };
 
 const NO_MATCH: ConfigureOptionIntentDetection = {
   matched: false,
   labelAnchorWouldDecide: false,
+  labelAnchorWouldDecideTrigger: null,
 };
 
 /** "configure"/"configuring"/"configuration" — whole-word, case-insensitive. */
@@ -282,13 +301,16 @@ export function detectConfigureOptionIntent(
   const trigger = classifyConfigureOptionTrigger(normalised, anchored);
   if (trigger !== null) return { matched: true, trigger };
 
+  // Derived from the same classifier, with the anchor granted, in ONE call.
+  // Nothing to keep in sync: adding a trigger below the `!anchored` guard
+  // automatically widens this, and adding one above it automatically does not.
+  const anchorGrantedTrigger = anchored
+    ? null
+    : classifyConfigureOptionTrigger(normalised, true);
   return {
     matched: false,
-    // Derived from the same classifier, with the anchor granted. Nothing to
-    // keep in sync: adding a trigger below the `!anchored` guard automatically
-    // widens this, and adding one above it automatically does not.
-    labelAnchorWouldDecide:
-      !anchored && classifyConfigureOptionTrigger(normalised, true) !== null,
+    labelAnchorWouldDecide: anchorGrantedTrigger !== null,
+    labelAnchorWouldDecideTrigger: anchorGrantedTrigger,
   };
 }
 

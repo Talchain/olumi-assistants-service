@@ -35,6 +35,10 @@ import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  buildOptionEffectReference,
+} from '../configure-option-chip-text.js';
 
 /**
  * ⭐ ROADMAP 2.1261 — did the user's own message state (a token of the same
@@ -718,8 +722,97 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
  * misroute) — a single text-prompt to disambiguate. Graph is unchanged by
  * the time this composes.
  */
+/**
+ * ⭐⭐ THE OUTSTANDING-EFFECT-ASK REFUSAL — the copy that has to be TRUE about
+ * the entity and the field, because the receipt it replaces was not.
+ *
+ * Fresh-guest browser witness, 20 Aug 2026. The product offered *"changing the
+ * strength of "<option>→<factor>" to 0.6"*, applied it, badged it **Applied**,
+ * and readiness did not move; separately it wrote a factor's own value under
+ * the same badge. Both writes were truthful about themselves and false about
+ * what the user was answering. The refusal therefore says three things the old
+ * generic copy could not: WHICH pair is outstanding, WHICH field the request
+ * would have moved instead, and — when the option is unambiguous — the
+ * product's OWN advised sentence for writing the right one.
+ *
+ * ⚠ THE OPTION IS NEVER CHOSEN HERE. Two or more outstanding options on the
+ * named factor is a genuine ambiguity, and the estate's ruling for that state is
+ * to ask (CLAUDE.md trap 22f). The copy lists them and stops.
+ *
+ * ⭐ THE EXEMPLAR IS `buildOptionEffectReference`, the estate's ONLY spelling of
+ * the option × factor noun phrase and the one the router's `effect_vocab`
+ * trigger is calibrated against — so a user who copies the sentence back routes
+ * into the writer that can honour it, not into the loop that could not.
+ */
+function composeOutstandingEffectAskMisroute(
+  details: Readonly<Record<string, unknown>>,
+): BranchResult | null {
+  const refusedField = readString(details.effect_ask_refused_field);
+  const factorLabel = readString(details.effect_ask_factor_label);
+  const rawOptions = details.effect_ask_option_labels;
+  const optionLabels = Array.isArray(rawOptions)
+    ? rawOptions.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+    : [];
+  if (!refusedField || !factorLabel || optionLabels.length === 0) return null;
+
+  const factor = safeLabel({ label: factorLabel, kind: undefined });
+  // Name the field the request WOULD have moved, in the user's terms.
+  const wrongField =
+    refusedField === 'edge_strength'
+      ? `the strength of the link into ${factor}`
+      : `${factor}'s own value`;
+
+  if (optionLabels.length === 1) {
+    const option = safeLabel({ label: optionLabels[0]!, kind: undefined });
+    return {
+      body: {
+        assistant_text:
+          `I haven't changed anything. I'm still waiting on `
+          + `${buildOptionEffectReference(option, factor)}, and what you asked for `
+          + `would have moved ${wrongField} instead — a different number, which `
+          + `would not have answered that question. Send me the effect value like `
+          + `this and I'll write it in: `
+          // ⭐ THE EXEMPLAR NAMES NO OPTION, DELIBERATELY. `safeLabel` truncates
+          // a real drafted option label, and the truncated sentence does NOT
+          // route (`option_not_named`, measured) — it would be a dead end
+          // dressed as help. With the option left out, rule 3b resolves it from
+          // this very ask. Pinned by the routing spec, so the exemplar can never
+          // drift away from the lane that would honour it.
+          + `"${buildConfigureOptionAdvisedFormat('', factor, '0.6')}" `
+          + `(any number from 0 to 1).`,
+        suggested_actions: [fallbackPrompt('Give the effect value')],
+      },
+      template_id: 'option_intervention_misroute',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  const options = optionLabels
+    .map((l) => `"${safeLabel({ label: l, kind: undefined })}"`)
+    .join(' and ');
+  return {
+    body: {
+      assistant_text:
+        `I haven't changed anything, because I'm not sure which option you mean. `
+        + `${options} are both still missing their effect on ${factor}, and what `
+        + `you asked for would have moved ${wrongField} instead. Tell me which `
+        + `option you mean and the number, and I'll write it in `
+        + `(any number from 0 to 1).`,
+      suggested_actions: [fallbackPrompt('Say which option')],
+    },
+    template_id: 'option_intervention_misroute',
+    chip_type: 'text_prompt',
+  };
+}
+
 function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
   const details = error.details ?? {};
+  // ⭐ The identity-bound refusal takes precedence when the guard supplied a
+  // pair: it can name the entity and the field, and the generic copy below
+  // cannot. Falls through byte-identically when the details are absent, so the
+  // pre-existing prose-triggered refusals are untouched.
+  const effectAsk = composeOutstandingEffectAskMisroute(details);
+  if (effectAsk !== null) return effectAsk;
   // ROADMAP 2.11 / P1-3 — the guard now also refuses adjust_edge_strength
   // proposals for configure-option intent (the live A5/A7 loop wrote edge
   // strength while READING as configuration). The clarify names the right
