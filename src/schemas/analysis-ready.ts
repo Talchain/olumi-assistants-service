@@ -264,6 +264,27 @@ export const AnalysisReadyPayload = z.object({
   /** Status: ready, needs_user_mapping, needs_encoding, or needs_user_input */
   status: AnalysisReadyStatus,
   /**
+   * THE run path's own admission answer for this turn — will the analysis
+   * proceed if asked, right now?
+   *
+   * ⚠ THIS IS A DIFFERENT QUESTION FROM `status`, AND THAT IS THE POINT.
+   * `status` is the STRICTER *"is this model ready as it stands?"*. `may_run` is
+   * `resolveRunAdmission(...).willProceed` — the boolean `build-turn-context.ts`
+   * throws `AnalysisNotReadyError` on — which is ALSO true when the run will
+   * proceed by excluding options the user left open. A turn can be
+   * `needs_user_input` and admissible at the same time; that is the readiness
+   * loop's payoff turn, and a consumer reading only `status` hides the Run
+   * affordance the turn has just offered.
+   *
+   * Consumers gate on `may_run !== false` and fall back to their existing
+   * behaviour when it is ABSENT — absence means an older producer, never "no".
+   * (The `/assist/v1/graph-readiness` route publishes the same predicate under
+   * the same name, three-valued there because a caller can fail to reach it.)
+   *
+   * Optional so every pre-`may_run` dispatch path still validates.
+   */
+  may_run: z.boolean().optional(),
+  /**
    * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — stable machine-readable code for
    * WHY this turn's analysis was refused. Present iff `status === 'blocked'`.
    * See the contract note on `GraphPatchBlockData.analysis_ready` in
