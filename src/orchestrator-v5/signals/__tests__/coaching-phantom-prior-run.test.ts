@@ -39,10 +39,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+// ⚠ `AUTO_RUN_RESULT_REACHES_USER` and `hasUserSeenRunAnalysisResult` are NOT
+// imported here on purpose. The mock below injects the pre-delivery posture over
+// this module, so a file-level import of either would hand the tests the
+// injection back and let them agree with themselves (CLAUDE.md trap #13b). Every
+// test that needs the SHIPPED answer reaches for it with `vi.importActual`.
 import {
-  AUTO_RUN_RESULT_REACHES_USER,
   buildAutoRunProvenance,
-  hasUserSeenRunAnalysisResult,
   isAutoInitiatedRunAnalysisFact,
   RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../../context/run-initiator.js';

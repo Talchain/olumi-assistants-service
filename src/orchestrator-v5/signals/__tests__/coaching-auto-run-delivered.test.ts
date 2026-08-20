@@ -14,11 +14,13 @@
  * first analysis: #1058's defect facing the other way (CLAUDE.md trap #21 — two
  * questions under one name, coincident until a change decouples them).
  *
- * The posture is switched by mocking ONLY `AUTO_RUN_RESULT_REACHES_USER` and the
- * predicate that reads it, `importOriginal`-spread so every other export stays
- * the real one (CLAUDE.md trap #12: a `vi.mock` factory REPLACES the module).
- * `vi.mock` is file-scoped and hoisted, which is exactly why the two postures
- * live in two files rather than two `describe`s.
+ * ⭐ THAT WORLD IS NOW PRODUCTION, so this file no longer mocks anything. It
+ * USED to inject the delivered posture over a production `false`; the constant
+ * was flipped alongside UI #752 and the injection became a no-op — see the note
+ * above the fixtures. The counterfactual moved to
+ * `coaching-phantom-prior-run.test.ts`, which now carries the injected
+ * PRE-DELIVERY posture. `vi.mock` is file-scoped and hoisted, which is why the
+ * two postures live in two files rather than two `describe`s.
  *
  * ── WHY BOTH DIRECTIONS ARE HERE, NOT JUST THE INVERSION (trap 22b) ─────────
  * One direction alone lets the other through. A fix that makes an auto-run count
@@ -28,15 +30,16 @@
  * has its opposite-direction twin, and the twins are asserted in the SAME
  * posture, so neither can be satisfied by the flag simply not applying.
  *
- * ── THE POSITIVE CONTROL (trap 13) ─────────────────────────────────────────
- * A mock that silently fails to apply leaves every assertion below passing for
- * the wrong reason — they would be re-testing the current posture under a
- * heading that claims otherwise. The first test therefore proves the injected
- * posture actually reaches the predicate the production code calls, and every
- * later assertion is meaningful only because that control fires.
+ * ── THE POSITIVE CONTROL (trap 13, and trap 12b) ───────────────────────────
+ * The first test proves production really ships the delivered posture, so every
+ * assertion below is about the shipped constant rather than an injected one.
+ * ⚠ It deliberately does NOT rest on that constant alone: a control asserting
+ * only the current value cannot fail once that value is the default — the way
+ * the prompt-drift gate's three controls hollowed out. Its discriminating half
+ * is the predicate's explicit parameter, which is real in both directions.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
