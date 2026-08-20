@@ -64,6 +64,35 @@ const MAX_RENDERED_CHIPS = 3;
  * last step told the user to "run it whenever you like" would end by pointing
  * at a control that may not be on screen. `run_analysis` is in the client's
  * dispatch vocabulary already, so this chip routes deterministically.
+ *
+ * ⚠⚠ HALF OF THIS IS DARK TODAY, AND THE HONEST SCOPE IS NARROW.
+ *
+ * The client gates `run_analysis` chips on `ceeAnalysisReady.status === 'ready'`
+ * (`SuggestedChips.tsx`, `READINESS_GATED_ACTIONS`). So:
+ *
+ *   - `readiness_ready` branch  → status IS 'ready'          → chip RENDERS.
+ *   - `readiness_open` + `willProceed` → status is
+ *     'needs_user_input' (exclusion carries the run)         → chip is FILTERED.
+ *
+ * That second case is the interesting one — the turn where the loop says
+ * "there is already enough here to run" — and it is trap 21's shape: the client
+ * gates on "is the model fully configured?" while the chip's correctness rests
+ * on "will a run actually proceed?". Two authorities, two different questions.
+ *
+ * CEE ALREADY PUBLISHES THE RIGHT SIGNAL: `may_run: admission.willProceed`
+ * (`cee/graph-readiness/canonical-readiness.ts`), whose own docblock says it is
+ * declared so "a consumer's gate is written for it from the start rather than
+ * retrofitted". ⚠ But `may_run` is ABSENT from the vendored contract 0.48.0
+ * (measured with four contrast controls firing at 5/6/8/9 files while `may_run`,
+ * `options_ready`, `scaffold_plan` and `waived_by_exclusion` all read zero), so
+ * it does not survive to the client. Closing this needs a schema change plus one
+ * line in the client gate — a THIRD repo, deliberately out of this lane's scope.
+ *
+ * The chip is emitted anyway: it is correct, it renders today in the ready
+ * branch, a filtered chip is ABSENT rather than broken, and it lights up the
+ * moment the contract carries `may_run`. The prose above it states the run
+ * state as a FACT and never instructs the user to click anything, so it stays
+ * true in both postures.
  */
 const RUN_ANALYSIS_CHIP = {
   id: 'chip_readiness_run_analysis',
