@@ -686,12 +686,82 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
 
 // ----- sentence builders ----------------------------------------------------
 
+/**
+ * ⭐⭐ QUOTE THE GOAL WHOLE, OR DO NOT QUOTE IT (UX gate 4, 20 Aug 2026).
+ *
+ * ── THE WITNESSED DEFECT ───────────────────────────────────────────────────
+ *   I've built a first decision model for "Several of our largest enterprise
+ *   customers are asking for a self-hosted…".
+ *
+ * The product's first sentence to a customer quoted their own goal, cut
+ * mid-phrase. Reproduced byte-for-byte at pristine through this very function
+ * by `__tests__/goal-quotation-whole-or-none.test.ts`.
+ *
+ * ── ⛔ WHAT THIS IS NOT, AND THE ROAD THAT STAYS CLOSED ─────────────────────
+ * It is NOT an elider defect, and this change does not touch the elider.
+ * `utils/label-elision.ts` cuts at a word boundary and admits the cut, which
+ * is all it claims. The obvious extension — reject a head whose second-to-last
+ * token is a determiner — was RUN BEFORE BEING COMMISSIONED and REFUSED: it
+ * fixes this string and breaks `"Defend and hold the line…"` in the same move
+ * (`label-elision.ts:215-232`, pinned executably by the KNOWN-LIMIT case in
+ * `label-elision.test.ts`, which must stay GREEN). Two harms cannot share one
+ * window, and that predicate has had its round.
+ *
+ * ── WHAT THE DEFECT ACTUALLY IS, DERIVED ───────────────────────────────────
+ * A goal authored AS A GOAL is short and never needs eliding. Measured over
+ * the frozen governed corpus (real `claude-sonnet-4-6` output under
+ * `draft_graph_default@v195 (production)`), each label put through the SAME
+ * authoring call `projector.ts:1384` makes:
+ *
+ *   11 goal nodes · 7 authored (longest 62 chars) · 4 refused
+ *   over the 80-char budget: 2 — BOTH refusals, BOTH `deliberation_frame`
+ *   AUTHORED labels over the budget: 0
+ *
+ * The canonical owner of what a goal label SAYS is
+ * `cee/draft/records/objective-label.ts` (`deriveGoalObjectiveLabel`). It
+ * REFUSES when the user stated a DECISION where a goal was expected
+ * ("evaluating whether to invest £800k … or to hire 15 additional staff"),
+ * because promoting one branch of a choice to "the team's goal" would be a
+ * fabrication — refusal is the feature, and the verbatim stays as the label.
+ *
+ * So every over-budget goal label is one the product's own authority has
+ * explicitly DECLINED to call an objective — and this sentence was announcing
+ * a mangled half of it as the objective the model was built for.
+ *
+ * ── THE RULE ───────────────────────────────────────────────────────────────
+ * Quotation marks promise the user "these are your words". A fragment cannot
+ * keep that promise, so where no whole quotation exists the opener falls back
+ * to the sentence this function ALREADY ships when there is no goal at all.
+ *
+ * ⚠ THIS DELIBERATELY SAYS LESS IN ONE SENTENCE, AND THE TRADE IS ARGUED
+ * RATHER THAN SLID INTO. Quoting the user's own words does real work — it
+ * shows the model was built from what they actually said. Two things keep that
+ * assurance: the fallback still credits `your brief`, and the user's own words
+ * still reach them one line below, in `Options compared`, which is unchanged.
+ * What is given up is a quotation that was never a whole one.
+ *
+ * ⚠ THE BUDGET DECISION IS DELEGATED, NEVER MIRRORED. "Is there a whole
+ * quotation?" is answered by asking {@link elideLabelAtWordBoundary} itself
+ * and seeing whether it had to cut — its contract is to return the trimmed
+ * label UNCHANGED when it already fits. A second `length > MAX_GOAL_CHARS`
+ * test here would be the hand-maintained mirror trap 12 exists to remove, and
+ * would drift the day the elider's budget arithmetic changes.
+ */
 function buildConfirmSentence(goalLabel: string | null): string {
   if (!goalLabel) {
     return "I've built a first decision model from your brief.";
   }
-  const safe = elideLabelAtWordBoundary(goalLabel, MAX_GOAL_CHARS);
-  return `I've built a first decision model for "${safe}".`;
+  const trimmed = goalLabel.trim();
+  if (trimmed.length === 0) {
+    return "I've built a first decision model from your brief.";
+  }
+  // Ask the canonical elider whether a whole quotation exists. It returns the
+  // trimmed label unchanged iff nothing had to be removed.
+  const safe = elideLabelAtWordBoundary(trimmed, MAX_GOAL_CHARS);
+  if (safe !== trimmed) {
+    return "I've built a first decision model from your brief.";
+  }
+  return `I've built a first decision model for "${trimmed}".`;
 }
 
 /**
