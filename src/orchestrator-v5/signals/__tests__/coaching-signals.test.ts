@@ -726,17 +726,29 @@ describe('detectCoachingSignal', () => {
     });
 
     /**
-     * The two coaching predicates are byte-identical today and kept separate on
-     * purpose (CLAUDE.md trap #21 — two authorities answering different
-     * questions must not be collapsed just because they agree). Their agreement
-     * is therefore itself an invariant: pin it, so tightening one without the
-     * other is LOUD instead of silent.
+     * The two coaching predicates are kept separate on purpose (CLAUDE.md trap
+     * #21 — two authorities answering different questions must not be collapsed
+     * just because they agree). Where they DO agree, that agreement is itself an
+     * invariant: pin it, so tightening one without the other is LOUD instead of
+     * silent.
+     *
+     * ⚠⚠ THEY ARE NO LONGER BYTE-IDENTICAL, AND THE SCOPE OF THIS TEST IS NOW
+     * NARROWER THAN ITS OLD NAME CLAIMED (2026-08-20). The run_analysis branch
+     * asks "has the USER seen a result?" and the edit branch asks "could this
+     * edit have staled the persisted analysis?" — questions that give DIFFERENT
+     * answers on two fixture classes: a server-initiated post-draft auto-run,
+     * and a `noop` run. Those two classes are deliberately absent from the loop
+     * below and are pinned, in both directions, in
+     * `coaching-phantom-prior-run.test.ts`. A blanket "agree on every fixture"
+     * claim over a corpus that omits the classes where they differ is exactly
+     * the short-list defect (trap 12d): the fixtures below are USER-INITIATED,
+     * NON-NOOP priors, and this test says only that.
      *
      * Observed end-to-end rather than by exporting the private helpers: the
      * edit branch fires STALE exactly when the run_analysis branch does NOT fire
      * FIRST_ANALYSIS.
      */
-    it('the edit-branch and run_analysis-branch predicates agree on every fixture', () => {
+    it('the edit-branch and run_analysis-branch predicates agree on every USER-INITIATED, NON-NOOP fixture', () => {
       const cases: ReadonlyArray<{ label: string; priorFacts: HandlerFact[] }> = [
         { label: 'no prior facts', priorFacts: [] },
         { label: 'only a non-analysis prior fact', priorFacts: [priorEditFact('f-cost')] },

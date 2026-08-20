@@ -9,10 +9,11 @@
  *   - HIGH_SENSITIVITY_EDIT     (priority 2)
  *   - FIRST_ANALYSIS_COMPLETE   (priority 3)
  *   - RERUN_ANALYSIS_COMPLETE   (run_analysis branch, ROADMAP 2.73 — fires
- *     when a prior run_analysis fact exists, i.e. exactly when
+ *     when a prior run_analysis result was SHOWN TO THE USER, i.e. exactly when
  *     FIRST_ANALYSIS_COMPLETE does not; text derives from the shared
  *     `compareRuns` comparator so the rerun acknowledgment names the delta
- *     or the no-change verdict)
+ *     or the no-change verdict. ⚠ "shown to the user" is NOT "a fact exists" —
+ *     see `hasPriorRunAnalysisShownToUser`.)
  *
  * Edit-handler signals (STALE_*, HIGH_*) are LIVE. The header previously
  * described them as "dormant until set_factor_value / adjust_edge_strength
@@ -45,6 +46,7 @@ import {
 } from '../coaching/intervening-change.js';
 import type { RecentChangeAction } from '../context/recent-changes.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
+import { isAutoInitiatedRunAnalysisFact } from '../context/run-initiator.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -368,10 +370,26 @@ export function detectCoachingSignal(
     // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
     const leaderWithheld = !input.mayNameLeadingOption;
 
-    // The question THIS branch asks: "has an analysis ever completed before,
-    // i.e. is this a re-run rather than the first?" — a different question from
-    // the edit branch's, with the same answer today.
-    if (!hasAnyPriorRunAnalysisFact(input.priorFacts)) {
+    // ⭐⭐ THE QUESTION THIS BRANCH ASKS IS ABOUT THE USER, NOT ABOUT THE SERVER:
+    // "has a result ever been PUT IN FRONT OF THIS USER before this turn?"
+    //
+    // ⚠ IT USED TO ASK `hasAnyPriorRunAnalysisFact` — "does ANY run_analysis
+    // fact exist?" — and since R2 those are different questions, because
+    // `scheduleAutoRunAfterFreshDraft` commits a server-initiated provisional
+    // run after every admissible fresh draft. Every arm of this branch's rerun
+    // copy presupposes the user saw something: "The result is unchanged",
+    // "still leads after this re-run", "It replaces the earlier result". On a
+    // user's genuinely FIRST analysis, an auto-run fact made all of those fire
+    // — witnessed on staging 2026-08-19, "The result is unchanged: build
+    // self-hosting this year still leads" on a first-ever run.
+    //
+    // The edit branch's `hasPriorRunAnalysisFactToStale` is deliberately NOT
+    // changed with it: "could this edit have staled an analysis?" is a question
+    // about the persisted analysis, which the auto-run really did produce. The
+    // two predicates therefore DISAGREE on an auto-run-only scenario, and that
+    // disagreement is pinned by test (CLAUDE.md trap #21 — name the concepts
+    // apart, never collapse or co-tighten them).
+    if (!hasPriorRunAnalysisShownToUser(input.priorFacts)) {
       // SUPPRESSED, not reworded. The whole of this signal's value is the
       // "explore the leading option" nudge, and on a withheld turn there is no
       // leading option to explore. A replacement sentence would either repeat
@@ -493,36 +511,58 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
 }
 
 /**
- * "Has an analysis ever completed before this turn, i.e. is this a RE-RUN
- * rather than the first analysis?"
+ * "Has a run_analysis RESULT been PUT IN FRONT OF THIS USER on a prior turn?"
  *
- * ⚠ APPLIES NO SUCCESS TEST, AND THE LOOSENESS IS THE CONTRACT. Presence of a
- * run_analysis fact in priorFacts means the handler returned success on a prior
- * turn (failed handlers throw and never emit facts). Paul's Task C correction:
- * a failed analysis attempt must NOT block FIRST_ANALYSIS_COMPLETE from firing
- * on the first success.
+ * ⚠⚠ SUPERSEDES `hasAnyPriorRunAnalysisFact` (2026-08-20), WHICH ASKED
+ * "does ANY run_analysis fact exist?". Those were one question until R2
+ * (2026-08-16) gave the SERVER a way to run an analysis nobody asked for:
+ * `scheduleAutoRunAfterFreshDraft` commits a provisional `run_analysis` fact
+ * after every admissible fresh draft. The old predicate counted it, so the
+ * user's first-ever analysis took the RE-RUN arm and the product asserted a
+ * comparison against a result the user had never seen. Per Paul's convergence
+ * rule the old name is SUPERSEDED, not kept alongside: one canonical owner for
+ * this question, no parallel rule.
  *
- * ⚠ RENAMED FROM `hasPriorSuccessfulRunAnalysis` (ROADMAP 2.842). The old name
- * claimed a success test this function does not perform, which made it a THIRD
- * status predicate in a codebase whose dominant defect class is predicate
- * drift: a `partial` / `degraded` fact counts as "successful" here while
- * `isSuccessfulRunAnalysisFact` (`context/freshness.ts`) excludes exactly
- * those. The NAME was the defect — tightening the behaviour would change the
- * first-analysis path. The divergence from the freshness authority is now
- * pinned by test rather than remembered; see `__tests__/coaching-signals.test.ts`
- * ("the coaching layer's predicate is DELIBERATELY broader...").
+ * ── WHAT "SEEN" MEANS, AND WHY THIS DERIVATION IS HONEST AT THIS TIP ────────
+ * A fact counts as seen when it (a) actually ran and (b) was initiated by the
+ * user. (b) is read through {@link isAutoInitiatedRunAnalysisFact}, the one
+ * authority on run initiation, whose module documents the deployed measurement:
+ * the auto-run's result reaches no client at all, because the draft's SSE stream
+ * is already closed, the auto-run turn is server-initiated with no listener, and
+ * the scenario-graph read leg returns no analysis. ⭐ THE DAY THAT CHANGES —
+ * CEE #1010 + UI #752, both currently unmerged — an auto-run's result WILL be
+ * on screen and this predicate must count it again. That is a one-line change
+ * HERE, which is the whole point of naming the question rather than the shape.
  *
- * ⚠ BYTE-IDENTICAL TO `hasPriorRunAnalysisFactToStale` TODAY, AND KEPT SEPARATE
- * ON PURPOSE. The two answer different questions ("is this a re-run?" vs "could
- * this edit have staled a shown analysis?") that happen to share an answer, and
- * they are loose for different reasons. CLAUDE.md trap #21: when two authorities
- * agree today, the fix is to name the concepts apart, not to collapse them —
- * merging would silently bind a future tightening of one to the other. Their
- * agreement is itself pinned by test, so a divergence is loud rather than
- * silent.
+ * ── (a) IS AN EXCLUSION, NOT A SUCCESS TEST ────────────────────────────────
+ * A `noop: true` fact means the analysis did not run, so nothing was displayed.
+ * `partial` and `degraded` facts DO count: a degraded analysis is still an
+ * analysis the user looked at. That deliberate divergence from
+ * `isSuccessfulRunAnalysisFact` (`context/freshness.ts`) is unchanged from the
+ * superseded predicate and is pinned by test. The `noop` exclusion also closes,
+ * before it can open, a latent inversion the old predicate carried: it counted
+ * `noop` facts while `selectRunAnalysisFact` excludes them, so a `noop`-only
+ * prior would have taken the re-run arm and then failed to build a comparison,
+ * asserting "This was a re-run. It replaces the earlier result as the current
+ * analysis" on a genuine first run. Verified at this tip: `run-analysis.ts`
+ * emits `noop: false` only (one occurrence, line ~1703), so that inversion is
+ * UNREACHABLE today — this makes it unreachable by construction rather than by
+ * a property of one handler nobody re-checks.
+ *
+ * ⚠ NOT BYTE-IDENTICAL TO `hasPriorRunAnalysisFactToStale`, AND THAT IS THE
+ * POINT. The two answer different questions and now give different answers on
+ * two fixture classes (auto-initiated, and `noop`). CLAUDE.md trap #21: name the
+ * concepts apart rather than collapsing or co-tightening them. The divergence is
+ * pinned by test in both directions, so a future edit that re-aligns them is
+ * LOUD.
  */
-function hasAnyPriorRunAnalysisFact(facts: readonly HandlerFact[]): boolean {
-  return facts.some((f) => f.fact_type === 'run_analysis');
+function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean {
+  return facts.some(
+    (f) =>
+      f.fact_type === 'run_analysis' &&
+      f.noop !== true &&
+      !isAutoInitiatedRunAnalysisFact(f),
+  );
 }
 
 /**
@@ -554,8 +594,19 @@ function hasAnyPriorRunAnalysisFact(facts: readonly HandlerFact[]): boolean {
  * `degraded` fact counts. That is correct for THIS question (an edit invalidates
  * whatever was on screen, degraded or not) and is a deliberate divergence from
  * `isSuccessfulRunAnalysisFact`, pinned by test. See the note on
- * {@link hasAnyPriorRunAnalysisFact} for why the two coaching predicates stay
- * separate despite agreeing today.
+ * {@link hasPriorRunAnalysisShownToUser} — the run_analysis branch's predicate,
+ * which SUPERSEDED `hasAnyPriorRunAnalysisFact` on 2026-08-20 — for why the two
+ * coaching predicates stay separate, and for the two fixture classes on which
+ * they now deliberately DISAGREE.
+ *
+ * ⚠ THIS PREDICATE STILL COUNTS A SERVER-INITIATED POST-DRAFT AUTO-RUN, and
+ * that is a deliberate scope boundary, not an oversight. The auto-run really did
+ * produce a persisted analysis, so an edit really can stale it. What is NOT
+ * settled here is that STALE_ANALYSIS_AFTER_EDIT's copy says "The current
+ * analysis may not reflect it" — a presupposition about something the user has
+ * not been shown when the only prior run was auto-initiated. Same defect class,
+ * different surface, materially lower harm (the copy's call to action is
+ * correct either way). Rowed rather than widened into this change.
  */
 function hasPriorRunAnalysisFactToStale(facts: readonly HandlerFact[]): boolean {
   return facts.some((f) => f.fact_type === 'run_analysis');
