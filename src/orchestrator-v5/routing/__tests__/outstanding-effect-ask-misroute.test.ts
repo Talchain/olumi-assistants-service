@@ -169,6 +169,25 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
     expect(hit).toBeNull();
   });
 
+  it('⭐⭐ A DIFFERENT OPTION’S LINK INTO AN OUTSTANDING FACTOR IS NOT THIS PAIR — and still writes', () => {
+    // ⚠ ADDED AFTER A SURVIVING MUTANT (trap 22 — a corpus that omits a value
+    // class cannot certify the code over it). Deleting the `optionId ===
+    // parsed.from` half of the match left the whole battery GREEN, because every
+    // negative case above also failed the FACTOR half. This is the class where
+    // the option half is the ONLY thing standing: `0ebfde36` IS outstanding, but
+    // it is outstanding on `15637f46`, not on the acquisition option. Without
+    // the conjunct the guard would refuse a perfectly ordinary link edit on a
+    // pair the product never asked about.
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'adjust_edge_strength',
+      entityId: `${OPT_ACQUIRE}→${FAC_SELF_SERVE}`,
+      message: WITNESSED_A,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+    });
+    expect(hit).toBeNull();
+  });
+
   it('a malformed edge id claims nothing (the handler would refuse it anyway)', () => {
     const hit = findOutstandingEffectAskCollision({
       handlerId: 'adjust_edge_strength',

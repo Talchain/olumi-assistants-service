@@ -287,6 +287,16 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
     const quoted = /"([^"]+)"/.exec(response.assistant_text);
     expect(quoted).not.toBeNull();
     const exemplar = quoted![1]!;
+    // ⚠ ADDED AFTER A SURVIVING MUTANT, and the mutant is EQUIVALENT FOR
+    // ROUTING — demonstrated, not asserted (trap 13c). Reverting
+    // `buildOptionEffectReference` to its single form renders the empty option
+    // ref as a DOUBLE SPACE ("the  option's effect on …"), and
+    // `resolveOptionEffectWrite` normalises whitespace, so it still binds
+    // `4abad64d::4d3256b4` — measured both ways at `207b05f9`. The branch is
+    // load-bearing for the SENTENCE THE USER READS AND RETYPES, not for the
+    // router, so it is pinned where it actually bites.
+    expect(exemplar).not.toMatch(/ {2}/);
+    expect(response.assistant_text).not.toMatch(/ {2}/);
     // Bound by identity to the pair the refusal was about — not merely "it
     // matched something".
     expect(resolveOptionEffectWrite({ message: `${exemplar}.`, graph: graph() })).toMatchObject({
