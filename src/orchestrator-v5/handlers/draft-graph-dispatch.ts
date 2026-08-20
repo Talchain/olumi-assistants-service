@@ -443,6 +443,21 @@ export function draftResultToOlumiResponse(
     insights: [],
     stage_indicator: stageIndicator,
     ...(draftGraphField && { draft_graph: draftGraphField }),
+    // ⭐⭐ THE PROJECTOR'S REFUSALS BECOME SAYABLE TO THE USER HERE.
+    //
+    // Populates the EXISTING `model_building_notices` contract field
+    // (`OlumiResponseSchema`, schemas 0.48.0) — a published carrier that CEE
+    // had never written: derived 2026-08-19, 0 occurrences under `src/` against
+    // live contrast controls. This adds the missing WRITER, not a second
+    // channel beside one.
+    //
+    // ⚠ NOT GATED ON `graphPersisted`. A refusal on a turn whose graph did not
+    // persist is precisely the case the product may not swallow — refusing AND
+    // hiding the reason is the worst of the two, and the founder's constraint
+    // is that a user always gets a route rather than an unexplained dead end.
+    ...(result.modelBuildingNotices !== undefined && {
+      model_building_notices: result.modelBuildingNotices,
+    }),
     ...(timingsBlock !== undefined && { _timings: timingsBlock }),
   } as OlumiResponse;
 }
