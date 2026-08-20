@@ -174,7 +174,29 @@ export function buildConfigureOptionAdvisedFormat(
  * the one that rots). One phrase, two sentences.
  */
 export function buildOptionEffectReference(optionRef: string, factorRef: string): string {
-  return `the ${optionRef} option's effect on ${factorRef}`;
+  const ref = typeof optionRef === 'string' ? optionRef.trim() : '';
+  // ⭐ AN EMPTY OPTION REF IS THE "LEAVE IT TO THE OUTSTANDING ASK" FORM, and it
+  // is HERE rather than in a second helper because a second spelling of this
+  // noun phrase is precisely what the note above bans (trap 12).
+  //
+  // ⚠ IT EXISTS BECAUSE THE FULL-LABEL FORM CAN BE UNROUTABLE, and that was
+  // MEASURED, not anticipated. Real drafted option labels are the user's own
+  // brief fragments (84–101 characters on the captured 18 Aug graph), and every
+  // user-facing rendering passes them through `safeLabel`, which TRUNCATES. Fed
+  // back verbatim, the truncated sentence carries enough of the option's
+  // distinctive vocabulary for `messageCarriesOptionCue` to say "the user named
+  // a particular option" while no full label matches — so
+  // `resolveOptionEffectWrite` correctly declines `option_not_named` and rule 3b
+  // never runs. Measured at `65445df`: the truncated exemplar resolves
+  // `{matched:false, reason:'option_not_named'}` and this form resolves
+  // `{matched:true, kind:'write', optionId:'4abad64d'}` on the same graph.
+  //
+  // **Advising a sentence the product cannot execute is the P8 defect this
+  // estate has already paid for twice.** Any copy that puts an exemplar in front
+  // of a user must use the form that routes.
+  return ref.length > 0
+    ? `the ${ref} option's effect on ${factorRef}`
+    : `the option's effect on ${factorRef}`;
 }
 
 /**

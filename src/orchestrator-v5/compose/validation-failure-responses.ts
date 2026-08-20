@@ -35,6 +35,11 @@ import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { findChipRawDecimalLeak } from './chip-safety.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  buildOptionEffectReference,
+} from '../configure-option-chip-text.js';
 
 /**
  * ⭐ ROADMAP 2.1261 — did the user's own message state (a token of the same
@@ -718,8 +723,155 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
  * misroute) — a single text-prompt to disambiguate. Graph is unchanged by
  * the time this composes.
  */
+/**
+ * ⭐⭐ THE OUTSTANDING-EFFECT-ASK REFUSAL — the copy that has to be TRUE about
+ * the entity and the field, because the receipt it replaces was not.
+ *
+ * Fresh-guest browser witness, 20 Aug 2026. The product offered *"changing the
+ * strength of "<option>→<factor>" to 0.6"*, applied it, badged it **Applied**,
+ * and readiness did not move; separately it wrote a factor's own value under
+ * the same badge. Both writes were truthful about themselves and false about
+ * what the user was answering. The refusal therefore says three things the old
+ * generic copy could not: WHICH pair is outstanding, WHICH field the request
+ * would have moved instead, and — when the option is unambiguous — the
+ * product's OWN advised sentence for writing the right one.
+ *
+ * ⚠ THE OPTION IS NEVER CHOSEN HERE. Two or more outstanding options on the
+ * named factor is a genuine ambiguity, and the estate's ruling for that state is
+ * to ask (CLAUDE.md trap 22f). The copy lists them and stops.
+ *
+ * ⭐ THE EXEMPLAR IS `buildOptionEffectReference`, the estate's ONLY spelling of
+ * the option × factor noun phrase and the one the router's `effect_vocab`
+ * trigger is calibrated against — so a user who copies the sentence back routes
+ * into the writer that can honour it, not into the loop that could not.
+ */
+function composeOutstandingEffectAskMisroute(
+  details: Readonly<Record<string, unknown>>,
+): BranchResult | null {
+  const refusedField = readString(details.effect_ask_refused_field);
+  const factorLabel = readString(details.effect_ask_factor_label);
+  const rawOptions = details.effect_ask_option_labels;
+  const optionLabels = Array.isArray(rawOptions)
+    ? rawOptions.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+    : [];
+  if (!refusedField || !factorLabel || optionLabels.length === 0) return null;
+
+  const factor = safeLabel({ label: factorLabel, kind: undefined });
+  // Name the field the request WOULD have moved, in the user's terms.
+  const wrongField =
+    refusedField === 'edge_strength'
+      ? `the strength of the link into ${factor}`
+      : `${factor}'s own value`;
+
+  if (optionLabels.length === 1) {
+    const option = safeLabel({ label: optionLabels[0]!, kind: undefined });
+    // ⭐⭐ CORRECT THE MUTATION IN ONE CLICK, not one retype. When the user's own
+    // sentence already carried a model-unit effect value, the only thing wrong
+    // with the turn was WHICH FIELD it was going to move — so the chip replays
+    // the value they typed, into the phrasing that reaches the honest writer.
+    //
+    // The value is READ BY THE GUARD, using `readOptionEffectValue` — the
+    // writer's OWN reader (trap 12: not a second spelling) — and arrives here as
+    // a number. That reader is anchored on `to <number>` and therefore declines
+    // a hedge like "…strongly, about 0.6" all by itself. The restraint is
+    // deliberate and is the P5 half of this: replaying an approximation as an
+    // exact figure would launder the user's judgement. No value ⇒ no chip, and
+    // the copy asks for the number instead.
+    const rawValue = details.effect_ask_user_value;
+    const userValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null;
+    const candidateLabel = userValue === null ? '' : `Set the effect to ${userValue}`;
+    // ⭐⭐ THE CHIP CARRIES THE OPTION'S IDENTITY — it does not re-derive it.
+    //
+    // REVIEW FINDING, demonstrated by execution at `1b4e2c1a`. The first cut
+    // emitted the OPTION-LESS advised form so the sentence would route, and rule
+    // 3b then re-resolved the option AT CLICK TIME from whatever was outstanding
+    // then. Measured on the captured graph with the outstanding option shifted
+    // between offer and click:
+    //
+    //   option-less form → binds 939d4630   ← an option the user never chose
+    //   full-label form  → binds 4abad64d   ← the one the copy named
+    //
+    // So the message names the option IN FULL, from the RAW label rather than
+    // the displayed one: `safeLabel` TRUNCATES (real drafted labels run 84-101
+    // characters) and a truncated label matches nothing, which is what pushed
+    // the first cut into the option-less form in the first place. The rendered
+    // sentence the user READS stays truncated; the replay the chip SENDS is
+    // whole. Different jobs, different strings.
+    //
+    // ⚠ RESIDUAL, MEASURED AND NOT CLOSED HERE: if the named option is DELETED
+    // between offer and click, rule 3b still re-resolves (measured: binds
+    // 939d4630) rather than declining, because once the node is gone nothing in
+    // the sentence is recognisable as an option reference. Closing that needs a
+    // chip that pins `optionId` and a resume that binds by it — new pending-action
+    // machinery, not a predicate tweak. Reported rather than bodged.
+    // ⭐ THE REPLAY ARRIVES VERIFIED. `buildVerifiedCorrectionReplay` already ran
+    // it through the real writer against the real graph and confirmed it binds
+    // this exact pair and value, so this site never mints an affordance that
+    // would dead-end. See that function's header for the label class that broke
+    // the previous, hand-reasoned version.
+    const verifiedReplay = readString(details.effect_ask_replay_message) ?? null;
+    const replay =
+      verifiedReplay !== null
+      && !findChipRawDecimalLeak(candidateLabel, verifiedReplay, { isValidatedProposal: false })
+        ? verifiedReplay
+        : null;
+    return {
+      body: {
+        assistant_text:
+          `I haven't changed anything. I'm still waiting on `
+          + `${buildOptionEffectReference(option, factor)}, and what you asked for `
+          + `would have moved ${wrongField} instead — a different number, which `
+          + `would not have answered that question. Send me the effect value like `
+          + `this and I'll write it in: `
+          // ⭐ THE EXEMPLAR NAMES NO OPTION, DELIBERATELY. `safeLabel` truncates
+          // a real drafted option label, and the truncated sentence does NOT
+          // route (`option_not_named`, measured) — it would be a dead end
+          // dressed as help. With the option left out, rule 3b resolves it from
+          // this very ask. Pinned by the routing spec, so the exemplar can never
+          // drift away from the lane that would honour it.
+          + `"${buildConfigureOptionAdvisedFormat('', factor, String(replay === null ? 0.6 : userValue))}" `
+          + `(any number from 0 to 1).`,
+        suggested_actions: [
+          replay === null
+            ? fallbackPrompt('Give the effect value')
+            : {
+                id: chipId('prompt', `option-effect-${factor}`),
+                label: candidateLabel,
+                message: replay,
+              },
+        ],
+      },
+      template_id: 'option_intervention_misroute',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  const options = optionLabels
+    .map((l) => `"${safeLabel({ label: l, kind: undefined })}"`)
+    .join(' and ');
+  return {
+    body: {
+      assistant_text:
+        `I haven't changed anything, because I'm not sure which option you mean. `
+        + `${options} are both still missing their effect on ${factor}, and what `
+        + `you asked for would have moved ${wrongField} instead. Tell me which `
+        + `option you mean and the number, and I'll write it in `
+        + `(any number from 0 to 1).`,
+      suggested_actions: [fallbackPrompt('Say which option')],
+    },
+    template_id: 'option_intervention_misroute',
+    chip_type: 'text_prompt',
+  };
+}
+
 function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
   const details = error.details ?? {};
+  // ⭐ The identity-bound refusal takes precedence when the guard supplied a
+  // pair: it can name the entity and the field, and the generic copy below
+  // cannot. Falls through byte-identically when the details are absent, so the
+  // pre-existing prose-triggered refusals are untouched.
+  const effectAsk = composeOutstandingEffectAskMisroute(details);
+  if (effectAsk !== null) return effectAsk;
   // ROADMAP 2.11 / P1-3 — the guard now also refuses adjust_edge_strength
   // proposals for configure-option intent (the live A5/A7 loop wrote edge
   // strength while READING as configuration). The clarify names the right

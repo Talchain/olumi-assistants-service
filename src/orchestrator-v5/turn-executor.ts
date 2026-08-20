@@ -211,6 +211,11 @@ import {
   impliesOptionInterventionEdit,
 } from './routing/option-intervention-guard.js';
 import { detectConfigureOptionIntent } from './routing/configure-option-intent.js';
+import {
+  buildOutstandingEffectAskDetails,
+  buildVerifiedCorrectionReplay,
+  findOutstandingEffectAskCollision,
+} from './routing/outstanding-effect-ask-misroute.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
@@ -8508,6 +8513,106 @@ export async function runTurnExecutor(
         );
       }
 
+      // ⭐⭐ THE OUTSTANDING-EFFECT-ASK COLLISION, shared by both misroute
+      // guards below. Fresh-guest browser witness, 20 Aug 2026: the product
+      // OFFERED an edge-strength write, and separately APPLIED a factor-value
+      // write, on the very option × factor pairs it was asking effect values
+      // for — badging both "Applied" while readiness did not move.
+      //
+      // Derived from the turn's OWN graph (the same `graphStateForTurn` the
+      // validation above ran against), never from `analysisReadyForTurn`, which
+      // several branches overwrite. Memoised and lazy: the readiness build only
+      // runs on a turn that reaches one of the two guards with a valid
+      // mutating proposal. See `routing/outstanding-effect-ask-misroute.ts`.
+      let outstandingEffectAskReadiness:
+        | ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        | null
+        | undefined;
+      const readOutstandingEffectAskReadiness = ():
+        | ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        | null => {
+        if (outstandingEffectAskReadiness === undefined) {
+          outstandingEffectAskReadiness = graphStateForTurn
+            ? buildCanonicalAnalysisReadyFromGraph(graphStateForTurn)
+            : null;
+        }
+        return outstandingEffectAskReadiness;
+      };
+      // ⭐⭐ IS THIS TURN'S MESSAGE THE PRODUCT'S OWN CHIP COPY? Review finding at
+      // `1b4e2c1a`: the demotion chips carry content-free copy by design, so a
+      // prose-gated arm can never fire on one. Both arrival paths are covered —
+      // a TYPED chip click (`source: 'chip_click'`, the C2 typed-chip proposal
+      // route) and a chip whose message was matched back to its pending by the
+      // short-confirm / ordinal / label resumes (all of which assign
+      // `consumedPendingAction` upstream of this line).
+      // ⭐⭐ IS THIS TURN THE RESUME OF AN OFFER THE PRODUCT ITSELF MADE?
+      //
+      // ⚠⚠ DELIBERATELY **NOT** `payload.source`, AND THAT IS A CORRECTION TO
+      // THIS GUARD'S OWN FIRST CUT. The contract union is exactly four —
+      // `composer | chip | chip_click | retry` (`@talchain/schemas` 0.48.0,
+      // `dist/boundary/enums.d.ts:24`). `chip_click` does NOT mean "the product
+      // wrote this copy". It means **"this turn carries one of the 11
+      // CEE-routable `action_type`s"**, and the UI PROMOTES it, overriding
+      // whatever source the caller passed
+      // (`DecisionGuideAI/src/v5/buildPayload.ts:154-164` —
+      // `hasBoundAction = Boolean(wireActionType) || rawSource === 'chip_click'`).
+      // Exactly ONE production call site in the whole UI sets the literal — the
+      // payload builder itself — against a contrast control of 21 for
+      // `source: 'chip'`.
+      //
+      // MEASURED HARM from reading it as provenance, end to end at this tip.
+      // `MessageBubble.tsx:616` is the ONLY production UI sender of a
+      // `set_factor_value` chip: "Calibrate <X>" / "Help me calibrate <X>",
+      // CARRYING NO VALUE. Gated on source:
+      //
+      //   chip_click + outstanding factor -> "I haven't changed anything …
+      //                                       would have moved <factor>'s own
+      //                                       value instead"
+      //   same message, source composer   -> the helpful warrant demotion
+      //
+      // The product answered a plain request for HELP with a refusal about
+      // writing to the wrong field, and the only difference was a transport
+      // flag. That is this guard's own defect one level up: TWO QUESTIONS UNDER
+      // ONE NAME.
+      //
+      // ⚠ THE MISREAD IS AN ESTABLISHED CLASS, NOT A NEW ONE: of 15 production
+      // readers of this field in CEE, FOUR already treat it as provenance and
+      // are on `staging` today, and three of those name `'chip_click'` only —
+      // wrong in BOTH directions at once, since `'chip'` is also canned chip
+      // copy. The contract's own reader holds the standard
+      // (`turn-payload.js:720`: `isChipSource` names both). This gate does not
+      // join that class; it reads a field that cannot have a second spelling.
+      // (The three worst instances all sit on the DRAFT path and are ROWED —
+      // deliberately untouched here.)
+      //
+      // ⭐ SO THE GATE IS THE CONSUMED PENDING ACTION, which is genuine
+      // provenance: the product minted `apply_proposed_change` itself, and
+      // consuming it is proof this turn resumes an offer the product made.
+      // DERIVED BY ROUND TRIP, not assumed — a real demotion emitted
+      // `{message:'Set that value in my model.'}` with pending
+      // `{kind:'apply_proposed_change', chip_id:'prop_0865246bcd44'}`, and
+      // replaying that copy consumed the pending and applied the write. The
+      // demotion chips — the whole N=2 — arrive exactly this way.
+      //
+      // ⚠ RESIDUAL, STATED RATHER THAN PAPERED OVER: a chip whose pending has
+      // EXPIRED consumes nothing, so its canned copy is read as free-typed prose
+      // and the prose gate applies. Covering that by ALSO reading `source` would
+      // trade a measured harm for an unmeasured one, which is the wrong
+      // direction; the honest fix is upstream, where routing and provenance stop
+      // sharing a field.
+      const turnIsChipOriginated =
+        consumedPendingAction?.action.kind === 'apply_proposed_change';
+      const outstandingEffectAskOptionLabels = (): readonly string[] =>
+        graphLookupForValidate
+          ? graphLookupForValidate
+              .listEntitiesByKind('option')
+              .map((entity) => entity.label)
+              .filter(
+                (label): label is string =>
+                  typeof label === 'string' && label.trim().length > 0,
+              )
+          : [];
+
       // V5 edit_graph P0 containment (task_99f83f0d) — option-intervention
       // misroute guard. A request that implies editing an OPTION's
       // intervention ("revise the Outsource option's Annual Support Cost
@@ -8523,18 +8628,49 @@ export async function runTurnExecutor(
       // edits — we refuse ONLY this case, re-using the existing recoverable-
       // validator path so the turn composes a clarify and commits a
       // direct_answer with the graph UNCHANGED (no handler executes).
+      //
+      // ⚠ SECOND TRIGGER (20 Aug 2026 witness, defect B). The predicate above
+      // is anchored on an option LABEL or the word "option", and its own header
+      // declares the residual: *"an option referred to only by a pronoun … is
+      // still not caught"* (`option-intervention-guard.ts:282-285`). Witnessed
+      // live: *"Set its effect on Enterprise sales investment to 0.7"* wrote the
+      // FACTOR's own value 0.5 → 0.7 under an "Applied" receipt. The collision
+      // check closes exactly that case WITHOUT widening the label predicate —
+      // it requires the shipped classifier's own report that the sentence was
+      // effect-framed and merely unanchored, AND an identity match against a
+      // pair the product itself put on screen. An ordinary baseline edit on the
+      // same factor is untouched (its twin is pinned in the module's spec).
+      const setFactorValueEffectAskCollision =
+        validationResult.valid && proposedHandlerId === 'set_factor_value'
+          ? findOutstandingEffectAskCollision({
+              handlerId: 'set_factor_value',
+              entityId: action.entity.id,
+              message: userMessageForTurn ?? '',
+              optionLabels: outstandingEffectAskOptionLabels(),
+              readiness: readOutstandingEffectAskReadiness(),
+              chipOriginated: turnIsChipOriginated,
+            })
+          : null;
+      // ⭐ THE CORRECTION IS VERIFIED AGAINST THE WRITER BEFORE IT IS OFFERED.
+      // Built here rather than in the composer because only this site holds the
+      // graph the chip would be honoured against.
+      const setFactorValueVerifiedReplay =
+        setFactorValueEffectAskCollision !== null
+          ? buildVerifiedCorrectionReplay(setFactorValueEffectAskCollision, graphStateForTurn)
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
-        ((): boolean => {
-          if (!graphLookupForValidate) return false;
-          const guardLabels = collectOptionGuardLabels(graphLookupForValidate);
-          return impliesOptionInterventionEdit(
-            userMessageForTurn ?? '',
-            guardLabels.optionLabels,
-            guardLabels.nonOptionLabels,
-          );
-        })()
+        (setFactorValueEffectAskCollision !== null ||
+          ((): boolean => {
+            if (!graphLookupForValidate) return false;
+            const guardLabels = collectOptionGuardLabels(graphLookupForValidate);
+            return impliesOptionInterventionEdit(
+              userMessageForTurn ?? '',
+              guardLabels.optionLabels,
+              guardLabels.nonOptionLabels,
+            );
+          })())
       ) {
         validationResult = {
           valid: false,
@@ -8545,6 +8681,10 @@ export async function runTurnExecutor(
             details: {
               handler_id: 'set_factor_value',
               ...(action.entity.label ? { factor_label: action.entity.label } : {}),
+              ...buildOutstandingEffectAskDetails(
+                setFactorValueEffectAskCollision,
+                setFactorValueVerifiedReplay,
+              ),
             },
           },
         };
@@ -8564,20 +8704,45 @@ export async function runTurnExecutor(
       // set_factor_value misroute guard above: refuse into the recoverable
       // clarify path, graph unchanged; a false positive costs one clarify
       // turn, a false negative writes the wrong field forever.
+      //
+      // ⚠ SECOND TRIGGER (20 Aug 2026 witness, defect A) — AND THE PROSE
+      // PREDICATE COULD NOT HAVE CAUGHT IT. The witnessed sentence carried no
+      // assignment verb and no effect noun ("I would say it drives self-serve
+      // product investment fairly strongly, about 0.6."), so
+      // `detectConfigureOptionIntent` correctly returns false — measured at
+      // pristine `65445df`, and it returns false EVEN WITH the option named in
+      // full. What made the proposal wrong was not the prose: it was that the
+      // edge it targets, `15637f46→0ebfde36`, IS the option × factor pair the
+      // product had just asked an effect value for. That is an IDENTITY fact,
+      // so the second trigger reads identity and no prose at all.
+      //
+      // Placement matters: this validate chokepoint runs BEFORE the INV-1
+      // warrant gate, so refusing here also means the warrantless case never
+      // reaches `buildWarrantDemotion` and the "Adjust this link" chip is never
+      // minted. The witnessed harm was the OFFER as much as the write.
+      const edgeStrengthEffectAskCollision =
+        validationResult.valid && proposedHandlerId === 'adjust_edge_strength'
+          ? findOutstandingEffectAskCollision({
+              handlerId: 'adjust_edge_strength',
+              entityId: action.entity.id,
+              message: userMessageForTurn ?? '',
+              optionLabels: outstandingEffectAskOptionLabels(),
+              readiness: readOutstandingEffectAskReadiness(),
+              chipOriginated: turnIsChipOriginated,
+            })
+          : null;
+      const edgeStrengthVerifiedReplay =
+        edgeStrengthEffectAskCollision !== null
+          ? buildVerifiedCorrectionReplay(edgeStrengthEffectAskCollision, graphStateForTurn)
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'adjust_edge_strength' &&
-        detectConfigureOptionIntent(
-          userMessageForTurn ?? '',
-          graphLookupForValidate
-            ? graphLookupForValidate
-                .listEntitiesByKind('option')
-                .map((entity) => entity.label)
-                .filter((label): label is string =>
-                  typeof label === 'string' && label.trim().length > 0,
-                )
-            : [],
-        ).matched
+        (edgeStrengthEffectAskCollision !== null ||
+          detectConfigureOptionIntent(
+            userMessageForTurn ?? '',
+            outstandingEffectAskOptionLabels(),
+          ).matched)
       ) {
         validationResult = {
           valid: false,
@@ -8587,6 +8752,10 @@ export async function runTurnExecutor(
               'adjust_edge_strength refused — the request implies configuring an option\'s interventions, not tuning a link strength',
             details: {
               handler_id: 'adjust_edge_strength',
+              ...buildOutstandingEffectAskDetails(
+                edgeStrengthEffectAskCollision,
+                edgeStrengthVerifiedReplay,
+              ),
             },
           },
         };

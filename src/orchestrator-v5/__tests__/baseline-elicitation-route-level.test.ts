@@ -320,3 +320,72 @@ describe('2.918 RESUME — the bare answer dispatches the replay with zero LLM c
     }
   });
 });
+
+describe('2.918 RESUME — the source gate is PINNED (it was not)', () => {
+  /**
+   * ⭐⭐ THIS GUARD PROTECTED NOTHING. `turn-executor.ts:5510-5514` refuses to
+   * resume a baseline question on a chip turn — *"their copy is canned, not an
+   * answer"* — and DELETING BOTH CONJUNCTS LEFT THIS SUITE GREEN: every resume
+   * case above uses `makeMessagePayload`'s default `source: 'composer'`, and the
+   * only two `chip_click` payloads in this file are EMIT-side.
+   *
+   * ⚠ BOTH SPELLINGS, and that is the point of the `it.each`. The contract union
+   * is exactly four — `composer | chip | chip_click | retry`
+   * (`schemas 0.48.0`, `dist/boundary/enums.d.ts:24`) — and the contract's own
+   * reader holds the standard: `turn-payload.js:720`'s `isChipSource` names BOTH.
+   * A pin that named only `chip_click` would leave half the gate unprotected and
+   * would read as deliberate, which is worse than leaving it unpinned.
+   *
+   * Test-only. No behaviour change: the gate already reads both.
+   */
+  it.each(['chip', 'chip_click'] as const)(
+    'a canned chip turn does NOT resume the live question (source: %s)',
+    async (source) => {
+      const graph = graphWithFramedRow();
+      const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+      mockedPendingActions = [elicitPending(liveHash)];
+      const { adapter, chatWithTools } = directAnswerAdapter();
+
+      const { response } = await runTurnExecutor(
+        payload('about 12%', { source }),
+        `req-2918-chip-${source}`,
+        { routingAdapter: adapter, graphState: graph },
+      );
+
+      // The pre-route did NOT claim the turn — it reached the ordinary path.
+      expect(chatWithTools).toHaveBeenCalled();
+      // Nothing was minted on the question's target, bound by IDENTITY.
+      const committedGraphs = appendCalls
+        .map((c) => c.graph as GraphV3T | undefined)
+        .filter((g): g is GraphV3T => g != null);
+      for (const g of committedGraphs) {
+        expect(
+          g.nodes.find((n) => n.id === 'o-churn-rate')?.observed_state?.baseline,
+        ).toBeUndefined();
+      }
+      // …and no resume receipt was spoken.
+      expect(response.assistant_text).not.toContain('Noted Churn rate is currently at 12%.');
+    },
+  );
+
+  it('POSITIVE CONTROL — the SAME message and the SAME live question DO resume from the composer', async () => {
+    // Trap 13: without this, both cases above could pass because the fixture
+    // stopped being resumable at all, and the gate would be proving nothing.
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('about 12%'), 'req-2918-chip-control', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(1);
+    expect(
+      (appendCalls[0]!.graph as GraphV3T).nodes.find((n) => n.id === 'o-churn-rate')
+        ?.observed_state?.baseline,
+    ).toBe(0.12);
+  });
+});
