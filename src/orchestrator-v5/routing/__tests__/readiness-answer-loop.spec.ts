@@ -31,6 +31,7 @@ import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/an
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { buildRepairPairChipMessage } from '../../configure-option-chip-text.js';
 import { composeReadinessIntakeResponse } from '../readiness-intake.js';
+import { selectAnswerableBlockers } from '../readiness-answer-chips.js';
 
 const CAPTURE = JSON.parse(
   readFileSync(
@@ -191,7 +192,16 @@ describe('readiness answer loop — the blocked model gets an answerable route',
     expect(assessment.repairProposal, 'the ≥2 gate must genuinely be shut here').toBeNull();
 
     const result = composeReadinessIntakeResponse(graph, STAGE);
-    expect(result.response.suggested_actions.length).toBeGreaterThan(0);
+    // ⚠ BIND TO AN *ANSWER* CHIP, NOT TO "any chip". The first version of this
+    // assertion read `suggested_actions.length > 0` and PASSED under the
+    // mutant that reintroduced the defect — because at this point the run
+    // already proceeds, so the Run chip alone satisfied it. A guard that the
+    // defect walks straight through is worse than none: it reports coverage
+    // it does not provide.
+    const answerChips = result.response.suggested_actions.filter((a) =>
+      a.id.startsWith('chip_readiness_answer_'),
+    );
+    expect(answerChips.length, 'the last question must still be answerable').toBeGreaterThan(0);
   });
 
   it('an OPTION_NEEDS_MAPPING blocker (no factor_id) gets a configure chip, never a fabricated value sentence', () => {
@@ -294,6 +304,30 @@ describe('readiness answer loop — the blocked model gets an answerable route',
       { configured: 3, blocking: 3, hasProposal: true, willProceed: true },
       { configured: 5, blocking: 1, hasProposal: false, willProceed: true },
     ]);
+  });
+
+  it('the answerable filter binds by BLOCKER CODE, not merely by having an option', () => {
+    // ⚠ ADDED BECAUSE A MUTANT SURVIVED. Deleting the code check left every
+    // assertion green: structural blockers were still excluded, but only
+    // INCIDENTALLY — they carry no `option_id`. A blocker that DOES name an
+    // option and DOES need human input, but is not about a missing effect
+    // (a constraint review, a unit mismatch), would have been offered a
+    // "set the value" chip it cannot answer. Tested on the selector directly,
+    // bound by code identity.
+    const base = {
+      issue_id: 'probe_1',
+      option_id: 'opt_1',
+      repairability: 'human_input_required',
+      message: 'probe',
+    } as unknown as Parameters<typeof selectAnswerableBlockers>[0][number];
+
+    const answerable = { ...base, code: 'MISSING_OPTION_VALUE' } as typeof base;
+    const notAnswerable = { ...base, code: 'CONSTRAINT_REVIEW_REQUIRED' } as typeof base;
+
+    // Positive control FIRST — without it, "excludes X" could pass on a
+    // selector that excludes everything.
+    expect(selectAnswerableBlockers([answerable]).map((i) => i.issue_id)).toEqual(['probe_1']);
+    expect(selectAnswerableBlockers([notAnswerable])).toEqual([]);
   });
 
   it('reads as English: every sentence in the composed answer starts with a capital', () => {
