@@ -538,7 +538,7 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     // routing/orchestrator system prompt (~22k chars — PMS_TASK_ALIAS in
     // src/prompts/tracked.ts resolves 'routing' to 'orchestrator' for store
     // lookups). Its registered code default, however, is the LEGACY cf-v28
-    // V4 mega-prompt (57,643 chars). Auto-seeding that default into a FRESH
+    // V4 mega-prompt (~57k chars). Auto-seeding that default into a FRESH
     // store (file store / ':memory:' in tests, or a new deployment with
     // PROMPTS_ENABLED=true) put the 57,643-char coach prompt on the
     // orchestrator row; buildRoutingPromptSnapshot() then resolved it as the
