@@ -75,6 +75,7 @@
  */
 
 import { classifyEncodedInterventionAdmissibility } from '../../orchestrator/shared/encoded-intervention-admissibility.js';
+import { recoverScaleFrame } from './handlers/d1-shared/scale-frame.js';
 
 /**
  * Factor scale descriptor extracted from a factor node's `observed_state`.
@@ -724,8 +725,19 @@ export function projectRequestInterventionsToWireScale(
  * ── THE BASELINE GATE (row 2.1085; PR #926 rounds 2–3) ─────────────────────
  * THE QUESTION THIS PREDICATE ANSWERS, NAMED APART (trap 21): "is this factor
  * SCALE-COHERENT WITHIN ITSELF?" — it is NOT "is any baseline outside [0,1]?"
- * and it is NOT an arbitrary exemption. It reconciles two measured prior
- * cases, and a future session must not "fix" either half away:
+ * and it is NOT an arbitrary exemption. It reconciles three measured prior
+ * cases, and a future session must not "fix" any of them away:
+ *
+ *   · THE PAIR-ENCODED-FRAME CLASS (wire-witnessed 2026-08-19 on the frozen
+ *     quartet; see the inline note at the `recoverScaleFrame` call below): a
+ *     capless factor whose `{value, raw_value}` pair encodes a frame has a
+ *     RESOLVED scale — that is the records projector's persisted convention
+ *     and the state the canonical edit writer manufactures by design on an
+ *     over-frame edit. It is read through `recoverScaleFrame`, the one owner
+ *     of that question, so this gate and the two writers cannot disagree.
+ *     COMPUTES. ⚠ Its absence is what made the out/none default below fire on
+ *     the product's own edits — the corpus premise quoted there held for the
+ *     pre-cutover captures and never for CEE's own writer.
  *
  *   · THE R2-2 SILENT-CORRUPTION CLASS (round-2 re-review, measured): a
  *     capless baseline OUTSIDE [0,1] beside that factor's own IN-unit-interval
@@ -787,9 +799,43 @@ export function findScaleIncoherentBaselineFactorIds(
     const baseline = firstFiniteNumber(observed?.value);
     if (baseline === undefined) continue;
     if (baseline >= 0 && baseline <= 1) continue;
-    // Baseline outside [0,1]: coherent ONLY if the factor's own USER-AUTHORED
-    // interventions establish the same raw frame (round-5 semantics: any
-    // user-authored value outside the unit interval).
+    // ── THE PAIR-ENCODED FRAME IS A RESOLVED SCALE, NOT AN UNRESOLVED ONE ──
+    // Read the frame the WRITER already wrote, through the same canonical
+    // owner both writers consume (`recoverScaleFrame`, d1-shared/scale-frame).
+    // A capless factor's `{value, raw_value}` pair encodes its frame EXACTLY
+    // (`raw / value`): that is the records projector's persisted convention
+    // (pass 3d — the frame itself is deliberately not stored as a `cap`, which
+    // would flip every later edit to cap-normalised writes), and an over-frame
+    // edit's honest `value > 1` is a state the canonical writer MANUFACTURES
+    // BY DESIGN (`normalise-factor-value.ts`: no clamp, no re-framing, because
+    // inventing a frame mid-edit would silently rescale every sibling
+    // intervention). Testing `baseline ∈ [0,1]` alone was a SECOND, weaker
+    // notion of "scale resolved" that ignored `raw_value` — so this gate
+    // refused the very pairs CEE's own edit path writes, and the product
+    // accepted an edit it then declined to analyse (wire-witnessed on a fresh
+    // guest journey, 2026-08-19, frozen quartet; two factors, two clean walks).
+    //
+    // ⚠ THIS IS A POSITIVE DETERMINATION, NOT A WIDENED WINDOW. It fires only
+    // when a frame is RECOVERABLE, and `recoverScaleFrame`'s preconditions are
+    // the producers' own pair domain: `value > 0`, `raw > value`, quotient
+    // finite and > 1. So every genuinely unresolvable shape still blocks —
+    // a bare raw baseline (`raw === value`, no frame encoded: the R2-2
+    // silent-corruption class), a negative pair (no truthful frame exists;
+    // `deriveFactorScaleFrame` refuses negatives sign-symmetrically too), and
+    // a level with no magnitude beside it. The gate's own out/none default was
+    // justified on the premise that "no legitimate shape is known to occupy
+    // this quadrant"; that premise held only for the pre-cutover capture
+    // corpus and is refuted by CEE's own writer, so the exemption is derived
+    // from the producer, exactly as the round-5 exemption below is.
+    // Round 2 learned this once already, at the writer: "the pair still
+    // encodes the frame EXACTLY; refusing it was the defect."
+    if (recoverScaleFrame({ value: baseline, raw_value: observed?.raw_value }) !== undefined) {
+      continue;
+    }
+    // Baseline outside [0,1] AND no frame encoded in its own pair: coherent
+    // ONLY if the factor's own USER-AUTHORED interventions establish the same
+    // raw frame (round-5 semantics: any user-authored value outside the unit
+    // interval).
     const selfFramed = perOptionRawObjects.some((rawObjects, optionIndex) => {
       if (synthesisedByOption?.[optionIndex]?.has(id) === true) return false;
       const v = extractNumericInterventionValue(rawObjects[id]);
