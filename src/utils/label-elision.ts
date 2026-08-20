@@ -189,6 +189,95 @@ export function hasUnclosedDelimiter(text: string): boolean {
 }
 
 /**
+ * THE PHRASE-BOUNDARY DISCIPLINE — closed-class only, and deliberately so.
+ *
+ * A word boundary is not a phrase boundary. N26 landed the ellipsis and the
+ * word-boundary cut; the UX gate re-witnessed this seam on 19 AND 20 August
+ * and found the other half of the 18 August prescription still open — the
+ * product stops on words that cannot end a phrase:
+ *
+ *   "hold the line on cloud-only for another…"     (option label @40)
+ *
+ * `another` is a determiner with no noun; `for` behind it is a preposition
+ * with no object. Neither can END anything, so the marker reads as a broken
+ * sentence rather than an elision.
+ *
+ * THE RULE: reject a candidate head whose LAST token is a closed-class
+ * function word, and let the existing back-off walk to the next candidate.
+ * Iteration falls out of the loop for free — `for another` drops `another`,
+ * then drops `for`, and stops on `cloud-only`, a content word.
+ *
+ * ⭐ WHY CLOSED-CLASS ONLY, AND WHY THE OBVIOUS EXTENSION IS REFUSED. This set
+ * contains only function words, so the rule can NEVER delete a content word
+ * the user wrote — it is determinate, needs no part-of-speech lexicon, and has
+ * no tuning constants. That is the whole of its claim.
+ *
+ * ⚠ IT THEREFORE DOES NOT FIX THE SECOND WITNESSED STRING, and that is a
+ * MEASURED decision, not an oversight:
+ *
+ *   "…enterprise customers are asking for a self-hosted…"   (goal quote @80)
+ *
+ * That head ends on a CONTENT word. It reads broken only because the
+ * determiner `a`, two tokens back, never got its noun — and knowing that needs
+ * a lexicon, because the identical shape `<determiner> <token>` is a perfectly
+ * good phrase ending in `"Defend and hold the line"`.
+ *
+ * The obvious next round — also reject a head whose SECOND-to-last token is a
+ * determiner — was RUN BEFORE BEING COMMISSIONED (platform trap 22f(b)). It
+ * fixes the goal string and simultaneously breaks the legitimate one, turning
+ * `"Defend and hold the line…"` into `"Defend and hold…"`, which is a dangling
+ * verb phrase — the same harm, relocated. Two harms under one predicate cannot
+ * share a window (trap 22b), so the extension is REFUSED rather than shipped.
+ * `label-elision.test.ts` pins BOTH halves of that finding executably, so the
+ * gap REDs if it is closed and REDs if it degrades.
+ *
+ * RANKING, unchanged from N26: this is a PREFERENCE, below the budget
+ * GUARANTEE and below the retention floor. Where no head satisfies it above
+ * the floor, the floor wins and the label keeps its dangling tail rather than
+ * collapsing to a stub — the same ordering the module already applies to
+ * delimiter closure.
+ */
+const DANGLING_TAIL_WORDS: ReadonlySet<string> = new Set([
+  // determiners / possessives
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'another', 'each', 'every',
+  'some', 'any', 'no', 'my', 'your', 'our', 'their', 'its', 'his', 'her', 'both',
+  'either', 'neither', 'such', 'which', 'what',
+  // prepositions
+  'of', 'in', 'on', 'at', 'to', 'for', 'from', 'with', 'by', 'into', 'onto',
+  'over', 'under', 'about', 'across', 'through', 'between', 'among', 'during',
+  'before', 'after', 'against', 'per', 'via', 'without', 'within', 'upon',
+  'toward', 'towards', 'beyond', 'beneath', 'besides', 'despite', 'than',
+  // conjunctions / subordinators
+  'and', 'or', 'but', 'nor', 'so', 'yet', 'plus', 'if', 'while', 'when',
+  'whereas', 'because', 'as', 'whether', 'unless', 'until', 'since',
+  // auxiliaries / copulas / negation
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am', 'will', 'would',
+  'can', 'could', 'shall', 'should', 'may', 'might', 'must', 'do', 'does',
+  'did', 'has', 'have', 'had', 'not',
+]);
+
+/**
+ * True when `text` ends on a closed-class function word that cannot end a
+ * phrase, under the discipline documented on {@link DANGLING_TAIL_WORDS}.
+ *
+ * Exported so callers and tests interrogate the SAME predicate the back-off
+ * loop uses — a second, hand-written copy of this word set in a spec is
+ * exactly the hand-maintained mirror this module exists to remove (trap 12).
+ *
+ * Surrounding punctuation is stripped before the lookup so that `"...for a,"`
+ * and `"...for a"` are judged alike; case is folded for the same reason.
+ */
+export function endsOnDanglingWord(text: string): boolean {
+  const tokens = text.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return false;
+  const last = tokens[tokens.length - 1]
+    .toLowerCase()
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .replace(/[^\p{L}\p{N}]+$/u, '');
+  return DANGLING_TAIL_WORDS.has(last);
+}
+
+/**
  * Every word-boundary prefix of `text` that fits inside `budget`, LONGEST
  * FIRST, de-duplicated, strictly decreasing in length.
  *
@@ -268,7 +357,9 @@ export function elideLabelAtWordBoundary(label: string, max: number): string {
   for (const head of wordBoundaryHeads(trimmed, budget)) {
     if (head.length < floor) break;
     if (longestAboveFloor === null) longestAboveFloor = head;
-    if (!hasUnclosedDelimiter(head)) return `${head}${ELLIPSIS}`;
+    if (hasUnclosedDelimiter(head)) continue;
+    if (endsOnDanglingWord(head)) continue;
+    return `${head}${ELLIPSIS}`;
   }
 
   if (longestAboveFloor !== null) return `${longestAboveFloor}${ELLIPSIS}`;
