@@ -88,6 +88,9 @@ import {
   AUTO_RUN_PROVISIONAL_DISCLOSURE,
   RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../chip-click-dispatch.js';
+import {
+  isAutoInitiatedRunAnalysisFact,
+} from '../../context/run-initiator.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -214,6 +217,13 @@ describe('dispatchChipClickRunAnalysis — autoRun trigger present', () => {
     });
     // The PLoT-originated key survives — spread, not replace.
     expect(enrichment.results).toEqual({ report: { option_probabilities: { opt_a: 0.7 } } });
+    // ⭐ WRITER → READER ROUND TRIP, THROUGH THE PRODUCTION COMMIT PATH.
+    // The coaching layer suppresses a "you already saw this" claim by asking
+    // `isAutoInitiatedRunAnalysisFact` of the prior fact. That question is only
+    // answerable if the fact THIS dispatch actually commits carries the marker
+    // the reader looks for — so the two ends are pinned against each other
+    // here rather than against a shared literal each could drift from.
+    expect(isAutoInitiatedRunAnalysisFact(fact)).toBe(true);
   });
 
   it('opens the committed assistant answer with the provisional disclosure', async () => {
@@ -265,6 +275,10 @@ describe('dispatchChipClickRunAnalysis — autoRun trigger ABSENT (the negative 
     expect(
       Object.prototype.hasOwnProperty.call(enrichment, RUN_PROVENANCE_ENRICHMENT_KEY),
     ).toBe(false);
+    // The discriminating NEGATIVE of the round trip above: a user's own run
+    // must not read as auto-initiated, or the coaching layer would delete a
+    // prior the user really saw.
+    expect(isAutoInitiatedRunAnalysisFact(fact)).toBe(false);
     expect(out.outcome).toBe('ok');
     if (out.outcome !== 'ok') return;
     expect(out.response.assistant_text.includes(AUTO_RUN_PROVISIONAL_DISCLOSURE)).toBe(false);

@@ -65,6 +65,10 @@ import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
+  buildAutoRunProvenance,
+  RUN_PROVENANCE_ENRICHMENT_KEY,
+} from '../context/run-initiator.js';
+import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
   type FreshnessDerivation,
@@ -145,7 +149,11 @@ export const AUTO_RUN_POST_DRAFT_CHIP_ID = 'auto_run_post_draft';
  * analysis: the graceful-degradation posture R2 requires. Surfacing it to the
  * browser is a schemas-train keep-list change, deliberately not made here.
  */
-export const RUN_PROVENANCE_ENRICHMENT_KEY = 'run_provenance';
+// ⭐ MOVED to `../context/run-initiator.js` (2026-08-20) — the ONE owner of the
+// auto-run marker vocabulary, imported by the writer below AND by the coaching
+// layer's reader. Re-exported here so this module's existing consumers and
+// specs keep their import path (CLAUDE.md trap #12: one definition, no copies).
+export { RUN_PROVENANCE_ENRICHMENT_KEY };
 
 /**
  * R2 — the user-visible provisional label. Opens the auto-run turn's
@@ -760,11 +768,7 @@ function stampAutoRunProvenance(
         ...fact.result,
         enrichment: {
           ...(fact.result.enrichment ?? {}),
-          [RUN_PROVENANCE_ENRICHMENT_KEY]: {
-            initiated_by: 'auto_post_draft',
-            provisional: true,
-            draft_turn_id: draftTurnId,
-          },
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: buildAutoRunProvenance(draftTurnId),
         },
       },
     };
