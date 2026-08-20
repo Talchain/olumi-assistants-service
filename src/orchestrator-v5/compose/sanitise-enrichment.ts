@@ -422,7 +422,25 @@ export function partitionCritiques(
       if (scrubbed.suppress) {
         diagnostic.push(c);
       } else {
-        user.push({ ...c, message: scrubbed.text });
+        // THE S-BUCKET CATALOGUE OWNS EVERY USER-FACING STRING ON AN S ROW,
+        // REMEDY INCLUDED — the same rule `projectCritiquesForTransport`
+        // enforces, now enforced here too (2026-08-19).
+        //
+        // This spread used to carry the producer's own `suggestion` through
+        // with NO scrub whatsoever — strictly worse than the transport seam's
+        // defect, which at least applied a hard-ban scrub and still shipped
+        // "Check that intervention targets are connected to the goal with
+        // non-zero edge strengths" to a first-time user (`intervention
+        // targets` is a WARNING pattern, not a hard ban —
+        // forbidden-tokens.ts:189-190).
+        //
+        // Replacing `message` because the producer's wording is unsafe for
+        // users, and then forwarding the producer's remedy beside it,
+        // contradicts the premise of the bucket. Bucket U is untouched: its
+        // declared contract IS to keep the producer's prose after scrubbing.
+        const row: Record<string, unknown> = { ...c, message: scrubbed.text };
+        delete row.suggestion;
+        user.push(row as CritiqueLike);
       }
       continue;
     }

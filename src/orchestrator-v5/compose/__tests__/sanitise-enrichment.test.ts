@@ -7,6 +7,7 @@ import {
   bucketFor,
   isAllowlistedPath,
   partitionCritiques,
+  projectCritiquesForTransport,
   sanitiseEnrichment,
   sanitiseEnrichmentText,
   type CritiqueLike,
@@ -579,6 +580,117 @@ describe('partitionCritiques — bucket routing + structural preservation', () =
     expect(r.diagnostic[0]?.message).toBe(
       "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
     );
+  });
+});
+
+// =============================================================================
+// S-bucket suggestion ownership — the two seams must not drift apart
+// =============================================================================
+
+/**
+ * ⚠ WHY THIS IS ONE TEST ACROSS TWO FUNCTIONS, NOT TWO TESTS EACH SIDE.
+ *
+ * `partitionCritiques` and `projectCritiquesForTransport` implement the SAME
+ * policy at two seams: on a bucket-S row, `S_BUCKET_REPLACEMENTS` owns EVERY
+ * user-facing string, because the premise of the bucket is that the producer's
+ * own wording is unsafe for users.
+ *
+ * They drifted, and the drift shipped. The transport seam replaced `message`
+ * and then forwarded the producer's `suggestion` beside it under a hard-ban-only
+ * scrub; `intervention targets` is a WARNING pattern, not a hard ban
+ * (forbidden-tokens.ts:189-190), so it reached a first-time user on the deployed
+ * build. That seam was fixed. The partition seam had the same defect in a WORSE
+ * form — its `{ ...c }` spread carried `suggestion` through with no scrub at all
+ * — and survived because every existing test checked the two functions
+ * SEPARATELY. Checking them separately is precisely what let the twin exist.
+ *
+ * So this suite asserts the property ACROSS BOTH seams in one case, over the S
+ * codes DERIVED from `CRITIQUE_BUCKETS` rather than hand-listed (a code newly
+ * promoted to S is covered here automatically, and cannot be added on one seam
+ * only).
+ */
+describe('S-bucket suggestion ownership — partition and transport seams agree', () => {
+  const S_CODES = Object.keys(CRITIQUE_BUCKETS).filter((code) => CRITIQUE_BUCKETS[code] === 'S');
+
+  // The exact string witnessed on the deployed build. A DERIVED guard proves the
+  // two seams AGREE; only a hand-written corpus case notices that the agreed
+  // rule is the wrong one. Both are kept deliberately.
+  const WITNESSED_LEAK =
+    'Check that intervention targets are connected to the goal with non-zero edge strengths.';
+
+  it('derives a non-empty S-code set from the canonical bucket map', () => {
+    // Guards the derivation itself: if `CRITIQUE_BUCKETS` is refactored such
+    // that this filter yields nothing, every `it.each` below would silently
+    // stop running and the suite would still pass.
+    expect(S_CODES.length).toBeGreaterThanOrEqual(10);
+    expect(S_CODES).toContain('NO_EFFECTIVE_PATH_TO_GOAL');
+  });
+
+  it.each(S_CODES)('S row %s — neither seam forwards the producer suggestion', (code) => {
+    const c: CritiqueLike = {
+      id: 'c_bind',
+      code,
+      severity: 'blocker',
+      source: 'validation',
+      message: 'engine wording that must not ship',
+      suggestion: WITNESSED_LEAK,
+      affected_option_ids: ['opt_hire_local', 'opt_offshore'],
+      affected_node_ids: ['opt_hire_local', 'opt_offshore'],
+    };
+
+    // PRECONDITION PIN. Without these three assertions the expectations below
+    // would pass vacuously on a row that was routed to `diagnostic` or dropped
+    // — i.e. a guard agreeing with itself. Pin that this row really is an S row
+    // that SURVIVES to the user on both seams.
+    expect(bucketFor(code)).toBe('S');
+    const partitioned = partitionCritiques([c], CTX);
+    expect(partitioned.user).toHaveLength(1);
+    const projected = projectCritiquesForTransport([c], CTX);
+    expect(projected).toHaveLength(1);
+
+    // Bind by IDENTITY (id + code), never by prose — another row could satisfy
+    // a value predicate.
+    const partitionRow = partitioned.user[0]!;
+    const transportRow = projected![0]!;
+    expect(partitionRow.id).toBe('c_bind');
+    expect(partitionRow.code).toBe(code);
+    expect(transportRow.id).toBe('c_bind');
+    expect(transportRow.code).toBe(code);
+
+    // THE BOUND PROPERTY: the producer's remedy prose is gone on BOTH seams.
+    expect(partitionRow.suggestion).toBeUndefined();
+    expect(transportRow.suggestion).toBeUndefined();
+  });
+
+  it('bucket U keeps its producer suggestion on BOTH seams — the S rule is scoped', () => {
+    // OPPOSITE-DIRECTION TWIN. Dropping the suggestion is a gap-closing fix; the
+    // symmetric harm is over-reach that strips bucket U, whose DECLARED contract
+    // is to keep the producer's prose after scrubbing. Without this case, a
+    // mutant that drops `suggestion` for every bucket would survive.
+    const uCode = 'NO_OPTIONS';
+    expect(bucketFor(uCode)).toBe('U');
+
+    // The suggestion carries a raw entity ID on purpose. Asserting the RESOLVED
+    // form pins that U's suggestion is both KEPT and SCRUBBED — a corpus string
+    // the scrubber leaves untouched would make this case blind to a seam that
+    // keeps the field but stops sanitising it.
+    const c: CritiqueLike = {
+      id: 'c_u',
+      code: uCode,
+      severity: 'blocker',
+      source: 'validation',
+      message: 'engine wording',
+      suggestion: "Add a second option so 'opt_hire_local' can be compared.",
+    };
+    const RESOLVED =
+      "Add a second option so 'Hire Two Senior Engineers Locally' can be compared.";
+
+    const partitionRow = partitionCritiques([c], CTX).user[0]!;
+    const transportRow = projectCritiquesForTransport([c], CTX)![0]!;
+    expect(partitionRow.id).toBe('c_u');
+    expect(transportRow.id).toBe('c_u');
+    expect(partitionRow.suggestion).toBe(RESOLVED);
+    expect(transportRow.suggestion).toBe(RESOLVED);
   });
 });
 
