@@ -96,7 +96,7 @@ import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
-import { AnalysisNotReadyError } from './analysis-ready-core.js';
+import { AnalysisNotReadyError, readinessQuestions } from './analysis-ready-core.js';
 import {
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -323,6 +323,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
               scenario_id: args.scenario_id,
               ...(verdict.reasonCodes[0] !== undefined ? { reason_code: verdict.reasonCodes[0] } : {}),
               ...(verdict.nextStep !== null ? { next_step: verdict.nextStep } : {}),
+              // ⭐ The NAMED questions behind the refusal, so the composer can
+              // give the user a route instead of a count. Already derived by
+              // the same assessment that produced `nextStep`; forwarding it was
+              // the whole of the gap (witnessed 2026-08-20: six composed
+              // questions held here while the user was told to "ask in the chat
+              // what they need"). Omitted when empty so a verdict with no
+              // enumerable inputs (NO_GRAPH, SCHEMA_INVALID) is unchanged.
+              ...(readinessQuestions(verdict).length > 0
+                ? { readiness_questions: [...readinessQuestions(verdict)] }
+                : {}),
             },
             cause: readError,
           },

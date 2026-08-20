@@ -35,6 +35,20 @@ import {
   CONFIGURE_OPTION_GENERIC_CHIP,
 } from '../configure-option-chip-text.js';
 
+/**
+ * How many outstanding questions the refusal lists inline. Six is the witnessed
+ * fresh-draft count (3 missing effect values + 3 unmapped options), so the
+ * common case lists in full; anything beyond is disclosed, never dropped.
+ */
+const MAX_LISTED_READINESS_QUESTIONS = 6;
+
+/** Read the forwarded questions defensively: `details` is an untyped record. */
+function readReadinessQuestions(details: Record<string, unknown>): readonly string[] {
+  const raw = details.readiness_questions;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0);
+}
+
 export interface ComposedHandlerFailure {
   readonly response: OlumiResponse;
   readonly template_id: string;
@@ -268,19 +282,71 @@ export function composeHandlerFailureBody(
         typeof details.next_step === 'string' && details.next_step.trim().length > 0
           ? details.next_step.trim()
           : 'This scenario needs a quick fix before it can be analysed.';
+      // ⭐ THE NAMED QUESTIONS, not just the count (witnessed 2026-08-20).
+      // `next_step` says "Review all 6 readiness issues together before
+      // analysis." and the panel tells the user to "ask in the chat what they
+      // need" — while CEE holds six fully-composed questions naming the option
+      // AND the factor. Printing the count and discarding the list is what left
+      // a fresh user with no route. The list is SELECTED, never composed here:
+      // every string is `unresolved_inputs[].prompt` from the same assessment
+      // that produced `next_step` (see `analysis-ready-core.readinessQuestions`).
+      const questions = readReadinessQuestions(details);
+      const shown = questions.slice(0, MAX_LISTED_READINESS_QUESTIONS);
+      const withheld = questions.length - shown.length;
+      const assistantText = shown.length === 0
+        // Unchanged for a verdict with no enumerable inputs (NO_GRAPH,
+        // SCHEMA_INVALID). A blanket append would manufacture an obligation on
+        // a refusal that has none.
+        ? nextStep
+        : [
+            nextStep,
+            '',
+            'Here is what each one needs:',
+            ...shown.map((q) => `- ${q}`),
+            // ⚠ DISCLOSED, never silent. A truncated list that does not account
+            // for what it dropped is the same class of defect as the count that
+            // dropped the whole list.
+            ...(withheld > 0
+              ? [`And ${withheld} more like these. Ask me for the rest whenever you want them.`]
+              : []),
+          ].join('\n');
       return {
         body: {
-          assistant_text: nextStep,
+          assistant_text: assistantText,
           suggested_actions: [
             {
               id: 'chip_prompt_fix_before_analysis',
-              label: 'Review the model',
-              message: 'Help me fix my model so it can be analysed.',
+              label: 'Prepare first analysis',
+              // ⭐ TYPED, AND THE MESSAGE IS ONE THE PRODUCT ALREADY HONOURS.
+              //
+              // This chip used to replay "Help me fix my model so it can be
+              // analysed." with NO `action_type`. The UI renders producer chips
+              // verbatim and mints an untyped chip for them, so it reached CEE
+              // as ordinary chat, the LLM router elected `run_analysis`, and
+              // `analysis-election-gate.ts` DEMOTED it — the user clicked the
+              // product's own recovery affordance and was told "I have not run
+              // the analysis, because I did not read that as a request to run
+              // one." The product refusing its own CTA is the P8 violation that
+              // gate's docblock claims to protect against.
+              //
+              // `analysis_readiness` is the ONE action_type `route-v2.ts:2789`
+              // routes to the readiness arm, ahead of every string heuristic and
+              // without an LLM round-trip, so it cannot be demoted. The message
+              // is the EXISTING canonical prompt (`PRODUCT_COACHING_PROMPTS`,
+              // `process-meta-intake.ts:63`) which is also the UI's own
+              // `prepare_first_analysis` spark, so no second string authority is
+              // minted here.
+              action_type: 'analysis_readiness',
+              message: 'What should I check before running the first analysis?',
             },
           ],
         },
         template_id: 'analysis_not_ready',
-        chip_type: 'text_prompt',
+        // The chip now carries an `action_type`, so it is an action chip. It is
+        // NOT in `CHIP_DERIVABLE_ACTION_TYPES` ({run_analysis, what_would_flip}),
+        // so no pending action is derived from it and the short-confirm resumer
+        // is unaffected.
+        chip_type: 'action',
       };
     }
 

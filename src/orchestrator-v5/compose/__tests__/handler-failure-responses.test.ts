@@ -112,12 +112,23 @@ describe('composeHandlerFailure — per cause_kind', () => {
     expect(template_id).toBe('analysis_not_ready');
     // The honest, no-internal-ID next-step is surfaced verbatim as the prose.
     expect(response.assistant_text).toBe('Draft or save a model first, then run analysis.');
-    // KNOWN COPY LIMITATION: the recovery chip is the shared analysis-not-ready
-    // "Review the model" chip — no dedicated "draft a model" chip exists yet. The
-    // PROSE is correct for the no-model case; only the chip label leans "fix" rather
-    // than "create". A dedicated chip is a follow-up (needs UI/DGAI coordination).
+    // KNOWN COPY LIMITATION (unchanged): the recovery chip is the shared
+    // analysis-not-ready chip; no dedicated "draft a model" chip exists yet. The
+    // PROSE is correct for the no-model case; only the chip leans "prepare"
+    // rather than "create". A dedicated chip is a follow-up (needs UI/DGAI
+    // coordination).
     expect(response.suggested_actions[0]?.id).toBe('chip_prompt_fix_before_analysis');
-    expect(chip_type).toBe('text_prompt');
+    // ⭐ CHANGED DELIBERATELY 2026-08-20, not absorbed. The chip now carries
+    // `action_type: 'analysis_readiness'` so route-v2 routes it BY TYPE to the
+    // readiness arm. As an untyped `text_prompt` it round-tripped through the
+    // LLM router, was elected `run_analysis`, and was DEMOTED by
+    // `analysis-election-gate.ts` — the product refusing its own recovery CTA
+    // with "I did not read that as a request to run one" (witnessed on the
+    // deployed build, 2026-08-20). A chip with an `action_type` is an action
+    // chip; `analysis_readiness` is not in `CHIP_DERIVABLE_ACTION_TYPES`, so no
+    // pending action is derived and the short-confirm resumer is unaffected.
+    expect(chip_type).toBe('action');
+    expect(response.suggested_actions[0]?.action_type).toBe('analysis_readiness');
     assertStyle(response.assistant_text);
   });
 
