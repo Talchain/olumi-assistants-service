@@ -136,6 +136,43 @@ function payload(message: string): MessageTurnPayload {
   });
 }
 
+/** A turn whose message is the PRODUCT'S OWN chip copy, not the user's prose. */
+function chipPayload(message: string): MessageTurnPayload {
+  return makeMessagePayload({
+    turn_id: `t-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    source: 'chip_click',
+    message,
+  });
+}
+
+/**
+ * The demotion chip's copy, VERBATIM from `compose/warrant-demotion.ts:52`.
+ * Content-free by design — which is exactly why a prose-gated guard could not
+ * see it.
+ */
+const DEMOTION_CHIP_SET_VALUE = 'Set that value in my model.';
+
+/**
+ * A FACTOR-KIND node with NO outstanding effect ask — the positive-control
+ * target.
+ *
+ * ⚠ The first choice here was `ce6b11d2`, which is an **outcome**: the write was
+ * refused by the unrelated `non_factor_kind` downgrade, so the control "passed"
+ * for a reason that had nothing to do with this guard. Derived from the fixture
+ * instead of chosen by eye — the only factor-kind node outside the outstanding
+ * set.
+ */
+const UNBLOCKED_FACTOR_ID = '24931e51';
+/**
+ * ⚠ The label must MATCH the id. Passing the outstanding factor's label with a
+ * different id tripped `ENTITY_RESOLUTION_AMBIGUOUS` ("Did you mean … or …?"),
+ * so the control read as a refusal for a reason that had nothing to do with this
+ * guard — a control failing for the wrong reason is as useless as one passing
+ * for the wrong reason.
+ */
+const UNBLOCKED_FACTOR_LABEL = 'NHS Data Regulation Outcome';
+
 function mkToolUseResult(input: unknown): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [
     { type: 'tool_use', id: 'tu-1', name: OLUMI_ACTION_TOOL_NAME, input: input as Record<string, unknown> },
@@ -173,7 +210,10 @@ function edgeStrengthAdapter(edgeId: string) {
   };
 }
 
-function setFactorValueAdapter() {
+function setFactorValueAdapter(
+  targetId: string = FACTOR_ID,
+  targetLabel: string = J18.ids.factor_label,
+) {
   return {
     chatWithTools: vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
@@ -183,9 +223,9 @@ function setFactorValueAdapter() {
           action: {
             handler_id: 'set_factor_value',
             entity: {
-              id: FACTOR_ID,
+              id: targetId,
               kind: 'node',
-              label: J18.ids.factor_label,
+              label: targetLabel,
               resolution_status: 'resolved',
               resolution_method: 'label_match',
             },
@@ -418,5 +458,151 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
     // …and the honest half: this write did NOT answer the effect ask, and the
     // model still says so. A baseline edit must not silently clear a blocker.
     expect(pairStillOutstanding(persistedGraph, OPTION_ID, FACTOR_ID)).toBe(true);
+  });
+});
+
+describe('⭐⭐ THE REVIEW\'S N=2 — the chip click that the prose gate could not see', () => {
+  it('THE TWIN: a chip-originated set_factor_value on the outstanding pair writes NOTHING', async () => {
+    const { response } = await runTurnExecutor(
+      chipPayload(DEMOTION_CHIP_SET_VALUE),
+      'req-effect-ask-chip-refused',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    // Read BACK from state, bound by identity — the options_ready check the
+    // witness failed.
+    expect(factorValue(stateAfterTurn())).toBe(0.5);
+    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
+    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
+  });
+
+  it('⭐⭐ OPPOSITE DIRECTION — a chip-originated write on an UNBLOCKED factor still lands', async () => {
+    // Trap 13: without this the refusal above could be the harness declining
+    // every chip turn, and the identity match would be proving nothing.
+    const { response } = await runTurnExecutor(
+      chipPayload(DEMOTION_CHIP_SET_VALUE),
+      'req-effect-ask-chip-control',
+      {
+        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
+        graphState: graph(),
+      },
+    );
+    expect(graphWrites().length).toBeGreaterThan(0);
+    expect(response.assistant_text.toLowerCase()).not.toContain("i haven't changed anything");
+  });
+
+  it('⭐ AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand is not claimed', async () => {
+    // The correction is scoped to chip-originated turns. Free-typed prose keeps
+    // its prose gate, which is what keeps the legitimate baseline edit working.
+    const before = factorValue(graph());
+    await runTurnExecutor(
+      payload(DEMOTION_CHIP_SET_VALUE),
+      'req-effect-ask-chip-typed-twin',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    expect(graphWrites().length).toBeGreaterThan(0);
+    expect(factorValue(persistedGraph)).not.toBe(before);
+  });
+});
+
+describe('the one-click correction degrades HONESTLY when its value cannot be rendered safely', () => {
+  it('⭐ an unsafe-precision value yields NO chip rather than a chip the finaliser would drop', async () => {
+    // ⚠ REVIEW FINDING: the earlier `toHaveLength(1)` passed only because the
+    // fixture value is 0.8. High-precision decimals are refused by the chip
+    // raw-decimal safety rule, so the correction silently becomes unavailable.
+    // That degradation is to NO CHIP, never to a false receipt — but it must be
+    // asserted, so the next reader learns the rule instead of inheriting a
+    // fixture that hides it.
+    const { response } = await runTurnExecutor(
+      payload(`Set its effect on ${J18.ids.factor_label} to 0.6667.`),
+      'req-effect-ask-unsafe-precision',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    expect(graphWrites()).toHaveLength(0);
+    const chips = response.suggested_actions ?? [];
+    for (const c of chips) expect(c.label).not.toContain('0.6667');
+    // …and it degrades to an ASK, not to silence.
+    expect(chips).toHaveLength(1);
+    // …and the copy still asks, so the turn is not a dead end.
+    expect(response.assistant_text).toContain(J18.ids.factor_label);
+  });
+});
+
+describe('⭐⭐ THE CORRECTION CHIP CARRIES THE OPTION IT NAMED — it does not re-resolve at click time', () => {
+  const OTHER_OPTION_ID = '939d4630';
+
+  /** The click-time graph: OPT is satisfied, so a DIFFERENT option is now the
+   * unique outstanding one on the same factor. This is the dangerous window —
+   * not the fully-stale case, which already declines. */
+  function shiftedGraph(): GraphV3T {
+    const g = graph() as unknown as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    const tmpl = g.edges.find((e) => e.from === OPTION_ID && e.to === FACTOR_ID)!;
+    (g.nodes.find((n) => n.id === OPTION_ID) as Record<string, unknown>).interventions = {
+      [FACTOR_ID]: 0.42,
+    };
+    g.edges.push({ ...tmpl, from: OTHER_OPTION_ID, to: FACTOR_ID });
+    return g as unknown as GraphV3T;
+  }
+
+  it('POSITIVE CONTROL — the click-time graph really has shifted (else the test proves nothing)', () => {
+    const outstanding = deriveMissingEffectPairs(
+      buildCanonicalAnalysisReadyFromGraph(shiftedGraph()),
+    ).filter((p) => p.factorId === FACTOR_ID);
+    expect(outstanding.map((p) => p.optionId)).toEqual([OTHER_OPTION_ID]);
+  });
+
+  it('⭐ the chip binds the option the copy NAMED, not whatever is outstanding at click time', async () => {
+    const { response } = await runTurnExecutor(
+      payload(EFFECT_FRAMED),
+      'req-effect-ask-chip-identity',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    const chip = (response.suggested_actions ?? [])[0]!;
+    // Resolved against the SHIFTED graph — offer time and click time differ.
+    expect(resolveOptionEffectWrite({ message: chip.message, graph: shiftedGraph() })).toMatchObject(
+      { matched: true, kind: 'write', optionId: OPTION_ID, factorId: FACTOR_ID, value: 0.8 },
+    );
+  });
+
+  it('⭐⭐ DISCRIMINATING TWIN — the option-LESS form binds the WRONG option on the same graph', () => {
+    // This is the defect the fix removes, kept as a live discriminator. Without
+    // it the assertion above could pass on a graph where both forms agree, and
+    // the identity carriage would be proving nothing.
+    const optionLess = `Set the option's effect on ${J18.ids.factor_label} to 0.8.`;
+    expect(resolveOptionEffectWrite({ message: optionLess, graph: shiftedGraph() })).toMatchObject({
+      matched: true,
+      optionId: OTHER_OPTION_ID,
+    });
+  });
+
+  it('⚠ KNOWN-DROPPED, MEASURED: a DELETED option still re-resolves rather than declining', () => {
+    // Pinned as an honest gap rather than left invisible (trap 22f). Once the
+    // option node is gone, nothing in the sentence is recognisable as an option
+    // reference, so rule 3b's "no option was named" conjunct holds and it binds
+    // the sole remaining outstanding option. The receipt is still truthful about
+    // what it wrote (`formatOptionEffectWriteAck` names it), so this is a wrong
+    // write with an honest ack, not the witnessed shape.
+    //
+    // Closing it needs a chip that PINS `optionId` and a resume that binds by
+    // it — new pending-action machinery, not a predicate tweak. This test REDs
+    // if that lands, which is the point: the gap cannot be silently fixed or
+    // silently widened.
+    const g = graph() as unknown as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    const tmpl = g.edges.find((e) => e.from === OPTION_ID && e.to === FACTOR_ID)!;
+    g.nodes = g.nodes.filter((n) => n.id !== OPTION_ID);
+    g.edges = g.edges.filter((e) => e.from !== OPTION_ID && e.to !== OPTION_ID);
+    g.edges.push({ ...tmpl, from: OTHER_OPTION_ID, to: FACTOR_ID });
+    const full = `Set the ${J18.ids.option_label} option's effect on ${J18.ids.factor_label} to 0.8.`;
+    expect(
+      resolveOptionEffectWrite({ message: full, graph: g as unknown as GraphV3T }),
+    ).toMatchObject({ matched: true, optionId: OTHER_OPTION_ID });
   });
 });

@@ -124,6 +124,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
 
     expect(hit).not.toBeNull();
@@ -141,6 +142,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit?.pairs).toHaveLength(1);
   });
@@ -154,6 +156,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: 'Weaken that link to 0.3.',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -165,6 +168,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -184,6 +188,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -195,6 +200,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -206,6 +212,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: { blockers: [] },
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -219,6 +226,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: WITNESSED_B,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
 
     expect(hit).not.toBeNull();
@@ -238,6 +246,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: 'Set Enterprise sales investment to 0.7',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -249,6 +258,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: 'Set its effect on the Enterprise sales investment baseline to 0.7',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -263,6 +273,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: `Set the ${OPT_ENTERPRISE_LABEL} option's effect on ${FAC_ENTERPRISE_LABEL} to 0.7`,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -274,6 +285,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: 'Set its effect on Cash runway to 0.7',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -285,6 +297,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       message: 'What is its effect on Enterprise sales investment?',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -298,6 +311,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       message: WITNESSED_B,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit?.userValue).toBe(0.7);
   });
@@ -312,6 +326,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       message: WITNESSED_A,
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit).not.toBeNull();
     expect(hit?.userValue).toBeNull();
@@ -324,6 +339,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       message: 'Set its effect on Enterprise sales investment to 70',
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
+      chipOriginated: false,
     });
     expect(hit?.userValue).toBeNull();
   });
@@ -400,5 +416,95 @@ describe('AMBIGUITY IS THE PRODUCT — two outstanding options on one factor are
       },
     });
     expect(hit?.pairs.map((p) => p.optionId)).toEqual([OPT_ENTERPRISE, OPT_ACQUIRE]);
+  });
+});
+
+describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on IDENTITY ALONE', () => {
+  /**
+   * REVIEW FINDING, measured at `1b4e2c1a`. The demotion chips are minted from
+   * ONE path with copy that is CONTENT-FREE BY DESIGN
+   * (`compose/warrant-demotion.ts:50-52`). Neither message carries `effect`,
+   * `intervention` or `configure` — so a prose-gated factor arm could never fire
+   * on a chip click, while its edge twin refused. Two arms, one harm, opposite
+   * verdicts: trap 21 inside one change.
+   *
+   * These strings are the chip copy VERBATIM, so the spec REDs if that copy is
+   * ever edited into something this guard happens to classify — which would make
+   * the test pass for the wrong reason.
+   */
+  const CHIP_SET_VALUE = 'Set that value in my model.';
+  const CHIP_ADJUST_LINK = 'Adjust that link in my model.';
+
+  it('the content-free `set_factor_value` chip copy is REFUSED on the outstanding pair', () => {
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: FAC_ENTERPRISE,
+      message: CHIP_SET_VALUE,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+      chipOriginated: true,
+    });
+    expect(hit?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
+      `${OPT_ENTERPRISE}::${FAC_ENTERPRISE}`,
+    ]);
+  });
+
+  it('⭐ THE SAME COPY ON A TYPED TURN IS NOT CLAIMED — the hole is closed at the chip, not at the prose', () => {
+    // The discriminating pair. If `chipOriginated` were ignored, this would also
+    // refuse and the parameter would be proving nothing.
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: FAC_ENTERPRISE,
+      message: CHIP_SET_VALUE,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+      chipOriginated: false,
+    });
+    expect(hit).toBeNull();
+  });
+
+  it('POSITIVE CONTROL — the chip copy really is content-free (it carries no effect vocabulary)', () => {
+    // Trap 13: without this, the case above could pass because the copy happens
+    // to be effect-framed, and the identity path would never be exercised.
+    for (const copy of [CHIP_SET_VALUE, CHIP_ADJUST_LINK]) {
+      expect(copy.toLowerCase()).not.toMatch(/\b(effects?|interventions?|configur)/);
+    }
+  });
+
+  it('⭐⭐ OPPOSITE DIRECTION — a chip on a factor with NO outstanding effect ask still writes', () => {
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: 'e7aa3a5d', // Cash runway — a blocker with no option identity
+      message: CHIP_SET_VALUE,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+      chipOriginated: true,
+    });
+    expect(hit).toBeNull();
+  });
+
+  it('⭐⭐ THE SHARPEST FORM — the verbatim witnessed sentence no longer gets opposite verdicts per handler', () => {
+    // Before the correction: REFUSED as an edge write, PASSED as a factor write.
+    // On a chip-originated turn both handlers now agree, because both read the
+    // same identity fact rather than the same string.
+    const asEdge = findOutstandingEffectAskCollision({
+      handlerId: 'adjust_edge_strength',
+      entityId: `${OPT_SELF_SERVE}→${FAC_SELF_SERVE}`,
+      message: WITNESSED_A,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+      chipOriginated: true,
+    });
+    const asFactor = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: FAC_SELF_SERVE,
+      message: WITNESSED_A,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+      chipOriginated: true,
+    });
+    expect(asEdge).not.toBeNull();
+    expect(asFactor).not.toBeNull();
+    expect(asEdge!.pairs.map((p) => p.optionId)).toEqual(asFactor!.pairs.map((p) => p.optionId));
   });
 });

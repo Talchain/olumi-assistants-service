@@ -8537,6 +8537,16 @@ export async function runTurnExecutor(
         }
         return outstandingEffectAskReadiness;
       };
+      // ⭐⭐ IS THIS TURN'S MESSAGE THE PRODUCT'S OWN CHIP COPY? Review finding at
+      // `1b4e2c1a`: the demotion chips carry content-free copy by design, so a
+      // prose-gated arm can never fire on one. Both arrival paths are covered —
+      // a TYPED chip click (`source: 'chip_click'`, the C2 typed-chip proposal
+      // route) and a chip whose message was matched back to its pending by the
+      // short-confirm / ordinal / label resumes (all of which assign
+      // `consumedPendingAction` upstream of this line).
+      const turnIsChipOriginated =
+        payload.source === 'chip_click' ||
+        consumedPendingAction?.action.kind === 'apply_proposed_change';
       const outstandingEffectAskOptionLabels = (): readonly string[] =>
         graphLookupForValidate
           ? graphLookupForValidate
@@ -8583,6 +8593,7 @@ export async function runTurnExecutor(
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
               readiness: readOutstandingEffectAskReadiness(),
+              chipOriginated: turnIsChipOriginated,
             })
           : null;
       if (
@@ -8652,6 +8663,7 @@ export async function runTurnExecutor(
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
               readiness: readOutstandingEffectAskReadiness(),
+              chipOriginated: turnIsChipOriginated,
             })
           : null;
       if (

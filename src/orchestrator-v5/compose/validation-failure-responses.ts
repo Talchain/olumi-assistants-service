@@ -35,6 +35,7 @@ import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { findChipRawDecimalLeak } from './chip-safety.js';
 import {
   buildConfigureOptionAdvisedFormat,
   buildOptionEffectReference,
@@ -778,10 +779,53 @@ function composeOutstandingEffectAskMisroute(
     // the copy asks for the number instead.
     const rawValue = details.effect_ask_user_value;
     const userValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null;
-    const replay =
-      userValue === null
+    const candidateLabel = userValue === null ? '' : `Set the effect to ${userValue}`;
+    // ⭐⭐ THE CHIP CARRIES THE OPTION'S IDENTITY — it does not re-derive it.
+    //
+    // REVIEW FINDING, demonstrated by execution at `1b4e2c1a`. The first cut
+    // emitted the OPTION-LESS advised form so the sentence would route, and rule
+    // 3b then re-resolved the option AT CLICK TIME from whatever was outstanding
+    // then. Measured on the captured graph with the outstanding option shifted
+    // between offer and click:
+    //
+    //   option-less form → binds 939d4630   ← an option the user never chose
+    //   full-label form  → binds 4abad64d   ← the one the copy named
+    //
+    // So the message names the option IN FULL, from the RAW label rather than
+    // the displayed one: `safeLabel` TRUNCATES (real drafted labels run 84-101
+    // characters) and a truncated label matches nothing, which is what pushed
+    // the first cut into the option-less form in the first place. The rendered
+    // sentence the user READS stays truncated; the replay the chip SENDS is
+    // whole. Different jobs, different strings.
+    //
+    // ⚠ RESIDUAL, MEASURED AND NOT CLOSED HERE: if the named option is DELETED
+    // between offer and click, rule 3b still re-resolves (measured: binds
+    // 939d4630) rather than declining, because once the node is gone nothing in
+    // the sentence is recognisable as an option reference. Closing that needs a
+    // chip that pins `optionId` and a resume that binds by it — new pending-action
+    // machinery, not a predicate tweak. Reported rather than bodged.
+    const rawOptionLabel = optionLabels[0]!;
+    const candidateReplay =
+      userValue === null || safeLabel({ label: rawOptionLabel, kind: undefined }) === 'that item'
         ? null
-        : `${buildConfigureOptionAdvisedFormat('', factor, String(userValue))}.`;
+        : `${buildConfigureOptionAdvisedFormat(rawOptionLabel, factor, String(userValue))}.`;
+    // ⚠ MINT THE CHIP ONLY IF IT WOULD SURVIVE EGRESS — review finding. A
+    // high-precision value (`0.6667`) is refused by the chip raw-decimal rule
+    // downstream, so a chip minted here would be DROPPED two layers later,
+    // leaving copy that promises an affordance the user never sees. Running the
+    // SAME predicate the finaliser runs (`chip-safety.ts`, imported rather than
+    // re-spelled — trap 12) makes emit ⟺ egress agree, exactly as
+    // `proposed-change.ts:220-235` already does for the other chip channel.
+    //
+    // The degradation is to NO CHIP and a copy that ASKS — never to a false
+    // receipt. `isValidatedProposal: false` is the stricter reading: this is a
+    // text-prompt affordance, not a validated proposal carrying a formatted
+    // display value, so it earns no exemption.
+    const replay =
+      candidateReplay !== null
+      && !findChipRawDecimalLeak(candidateLabel, candidateReplay, { isValidatedProposal: false })
+        ? candidateReplay
+        : null;
     return {
       body: {
         assistant_text:
@@ -796,14 +840,14 @@ function composeOutstandingEffectAskMisroute(
           // dressed as help. With the option left out, rule 3b resolves it from
           // this very ask. Pinned by the routing spec, so the exemplar can never
           // drift away from the lane that would honour it.
-          + `"${buildConfigureOptionAdvisedFormat('', factor, String(userValue ?? 0.6))}" `
+          + `"${buildConfigureOptionAdvisedFormat('', factor, String(replay === null ? 0.6 : userValue))}" `
           + `(any number from 0 to 1).`,
         suggested_actions: [
           replay === null
             ? fallbackPrompt('Give the effect value')
             : {
                 id: chipId('prompt', `option-effect-${factor}`),
-                label: `Set the effect to ${userValue}`,
+                label: candidateLabel,
                 message: replay,
               },
         ],

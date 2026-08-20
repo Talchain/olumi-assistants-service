@@ -52,23 +52,64 @@
  *     readiness payload the blocker copy on screen is composed from, so this
  *     refusal cannot disagree with the sentence the user is answering;
  *   · the EDGE PARSE is `parseEdgeId`, the adjust-edge-strength handler's OWN
- *     parser, so this guard and the writer can never disagree about which edge
- *     an id names (trap 12: the second spelling is the one that rots);
+ *     parser, so this guard cannot acquire a SECOND SPELLING of "which edge does
+ *     this id name" (trap 12: the second spelling is the one that rots).
+ *     ⚠ STATED NARROWLY, BECAUSE THE STRONGER CLAIM IS FALSE. The handler
+ *     resolves `invocation.edgeStrengthEndpointAuthority ?? parseEdgeId(...)`
+ *     (`tools/handlers/adjust-edge-strength.ts:146-147`) and this guard
+ *     implements ONLY the second limb. The first limb is set in exactly one
+ *     place — `system-events/edge-strength-edit.ts:499`, the system-event path —
+ *     which does not reach this chokepoint, so guard and writer cannot disagree
+ *     TODAY. They are not structurally prevented from disagreeing. If the
+ *     authority ever becomes reachable here, this guard must read it too.
+ *     An invariant stated more strongly than the code supports is how the next
+ *     reader stops checking;
  *   · the EFFECT FRAMING is the shipped classifier's own
  *     `labelAnchorWouldDecideTrigger` filtered through `EFFECT_FRAMED_TRIGGERS`,
  *     the canonical set `option-effect-write.ts` already uses. No regex here.
  *   · the `baseline` suppressor is `BASELINE_FRAMING`, imported from the writer.
  *
- * ⭐⭐ WHY `set_factor_value` NEEDS THE PROSE CONJUNCT AND `adjust_edge_strength`
- * DOES NOT. A factor whose effect value is outstanding is STILL a legitimate
- * target for an ordinary baseline edit ("Set Enterprise sales investment to
- * 0.7"), and refusing those would strand the user for as long as the model is
- * blocked. So the factor arm requires the classifier's own evidence that the
- * sentence was effect-framed and merely unanchored. The edge arm needs no such
- * conjunct: on an option → factor link there is no separate "strength" the user
- * could legitimately mean while that pair's effect value is the thing the
- * product is asking for, and the witnessed offer proves the cost of guessing.
- * Two arms, two different questions, named apart (trap 21).
+ * ⭐⭐ WHY `set_factor_value` NEEDS THE PROSE CONJUNCT ON A TYPED TURN AND
+ * `adjust_edge_strength` DOES NOT. A factor whose effect value is outstanding is
+ * STILL a legitimate target for an ordinary baseline edit ("Set Enterprise sales
+ * investment to 0.7"), and refusing those would strand the user for as long as
+ * the model is blocked. So on a turn carrying the USER'S OWN PROSE the factor arm
+ * requires the classifier's own evidence that the sentence was effect-framed and
+ * merely unanchored. The edge arm needs no such conjunct: on an option → factor
+ * link there is no separate "strength" the user could legitimately mean while
+ * that pair's effect value is the thing the product is asking for.
+ *
+ * ⚠⚠ AND ON A CHIP-ORIGINATED TURN THE PROSE CONJUNCT IS NOT A NARROWING, IT IS
+ * A HOLE — REVIEW FINDING, MEASURED AT `1b4e2c1a`, AND IT IS THE WITNESS'S OWN
+ * TWIN. The demotion chips are minted from ONE path with copy that is
+ * CONTENT-FREE BY DESIGN (`compose/warrant-demotion.ts:50-52`):
+ *
+ *     set_factor_value:     'Set that value in my model.'
+ *     adjust_edge_strength: 'Adjust that link in my model.'
+ *
+ * Neither carries `effect`, `intervention` or `configure`. So the factor arm
+ * COULD NOT FIRE ON ANY CHIP CLICK, while its edge twin — matching on identity —
+ * refused. Measured, both contrast controls discriminating in the same run:
+ * "Set that value in my model." → WRITE PROCEEDS; "Adjust that link in my
+ * model." → REFUSED. Sharper still, the VERBATIM witnessed defect-A sentence
+ * ("…drives self-serve product investment fairly strongly, about 0.6.") is
+ * REFUSED as an edge write and PASSES as a factor write — same sentence, same
+ * pair, two handlers, opposite verdicts.
+ *
+ * **That asymmetry was trap 21 inside one change: identity for edges, prose for
+ * factors.** The correction is symmetry, not widening: when the turn's message is
+ * THE PRODUCT'S OWN COPY rather than the user's prose, there is no prose to
+ * classify, and classifying it anyway is not a safeguard — it is a guard reading
+ * a string it wrote itself. On such a turn the factor arm refuses on IDENTITY
+ * ALONE, exactly as the edge arm always has. Free-typed prose is untouched,
+ * which is what keeps the legitimate baseline edit working.
+ *
+ * ⚠ THE RESIDUAL, STATED: a product-authored chip that DELIBERATELY offers a
+ * factor-baseline edit on a pair whose effect value is outstanding would now be
+ * refused. No such chip exists (`what_would_flip`'s `set_factor_value` proposal
+ * needs a completed analysis, which needs readiness, so the pair cannot be
+ * outstanding), and such an offer would itself be the wrong-field defect one
+ * level up. This is the same fail-safe direction as the edge arm.
  *
  * ⚠ IT REFUSES; IT NEVER WRITES AND NEVER PICKS. When more than one outstanding
  * option carries the named factor, BOTH are returned so the caller's copy can
@@ -187,6 +228,14 @@ export function findOutstandingEffectAskCollision(params: {
   readonly message: string;
   readonly optionLabels: readonly string[];
   readonly readiness: { readonly blockers?: unknown } | null | undefined;
+  /**
+   * ⭐ Is `message` the PRODUCT'S OWN CHIP COPY rather than the user's prose?
+   *
+   * REQUIRED rather than optional on purpose: an omitted argument would silently
+   * restore the hole this parameter closes, so the compiler is made to point at
+   * every caller instead (trap 12 — fail loud on drift, never assume-good).
+   */
+  readonly chipOriginated: boolean;
 }): OutstandingEffectAskCollision | null {
   const pairs = deriveMissingEffectPairs(params.readiness);
   if (pairs.length === 0) return null;
@@ -205,9 +254,13 @@ export function findOutstandingEffectAskCollision(params: {
       : null;
   }
 
-  // set_factor_value — the prose conjunct, for the reason in the header.
-  if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
-  if (!isUnanchoredEffectFraming(params.message, params.optionLabels)) return null;
+  // set_factor_value — the prose conjuncts apply to a TYPED turn only. On a
+  // chip-originated turn the message is the product's own content-free copy, so
+  // the arm matches on identity alone, symmetric with the edge arm above.
+  if (!params.chipOriginated) {
+    if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
+    if (!isUnanchoredEffectFraming(params.message, params.optionLabels)) return null;
+  }
   const match = pairs.filter((p) => p.factorId === params.entityId);
   return match.length > 0
     ? { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) }
