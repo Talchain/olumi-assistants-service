@@ -133,6 +133,8 @@ export type ContextSource =
   | 'recent_changes'
   | 'coaching_cache'
   | 'coaching_context'
+  /** The canonical `analysis_ready` payload — status + `readiness_issues[]`. */
+  | 'readiness'
   | 'decision_records'
   | 'system_event'
   | 'quantities'
@@ -384,6 +386,10 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'context_budget', source: 'budget_disclosure', projection: 'applyContextBudgetToAssemblyInputs disclosure (key ABSENT when nothing was trimmed)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'compound_segments', source: 'compound', projection: 'detectCompound segments (present IFF compound_detected)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'coaching_context', source: 'coaching_context', projection: 'CoachingStatePack (hash-free prompt-safe canonical state; unconditional since O-7 wave 2 but absent when no freshness verdict was derived)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Readiness — status + the OPEN ITEMS behind it. `coaching_context` above
+    // carries a readiness STATUS and a blocker COUNT; this section is the only
+    // one carrying the blocker IDENTITY and the user's route out of it.
+    { name: 'readiness', source: 'readiness', projection: 'projectContextPackReadiness → summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },

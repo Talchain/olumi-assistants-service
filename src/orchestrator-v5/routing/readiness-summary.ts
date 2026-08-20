@@ -44,6 +44,35 @@ export interface ReadinessOpenItem {
   readonly option_label?: string;
 }
 
+/**
+ * What the ContextPack carries. `status` is the canonical
+ * `analysis_ready.status` VERBATIM (never re-derived); `open_items` is
+ * {@link summariseReadiness}'s projection, which carries both the blocker
+ * identity and the user's route out of it.
+ */
+export interface ContextPackReadinessProjection {
+  readonly status: string;
+  readonly open_items: readonly ReadinessOpenItem[];
+  /**
+   * Disclosed truncation — present ONLY when the cap dropped DISTINCT items
+   * (never for deduplicated copies, which lose no fact). Same key-absence
+   * discipline as `focus.elements_omitted`.
+   */
+  readonly items_omitted?: number;
+}
+
+/**
+ * Prompt-budget cap on DISTINCT open items.
+ *
+ * A judgement, stated as one: the sibling `rest` slot the pack budgets against
+ * is capped at 2,500 chars, and the measured worst case ran ~310 chars per
+ * item, so 12 keeps this section inside a comparable envelope while still
+ * covering roughly two options per blocker kind (the `kind` enum has six
+ * members). It is also more items than a user can act on at once, which is the
+ * point of the field. Truncation is DISCLOSED, never silent.
+ */
+export const READINESS_MAX_OPEN_ITEMS = 12;
+
 export interface ReadinessSummary {
   readonly open_items: readonly ReadinessOpenItem[];
   /**
@@ -138,6 +167,79 @@ export function summariseReadiness(
     ...(recovery.optionLabel ? { option_label: recovery.optionLabel } : {}),
   }];
   return { open_items: openItems, prose: composeReadinessProse(openItems) };
+}
+
+/**
+ * The ContextPack's readiness projection — status + the OPEN ITEMS behind it.
+ *
+ * WHY THIS EXISTS. The ContextPack already carried a readiness STATUS and a
+ * blocker COUNT (`coaching_context.readiness_status` /
+ * `.actionable_blocker_count`). It never carried the blocker IDENTITY, so the
+ * model could know that something was blocking and still be unable to name
+ * WHAT — which is how the assistant came to tell a user *"so nothing there is
+ * blocking analysis"* while two factors were the only blockers.
+ *
+ * NOT A SECOND AUTHORITY. Every value here is taken VERBATIM from the
+ * canonical readiness payload and from {@link summariseReadiness} (which
+ * itself delegates to `projectReadinessRecovery`). This function classifies
+ * nothing, counts nothing, and re-derives nothing — it is a projection, and
+ * the moment it starts deciding readiness it becomes the drift this estate
+ * keeps paying for.
+ *
+ * ⚠ `open_items: []` DOES NOT MEAN "MAY RUN". The canonical projection filters
+ * out auto-repairable issues, so an empty list co-exists with a non-ready
+ * `status`. That is exactly why `status` is carried ALONGSIDE the items rather
+ * than a derived boolean: a consumer that reads emptiness as permission
+ * re-creates the defect one level down.
+ *
+ * Returns `null` when there is no canonical payload to project — the caller
+ * omits the pack key entirely, so an unknown readiness stays UNKNOWN instead
+ * of serialising as an absence of blockers.
+ */
+export function projectContextPackReadiness(
+  analysisReady: AnalysisReadyPayload | null | undefined,
+): ContextPackReadinessProjection | null {
+  if (!analysisReady) return null;
+  const status = analysisReady.status;
+  if (typeof status !== 'string' || status.trim().length === 0) return null;
+
+  // DEDUPE FIRST, THEN CAP — in that order, so the cap spends its budget on
+  // DISTINCT items rather than on copies. Measured on a 25-node graph in
+  // exactly the state this field exists to describe: 49 items / 7,745 chars,
+  // of which 24 were exact byte-duplicates carrying no identity at all (12x
+  // "…leave a node with no connections", 12x "An option has no factor
+  // connections…"). Un-deduped and uncapped that was 51% of the whole pack, on
+  // every turn regardless of what the user asked — and the only
+  // ceiling-cuttable section is `conversation`, so unbounded readiness growth
+  // silently EVICTS THE USER'S CONVERSATION HISTORY.
+  //
+  // The identity is the whole triple: two items of the same `kind` about
+  // DIFFERENT options are different facts and both survive. Canonical order is
+  // preserved (first occurrence wins) — this filters, it never reorders.
+  //
+  // Precedent: `coaching-state.ts` (the estate's only other presenter of this
+  // same array) already dedupes it for the same reason. The canonical owner is
+  // NOT changed — `summariseReadiness` still returns everything; this is a
+  // prompt-budget projection over its output.
+  const seen = new Set<string>();
+  const distinct: ReadinessOpenItem[] = [];
+  for (const item of summariseReadiness(analysisReady).open_items) {
+    const identity = JSON.stringify([item.kind, item.description, item.option_label ?? null]);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    distinct.push(item);
+  }
+  const open_items = distinct.slice(0, READINESS_MAX_OPEN_ITEMS);
+  const omitted = distinct.length - open_items.length;
+  return {
+    status,
+    open_items,
+    // DISCLOSED truncation, and it counts CAP-DROPPED items only. Deduplicated
+    // copies are deliberately NOT counted as omissions: they carried no
+    // distinct fact, so reporting them as withheld would overstate the loss —
+    // and the instruction forbids the model stating a blocker COUNT anyway.
+    ...(omitted > 0 ? { items_omitted: omitted } : {}),
+  };
 }
 
 function composeReadinessProse(items: readonly ReadinessOpenItem[]): string {

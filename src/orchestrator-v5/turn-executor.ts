@@ -383,6 +383,7 @@ import {
   summariseCoachingStatePack,
   type CanonicalAnalysisState,
 } from './context/canonical-analysis-state.js';
+import { projectContextPackReadiness } from './routing/readiness-summary.js';
 // T4 Slice 2 — canonical context frame, built ONCE per turn at the finalise
 // seam from the authority outputs already in scope (wrap, never re-derive).
 import {
@@ -2474,6 +2475,27 @@ export async function runTurnExecutor(
       const coachingContext = coachingPromptCanonical
         ? summariseCoachingStatePack(coachingPromptCanonical)
         : undefined;
+      // READINESS → the pack. `coachingContext` gives the model a readiness
+      // STATUS and a blocker COUNT; it has never carried the blocker IDENTITY,
+      // so the model could know something was blocking and still be unable to
+      // name WHAT — which is how the assistant came to say "so nothing there is
+      // blocking analysis" while two factors were the only blockers.
+      //
+      // CANONICAL OWNER REUSED, NOT DUPLICATED: `projectContextPackReadiness`
+      // wraps `summariseReadiness` → `projectReadinessRecovery` over the SAME
+      // `analysisReadyForTurn` payload the chips and the route summary read, so
+      // the prompt and the chips cannot disagree. Nothing is re-derived here.
+      //
+      // ⚠ THIS LINE IS THE WIRE. The projection is defended by its own unit
+      // suite, but a defended pure function with a dark call site is this
+      // estate's chronic failure #1 — neutering this line must turn
+      // `context-pack-readiness.route-level.test.ts` red.
+      //
+      // `undefined` when no canonical payload was derived → the pack key is
+      // ABSENT → the instruction is not appended → byte-identity, and an
+      // unknown readiness stays UNKNOWN rather than reading as "unblocked".
+      const readinessForPack =
+        projectContextPackReadiness(analysisReadyForTurn) ?? undefined;
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
       // read the stored rolling summary for injection — UNCONDITIONAL since
       // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the
@@ -2629,6 +2651,9 @@ export async function runTurnExecutor(
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
         coachingContext,
+        // Readiness verdict + the OPEN ITEMS behind it (undefined ⇒ field
+        // omitted ⇒ no instruction ⇒ byte-identity).
+        readiness: readinessForPack,
         // Track 2 — real pending-confirmation truth (was never threaded, so the
         // assembler's `?? false` default made the field constant-false). Same
         // shared const the canonical frame receives at the finalise seam —
