@@ -337,6 +337,67 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * ⭐⭐ A NAME IS NOT AN INSTRUCTION — the cue-domain correction.
+ *
+ * `PROTECTION_CUE` asks *"did the USER ask for this to be left as it is?"*, but
+ * it was tested against the raw clause, and a clause carries the graph's OWN
+ * LABELS. So an entity whose name happens to contain a cue word MANUFACTURED
+ * ITS OWN PROTECTION. Measured on the deployed build (golden journey
+ * 20260819T221620Z): the drafter produced an option labelled
+ * `"keep what we have"`; the product advised
+ * `"Set the keep what we have option's effect on Customer churn to 0.4"` — a
+ * sentence CEE composes itself (`buildConfigureOptionAdvisedFormat`, which also
+ * rides as a chip whose message replays as user text) — and `keep`, contributed
+ * entirely by the option's NAME, held the turn. The co-mentioned FACTOR went
+ * with it, because bare commas are not clause boundaries. The hold then
+ * asserted *"You asked for 'keep what we have' … to stay as it is"* about a
+ * sentence that says SET. 9 of the 18 canonical status-quo labels in
+ * `cee/structure/status-quo-patterns.ts` — the list
+ * `detectMissingCounterfactual` coaches users TOWARD — reproduce it.
+ *
+ * ⭐ THE DISCRIMINATOR IS GRAMMATICAL POSITION, NOT THE OP. Only a name in a
+ * REFERRING position is masked — `"<name> option"` and `"effect on <name>"`,
+ * the two slots the advised sentence puts a name in. Everywhere else the same
+ * words are the user's own, and still protect.
+ *
+ * ⚠⚠ AN EARLIER VERSION OF THIS FIX SCOPED THE MASK TO THE OP'S TARGET SET
+ * INSTEAD, AND THAT WAS WEAPONISABLE — recorded because the shape is subtle and
+ * will be proposed again. `envelopeTargetNodeIds` returns BOTH the option and
+ * the factor for the canonical option-configure write, and the mask was global
+ * within the clause, so co-targeting DELETED the user's protection wherever
+ * they had written that phrase — including as an instruction about a THIRD
+ * entity. Executed: `"Set Customer churn to 0.4, and do nothing to CRM Platform
+ * Cost."` went HELD → APPLY, and a corpus of 18 canonical labels × 3 protection
+ * templates lost 27 of 27 protections, while a direct write to the same factor
+ * stayed held — the co-targeting was the disarming agent. Position-scoped
+ * masking restores all 27. It also fixes what op-scoping could not: a DIRECT
+ * factor write emitted from the same advised sentence reproduced the original
+ * defect verbatim, because the option's label was then unmasked.
+ *
+ * Total: an unbuildable pattern masks nothing (degrades to today's behaviour).
+ */
+function maskReferringMentions(text: string, graphNames: readonly string[]): string {
+  let out = text;
+  for (const name of graphNames) {
+    const trimmed = name.trim();
+    if (trimmed.length < MIN_LABEL_LENGTH) continue;
+    const flexible = trimmed.split(/\s+/).map(escapeRegExp).join('\\s+');
+    try {
+      // "<name> option" — the advised sentence's option slot.
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${flexible}(?=\\s+option\\b)`, 'gi'), ' ');
+      // "effect on <name>" — the advised sentence's factor slot.
+      out = out.replace(
+        new RegExp(`(?<=\\beffect\\s+on\\s+)${flexible}(?![A-Za-z0-9])`, 'gi'),
+        ' ',
+      );
+    } catch {
+      // Unbuildable pattern: mask nothing for this name.
+    }
+  }
+  return out;
+}
+
 /** Word-boundary-ish, whitespace-flexible, case-insensitive mention test. */
 function mentionPattern(name: string): RegExp | null {
   const trimmed = name.trim();
@@ -389,11 +450,25 @@ export function extractProtectedEntities(
     const nodes = readGraphNodes(currentGraph);
     if (nodes.length === 0) return [];
 
+    // Every name the graph knows, in both spellings the message might use.
+    const graphNames: string[] = [];
+    for (const node of nodes) graphNames.push(node.label, node.id);
+
     const protectiveTexts: string[] = [];
     for (const clause of splitIntoClauses(userMessage)) {
-      if (clauseIsProtective(clause)) protectiveTexts.push(clause);
+      // The cue must survive masking names in a REFERRING position (see
+      // maskReferringMentions). MENTIONS are still matched against the
+      // ORIGINAL clause, so a masked name is still protectable by a cue the
+      // user actually wrote.
+      if (clauseIsProtective(maskReferringMentions(clause, graphNames))) {
+        protectiveTexts.push(clause);
+      }
     }
-    const capped = userMessage.slice(0, MESSAGE_SCAN_CAP);
+    // The exception-tail scan reads the SAME masked text, so a label carrying
+    // an exception seam ("Roll out except Germany") cannot self-protect through
+    // that path either. A genuine "except <name>" is untouched: the name there
+    // is not in a referring position, so it survives to be matched.
+    const capped = maskReferringMentions(userMessage.slice(0, MESSAGE_SCAN_CAP), graphNames);
     EXCEPTION_TAIL.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = EXCEPTION_TAIL.exec(capped)) !== null) {
