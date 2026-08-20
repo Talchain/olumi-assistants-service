@@ -323,6 +323,14 @@ export function buildVerifiedCorrectionReplay(
     String(collision.userValue),
   )}.`;
   const resolved = resolveOptionEffectWrite({ message: replay, graph });
+  // ⚠ THESE TWO LINES ARE MUTUALLY COVERING, AND THAT WAS MEASURED RATHER THAN
+  // ASSUMED. Each SURVIVES deletion on its own — remove the kind check and an
+  // `ask` result is caught by the identity check (its `optionId` is undefined);
+  // remove the identity check and the kind check catches the same case. Deleting
+  // BOTH is BITTEN by the duplicate-option-label case in the spec. So neither is
+  // dead code and neither is individually pinnable: the PAIR is the guard.
+  // Recorded because a future reader looking at a lone surviving mutant would
+  // otherwise conclude one of them is redundant and delete it.
   if (!resolved.matched || resolved.kind !== 'write') return null;
   // Bound by IDENTITY to the pair the copy names — never "it matched something".
   if (resolved.optionId !== pair.optionId || resolved.factorId !== pair.factorId) return null;
