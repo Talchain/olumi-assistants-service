@@ -8632,6 +8632,24 @@ export async function runTurnExecutor(
       // did resume something, and declining it would be a false refusal. The
       // honest question is whether this turn is standing on any offer at all.
       //
+      // ⚠ THAT CHOICE IS **UNPINNED**, AND THE ARGUMENT IS RECORDED HERE RATHER
+      // THAN LEFT AS A BARE SURVIVING MUTANT. Swapping this for
+      // `!turnIsChipOriginated` SURVIVES the battery — no case in the suite
+      // discriminates the two. The direction was settled by REASONING, not by a
+      // test, and the reasoning is what the next reader needs: the mutant's
+      // firing set is a strict SUPERSET of this one (`turnIsChipOriginated`
+      // requires the consumed pending to be `apply_proposed_change`
+      // specifically, so every turn this declines the mutant also declines, plus
+      // the turns that resumed a DIFFERENT pending kind). A superset of a
+      // decline can only ever decline MORE — it can never write more. So the gap
+      // is in the FALSE-REFUSAL direction, not the trust direction, and a
+      // surviving mutant here is a missing test rather than a live defect.
+      // ⚠ DO NOT "SIMPLIFY" THIS TO THE MUTANT: it would refuse a turn that
+      // genuinely resumed something else, which is the false refusal this line
+      // exists to avoid. A discriminating case (an expired offer replay on a
+      // turn that consumes a NON-`apply_proposed_change` pending) is worth
+      // adding; it is recorded as owed rather than silently absent.
+      //
       // ⭐ WHY THE STRING IS ADMISSIBLE EVIDENCE HERE, WHEN `payload.source` IS
       // NOT. `source` is a field someone ELSE fills in, and four CEE readers
       // already misread it as provenance. This copy is one CEE MINTS ITSELF,

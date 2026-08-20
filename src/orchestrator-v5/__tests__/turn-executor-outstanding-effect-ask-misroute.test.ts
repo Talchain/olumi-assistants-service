@@ -38,6 +38,8 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/a
 import { safeLabel } from '../compose/helpers.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
+import { isProposedChangeActionType } from '../types/proposed-change.js';
 import { makeMessagePayload } from './fixtures.js';
 import type {
   ChatWithToolsArgs,
@@ -929,6 +931,71 @@ describe('⭐⭐ THE EXPIRED OFFER — a chip whose offer is gone is declined, n
     // here — asserting it would have made the pin fail for a reason unrelated to
     // the guard. The property is that nothing was MUTATED, bound by identity.
     expect(factorValue(stateAfterTurn())).toBe(0.5);
+  });
+
+  /**
+   * ⭐⭐⭐ THE COVERAGE UNION — the ONE way this guard degrades in silence.
+   *
+   * The scope conjunct is `isProposedChangeActionType` and the estate's set of
+   * handlers that can MUTATE THE GRAPH is `GRAPH_MUTATING_HANDLER_IDS`
+   * (`routing/mutation-consent.ts:87`). They are **two hand-maintained lists**
+   * that happen to hold the same three members today, and **nothing fails loud
+   * if the mutating set grows**. Add a fourth graph-mutating handler tomorrow
+   * and this guard silently UNDER-COVERS it: the false-`Applied` route reopens
+   * on that handler, and no test anywhere REDs.
+   *
+   * ⭐ THIS IS THE SAME DISCIPLINE APPLIED ONE LEVEL OVER. The recogniser spec
+   * beside `warrant-demotion.ts` refuses to derive its corpus from `CHIP_COPY`
+   * because that would be *the constant agreeing with itself*; it asserts a
+   * DERIVED union against the producer instead. Here the producer of the
+   * obligation is `GRAPH_MUTATING_HANDLER_IDS` — both lists live in this repo
+   * and are importable, so this is genuinely derivable and NOT a third mirror
+   * (CLAUDE.md trap 12d: derivation moves the risk, so the completeness check
+   * must come from a source the guard does not own).
+   *
+   * ⚠ THE DIRECTION IS DELIBERATE AND IS **⊇**, NOT **=**. Every graph-mutating
+   * handler must be admitted by the scope predicate. The converse is NOT
+   * asserted: the predicate is allowed to admit a handler that is not (yet)
+   * graph-mutating, because over-scoping this guard costs a clarify turn on a
+   * content-free sentence, while under-scoping it writes a field the user never
+   * named and badges it "Applied". Asserting equality would RED on a harmless
+   * divergence and teach the next reader to loosen it.
+   */
+  it('⭐⭐⭐ COVERAGE UNION — the scope predicate admits EVERY graph-mutating handler', () => {
+    // ⚠ THE VACUITY CONTROL IS A **COUNT**, NOT A MEMBERSHIP LIST, AND THE
+    // FIRST DRAFT OF THIS TEST GOT IT WRONG IN A WAY WORTH RECORDING. It
+    // asserted `[...GRAPH_MUTATING_HANDLER_IDS].sort()` against three hardcoded
+    // strings — which is (a) a THIRD copy of a list this test exists to stop
+    // mirroring, and (b) self-defeating: growing the set is exactly the
+    // mutation this test must catch, and that literal would have RED first, so
+    // the union loop below would never have run under it. A control that
+    // pre-empts its own discriminator asserts nothing (trap 13b).
+    //
+    // The membership of the set is owned by `routing/__tests__/
+    // mutation-consent.test.ts`. What THIS test needs is only that the loop was
+    // not empty — asserted by counting iterations, which cannot mirror anything.
+    expect(GRAPH_MUTATING_HANDLER_IDS.size).toBeGreaterThan(0);
+
+    // THE UNION. Bound by identity to each member, named in the failure message.
+    let checked = 0;
+    for (const handlerId of GRAPH_MUTATING_HANDLER_IDS) {
+      expect(
+        isProposedChangeActionType(handlerId),
+        `${handlerId} can MUTATE THE GRAPH but the expired-offer guard's scope `
+          + 'predicate does not admit it — the false-"Applied" route is reopened '
+          + 'for that handler. Add it to isProposedChangeActionType, or justify '
+          + 'the exception at the bytes.',
+      ).toBe(true);
+      checked += 1;
+    }
+    expect(checked, 'the union loop asserted nothing').toBe(GRAPH_MUTATING_HANDLER_IDS.size);
+
+    // CONTRAST CONTROL — without it, a predicate rewritten to `return true`
+    // would satisfy the union above while scoping the guard to everything.
+    // `explain_from_structure` is the same handler the SCOPE PIN above drives
+    // through the real executor, so the two agree by construction.
+    expect(isProposedChangeActionType('explain_from_structure')).toBe(false);
+    expect(GRAPH_MUTATING_HANDLER_IDS.has('explain_from_structure')).toBe(false);
   });
 
   it('⭐⭐ THE NEAR-MISS TWIN — one extra word and it is a real sentence again, and it WRITES', async () => {
