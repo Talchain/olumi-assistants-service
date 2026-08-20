@@ -610,6 +610,33 @@ export interface GraphPatchBlockData {
      * change.
      */
     blocked_reason?: string;
+    /**
+     * THE run path's own admission answer for this turn — will the analysis
+     * proceed if asked, right now?
+     *
+     * ⚠ A DIFFERENT QUESTION FROM `status`, WHICH IS WHY IT EXISTS. `status` is
+     * the stricter *"is this model ready as it stands?"*; `may_run` is
+     * `resolveRunAdmission(...).willProceed`, the boolean `build-turn-context.ts`
+     * throws `AnalysisNotReadyError` on. It is ALSO true when the run will
+     * proceed by excluding options the user left open — so a turn can be
+     * `needs_user_input` AND admissible. That is the readiness loop's payoff
+     * turn, and a client gating its Run affordance on `status === 'ready'`
+     * (`DecisionGuideAI SuggestedChips.tsx:196`) hides the very thing the turn
+     * just offered. Measured on `live-4day-week`: one unconfigured option gives
+     * `needs_user_input` + `willProceed: true`, two and three give
+     * `needs_user_input` + `false` — one status, both verdicts.
+     *
+     * Consumers gate on `may_run !== false`, falling back to their existing
+     * behaviour when ABSENT: absence means a pre-`may_run` producer, never "no".
+     *
+     * Additive + passthrough-safe, same as `blocked_reason` above:
+     * `analysis_ready` is `.passthrough()` at the CEE schema
+     * (`src/schemas/analysis-ready.ts`) and at the boundary (`@talchain/schemas`
+     * 0.48.0 `OlumiResponseSchema`), so this crosses the wire with NO
+     * shared-schema change — proven by executing the vendored 0.48.0 schema
+     * against a payload carrying it.
+     */
+    may_run?: boolean;
     /** Exhaustive structural + semantic issues from the canonical readiness authority. */
     readiness_issues?: Array<{
       issue_id: string;

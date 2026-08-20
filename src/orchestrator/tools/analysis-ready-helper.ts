@@ -21,6 +21,13 @@ import {
   CURRENT_STATE_VIOLATION_MESSAGES,
   type StructuralViolationCode,
 } from "../graph-structure-validator.js";
+// ⚠ CYCLE, DELIBERATE AND FUNCTION-LEVEL. `analysis-ready-core` imports
+// `assessCanonicalAnalysisReadiness` from THIS file, so this edge closes a loop.
+// It is safe because neither side touches the other during module evaluation —
+// both are hoisted function declarations, used only at call time. The
+// alternative was to re-derive `willProceed` here, which would mint the second
+// admission predicate this estate keeps paying for.
+import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1170,11 +1177,48 @@ export function assessCanonicalAnalysisReadiness(
   }
 }
 
-/** Thin wire adapter over the canonical assessment. */
+/**
+ * Thin wire adapter over the canonical assessment, carrying the run path's OWN
+ * admission answer as {@link AnalysisReadyPayload.may_run}.
+ *
+ * ⭐ WHY `status` IS NOT ENOUGH, AND WHY THIS IS NOT A SECOND PREDICATE.
+ *
+ * `status` answers *"is this model ready as it stands?"*. The client gates its
+ * `run_analysis` chip on `status === 'ready'`, which is the STRICTER question —
+ * so on the turn where the readiness loop says *"that's enough to run, I'll
+ * leave the others out and say so"* the chip is filtered out, because that turn
+ * is `needs_user_input` WITH an admitting run path. Measured on the
+ * `live-4day-week` capture: one unconfigured option gives
+ * `status: needs_user_input, willProceed: TRUE`, while two and three give
+ * `needs_user_input, willProceed: false` — one status, both verdicts, which is
+ * exactly why no reading of `status` can recover the answer.
+ *
+ * `may_run` is NOT a new rule. It is `resolveRunAdmission(...).willProceed` —
+ * literally the boolean `build-turn-context.ts` throws `AnalysisNotReadyError`
+ * on — published so a consumer stops reconstructing an admission rule it cannot
+ * see. The same predicate already surfaces as `may_run` on the
+ * `/assist/v1/graph-readiness` route (`canonical-readiness.ts:400`); this is the
+ * same field, same name, same source, on the turn payload.
+ *
+ * ⚠ ONE ASSESSMENT, NOT TWO. `resolveRunAdmission` EXPOSES the assessment it
+ * derived from precisely so a caller needing both does not run the assessor
+ * twice — two independent assessments of one graph could disagree, which is the
+ * hazard `analysis-ready-core` exists to remove. Read the payload off
+ * `admission.assessment`, never from a second `assessCanonicalAnalysisReadiness`
+ * call.
+ *
+ * ⚠ ABSENCE, NOT `'unknown'`. The route's {@link MayRun} is three-valued because
+ * a caller may fail to REACH it; a turn payload has no such case — CEE holds the
+ * graph. Here the field is a plain boolean, and its ABSENCE (an older producer)
+ * is the signal a consumer must fall back on, which is why it stays optional.
+ */
 export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
 ): AnalysisReadyPayload | undefined {
-  return assessCanonicalAnalysisReadiness(graph).analysisReady;
+  const admission = resolveRunAdmission(graph);
+  const payload = admission.assessment.analysisReady;
+  if (!payload) return undefined;
+  return { ...payload, may_run: admission.willProceed };
 }
 
 // ============================================================================
