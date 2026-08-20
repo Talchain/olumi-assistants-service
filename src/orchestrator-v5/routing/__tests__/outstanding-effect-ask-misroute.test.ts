@@ -44,7 +44,26 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { findOutstandingEffectAskCollision } from '../outstanding-effect-ask-misroute.js';
+import { readFileSync } from 'node:fs';
+
+import {
+  buildVerifiedCorrectionReplay,
+  findOutstandingEffectAskCollision,
+} from '../outstanding-effect-ask-misroute.js';
+
+// The CAPTURED graph — a real drafted model, never authored here (trap 16).
+const CAPTURED_GRAPH = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../__tests__/fixtures/witness-2026-08-18/model-compiler-option-effect.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { draft_graph: unknown; ids: Record<string, string> }
+);
+const OPT_CAPTURED = CAPTURED_GRAPH.ids.option_id!;
+const FAC_CAPTURED = CAPTURED_GRAPH.ids.factor_id!;
+const OPT_LABEL_CAPTURED = CAPTURED_GRAPH.ids.option_label!;
+const FAC_LABEL_CAPTURED = CAPTURED_GRAPH.ids.factor_label!;
 
 // ---------------------------------------------------------------------------
 // THE WITNESSED GRAPH IDENTITIES, copied from the capture's readiness payload
@@ -509,5 +528,102 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
     expect(asEdge).not.toBeNull();
     expect(asFactor).not.toBeNull();
     expect(asEdge!.pairs.map((p) => p.optionId)).toEqual(asFactor!.pairs.map((p) => p.optionId));
+  });
+});
+
+/**
+ * ⭐⭐ THE CORRECTION CHIP'S GAP IS EXACTLY THIS SET.
+ *
+ * A review swept hostile OPTION-LABEL classes through the offered replay — option
+ * labels are the USER'S OWN brief fragments, so this input space is not one I
+ * control and a corpus from my own head could not certify it (trap 22). Eleven
+ * classes bind correctly; ONE breaks, because a second `to <number>` span in the
+ * label defeats the value reader.
+ *
+ * `buildVerifiedCorrectionReplay` closes the CLASS rather than the case by asking
+ * the writer itself. These sets pin the outcome in BOTH directions, following the
+ * estate's existing pattern (`option-rephrase-merge.corpus.test.ts`):
+ *   · MUST_OFFER  going RED catches the gap GROWING (something stopped working);
+ *   · KNOWN_DROPPED length-equality catches it SHRINKING (something started
+ *     working, and the row should be deleted rather than the assertion loosened);
+ *   · disjointness catches a shape being claimed by both at once.
+ */
+const CORRECTION_LABEL_MUST_OFFER: readonly { readonly name: string; readonly label: string }[] = [
+  { name: 'captured baseline', label: OPT_LABEL_CAPTURED },
+  { name: 'full stop inside', label: 'double down on enterprise sales. phase two' },
+  { name: 'decimal inside', label: 'double down on enterprise sales at 1.5x quota' },
+  { name: 'apostrophe inside', label: "double down on enterprise sales (Q3's push)" },
+  { name: 'percent inside', label: 'double down on enterprise sales (12% uplift)' },
+  { name: 'contains the factor label', label: `double down on ${FAC_LABEL_CAPTURED}` },
+  { name: 'contains the advised phrase', label: "double down on the option's effect on sales" },
+];
+
+const CORRECTION_LABEL_KNOWN_DROPPED: readonly {
+  readonly name: string;
+  readonly label: string;
+  readonly why: string;
+}[] = [
+  {
+    name: 'label ends with a second "to <number>" span',
+    label: 'raise the enterprise seat minimum from 2 to 5',
+    why:
+      'the value reader is anchored on `to <number>`; a second span in the OPTION LABEL makes the '
+      + 'sentence carry two, so `resolveOptionEffectWrite` declines no_single_unit_scale_value. '
+      + 'The mint-time gate drops the chip and the copy asks instead — a dead-end affordance is '
+      + 'the class this estate has already paid for twice.',
+  },
+];
+
+describe('the correction chip is offered for EXACTLY the shapes that work', () => {
+  function offeredFor(label: string): string | null {
+    const g = JSON.parse(JSON.stringify(CAPTURED_GRAPH.draft_graph)) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    (g.nodes.find((n) => n.id === OPT_CAPTURED) as Record<string, unknown>).label = label;
+    return buildVerifiedCorrectionReplay(
+      {
+        refusedField: 'factor_value',
+        userValue: 0.8,
+        pairs: [
+          {
+            optionId: OPT_CAPTURED,
+            optionLabel: label,
+            factorId: FAC_CAPTURED,
+            factorLabel: FAC_LABEL_CAPTURED,
+          },
+        ],
+      },
+      g,
+    );
+  }
+
+  it.each(CORRECTION_LABEL_MUST_OFFER)('OFFERS the correction: $name', ({ label }) => {
+    expect(offeredFor(label)).not.toBeNull();
+  });
+
+  it.each(CORRECTION_LABEL_KNOWN_DROPPED)('KNOWN-DROPPED (no chip, copy asks): $name', ({ label }) => {
+    expect(offeredFor(label)).toBeNull();
+  });
+
+  it('⭐ the gap is EXACTLY this set — REDs if a member starts working (SHRINK)', () => {
+    // Structurally shrink-only, and said plainly rather than over-claimed: a
+    // NEWLY-broken shape is not a member here. Growth is caught by MUST_OFFER
+    // going RED and by the disjointness assertion below.
+    const stillDropped = CORRECTION_LABEL_KNOWN_DROPPED.filter(
+      ({ label }) => offeredFor(label) === null,
+    );
+    expect(stillDropped).toHaveLength(CORRECTION_LABEL_KNOWN_DROPPED.length);
+  });
+
+  it('⭐ MUST-OFFER and KNOWN-DROPPED are DISJOINT — a label cannot be both', () => {
+    const offered = new Set(CORRECTION_LABEL_MUST_OFFER.map((m) => m.label));
+    for (const { label } of CORRECTION_LABEL_KNOWN_DROPPED) expect(offered.has(label)).toBe(false);
+  });
+
+  it('⭐ every KNOWN-DROPPED row states WHY — a gap without a reason is a to-do', () => {
+    expect(CORRECTION_LABEL_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(1);
+    for (const row of CORRECTION_LABEL_KNOWN_DROPPED) {
+      expect(row.why.length).toBeGreaterThan(40);
+    }
   });
 });

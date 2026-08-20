@@ -50,9 +50,12 @@ interface AppendWrite {
   graph?: unknown;
   handler_id?: unknown;
   handler_facts?: unknown;
+  pending_actions?: unknown;
 }
 const appendCalls: AppendWrite[] = [];
 let persistedGraph: unknown = null;
+/** Pendings the store hands back — seeded from a REAL demotion, never authored. */
+let pendingActionsForRead: readonly unknown[] = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -64,7 +67,7 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => [],
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
-    readMostRecentPendingActions: async () => [],
+    readMostRecentPendingActions: async () => pendingActionsForRead,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
@@ -136,8 +139,17 @@ function payload(message: string): MessageTurnPayload {
   });
 }
 
-/** A turn whose message is the PRODUCT'S OWN chip copy, not the user's prose. */
-function chipPayload(message: string): MessageTurnPayload {
+/**
+ * A turn arriving on the ROUTING flag the UI actually sets. Used ONLY to prove
+ * this guard does NOT read it — see the Calibrate regression below.
+ *
+ * WARNING: `source: 'chip_click'` is NOT provenance. The UI promotes any turn
+ * carrying a CEE-routable `action_type` to this value regardless of what the
+ * caller said (`buildPayload.ts:155`); exactly ONE production call site sets the
+ * literal, against a contrast control of 21 for `source: 'chip'`. User-authored
+ * text ships under it every day.
+ */
+function routingFlagPayload(message: string): MessageTurnPayload {
   return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
@@ -147,11 +159,25 @@ function chipPayload(message: string): MessageTurnPayload {
 }
 
 /**
- * The demotion chip's copy, VERBATIM from `compose/warrant-demotion.ts:52`.
- * Content-free by design — which is exactly why a prose-gated guard could not
- * see it.
+ * Emit a REAL demotion and hand back its chip copy plus the pending the product
+ * actually persisted. Nothing here is authored: both are whatever
+ * `emitProposedChange` produced on a warrantless mutating turn.
  */
-const DEMOTION_CHIP_SET_VALUE = 'Set that value in my model.';
+async function emitRealDemotion(
+  targetId: string,
+  targetLabel: string,
+): Promise<{ chipMessage: string; pendings: readonly unknown[] }> {
+  const { response } = await runTurnExecutor(
+    payload('I would say sales headcount matters quite a lot here, roughly 0.8.'),
+    `req-demote-${randomUUID()}`,
+    { routingAdapter: setFactorValueAdapter(targetId, targetLabel), graphState: graph() },
+  );
+  const pendings = appendCalls.flatMap((c) =>
+    Array.isArray(c.pending_actions) ? (c.pending_actions as unknown[]) : [],
+  );
+  return { chipMessage: (response.suggested_actions ?? [])[0]?.message ?? '', pendings };
+}
+
 
 /**
  * A FACTOR-KIND node with NO outstanding effect ask — the positive-control
@@ -282,6 +308,7 @@ function stateAfterTurn(): unknown {
 }
 
 beforeEach(() => {
+  pendingActionsForRead = [];
   appendCalls.length = 0;
   persistedGraph = null;
   setTestSink(() => undefined);
@@ -461,28 +488,55 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
   });
 });
 
-describe('⭐⭐ THE REVIEW\'S N=2 — the chip click that the prose gate could not see', () => {
-  it('THE TWIN: a chip-originated set_factor_value on the outstanding pair writes NOTHING', async () => {
+describe('THE REVIEW N=2 — the demotion chip the prose gate could not see', () => {
+  /**
+   * The demotion chips are minted from ONE path with copy that is CONTENT-FREE
+   * BY DESIGN (`compose/warrant-demotion.ts:50-52`) — neither message carries
+   * `effect`, `intervention` or `configure`. A prose-gated factor arm therefore
+   * could not fire on one, while its edge twin (identity) refused. The verbatim
+   * witnessed defect-A sentence got OPPOSITE verdicts per handler.
+   *
+   * ⚠⚠ THE GATE IS THE CONSUMED PENDING, NOT `payload.source`. The first cut
+   * gated on `source === 'chip_click'`, which measurement REFUTED: that flag is
+   * a ROUTING signal the UI promotes onto anything carrying a routable
+   * `action_type`, so it also carries user-authored text. Genuine provenance is
+   * the pending action — the product minted `apply_proposed_change` itself.
+   * Derived by round trip at this tip, not assumed.
+   */
+  it('THE TWIN: a real demotion chip resumed on the OUTSTANDING pair writes NOTHING', async () => {
+    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
+    // POSITIVE CONTROLS on the fixture itself (trap 13): the round trip really
+    // produced the content-free chip and a pending, else the replay proves nothing.
+    expect(chipMessage).toBe('Set that value in my model.');
+    expect(pendings).toHaveLength(1);
+    expect(chipMessage.toLowerCase()).not.toMatch(/\b(effects?|interventions?|configur)/);
+
+    pendingActionsForRead = pendings;
+    appendCalls.length = 0;
+    persistedGraph = null;
+
     const { response } = await runTurnExecutor(
-      chipPayload(DEMOTION_CHIP_SET_VALUE),
+      routingFlagPayload(chipMessage),
       'req-effect-ask-chip-refused',
       { routingAdapter: setFactorValueAdapter(), graphState: graph() },
     );
-
     expect(graphWrites()).toHaveLength(0);
-    expect(persistedGraph).toBeNull();
-    // Read BACK from state, bound by identity — the options_ready check the
-    // witness failed.
     expect(factorValue(stateAfterTurn())).toBe(0.5);
     expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
     expect(response.assistant_text.toLowerCase()).not.toContain('applied');
   });
 
-  it('⭐⭐ OPPOSITE DIRECTION — a chip-originated write on an UNBLOCKED factor still lands', async () => {
-    // Trap 13: without this the refusal above could be the harness declining
-    // every chip turn, and the identity match would be proving nothing.
-    const { response } = await runTurnExecutor(
-      chipPayload(DEMOTION_CHIP_SET_VALUE),
+  it('OPPOSITE DIRECTION — the same resume on an UNBLOCKED factor still LANDS', async () => {
+    const { chipMessage, pendings } = await emitRealDemotion(
+      UNBLOCKED_FACTOR_ID,
+      UNBLOCKED_FACTOR_LABEL,
+    );
+    pendingActionsForRead = pendings;
+    appendCalls.length = 0;
+    persistedGraph = null;
+
+    await runTurnExecutor(
+      routingFlagPayload(chipMessage),
       'req-effect-ask-chip-control',
       {
         routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
@@ -490,20 +544,43 @@ describe('⭐⭐ THE REVIEW\'S N=2 — the chip click that the prose gate could 
       },
     );
     expect(graphWrites().length).toBeGreaterThan(0);
-    expect(response.assistant_text.toLowerCase()).not.toContain("i haven't changed anything");
   });
 
-  it('⭐ AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand is not claimed', async () => {
-    // The correction is scoped to chip-originated turns. Free-typed prose keeps
-    // its prose gate, which is what keeps the legitimate baseline edit working.
+  it('AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand still writes', async () => {
+    // ⭐ THE PROOF THAT THIS IS SYMMETRY, NOT WIDENING: the gate is on the
+    // PROVENANCE of the turn, not on the string. The identical bytes with no
+    // pending to consume are the user's own words, and they write.
     const before = factorValue(graph());
     await runTurnExecutor(
-      payload(DEMOTION_CHIP_SET_VALUE),
+      payload('Set that value in my model.'),
       'req-effect-ask-chip-typed-twin',
       { routingAdapter: setFactorValueAdapter(), graphState: graph() },
     );
     expect(graphWrites().length).toBeGreaterThan(0);
     expect(factorValue(persistedGraph)).not.toBe(before);
+  });
+});
+
+describe('REGRESSION — the guard must NOT read the ROUTING flag', () => {
+  /**
+   * `MessageBubble.tsx:616` is the ONLY production UI sender of a
+   * `set_factor_value` chip: label "Calibrate <X>", message "Help me calibrate
+   * <X>", carrying NO value. It ships as `source: 'chip_click'` because the UI
+   * promotes anything with a routable `action_type` (`buildPayload.ts:155`).
+   *
+   * MEASURED before this gate was corrected: it drew "I haven't changed anything
+   * … would have moved <factor>'s own value instead" — the product answering a
+   * plain request for HELP with a refusal about writing to the wrong field,
+   * differing from the composer-sourced turn only by a transport flag.
+   */
+  it('the Calibrate affordance on an OUTSTANDING factor is not refused by this guard', async () => {
+    const { response } = await runTurnExecutor(
+      routingFlagPayload(`Help me calibrate ${J18.ids.factor_label}`),
+      'req-calibrate-not-refused',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    expect(response.assistant_text).not.toContain("I haven't changed anything");
+    expect(response.assistant_text).not.toContain("'s own value instead");
   });
 });
 

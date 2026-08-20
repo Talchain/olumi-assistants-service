@@ -124,6 +124,7 @@
  * bounded by an identity match against a pair the product itself put on screen.
  */
 
+import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text.js';
 import { parseEdgeId } from '../tools/handlers/adjust-edge-strength.js';
 import {
   detectConfigureOptionIntent,
@@ -132,6 +133,7 @@ import {
   BASELINE_FRAMING,
   EFFECT_FRAMED_TRIGGERS,
   readOptionEffectValue,
+  resolveOptionEffectWrite,
 } from './option-effect-write.js';
 import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value-binding.js';
 
@@ -177,9 +179,16 @@ export interface OutstandingEffectAskCollision {
  */
 export function buildOutstandingEffectAskDetails(
   collision: OutstandingEffectAskCollision | null,
+  /**
+   * The VERIFIED replay from {@link buildVerifiedCorrectionReplay}, or null when
+   * no correction can be offered. Required rather than optional so a caller
+   * cannot silently fall back to an unverified chip (trap 12).
+   */
+  verifiedReplay: string | null,
 ): Readonly<Record<string, unknown>> {
   if (collision === null) return {};
   return {
+    ...(verifiedReplay !== null ? { effect_ask_replay_message: verifiedReplay } : {}),
     effect_ask_refused_field: collision.refusedField,
     ...(collision.userValue !== null ? { effect_ask_user_value: collision.userValue } : {}),
     // Every pair in a collision shares the factor (both arms match on it), so
@@ -265,4 +274,58 @@ export function findOutstandingEffectAskCollision(params: {
   return match.length > 0
     ? { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) }
     : null;
+}
+
+/**
+ * ⭐⭐ WOULD THE CORRECTION CHIP'S REPLAY ACTUALLY WORK? ASK THE WRITER.
+ *
+ * Returns the replay message ONLY when running it through the real
+ * `resolveOptionEffectWrite` — against the graph the chip is being offered on —
+ * binds the EXACT pair and value the copy names. Otherwise `null`, and the caller
+ * offers no chip and asks instead.
+ *
+ * ⚠ THIS EXISTS BECAUSE A GROWING LIST OF THINGS-THAT-BREAK-IT IS NOT A GUARD.
+ * A review swept eleven hostile option-label classes through the offered replay:
+ * full stops, decimals, apostrophes, double quotes, em-dashes, question marks,
+ * colons, a label containing the factor label, even a label containing the
+ * literal phrase `option's effect on` — all resolve correctly. ONE breaks:
+ *
+ *     "raise the enterprise seat minimum from 2 to 5"
+ *       -> {matched:false, reason:"no_single_unit_scale_value"}
+ *
+ * A second `to <number>` span in the OPTION'S OWN LABEL defeats the value
+ * reader, so the chip is minted, the user clicks it, and nothing happens. It
+ * degrades to a decline rather than a false receipt — a UX defect, not a trust
+ * one — but it is the DEAD-END-AFFORDANCE class this module's neighbours say the
+ * estate has already paid for TWICE, and it sits on the repair path this change
+ * makes central.
+ *
+ * Enumerating the breaking label shapes would be a corpus written from my own
+ * head over an input space I do not control (trap 22): option labels are the
+ * USER'S OWN brief fragments. So the gate asks the only authority that can
+ * answer — the writer itself — and closes the whole class rather than this case.
+ *
+ * ⚠ IT DOES **NOT** SUBSUME THE EGRESS COPY CHECK, and conflating them would be
+ * trap 21. This function answers *"would this replay WRITE the right thing?"*;
+ * `findChipRawDecimalLeak` at the composer answers *"would this chip SURVIVE
+ * RENDERING?"*. A high-precision value (`0.6667`) passes this gate and fails
+ * that one. Two questions, named apart, both required.
+ */
+export function buildVerifiedCorrectionReplay(
+  collision: OutstandingEffectAskCollision,
+  graph: unknown,
+): string | null {
+  if (collision.pairs.length !== 1 || collision.userValue === null) return null;
+  const pair = collision.pairs[0]!;
+  const replay = `${buildConfigureOptionAdvisedFormat(
+    pair.optionLabel,
+    pair.factorLabel,
+    String(collision.userValue),
+  )}.`;
+  const resolved = resolveOptionEffectWrite({ message: replay, graph });
+  if (!resolved.matched || resolved.kind !== 'write') return null;
+  // Bound by IDENTITY to the pair the copy names — never "it matched something".
+  if (resolved.optionId !== pair.optionId || resolved.factorId !== pair.factorId) return null;
+  if (resolved.value !== collision.userValue) return null;
+  return replay;
 }

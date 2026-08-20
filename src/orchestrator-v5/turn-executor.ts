@@ -213,6 +213,7 @@ import {
 import { detectConfigureOptionIntent } from './routing/configure-option-intent.js';
 import {
   buildOutstandingEffectAskDetails,
+  buildVerifiedCorrectionReplay,
   findOutstandingEffectAskCollision,
 } from './routing/outstanding-effect-ask-misroute.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
@@ -8544,8 +8545,48 @@ export async function runTurnExecutor(
       // route) and a chip whose message was matched back to its pending by the
       // short-confirm / ordinal / label resumes (all of which assign
       // `consumedPendingAction` upstream of this line).
+      // ⭐⭐ WAS THIS TURN'S MESSAGE AUTHORED BY THE PRODUCT?
+      //
+      // ⚠⚠ NOT `payload.source`. THAT FIELD DOES NOT MEAN WHAT ITS NAME SUGGESTS,
+      // AND MEASURING IT REFUTED THIS GUARD'S FIRST JUSTIFICATION. `chip_click`
+      // is a ROUTING signal, not provenance: the UI PROMOTES any turn carrying a
+      // CEE-routable `action_type` to `chip_click` regardless of what the caller
+      // said (`DecisionGuideAI/src/v5/buildPayload.ts:155` —
+      // `hasBoundAction = Boolean(wireActionType) || rawSource === 'chip_click'`).
+      // Exactly ONE production call site in the whole UI sets the literal
+      // (the payload builder itself); the contrast control `source: 'chip'`
+      // reads 21. So user-authored text ships as `chip_click` every day — a
+      // free-text constraint box, a success-target field dispatched `hidden`,
+      // and user-editable node and edge labels interpolated into chip messages.
+      //
+      // MEASURED HARM, end to end at this tip. A user clicks "Calibrate <factor>"
+      // (`MessageBubble.tsx:616` — the ONLY production sender of a
+      // `set_factor_value` chip, and it carries NO value). Gated on `source`:
+      //
+      //   chip_click + outstanding factor -> "I haven't changed anything …
+      //                                       would have moved <factor>'s own
+      //                                       value instead"
+      //   same message, source composer   -> the helpful warrant demotion
+      //
+      // The product answered a plain request for HELP with a refusal about
+      // writing to the wrong field, and the only difference was the transport
+      // flag. That is this PR's own defect one level up: TWO QUESTIONS UNDER ONE
+      // NAME. `chip_click` answers "does this carry a routable action_type?";
+      // this guard needs "did the product author this copy?".
+      //
+      // ⭐ SO THE GATE IS THE PENDING ACTION, WHICH IS GENUINE PROVENANCE: the
+      // product minted `apply_proposed_change` itself, and consuming it is proof
+      // this turn is the resume of an offer the product made. DERIVED, not
+      // assumed — a full round trip at this tip emitted
+      // `{label:'Set this value', message:'Set that value in my model.'}` with
+      // pending `{kind:'apply_proposed_change', chip_id:'prop_0865246bcd44'}`,
+      // and replaying that copy consumed the pending and applied the write. The
+      // demotion chips — the whole N=2 — arrive exactly this way.
+      //
+      // This is NARROWER than the `source` reading and it is the honest one. It
+      // also makes the `chip`/`chip_click` spelling question moot rather than
+      // answered: the field is not read at all.
       const turnIsChipOriginated =
-        payload.source === 'chip_click' ||
         consumedPendingAction?.action.kind === 'apply_proposed_change';
       const outstandingEffectAskOptionLabels = (): readonly string[] =>
         graphLookupForValidate
@@ -8596,6 +8637,13 @@ export async function runTurnExecutor(
               chipOriginated: turnIsChipOriginated,
             })
           : null;
+      // ⭐ THE CORRECTION IS VERIFIED AGAINST THE WRITER BEFORE IT IS OFFERED.
+      // Built here rather than in the composer because only this site holds the
+      // graph the chip would be honoured against.
+      const setFactorValueVerifiedReplay =
+        setFactorValueEffectAskCollision !== null
+          ? buildVerifiedCorrectionReplay(setFactorValueEffectAskCollision, graphStateForTurn)
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
@@ -8619,7 +8667,10 @@ export async function runTurnExecutor(
             details: {
               handler_id: 'set_factor_value',
               ...(action.entity.label ? { factor_label: action.entity.label } : {}),
-              ...buildOutstandingEffectAskDetails(setFactorValueEffectAskCollision),
+              ...buildOutstandingEffectAskDetails(
+                setFactorValueEffectAskCollision,
+                setFactorValueVerifiedReplay,
+              ),
             },
           },
         };
@@ -8666,6 +8717,10 @@ export async function runTurnExecutor(
               chipOriginated: turnIsChipOriginated,
             })
           : null;
+      const edgeStrengthVerifiedReplay =
+        edgeStrengthEffectAskCollision !== null
+          ? buildVerifiedCorrectionReplay(edgeStrengthEffectAskCollision, graphStateForTurn)
+          : null;
       if (
         validationResult.valid &&
         proposedHandlerId === 'adjust_edge_strength' &&
@@ -8683,7 +8738,10 @@ export async function runTurnExecutor(
               'adjust_edge_strength refused — the request implies configuring an option\'s interventions, not tuning a link strength',
             details: {
               handler_id: 'adjust_edge_strength',
-              ...buildOutstandingEffectAskDetails(edgeStrengthEffectAskCollision),
+              ...buildOutstandingEffectAskDetails(
+                edgeStrengthEffectAskCollision,
+                edgeStrengthVerifiedReplay,
+              ),
             },
           },
         };

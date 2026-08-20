@@ -804,27 +804,16 @@ function composeOutstandingEffectAskMisroute(
     // the sentence is recognisable as an option reference. Closing that needs a
     // chip that pins `optionId` and a resume that binds by it — new pending-action
     // machinery, not a predicate tweak. Reported rather than bodged.
-    const rawOptionLabel = optionLabels[0]!;
-    const candidateReplay =
-      userValue === null || safeLabel({ label: rawOptionLabel, kind: undefined }) === 'that item'
-        ? null
-        : `${buildConfigureOptionAdvisedFormat(rawOptionLabel, factor, String(userValue))}.`;
-    // ⚠ MINT THE CHIP ONLY IF IT WOULD SURVIVE EGRESS — review finding. A
-    // high-precision value (`0.6667`) is refused by the chip raw-decimal rule
-    // downstream, so a chip minted here would be DROPPED two layers later,
-    // leaving copy that promises an affordance the user never sees. Running the
-    // SAME predicate the finaliser runs (`chip-safety.ts`, imported rather than
-    // re-spelled — trap 12) makes emit ⟺ egress agree, exactly as
-    // `proposed-change.ts:220-235` already does for the other chip channel.
-    //
-    // The degradation is to NO CHIP and a copy that ASKS — never to a false
-    // receipt. `isValidatedProposal: false` is the stricter reading: this is a
-    // text-prompt affordance, not a validated proposal carrying a formatted
-    // display value, so it earns no exemption.
+    // ⭐ THE REPLAY ARRIVES VERIFIED. `buildVerifiedCorrectionReplay` already ran
+    // it through the real writer against the real graph and confirmed it binds
+    // this exact pair and value, so this site never mints an affordance that
+    // would dead-end. See that function's header for the label class that broke
+    // the previous, hand-reasoned version.
+    const verifiedReplay = readString(details.effect_ask_replay_message) ?? null;
     const replay =
-      candidateReplay !== null
-      && !findChipRawDecimalLeak(candidateLabel, candidateReplay, { isValidatedProposal: false })
-        ? candidateReplay
+      verifiedReplay !== null
+      && !findChipRawDecimalLeak(candidateLabel, verifiedReplay, { isValidatedProposal: false })
+        ? verifiedReplay
         : null;
     return {
       body: {
