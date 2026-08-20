@@ -150,6 +150,11 @@ import {
   recogniseReferenceClass,
 } from './belief-elicitation/index.js';
 import {
+  buildCoachingMethodDirective,
+  composeCoachingRoutingMessage,
+  resolveCoachingIntent,
+} from './coaching/typed-intent-directive.js';
+import {
   buildStructuralRemainderNotice,
   buildUnmappedPartsNotice,
   decomposeEditMessage,
@@ -7791,8 +7796,111 @@ export async function runTurnExecutor(
           recent_changes_field_present: recentChangesEvidence.field_present,
           recent_changes_hash: recentChangesEvidence.hash,
         });
+        // ⭐ TYPED COACHING-INTENT ARM (coaching/typed-intent-directive.ts).
+        //
+        // Four MOUNTED sparks (`pressure_test_frame`, `define_success`,
+        // `widen_options`, `reflect_bias`) declare a typed `chip.intent` and,
+        // until this arm existed, silently degraded to generic free prose
+        // because CEE routed none of them and the UI's two-signal send gate
+        // (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly failed closed.
+        //
+        // ⚠ THE POSITION IS DELIBERATE, and it is the OPPOSITE of every
+        // deterministic pre-route above. Those claim the turn and skip the LLM.
+        // This one runs at the LLM call because it must NOT claim the turn: the
+        // free-prose path reaches the reasoning layer and often answers well,
+        // so a deterministic responder here would replace a good answer with a
+        // canned one. The arm appends a method directive and lets the coach
+        // author, which makes today's prose answer the FLOOR by construction.
+        //
+        // No handler is pinned, no tool forced, thinking untouched.
+        //
+        // ⭐ THE SEAM IS THE `message` ARGUMENT, AND THE CHOICE IS DELIBERATE.
+        // The obvious place to append a directive is inside `routeWithToolUse`
+        // beside `buildForcedIntentDirective`. That file is under a live
+        // concurrent rebuild of the repair loop (`orchestrator-v5/routing/**`),
+        // so this lane does not touch it. Appending here instead is not a
+        // workaround with a cost — it is BYTE-IDENTICAL for this arm:
+        // `buildUserMessage` ends with `parts.push('', '## User turn', message)`
+        // and joins on `'\n'`, so `message` is the FINAL segment of the built
+        // string. Appending `\n\n<directive>` to `message` before the call and
+        // appending it to the built base after the call produce the same bytes,
+        // and a test in `typed-coaching-intent-wire.test.ts` pins exactly that
+        // equality so the claim cannot rot.
+        //
+        // The one behaviour this seam does NOT reproduce is ORDERING when a
+        // forced-explanation directive is also set: appended after the base,
+        // the forced directive would precede the coaching one; appended inside
+        // `message`, the coaching one precedes it. That combination is
+        // unreachable and pinned as such — `resolveCoachingIntent` requires
+        // `chip.intent ∈ ROUTED_COACHING_INTENTS`, `chipClickForcedIntent`
+        // requires a typed `action_type` pill, and no affordance carries both.
+        // The pin is a test, not a comment.
+        //
+        // The `v5.context_budget` measurement at :7927 reads
+        // `buildUserMessage(contextPack, payload.message)` — the RAW message,
+        // deliberately unchanged here, so the budget series stays comparable
+        // across the arm landing.
+        const coachingIntent = resolveCoachingIntent(payload);
+        const coachingDirective =
+          coachingIntent === undefined
+            ? undefined
+            : buildCoachingMethodDirective(coachingIntent, context.stage);
+        if (coachingIntent !== undefined && coachingDirective !== undefined) {
+          emit(TelemetryEvents.V5TypedCoachingIntentRoute, {
+            request_id: requestId,
+            session_id: context.session_id,
+            intent: coachingIntent,
+            stage: context.stage,
+            dsk_protocol_id: coachingDirective.dskProtocolId,
+          });
+        }
+        // ⭐ F2 — THE DROP IS OBSERVABLE. `resolveCoachingIntent` answers
+        // `undefined` for an intent CEE does not route, and the arm above then
+        // simply skipped: no telemetry, no log, nothing. THAT SILENCE IS THE
+        // MECHANISM that let four mounted sparks degrade to anonymous prose for
+        // as long as they did — nothing anywhere could distinguish an intent
+        // nobody clicked from one the product threw away.
+        //
+        // The condition is the presence of a typed intent ON THE PAYLOAD, not
+        // the resolver's `undefined` alone: `resolveCoachingIntent` also
+        // answers `undefined` for every ordinary composer turn, which is the
+        // whole traffic of the service. Firing there would bury this signal
+        // under its own noise, so the guard reads `payload.chip?.intent`
+        // directly and requires a NON-EMPTY string.
+        //
+        // Content-free: the declined token, the ids and the stage. Never user
+        // text. Guarded like its neighbours — an observability fault must not
+        // fail a turn.
+        const declinedChipIntent = payload.chip?.intent;
+        if (
+          coachingIntent === undefined &&
+          typeof declinedChipIntent === 'string' &&
+          declinedChipIntent.length > 0
+        ) {
+          try {
+            emit(TelemetryEvents.V5TypedCoachingIntentUnrouted, {
+              request_id: requestId,
+              session_id: context.session_id,
+              intent: declinedChipIntent,
+              stage: context.stage,
+            });
+          } catch {
+            log.warn(
+              { request_id: requestId, session_id: context.session_id },
+              'V5 turn-executor — v5.typed_coaching_intent_unrouted emit failed; continuing',
+            );
+          }
+        }
+
+        // Composed once so the value handed to the router and the value a test
+        // asserts are the same expression, not two spellings of one intent.
+        const routingMessage =
+          coachingDirective === undefined
+            ? payload.message
+            : composeCoachingRoutingMessage(payload.message, coachingDirective.directive);
+
         const routingStartedAt = timingsEnabled ? Date.now() : 0;
-        routingResult = await routeWithToolUse(contextPack, payload.message, {
+        routingResult = await routeWithToolUse(contextPack, routingMessage, {
           requestId,
           sessionId: context.session_id,
           signal: turnAbort.signal,

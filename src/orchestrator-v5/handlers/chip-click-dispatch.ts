@@ -879,7 +879,21 @@ export async function dispatchChipClickRunAnalysis(
         orientation: '',
         confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',
         coaching: null,
-        stage: payload.stage,
+        // ⚠ THE DERIVED STAGE, NOT THE CLIENT'S ECHO — AND THE LIMIT OF WHAT
+        // THAT BUYS, STATED PLAINLY.
+        //
+        // `context` came from `buildTurnContext` above, which is where the ONE
+        // stage authority (`context/derive-stage.ts`) runs. Reading
+        // `payload.stage` here re-echoed the client's own guess and could ship a
+        // stale `decide` the derivation had already corrected.
+        //
+        // ⚠ WHAT THIS DOES NOT FIX: `buildTurnContext` runs BEFORE the handler,
+        // so on a `run_analysis` chip click the analysis has NOT yet run when
+        // the stage is derived. The promotion to `decide` therefore CANNOT
+        // originate on the turn that completes the analysis — it lands on the
+        // next routed turn. This swap fixes the stale-`decide` echo only; the
+        // origination ordering is untouched and out of scope for this change.
+        stage: context.stage,
         handlerFacts: [],
       }),
       commitPerformed: false,
@@ -897,7 +911,9 @@ export async function dispatchChipClickRunAnalysis(
     orientation: '',
     confirmation: 'Analysis could not complete.',
     coaching: null,
-    stage: payload.stage,
+    // Derived stage, same authority as the composed exit below — see the
+    // note at the safety-net exit above for what this does and does not fix.
+    stage: context.stage,
     handlerFacts: [],
   });
 
@@ -929,7 +945,15 @@ export async function dispatchChipClickRunAnalysis(
         const recovered = tryComposeRecoverableChipOutcome(
           err,
           snapshotGraph,
-          payload.stage,
+          // Source-consistency only: `tryComposeRecoverableChipOutcome`
+          // `void`s this parameter and composes with the literal
+          // ANALYSE_STAGE_INDICATOR, deliberately (ROADMAP 2.1085 — a
+          // non-analyse refusal with no analysis_result block makes the
+          // deployed UI clear ten fields of user state). Passing the derived
+          // stage changes no wire byte; it removes the last read of the
+          // client echo from this function so the wrong source cannot be
+          // resurrected here by a later reader.
+          context.stage,
           requestId,
           payload.scenario_id,
           turnAbort.signal.aborted,
@@ -1142,7 +1166,10 @@ export async function dispatchChipClickRunAnalysis(
     //   - `validationRegistry` — required for executable-chip
     //     registry-presence validation (existing chip-generator contract).
     const chipClickSuggestedActions = generateChips({
-      stage: payload.stage,
+      // The SAME value the response's `stage_indicator` carries below, so the
+      // pill and the coaching chips cannot disagree about which stage the
+      // user is in — the two-authorities defect the derivation removes.
+      stage: context.stage,
       handlerFacts: enrichedFacts,
       priorFacts: context.prior_facts,
       analysis: null,
@@ -1192,7 +1219,8 @@ export async function dispatchChipClickRunAnalysis(
       // on a first run, RERUN_ANALYSIS_COMPLETE with the compareRuns delta on
       // a rerun) exactly as the routed path does.
       coaching: coachingApplication.coachingText,
-      stage: payload.stage,
+      // Derived stage — same authority as `generateChips` above.
+      stage: context.stage,
       handlerFacts: enrichedFacts,
       suggested_actions: chipClickSuggestedActions,
       // R4 lookup fix — persisted-snapshot fallback for graph-node

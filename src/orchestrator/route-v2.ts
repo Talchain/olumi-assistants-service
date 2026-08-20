@@ -123,7 +123,10 @@ import type { CanonicalContextFrame } from '../orchestrator-v5/context/frame/ind
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
-import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
+import {
+  dispatchSystemEvent,
+  type DispatchSystemEventResult,
+} from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
@@ -177,6 +180,8 @@ import {
   loadRecentConversationTurns,
 } from '../orchestrator-v5/build-turn-context.js';
 import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import { deriveAuthoritativeStage } from '../orchestrator-v5/context/derive-stage.js';
+import { extractGraphOptionIds } from '../orchestrator-v5/context/option-identity.js';
 import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
 import { buildHeldSupersessionNotice } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { appendLapseNotice } from '../orchestrator-v5/handlers/hold-thread-through.js';
@@ -2477,10 +2482,67 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     honest ("commit_performed=false + recognised skip reason ⇒ 200";
     //     "commit_performed=false + no recognised skip reason ⇒ 500").
     if (ingress.kind === 'system_event') {
-      const sysResult = await dispatchSystemEvent({
+      const rawSysResult = await dispatchSystemEvent({
         payload: ingress,
         requestId,
       });
+
+      // ═══════════════════════════════════════════════════════════════════
+      // ⭐ THE SYSTEM-EVENT FAMILY'S ONE STAGE-AUTHORITY APPLICATION POINT
+      // ═══════════════════════════════════════════════════════════════════
+      //
+      // ── THE DEFECT THIS CLOSES ────────────────────────────────────────
+      // `deriveAuthoritativeStage` (orchestrator-v5/context/derive-stage.ts)
+      // carries a TWIN: a `decide` request over a model whose analysis has
+      // gone stale is corrected back to `analyse`, so the stage pill cannot
+      // outlive the analysis that earned it. That twin ran in exactly one
+      // place — `buildTurnContext` — and the system-event family never calls
+      // it (SystemEventTurnPayload has no `message` field, which is why this
+      // branch dispatches before the TurnExecutor at all). So every
+      // system-event writer stamped `stage_indicator: payload.stage` RAW, and
+      // a user editing a factor value got their own stale `decide` echoed
+      // back over a model CEE could no longer vouch for — the exact lie the
+      // twin exists to prevent, on the one path the twin could not see.
+      //
+      // ── WHY HERE, AND NOWHERE ELSE ────────────────────────────────────
+      // `dispatchSystemEvent` has exactly ONE call site — this one — and its
+      // result carries all three derivation inputs together: the requested
+      // stage (on `ingress`), the freshness derivation, and the committed
+      // graph. No individual writer holds all three, and there are six of
+      // them plus two acknowledgement composers. Correcting once, here, is
+      // the single-authority move; correcting at each writer would be eight
+      // hand-maintained mirrors of one rule (CLAUDE.md trap 12).
+      //
+      // ── FAIL-CLOSED: NO READ, NO VERDICT ──────────────────────────────
+      // On an acknowledgement or refusal floor nothing was read: `freshness`
+      // is undefined (→ `'unknown'`, which cannot promote) and `graph` is
+      // null (→ `hasGraph: false`, which the twin's own bound refuses to fire
+      // on). Both inputs therefore degrade to "the requested stage passes
+      // through untouched". That is CORRECT, not a gap: a floor that
+      // inspected no model must not deliver a verdict about one.
+      //
+      // ── ONLY `stage_indicator` ────────────────────────────────────────
+      // Nothing else about the response is touched, and the result is rebuilt
+      // IMMUTABLY (every field on `DispatchSystemEventResult` is `readonly`).
+      // The corrected object is bound to `sysResult`, so EVERY downstream
+      // read below — today's `sendFinalised200` and any added later — sees
+      // the corrected value by construction rather than by remembering to.
+      const authoritativeSystemEventStage = deriveAuthoritativeStage({
+        requestedStage: ingress.stage,
+        freshness: rawSysResult.freshness?.freshness ?? 'unknown',
+        optionCount: extractGraphOptionIds(rawSysResult.graph)?.length ?? null,
+        hasGraph: rawSysResult.graph != null,
+      });
+      const sysResult: DispatchSystemEventResult =
+        rawSysResult.response.stage_indicator === authoritativeSystemEventStage
+          ? rawSysResult
+          : {
+              ...rawSysResult,
+              response: {
+                ...rawSysResult.response,
+                stage_indicator: authoritativeSystemEventStage,
+              },
+            };
       if (sysResult.graphConflict !== undefined) {
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'turn_commit',
