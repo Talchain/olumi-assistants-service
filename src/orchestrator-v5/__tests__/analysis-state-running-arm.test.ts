@@ -223,7 +223,14 @@ describe("2.1271 — the draft turn's `running` arm", () => {
 
 describe('2.1271 — `running` precedence is load-bearing in both directions', () => {
   it('LOSES to `refused` — a turn that declined to analyse says so', () => {
-    const refused = clampRefusalFreshness(freshDerivation(), 'analysis_refused');
+    // `clampRefusalFreshness` takes the derivation and NOTHING ELSE: it derives
+    // the refusal reason itself (`analysis_refused_currency_unverified`, or the
+    // preserved `no_successful_run_analysis_fact`). This call previously passed a
+    // second `'analysis_refused'` argument against a signature that has never
+    // existed on either base — invisible to `pnpm typecheck`, which builds from
+    // `tsconfig.build.json` and excludes specs, and caught only by the full-tsc
+    // drift ratchet. Fixed at source, not by widening the baseline.
+    const refused = clampRefusalFreshness(freshDerivation());
     const wire = finaliseDraft({
       freshness: refused,
       analysisReady: blockedPayload(),
