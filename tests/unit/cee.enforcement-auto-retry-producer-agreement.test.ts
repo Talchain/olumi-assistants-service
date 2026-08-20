@@ -45,7 +45,7 @@ import {
   applyDeterministicEnforcement,
   isEnforcementBlockedResult,
 } from "../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js";
-import { decideEnforcementAutoRetry } from "../../src/cee/unified-pipeline/draft-auto-retry.js";
+import { decideDraftAutoRetry } from "../../src/cee/unified-pipeline/draft-auto-retry.js";
 import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
 
 /** Shape the deterministic validator requires of a controllable factor. */
@@ -131,7 +131,7 @@ describe("2.1086 — the retry trigger recognises the REAL producer's emission",
     expect(isEnforcementBlockedResult(ctx.earlyReturn!)).toBe(true);
 
     // And the decision layer funds the retry at the BASELINE worst case.
-    const decision = decideEnforcementAutoRetry(ctx.earlyReturn!, 28_300);
+    const decision = decideDraftAutoRetry(ctx.earlyReturn!, 28_300);
     expect(decision.retry).toBe(true);
   });
 

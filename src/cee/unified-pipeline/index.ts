@@ -27,8 +27,11 @@ import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, Ups
 import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
-import { decideEnforcementAutoRetry, applyEnforcementRetryExhaustedCopy } from "./draft-auto-retry.js";
-import { isEnforcementBlockedResult } from "./stages/repair/graph-enforcement.js";
+import {
+  decideDraftAutoRetry,
+  applyRetryExhaustedCopy,
+  classifyRetryableDraftFailure,
+} from "./draft-auto-retry.js";
 import {
   MIN_DRAFT_RETRY_BUDGET_MS,
   VALIDATION_ATTACH_WAIT_MS,
@@ -625,17 +628,35 @@ function drainEarlyReturn(ctx: StageContext): UnifiedPipelineResult | undefined 
  * ROADMAP 2.1086 — the bounded auto-retry entry point.
  *
  * ONE pipeline attempt for every caller and every outcome EXCEPT the
- * post-enforcement fail-closed 422 (`isEnforcementBlockedResult` — the
- * producer's own signature, shared constants with the emitter in
- * graph-enforcement.ts). That failure class is self-declared stochastic
- * model topology (`retryable: true` at the gate), completes far inside the
- * request budget (17–28s observed vs a 120s envelope), and recovered 3/5 on
- * a same-brief retry (BASELINE.md, draft-reliability-2026-08-12) — so the
- * server spends the retry the user would otherwise be asked to click.
+ * self-declared-stochastic draft failure classes named by
+ * `classifyRetryableDraftFailure` — each recognised by its OWN producer's
+ * signature, with the constants shared with that producer's emitter:
+ *
+ *   - `post_enforcement`  — the fail-closed 422 from graph-enforcement.ts.
+ *     Stochastic model TOPOLOGY (`retryable: true` at the gate), completes in
+ *     17–28s against a 120s envelope, recovered 3/5 on a same-brief retry
+ *     (BASELINE.md, draft-reliability-2026-08-12).
+ *   - `options_identical` — the fail-fast 400 from options-identical-bypass.ts.
+ *     Stochastic model SAMPLING: the draft emits two options with the same
+ *     intervention signature, so there is nothing to compare. Also
+ *     `retryable: true` at the gate, and its own single-attempt copy already
+ *     tells the user "this often clears on a retry". ADDED 2026-08-20 — it had
+ *     been outside this seam because the trigger was scoped to the 422's
+ *     `last_phase`, so the server asked the user to spend a retry it was
+ *     funded to spend itself, and a first-time user got HTTP 500 and no model.
+ *     Same-brief evidence at the frozen deployed build (UI 2b6ec553 · CEE
+ *     19a60fd · PLoT fb63b03 · ISL 28fe0c9): brief `09-nested-subdecision`
+ *     drafted cleanly on 2 of 4 draws and 500'd on the other 2, at 27.0s and
+ *     31.0s elapsed — windows of 83s and 79s against a 55s floor, unspent.
+ *     (canonical-ready-rate-2026-08-20; earlier live run 2/5, ROADMAP 2.53.)
+ *
+ * ⚠ The retry is a re-draft, NOT a suppression: the validator still runs on
+ * attempt 2 and a second degenerate draft still fails closed. Nothing here
+ * lets an unrepaired graph through.
  *
  * Guarantees, each pinned in
  * tests/unit/cee.unified-pipeline.enforcement-auto-retry.test.ts:
- *  - EXACTLY one retry, only on that class, never on thrown errors;
+ *  - EXACTLY one retry, only on those classes, never on thrown errors;
  *  - byte-identical input (same object; `ctx.input` is readonly and the
  *    pipeline never writes it — asserted at the parse seam);
  *  - attempt 2 measures elapsed time from the ORIGINAL request start
@@ -644,10 +665,10 @@ function drainEarlyReturn(ctx: StageContext): UnifiedPipelineResult | undefined 
  *    attempt 1's spend — the composition cannot exceed
  *    DRAFT_REQUEST_BUDGET_MS by construction;
  *  - the retry is funded only when the remaining window fits a healthy
- *    draft (`decideEnforcementAutoRetry`), and a skip is telemetry-visible;
- *  - a second identical failure ships the honest exhausted copy
- *    (`applyEnforcementRetryExhaustedCopy`) instead of the now-stale
- *    "usually succeeds" hint.
+ *    draft (`decideDraftAutoRetry`), and a skip is telemetry-visible;
+ *  - a second failure ships the honest exhausted copy for the class the
+ *    SECOND attempt landed in (`applyRetryExhaustedCopy`) instead of the
+ *    now-stale "usually succeeds" / "often clears on a retry" hint.
  */
 export async function runUnifiedPipeline(
   input: DraftInputWithCeeExtras,
@@ -666,17 +687,20 @@ export async function runUnifiedPipeline(
   const first = await runUnifiedPipelineAttempt(input, rawBody, request, opts);
 
   const elapsedMs = Date.now() - retryBaselineMs;
-  const decision = decideEnforcementAutoRetry(first, elapsedMs);
+  const decision = decideDraftAutoRetry(first, elapsedMs);
   if (!decision.retry) {
     if (decision.reason === "budget_unaffordable") {
       log.warn({
         event: TelemetryEvents.CeeEnforcementAutoRetrySkipped,
         request_id: getRequestId(request),
+        // The class that WOULD have been retried — the skip is only reachable
+        // when the classifier already matched.
+        retry_class: classifyRetryableDraftFailure(first),
         auto_retry_skip_reason: decision.reason,
         elapsed_ms: elapsedMs,
         retry_budget_ms: decision.retryBudgetMs,
         min_retry_budget_ms: MIN_DRAFT_RETRY_BUDGET_MS,
-      }, "Post-enforcement draft failure is retryable but the remaining request budget cannot fund a fresh draft — returning the single-attempt failure");
+      }, "A retryable draft failure cannot be funded from the remaining request budget — returning the single-attempt failure");
     }
     return first;
   }
@@ -685,13 +709,21 @@ export async function runUnifiedPipeline(
   log.info({
     event: TelemetryEvents.CeeEnforcementAutoRetry,
     request_id: getRequestId(request),
+    // ⚠ THE EVENT NAME SAYS "Enforcement" AND THE SEAM NOW COVERS TWO CLASSES.
+    // `retry_class` is the discriminator — filter on it, never on the event
+    // name alone. The names live in `src/utils/telemetry.ts`, which is held by
+    // two banked PRs (#1042, #1051) at the time of writing, so renaming them
+    // here would collide; rowed for the rename once those land.
+    retry_class: decision.retryClass,
     attempt: 2,
     elapsed_ms: elapsedMs,
     retry_budget_ms: decision.retryBudgetMs,
     // Fixed validator enum strings (the codes-only mirror, ROADMAP 2.718) —
     // no user content.
     first_attempt_validation_error_codes: firstDetails.validation_error_codes,
-  }, "Post-enforcement draft validation failed on stochastic topology — funding ONE automatic retry with byte-identical input");
+    // OPTIONS_IDENTICAL diagnostic — a fixed validator enum, no user content.
+    first_attempt_violation_code: firstDetails.violation_code,
+  }, "Draft failed on a self-declared-stochastic class — funding ONE automatic retry with byte-identical input");
 
   // Byte-identical input and rawBody (same objects — the pipeline treats
   // both as readonly); requestStartMs pinned so attempt 2's budget
@@ -701,14 +733,23 @@ export async function runUnifiedPipeline(
     requestStartMs: retryBaselineMs,
   });
 
-  if (isEnforcementBlockedResult(second)) {
+  // The SECOND attempt is classified independently — it may fail in a
+  // DIFFERENT class than the first (a re-draft that fixes the identical
+  // options can still fail post-enforcement, and vice versa). Keying the
+  // exhausted copy off `decision.retryClass` would then describe the wrong
+  // defect to the user, which is the exact failure the per-class copy table
+  // exists to prevent.
+  const secondClass = classifyRetryableDraftFailure(second);
+  if (secondClass !== null) {
     log.warn({
       event: TelemetryEvents.CeeEnforcementAutoRetryExhausted,
       request_id: getRequestId(request),
+      retry_class: secondClass,
+      first_attempt_retry_class: decision.retryClass,
       attempt: 2,
       elapsed_ms: Date.now() - retryBaselineMs,
-    }, "The automatic retry hit the post-enforcement gate again — returning the typed failure with honest exhausted copy");
-    return applyEnforcementRetryExhaustedCopy(second);
+    }, "The automatic retry hit a retryable draft-failure gate again — returning the typed failure with honest exhausted copy");
+    return applyRetryExhaustedCopy(second, secondClass);
   }
   return second;
 }

@@ -20,8 +20,9 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  decideEnforcementAutoRetry,
-  applyEnforcementRetryExhaustedCopy,
+  decideDraftAutoRetry,
+  applyRetryExhaustedCopy,
+  classifyRetryableDraftFailure,
 } from "../draft-auto-retry.js";
 import {
   isEnforcementBlockedResult,
@@ -81,11 +82,12 @@ describe("isEnforcementBlockedResult — the trigger recognises exactly the prod
   });
 });
 
-describe("decideEnforcementAutoRetry — budget gate derived from the draft path's own primitives", () => {
+describe("decideDraftAutoRetry — budget gate derived from the draft path's own primitives", () => {
   it("funds the retry at the BASELINE worst case (28.3s elapsed)", () => {
-    const d = decideEnforcementAutoRetry(blockedResult(), 28_300);
+    const d = decideDraftAutoRetry(blockedResult(), 28_300);
     expect(d.retry).toBe(true);
     if (d.retry) {
+      expect(d.retryClass).toBe("post_enforcement");
       expect(d.retryBudgetMs).toBe(getDraftLlmRetryBudgetMs(28_300));
       expect(d.retryBudgetMs).toBeGreaterThanOrEqual(MIN_DRAFT_RETRY_BUDGET_MS);
     }
@@ -98,26 +100,31 @@ describe("decideEnforcementAutoRetry — budget gate derived from the draft path
     while (getDraftLlmRetryBudgetMs(boundary + 1_000) >= MIN_DRAFT_RETRY_BUDGET_MS) boundary += 1_000;
     while (getDraftLlmRetryBudgetMs(boundary + 1) >= MIN_DRAFT_RETRY_BUDGET_MS) boundary += 1;
     // At the boundary: still affordable.
-    expect(decideEnforcementAutoRetry(blockedResult(), boundary).retry).toBe(true);
+    expect(decideDraftAutoRetry(blockedResult(), boundary).retry).toBe(true);
     // One millisecond past it: refused, with the reason named.
-    const past = decideEnforcementAutoRetry(blockedResult(), boundary + 1);
+    const past = decideDraftAutoRetry(blockedResult(), boundary + 1);
     expect(past.retry).toBe(false);
     if (!past.retry) expect(past.reason).toBe("budget_unaffordable");
   });
 
-  it("a non-enforcement result is never retried, even with the whole budget remaining", () => {
-    const d = decideEnforcementAutoRetry(blockedResult({ lastPhase: "orchestrator_validation" }), 0);
+  it("a result in NEITHER retryable class is never retried, even with the whole budget remaining", () => {
+    // A 422 CEE_GRAPH_INVALID that is retryable but came from the
+    // orchestrator-validation emitter: not the post-enforcement signature, and
+    // it carries no `violation_code`, so not the OPTIONS_IDENTICAL one either.
+    const other = blockedResult({ lastPhase: "orchestrator_validation" });
+    expect(classifyRetryableDraftFailure(other as never)).toBeNull();
+    const d = decideDraftAutoRetry(other, 0);
     expect(d.retry).toBe(false);
-    if (!d.retry) expect(d.reason).toBe("not_enforcement_blocked");
+    if (!d.retry) expect(d.reason).toBe("not_retryable_class");
   });
 });
 
-describe("applyEnforcementRetryExhaustedCopy — honest copy after the server has already retried", () => {
+describe("applyRetryExhaustedCopy — honest copy after the server has already retried", () => {
   it("replaces the stale 'usually succeeds' claim, discloses the retry, and preserves the diagnostics", () => {
     const second = blockedResult();
     const before = JSON.stringify(second.body);
 
-    const adjusted = applyEnforcementRetryExhaustedCopy(second as never);
+    const adjusted = applyRetryExhaustedCopy(second as never, "post_enforcement");
     const body = adjusted.body as Record<string, any>;
 
     // Unchanged mechanics: still the same typed failure.
