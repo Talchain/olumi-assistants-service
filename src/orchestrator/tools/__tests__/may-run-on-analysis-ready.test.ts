@@ -34,6 +34,10 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { maximalOlumiResponse } from '@talchain/schemas/fixtures';
+
+import { attachComputedAt } from '../../../orchestrator-v5/compose/analysis-ready-emit.js';
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../analysis-ready-helper.js';
 
@@ -173,5 +177,59 @@ describe('analysis_ready.may_run — bound to the run path by identity', () => {
       ambiguous.length,
       'at least one status value must map to BOTH admission verdicts',
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('may_run reaches the WIRE, not just the payload object', () => {
+  /**
+   * ⭐ THIS IS THE GUARD THAT FAILS LOUD IF THE CONTRACT IS EVER TIGHTENED.
+   *
+   * `may_run` is additive: it is NOT declared in `@talchain/schemas` 0.48.0. It
+   * crosses only because `analysis_ready` is `.passthrough()` there. That is a
+   * real property of a real dependency, not an assumption — so it is asserted
+   * against the ACTUAL pinned schema. If a future contract makes
+   * `analysis_ready` strict, or the boundary starts stripping unknown keys, this
+   * REDs here rather than silently dropping the field on the wire, where the
+   * only symptom would be a Run chip quietly going missing again.
+   */
+  it('survives attachComputedAt AND the pinned boundary schema', () => {
+    const graph = withUnconfiguredOptions(optionIds().slice(0, 1));
+    const payload = buildCanonicalAnalysisReadyFromGraph(graph);
+    expect(payload).toBeDefined();
+
+    // PRECONDITION: the arm is the disagreement case, so this is not a test
+    // about an already-ready model.
+    expect(payload!.status).not.toBe('ready');
+    expect(mayRunOf(payload)).toBe(true);
+
+    // Hop 1 — the finaliser's stamp must not drop it.
+    const stamped = attachComputedAt(payload!);
+    expect(mayRunOf(stamped), 'attachComputedAt must preserve additive fields').toBe(true);
+
+    // Hop 2 — the PINNED boundary contract must accept AND preserve it.
+    // Base on the CONTRACT'S OWN maximal fixture so the envelope is valid by
+    // construction and the only thing under test is the added field.
+    const parsed = OlumiResponseSchema.safeParse({
+      ...structuredClone(maximalOlumiResponse),
+      analysis_ready: stamped,
+    });
+
+    // POSITIVE CONTROL: prove the probe can see a success at all before reading
+    // anything into one. A schema error here is about the envelope, not may_run.
+    expect(parsed.success, 'CONTROL: the envelope itself must be valid').toBe(true);
+    if (!parsed.success) return;
+
+    const wire = (parsed.data as { analysis_ready?: { may_run?: unknown } }).analysis_ready;
+    expect(wire?.may_run, 'may_run must survive the boundary schema').toBe(true);
+  });
+
+  it('NEGATIVE CONTROL — the boundary schema really does reject something', () => {
+    // Without this, the assertion above could pass against a schema that
+    // validates anything, which would make it evidence about nothing.
+    const bad = OlumiResponseSchema.safeParse({
+      ...structuredClone(maximalOlumiResponse),
+      may_run: true,
+    });
+    expect(bad.success, 'an unknown TOP-LEVEL key must still be rejected').toBe(false);
   });
 });
