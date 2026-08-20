@@ -65,34 +65,81 @@ const MAX_RENDERED_CHIPS = 3;
  * at a control that may not be on screen. `run_analysis` is in the client's
  * dispatch vocabulary already, so this chip routes deterministically.
  *
- * ⚠⚠ HALF OF THIS IS DARK TODAY, AND THE HONEST SCOPE IS NARROW.
+ * THE SECOND BRANCH WAS DARK, AND IS NOW CLOSED (2026-08-20, CEE #1064 + UI #809).
  *
- * The client gates `run_analysis` chips on `ceeAnalysisReady.status === 'ready'`
- * (`SuggestedChips.tsx`, `READINESS_GATED_ACTIONS`). So:
+ * The client USED TO gate `run_analysis` chips on
+ * `ceeAnalysisReady.status === 'ready'` (`SuggestedChips.tsx`,
+ * `READINESS_GATED_ACTIONS`). So:
  *
  *   - `readiness_ready` branch  → status IS 'ready'          → chip RENDERS.
  *   - `readiness_open` + `willProceed` → status is
- *     'needs_user_input' (exclusion carries the run)         → chip is FILTERED.
+ *     'needs_user_input' (exclusion carries the run)         → chip was FILTERED.
  *
  * That second case is the interesting one — the turn where the loop says
  * "there is already enough here to run" — and it is trap 21's shape: the client
- * gates on "is the model fully configured?" while the chip's correctness rests
+ * gated on "is the model fully configured?" while the chip's correctness rests
  * on "will a run actually proceed?". Two authorities, two different questions.
+ * The diagnosis above is exactly right and is why the fix took the shape it did.
  *
- * CEE ALREADY PUBLISHES THE RIGHT SIGNAL: `may_run: admission.willProceed`
- * (`cee/graph-readiness/canonical-readiness.ts`), whose own docblock says it is
- * declared so "a consumer's gate is written for it from the start rather than
- * retrofitted". ⚠ But `may_run` is ABSENT from the vendored contract 0.48.0
- * (measured with four contrast controls firing at 5/6/8/9 files while `may_run`,
- * `options_ready`, `scaffold_plan` and `waived_by_exclusion` all read zero), so
- * it does not survive to the client. Closing this needs a schema change plus one
- * line in the client gate — a THIRD repo, deliberately out of this lane's scope.
+ * ⚠⚠ BUT THE MECHANISM THIS BLOCK ORIGINALLY GAVE FOR THE DARKNESS WAS WRONG,
+ * AND THE WRONG REASON IS THE THING THAT OUTLIVES A FIX. Corrected here at the
+ * bytes rather than deleted, because the MEASUREMENT was right and only the
+ * INFERENCE from it was not.
  *
- * The chip is emitted anyway: it is correct, it renders today in the ready
- * branch, a filtered chip is ABSENT rather than broken, and it lights up the
- * moment the contract carries `may_run`. The prose above it states the run
- * state as a FACT and never instructs the user to click anything, so it stays
- * true in both postures.
+ * What this block measured, and measured correctly: `may_run` is ABSENT from the
+ * vendored contract 0.48.0 (four contrast controls firing at 5/6/8/9 files while
+ * `may_run`, `options_ready`, `scaffold_plan` and `waived_by_exclusion` all read
+ * zero). Independently reproduced: 0 hits against a contrast control of 8.
+ *
+ * What it then inferred, and this is the false step:
+ *     "absent from the contract ⇒ it does not survive to the client".
+ *
+ * ⭐ ABSENCE FROM A SCHEMA'S DECLARED SHAPE IS NOT ABSENCE FROM THE WIRE.
+ * `analysis_ready` is `.passthrough()` — at the CEE schema
+ * (`src/schemas/analysis-ready.ts`) and at the boundary (`@talchain/schemas`
+ * 0.48.0 `OlumiResponseSchema`) — so an UNDECLARED key inside it crosses INTACT.
+ * Proven by executing the pinned 0.48.0 schema, both controls green: the
+ * package's own maximal fixture parses (positive), a malformed `status` is
+ * rejected (negative), and `may_run` survives `safeParse` for `true`, `false`
+ * and `'unknown'`. The contract's own fixture already carries a
+ * `FIXTURE_passthrough_probe` inside `analysis_ready`, and `blocked_reason`
+ * above set the same precedent.
+ *
+ * ⚠ THE CARRIER IS LOAD-BEARING: the PARENT `OlumiResponseSchema` IS `.strict()`.
+ * The same field at TOP LEVEL is rejected `unrecognized_keys`. So "inside
+ * `analysis_ready`" is not a stylistic choice — it is the whole reason no
+ * contract change was needed.
+ *
+ * SO WHAT WAS ACTUALLY MISSING WAS A PRODUCER, NOT A CONTRACT SLOT. The fix was
+ * TWO repos, not three: CEE emits `may_run` from
+ * `buildCanonicalAnalysisReadyFromGraph` (#1064) and the client widens its gate
+ * to `status === 'ready' || may_run === true` (#809). No schemas release, no
+ * hand re-vendor in either consumer, and no reader-first deploy ordering —
+ * each half is inert until the other lands, so deploy order is free.
+ *
+ * ⚠ TWO FURTHER CORRECTIONS WORTH INHERITING, both derived while closing this:
+ *
+ * 1. `may_run` IS TRI-STATE ON THE ROUTE, AND `=== true` IS THE WRONG GATE THERE.
+ *    `canonical-readiness.ts` declares `MayRun = true | false | 'unknown'`, and
+ *    its doctrine is `gate = may_run !== false`: a MISSING verdict means UNKNOWN
+ *    and must NOT object, because failing closed bricks the Run control for a
+ *    healthy user whose only problem is that a side-car is down. On the TURN
+ *    PAYLOAD there is no such transport case — CEE holds the graph — so it is a
+ *    plain boolean there and ABSENCE is the "producer did not say" signal, which
+ *    is why the client's strict `=== true` is correct on that surface and would
+ *    be wrong on the route. Same name, same predicate, different carrier.
+ *
+ * 2. THE CHIP AND THE RUN BUTTON ARE INDEPENDENT SURFACES READING DIFFERENT
+ *    AUTHORITIES. This chip is gated by `SuggestedChips.tsx` off the turn
+ *    envelope's `analysis_ready`; the canvas Run BUTTON is gated by
+ *    `canRunAnalysis.ts` off the `/assist/v1/graph-readiness` ROUTE
+ *    (`can_run_analysis || scaffold_plan.will_scaffold_options`). #1064/#809
+ *    reached the CHIP ONLY. Do not assume a change to one moves the other, and
+ *    do not read a witness of one as evidence about the other.
+ *
+ * The prose above the chip states the run state as a FACT and never instructs
+ * the user to click anything, so it stayed true while the chip was filtered and
+ * stays true now that it renders.
  */
 const RUN_ANALYSIS_CHIP = {
   id: 'chip_readiness_run_analysis',
