@@ -363,6 +363,7 @@ describe('the pair set is read from ONE owner, in both of its spellings', () => 
           },
         ],
       },
+      chipOriginated: false,
     });
     expect(byType?.pairs).toHaveLength(1);
   });
@@ -384,6 +385,7 @@ describe('the pair set is read from ONE owner, in both of its spellings', () => 
           },
         ],
       },
+      chipOriginated: false,
     });
     expect(hit).toBeNull();
   });
@@ -414,6 +416,7 @@ describe('AMBIGUITY IS THE PRODUCT — two outstanding options on one factor are
           },
         ],
       },
+      chipOriginated: false,
     });
     expect(hit?.pairs.map((p) => p.optionId)).toEqual([OPT_ENTERPRISE, OPT_ACQUIRE]);
   });
