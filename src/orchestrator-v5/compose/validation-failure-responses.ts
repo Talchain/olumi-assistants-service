@@ -864,6 +864,42 @@ function composeOutstandingEffectAskMisroute(
   };
 }
 
+/**
+ * ⭐⭐ THE OFFER IS GONE, SO SAY SO — never guess at what it was.
+ *
+ * The demotion chips carry copy that is CONTENT-FREE BY DESIGN ("Set that value
+ * in my model."). While the offer is live that is harmless: the pending carries
+ * the actual patch and the resume executes IT, not the sentence. Once the offer
+ * is gone the sentence is all that is left, and it says nothing — so anything
+ * built from it is reconstructed from conversation history. Measured at
+ * `1647d99b` from a real round trip: the factor's own value moved 0.5 → 0.8
+ * under the receipt *"Updated Sales Headcount - Hybrid Maintained from 0.5 to
+ * 0.8."* — a confident sentence about a number the user never asked for.
+ *
+ * ⭐ THE VOCABULARY IS THE ESTATE'S OWN, NOT A NEW ONE. `turn-executor.ts`'s
+ * what_would_flip no-pending recovery already says *"no longer available"* for
+ * exactly this state. Same words, so the product does not describe one
+ * situation two ways.
+ *
+ * ⚠ IT DECLINES; IT NEVER RE-DERIVES. Re-offering would mean rebuilding the
+ * proposal from history — the very act that produced the wrong write. The route
+ * onward is to ask, which costs one turn and cannot be wrong.
+ */
+function composeExpiredOfferReplay(): BranchResult {
+  return {
+    body: {
+      assistant_text:
+        `I haven't changed anything. That suggestion is no longer available — `
+        + `offers expire after a couple of turns, and on its own it doesn't say `
+        + `what to change, so acting on it now would mean guessing. Tell me what `
+        + `you'd like to change and I'll write it in.`,
+      suggested_actions: [fallbackPrompt('Tell me what to change')],
+    },
+    template_id: 'expired_offer_replay',
+    chip_type: 'text_prompt',
+  };
+}
+
 function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
   const details = error.details ?? {};
   // ⭐ The identity-bound refusal takes precedence when the guard supplied a
@@ -956,6 +992,7 @@ export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchCo
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
   PARAMETER_INVALID: (e, ctx) => composeParameterInvalid(e, ctx),
   OPTION_INTERVENTION_MISROUTE: (e) => composeOptionInterventionMisroute(e),
+  EXPIRED_OFFER_REPLAY: () => composeExpiredOfferReplay(),
   VALUE_UNIT_UNRESOLVED: (e) => composeValueUnitUnresolved(e),
 };
 

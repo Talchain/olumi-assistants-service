@@ -23,6 +23,8 @@ import {
   buildWarrantDemotion,
   proposalParamsToRecord,
   findSurvivingConstraint,
+  isProductMintedOfferCopy,
+  PRODUCT_MINTED_OFFER_MESSAGES,
 } from '../warrant-demotion.js';
 import { buildApplyProposedChangeProposal } from '../../routing/proposed-change-synthesis.js';
 import type { ProposalAction } from '../../routing/types.js';
@@ -243,5 +245,90 @@ describe('INV-2 — the residual-constraint rule (ROADMAP 2.659 rider)', () => {
   it('a non-constraint mutation never carries the disclosure', () => {
     const d = buildWarrantDemotion(setFactorValueAction(), [floor]);
     expect(d.ok && d.residualDisclosure).toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ THE RECOGNISER IS COMPLETE OVER THE PRODUCER — AND EXACT AGAINST EVERYTHING
+ * ELSE.
+ *
+ * Two guards, and CLAUDE.md trap 12d is explicit that neither substitutes for
+ * the other:
+ *
+ *   · the UNION assertion below is DERIVED — it runs the real
+ *     `buildWarrantDemotion` for every intent it can emit and asserts the
+ *     message it produced is recognised. That is what catches a fourth intent
+ *     being added, or the copy being edited, without the recogniser moving.
+ *     Deriving it from `CHIP_COPY` instead would be the recogniser agreeing
+ *     with itself;
+ *   · the MUST-NOT-MATCH corpus is HAND-WRITTEN, deliberately, because
+ *     derivation is structurally blind to a predicate that is too WIDE. These
+ *     are the sentences a user could plausibly type, including the near-misses
+ *     that would fire a substring or fuzzy match.
+ *
+ * The set is EXACT: it REDs if it GROWS (a real sentence starts being claimed)
+ * and if it SHRINKS (an emitted chip stops being recognised).
+ */
+describe('⭐⭐ isProductMintedOfferCopy — exactly the copy this module emits', () => {
+  const EMITTED_BY_THE_PRODUCER = [
+    addConstraintAction,
+    setFactorValueAction,
+    adjustEdgeStrengthAction,
+  ] as const;
+
+  it('⭐ DERIVED UNION — every message the demotion path can emit is recognised', () => {
+    // Not `CHIP_COPY.map(...)`: that would assert the constant against itself.
+    // These come out of the production builder, the same call the turn executor
+    // makes.
+    const emitted: string[] = [];
+    for (const build of EMITTED_BY_THE_PRODUCER) {
+      const result = buildWarrantDemotion(build(), []);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      emitted.push(result.proposal.message);
+      expect(isProductMintedOfferCopy(result.proposal.message)).toBe(true);
+    }
+    // POSITIVE CONTROL on the corpus itself (trap 13): three DISTINCT messages
+    // really were produced, so the loop above cannot have passed on one string
+    // three times.
+    expect(new Set(emitted).size).toBe(3);
+    // …and the recogniser's own published set is exactly what the producer emits
+    // — REDs if either side grows or shrinks.
+    expect([...PRODUCT_MINTED_OFFER_MESSAGES].sort()).toEqual(emitted.sort());
+  });
+
+  it('⭐ the copy really is content-free — the property that makes an exact match sound', () => {
+    for (const message of PRODUCT_MINTED_OFFER_MESSAGES) {
+      expect(message).not.toMatch(/\d/);
+    }
+  });
+
+  it.each([
+    ['a near-miss with one extra word', 'Set that value in my model please.'],
+    // ⚠ THESE TWO WERE ADDED AFTER A SURVIVING MUTANT, and they are the reason
+    // the corpus is hand-written rather than derived. Loosening the exact-set
+    // membership to SUBSTRING CONTAINMENT survived the whole battery, because
+    // every near-miss above differs from the copy INSIDE it — none of them
+    // CONTAINS it. A containment recogniser would claim both of these, and the
+    // first one is a NEGATION: the product would decline a sentence that means
+    // the opposite of the offer.
+    ['the copy contained in a negation', 'Please do not set that value in my model.'],
+    ['the copy contained in a longer instruction', 'Set that value in my model. Then run the analysis.'],
+    ['a prefix of the copy', 'Set that value'],
+    ['the copy embedded in a real instruction', 'Set that value in my model to 0.8.'],
+    ['an ordinary baseline edit', 'Set Sales Headcount to 0.8.'],
+    ['an effect-framed edit', "Set the option's effect on Sales Headcount to 0.8."],
+    ['a bare confirmation', 'yes'],
+    ['empty', ''],
+    ['whitespace only', '   '],
+  ])('MUST NOT MATCH — %s', (_name, message) => {
+    expect(isProductMintedOfferCopy(message)).toBe(false);
+  });
+
+  it('⭐ transport whitespace and case do not defeat it — one normalisation, both sides', () => {
+    // The failure this closes is the product not recognising a sentence it wrote
+    // itself because something re-wrapped it. It is NOT a licence to match
+    // loosely: the near-miss corpus above is what holds that line.
+    expect(isProductMintedOfferCopy('  set that value   in my model.  ')).toBe(true);
   });
 });

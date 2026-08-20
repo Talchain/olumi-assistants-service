@@ -261,6 +261,7 @@ import {
 } from './compose/proposed-change.js';
 import {
   buildWarrantDemotion,
+  isProductMintedOfferCopy,
   type PersistedConstraintRow,
 } from './compose/warrant-demotion.js';
 import {
@@ -8602,6 +8603,75 @@ export async function runTurnExecutor(
       // sharing a field.
       const turnIsChipOriginated =
         consumedPendingAction?.action.kind === 'apply_proposed_change';
+
+      // ⭐⭐ THE OTHER SIDE OF THAT GATE — AND THE ROUTE THE WITNESS ACTUALLY
+      // TOOK. The residual this block closes was stated in prose above and left
+      // open by #1067; it is reproduced here from a REAL round trip at
+      // `1647d99b`, not from an authored fixture:
+      //
+      //   pending PRESENT | refused       | 4d3256b4.value 0.5 -> 0.5
+      //   pending ABSENT  | *** WROTE *** | 4d3256b4.value 0.5 -> 0.8
+      //                     "Updated Sales Headcount - Hybrid Maintained from
+      //                      0.5 to 0.8."
+      //
+      // ⚠ AND THE MECHANISM IS **NOT** `isExpired`, WHICH IS WORTH STATING
+      // BECAUSE THE OBVIOUS READING IS WRONG. Measured: a WALL-EXPIRED pending
+      // that is still carried forward IS still resumed — the label-pick resume
+      // at :4684 filters `most_recent_pending_actions` on KIND ONLY (its local
+      // is named `liveProposals`, which is a misnomer), so it consumes the
+      // pending and the guard above fires correctly. The turn that WRITES is
+      // the one where the pending is ABSENT: carry-forward decrements
+      // `expires_at_turn_count` and DROPS the row at persistence, and
+      // `readMostRecentPendingActions` reads only the MOST RECENT turn
+      // (`supabase-store.ts:1745-1750`). So the operative bound is the TURN TTL
+      // via carry-forward, not the wall clock. Both are covered below, because
+      // the condition asked is neither — it is "was anything consumed at all?".
+      //
+      // ⭐ WHY THE CONDITION IS `consumedPendingAction === null` AND NOT
+      // `!turnIsChipOriginated`. A turn that resumed some OTHER pending kind
+      // did resume something, and declining it would be a false refusal. The
+      // honest question is whether this turn is standing on any offer at all.
+      //
+      // ⭐ WHY THE STRING IS ADMISSIBLE EVIDENCE HERE, WHEN `payload.source` IS
+      // NOT. `source` is a field someone ELSE fills in, and four CEE readers
+      // already misread it as provenance. This copy is one CEE MINTS ITSELF,
+      // recognised against the constants the producer emits (imported, never
+      // re-spelled — `compose/warrant-demotion.ts`). It cannot acquire a second
+      // spelling, and editing the copy moves the recogniser in the same commit.
+      //
+      // ⚠ THE ALTERNATIVE, NAMED AND REJECTED (so the next reader does not
+      // "fix" this back): carry the chip's identity and bind the resume by it.
+      // That is the better shape and it is NOT available from CEE alone — the
+      // wire has no chip id. `MessageTurnPayload` carries `source` and
+      // `chip.action_type` and nothing else identifying (schemas 0.48.0,
+      // `dist/boundary/turn-payload.d.ts:20-33`), so binding by identity needs a
+      // contract field AND a UI change, and would be dark until both halves
+      // ship. Recognising our own copy needs neither and closes the measured
+      // write today.
+      //
+      // ⚠ DIRECTION OF THE FAILURE MODE: a false positive costs one clarify
+      // turn on a sentence that carries no content anyway; a false negative
+      // writes a number the user never named and badges it "Applied". The
+      // handler set is DERIVED (`isProposedChangeActionType` — the same three
+      // mutations the demotion path can offer), never a hand-listed one.
+      const turnReplaysAnExpiredOffer =
+        consumedPendingAction === null
+        && isProductMintedOfferCopy(userMessageForTurn ?? '');
+      if (
+        validationResult.valid
+        && turnReplaysAnExpiredOffer
+        && isProposedChangeActionType(proposedHandlerId)
+      ) {
+        validationResult = {
+          valid: false,
+          error: {
+            code: 'EXPIRED_OFFER_REPLAY',
+            message:
+              'refused — this turn replays the product\'s own offer copy and no offer is live',
+            details: { handler_id: proposedHandlerId },
+          },
+        };
+      }
       const outstandingEffectAskOptionLabels = (): readonly string[] =>
         graphLookupForValidate
           ? graphLookupForValidate
