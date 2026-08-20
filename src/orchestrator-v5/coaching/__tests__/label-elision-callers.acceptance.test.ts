@@ -11,13 +11,37 @@
  * so at pristine this file collects, runs, and fails on the exact bytes a
  * user was shown.
  *
- * THE FOUR WITNESSED STRINGS (COMPOSED-JOURNEY-WITNESS-2026-08-18-B links
- * 2(c) and 4; each reproduced byte-for-byte by executing the pristine bodies
- * at `877affe2` before this spec was written):
+ * THE FOUR WITNESSED STRINGS — each reproduced byte-for-byte by executing the
+ * pristine bodies at `877affe2` before this spec was written.
+ *
+ * ⚠ CITATION CORRECTED 20 Aug 2026 — TWO DOCUMENTS, NOT ONE. This header
+ * attributed all four to `COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md`. Strings 2
+ * and 3 are not in that document: it has ZERO hits for `self-hosted`, `hold
+ * the line` and `cloud-only` (contrast control `double down` fires 7 times, so
+ * the sweep could see). They come from `UX-GATE-2026-08-18.md` — a different
+ * document, a different brief, a different journey.
+ *
+ * ⭐ WHY THIS MATTERED ENOUGH TO FIX: a citation to the WRONG document is
+ * worse than no citation. The next reader opens the named file, cannot find
+ * the claim, and concludes the claim was FABRICATED rather than mis-cited —
+ * so a correct finding gets discarded. Neither document is touched; only the
+ * pointer is.
+ *
  *   1. `double down on enterprise sales (higher`                       @40
+ *      → COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md, links 2(c) and 4
  *   2. `Several of our largest enterprise customers are asking for a self-hosted` @80
+ *      → UX-GATE-2026-08-18.md
  *   3. `hold the line on cloud-only for another`                       @40
+ *      → UX-GATE-2026-08-18.md
  *   4. `Configure double down on enterprise sales (higher…`            chip
+ *      → COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md, links 2(c) and 4
+ *
+ * ⚠ String 2 is ALSO the point at which this seam stopped being an elision
+ * problem. `UX-GATE-2026-08-18.md` diagnoses it in its own words — "a raw
+ * sentence lifted from the brief … a stated fact, not a goal" — and
+ * `deriveGoalObjectiveLabel` REFUSES to author an objective from it. The
+ * opener therefore quotes nothing at all now; see
+ * `goal-quotation-whole-or-none.test.ts`.
  * String 4 is the one PR #1038's corpus omits entirely, and it is the
  * counter-example to that PR's doc claim that every ellipsis-appending helper
  * is therefore innocent. An ellipsis does not close a bracket.
@@ -31,7 +55,11 @@ import {
 import type { GraphV3T } from '../../../orchestrator/types.js';
 
 // ---------------------------------------------------------------------------
-// The user's own words, verbatim from the 18 Aug composed-journey witness.
+// The user's own words, verbatim from the TWO 18 Aug witnesses named in the
+// header — the option labels and the chip from COMPOSED-JOURNEY-WITNESS-
+// 2026-08-18-B.md, the goal from UX-GATE-2026-08-18.md. (This line used to say
+// "the 18 Aug composed-journey witness", singular, which is the same
+// mis-attribution the header corrects.)
 // These are RECORDS of what a real brief produced. Append to them; never edit
 // them to keep a suite green.
 // ---------------------------------------------------------------------------
