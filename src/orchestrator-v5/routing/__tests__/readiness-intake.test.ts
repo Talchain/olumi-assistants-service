@@ -154,7 +154,7 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
 });
 
 describe('composeReadinessIntakeResponse — envelope invariants', () => {
-  it('every branch returns a well-formed response_version 2 envelope, no chips', () => {
+  it('every branch returns a well-formed response_version 2 envelope', () => {
     const graphs: Array<unknown | null> = [
       null,
       { nodes: [], edges: [] },
@@ -166,11 +166,55 @@ describe('composeReadinessIntakeResponse — envelope invariants', () => {
       const { response } = composeReadinessIntakeResponse(g, 'frame');
       expect(response.response_version).toBe(2);
       expect(Array.isArray(response.blocks)).toBe(true);
-      // No suggested_actions: a chip here would need a brief seed / pending —
-      // parity with the process-meta answer (no commit, scenario stays fresh).
-      expect(response.suggested_actions).toEqual([]);
+      expect(Array.isArray(response.suggested_actions)).toBe(true);
       expect(typeof response.assistant_text).toBe('string');
       expect(response.assistant_text.length).toBeGreaterThan(0);
+      for (const action of response.suggested_actions) {
+        expect(typeof action.id).toBe('string');
+        expect(action.label.length).toBeGreaterThan(0);
+        expect(action.message.length).toBeGreaterThan(0);
+      }
     }
+  });
+
+  /**
+   * ⭐ CHANGED DELIBERATELY, AT SOURCE (readiness answer loop, 2026-08-20).
+   *
+   * This assertion used to be a blanket `suggested_actions === []` for every
+   * branch, on the rationale: *"a chip here would need a brief seed / pending —
+   * parity with the process-meta answer (no commit, scenario stays fresh)."*
+   *
+   * That rationale is TRUE, and it is about the FRESH-CANVAS branch: with no
+   * committed scenario there is nothing for a chip to act on. It was never
+   * true of the POPULATED branches, which read a PERSISTED graph — and holding
+   * them to it is what left a typed `analysis_readiness` chip routing correctly
+   * into prose with no affordance at all.
+   *
+   * So the invariant is now bound BY OUTCOME rather than asserted flat. The
+   * fresh-canvas parity it was protecting is preserved exactly, and pinned
+   * here by name instead of incidentally.
+   */
+  it('chips appear only where a persisted graph makes them actionable', () => {
+    const byOutcome = (g: unknown | null) => composeReadinessIntakeResponse(g, 'frame');
+
+    // Fresh canvas — unchanged, and this is the case the old blanket
+    // assertion genuinely protected.
+    expect(byOutcome(null).outcome).toBe('fresh_canvas');
+    expect(byOutcome(null).response.suggested_actions).toEqual([]);
+    expect(byOutcome({ nodes: [], edges: [] }).response.suggested_actions).toEqual([]);
+
+    // Structural gap — not answerable with an effect value, so still chipless.
+    const noGoal = byOutcome({
+      nodes: [optionNode('opt_1', 'A'), optionNode('opt_2', 'B')],
+      edges: [],
+    });
+    expect(noGoal.outcome).toBe('goal_missing');
+    expect(noGoal.response.suggested_actions).toEqual([]);
+
+    // Ready — the copy says "run the analysis whenever you are ready" and now
+    // offers a way to do it.
+    const ready = byOutcome(readyGraph());
+    expect(ready.outcome).toBe('readiness_ready');
+    expect(ready.response.suggested_actions.some((a) => a.action_type === 'run_analysis')).toBe(true);
   });
 });
