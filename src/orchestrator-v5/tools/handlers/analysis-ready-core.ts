@@ -592,6 +592,39 @@ export function admittedVerdict(admission: RunAdmission): ReadinessResult {
 }
 
 /**
+ * ⭐ THE NAMED QUESTIONS BEHIND A REFUSAL — derived here because this module
+ * already owns `nextStep`, i.e. "what do I tell the user is outstanding".
+ *
+ * `nextStep` answers that question as a COUNT ("Review all 6 readiness issues
+ * together before analysis."). This answers it as the LIST. They are the same
+ * question at two grains, so they live together: a second module deriving the
+ * list would be a second authority on what is outstanding, which is the defect
+ * shape this file exists to remove.
+ *
+ * The content is not composed here and is never invented: every prompt is
+ * `repairProposal.unresolved_inputs[].prompt`, already minted by
+ * `requiredInputForIssue` from the issue's own message, and already carrying
+ * the option and factor the issue names. This function only SELECTS.
+ *
+ * ⚠ WITNESSED 2026-08-20: the refusal printed the count and discarded all six
+ * prompts, having just told the user (via the panel) to "ask in the chat what
+ * they need". CEE was holding the answer at the moment it said it could not
+ * break the blockers out by name.
+ */
+export function readinessQuestions(verdict: ReadinessResult): readonly string[] {
+  const inputs = verdict.repairProposal?.unresolved_inputs ?? [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const input of inputs) {
+    const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+    if (prompt.length === 0 || seen.has(prompt)) continue;
+    seen.add(prompt);
+    out.push(prompt);
+  }
+  return out;
+}
+
+/**
  * Thrown by the run_analysis snapshot reader when EP2 finds the persisted graph
  * `unrecoverable`. The run_analysis handler maps this to a typed `analysis_not_ready`
  * recoverable failure (a 200 with honest next-step copy + recovery chip) — NOT a
