@@ -114,20 +114,30 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
   });
 
   it('discloses truncation rather than silently dropping questions', () => {
-    const many = Array.from({ length: 9 }, (_, i) => `Choose the missing effect value for "opt ${i}" on "fac ${i}".`);
+    // ⚠ THE LABELS ARE DELIBERATELY DIGIT-FREE, and that is the whole test.
+    // My first version numbered them ("opt 3"), so the assertion that the
+    // withheld COUNT appears was satisfied by the digit inside a question that
+    // WAS shown — a guard agreeing with itself, and a mutant that deleted the
+    // disclosure line SURVIVED it. With word labels the only digit that can
+    // supply the count is the disclosure sentence itself.
+    const NAMES = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india'];
+    const many = NAMES.map((n) => `Choose the missing effect value for "opt ${n}" on "fac ${n}".`);
     const { response } = composeHandlerFailure(
-      build({ reason_code: 'MISSING_OPTION_VALUE', next_step: 'Review all 9 readiness issues together before analysis.',
+      build({ reason_code: 'MISSING_OPTION_VALUE', next_step: 'Review all nine readiness issues together before analysis.',
         readiness_questions: many }),
       CTX,
       'frame',
     );
     const shown = many.filter((q) => response.assistant_text.includes(q));
+    expect(shown.length).toBeGreaterThan(0);
     // Whatever the cap is, the response must ACCOUNT for every question it did
     // not print. A silent truncation is the dishonesty this estate bans.
-    if (shown.length < many.length) {
-      expect(response.assistant_text).toContain(String(many.length - shown.length));
-    }
-    expect(shown.length).toBeGreaterThan(0);
+    const withheld = many.length - shown.length;
+    expect(withheld).toBeGreaterThan(0);
+    expect(response.assistant_text).toContain(String(withheld));
+    // PRECONDITION pinned in-test: no SHOWN question may carry a digit, or the
+    // assertion above could pass without any disclosure at all.
+    for (const q of shown) expect(q).not.toMatch(/[0-9]/);
   });
 
   it('⭐ the recovery chip is TYPED, so it cannot be demoted by the election gate', () => {
