@@ -39,6 +39,49 @@ import { attemptOptionsIdenticalGracefulDedup } from "./options-identical-gracef
 
 const VIOLATION_CODE = "OPTIONS_IDENTICAL";
 
+// ---------------------------------------------------------------------------
+// The emission's own signature — exported BESIDE the emitter so the auto-retry
+// trigger binds to what this file ACTUALLY produces (trap 16: a fixture written
+// by the retry lane encodes that lane's model of the producer, not the
+// producer). Mirrors `graph-enforcement.ts`'s ENFORCEMENT_BLOCK_* constants +
+// `isEnforcementBlockedResult`, deliberately: two failure classes, one shared
+// pattern, each owned by the file that emits it.
+// ---------------------------------------------------------------------------
+
+/** Status code `ctx.earlyReturn` carries when this gate fires. */
+export const OPTIONS_IDENTICAL_BLOCK_STATUS_CODE = 400;
+
+/** CEE error code this gate emits. Shared with the post-enforcement gate — it
+ *  is `details.violation_code` that discriminates the two, not the code. */
+export const OPTIONS_IDENTICAL_BLOCK_ERROR_CODE = "CEE_GRAPH_INVALID" as const;
+
+/** The validator violation this gate fails fast on, mirrored into
+ *  `details.violation_code` by the emission below. */
+export const OPTIONS_IDENTICAL_VIOLATION_CODE = VIOLATION_CODE;
+
+/**
+ * True iff `result` is THIS gate's fail-fast emission.
+ *
+ * Binds by IDENTITY on four conjuncts — the status code, the error code, the
+ * producer's own `retryable` declaration, and `details.violation_code`. The
+ * last is the discriminator: the post-enforcement gate emits the same error
+ * code and also declares `retryable: true`, but carries `last_phase` and no
+ * `violation_code`. A predicate keyed on code alone would match both.
+ */
+export function isOptionsIdenticalBypassResult(
+  result: { statusCode: number; body: unknown } | undefined,
+): boolean {
+  if (!result || result.statusCode !== OPTIONS_IDENTICAL_BLOCK_STATUS_CODE) return false;
+  const body = result.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  if (b.code !== OPTIONS_IDENTICAL_BLOCK_ERROR_CODE) return false;
+  if (b.retryable !== true) return false;
+  const details = b.details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
+  return (details as Record<string, unknown>).violation_code === OPTIONS_IDENTICAL_VIOLATION_CODE;
+}
+
 interface OptionsIdenticalContext {
   readonly optionIds?: readonly string[];
   readonly signature?: string;
@@ -162,7 +205,7 @@ export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
   });
 
   ctx.earlyReturn = {
-    statusCode: 400,
+    statusCode: OPTIONS_IDENTICAL_BLOCK_STATUS_CODE,
     body: errorBody,
   };
   return true;

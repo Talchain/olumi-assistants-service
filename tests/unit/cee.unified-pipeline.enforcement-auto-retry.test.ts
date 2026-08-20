@@ -327,3 +327,193 @@ describe("2.1086 — bounded auto-retry on post-enforcement draft validation fai
     expect(result.statusCode).toBe(504);
   });
 });
+
+/**
+ * THE SECOND RETRYABLE CLASS — the OPTIONS_IDENTICAL fail-fast bypass.
+ *
+ * Witnessed 2026-08-20 on the frozen deployed build (canonical-ready-rate):
+ * brief `09-nested-subdecision` returned HTTP 500 with no model at all on 2 of
+ * 4 draws and drafted cleanly on the other 2, at 27.0s / 31.0s elapsed — a
+ * funded 83s / 79s window, unspent, because the trigger was scoped to the
+ * post-enforcement 422's `last_phase`.
+ *
+ * The producer-side signature agreement (that the trigger recognises what the
+ * real bypass actually emits, with a contrast control) is pinned separately in
+ * tests/unit/cee.options-identical-auto-retry-producer-agreement.test.ts. This
+ * block pins the WRAPPER behaviour: that the seam actually runs the second
+ * attempt, and what the user ends up with.
+ */
+describe("bounded auto-retry on the OPTIONS_IDENTICAL fail-fast bypass", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** The bypass's fail-fast body EXACTLY as options-identical-bypass.ts builds
+   *  it — same builder, same top-level fields, same mutated `details` keys. */
+  function optionsIdenticalBody() {
+    const body = buildCeeErrorResponse(
+      "CEE_GRAPH_INVALID",
+      "Options need at least one distinct value to compare",
+      {
+        requestId: "test-request-id",
+        reason: "options_identical_unrepairable_by_llm",
+        retryable: true,
+        recovery: {
+          suggestion:
+            "Your options came out looking identical, so there was nothing to compare — " +
+            "this often clears on a retry. If it happens again, give each option at least " +
+            "one value that differs from the others.",
+          hints: ["Retrying the same brief often produces distinct options"],
+        },
+      },
+    ) as Record<string, any>;
+    body.details = {
+      ...(body.details ?? {}),
+      violation_code: "OPTIONS_IDENTICAL",
+      // The witnessed ids from the r4 draw.
+      identical_option_ids: ["7cb3711f", "dfeedc48"],
+      intervention_signature: "8515fef",
+      repair_skip_reason: "options_identical_unrepairable_by_llm",
+    };
+    return body;
+  }
+
+  /** Repair fails fast with the bypass signature for the first
+   *  `blockedAttempts` calls, then succeeds. */
+  function wireBypass(blockedAttempts: number) {
+    let repairCalls = 0;
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = { nodes: [], edges: [], version: "1.2" };
+    });
+    (runStageRepair as any).mockImplementation(async (ctx: any) => {
+      repairCalls += 1;
+      if (repairCalls <= blockedAttempts) {
+        ctx.earlyReturn = { statusCode: 400, body: optionsIdenticalBody() };
+      }
+    });
+    (runStageBoundary as any).mockImplementation(async (ctx: any) => {
+      ctx.finalResponse = { graph: { nodes: [], edges: [] }, ok: true };
+    });
+  }
+
+  it("⭐ THE HEADLINE: a first-attempt collision now ends with the user holding a MODEL, not a 500", async () => {
+    wireBypass(1); // attempt 1 collides, attempt 2 drafts cleanly
+
+    const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, {
+      ...baseOpts,
+      requestStartMs: Date.now() - 27_000, // the witnessed r3 elapsed time
+    });
+
+    expect(runStageParse, "the collision must fund exactly one fresh draft").toHaveBeenCalledTimes(2);
+    expect(result.statusCode).toBe(200);
+    // No exhausted copy on a path that recovered.
+    expect((result.body as Record<string, any>)?.details?.auto_retry).toBeUndefined();
+  });
+
+  it("retries EXACTLY ONCE when both attempts collide, and ships copy that describes THIS defect", async () => {
+    wireBypass(Infinity);
+
+    const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, {
+      ...baseOpts,
+      requestStartMs: Date.now() - 31_000, // the witnessed r4 elapsed time
+    });
+
+    expect(runStageParse, "one bounded retry = exactly 2 pipeline attempts").toHaveBeenCalledTimes(2);
+    expect(result.statusCode).toBe(400);
+    const body = result.body as Record<string, any>;
+
+    // ⚠ THE VALIDATION STILL FIRES. The retry is a re-draft, never a
+    // suppression: a second degenerate draft still fails closed, with the
+    // diagnostics intact.
+    expect(body.code).toBe("CEE_GRAPH_INVALID");
+    expect(body.details.violation_code).toBe("OPTIONS_IDENTICAL");
+    expect(body.details.identical_option_ids).toEqual(["7cb3711f", "dfeedc48"]);
+    expect(body.details.repair_skip_reason).toBe("options_identical_unrepairable_by_llm");
+
+    // The wire-visible retry disclosure.
+    expect(body.details.auto_retry).toEqual({ attempted: true, attempts: 2 });
+
+    // Honest copy: the "often clears on a retry" lead is stale once the
+    // server has spent the retry.
+    const recoveryText = JSON.stringify(body.recovery).toLowerCase();
+    expect(recoveryText, "post-retry copy must not lead with 'clears on a retry'").not.toContain(
+      "this often clears on a retry",
+    );
+    expect(recoveryText).toMatch(/second draft|automatically/);
+    // And it must NOT borrow the post-enforcement class's copy, which
+    // describes a topology failure this class did not have.
+    expect(recoveryText, "must not describe the OTHER class's defect").not.toContain(
+      "unconnected to your goal",
+    );
+
+    // Telemetry discriminates the class (the event NAME still says
+    // "Enforcement" — filter on retry_class, not on the name).
+    const retryLaunch = (log.info as any).mock.calls.find(
+      (c: any[]) => c[0] && typeof c[0] === "object" && c[0].attempt === 2,
+    );
+    expect(retryLaunch, "retry launch telemetry must fire").toBeDefined();
+    expect(retryLaunch[0].retry_class).toBe("options_identical");
+  });
+
+  it("CROSS-CLASS — when attempt 2 fails in the OTHER class, the copy describes THAT class", async () => {
+    // The exhausted copy is keyed off the SECOND attempt's class, not the
+    // first's. A re-draft that fixes the identical options can still fail
+    // post-enforcement, and telling that user "your options came out with the
+    // same values twice" would describe a defect the final draft did not have.
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = { nodes: [], edges: [], version: "1.2" };
+    });
+    let repairCalls = 0;
+    (runStageRepair as any).mockImplementation(async (ctx: any) => {
+      repairCalls += 1;
+      ctx.earlyReturn =
+        repairCalls === 1
+          ? { statusCode: 400, body: optionsIdenticalBody() }
+          : { statusCode: 422, body: enforcementBlockedBody() };
+    });
+
+    const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, {
+      ...baseOpts,
+      requestStartMs: Date.now() - 27_000,
+    });
+
+    expect(runStageParse).toHaveBeenCalledTimes(2);
+    expect(result.statusCode, "the terminal failure is attempt 2's").toBe(422);
+    const recoveryText = JSON.stringify((result.body as Record<string, any>).recovery).toLowerCase();
+    expect(recoveryText, "copy must describe attempt 2's class").toContain("unconnected to your goal");
+    expect(recoveryText, "copy must NOT describe attempt 1's class").not.toContain("what separates");
+
+    // Telemetry keeps BOTH classes visible, so the transition is diagnosable.
+    const exhausted = (log.warn as any).mock.calls.find(
+      (c: any[]) => c[0] && typeof c[0] === "object" && c[0].retry_class !== undefined,
+    );
+    expect(exhausted[0].retry_class).toBe("post_enforcement");
+    expect(exhausted[0].first_attempt_retry_class).toBe("options_identical");
+  });
+
+  it("OPPOSITE-DIRECTION TWIN — a 400 CEE_GRAPH_INVALID with NO violation_code is never retried", async () => {
+    // trap 22b: widening the class to 'any retryable 400' would silently start
+    // re-drafting unrelated typed refusals. This case must stay green.
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = { nodes: [], edges: [], version: "1.2" };
+    });
+    (runStageRepair as any).mockImplementation(async (ctx: any) => {
+      ctx.earlyReturn = {
+        statusCode: 400,
+        body: buildCeeErrorResponse("CEE_GRAPH_INVALID", "Graph failed validation", {
+          retryable: true,
+          details: { validation_error_codes: ["NO_PATH_TO_GOAL"] },
+        }),
+      };
+    });
+
+    const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, {
+      ...baseOpts,
+      requestStartMs: Date.now() - 5_000,
+    });
+
+    expect(runStageParse, "a violation_code-less 400 must run exactly one attempt").toHaveBeenCalledTimes(1);
+    expect(result.statusCode).toBe(400);
+    expect((result.body as Record<string, any>).details?.auto_retry).toBeUndefined();
+  });
+});
