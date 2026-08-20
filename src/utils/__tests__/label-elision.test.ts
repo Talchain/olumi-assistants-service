@@ -334,6 +334,21 @@ describe('UX-GATE-4 — an elision never ends on a word that cannot end a phrase
     }
   });
 
+  it('folds case — a Title Case label dangles on "Another" exactly as a lowercase one does', () => {
+    /**
+     * Added because a mutant that DELETED the `.toLowerCase()` survived the
+     * first kit: every corpus label was lowercase, so the guard could not
+     * observe its own case-folding. Title Case is an ordinary way for a user
+     * to write an option name, so the survivor was a corpus gap rather than an
+     * equivalent mutant — demonstrated by execution before this case was
+     * written, not assumed.
+     */
+    expect(endsOnDanglingWord('Hold The Line On Cloud-Only For Another')).toBe(true);
+    expect(elideLabelAtWordBoundary('Hold The Line On Cloud-Only For Another Year', 40)).toBe(
+      'Hold The Line On Cloud-Only…',
+    );
+  });
+
   it('never lets the phrase preference breach the budget guarantee', () => {
     for (const max of [12, 20, 32, 40, 80]) {
       const out = elideLabelAtWordBoundary(WITNESS_LABEL_40, max);
