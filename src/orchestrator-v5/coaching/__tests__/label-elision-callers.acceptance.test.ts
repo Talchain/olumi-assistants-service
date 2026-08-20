@@ -11,13 +11,37 @@
  * so at pristine this file collects, runs, and fails on the exact bytes a
  * user was shown.
  *
- * THE FOUR WITNESSED STRINGS (COMPOSED-JOURNEY-WITNESS-2026-08-18-B links
- * 2(c) and 4; each reproduced byte-for-byte by executing the pristine bodies
- * at `877affe2` before this spec was written):
+ * THE FOUR WITNESSED STRINGS — each reproduced byte-for-byte by executing the
+ * pristine bodies at `877affe2` before this spec was written.
+ *
+ * ⚠ CITATION CORRECTED 20 Aug 2026 — TWO DOCUMENTS, NOT ONE. This header
+ * attributed all four to `COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md`. Strings 2
+ * and 3 are not in that document: it has ZERO hits for `self-hosted`, `hold
+ * the line` and `cloud-only` (contrast control `double down` fires 7 times, so
+ * the sweep could see). They come from `UX-GATE-2026-08-18.md` — a different
+ * document, a different brief, a different journey.
+ *
+ * ⭐ WHY THIS MATTERED ENOUGH TO FIX: a citation to the WRONG document is
+ * worse than no citation. The next reader opens the named file, cannot find
+ * the claim, and concludes the claim was FABRICATED rather than mis-cited —
+ * so a correct finding gets discarded. Neither document is touched; only the
+ * pointer is.
+ *
  *   1. `double down on enterprise sales (higher`                       @40
+ *      → COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md, links 2(c) and 4
  *   2. `Several of our largest enterprise customers are asking for a self-hosted` @80
+ *      → UX-GATE-2026-08-18.md
  *   3. `hold the line on cloud-only for another`                       @40
+ *      → UX-GATE-2026-08-18.md
  *   4. `Configure double down on enterprise sales (higher…`            chip
+ *      → COMPOSED-JOURNEY-WITNESS-2026-08-18-B.md, links 2(c) and 4
+ *
+ * ⚠ String 2 is ALSO the point at which this seam stopped being an elision
+ * problem. `UX-GATE-2026-08-18.md` diagnoses it in its own words — "a raw
+ * sentence lifted from the brief … a stated fact, not a goal" — and
+ * `deriveGoalObjectiveLabel` REFUSES to author an objective from it. The
+ * opener therefore quotes nothing at all now; see
+ * `goal-quotation-whole-or-none.test.ts`.
  * String 4 is the one PR #1038's corpus omits entirely, and it is the
  * counter-example to that PR's doc claim that every ellipsis-appending helper
  * is therefore innocent. An ellipsis does not close a bracket.
@@ -31,7 +55,11 @@ import {
 import type { GraphV3T } from '../../../orchestrator/types.js';
 
 // ---------------------------------------------------------------------------
-// The user's own words, verbatim from the 18 Aug composed-journey witness.
+// The user's own words, verbatim from the TWO 18 Aug witnesses named in the
+// header — the option labels and the chip from COMPOSED-JOURNEY-WITNESS-
+// 2026-08-18-B.md, the goal from UX-GATE-2026-08-18.md. (This line used to say
+// "the 18 Aug composed-journey witness", singular, which is the same
+// mis-attribution the header corrects.)
 // These are RECORDS of what a real brief produced. Append to them; never edit
 // them to keep a suite green.
 // ---------------------------------------------------------------------------
@@ -184,17 +212,54 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
     expect(lines.join('\n')).not.toContain('hold the line on cloud-only for another…');
   });
 
-  it('elides the 90-char goal in the confirm sentence with an ellipsis, inside the 80-char goal cap', () => {
+  it('does NOT quote the 90-char goal at all — a fragment cannot keep the quotation mark\'s promise', () => {
+    /**
+     * ⚠ EXPECTATION SUPERSEDED BY UX-GATE-4 (20 Aug 2026), not weakened.
+     *
+     * N26 pinned the elided quotation
+     * `"…are asking for a self-hosted…"`, which is an HONEST elision and all
+     * N26 claimed. The UX gate then ruled the SENTENCE defective rather than
+     * the cut: quotation marks promise "these are your words", and a fragment
+     * cannot keep that promise.
+     *
+     * ⛔ The elider is NOT changed — extending it was run and refused
+     * (`label-elision.ts:215-232`). The suppression happens at THIS seam.
+     * Derived: every over-budget goal label in the frozen governed corpus is
+     * one `deriveGoalObjectiveLabel` REFUSED to author, so there is no
+     * objective to announce. See `goal-quotation-whole-or-none.test.ts`.
+     *
+     * Both superseded strings are kept below as NEGATIVE pins rather than
+     * deleted, so this test REDs if either cut ever comes back.
+     */
     const lines = narrativeLines([
       { id: GOAL_ID, kind: 'goal', label: USER_GOAL_90 },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
 
-    const elidedGoal =
+    expect(lines[0]).toBe("I've built a first decision model from your brief.");
+
+    // The N26-era elided quotation is now itself a defect: pin it unreachable.
+    const n26ElidedGoal =
       'Several of our largest enterprise customers are asking for a self-hosted…';
-    expect(lines[0]).toBe(`I've built a first decision model for "${elidedGoal}".`);
-    expect(elidedGoal.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
+    expect(lines[0]).not.toContain(n26ElidedGoal);
+    // And the pristine, unmarked cut stays unreachable too.
     expect(lines[0]).not.toContain(`"${WITNESSED_2}"`);
+    expect(lines[0]).not.toContain(WITNESSED_2);
+    // No quotation mark at all on this opener — there is nothing to quote.
+    expect(lines[0]).not.toContain('"');
+  });
+
+  it('OPPOSITE DIRECTION — a goal INSIDE the cap is still quoted verbatim, with no marker', () => {
+    // The rule must not creep inward: suppression fires only where a whole
+    // quotation is impossible.
+    const fittingGoal = 'Several of our largest enterprise customers want self-hosting';
+    expect(fittingGoal.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
+    const lines = narrativeLines([
+      { id: GOAL_ID, kind: 'goal', label: fittingGoal },
+      { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
+    ]);
+    expect(lines[0]).toBe(`I've built a first decision model for "${fittingGoal}".`);
+    expect(lines[0]).not.toContain('…');
   });
 
   it('leaves a label that already fits completely untouched — no marker when nothing was cut', () => {
@@ -248,12 +313,21 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
     expect(UNBREAKABLE_LABEL_76_ELIDED.length).toBeLessThanOrEqual(MAX_LABEL_CHARS);
     expect(UNBREAKABLE_LABEL_76_ELIDED.endsWith('…')).toBe(true);
 
-    // Goal-cap twin, same class, at MAX_GOAL_CHARS — exact confirm sentence.
-    expect(lines[0]).toBe(
-      `I've built a first decision model for "${UNBREAKABLE_GOAL_94_ELIDED}".`,
-    );
-    expect(UNBREAKABLE_GOAL_94_ELIDED.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
+    // Goal-cap twin, same class — UX-GATE-4: the OPENER suppresses rather than
+    // quoting a fragment, so the goal half of this case moves to the fallback.
+    // The elider's own last-resort branch is unchanged and still pinned, at
+    // `label-elision.test.ts` and by the elision assertion below.
+    expect(lines[0]).toBe("I've built a first decision model from your brief.");
     expect(lines[0]).not.toContain(UNBREAKABLE_GOAL_94);
+    expect(lines[0]).not.toContain(UNBREAKABLE_GOAL_94_ELIDED);
+
+    // ⚠ The matching POSITIVE pin — that the elider still produces
+    // `UNBREAKABLE_GOAL_94_ELIDED` for this input, so the suppression is a
+    // SEAM change and not a silent edit to the module — deliberately lives in
+    // `goal-quotation-whole-or-none.test.ts`, which may import the elider.
+    // This file must not (see the header): importing it would make the file
+    // fail to COLLECT at a pristine tip, which is not a behavioural red.
+    expect(UNBREAKABLE_GOAL_94_ELIDED.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
 
     // Both are still honest prefixes of what the user wrote.
     expect(UNBREAKABLE_LABEL_76.startsWith(UNBREAKABLE_LABEL_76_ELIDED.slice(0, -1))).toBe(true);
@@ -384,15 +458,39 @@ describe('N26 — prefix relation controls (both directions)', () => {
     }
   });
 
-  it('the PRODUCT confirm sentence passes the oracle for the 90-char goal', () => {
+  it('the PRODUCT confirm sentence quotes a WHOLE goal, and the oracle is not consulted because nothing was elided', () => {
+    /**
+     * ⚠ RE-AIMED BY UX-GATE-4 (20 Aug 2026). This case used to assert that the
+     * 90-char goal's quotation was an HONEST elision. It was — and the gate
+     * ruled the sentence defective anyway, because quotation marks promise
+     * "these are your words" and no fragment can keep that promise. The opener
+     * now quotes whole or not at all, so the oracle's job here changes from
+     * "was the elision honest?" to "is the quoted span the goal, entire?".
+     *
+     * The oracle itself is UNCHANGED and still load-bearing for the OPTION
+     * bullets in the case above, which do still elide at 40.
+     */
+    const fittingGoal = 'Several of our largest enterprise customers want self-hosting';
+    expect(fittingGoal.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: USER_GOAL_90 },
+      { id: GOAL_ID, kind: 'goal', label: fittingGoal },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
     const match = /^I've built a first decision model for "(.+)"\.$/.exec(lines[0] ?? '');
     expect(match, `confirm sentence not matched: ${JSON.stringify(lines[0])}`).not.toBeNull();
     const rendered = (match as RegExpExecArray)[1];
-    expect(rendered.length, 'rendered goal must be non-empty').toBeGreaterThan(0);
-    expect(isHonestElision(USER_GOAL_90, rendered)).toBe(true);
+    // Whole, not elided: identical to the label, and the oracle CONVICTS it as
+    // an elision precisely because there is no marker — the discrimination.
+    expect(rendered).toBe(fittingGoal);
+    expect(isHonestElision(fittingGoal, rendered)).toBe(false);
+  });
+
+  it('and the over-budget goal produces NO quotation for the oracle to judge', () => {
+    const lines = narrativeLines([
+      { id: GOAL_ID, kind: 'goal', label: USER_GOAL_90 },
+      { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
+    ]);
+    expect(/^I've built a first decision model for "(.+)"\.$/.exec(lines[0] ?? '')).toBeNull();
+    expect(lines[0]).toBe("I've built a first decision model from your brief.");
   });
 });

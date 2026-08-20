@@ -302,8 +302,45 @@ describe('non-string and degenerate inputs never throw', () => {
  */
 import { endsOnDanglingWord } from '../label-elision.js';
 
-const WITNESS_GOAL_80 =
+/**
+ * ⚠ RENAMED, NOT REWRITTEN — THIS CONSTANT WAS A FIXTURE WEARING A RECORD'S
+ * NAME (found 20 Aug 2026; the value is byte-unchanged).
+ *
+ * It was called `WITNESS_GOAL_80`, which claims witness status. It does not
+ * have it: its trailing `before they will renew` appears in NO witness and in
+ * no programme document (swept with a firing contrast control). The genuinely
+ * witnessed goal is {@link WITNESSED_GOAL_90} below.
+ *
+ * ⭐ WHY THE MISLABEL SURVIVED, AND WHY THE FIX IS ADDITIVE. The two strings
+ * ELIDE IDENTICALLY at 80 — both return
+ * `'…are asking for a self-hosted…'` — so nothing ever REDded, and no
+ * assertion in this file was ever wrong. Only the NAME was. The value is kept
+ * exactly as it was (deleting it would discard a working fixture and change
+ * what this suite exercises), the real record is added beside it, and neither
+ * is edited. A fixture presented as a witness is how a corpus stops being
+ * trustworthy, and the cost is paid by whoever next tries to trace the claim.
+ */
+const GOAL_80_ELISION_FIXTURE =
   'Several of our largest enterprise customers are asking for a self-hosted deployment option before they will renew';
+
+/**
+ * ⭐ THE ACTUAL WITNESSED GOAL LABEL, 90 characters, verbatim from
+ * `UX-GATE-2026-08-18.md` — which records it and diagnoses it in one breath:
+ *
+ *   "The drafted goal is a raw sentence lifted from the brief — 'Several of
+ *    our largest enterprise customers are asking for a self-hosted deployment
+ *    option' — which is a STATED FACT, NOT A GOAL."
+ *
+ * That sentence is the whole finding, and it is upstream of every cut this
+ * module makes: `deriveGoalObjectiveLabel` REFUSES to author an objective from
+ * it, so the verbatim survives as the label and reaches a display budget it was
+ * never shaped for. The seam-level consequence is owned by
+ * `orchestrator-v5/coaching/__tests__/goal-quotation-whole-or-none.test.ts`.
+ * APPEND-ONLY: this is a record of what a real brief produced.
+ */
+const WITNESSED_GOAL_90 =
+  'Several of our largest enterprise customers are asking for a self-hosted deployment option';
+
 const WITNESS_LABEL_40 = 'hold the line on cloud-only for another two quarters';
 
 describe('UX-GATE-4 — an elision never ends on a word that cannot end a phrase', () => {
@@ -383,13 +420,57 @@ describe('UX-GATE-4 — an elision never ends on a word that cannot end a phrase
      * This test pins the gap EXACTLY: it REDs if the limit is closed (so the
      * comment stops being true) and it REDs if the output degrades further.
      */
-    const out = elideLabelAtWordBoundary(WITNESS_GOAL_80, 80);
+    const out = elideLabelAtWordBoundary(GOAL_80_ELISION_FIXTURE, 80);
     expect(out).toBe('Several of our largest enterprise customers are asking for a self-hosted…');
     // The dangling-word rule is genuinely not firing here — not silently absent.
     expect(endsOnDanglingWord('Several of our largest enterprise customers are asking for a self-hosted')).toBe(false);
     // And the oscillating alternative is pinned as REJECTED by execution:
     expect(elideLabelAtWordBoundary('Defend and hold the line against the incumbent', 30)).toBe(
       'Defend and hold the line…',
+    );
+  });
+
+  it('the REAL witnessed goal elides identically to the fixture — which is why the mislabel never REDded', () => {
+    /**
+     * The claim that made the rename above safe, asserted rather than stated.
+     * The two strings are DIFFERENT (the fixture carries a 23-char tail no
+     * witness records) and their elisions at 80 are IDENTICAL, so every
+     * assertion this file ever made about the fixture was true of the record
+     * too — the name was the only thing that was wrong.
+     */
+    expect(WITNESSED_GOAL_90).toHaveLength(90);
+    expect(GOAL_80_ELISION_FIXTURE).toHaveLength(113);
+    expect(GOAL_80_ELISION_FIXTURE).not.toBe(WITNESSED_GOAL_90);
+    // The fixture is the record plus a tail — so it is a superset, not a variant.
+    expect(GOAL_80_ELISION_FIXTURE.startsWith(WITNESSED_GOAL_90)).toBe(true);
+
+    expect(elideLabelAtWordBoundary(WITNESSED_GOAL_90, 80)).toBe(
+      elideLabelAtWordBoundary(GOAL_80_ELISION_FIXTURE, 80),
+    );
+    expect(elideLabelAtWordBoundary(WITNESSED_GOAL_90, 80)).toBe(
+      'Several of our largest enterprise customers are asking for a self-hosted…',
+    );
+
+    /**
+     * ⚠ AND THE DISCRIMINATION, so the equality above is not a tautology.
+     * Identical output at 80 must be a property of THAT BUDGET, not of the two
+     * strings: where the tail is inside the budget they must diverge.
+     *
+     * ⭐ WHAT THIS CLAUSE ACTUALLY KILLS — DEMONSTRATED, NOT ASSERTED (the
+     * first version of this comment claimed the wrong thing, which is exactly
+     * the defect being corrected two constants above). A first draft said it
+     * guarded against "a stub that ignored its input". It does not: that stub
+     * (`return trimmed` always) is caught by the @80 EQUALITY, measured.
+     *
+     * The mutant this clause UNIQUELY kills is an input CLAMP —
+     * `label.trim().slice(0, 90)` — which collapses the fixture onto the
+     * record so the two become byte-identical at 100 while staying identical
+     * at 80. Measured against this file: that mutant leaves 27 of 28 tests
+     * GREEN and REDs only this one. Without this clause the clamp ships
+     * silently and the equality above starts holding for the wrong reason.
+     */
+    expect(elideLabelAtWordBoundary(WITNESSED_GOAL_90, 100)).not.toBe(
+      elideLabelAtWordBoundary(GOAL_80_ELISION_FIXTURE, 100),
     );
   });
 });
