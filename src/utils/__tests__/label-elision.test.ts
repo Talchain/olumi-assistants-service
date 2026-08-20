@@ -278,3 +278,103 @@ describe('non-string and degenerate inputs never throw', () => {
     expect(elideLabelAtWordBoundary(USER_OPTION_85, 40.5)).toBe(USER_OPTION_85);
   });
 });
+
+// ---------------------------------------------------------------------------
+// UX-GATE-4 — THE PHRASE BOUNDARY (the half of the 18 Aug prescription that
+// N26 did not land)
+// ---------------------------------------------------------------------------
+/**
+ * N26 made the cut ADMIT itself (one U+2026) and made it land on a WORD
+ * boundary. The UX gate re-witnessed the seam on 19 AND 20 August and found
+ * the remaining half open: a word boundary is not a PHRASE boundary, so the
+ * product still stops on a word that cannot end a phrase.
+ *
+ * Both strings below were reproduced BYTE-FOR-BYTE by executing the shipped
+ * `elideLabelAtWordBoundary` at staging `2b6ec553` / CEE `19a60fd` before this
+ * change — they are the witness, not an invention of this spec.
+ *
+ * ⭐ THESE ASSERTIONS ARE WRITTEN AGAINST THE SPEC, NOT THE FAILURE MODE.
+ * The property is "the retained text does not end on a word that cannot end a
+ * phrase", expressed through the module's own exported predicate so this file
+ * cannot mirror the rule wrong (platform trap 12). The exact-output pins are
+ * kept alongside because a predicate-only assertion would pass against an
+ * implementation that backed off to a stub.
+ */
+import { endsOnDanglingWord } from '../label-elision.js';
+
+const WITNESS_GOAL_80 =
+  'Several of our largest enterprise customers are asking for a self-hosted deployment option before they will renew';
+const WITNESS_LABEL_40 = 'hold the line on cloud-only for another two quarters';
+
+describe('UX-GATE-4 — an elision never ends on a word that cannot end a phrase', () => {
+  it('backs off a trailing DETERMINER and the preposition behind it (witnessed option label @40)', () => {
+    const out = elideLabelAtWordBoundary(WITNESS_LABEL_40, 40);
+    // The witnessed defect, pinned as the thing that must NOT come back.
+    expect(out).not.toBe('hold the line on cloud-only for another…');
+    expect(out).toBe('hold the line on cloud-only…');
+  });
+
+  it('rejects every dangling tail class: determiner, preposition, conjunction, auxiliary', () => {
+    const cases: Array<[string, number]> = [
+      ['hold the line on cloud-only for another two quarters', 40],
+      ['Reduce onboarding time for new enterprise customers', 32],
+      ['Migrate the billing platform to the cloud before the audit', 40],
+      ['Grow the mid-market segment and the enterprise segment', 36],
+      ['Decide whether the pricing model is worth defending now', 34],
+    ];
+    for (const [label, max] of cases) {
+      const out = elideLabelAtWordBoundary(label, max);
+      const retained = out.endsWith(LABEL_ELISION_MARKER)
+        ? out.slice(0, -LABEL_ELISION_MARKER.length)
+        : out;
+      expect(
+        endsOnDanglingWord(retained),
+        `elision of ${JSON.stringify(label)} @${max} ended on a dangling word: ${JSON.stringify(out)}`,
+      ).toBe(false);
+    }
+  });
+
+  it('never lets the phrase preference breach the budget guarantee', () => {
+    for (const max of [12, 20, 32, 40, 80]) {
+      const out = elideLabelAtWordBoundary(WITNESS_LABEL_40, max);
+      expect(out.length, `budget ${max} overrun by ${JSON.stringify(out)}`).toBeLessThanOrEqual(max);
+    }
+  });
+
+  it('leaves a label that ends on a CONTENT word untouched — the rule never deletes user words it need not', () => {
+    // Opposite-direction twin: the guard must not fire on a good cut.
+    const out = elideLabelAtWordBoundary('Invest in a major sales push into the NHS market', 40);
+    expect(out).toBe('Invest in a major sales push…');
+    expect(endsOnDanglingWord('Invest in a major sales push')).toBe(false);
+  });
+
+  it('KNOWN LIMIT, pinned by execution: a content-word tail left dangling by an EARLIER determiner is not detected', () => {
+    /**
+     * ⚠ THE WITNESSED GOAL STRING IS NOT FIXED BY THIS CHANGE, and that is a
+     * measured decision rather than an oversight.
+     *
+     * `"…are asking for a self-hosted"` ends on a CONTENT word. It reads broken
+     * only because the determiner `a` two tokens back has no noun — which needs
+     * a part-of-speech lexicon to know, because the identical shape
+     * `<determiner> <token>` is a perfectly good phrase ending in
+     * `"Defend and hold the line"`.
+     *
+     * The obvious next round (also reject a head whose second-to-last token is
+     * a determiner) was RUN BEFORE BEING COMMISSIONED, per platform trap 22f:
+     * it fixes this string and simultaneously breaks the legitimate one,
+     * turning `"Defend and hold the line…"` into `"Defend and hold…"`. That is
+     * an oscillation, not a fix, so it is deliberately NOT shipped.
+     *
+     * This test pins the gap EXACTLY: it REDs if the limit is closed (so the
+     * comment stops being true) and it REDs if the output degrades further.
+     */
+    const out = elideLabelAtWordBoundary(WITNESS_GOAL_80, 80);
+    expect(out).toBe('Several of our largest enterprise customers are asking for a self-hosted…');
+    // The dangling-word rule is genuinely not firing here — not silently absent.
+    expect(endsOnDanglingWord('Several of our largest enterprise customers are asking for a self-hosted')).toBe(false);
+    // And the oscillating alternative is pinned as REJECTED by execution:
+    expect(elideLabelAtWordBoundary('Defend and hold the line against the incumbent', 30)).toBe(
+      'Defend and hold the line…',
+    );
+  });
+});

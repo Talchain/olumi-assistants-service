@@ -161,11 +161,27 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
       { id: OPT_85_ID, kind: 'option', label: USER_OPTION_85 },
     ]);
 
-    const bullet = bulletFor(lines, 'hold the line on cloud-only for another…');
-    expect(bullet).toBe('• hold the line on cloud-only for another…');
+    /**
+     * ⚠ EXPECTATION UPDATED BY UX-GATE-4 (20 Aug 2026), not weakened.
+     *
+     * N26 pinned `"hold the line on cloud-only for another…"` — a cut that is
+     * honest about eliding and lands on a word boundary, which is all N26
+     * claimed. The UX gate then re-witnessed this exact string on 19 AND 20
+     * August and ruled it still defective: `another` is a determiner with no
+     * noun, so the cut is mid-PHRASE and the marker reads as a broken
+     * sentence. `utils/label-elision.ts` now rejects a head ending on a
+     * closed-class function word.
+     *
+     * The superseded expectation is kept below as a NEGATIVE pin rather than
+     * deleted, so this test REDs if the old cut ever comes back.
+     */
+    const bullet = bulletFor(lines, 'hold the line on cloud-only…');
+    expect(bullet).toBe('• hold the line on cloud-only…');
     // Whole output, marker included, fits the cap.
     expect((bullet as string).slice('• '.length).length).toBeLessThanOrEqual(MAX_LABEL_CHARS);
     expect(bulletFor(lines, WITNESSED_3)).toBeUndefined();
+    // The N26-era cut is now itself a defect: pin it as unreachable.
+    expect(lines.join('\n')).not.toContain('hold the line on cloud-only for another…');
   });
 
   it('elides the 90-char goal in the confirm sentence with an ellipsis, inside the 80-char goal cap', () => {
@@ -346,7 +362,10 @@ describe('N26 — prefix relation controls (both directions)', () => {
     const optionCases: ReadonlyArray<readonly [string, string]> = [
       [USER_OPTION_85, 'double down on enterprise sales…'],
       [USER_OPTION_101, 'invest heavily in a self-serve product…'],
-      [USER_OPTION_44, 'hold the line on cloud-only for another…'],
+      // UX-GATE-4: was `…for another…`; the trailing determiner is now backed
+      // off. The oracle below is unchanged and still passes, which is the
+      // point — the new cut is a prefix of the same source, only an honest one.
+      [USER_OPTION_44, 'hold the line on cloud-only…'],
     ];
     expect(optionCases.length, 'option corpus must be non-empty').toBe(3);
 
