@@ -117,3 +117,101 @@ export function isAutoInitiatedRunAnalysisFact(fact: HandlerFact): boolean {
     (provenance as Record<string, unknown>).initiated_by === AUTO_RUN_POST_DRAFT_INITIATOR
   );
 }
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE SECOND QUESTION — "HAS THE USER SEEN THIS RUN'S RESULT?"
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ⭐⭐ THIS IS NOT THE SAME QUESTION AS {@link isAutoInitiatedRunAnalysisFact},
+ * AND #1010 IS THE CHANGE THAT SEPARATES THEM (CLAUDE.md trap #21).
+ *
+ * Until this PR the two were COINCIDENT, and #1058 was right to decide delivery
+ * from the provenance stamp alone: an auto-initiated run's result reached no
+ * client at all, because the draft's SSE stream is already closed, the auto-run
+ * turn is server-initiated with no listener, and the scenario-graph read leg
+ * returned no analysis. "Auto-initiated" therefore entailed "never displayed".
+ *
+ * #1010 builds the delivery channel — `routes/scenario-graph-analysis-read.ts`
+ * makes the scenario read leg return the committed analysis. Once the channel's
+ * BOTH halves are live, an auto-initiated run's result IS on screen, the stamp
+ * still reads `auto_post_draft`, and a provenance-only reader would suppress the
+ * re-run acknowledgement — the product claiming a FIRST analysis on a genuine
+ * re-run. That is #1058's defect facing the other way.
+ *
+ * So the two questions are named apart HERE, at the one authority on run
+ * initiation, rather than by tightening the coaching predicate in place:
+ *
+ *   "was this run auto-initiated?"      → {@link isAutoInitiatedRunAnalysisFact}
+ *                                         A PERMANENT fact about the run's
+ *                                         provenance. Never changes. Unchanged
+ *                                         by this PR.
+ *   "has the user seen its result?"     → {@link hasUserSeenRunAnalysisResult}
+ *                                         A fact about DELIVERY, which changes
+ *                                         when the delivery channel goes live.
+ *
+ * ── WHY THIS IS A CONSTANT AND NOT A DERIVATION, STATED HONESTLY ────────────
+ * CEE cannot derive delivery today. `readScenarioAnalysis` is a PURE READ — it
+ * never mutates — so no trace of "this result was served" is persisted, and the
+ * fact carries no delivery marker. The honest options were a constant or a
+ * write-on-read, and a write-on-read would be WRONG at the intermediate deploy
+ * state: it would stamp "delivered" the moment CEE serves the payload, while a
+ * pre-#752 UI is still discarding it — re-opening #1058's defect in the window
+ * between the two deploys. CLAUDE.md: *a guarantee that spans services is dark
+ * until BOTH halves are live; check the copy is true at every intermediate
+ * deploy state, not only the final one.*
+ *
+ * ⚠ A CONSTANT IS A HAND-MAINTAINED MIRROR (CLAUDE.md trap #12), so it is made
+ * LOUD rather than left to be remembered: its value is asserted by test, and
+ * BOTH postures of the predicate — and of the coaching signal above it — are
+ * pinned by test NOW (`coaching-auto-run-delivered.test.ts`). Flipping it is a
+ * one-line, reviewed change whose behaviour is already proven on both sides.
+ *
+ * ⭐ THE FULLY-DERIVED SUCCESSOR, deliberately NOT built here (scope-expansion
+ * rule — it requires a change to UI #752, another lane's PR): have #752's read
+ * request carry a client-capability marker, and have the read leg record
+ * delivery only when a capable client was actually served. That derives at every
+ * deploy state with no constant to flip. Recommended as the follow-up.
+ */
+
+/**
+ * Does a post-draft auto-run's RESULT reach the user?
+ *
+ * `false` at this tip. The delivery channel needs both halves and only one is
+ * merged: CEE #1010 (this PR — the read leg that returns the analysis) and UI
+ * #752 (`canvas/hydrate/applyScenarioAnalysisRead.ts` — the consumer that
+ * renders it). Verified 2026-08-20: that file is ABSENT from `DecisionGuideAI`
+ * `staging` and PRESENT on #752's head `fe1944af`, and #752 is OPEN.
+ *
+ * ⭐ FLIP THIS TO `true` IN THE SAME CHANGE THAT MERGES UI #752, and not before.
+ * Flipping it early re-opens #1058 (a first-ever analysis narrated as a re-run);
+ * leaving it late leaves the inversion this block documents (a genuine re-run
+ * narrated as a first analysis). Both directions are already under test.
+ */
+export const AUTO_RUN_RESULT_REACHES_USER = false;
+
+/**
+ * Has this `run_analysis` fact's result been put in front of the user?
+ *
+ * FALSE for every non-`run_analysis` fact. TRUE for a user-initiated run — the
+ * turn that ran it is the turn that displayed it. For an auto-initiated run the
+ * answer is {@link AUTO_RUN_RESULT_REACHES_USER}, because that class is visible
+ * only once the delivery channel's both halves are live.
+ *
+ * ⚠ SAYS NOTHING ABOUT WHETHER THE RUN PRODUCED ANYTHING. A `noop` fact did not
+ * run, so nothing was displayed — but that is a different question again ("did
+ * it run?"), owned by the caller. `hasPriorRunAnalysisShownToUser` in
+ * `signals/coaching-signals.ts` applies its own `noop` exclusion alongside this
+ * predicate, deliberately, so neither predicate answers two questions.
+ *
+ * @param autoRunResultReachesUser injectable ONLY so both postures can be pinned
+ *        by test without module mocking. Production always takes the default.
+ */
+export function hasUserSeenRunAnalysisResult(
+  fact: HandlerFact,
+  autoRunResultReachesUser: boolean = AUTO_RUN_RESULT_REACHES_USER,
+): boolean {
+  if (fact.fact_type !== 'run_analysis') return false;
+  if (!isAutoInitiatedRunAnalysisFact(fact)) return true;
+  return autoRunResultReachesUser;
+}
