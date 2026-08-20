@@ -236,8 +236,36 @@ export function hasUnclosedDelimiter(text: string): boolean {
  * the floor, the floor wins and the label keeps its dangling tail rather than
  * collapsing to a stub — the same ordering the module already applies to
  * delimiter closure.
+ *
+ * ⭐ EXPORTED FOR ONE REASON: A MEMBERSHIP LOCK, AND THAT IS NOT THE MIRROR
+ * `endsOnDanglingWord`'s header WARNS ABOUT. The two are different objects and
+ * the distinction is the whole argument for this export (platform trap 21 —
+ * write down the question each one answers):
+ *
+ *   · A mirror as SOURCE re-implements the predicate in a spec to COMPUTE an
+ *     expectation. It drifts SILENTLY, because the copy and the original are
+ *     each self-consistent. That is the thing the header forbids, and it stays
+ *     forbidden: a caller or a test deciding whether a word dangles must ask
+ *     `endsOnDanglingWord`, never a private list of its own.
+ *   · A mirror as LOCK asserts set EQUALITY and computes nothing. It cannot
+ *     drift silently — divergence is the only thing it can do, and it REDs.
+ *     That is trap 12's own prescription for a list nothing can derive:
+ *     "where you cannot derive, the mirror must FAIL LOUD on drift".
+ *
+ * ⚠ AND THE DIRECTION THAT MAKES IT WORTH THE EXPORT. A word MISSING from this
+ * set is a GAP — an elision keeps a dangling tail, which is cosmetic. A word
+ * ADDED to it is not symmetric: this set is consulted to REJECT candidate
+ * heads, so a CONTENT word added here makes the back-off cut PAST a word the
+ * user wrote, which falsifies the "can NEVER delete a content word" claim
+ * above that is this rule's entire safety argument. Nothing in the language is
+ * derivable that would catch that (a closed-class inventory is a judgement, not
+ * a computation, and importing a part-of-speech lexicon is refused for the same
+ * reason the second-token extension was). A membership lock is therefore the
+ * honest instrument: it cannot say the list is RIGHT, only that no one changed
+ * it without a reviewer looking. `__tests__/label-elision.vocabulary.test.ts`
+ * holds the lock and the reachability half.
  */
-const DANGLING_TAIL_WORDS: ReadonlySet<string> = new Set([
+export const DANGLING_TAIL_WORDS: ReadonlySet<string> = new Set([
   // determiners / possessives
   'a', 'an', 'the', 'this', 'that', 'these', 'those', 'another', 'each', 'every',
   'some', 'any', 'no', 'my', 'your', 'our', 'their', 'its', 'his', 'her', 'both',
