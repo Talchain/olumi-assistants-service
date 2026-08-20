@@ -40,7 +40,9 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 import {
+  AUTO_RUN_RESULT_REACHES_USER,
   buildAutoRunProvenance,
+  hasUserSeenRunAnalysisResult,
   isAutoInitiatedRunAnalysisFact,
   RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../../context/run-initiator.js';
@@ -262,5 +264,53 @@ describe('the phantom prior: a post-draft auto-run is not a result the user saw'
     // …and the reader is not simply answering "true" for every run_analysis
     // fact — the discriminating negative, in the same test.
     expect(isAutoInitiatedRunAnalysisFact(USER_RUN_PRIOR())).toBe(false);
+  });
+
+  // ── provenance vs delivery: TWO questions, named apart (trap 21) ───────────
+
+  it('PROVENANCE AND DELIVERY ARE DIFFERENT QUESTIONS ABOUT THE SAME FACT', () => {
+    // The whole point of the #1010 split. On the identical object the two
+    // authorities answer differently, and neither is derivable from the other:
+    // the stamp says the SERVER started this run (permanently true), while
+    // delivery says its result has not been put on screen (true only until the
+    // channel's both halves are live).
+    const autoRun = AUTO_RUN_PRIOR();
+    expect(isAutoInitiatedRunAnalysisFact(autoRun)).toBe(true);
+    expect(hasUserSeenRunAnalysisResult(autoRun)).toBe(false);
+
+    // The discriminating positive, in the same test: a user-initiated run is
+    // neither auto-initiated nor undelivered.
+    const userRun = USER_RUN_PRIOR();
+    expect(isAutoInitiatedRunAnalysisFact(userRun)).toBe(false);
+    expect(hasUserSeenRunAnalysisResult(userRun)).toBe(true);
+  });
+
+  it('BOTH POSTURES of the delivery predicate are pinned, so flipping the constant is proven, not hoped', () => {
+    const autoRun = AUTO_RUN_PRIOR();
+    // Today.
+    expect(hasUserSeenRunAnalysisResult(autoRun, false)).toBe(false);
+    // The day UI #752 lands.
+    expect(hasUserSeenRunAnalysisResult(autoRun, true)).toBe(true);
+    // A user-initiated run is TRUE in BOTH postures — the flag governs exactly
+    // one class of fact, and a flip that moved this one would be the
+    // co-tightening trap 21 forbids.
+    expect(hasUserSeenRunAnalysisResult(USER_RUN_PRIOR(), false)).toBe(true);
+    expect(hasUserSeenRunAnalysisResult(USER_RUN_PRIOR(), true)).toBe(true);
+  });
+
+  it('THE DEPLOY-ORDERING PIN: auto-run delivery is OFF at this tip, and flipping it is a reviewed change', () => {
+    // ⚠ A CONSTANT IS A HAND-MAINTAINED MIRROR (CLAUDE.md trap #12), so it is
+    // asserted rather than left to be remembered. This is not ceremony: the two
+    // failure directions are real and opposite.
+    //   flip it EARLY (before UI #752 renders the result) → re-opens #1058: a
+    //     first-ever analysis narrated as a re-run;
+    //   flip it LATE  (after #752 ships)                  → the inversion: a
+    //     genuine re-run narrated as a first analysis.
+    // Verified 2026-08-20: `applyScenarioAnalysisRead.ts` is ABSENT from
+    // DecisionGuideAI `staging` and PRESENT on #752's head `fe1944af`; #752 is
+    // OPEN. When it merges, flip the constant and this assertion together, and
+    // the delivered-posture behaviour is already pinned in
+    // `coaching-auto-run-delivered.test.ts`.
+    expect(AUTO_RUN_RESULT_REACHES_USER).toBe(false);
   });
 });

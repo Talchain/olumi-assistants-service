@@ -1131,7 +1131,16 @@ export function toSafeTransportEnrichment(
  *   - enrichment reduced to the P0-B safe-transport keep-list (see
  *     toSafeTransportEnrichment) — transport-only, NOT the coaching contract.
  */
-function buildAnalysisResultBlock(
+/**
+ * ⭐ EXPORTED for ROADMAP 2.1271 (the scenario-graph read leg's additive
+ * analysis payload). Exported rather than reimplemented BECAUSE of what it does
+ * internally: it reads the fact's own persisted claim-safety verdict
+ * fail-closed and applies all three withheld projections. A second builder at
+ * the read surface would be the leader-claim harm re-opened at a new seam.
+ * See `routes/scenario-graph-analysis-read.ts` for the caller and for what that
+ * leg deliberately does NOT emit.
+ */
+export function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
 ): OlumiResponse['blocks'][number] {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =

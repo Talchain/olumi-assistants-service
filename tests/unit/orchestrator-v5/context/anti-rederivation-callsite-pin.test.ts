@@ -190,6 +190,20 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // would derive against a DIFFERENT hash. Deliberate, reviewed; still
     // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
     'src/orchestrator/route-v2.ts': 2,
+    // 2026-08-17 ROADMAP 2.1271: +2 (import + one call) — the scenario-graph
+    // READ leg composes a scenario's analysis verdict OUTSIDE a turn, so the
+    // guidance above ("read the value from the CanonicalContextFrame / turn
+    // context you already hold, or thread it from build-turn-context") has no
+    // referent here: there is no turn, no frame and no context to thread from.
+    // The seam is a pure composition over `loadPriorFactsWithReadState` +
+    // `computeAnalysisAffectingGraphHash(the graph this response is returning)`
+    // — the SAME hash function the run path stamps as `graph_hash_at_run`, so
+    // `fresh` on this leg means bit-for-bit what it means on a turn. It is NOT
+    // a second rule about freshness; it is the one function applied to a
+    // non-turn caller, which is why the alternative (hand-building a verdict at
+    // the route) would have been the mirror this guard exists to prevent.
+    // Deliberate, reviewed, and NOT precedent for a turn-path caller.
+    'src/routes/scenario-graph-analysis-read.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)

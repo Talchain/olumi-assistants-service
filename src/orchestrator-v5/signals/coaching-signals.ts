@@ -46,7 +46,7 @@ import {
 } from '../coaching/intervening-change.js';
 import type { RecentChangeAction } from '../context/recent-changes.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
-import { isAutoInitiatedRunAnalysisFact } from '../context/run-initiator.js';
+import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -524,15 +524,27 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
  * this question, no parallel rule.
  *
  * ── WHAT "SEEN" MEANS, AND WHY THIS DERIVATION IS HONEST AT THIS TIP ────────
- * A fact counts as seen when it (a) actually ran and (b) was initiated by the
- * user. (b) is read through {@link isAutoInitiatedRunAnalysisFact}, the one
- * authority on run initiation, whose module documents the deployed measurement:
- * the auto-run's result reaches no client at all, because the draft's SSE stream
- * is already closed, the auto-run turn is server-initiated with no listener, and
- * the scenario-graph read leg returns no analysis. ⭐ THE DAY THAT CHANGES —
- * CEE #1010 + UI #752, both currently unmerged — an auto-run's result WILL be
- * on screen and this predicate must count it again. That is a one-line change
- * HERE, which is the whole point of naming the question rather than the shape.
+ * A fact counts as seen when it (a) actually ran and (b) its result was
+ * DELIVERED to the user.
+ *
+ * ⭐⭐ (b) IS NO LONGER "was it user-initiated?" — #1010 SPLIT THAT CONFLATION.
+ * This predicate used to read `!isAutoInitiatedRunAnalysisFact(f)`, i.e. it
+ * decided delivery from the PROVENANCE STAMP. That was sound only while an
+ * auto-initiated run's result reached no client, which was true when #1058
+ * shipped and is exactly what #1010 changes: the scenario-graph read leg now
+ * returns the committed analysis. The stamp still reads `auto_post_draft` for a
+ * run the user may now have seen, so a provenance-only reader would suppress the
+ * re-run acknowledgement and the product would claim a FIRST analysis on a
+ * genuine re-run — #1058's defect facing the other way (CLAUDE.md trap #21: two
+ * questions under one name, coincident until a change decouples them).
+ *
+ * (b) is therefore now read through {@link hasUserSeenRunAnalysisResult}, which
+ * lives beside {@link isAutoInitiatedRunAnalysisFact} in `context/run-initiator.ts`
+ * — the one authority on run initiation AND delivery. The two are named apart
+ * there: provenance is a permanent fact about the run, delivery is a fact about
+ * the channel, and only the second one changes. See that module for why delivery
+ * is a constant rather than a derivation today, for the deploy-ordering rule
+ * (flip it with UI #752, not before), and for the fully-derived successor.
  *
  * ── (a) IS AN EXCLUSION, NOT A SUCCESS TEST ────────────────────────────────
  * A `noop: true` fact means the analysis did not run, so nothing was displayed.
@@ -560,8 +572,16 @@ function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean 
   return facts.some(
     (f) =>
       f.fact_type === 'run_analysis' &&
+      // (a) DID IT RUN? Owned here — see the `noop` note above.
       f.noop !== true &&
-      !isAutoInitiatedRunAnalysisFact(f),
+      // (b) WAS ITS RESULT DELIVERED? Owned by `context/run-initiator.ts`, the
+      //     one authority on run initiation AND delivery. This used to read
+      //     `!isAutoInitiatedRunAnalysisFact(f)` — the PROVENANCE question —
+      //     which answered (b) correctly only while an auto-initiated run's
+      //     result reached no client. #1010 builds the channel that changes
+      //     that, so the two questions are now named apart at their owner
+      //     rather than conflated here (CLAUDE.md trap #21).
+      hasUserSeenRunAnalysisResult(f),
   );
 }
 

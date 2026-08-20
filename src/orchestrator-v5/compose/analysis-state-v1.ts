@@ -56,10 +56,29 @@
  *
  * ─── STATED LIMITS (visible in a green suite, not assumed closed) ───────────
  *
- * L-A. `running` has NO PRODUCER at this step and is therefore never emitted.
- *      CEE turns are synchronous: by the time this composes, the run has
- *      finished, failed, been refused, or was never attempted. Emitting
- *      `running` would require an async run registry that does not exist.
+ * L-A. `running` HAS EXACTLY ONE PRODUCER, AND ITS SCOPE IS NARROW.
+ *      ⚠ THIS LIMIT USED TO READ "`running` has NO PRODUCER at this step and is
+ *      therefore never emitted … emitting it would require an async run
+ *      registry that does not exist". The first clause is now false and the
+ *      second was always narrower than it sounded, so both are corrected here
+ *      rather than deleted (trap 14).
+ *
+ *      The general claim it made is still TRUE: a synchronous turn cannot
+ *      discover, at compose time, that some OTHER request's run is in flight.
+ *      No registry exists and this producer does not invent one.
+ *
+ *      What it missed is the ONE case where the turn composing the verdict is
+ *      itself the turn that STARTED the run: a fresh admissible draft schedules
+ *      a provisional auto-run (`handlers/auto-run-after-draft.ts`, ROADMAP
+ *      2.1271). That turn does not need a registry — it knows, from its own
+ *      admission decision, that a run is beginning. `autoRunInFlight` carries
+ *      exactly that knowledge and nothing wider: it is threaded ONLY by the
+ *      draft exit, ONLY when the same `resolveRunAdmission` verdict that gates
+ *      the scheduler said the run will proceed, and it carries the START
+ *      instant as an observation rather than a compose-time clock read.
+ *
+ *      So the arm is emitted iff the composing turn is the run's own trigger.
+ *      Every other turn still cannot say `running`, and still does not.
  * L-B. `robustness.factors_that_flip_leader` is NEVER emitted. Absent means
  *      "the flip analysis was not computed"; `[]` would mean "it was computed
  *      and nothing flips" — opposite claims. The only flip evidence reachable
@@ -221,6 +240,26 @@ export interface AnalysisStateComposeInput {
   readonly mayNameLeadingOption?: boolean;
   /** The engine's own robustness signals as they appear on this turn's wire. */
   readonly rawRobustness: RawRobustnessSignals | null;
+  /**
+   * ROADMAP 2.1271 — THE ONE PRODUCER OF `run_state.kind === 'running'`.
+   *
+   * Present iff THIS turn has itself started a provisional analysis that is now
+   * in flight (today: the fresh-draft auto-run). See L-A above for why that is
+   * the only case a synchronous turn can honestly claim, and
+   * `orchestrator/route-v2.ts`'s draft exit for the single threading site.
+   *
+   * `startedAt` MUST be the instant the run was started, as a UTC ISO-8601
+   * string. It is validated with the same {@link utcIsoOrNull} the
+   * `complete_*` branches use, and for the same reason: the contract declares
+   * `started_at` as `z.string().datetime()` at RUNTIME (the generated `.d.ts`
+   * widens it to `string`, so TypeScript alone will NOT stop a bad value — it
+   * would fail egress validation and destroy the turn). An unusable timestamp
+   * therefore FALLS THROUGH to the ordinary derivation rather than being
+   * replaced by a fabricated `now`: a synthesised start instant would be read
+   * as provenance, and the contract's own text forbids inferring a finish time
+   * from it.
+   */
+  readonly autoRunInFlight?: { readonly startedAt: string };
 }
 
 function readNonEmptyString(value: unknown): string | null {
@@ -292,6 +331,34 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
       blockers: mapWireBlockers(input.readiness?.blockers, 'blocked'),
     };
   }
+
+  // 2b. A RUN THIS TURN STARTED IS IN FLIGHT (ROADMAP 2.1271).
+  //
+  // ⚠ THE POSITION IS LOAD-BEARING IN BOTH DIRECTIONS AND IS PINNED BY TESTS.
+  //
+  // BELOW refusal and blocked. Those two describe THIS TURN'S refusal and THE
+  // MODEL'S unanalysability, and neither can co-occur with a proceeding run
+  // under the sanctioned threading (`willProceed` is false on an inadmissible
+  // model). If either combination ever did become reachable, the refusal /
+  // blocked statement is the truer one — it says why nothing useful can come
+  // back — so the fail-safe direction is to let them win.
+  //
+  // ABOVE `never_run` and above every `complete_*` / `unknown_*` branch, and
+  // for two different reasons:
+  //   · `never_run` claims "no analysis has ever been run … a consumer renders
+  //     the pre-analysis affordance" (contract text). On a draft whose
+  //     provisional run is already in flight that invites the user to start an
+  //     analysis that is running — the exact mild dishonesty this arm removes.
+  //   · a `complete_*` verdict would present an EARLIER run's numbers as this
+  //     turn's outcome. The contract's own `running` text settles it: "Any
+  //     result currently on screen is from an EARLIER run: a consumer may keep
+  //     showing it but must mark it as superseded-pending, and must not present
+  //     it as the outcome of the run now in flight."
+  //
+  // An unusable timestamp falls through rather than fabricating one — see
+  // `autoRunInFlight`'s docstring.
+  const runStartedAt = utcIsoOrNull(input.autoRunInFlight?.startedAt);
+  if (runStartedAt !== null) return { kind: 'running', started_at: runStartedAt };
 
   // 3. Nothing has ever run.
   if (canonical.freshness === 'none') return { kind: 'never_run' };
