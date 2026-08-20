@@ -134,50 +134,137 @@ const MIN_OPTIONS = 2;
 // User-facing violation messages
 // ============================================================================
 
-export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
-  ORPHAN_NODE: 'This change would leave a node with no connections.',
+/**
+ * ⭐ THE SINGLE OWNER OF STRUCTURAL-VIOLATION COPY — TWO VOICES, ONE TABLE.
+ *
+ * The same structural finding is reported on two surfaces that are asking two
+ * DIFFERENT QUESTIONS, and for a long time both were served one string:
+ *
+ *   · PREVIEW  — `edit-graph.ts:3000/:3012`. A patch was validated and
+ *     REJECTED; it was never applied. The honest voice is conditional:
+ *     "This change would leave a node with no connections."
+ *
+ *   · CURRENT  — `analysis-ready-helper.ts` `structuralIssue()`. A graph the
+ *     user already has was loaded and assessed. NOTHING WAS PROPOSED. The
+ *     conditional voice is a false statement here: it describes an edit that
+ *     does not exist, and `summariseReadiness` then wraps it in "Here's what's
+ *     still open before this can run cleanly: …" — a frame whose entire job is
+ *     to describe the model AS IT STANDS.
+ *
+ * Two questions under one name is this estate's chronic defect (trap 21), and
+ * the wrong fix is to reword one voice — that just moves the lie to the other
+ * surface. The fix is to name them apart and KEY THEM OFF ONE OWNER. Both
+ * exported records are PROJECTIONS of this table, so there is no second string
+ * table to drift: adding a code is a type error here, and the two voices cannot
+ * go out of sync because neither is hand-maintained against the other.
+ *
+ * ⚠ IF YOU ADD A SURFACE, ASK WHICH QUESTION IT ANSWERS before picking a
+ * projection. A surface that describes a proposal takes `preview`; a surface
+ * that describes the model as it stands takes `current`.
+ */
+export const VIOLATION_COPY: Record<
+  StructuralViolationCode,
+  { readonly preview: string; readonly current: string }
+> = {
+  ORPHAN_NODE: {
+    preview: 'This change would leave a node with no connections.',
+    current: 'A node in the model has no connections.',
+  },
   // 1.16 item C: the message and the predicate now agree — checkPathToGoal's
   // second loop flags nodes that cannot REACH the goal via forward directed
   // edges (reverse-BFS from the goal), not nodes unreachable FROM the
   // decision. Loop 1 (goal reachable from the decision) also reports under
   // this code; "cannot reach the goal" reads correctly for both.
-  NO_PATH_TO_GOAL: 'This change would leave a node that cannot reach the goal.',
-  CYCLE_DETECTED: 'This change would create a circular dependency in the model.',
+  NO_PATH_TO_GOAL: {
+    preview: 'This change would leave a node that cannot reach the goal.',
+    current: 'A node in the model cannot reach the goal.',
+  },
+  CYCLE_DETECTED: {
+    preview: 'This change would create a circular dependency in the model.',
+    current: 'The model has a circular dependency.',
+  },
   // ⚠⚠ THESE TWO ENTRIES CURRENTLY HAVE NO PRODUCER. THE COPY BELOW IS LATENT,
   // NOT USER-FACING — do not cite it as a shipped copy fix.
   //
-  // Complete reader manifest for `VIOLATION_MESSAGES[code]`:
-  // `analysis-ready-helper.ts:630`, `edit-graph.ts:3000` and `:3012`. All three
-  // are driven exclusively by `validateGraphStructure().violations`, and after
-  // the deletion above that function can never emit these two codes. So nothing
-  // renders these strings today. (Contrast control: the same three lookups ARE
-  // live for `CYCLE_DETECTED` and `ORPHAN_NODE` — the readers work; only these
-  // two entries are orphaned.) They stay because `StructuralViolationCode` is
+  // Complete reader manifest for the two projections below:
+  // `analysis-ready-helper.ts:641` (CURRENT), `edit-graph.ts:3000` and `:3012`
+  // (PREVIEW). All three are driven exclusively by
+  // `validateGraphStructure().violations`, and after the size-clause deletion
+  // that function can never emit these two codes. So nothing renders these
+  // strings today. (Contrast control: the same three lookups ARE live for
+  // `CYCLE_DETECTED` and `ORPHAN_NODE` — the readers work; only these two
+  // entries are orphaned.) They stay because `StructuralViolationCode` is
   // shared vocabulary — `analysis-ready-core.ts:69` folds it into
   // `ReadinessReasonCode`, and the add-risk preflight below classifies against
   // these code STRINGS at `edit-graph-dispatch.ts:2031`.
   //
   // ⚠ The string a user CAN still hit is `edit-graph-dispatch.ts:2016`, which
   // still says "too complex to analyse reliably". Fixing it is out of this
-  // lane's fence and is rowed; nothing below changes what that user sees.
+  // lane's fence and is rowed; nothing here changes what that user sees.
   //
-  // The previous EDGE copy here carried the same claim, and measurement refutes
-  // it: at the 50-node/100-edge ceiling a full analysis costs 63.1% of ISL's
-  // budget, and at a typical refused draft (24/46) it costs 24.6%. Nothing about
-  // a model this size is unreliable to analyse. The copy now states the one
-  // thing that IS true — the size Olumi accepts — and names the number, derived
-  // from the authority rather than mirroring it, so that IF a producer is ever
-  // reattached the string is already honest.
-  NODE_LIMIT_EXCEEDED: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
-  EDGE_LIMIT_EXCEEDED: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
-  NO_GOAL: 'The model would have no goal node.',
-  NO_DECISION: 'The model would have no decision node.',
-  FEWER_THAN_TWO_OPTIONS: 'The model would have fewer than two options.',
-  OPTION_NO_FACTOR_EDGES: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+  // Both voices are IDENTICAL for these two, and deliberately so: the copy
+  // already states a standing fact about what Olumi accepts rather than a
+  // consequence of a proposed change, so there is no conditional to remove. A
+  // divergence invented for symmetry's sake would be a second string nobody
+  // needs.
+  NODE_LIMIT_EXCEEDED: {
+    preview: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
+    current: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
+  },
+  EDGE_LIMIT_EXCEEDED: {
+    preview: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
+    current: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
+  },
+  NO_GOAL: {
+    preview: 'The model would have no goal node.',
+    current: 'The model has no goal node.',
+  },
+  NO_DECISION: {
+    preview: 'The model would have no decision node.',
+    current: 'The model has no decision node.',
+  },
+  FEWER_THAN_TWO_OPTIONS: {
+    preview: 'The model would have fewer than two options.',
+    current: 'The model has fewer than two options.',
+  },
+  // Already present-tense and true of both surfaces — a rejected patch that
+  // leaves an option unwired and a loaded model with an unwired option are the
+  // same sentence. Kept identical rather than split for the sake of it.
+  OPTION_NO_FACTOR_EDGES: {
+    preview: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+    current: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+  },
   // PR #413 review FIXUP 3 — distinct from NO_PATH_TO_GOAL: a floating
   // option can reach the goal, but nothing selects it.
-  OPTION_NOT_LINKED_TO_DECISION: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
+  OPTION_NOT_LINKED_TO_DECISION: {
+    preview: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
+    current: 'An option is not connected from the decision. Link the decision to it.',
+  },
 };
+
+function projectVoice(voice: 'preview' | 'current'): Record<StructuralViolationCode, string> {
+  return Object.fromEntries(
+    Object.entries(VIOLATION_COPY).map(([code, copy]) => [code, copy[voice]]),
+  ) as Record<StructuralViolationCode, string>;
+}
+
+/**
+ * PREVIEW voice — for surfaces describing a PROPOSED change that was rejected
+ * and never applied. Consumed by `edit-graph.ts:3000` and `:3012`.
+ *
+ * ⚠ Not for readiness. A readiness surface asserting this copy tells a user who
+ * changed nothing what a change *would* do.
+ */
+export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = projectVoice('preview');
+
+/**
+ * CURRENT-STATE voice — for surfaces describing THE MODEL AS IT STANDS.
+ * Consumed by `structuralIssue()` in `analysis-ready-helper.ts`, and from there
+ * carried onto the wire as `analysis_ready.readiness_issues[].message` and into
+ * `summariseReadiness`'s "what's still open" prose.
+ */
+export const CURRENT_STATE_VIOLATION_MESSAGES: Record<StructuralViolationCode, string> =
+  projectVoice('current');
 
 // ============================================================================
 // Validator

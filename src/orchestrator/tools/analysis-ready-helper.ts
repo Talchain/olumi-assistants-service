@@ -18,7 +18,7 @@ import {
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import {
   validateGraphStructure,
-  VIOLATION_MESSAGES,
+  CURRENT_STATE_VIOLATION_MESSAGES,
   type StructuralViolationCode,
 } from "../graph-structure-validator.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
@@ -629,6 +629,22 @@ function classifyUnresolvedOption(
   }
 }
 
+/**
+ * Project ONE structural violation onto a canonical readiness issue.
+ *
+ * ⚠ CURRENT-STATE VOICE, DELIBERATELY. This runs when a graph the user ALREADY
+ * HAS is loaded and assessed — nothing has been proposed and nothing is about
+ * to change. It read the PREVIEW copy until 2026-08-20, so an untouched model
+ * reported "This change would leave a node with no connections." /"The model
+ * would have no decision node.", and `summariseReadiness` then wrapped that
+ * inside "Here's what's still open before this can run cleanly: …" — a
+ * conditional about an edit that does not exist, inside a frame that promises
+ * to describe the model as it stands.
+ *
+ * The preview voice is still correct on the EDIT path (`edit-graph.ts:3000`,
+ * `:3012`), where the patch really was rejected and never applied. Both come
+ * from one owner, `VIOLATION_COPY` — see graph-structure-validator.ts.
+ */
 function structuralIssue(
   code: StructuralViolationCode,
   ordinal: number,
@@ -637,7 +653,7 @@ function structuralIssue(
     issue_id: `structural_${ordinal + 1}`,
     code,
     category: 'graph_structure',
-    message: VIOLATION_MESSAGES[code],
+    message: CURRENT_STATE_VIOLATION_MESSAGES[code],
     repairability: 'human_input_required',
   };
 }
