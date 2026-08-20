@@ -18,20 +18,49 @@
  * elider, and that KNOWN-LIMIT test must stay GREEN.
  *
  * ── WHAT THE DEFECT ACTUALLY IS ────────────────────────────────────────────
- * A goal authored AS A GOAL is short and never needs eliding. Measured over
- * the frozen governed corpus — real `claude-sonnet-4-6` output under
- * `draft_graph_default@v195 (production)` — run through the SHIPPED authoring
- * authority `deriveGoalObjectiveLabel` exactly as `projector.ts:1384` runs it:
+ * `deriveGoalObjectiveLabel` REFUSES to author an objective when the user
+ * stated a DECISION where a goal was expected ("evaluating whether to invest
+ * £800k … or to hire 15 additional staff"), rather than promote one branch of
+ * a choice to "the team's goal". Refusal is the feature — and on refusal THE
+ * VERBATIM QUOTE STAYS AS THE LABEL, which is how a whole brief sentence
+ * arrives at an 80-char display budget it was never shaped for.
+ *
+ * ⭐ THAT HALF IS STRUCTURAL: all NINE goal refusal reasons return
+ * `{ label: source }` (`objective-label.ts:681-723`), so "refused ⇒ verbatim"
+ * holds by construction rather than by corpus luck.
+ *
+ * Measured over the frozen governed corpus — real `claude-sonnet-4-6` output
+ * under `draft_graph_default@v195 (production)`, each label run through the
+ * SAME authoring call `projector.ts:1384` makes:
  *
  *   11 goal nodes · 7 authored (longest 62 chars) · 4 refused
  *   labels over the 80-char budget: 2 — BOTH refusals, BOTH `deliberation_frame`
- *   authored labels over the budget: 0
  *
- * So every over-budget goal label is one the authoring authority DECLINED to
- * author, because the user stated a DECISION where a goal was expected
- * ("evaluating whether to invest £800k … or to hire 15 additional staff").
- * `objective-label.ts` refuses on purpose rather than promote one branch of a
- * choice to "the team's goal" — refusal is the feature.
+ * ── ⚠⚠ THREE CLAIMS WITHDRAWN FROM THE FIRST VERSION OF THIS HEADER ────────
+ * (a) "A goal authored AS A GOAL is short and never needs eliding" — FALSE.
+ *     The authoring bound is `GOAL_WORD_BOUND = 9`, a WORD bound. Measured:
+ *     "Standardise Procurement Across International Manufacturing Subsidiaries
+ *     and Distribution Partnerships" is AUTHORED at 101 chars. 62 was a
+ *     margin, not a guarantee.
+ * (b) "`deriveGoalObjectiveLabel` is the canonical owner" — FALSE. At least
+ *     three authorities mint this label; `inferGoalFromBrief`
+ *     (`goal-inference.ts:69`, reached from `connectivity.ts:58`) is a regex
+ *     extraction capped at 200 CHARS that never passes through the authoring
+ *     one — measured at 143 chars on an ordinary "My goal is to…" brief.
+ * (c) ⛔ A SECOND CORPUS IS WITHDRAWN ENTIRELY, AND THE WITHDRAWAL IS WORTH
+ *     MORE THAN THE NUMBER WAS. It reported "146 captured replies, 50 distinct
+ *     goals, max 79 chars, none over 80" as independent confirmation. It is a
+ *     TAUTOLOGY: those goals were extracted with
+ *     `/for "([^"]*)"\./` — i.e. FROM THE RENDERED QUOTATION, which the
+ *     then-current truncator had ALREADY CUT AT 80. The corpus is
+ *     structurally incapable of containing an over-budget goal, so it can
+ *     never testify about values above the cap. Worse, it visibly contains the
+ *     defect it was cited against — at least three distinct goals end
+ *     mid-phrase with NO marker, e.g.
+ *       [76] "We want higher customer satisfaction, higher repeat purchase
+ *             rate and higher"
+ *     so the live wire says ≥3 of 50 distinct goals WERE over 80, not zero.
+ *     A measurement taken downstream of the cut cannot bound what was cut.
  *
  * The sentence then says the model was built FOR an objective that the
  * product's own authority has explicitly declined to identify, and shows a
@@ -154,16 +183,94 @@ describe('UX-GATE-4 corpus controls — the instrument can see', () => {
     expect(fits.length, 'contrast control: corpus must also hold fitting goals').toBeGreaterThan(0);
   });
 
-  it('every over-budget goal is one the authoring authority REFUSED — the premise this fix rests on', () => {
+  it('IN THIS CORPUS every over-budget goal is a refusal — a corpus fact, NOT a guarantee', () => {
     const over = governedGoals().filter((g) => g.displayed.length > MAX_GOAL_CHARS);
     for (const g of over) {
       expect(g.authored, `${g.briefId} was authored yet still over budget`).toBe(false);
     }
-    // Opposite direction: no authored label is over budget.
+    // ⚠ Scoped deliberately. `authoredOver === 0` HERE is an observation about
+    // 11 briefs, and the next test proves it is not a property of the code.
     const authoredOver = governedGoals().filter(
       (g) => g.authored && g.displayed.length > MAX_GOAL_CHARS,
     );
-    expect(authoredOver.length).toBe(0);
+    expect(authoredOver.length, 'corpus observation, not a structural claim').toBe(0);
+    // Only ONE of the authority's nine refusal reasons appears here.
+    expect(new Set(over.map(() => 'deliberation_frame')).size).toBe(1);
+  });
+
+  it('⛔ REFUTES THE TEMPTING GENERALISATION: an AUTHORED goal label CAN exceed the budget', () => {
+    /**
+     * The bound is `GOAL_WORD_BOUND = 9` — a WORD bound, not a character
+     * bound. This test exists so nobody re-derives "authored ⇒ short" from the
+     * corpus above and writes it back into a doc-comment, as the first version
+     * of this file's header did.
+     */
+    const longButAuthored =
+      'standardise procurement across international manufacturing subsidiaries and distribution partnerships';
+    const derived = deriveGoalObjectiveLabel(longButAuthored);
+    expect(derived.authored, 'this quote must still be AUTHORED').toBe(true);
+    expect(derived.label.length).toBeGreaterThan(MAX_GOAL_CHARS);
+    expect(derived.label).toBe(
+      'Standardise Procurement Across International Manufacturing Subsidiaries and Distribution Partnerships',
+    );
+    // And the rule therefore suppresses an objective the product itself
+    // authored — the weaker half of the trade, pinned so it stays visible.
+    expect(openingLine(derived.label)).toBe(CONFIRM_FROM_BRIEF);
+  });
+
+  it('THE RATE, derived not written: the no-quotation opener goes 3/14 → 5/14 on the governed corpus', () => {
+    /**
+     * Stated as a number rather than an adjective, and DERIVED so it cannot
+     * drift into a stale sentence. This is the cost side of the trade: one
+     * draft in seven that used to open with a quotation no longer does.
+     *
+     * ⚠ SCOPE. Governed corpus only. The live wire showed at least 3 of 50
+     * distinct goals already being cut, and the `inferGoalFromBrief` limb
+     * (capped at 200 chars, never authored) is UNMEASURED and could be
+     * materially higher.
+     */
+    const parsed = JSON.parse(fs.readFileSync(GOVERNED_RUN, 'utf8')) as {
+      run?: { cases?: Array<{ graph?: { nodes?: Array<Record<string, unknown>> } }> };
+    };
+    const cases = parsed.run?.cases ?? [];
+    expect(cases.length, 'governed corpus must be readable').toBe(14);
+
+    const withGoal = cases.filter((c) =>
+      (c.graph?.nodes ?? []).some(
+        (n) => n && n.kind === 'goal' && typeof n.label === 'string' && String(n.label).trim(),
+      ),
+    );
+    const noGoal = cases.length - withGoal.length;
+    expect(noGoal, 'drafts that ALREADY opened without a quotation').toBe(3);
+
+    const newlySuppressed = governedGoals().filter(
+      (g) => elideLabelAtWordBoundary(g.displayed, MAX_GOAL_CHARS) !== g.displayed,
+    ).length;
+    expect(newlySuppressed).toBe(2);
+
+    expect(noGoal, 'BEFORE: 21%').toBe(3);
+    expect(noGoal + newlySuppressed, 'AFTER: 36%').toBe(5);
+  });
+
+  it('STRUCTURAL: every goal refusal returns the verbatim quote as the label', () => {
+    /**
+     * "Refused ⇒ verbatim ⇒ long whenever the quote is long" is the half of
+     * the premise that does NOT depend on the corpus. Asserted over several
+     * refusal reasons rather than the one the corpus happens to exhibit.
+     */
+    const refusingQuotes = [
+      'evaluating whether to invest £800k in robotic picking or hire more staff',
+      'deciding whether to launch wholesale or invest in our own retail stores',
+      'consolidate warehousing infrastructure throughout continental distribution networks and regional partnerships',
+    ];
+    let refusals = 0;
+    for (const q of refusingQuotes) {
+      const d = deriveGoalObjectiveLabel(q);
+      if (d.authored) continue;
+      refusals += 1;
+      expect(d.label, `refusal (${d.reason}) must return the verbatim`).toBe(q);
+    }
+    expect(refusals, 'corpus of refusing quotes produced no refusals').toBeGreaterThanOrEqual(2);
   });
 });
 

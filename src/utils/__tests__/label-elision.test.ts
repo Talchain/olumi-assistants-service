@@ -452,10 +452,22 @@ describe('UX-GATE-4 — an elision never ends on a word that cannot end a phrase
     );
 
     /**
-     * ⚠ AND THE DISCRIMINATION, so this is not a tautology. Identical output
-     * at 80 is a property of THIS budget, not of the two strings — at a budget
-     * where the tail matters they diverge. Without this the equality above
-     * would pass against a stub that ignored its input.
+     * ⚠ AND THE DISCRIMINATION, so the equality above is not a tautology.
+     * Identical output at 80 must be a property of THAT BUDGET, not of the two
+     * strings: where the tail is inside the budget they must diverge.
+     *
+     * ⭐ WHAT THIS CLAUSE ACTUALLY KILLS — DEMONSTRATED, NOT ASSERTED (the
+     * first version of this comment claimed the wrong thing, which is exactly
+     * the defect being corrected two constants above). A first draft said it
+     * guarded against "a stub that ignored its input". It does not: that stub
+     * (`return trimmed` always) is caught by the @80 EQUALITY, measured.
+     *
+     * The mutant this clause UNIQUELY kills is an input CLAMP —
+     * `label.trim().slice(0, 90)` — which collapses the fixture onto the
+     * record so the two become byte-identical at 100 while staying identical
+     * at 80. Measured against this file: that mutant leaves 27 of 28 tests
+     * GREEN and REDs only this one. Without this clause the clamp ships
+     * silently and the equality above starts holding for the wrong reason.
      */
     expect(elideLabelAtWordBoundary(WITNESSED_GOAL_90, 100)).not.toBe(
       elideLabelAtWordBoundary(GOAL_80_ELISION_FIXTURE, 100),

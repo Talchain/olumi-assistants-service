@@ -707,26 +707,63 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
  * `label-elision.test.ts`, which must stay GREEN). Two harms cannot share one
  * window, and that predicate has had its round.
  *
- * ── WHAT THE DEFECT ACTUALLY IS, DERIVED ───────────────────────────────────
- * A goal authored AS A GOAL is short and never needs eliding. Measured over
- * the frozen governed corpus (real `claude-sonnet-4-6` output under
- * `draft_graph_default@v195 (production)`), each label put through the SAME
- * authoring call `projector.ts:1384` makes:
+ * ── WHAT THE DEFECT ACTUALLY IS ────────────────────────────────────────────
+ * `cee/draft/records/objective-label.ts` (`deriveGoalObjectiveLabel`) REFUSES
+ * to author an objective when the user stated a DECISION where a goal was
+ * expected ("evaluating whether to invest £800k … or to hire 15 additional
+ * staff"), because promoting one branch of a choice to "the team's goal" would
+ * be a fabrication. Refusal is the feature — and on refusal THE VERBATIM QUOTE
+ * STAYS AS THE LABEL.
  *
- *   11 goal nodes · 7 authored (longest 62 chars) · 4 refused
- *   over the 80-char budget: 2 — BOTH refusals, BOTH `deliberation_frame`
- *   AUTHORED labels over the budget: 0
+ * ⭐ THAT HALF IS STRUCTURAL, not a corpus observation: ALL NINE goal refusal
+ * reasons return `{ label: source }` (`objective-label.ts:681-723`). So
+ * "refused ⇒ verbatim ⇒ long whenever the quote is long" holds by
+ * construction, for every refusal reason, not just the ones anyone has seen.
  *
- * The canonical owner of what a goal label SAYS is
- * `cee/draft/records/objective-label.ts` (`deriveGoalObjectiveLabel`). It
- * REFUSES when the user stated a DECISION where a goal was expected
- * ("evaluating whether to invest £800k … or to hire 15 additional staff"),
- * because promoting one branch of a choice to "the team's goal" would be a
- * fabrication — refusal is the feature, and the verbatim stays as the label.
+ * So an over-budget label is typically one the product's own authority has
+ * DECLINED to call an objective — and this sentence was announcing a mangled
+ * half of it as the objective the model was built for.
  *
- * So every over-budget goal label is one the product's own authority has
- * explicitly DECLINED to call an objective — and this sentence was announcing
- * a mangled half of it as the objective the model was built for.
+ * ── ⚠⚠ WHAT THIS FUNCTION MUST NOT BE BELIEVED TO GUARANTEE ────────────────
+ * An earlier version of this comment claimed "a goal authored AS A GOAL is
+ * short and never needs eliding", from a corpus measurement. THREE PARTS OF
+ * THAT WERE FALSE, and they are corrected here because a doc-comment is what
+ * every later session inherits.
+ *
+ * (a) ⛔ `deriveGoalObjectiveLabel` IS NOT THE ONLY AUTHORITY THAT MINTS THIS
+ *     LABEL. At least three do, and two never pass through it:
+ *       · `structure/goal-inference.ts:69` `inferGoalFromBrief`, reached via
+ *         `ensureGoalNode` from `unified-pipeline/stages/repair/
+ *         connectivity.ts:58` — a REGEX extraction capped at 200 CHARS
+ *         (`goal-inference.ts:85`) and merely capitalised. Measured: the brief
+ *         "My goal is to reduce total landed cost per unit across our
+ *         international manufacturing subsidiaries and distribution
+ *         partnerships before the next fiscal year." mints a 143-CHARACTER
+ *         label, `found: true, source: "brief"` — a user writing a goal AS A
+ *         GOAL, suppressed by the rule below. The exact inverse of the
+ *         withdrawn claim.
+ *       · the `explicitGoal` limb (`goal-inference.ts:289-291`) passes
+ *         `context.goals` through `createGoalNode` with a bare `.trim()`.
+ *       · `structure/compound-goal-label.ts` composes a label with no cap.
+ *     A sweep for callers of `deriveGoalObjectiveLabel` answers a question
+ *     about THAT FUNCTION, never "what mints the goal label" (platform trap
+ *     20 — a probe proves what it was pointed at).
+ *
+ * (b) ⛔ "AUTHORED ⇒ INSIDE THE BUDGET" IS NOT STRUCTURAL. The authoring bound
+ *     is `GOAL_WORD_BOUND = 9` — a WORD bound, not a character bound. Measured:
+ *     "Standardise Procurement Across International Manufacturing Subsidiaries
+ *     and Distribution Partnerships" is AUTHORED at 101 chars. The governed
+ *     corpus's authored maximum of 62 is an 18-char MARGIN, not a guarantee.
+ *
+ * (c) The corpus exhibits ONE of the nine refusal reasons
+ *     (`deliberation_frame`). It bounds nothing about the other eight.
+ *
+ * CONSEQUENCE, stated plainly: this rule suppresses the quotation for
+ * over-budget labels REGARDLESS of how they were minted. For a refusal that is
+ * clearly right. For an authored-but-long objective, or a 143-char inferred
+ * one, it suppresses a label the product itself considers a good objective —
+ * a weaker trade, rowed with a trigger (revisit if a witness or the live wire
+ * shows authored-long labels arriving).
  *
  * ── THE RULE ───────────────────────────────────────────────────────────────
  * Quotation marks promise the user "these are your words". A fragment cannot
@@ -735,10 +772,23 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
  *
  * ⚠ THIS DELIBERATELY SAYS LESS IN ONE SENTENCE, AND THE TRADE IS ARGUED
  * RATHER THAN SLID INTO. Quoting the user's own words does real work — it
- * shows the model was built from what they actually said. Two things keep that
- * assurance: the fallback still credits `your brief`, and the user's own words
- * still reach them one line below, in `Options compared`, which is unchanged.
- * What is given up is a quotation that was never a whole one.
+ * shows the model was built from what they actually said. What is given up is
+ * a quotation that was never a whole one: the user was being shown a mangled
+ * fragment, not their own words. The fallback still credits `your brief`.
+ *
+ * ⚠ AND THE COMPENSATION IS CORPUS-SPECIFIC, NOT A PROPERTY OF THIS FIX.
+ * "The user's own words still reach them one line below in `Options compared`"
+ * was VERIFIED for both governed cases — but it holds there ONLY because both
+ * over-budget labels are DELIBERATION FRAMES whose branches ARE the options
+ * ("… invest £800k in robotic picking … OR hire 15 QC staff"), so the goal's
+ * words genuinely reappear as option labels. For an authored-but-long
+ * objective, or a 143-char `inferGoalFromBrief` label, THE GOAL'S WORDS APPEAR
+ * NOWHERE ELSE ON THAT SCREEN. Do not restate this as a general guarantee.
+ *
+ * RATE, stated as a number rather than an adjective (governed corpus): the
+ * no-quotation opener goes from 3 of 14 drafts to 5 of 14 — 21% → 36%. On the
+ * live wire at least 3 of 50 distinct goals were already being cut. The
+ * `inferGoalFromBrief` limb is UNMEASURED and could be materially higher.
  *
  * ⚠ THE BUDGET DECISION IS DELEGATED, NEVER MIRRORED. "Is there a whole
  * quotation?" is answered by asking {@link elideLabelAtWordBoundary} itself
@@ -746,6 +796,20 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
  * label UNCHANGED when it already fits. A second `length > MAX_GOAL_CHARS`
  * test here would be the hand-maintained mirror trap 12 exists to remove, and
  * would drift the day the elider's budget arithmetic changes.
+ *
+ * ⚠ SCOPE — WHICH OPENER THIS GOVERNS. `buildPostDraftNarrative`'s
+ * whole-summary shortcut (`:459-466`) means this function is NEVER CALLED when
+ * the model's own summary passes the gate and readiness is `ready`. In the
+ * 18 Aug live capture the deterministic opener carried 146 of 688 replies
+ * (21%). This fix governs the path on which the defect was witnessed; the
+ * other path is UNMEASURED for this defect.
+ *
+ * ⚠ THE EMPTY-STRING GUARD BELOW IS UNREACHABLE, NOT DEAD — do not delete it.
+ * A mutant removing it SURVIVES the suite, and that survivor is UNREACHABLE
+ * rather than EQUIVALENT (demonstrated, not assumed): this function has one
+ * caller, and `findGoalLabel` already filters `label.trim().length > 0`. It is
+ * defensive against a second caller arriving, which is exactly when a
+ * `for ""` opener would ship.
  */
 function buildConfirmSentence(goalLabel: string | null): string {
   if (!goalLabel) {
