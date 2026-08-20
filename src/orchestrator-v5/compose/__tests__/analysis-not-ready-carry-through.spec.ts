@@ -227,7 +227,26 @@ describe('the questions are the producer\'s, derived not authored', () => {
     expect(assessment.status).toBe('unrecoverable');
     expect(admission.willProceed).toBe(false);
     // The witnessed count, and the witnessed sentence, by identity.
-    expect(assessment.issues.filter((i) => i.repairability === 'human_input_required')).toHaveLength(6);
+    //
+    // Read from the ADMISSION'S OWN assessment rather than the neutral verdict's
+    // optional `issues`: `blockingIssues` is the exact set the refusal counts
+    // (`analysis-ready-core.ts:176-177` prints `blockingIssues.length`), so this
+    // pins the same object the sentence is derived from.
+    expect(admission.assessment.blockingIssues).toHaveLength(6);
+    // ⭐ AND BY CODE, not just by count — this is the mechanism, and a count
+    // alone would be satisfied by six issues of any kind.
+    const codes = admission.assessment.blockingIssues.map((i) => i.code).sort();
+    expect(codes).toEqual([
+      'MISSING_OPTION_VALUE', 'MISSING_OPTION_VALUE', 'MISSING_OPTION_VALUE',
+      'OPTION_NEEDS_MAPPING', 'OPTION_NEEDS_MAPPING', 'OPTION_NEEDS_MAPPING',
+    ]);
+    // ⭐ EVERY ONE IS `offered`. CEE's own rule is that `user_stated` and only
+    // `user_stated` earns a demand (`obligation-provenance.ts:86`), so none of
+    // these six may be put to the user as an obligation. Pinned because the
+    // surfaces still render them as one.
+    for (const issue of admission.assessment.blockingIssues) {
+      expect((issue as { obligation?: string }).obligation).toBe('offered');
+    }
     expect(admission.strict.nextStep).toBe(WITNESSED_NEXT_STEP);
   });
 
