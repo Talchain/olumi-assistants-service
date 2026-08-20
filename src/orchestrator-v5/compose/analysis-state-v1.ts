@@ -120,11 +120,89 @@ export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
 export const SEPARATION_SEPARATED = 'separated';
 export const SEPARATION_NEAR_TIE = 'near_tie';
 
+/**
+ * STEP 4 / ROADMAP 2.1264 — the freshness derivation that is TRUE of a turn
+ * exit which carried no analysis context at all.
+ *
+ * WHY A DERIVATION AND NOT A HAND-WRITTEN `run_state`. Every value in the
+ * emitted verdict — the run state, the five usability predicates, the
+ * contradiction list — then comes out of the ONE implementation that computes
+ * them for every other turn (`assembleCanonicalState`, reached via
+ * `canonicalStateFromFreshness`) rather than out of a second literal that a
+ * future change to the predicate rules would silently leave behind. A
+ * hand-built minimal object here would be the hand-maintained mirror (trap 12)
+ * sitting directly beside the code it mirrors.
+ *
+ * ⚠ WHEN IT IS REACHED — NARROWED BY THE PR #1004 REVIEW, AND THE OLD TEXT WAS
+ * OVER-BROAD (trap 14). It used to say this derivation covers "the clarify-family
+ * exits", full stop. It does not, and must not: those exits now carry the
+ * persisted-graph derivation their own claim-safety read produced
+ * (`TurnExitStamp.exitFreshness`), because on a POST-ANALYSIS clarification turn
+ * this state would DEGRADE a verdict CEE already knew was current — the
+ * self-inflicted degradation the review blocked. This derivation is the LAST
+ * resort: no canonical state, no per-turn derivation, and no exit derivation
+ * either, i.e. genuinely nothing was looked at (today: the `system_event` family,
+ * which passes a `null` payload to the resolver, and non-route callers).
+ *
+ * WHY EACH MEMBER IS TRUE of that residual case, not merely convenient:
+ *   - `freshness: 'unknown'`      the turn classified nothing;
+ *   - `reason: 'current_graph_hash_unavailable'` no graph was in scope, so the
+ *                                current graph hash genuinely could not be
+ *                                computed. `composeRunState` maps exactly this
+ *                                reason to `unknown_degraded` /
+ *                                `no_graph_this_turn`, whose contract text is
+ *                                "no graph was in scope, so there was nothing
+ *                                to classify";
+ *   - `selected_fact_index: null` no fact was selected, which is what drives
+ *                                every usability predicate to false;
+ *   - the three remaining members are null because there is no fact and no
+ *                                graph to take a hash or a timestamp from.
+ *
+ * ⚠ AND WHAT IT IS DELIBERATELY *NOT*: `never_run`. The step-4 brief asked for
+ * `never_run` on these exits. The vendored contract declares that state as "No
+ * analysis has ever been run for this model", licensing a consumer to render
+ * the pre-analysis affordance — a claim about the SCENARIO'S WHOLE HISTORY that
+ * an exit with no fact read cannot support. On a scenario that does hold a
+ * completed analysis it would send the UI to the pre-analysis affordance over a
+ * real result: the contradiction class this contract exists to close,
+ * manufactured by its own fix. `never_run` stays reserved for the case a fact
+ * read actually returned nothing (`freshness: 'none'`), which is the only place
+ * the positive claim is earned.
+ *
+ * ⭐ AND THAT PLACE NOW EXISTS ON THESE EXITS. With `exitFreshness` threaded, a
+ * graph-less exit on a never-analysed scenario DOES have a real fact read behind
+ * it and DOES emit `never_run` — the brief's requested state, arrived at by
+ * earning the claim rather than by asserting it.
+ *
+ * ⚠ HOLD IT LOCALLY — NEVER ASSIGN IT TO `ctx.freshness`.
+ * `current_graph_hash_unavailable` is a member of
+ * `FRESHNESS_ONLY_SYNTHESIS_REASONS`, so a turn whose `ctx.freshness` carries
+ * it ALSO gets a synthesised freshness-only `analysis_ready` block whose status
+ * is `blocked`. Threading this derivation onto the context would therefore add
+ * a second top-level key and a fabricated blocked claim to every clarification
+ * turn. Pinned by a named test with a positive control on the synthesis path.
+ */
+export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze({
+  freshness: 'unknown',
+  reason: 'current_graph_hash_unavailable',
+  selected_fact_index: null,
+  graph_hash_at_run: null,
+  current_graph_hash: null,
+  computed_at: null,
+});
+
 export interface AnalysisStateComposeInput {
   /**
    * The turn's canonical analysis verdict. `null` ⇒ this producer has no
    * verdict to supply and emits NOTHING — contract-licensed absence, which
    * means "no verdict was supplied" and is distinct from every emitted state.
+   *
+   * ⚠ THE V5 FINALISER NO LONGER PASSES `null` (ROADMAP 2.1264): a turn exit
+   * with no analysis context now composes a verdict from
+   * {@link NO_ANALYSIS_CONTEXT_DERIVATION} instead, so that absence on the WIRE
+   * means only "this CEE build predates the field". The `null` branch stays
+   * because this composer is not V5-only property, and it stays under test
+   * rather than becoming untested dead code.
    */
   readonly canonical: CanonicalAnalysisState | null;
   /** The freshness derivation the canonical verdict was built from. */

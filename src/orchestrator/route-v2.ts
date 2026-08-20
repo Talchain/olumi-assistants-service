@@ -1442,17 +1442,34 @@ async function sendFinalised200(
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
   //
-  // THE POPULATION. Eighteen of this file's nineteen `sendFinalised200` call
-  // sites return BEFORE `runTurnExecutor` (`:4427`), so eighteen never pass
+  // THE POPULATION. This file's `sendFinalised200` call sites — however many
+  // there are TODAY. The number is deliberately NOT written here.
+  //
+  // ⚠ THIS COMMENT HAS NOW CARRIED A WRONG COUNT TWICE. It read "nineteen",
+  // was corrected to "twenty-one" on 2026-08-17 in the very same edit that said
+  // "do not re-type a number here" — and by 2026-08-18 it was twenty-two. The
+  // second correction was the same defect as the first: UPDATING a hand-typed
+  // number resets the clock on the mirror instead of removing it (trap 12). So
+  // the figure is gone rather than refreshed. The population is DERIVED by a
+  // balanced-paren enumeration in
+  // `__tests__/route-egress-analysis-state-freshness.drift.test.ts` (and the
+  // claim-safety marking guard beside it), which fails loud on a new exit.
+  // Read the guard; do not restore a number here.
+  //
+  // ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they never pass
   // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
   // a function NESTED inside `runTurnExecutor`, closed over run-local state, and
-  // therefore not callable from here even deliberately. Three of the eighteen
-  // can carry model-authored text (`chip_click` ok, `draft_graph`, and the MAIN
-  // edit exit), and the main edit exit is where the 28 Jul live confirmation
-  // caught a withheld leader claim shipping at HTTP 200.
+  // therefore not callable from here even deliberately. ⚠ THE EXACT SPLIT WAS
+  // NOT RE-DERIVED by the 2.1264 lane: it is a CONTROL-FLOW property and the
+  // lane only measured the call-site count, so "eighteen of nineteen" has been
+  // replaced with the qualitative statement rather than with a number nobody
+  // measured. The conclusion is untouched either way. Some of those exits carry
+  // model-authored text (`chip_click` ok, `draft_graph`, and the MAIN edit
+  // exit), and the main edit exit is where the 28 Jul live confirmation caught a
+  // withheld leader claim shipping at HTTP 200.
   //
-  // WHY HERE AND NOT PER-EXIT. Eighteen per-exit edits is eighteen places for
-  // the nineteenth exit to be forgotten — the hand-maintained mirror
+  // WHY HERE AND NOT PER-EXIT. A per-exit edit is one place per exit for the
+  // next exit to be forgotten — the hand-maintained mirror
   // (CLAUDE.md trap #12). This is the file's SOLE `reply.code(200).send`, it is
   // type-branded and grep-gated, and every exit already threads a REAL verdict
   // (#737 / ROADMAP 1.233 — no literal survives, pinned by
@@ -1589,10 +1606,18 @@ async function sendFinalised200(
   // between here and `reply.send`, so this satisfies that rule strictly better
   // than the old position did.
   //
-  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
-  // unchanged, and the return value is discarded. It cannot alter a single wire
-  // byte — which is why this move is byte-neutral by construction, not merely
-  // by test.
+  // OBSERVE-ONLY, AND NOW STRUCTURALLY SO (ROADMAP 2.1264): it reports and
+  // returns the response unchanged, and the return value is discarded. It
+  // cannot alter a single wire byte — which is why this move is byte-neutral by
+  // construction, not merely by test.
+  //
+  // ⚠ THIS CALL USED TO PASS `enforce: false`, AND THAT OPTION IS GONE. It
+  // gated nothing in the guard — only the `enforced` log field and the `dropped`
+  // telemetry tag — so "flipping it to enforcing" would have changed no wire
+  // byte and made the dashboard claim drops that never happened. Enforcement
+  // is the call immediately ABOVE this one
+  // (`enforceLeadingOptionClaimsAtWire`), which is unconditional, per-field and
+  // per-sentence. See the guard module's docstring.
   //
   // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
   // every sanitiser call on this path (it is passed to each of them from this
@@ -1630,7 +1655,6 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
-    enforce: false,
   });
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);

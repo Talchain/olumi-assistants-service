@@ -112,18 +112,51 @@ import {
   readMayNameLeadingOptionVerdict,
 } from './claim-safety-read.js';
 import type { MayNameLeadingOptionVerdict } from './claim-safety-read.js';
+import type { FreshnessDerivation } from './freshness.js';
 
 /**
- * The claim-safety fields a `sendFinalised200` exit must state.
+ * The fields a non-execute `sendFinalised200` exit must state, all derived from
+ * ONE memoised turn-context read.
  *
  * Returned as ONE object so an exit spreads it and cannot supply the boolean
  * while forgetting the provenance — the pairing that made the pre-fix wire
  * unfalsifiable (a `true` with a `null` provenance is indistinguishable from a
  * `true` that read a permitting fact).
+ *
+ * ⚠ RENAMED FROM `ClaimSafetyExitStamp` (ROADMAP 2.1264, PR #1004 review), and
+ * the rename is the honest half of the change. This object now carries a
+ * freshness derivation as well as the claim-safety verdict, and a name saying
+ * "claim safety" over a member that is not about claim safety is the
+ * two-concepts-one-name defect this estate keeps paying for (trap 21).
+ *
+ * WHY THE FRESHNESS RIDES HERE rather than in a second resolver: `resolve()`
+ * below already awaits `buildTurnContext`, which already computes the
+ * persisted-graph freshness derivation. A second reader would mean a second
+ * fact read AND a second authority that could disagree with this one about the
+ * same turn. One read, one context, one derivation, carried together.
  */
-export interface ClaimSafetyExitStamp {
+export interface TurnExitStamp {
   readonly mayNameLeadingOption: boolean;
   readonly mayNameLeadingOptionProvenance: MayNameLeadingOptionVerdict['provenance'];
+  /**
+   * The turn context's persisted-graph analysis-freshness derivation, for the
+   * `analysis_state` stamped at this exit.
+   *
+   * ⚠ DELIBERATELY NOT NAMED `freshness`. Four graph-bearing exits spread this
+   * object AND set `freshness` themselves, and the KEY ORDER DIFFERS BETWEEN
+   * THEM — `system_event` and `chip_click` set it BEFORE the spread,
+   * `draft_graph` and `edit_graph` after. A member called `freshness` here would
+   * therefore have silently overridden two of those exits' real per-turn
+   * derivations with a derivation about the PERSISTED graph. The distinct name
+   * makes that collision unrepresentable and moves precedence into the
+   * finaliser, where it is stated once and explicitly.
+   *
+   * ABSENT when there was no turn payload to read (the `system_event` family
+   * passes `null`) — a genuine "nothing was looked at", distinct from a read
+   * that looked and found nothing (`freshness: 'none'`) and from a read that
+   * failed (`reason: 'derivation_failed'`).
+   */
+  readonly exitFreshness?: FreshnessDerivation;
 }
 
 /**
@@ -139,12 +172,40 @@ const NO_TURN_CONTEXT_VERDICT: MayNameLeadingOptionVerdict = {
   provenance: 'fail_closed_no_turn_context',
 };
 
+/**
+ * The freshness derivation for a turn whose context read THREW.
+ *
+ * `derivation_failed` is this vocabulary's own word for "the dispatcher
+ * attempted derivation and failed (session-store error, bad graph parse)", and
+ * the `analysis_state` composer maps it to `unknown_degraded` /
+ * `store_unreadable`. Emitting it is strictly more honest than letting the
+ * stamp fall back to "no graph was in scope": we DID have a graph in scope and
+ * we could not read the store, which is a different sentence with a different
+ * remedy. It must never read `none` — a failed read that claims "this scenario
+ * has never been analysed" is the positive claim `prior_facts_read_ok` exists to
+ * prevent.
+ */
+const CONTEXT_READ_FAILED_DERIVATION: FreshnessDerivation = Object.freeze({
+  freshness: 'unknown',
+  reason: 'derivation_failed',
+  selected_fact_index: null,
+  graph_hash_at_run: null,
+  current_graph_hash: null,
+  computed_at: null,
+});
+
+/** The one memoised read's two answers, kept together (see {@link TurnExitStamp}). */
+interface ResolvedTurnExit {
+  readonly verdict: MayNameLeadingOptionVerdict;
+  readonly freshness?: FreshnessDerivation;
+}
+
 export interface TurnClaimSafetyResolver {
   /**
    * The verdict for this turn, derived once and reused. Every non-execute exit
    * spreads the result into its `sendFinalised200` ctx.
    */
-  forExit(): Promise<ClaimSafetyExitStamp>;
+  forExit(): Promise<TurnExitStamp>;
 }
 
 /**
@@ -162,18 +223,26 @@ export function createTurnClaimSafetyResolver(
   // The memo is a PROMISE, not a value: two concurrent exits (impossible
   // today, but not a property this module should depend on) would otherwise
   // each start their own read and the second would discard the first's answer.
-  let memo: Promise<MayNameLeadingOptionVerdict> | null = null;
+  let memo: Promise<ResolvedTurnExit> | null = null;
 
-  async function resolve(): Promise<MayNameLeadingOptionVerdict> {
-    if (payload === null) return NO_TURN_CONTEXT_VERDICT;
+  async function resolve(): Promise<ResolvedTurnExit> {
+    // No payload ⇒ nothing was looked at. NO freshness is carried, which is
+    // distinct from a read that looked and found nothing.
+    if (payload === null) return { verdict: NO_TURN_CONTEXT_VERDICT };
     try {
       const context = await buildTurnContext(payload, requestId);
       // THE canonical derivation — the same two arguments the execute path
       // passes at `turn-executor.ts`. Nothing is re-derived or mirrored here.
-      return readMayNameLeadingOptionVerdict(
-        context.prior_facts,
-        claimSafetyScopeFromContext(context),
-      );
+      return {
+        verdict: readMayNameLeadingOptionVerdict(
+          context.prior_facts,
+          claimSafetyScopeFromContext(context),
+        ),
+        // NOT a second derivation: the context computed this from the same
+        // facts, the same persisted-graph hash and the same degraded-read flag
+        // it hands `deriveCoachingState`. Read, never recomputed (trap 12).
+        freshness: context.persisted_analysis_freshness,
+      };
     } catch (err) {
       // FAIL CLOSED and SAY SO. A swallowed read failure that returned `true`
       // is the shape of every defect in this workstream; a swallowed read
@@ -191,17 +260,23 @@ export function createTurnClaimSafetyResolver(
         },
         'V5 claim safety — turn-context read failed at an early exit; withholding the leading-option permission',
       );
-      return NO_TURN_CONTEXT_VERDICT;
+      // SAY WHICH KIND OF IGNORANCE THIS IS. The verdict fails closed as before;
+      // the freshness reports a FAILED read rather than letting the exit's
+      // `analysis_state` claim no graph was in scope.
+      return { verdict: NO_TURN_CONTEXT_VERDICT, freshness: CONTEXT_READ_FAILED_DERIVATION };
     }
   }
 
   return {
-    async forExit(): Promise<ClaimSafetyExitStamp> {
+    async forExit(): Promise<TurnExitStamp> {
       memo ??= resolve();
-      const verdict = await memo;
+      const resolved = await memo;
       return {
-        mayNameLeadingOption: verdict.may_name_leading_option,
-        mayNameLeadingOptionProvenance: verdict.provenance,
+        mayNameLeadingOption: resolved.verdict.may_name_leading_option,
+        mayNameLeadingOptionProvenance: resolved.verdict.provenance,
+        // Spread conditionally: an exit with no derivation carries NO key, so
+        // "not read" stays distinguishable from every derived verdict.
+        ...(resolved.freshness !== undefined ? { exitFreshness: resolved.freshness } : {}),
       };
     },
   };

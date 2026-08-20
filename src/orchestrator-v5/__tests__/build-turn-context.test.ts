@@ -83,6 +83,11 @@ describe('buildTurnContext', () => {
       coaching_state: _cs,
       prior_coaching_state: _pcs,
       coaching_lifecycle: _cl,
+      // ROADMAP 2.1264 — an ENRICHED member (the context's persisted-graph
+      // freshness derivation), stripped here like every other one so what
+      // remains is a base TurnContext the strict schema accepts. Its presence in
+      // this list is the assertion that it did NOT leak into the base contract.
+      persisted_analysis_freshness: _paf,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);
@@ -592,6 +597,138 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
     const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
     expect(stale?.status).toBe('active');
     expect(stale?.reason_code).toBe('graph_hash_diverged');
+  });
+
+  // ── ROADMAP 2.1264 — the EXPOSED derivation is the SAME one, not a second ──
+  //
+  // `persisted_analysis_freshness` now leaves this function and reaches the wire
+  // (via `TurnExitStamp.exitFreshness` → the graph-less exits' `analysis_state`).
+  // The value of exposing it rather than recomputing downstream is ENTIRELY that
+  // it is the same object the coaching state was built from: two derivations of
+  // one turn's freshness is how two surfaces come to disagree, which is the
+  // defect the whole analysis-state contract exists to close.
+  //
+  // ⚠ THIS COMMENT USED TO OVERCLAIM, AND THE OVERCLAIM WAS CAUGHT BY A MUTANT
+  // (#1004 review, M7b). It said "a change that computes a fresh verdict here (a
+  // different hash, a different helper, a dropped degraded-read flag) turns them
+  // red". The degraded-read half was FALSE: replacing the production call with a
+  // plain two-argument `deriveAnalysisFreshness(priorFacts, persistedGraphHash)`
+  // left all tests GREEN, because the first test's own EXPECTATION is that same
+  // two-argument call — so the mutant and the oracle agreed with each other. A
+  // comment asserting a proof that does not exist is worse than no comment: it
+  // tells the next reader not to look.
+  //
+  // WHAT THESE THREE TESTS ACTUALLY PIN, stated so it can be checked:
+  //   1. the HASH — it is the PERSISTED graph's, cross-checked against the
+  //      coaching state's own emitted `graph_hash` (test 1);
+  //   2. that DIVERGENCE is honoured, so the agreement in test 1 is not a
+  //      fixture on which every path returns `fresh` (test 2);
+  //   3. the DEGRADED-READ FLAG — test 3 drives a genuinely thrown facts read,
+  //      where the two-argument form yields `'none'` and the production
+  //      four-argument form yields `'unknown' / derivation_failed`. THIS is the
+  //      arm that makes the dropped-flag claim true; it did not exist before.
+  //
+  // WHAT THEY DO NOT PIN, so nobody infers it: the OPTION-IDENTITY argument
+  // (`extractGraphOptionIds`). Every fixture here reaches a hash-proven verdict,
+  // and the guard is deliberately NOT consulted on the hash-proven `fresh` path
+  // (see `deriveAnalysisFreshness`'s INVARIANT note — equal hashes already prove
+  // the option set is unchanged). So dropping that argument is byte-identical on
+  // these inputs and no assertion here can see it. Pinning it needs a
+  // hash-impossible `unknown` fixture with diverged analysed option ids; the
+  // guard's own behaviour is covered in `context/__tests__/freshness.test.ts`,
+  // but its THREADING out of `buildTurnContext` is currently unpinned.
+
+  it('the EXPOSED derivation equals the single-source verdict for the same inputs', async () => {
+    const parsed = GraphStateIngressSchema.safeParse(STAGE1_GRAPH);
+    expect(parsed.success).toBe(true);
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data as never) as string;
+    const matchFact = makeRunAnalysisFact(expectedHash);
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [matchFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-paf-1', { sessionStore: store });
+
+    // Same verdict as the routing/pre-dispatch selector on the same inputs…
+    expect(ctx.persisted_analysis_freshness).toEqual(
+      deriveAnalysisFreshness([matchFact], expectedHash),
+    );
+    // …and it is the PERSISTED graph's hash, which is what makes it safe for a
+    // graph-less exit to describe what the user is looking at.
+    expect(ctx.persisted_analysis_freshness.current_graph_hash).toBe(expectedHash);
+    // Cross-checked against the coaching state's own emitted hash, so the two
+    // consumers are pinned to one number rather than to each other's word.
+    const ev = events.find((e) => e.name === 'v5.coaching_state.derived')!;
+    expect(ev.data.graph_hash).toBe(expectedHash);
+    expect(ev.data.freshness).toBe(ctx.persisted_analysis_freshness.freshness);
+  });
+
+  it('THE OTHER DIRECTION — a diverged hash exposes stale, agreeing with the signal', async () => {
+    // The discriminating twin. Without it the assertion above could hold on a
+    // fixture where every path returns `fresh`, and an implementation that
+    // ignored divergence would pass.
+    const diffFact = makeRunAnalysisFact('0000000000000000');
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [diffFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-paf-2', { sessionStore: store });
+    expect(ctx.persisted_analysis_freshness.freshness).toBe('stale');
+    expect(ctx.persisted_analysis_freshness.reason).toBe('graph_hash_diverged');
+    // The coaching signal derived from the SAME object says the same thing.
+    const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
+    expect(stale?.reason_code).toBe(ctx.persisted_analysis_freshness.reason);
+  });
+
+  it('THE DEGRADED-READ FLAG IS CARRIED — a dropped 4th argument turns this red (M7b)', async () => {
+    // The arm the block's comment claimed to have and did not. Mutant M7b
+    // replaced the production `persisted_analysis_freshness: coachingFreshness`
+    // with a fresh `deriveAnalysisFreshness(priorFacts, persistedGraphHash)` —
+    // dropping the degraded-read flag — and survived, because the two tests above
+    // both assert against that very two-argument call. On THIS fixture the two
+    // forms disagree, which is what gives the mutant somewhere to die:
+    //   two-arg  → 'none' / no_successful_run_analysis_fact  (the false claim)
+    //   four-arg → 'unknown' / derivation_failed             (the honest one)
+    const store = {
+      ...createNoopSessionStore({
+        loadGraphResult: STAGE1_GRAPH,
+        priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      }),
+      readFactsFor: async () => {
+        throw new SessionReadError('DB offline', { code: '57P03' });
+      },
+    };
+    const ctx = await buildTurnContext(BASE, 'req-paf-3', { sessionStore: store });
+
+    // Preconditions, pinned in-test so the assertions below cannot pass for the
+    // wrong reason (trap 13b): the read really did fail, and the facts really
+    // are empty, so this really is the ambiguous case the flag disambiguates.
+    expect(ctx.prior_facts_read_ok).toBe(false);
+    expect(ctx.prior_facts).toEqual([]);
+
+    // The exposed derivation carries the flag's consequence…
+    expect(ctx.persisted_analysis_freshness.freshness).toBe('unknown');
+    expect(ctx.persisted_analysis_freshness.reason).toBe('derivation_failed');
+    // …and explicitly NOT the two-argument answer. Stated as its own assertion
+    // because `'none'` is the specific falsehood at issue, and a future refactor
+    // could satisfy "is not fresh" while reintroducing it.
+    expect(ctx.persisted_analysis_freshness.freshness).not.toBe('none');
+
+    // Cross-checked against the OTHER consumer of the same object: the coaching
+    // state reads it as unavailable, not as "never analysed". Two surfaces, one
+    // derivation — which is the property this whole block exists to hold. The
+    // expected shape is derived from the PRODUCER, not from what the name
+    // suggests: `derivation_failed` maps to `analysis_stale` / `unavailable` /
+    // `staleness_indeterminate` (coaching-state.ts:453-457, because the closed
+    // `CoachingStateReasonCode` enum has no member of its own for it).
+    expect(ctx.coaching_state.signals.map((s) => s.kind)).not.toContain('analysis_missing');
+    const degraded = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
+    expect(degraded?.status).toBe('unavailable');
+    expect(degraded?.reason_code).toBe('staleness_indeterminate');
   });
 });
 

@@ -5,12 +5,17 @@
  * THE DEFECT THIS CLOSES, live-confirmed 28 Jul and pinned by the estate's own
  * test as alarm-fires-only.
  *
- * `route-v2.ts` has NINETEEN `sendFinalised200` call sites. EIGHTEEN of them
- * return BEFORE `runTurnExecutor`, so eighteen of them never pass through
- * `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is a function
- * nested inside `runTurnExecutor`, closed over run-local state, and therefore
- * not callable from the route at all. Three of those eighteen can carry
- * MODEL-AUTHORED text:
+ * `route-v2.ts` has a population of `sendFinalised200` call sites that GROWS.
+ * The count is deliberately not written here: it said NINETEEN, was corrected to
+ * TWENTY-ONE on 2026-08-17, and was TWENTY-TWO a day later. It is enumerated by
+ * `__tests__/route-egress-analysis-state-freshness.drift.test.ts`; read that.
+ * ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they
+ * never pass through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) —
+ * which is a function nested inside `runTurnExecutor`, closed over run-local
+ * state, and therefore not callable from the route at all. ⚠ The exact split is
+ * a CONTROL-FLOW property and was NOT re-derived when the count was corrected;
+ * the qualitative statement replaces the old numbers rather than a figure nobody
+ * measured. Some of those exits can carry MODEL-AUTHORED text:
  *
  *   `:2310` chip_click ok      — decision_review enrichment prose
  *   `:3410` draft_graph        — LLM coaching prose
@@ -23,9 +28,14 @@
  *      against Hold at 28%."
  *
  * The Layer-3 alarm (`leading-option-egress-guard.ts`) saw it and logged it and
- * changed nothing, because `enforce: false` is the only mode wired. The estate's
+ * changed nothing, because that rail has no enforcing mode at all. The estate's
  * own test asserted exactly that — status 200, one alarm, `hit_count > 0`, and
  * NO assertion on the body. The harm was pinned, not fixed.
+ *
+ * ⚠ THIS SENTENCE USED TO READ "because `enforce: false` is the only mode
+ * wired", which invited a reader to look for the flip. There was no flip to
+ * find: that option gated no byte, and it was deleted in ROADMAP 2.1264. THIS
+ * MODULE is the enforcement, and it is unconditional.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHAT THIS MODULE DOES, AND — MORE IMPORTANTLY — WHAT IT REFUSES TO DO.
@@ -357,11 +367,18 @@ export interface WireLeaderClaimEnforcementOpts {
    * defensively.
    *
    * ⚠ A NULL GRAPH MEANS NO ROSTER MEANS NO ENFORCEMENT, and the hole is real:
-   * **13 of `route-v2.ts`'s 19 exits pass `graph: null`** (derived at
-   * `16d0d704`, not assumed). They are exactly the deterministic-copy exits —
-   * all three model-text-capable exits (`chip_click` ok `:2420`, `draft_graph`
-   * `:3520`, MAIN edit `:4192`) and the executor exit `:4650` thread a real
-   * graph. But a dispatch that returns a null graph on some branch disarms this
+   * MOST of `route-v2.ts`'s exits pass `graph: null`. No ratio and no line
+   * numbers are written here, and that is deliberate — this sentence has
+   * carried "13 of 19", then "15 of 21", and both went stale within days, while
+   * the line references beside them (`:2420`, `:3520`, `:4192`, `:4650`) had
+   * drifted to different code entirely. A figure re-typed is a mirror re-armed
+   * (trap 12). The population, the split, and which exits thread a real graph
+   * are all enumerated by
+   * `__tests__/route-egress-analysis-state-freshness.drift.test.ts` — read it.
+   * QUALITATIVELY, and this is the part that does not drift: the graph-less
+   * exits are the deterministic-copy ones, while the model-text-capable exits
+   * (`chip_click` ok, `draft_graph`, the MAIN edit exit) and the executor exit
+   * thread a real graph. But a dispatch that returns a null graph on some branch disarms this
    * gate for that turn, so the stand-down is REPORTED
    * (`mode: 'roster_unavailable'`) rather than silent.
    *

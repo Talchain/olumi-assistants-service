@@ -708,7 +708,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     // three things: `status === 200`, exactly one alarm event, `hit_count > 0`.
     // NOTHING touched the body. That is a faithful record of the state #737 left
     // behind — the alarm was armed and the leader claim SHIPPED ANYWAY, because
-    // `enforce: false` is the alarm's only wired mode and the #755 enforcing
+    // the alarm rail has no enforcing mode at all and the #755 enforcing
     // guard is a function nested inside `runTurnExecutor` that this exit returns
     // before ever reaching. The test pinned the harm; it did not fix it.
     //

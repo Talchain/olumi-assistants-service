@@ -90,6 +90,7 @@ import {
 } from './compose/analysis-ready-emit.js';
 import {
   composeAnalysisStateV1,
+  NO_ANALYSIS_CONTEXT_DERIVATION,
   readRawRobustnessFromResponseBody,
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
@@ -203,6 +204,33 @@ export interface FinaliserContext {
    * which is the fail-closed direction.
    */
   readonly mayNameLeadingOption?: boolean;
+  /**
+   * The turn context's PERSISTED-GRAPH freshness derivation, carried to every
+   * non-execute exit by `claimSafety.forExit()` (see `TurnExitStamp`).
+   *
+   * Consumed ONLY as the third choice, and ONLY when `graph` is null — see
+   * `attachAnalysisState`. It exists because the graph-less exits genuinely know
+   * whether the analysis is current (their claim-safety read established it) and
+   * were throwing that knowledge away.
+   */
+  readonly exitFreshness?: import('./context/freshness.js').FreshnessDerivation;
+  /**
+   * The per-turn graph this exit declared, verbatim from the `sendFinalised200`
+   * ctx where it is a REQUIRED member (`GraphV3T | null`).
+   *
+   * ⚠ DECLARED HERE PURELY AS A NULLNESS SIGNAL — never walked, never read for
+   * content. It was already being passed (the whole ctx object reaches this
+   * function); the finaliser simply had no name for it, and so was inferring
+   * "no graph was in scope" from `ctx.freshness === undefined`. That inference
+   * is FALSE on the four graph-bearing exits that spread their freshness
+   * conditionally (`system_event`, `chip_click`, `draft_graph`, `edit_graph`):
+   * on any of those an absent derivation would have shipped a
+   * `no_graph_this_turn` cause about a turn that had a graph. Reading the graph
+   * directly makes the cause true rather than inferred, and
+   * `route-egress-analysis-state-freshness.drift.test.ts` makes the
+   * graph-without-freshness combination fail loud in CI besides.
+   */
+  readonly graph?: import('../orchestrator/types.js').GraphV3T | null;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -298,14 +326,60 @@ export function finaliseV5Response(
 }
 
 /**
- * Compose and stamp `analysis_state`, or return the body untouched when there
- * is no verdict to supply.
+ * The persisted-graph derivation, IF this exit may honestly use it.
  *
- * Absence is a first-class state in the contract — "no verdict was supplied" —
- * and it is what a dispatch path with no analysis context must emit. Stamping
- * a fabricated default (an invented readiness status over an invented run
- * state) would make every no-analysis turn indistinguishable from a turn whose
- * producer genuinely assessed one.
+ * ⚠ THE GATE IS THE POINT, and it is the difference between fixing a
+ * degradation and shipping a false currency claim. `exitFreshness` describes the
+ * PERSISTED graph as the turn-entry claim-safety read found it. On an exit that
+ * declared NO graph in scope — the clarify family, the readiness intake, the
+ * declines — nothing this turn changed the graph, so that derivation is exactly
+ * true of what the user is looking at. On an exit that DID carry a graph, the
+ * turn may have mutated it, and a persisted-graph `fresh` verdict over a mutated
+ * graph would tell the user a stale result is current. Those exits thread their
+ * own `freshness`; if one ever fails to, falling back to `unknown_degraded` is
+ * the correct, visible failure, and the drift guard REDs on the combination
+ * besides.
+ *
+ * Precedence lives HERE, in one expression, rather than in object-literal key
+ * order at every call site — see `TurnExitStamp.exitFreshness` for the collision
+ * that made that mandatory. (No count is typed here on purpose: the population
+ * is enumerated by
+ * `__tests__/route-egress-analysis-state-freshness.drift.test.ts`.)
+ */
+function exitDerivationFor(
+  ctx: FinaliserContext,
+): import('./context/freshness.js').FreshnessDerivation | undefined {
+  if (ctx.exitFreshness === undefined) return undefined;
+  // `== null` deliberately: a route exit states `graph: GraphV3T | null`, and a
+  // non-route caller that omits the member has no graph either.
+  return ctx.graph == null ? ctx.exitFreshness : undefined;
+}
+
+/**
+ * Compose and stamp `analysis_state` — on EVERY exit, ROADMAP 2.1264.
+ *
+ * ⚠ THIS FUNCTION USED TO RETURN THE BODY UNTOUCHED when the turn carried no
+ * analysis context, and the reasoning is kept rather than deleted (trap 14)
+ * because half of it still holds. It read: *absence is a first-class state in
+ * the contract — "no verdict was supplied" — and stamping a fabricated default
+ * would make every no-analysis turn indistinguishable from a turn whose
+ * producer genuinely assessed one.*
+ *
+ * The half that still holds: A FABRICATED DEFAULT IS STILL FORBIDDEN. What
+ * changed is that omission was ALSO carrying a second meaning. With the key
+ * present on some exits and absent on others, absence on the wire meant BOTH
+ * "this CEE build predates the field" AND "this turn supplied no verdict", and
+ * no consumer can separate those — which is precisely what kept the UI on
+ * legacy per-turn-type feature detection instead of reading one contract. CEE
+ * now always supplies a verdict, so absence means exactly one thing.
+ *
+ * The emission on a no-context exit is NOT a default: it is the verdict
+ * `canonicalStateFromFreshness` computes from the derivation that is TRUE of
+ * such an exit (see `NO_ANALYSIS_CONTEXT_DERIVATION` for why each member is
+ * true, and why the state is `unknown_degraded` / `no_graph_this_turn` rather
+ * than the `never_run` the brief asked for). Every predicate, contradiction and
+ * readiness value still comes from the one shared implementation — there is no
+ * second literal here to drift.
  */
 function attachAnalysisState(
   response: OlumiResponse,
@@ -313,12 +387,19 @@ function attachAnalysisState(
 ): OlumiResponse {
   const canonical =
     ctx.canonicalState ??
-    (ctx.freshness !== undefined
-      ? canonicalStateFromFreshness(
-          ctx.freshness,
-          ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
-        )
-      : null);
+    canonicalStateFromFreshness(
+      // The no-context derivation is passed POSITIONALLY and never assigned to
+      // `ctx.freshness` — see its docstring: its reason is a
+      // FRESHNESS_ONLY_SYNTHESIS_REASONS member, so binding it to the context
+      // would also synthesise a `blocked` analysis_ready block.
+      ctx.freshness ?? exitDerivationFor(ctx) ?? NO_ANALYSIS_CONTEXT_DERIVATION,
+      // Threaded UNCONDITIONALLY, which it was not before. Three graph-less
+      // exits (`readiness_intake` and two `edit_graph` declines) supply a
+      // readiness payload with no freshness derivation; under the old
+      // `ctx.freshness !== undefined` guard their readiness verdict and their
+      // blockers were dropped on the floor.
+      ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+    );
   const analysisState = composeAnalysisStateV1({
     canonical,
     freshness: ctx.freshness,

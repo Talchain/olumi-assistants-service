@@ -200,7 +200,8 @@ describe('guardLeadingOptionClaimsAtEgress — behaviour', () => {
     vi.restoreAllMocks();
   });
 
-  const opts = { requestId: 'req-1', exitPath: 'test', enforce: false };
+  // No `enforce` member: this rail has no enforcing mode (ROADMAP 2.1264).
+  const opts = { requestId: 'req-1', exitPath: 'test' };
 
   it('is a NO-OP when the turn may name a leading option', () => {
     const res = envelope({ blocks: [{ type: 'review_card', body: LEADER_PROSE }] });
@@ -223,8 +224,9 @@ describe('guardLeadingOptionClaimsAtEgress — behaviour', () => {
     expect(events[0]!.name).toBe('v5.egress.leading_option_claim_withheld_violated');
     expect(events[0]!.data.hit_count).toBe(1);
     expect(events[0]!.data.reason).toBe('leads');
-    // `dropped: false` is the whole point of the observe-only ship — it makes
-    // the pre-enforcement period countable apart from enforcement.
+    // `dropped: false` says this rail removed nothing — the removal, when it
+    // happens, is `enforceLeadingOptionClaimsAtWire`'s and is counted on its
+    // own event. It is a constant now, not a caller-supplied flag (2.1264).
     expect(events[0]!.data.dropped).toBe(false);
   });
 
@@ -541,5 +543,104 @@ describe('findLeaderClaims — ExerciseBlock prose (B1)', () => {
       // can reach the wire through this field.
       expect(resolved!.protocol_title).toBe(p.title);
     }
+  });
+});
+
+// ─── ROADMAP 2.1264 — this rail has NO enforcing mode, structurally ───────
+//
+// The analysis-state authority brief's removal list asked for the `enforce`
+// option to be "flipped or deleted", on the correct principle that an
+// observe-only guard on a P0 trust surface is guarantee theatre. Derived at the
+// bytes, the flip was the theatre: `enforce` reached only the `enforced` log
+// field and the `dropped` telemetry tag and gated no byte of the response, so
+// setting it `true` would have left the wire identical while the dashboard
+// reported drops that never occurred. It is deleted. These tests keep it
+// deleted, and keep the reason visible.
+
+describe('the observe-only rail exposes no enforcement switch', () => {
+  const GUARD_SRC = readFileSync(
+    resolvePath(import.meta.dirname, '../leading-option-egress-guard.ts'),
+    'utf-8',
+  );
+
+  /** The opts interface body — where a re-added switch would have to appear. */
+  function optsInterfaceBody(source: string): string {
+    const start = source.indexOf('export interface LeadingOptionEgressGuardOpts');
+    expect(start, 'the opts interface was not found — this probe is reading nothing').toBeGreaterThan(
+      0,
+    );
+    const end = source.indexOf('\n}', start);
+    expect(end, 'the opts interface has no closing brace').toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  it('the opts contract declares no `enforce` member', () => {
+    expect(optsInterfaceBody(GUARD_SRC)).not.toMatch(/^\s*readonly enforce\b/m);
+  });
+
+  it('POSITIVE CONTROL — the probe SEES a switch that is actually declared', () => {
+    // Without this the assertion above would pass just as happily against an
+    // empty string or a mis-sliced interface (trap 13).
+    const planted = GUARD_SRC.replace(
+      'export interface LeadingOptionEgressGuardOpts {',
+      'export interface LeadingOptionEgressGuardOpts {\n  readonly enforce: boolean;',
+    );
+    expect(optsInterfaceBody(planted)).toMatch(/^\s*readonly enforce\b/m);
+  });
+
+  it('the enforcing rail this defers to is imported by the route', () => {
+    // Deleting the switch must not read as "enforcement was abandoned". The
+    // rail that DOES remove bytes is asserted present at the route rather than
+    // asserted in prose. Its POSITION is pinned separately, in
+    // `single-pass-egress-byte-identity.test.ts`.
+    const routeSrc = readFileSync(
+      resolvePath(import.meta.dirname, '../../../orchestrator/route-v2.ts'),
+      'utf-8',
+    );
+    expect(routeSrc).toContain('enforceLeadingOptionClaimsAtWire(wireBody, {');
+  });
+
+  it('POSITIVE CONTROL — that route probe can fail', () => {
+    expect('const nothing = 1;').not.toContain('enforceLeadingOptionClaimsAtWire(wireBody, {');
+  });
+});
+
+describe('every emission from this rail reports dropped:false', () => {
+  const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+  beforeEach(() => {
+    events.length = 0;
+    setTestSink((name, data) => {
+      events.push({ name, data: data as Record<string, unknown> });
+    });
+  });
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  const opts = { requestId: 'req-2', exitPath: 'test', mayNameLeadingOption: false };
+
+  it('on a HIT — the caller cannot make this claim a drop', () => {
+    guardLeadingOptionClaimsAtEgress(
+      envelope({ blocks: [{ type: 'review_card', body: 'MacBook Pro leads by 52 points.' }] }),
+      opts,
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]!.data.hit_count).toBe(1);
+    expect(events[0]!.data.dropped).toBe(false);
+  });
+
+  it('on a SCAN FAILURE — the degrade path reports the same thing', () => {
+    // The other emission site. Both are now constants, so the two cannot drift
+    // into disagreeing about whether this rail drops anything.
+    const hostile = envelope();
+    Object.defineProperty(hostile, 'blocks', {
+      get() {
+        throw new Error('exploding envelope');
+      },
+    });
+    guardLeadingOptionClaimsAtEgress(hostile, opts);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.data.reason).toBe('scan_failed');
+    expect(events[0]!.data.dropped).toBe(false);
   });
 });

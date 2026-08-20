@@ -18,14 +18,56 @@
  * them one at a time is not a strategy; this layer measures the residue.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * SHIPS OBSERVE-ONLY. `enforce: false` (the only mode wired today) SCANS and
- * REPORTS and changes not one byte of the response. The `dropped` boolean tag
- * on the telemetry event separates a safety-enforced drop from a
- * telemetry-only detection, exactly as `V5DecisionReviewContractViolation`
- * does (`telemetry.ts`), so the enforcement flip is visible on the dashboard
- * rather than inferred. Turn it on only once real staging traffic has shown
- * what it catches — an enforcing guard built on a guess about its own hit rate
- * is how a fix becomes an outage.
+ * THIS RAIL OBSERVES. IT HAS NO ENFORCING MODE, AND AS OF ROADMAP 2.1264 IT NO
+ * LONGER PRETENDS TO — the `enforce` option is GONE.
+ *
+ * ⚠ WHAT USED TO BE HERE, AND WHY REMOVING IT IS THE HONEST MOVE (trap 14:
+ * replace the instruction, never delete it). This block read: *"SHIPS
+ * OBSERVE-ONLY. `enforce: false` (the only mode wired today) SCANS and REPORTS
+ * and changes not one byte of the response … Turn it on only once real staging
+ * traffic has shown what it catches — an enforcing guard built on a guess about
+ * its own hit rate is how a fix becomes an outage."*
+ *
+ * That sentence outlived the situation it described, and the option it
+ * advertised was a LIE-SHAPED AFFORDANCE. Read the function below: `enforce`
+ * reached exactly two places, the `enforced` log field and the `dropped`
+ * telemetry tag. It gated NO byte of the response on any path. So "flipping the
+ * guard to enforcing" — which the analysis-state authority brief's removal list
+ * proposed, on the correct principle that observe-only on a P0 trust surface is
+ * guarantee theatre — would have changed nothing except to make the dashboard
+ * report drops that never happened. The theatre was not the observing; it was
+ * the switch.
+ *
+ * ENFORCEMENT IS ALREADY WIRED, ONE RAIL OVER:
+ * `compose/leading-option-wire-enforcement.ts` (`enforceLeadingOptionClaimsAtWire`,
+ * ROADMAP 2.149), per FIELD and per SENTENCE, called from `sendFinalised200`
+ * immediately upstream of this scan.
+ *
+ * ⚠ AND ITS SCOPE, STATED RATHER THAN ROUNDED UP — this paragraph first said
+ * "unconditionally", which is the guarantee-theatre shape it was written to
+ * complain about. Derived at that module's bytes: it is CALLED on every exit,
+ * and it ENFORCES over `WIRE_ENFORCED_PROSE_FIELDS` — `assistant_text` and
+ * `framing_question` only — and only when the exit carries a NON-NULL graph,
+ * because the option roster comes from the graph and a null graph stands the
+ * gate down (reported as `mode: 'roster_unavailable'`, not silently). Block
+ * prose, enrichment blobs and structured key designations are producer-owned
+ * (`compose/withheld-claim-projection.ts`). Which is precisely why this alarm
+ * still matters: a hit here names a surface the wire gate does not cover.
+ *
+ * The two rails are deliberately separate —
+ * see the closing block of `guardLeadingOptionClaimsAtEgress`: if the meter also
+ * removed what it found it would report its own success and the producer defect
+ * would go dark. So this module keeps measuring THE RESIDUE THAT STILL SHIPS,
+ * and `dropped` is now a constant `false` whose comment names the rail that
+ * does the dropping.
+ *
+ * ⚠ AND THE WARNING IN THE OLD TEXT WAS RIGHT ABOUT THE REAL RISK, just aimed
+ * at the wrong reader: this module's ALARM vocabulary is deliberately WIDER than
+ * an enforcer's may safely be (see ENFORCEMENT_FALSE_POSITIVE_SPANS — "team
+ * leads", "leads to" and the POST-710 §7.1 false positives all trip it). Had
+ * anyone wired `enforce: true` here expecting suppression, it would have been an
+ * enforcer running the WIDE reader over user prose. Deleting the option closes
+ * that door by construction rather than by docstring.
  * ────────────────────────────────────────────────────────────────────────────
  *
  * NEVER THROWS. House rule, ruled at `turn-executor.ts` (the finalise-path
@@ -510,10 +552,17 @@ export interface LeadingOptionEgressGuardOpts {
    */
   readonly mayNameLeadingOption: boolean;
   /**
-   * OBSERVE-ONLY when false: hits are reported, the response is returned
-   * unchanged. Nothing wires `true` yet — see the module docstring.
+   * ⚠ THERE IS DELIBERATELY NO `enforce` MEMBER HERE (ROADMAP 2.1264). It
+   * existed, it gated no byte of the response, and its only effect was to
+   * mislabel the telemetry — see the module docstring. If you are reaching for
+   * it to make a withheld leader claim stop shipping, the rail you want is
+   * `enforceLeadingOptionClaimsAtWire` in
+   * `compose/leading-option-wire-enforcement.ts` — CALLED on every exit, and
+   * ENFORCING over `assistant_text` and `framing_question` when the exit carries
+   * a non-null graph (see the module docstring for the scope in full; it is not
+   * "everything"). Do NOT re-add a switch here: this reader is intentionally
+   * wider than any enforcer may safely be.
    */
-  readonly enforce: boolean;
 }
 
 function scanString(path: string, value: unknown, out: LeaderClaimHit[]): void {
@@ -895,7 +944,12 @@ export function guardLeadingOptionClaimsAtEgress(
       hit_paths: paths,
       hit_codes: codes,
       hit_count: hits.length,
-      enforced: opts.enforce,
+      // A CONSTANT, and it is a statement about THIS rail, not about the
+      // estate: nothing below removes a byte. The rail that does is
+      // `enforceLeadingOptionClaimsAtWire`, which ran immediately upstream of
+      // this scan and logs its own edits — so a hit here is residue that
+      // SURVIVED enforcement, which is exactly what this meter is for.
+      enforced: false,
     },
     'V5 egress: this turn withheld the leading-option claim, and then asserted it anyway in the fields listed ' +
       'in hit_paths. A user is being told "no option can be put forward yet" and shown which option leads, in ' +
@@ -935,9 +989,16 @@ export function guardLeadingOptionClaimsAtEgress(
     // PRIMARY code rides the tag; the full set is on the log payload above.
     reason: codes[0] ?? 'unknown',
     hit_count: hits.length,
-    // Separates safety-ENFORCED drop from telemetry-only DETECTION, so the
-    // observe-only period is distinguishable from enforcement on the dashboard.
-    dropped: opts.enforce,
+    // ⚠ ALWAYS `false`, AND THE TAG IS KEPT RATHER THAN DROPPED. It is a
+    // Datadog tag (`utils/telemetry.ts` increments
+    // `v5.egress.leading_option_claim_withheld_violated` with
+    // `dropped: String(eventData.dropped === true)`), so removing it would
+    // silently change the metric's tag set and split every existing dashboard
+    // query. It used to read `opts.enforce` — a value that could only ever be
+    // `false`, and which, had anyone set it, would have claimed a drop this
+    // rail does not perform. A constant states the same truth without the
+    // affordance to lie about it.
+    dropped: false,
   });
 
   // OBSERVE-ONLY: report, change nothing.
