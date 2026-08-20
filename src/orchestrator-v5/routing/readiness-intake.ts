@@ -39,6 +39,38 @@ import {
 } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { summariseReadiness } from './readiness-summary.js';
 import { composeProcessMetaIntakeResponse } from './process-meta-intake.js';
+import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
+import { PLOT_MIN_COMPARISON_OPTIONS } from '../tools/handlers/analysable-option-gate.js';
+import {
+  buildAnswerChips,
+  buildLabelLookup,
+  selectAnswerableBlockers,
+} from './readiness-answer-chips.js';
+
+/**
+ * The deployed `SuggestedChips` slices to THREE (observed in the staging
+ * bundle, 2026-08-20). Emitting more would silently drop affordances this
+ * composer's own prose may have promised — so the cap is enforced HERE, where
+ * the promise is written, rather than left to the client to truncate.
+ */
+const MAX_RENDERED_CHIPS = 3;
+
+/**
+ * ⭐ THE RUN AFFORDANCE THE LOOP OWNS.
+ *
+ * Deliberately emitted by this composer rather than relied upon elsewhere: the
+ * canvas's own Analyse control is rendered CONDITIONALLY on the results tab
+ * (`OutputsDock.tsx`), so selecting the Olumi tab UNMOUNTS it. A loop whose
+ * last step told the user to "run it whenever you like" would end by pointing
+ * at a control that may not be on screen. `run_analysis` is in the client's
+ * dispatch vocabulary already, so this chip routes deterministically.
+ */
+const RUN_ANALYSIS_CHIP = {
+  id: 'chip_readiness_run_analysis',
+  label: 'Run the analysis',
+  action_type: 'run_analysis',
+  message: 'Run the analysis.',
+} as const;
 
 /** Where the readiness arm landed — surfaced to telemetry so the typed arm is
  *  observable per turn (fresh-canvas unification vs each populated branch). */
@@ -73,6 +105,13 @@ function composeGoalMissingResponse(stage: StageIndicator): OlumiResponse {
     'there is nothing for the analysis to judge the options against. Add the ' +
     'goal you want to weigh the options up against, and I will help you check ' +
     'the rest before you run the first analysis.';
+  // ⚠ DELIBERATELY CHIPLESS, and this is a judgement rather than an omission.
+  // A missing goal is a STRUCTURAL gap: it is not answerable with an effect
+  // value, and offering a "set a value" affordance here would attach the
+  // loop's mechanic to a question it cannot answer. The answer chips are
+  // scoped by blocker code for exactly this reason (see
+  // `readiness-answer-chips.ts`), and the suite's discrimination control pins
+  // that a structural blocker is never offered one.
   return {
     response_version: 2,
     assistant_text: assistantText,
@@ -83,10 +122,40 @@ function composeGoalMissingResponse(stage: StageIndicator): OlumiResponse {
   } as OlumiResponse;
 }
 
+/**
+ * ⭐⭐ "TWO ANSWERS, NOT SIX" — the sentence that makes this loop finite.
+ *
+ * `PLOT_MIN_COMPARISON_OPTIONS` is the real finish line: once that many options
+ * carry effect values the comparison runs, and the exclusion honestly carries
+ * the rest. Measured over the J4 capture, admission flips at exactly TWO
+ * configured options with FOUR blockers still open.
+ *
+ * Saying this is not a convenience — it is what stops the loop reading as a
+ * march through every blocker. These blockers are `obligation: 'offered'`, so
+ * the product may offer to work them through and may never demand them.
+ */
+function spellSmallNumber(value: number): string {
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six'];
+  // Falls back to digits rather than going silently wrong if the constant moves.
+  return words[value] ?? String(value);
+}
+
+/**
+ * ⚠ Caught by READING THE COMPOSED OUTPUT, not by the suite — every assertion
+ * was green while the product said "…to run. four options are still unset".
+ * A spelled number opening a sentence needs a capital, and no test that checks
+ * for chips, counts or forbidden phrasings can see that.
+ */
+function startSentence(text: string): string {
+  return text.length === 0 ? text : `${text[0]!.toUpperCase()}${text.slice(1)}`;
+}
+
 function composeOpenItemsResponse(
   prose: string,
   stage: StageIndicator,
   proposal: CanonicalReadinessRepairProposal | null,
+  assessment: CanonicalReadinessAssessment,
+  graph: unknown,
 ): OlumiResponse {
   // `prose` is the reviewed, deterministic readiness-summary text (the SAME
   // string the post-analysis advice gate ships). It already opens with
@@ -98,11 +167,45 @@ function composeOpenItemsResponse(
     : proposal.changes.length > 0
       ? `\n\nI have grouped the ${proposal.changes.length} safe model ${proposal.changes.length === 1 ? 'fix' : 'fixes'} into one reviewable change. ${proposal.unresolved_inputs.length} ${proposal.unresolved_inputs.length === 1 ? 'item still needs' : 'items still need'} your judgement; I will not invent missing values or relationships.`
       : `\n\nI have grouped all ${proposal.unresolved_inputs.length} open items into one review plan. They need your judgement, so I will not invent missing values or relationships.`;
+
+  // ⚠ Derived from `blockingIssues`, NOT from `proposal.unresolved_inputs`:
+  // that array exists only at two-or-more blockers, and this loop converges
+  // toward one. See `readiness-answer-chips.ts`.
+  const answerable = selectAnswerableBlockers(assessment.blockingIssues);
+  const willProceed = resolveRunAdmission(graph).willProceed;
+
+  if (willProceed) {
+    // ⭐ THE LOOP STOPS ASKING HERE. Continuing to walk the remaining blockers
+    // would be asking for values that no longer block anything — an obligation
+    // these `offered` blockers do not carry. The run already discloses which
+    // options it left out; this says so before the user commits to it.
+    const optionsLeftOut = new Set(answerable.map((issue) => issue.option_id)).size;
+    const leaveOutCopy = optionsLeftOut > 0
+      ? ` ${startSentence(spellSmallNumber(optionsLeftOut))} ${optionsLeftOut === 1 ? 'option is' : 'options are'} still unset, so I will leave ${optionsLeftOut === 1 ? 'it' : 'them'} out of the comparison and name ${optionsLeftOut === 1 ? 'it' : 'them'} in the results.`
+      : '';
+    return {
+      response_version: 2,
+      assistant_text: `${prose}\n\nThere is already enough here to run.${leaveOutCopy}`,
+      blocks: [],
+      // The run comes first: it is the thing the user can now do. The answer
+      // chips stay available for anyone who would rather set one more first.
+      suggested_actions: [
+        RUN_ANALYSIS_CHIP,
+        ...buildAnswerChips(answerable, buildLabelLookup(graph), MAX_RENDERED_CHIPS - 1),
+      ],
+      insights: [],
+      stage_indicator: stage,
+    } as OlumiResponse;
+  }
+
+  const enoughCopy = answerable.length > PLOT_MIN_COMPARISON_OPTIONS
+    ? `\n\nAnswering ${spellSmallNumber(PLOT_MIN_COMPARISON_OPTIONS)} of them is enough to start: once ${spellSmallNumber(PLOT_MIN_COMPARISON_OPTIONS)} options have effect values, I can run the comparison and leave the rest out — and I will name what I left out.`
+    : '';
   return {
     response_version: 2,
-    assistant_text: `${prose}${planCopy}`,
+    assistant_text: `${prose}${planCopy}${enoughCopy}`,
     blocks: [],
-    suggested_actions: [],
+    suggested_actions: [...buildAnswerChips(answerable, buildLabelLookup(graph), MAX_RENDERED_CHIPS)],
     insights: [],
     stage_indicator: stage,
   } as OlumiResponse;
@@ -113,11 +216,15 @@ function composeReadyResponse(stage: StageIndicator): OlumiResponse {
     'Your model has a goal, at least two options, and factors mapped with ' +
     'values, so it looks ready to analyse. Run the analysis whenever you are ' +
     'ready, and I can talk through the results with you afterwards.';
+  // The copy said "run the analysis whenever you are ready" and offered no way
+  // to do it — while the canvas's own Analyse control is unmounted on the Olumi
+  // tab. An affordance-free instruction to use an affordance that may not be
+  // on screen is the shape this loop exists to remove.
   return {
     response_version: 2,
     assistant_text: assistantText,
     blocks: [],
-    suggested_actions: [],
+    suggested_actions: [RUN_ANALYSIS_CHIP],
     insights: [],
     stage_indicator: stage,
   } as OlumiResponse;
@@ -166,7 +273,13 @@ export function composeReadinessIntakeResponse(
   if (summary.open_items.length > 0) {
     return {
       outcome: 'readiness_open',
-      response: composeOpenItemsResponse(summary.prose, stage, assessment.repairProposal),
+      response: composeOpenItemsResponse(
+        summary.prose,
+        stage,
+        assessment.repairProposal,
+        assessment,
+        persistedGraph,
+      ),
       assessment,
     };
   }
