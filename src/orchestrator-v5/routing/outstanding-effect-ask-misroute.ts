@@ -87,7 +87,11 @@ import { parseEdgeId } from '../tools/handlers/adjust-edge-strength.js';
 import {
   detectConfigureOptionIntent,
 } from './configure-option-intent.js';
-import { BASELINE_FRAMING, EFFECT_FRAMED_TRIGGERS } from './option-effect-write.js';
+import {
+  BASELINE_FRAMING,
+  EFFECT_FRAMED_TRIGGERS,
+  readOptionEffectValue,
+} from './option-effect-write.js';
 import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value-binding.js';
 
 /** The handlers this module can refuse. Both are D1 graph-mutating writers. */
@@ -105,6 +109,18 @@ export interface OutstandingEffectAskCollision {
    * Never empty (a collision with no pair is not a collision).
    */
   readonly pairs: readonly MissingEffectPair[];
+  /**
+   * ⭐ The model-unit effect value the user's OWN sentence already carried, or
+   * `null`. Read with `readOptionEffectValue` — the writer's own reader, not a
+   * second spelling (trap 12) — so the value a repair chip replays can never
+   * differ from the value the writer would accept.
+   *
+   * `null` is the common and CORRECT outcome for a hedged sentence ("…about
+   * 0.6"): that reader is anchored on `to <number>`, so an approximation is
+   * declined rather than laundered into an exact user-stated figure. A caller
+   * with no value must ask for one.
+   */
+  readonly userValue: number | null;
 }
 
 /**
@@ -124,6 +140,7 @@ export function buildOutstandingEffectAskDetails(
   if (collision === null) return {};
   return {
     effect_ask_refused_field: collision.refusedField,
+    ...(collision.userValue !== null ? { effect_ask_user_value: collision.userValue } : {}),
     // Every pair in a collision shares the factor (both arms match on it), so
     // one label is the honest rendering rather than a list.
     effect_ask_factor_label: collision.pairs[0]!.factorLabel,
@@ -148,6 +165,11 @@ function isUnanchoredEffectFraming(
   if (detection.matched) return false;
   const trigger = detection.labelAnchorWouldDecideTrigger;
   return trigger !== null && EFFECT_FRAMED_TRIGGERS.has(trigger);
+}
+
+/** Normalised exactly as the writer normalises, so the two read one string. */
+function readUserValue(message: string): number | null {
+  return readOptionEffectValue(message.toLowerCase().replace(/\s+/g, ' ').trim());
 }
 
 /**
@@ -178,12 +200,16 @@ export function findOutstandingEffectAskCollision(params: {
     const match = pairs.filter(
       (p) => p.optionId === parsed.from && p.factorId === parsed.to,
     );
-    return match.length > 0 ? { refusedField: 'edge_strength', pairs: match } : null;
+    return match.length > 0
+      ? { refusedField: 'edge_strength', pairs: match, userValue: readUserValue(params.message) }
+      : null;
   }
 
   // set_factor_value — the prose conjunct, for the reason in the header.
   if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
   if (!isUnanchoredEffectFraming(params.message, params.optionLabels)) return null;
   const match = pairs.filter((p) => p.factorId === params.entityId);
-  return match.length > 0 ? { refusedField: 'factor_value', pairs: match } : null;
+  return match.length > 0
+    ? { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) }
+    : null;
 }

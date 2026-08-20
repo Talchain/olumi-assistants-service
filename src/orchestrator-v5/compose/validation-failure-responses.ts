@@ -764,6 +764,24 @@ function composeOutstandingEffectAskMisroute(
 
   if (optionLabels.length === 1) {
     const option = safeLabel({ label: optionLabels[0]!, kind: undefined });
+    // ⭐⭐ CORRECT THE MUTATION IN ONE CLICK, not one retype. When the user's own
+    // sentence already carried a model-unit effect value, the only thing wrong
+    // with the turn was WHICH FIELD it was going to move — so the chip replays
+    // the value they typed, into the phrasing that reaches the honest writer.
+    //
+    // The value is READ BY THE GUARD, using `readOptionEffectValue` — the
+    // writer's OWN reader (trap 12: not a second spelling) — and arrives here as
+    // a number. That reader is anchored on `to <number>` and therefore declines
+    // a hedge like "…strongly, about 0.6" all by itself. The restraint is
+    // deliberate and is the P5 half of this: replaying an approximation as an
+    // exact figure would launder the user's judgement. No value ⇒ no chip, and
+    // the copy asks for the number instead.
+    const rawValue = details.effect_ask_user_value;
+    const userValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : null;
+    const replay =
+      userValue === null
+        ? null
+        : `${buildConfigureOptionAdvisedFormat('', factor, String(userValue))}.`;
     return {
       body: {
         assistant_text:
@@ -778,9 +796,17 @@ function composeOutstandingEffectAskMisroute(
           // dressed as help. With the option left out, rule 3b resolves it from
           // this very ask. Pinned by the routing spec, so the exemplar can never
           // drift away from the lane that would honour it.
-          + `"${buildConfigureOptionAdvisedFormat('', factor, '0.6')}" `
+          + `"${buildConfigureOptionAdvisedFormat('', factor, String(userValue ?? 0.6))}" `
           + `(any number from 0 to 1).`,
-        suggested_actions: [fallbackPrompt('Give the effect value')],
+        suggested_actions: [
+          replay === null
+            ? fallbackPrompt('Give the effect value')
+            : {
+                id: chipId('prompt', `option-effect-${factor}`),
+                label: `Set the effect to ${userValue}`,
+                message: replay,
+              },
+        ],
       },
       template_id: 'option_intervention_misroute',
       chip_type: 'text_prompt',

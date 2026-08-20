@@ -34,8 +34,10 @@ import { readFileSync } from 'node:fs';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { safeLabel } from '../compose/helpers.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
+import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
 import { makeMessagePayload } from './fixtures.js';
 import type {
   ChatWithToolsArgs,
@@ -209,6 +211,36 @@ function factorValue(g: unknown): unknown {
   return node?.observed_state?.value;
 }
 
+/** The edge's strength, by IDENTITY (`from`/`to`), never by position. */
+function edgeStrength(g: unknown, from: string, to: string): unknown {
+  const edges = (g as { edges?: Array<Record<string, unknown>> }).edges ?? [];
+  const e = edges.find((x) => x.from === from && x.to === to) as
+    | { strength?: { mean?: unknown } }
+    | undefined;
+  return e?.strength?.mean;
+}
+
+/**
+ * ⭐⭐ IS THE PAIR STILL OUTSTANDING, ACCORDING TO PERSISTED STATE?
+ *
+ * Re-derived from the graph the turn actually persisted, through the SAME
+ * canonical readiness the on-screen blocker is composed from. This is the
+ * question the witnessed "Applied" badge could not answer: on defect A the
+ * receipt said applied while `options_ready` stayed 0/4, and the only way to
+ * catch that is to read the outcome back out of persistence rather than trust
+ * the handler's return value.
+ */
+function pairStillOutstanding(g: unknown, optionId: string, factorId: string): boolean {
+  return deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(g)).some(
+    (p) => p.optionId === optionId && p.factorId === factorId,
+  );
+}
+
+/** The persisted graph, or — when the turn wrote nothing — the graph it started from. */
+function stateAfterTurn(): unknown {
+  return persistedGraph ?? graph();
+}
+
 beforeEach(() => {
   appendCalls.length = 0;
   persistedGraph = null;
@@ -231,6 +263,12 @@ describe('DEFECT A — the offer against the product’s own blocker', () => {
     expect(chipLabels).not.toContain(WITNESSED_CHIP_LABEL);
     // …and nothing was written either way.
     expect(graphWrites()).toHaveLength(0);
+    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT — read back, bound by identity.
+    // The witnessed build said "Applied" while `options_ready` stayed 0/4; a
+    // receipt that describes an intention rather than an outcome IS the defect.
+    // The receipt here says nothing changed, so persistence must agree:
+    expect(edgeStrength(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(1);
+    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
     // The refusal NAMES the entity — the whole point of the fix.
     expect(response.assistant_text).toContain(J18.ids.factor_label);
     expect(response.assistant_text.toLowerCase()).not.toContain('applied');
@@ -259,6 +297,10 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
 
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
+    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT. The witnessed build badged
+    // "Applied" while the FACTOR's own value had moved instead. Read it back:
+    expect(factorValue(stateAfterTurn())).toBe(0.5);
+    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
     // The refusal names BOTH the entity and the option it is still waiting on.
     // The option is asserted through `safeLabel` — the estate's own user-facing
     // renderer — rather than as the raw 84-character brief fragment, because
@@ -307,6 +349,45 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
     });
   });
 
+  it('⭐⭐ CORRECT THE MUTATION IN ONE CLICK — the chip carries the user\'s own value and lands on the option\'s effect', async () => {
+    // Founder requirement 1: the write must land on the thing the user meant.
+    // The turn is refused rather than redirected mid-flight (a routing change
+    // at the highest-blast-radius seam in the estate), and the correction is
+    // offered as ONE CLICK through the path already proven to write option
+    // interventions honestly.
+    const { response } = await runTurnExecutor(
+      payload(EFFECT_FRAMED),
+      'req-effect-ask-one-click',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    const chips = response.suggested_actions ?? [];
+    expect(chips).toHaveLength(1);
+    // The chip carries the USER'S value (0.8), not a value the product invented.
+    expect(chips[0]!.label).toContain('0.8');
+    // …and its replay message binds the RIGHT pair, by identity.
+    expect(resolveOptionEffectWrite({ message: chips[0]!.message, graph: graph() })).toMatchObject({
+      matched: true,
+      kind: 'write',
+      optionId: OPTION_ID,
+      factorId: FACTOR_ID,
+      value: 0.8,
+    });
+  });
+
+  it('⭐ A HEDGE IS NEVER LAUNDERED INTO AN EXACT FIGURE — no value chip on "about 0.6"', async () => {
+    // The opposite restraint, and it is the P5 half. `readOptionEffectValue` is
+    // anchored on `to <number>`, so "…strongly, about 0.6" yields no value and
+    // the product asks for one rather than putting a figure in the user's mouth.
+    const { response } = await runTurnExecutor(
+      payload(OPINION_NO_WARRANT),
+      'req-effect-ask-hedge-no-value',
+      { routingAdapter: edgeStrengthAdapter(OUTSTANDING_EDGE), graphState: graph() },
+    );
+    const chips = response.suggested_actions ?? [];
+    expect(chips.map((c) => c.label)).not.toContain(WITNESSED_CHIP_LABEL);
+    for (const c of chips) expect(c.label).not.toMatch(/0\.6/);
+  });
+
   it('⭐⭐ OPPOSITE-DIRECTION TWIN — the SAME factor and value WITHOUT effect framing still writes', async () => {
     const before = factorValue(graph());
     await runTurnExecutor(payload(BASELINE_EDIT), 'req-effect-ask-factor-twin', {
@@ -317,5 +398,25 @@ describe('DEFECT B — the effect-framed sentence whose option is a pronoun', ()
     expect(graphWrites().length).toBeGreaterThan(0);
     expect(factorValue(persistedGraph)).toBe(0.8);
     expect(factorValue(persistedGraph)).not.toBe(before);
+
+    // ⭐⭐ THE RECEIPT IS CHECKED AGAINST PERSISTENCE, NOT AGAINST ITSELF. The
+    // `graph_patch` fact is what the UI renders the card from; if it and the
+    // persisted graph can disagree, the card is describing an intention. Bound
+    // by identity (`target_id`), never by "the fact whose value is 0.8".
+    const facts = (appendCalls.find((c) => Array.isArray(c.handler_facts)
+      && (c.handler_facts as unknown[]).length > 0)?.handler_facts ?? []) as Array<{
+        fact_type?: string;
+        result?: { target_id?: string; status?: string; after?: { value?: unknown } };
+      }>;
+    const receipt = facts.find(
+      (f) => f.fact_type === 'set_factor_value' && f.result?.target_id === FACTOR_ID,
+    );
+    expect(receipt).toBeDefined();
+    expect(receipt!.result!.status).toBe('applied');
+    expect(receipt!.result!.after!.value).toBe(factorValue(persistedGraph));
+
+    // …and the honest half: this write did NOT answer the effect ask, and the
+    // model still says so. A baseline edit must not silently clear a blocker.
+    expect(pairStillOutstanding(persistedGraph, OPTION_ID, FACTOR_ID)).toBe(true);
   });
 });

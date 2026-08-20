@@ -290,6 +290,45 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
   });
 });
 
+describe('the user\'s own value rides on the collision — read by the WRITER\'s reader', () => {
+  it('an explicit `to 0.7` is carried, so a repair chip can replay the user\'s figure', () => {
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: FAC_ENTERPRISE,
+      message: WITNESSED_B,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+    });
+    expect(hit?.userValue).toBe(0.7);
+  });
+
+  it('⭐ OPPOSITE DIRECTION — a HEDGE carries no value, so nothing is put in the user\'s mouth', () => {
+    // "…fairly strongly, about 0.6" is an approximation. `readOptionEffectValue`
+    // is anchored on `to <number>` and declines it, and that decline is the
+    // product behaviour: ask for the number, never launder the hedge.
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'adjust_edge_strength',
+      entityId: `${OPT_SELF_SERVE}→${FAC_SELF_SERVE}`,
+      message: WITNESSED_A,
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+    });
+    expect(hit).not.toBeNull();
+    expect(hit?.userValue).toBeNull();
+  });
+
+  it('⭐ OPPOSITE DIRECTION — a value outside the 0-1 model scale carries nothing', () => {
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: FAC_ENTERPRISE,
+      message: 'Set its effect on Enterprise sales investment to 70',
+      optionLabels: OPTION_LABELS,
+      readiness: witnessedReadiness(),
+    });
+    expect(hit?.userValue).toBeNull();
+  });
+});
+
 describe('the pair set is read from ONE owner, in both of its spellings', () => {
   it('the `blocker_type: "missing_value"` spelling yields the same refusal as `code: "MISSING_OPTION_VALUE"`', () => {
     const byType = findOutstandingEffectAskCollision({
