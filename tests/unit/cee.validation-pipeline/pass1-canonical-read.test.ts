@@ -196,22 +196,36 @@ describe('bias offsets are computed from real pass1 values', () => {
   });
 
   it('excludes unreadable edges rather than entering them as 0', () => {
-    // ⚠ THE SHAPE OF THIS FIXTURE IS LOAD-BEARING. An earlier version used one
-    // unreadable edge among two readable ones; the median of [0, -0.5, 0] is
-    // still 0, so it agreed with the defect and could never bite (a mutant
-    // entering unreadable edges as 0 survived it). TWO unreadable edges against
-    // one readable edge move the median iff the defect is present:
-    //   skipping  -> deltas [0]              -> median  0
-    //   `?? 0`    -> deltas [0, -0.5, -0.5]  -> median -0.5
+    // ⚠ THE SHAPE OF THIS FIXTURE IS LOAD-BEARING, AND IT TOOK TWO GOES.
+    // A mutant that enters unreadable edges as `?? 0` must RED here, and twice
+    // it did not:
+    //   (1) one unreadable edge among two readable ones -> deltas [0, -0.5, 0],
+    //       median still 0. The assertion agreed with the defect.
+    //   (2) two unreadable edges at magnitude 0.5 -> median -0.5, which EXCEEDS
+    //       EXTREME_BIAS_OFFSET_LIMIT (0.3), so guardExtremeOffsets discarded it
+    //       back to 0 and the assertion agreed with the defect AGAIN — this time
+    //       via a guard one layer down that the fixture never mentioned.
+    // Magnitude 0.25 keeps the fabricated offset INSIDE the limit, so it reaches
+    // the output and the assertion can see it:
+    //   skipping -> deltas [0]                -> median  0
+    //   `?? 0`   -> deltas [0, -0.25, -0.25]  -> median -0.25, applied, RED.
+    // The warnings assertion pins the precondition: if a future limit change
+    // starts absorbing this again, THAT fails rather than silently restoring a
+    // fixture that cannot bite (trap 13b).
     const edges = [
-      flatEdge('a', 'b', 0.5, 0.15, 0.9),
+      flatEdge('a', 'b', 0.25, 0.15, 0.9),
       { from: 'c', to: 'd' } as unknown as EdgeV3T, // no readable numbers
       { from: 'e', to: 'f' } as unknown as EdgeV3T, // no readable numbers
     ];
-    const ests = [p2('a', 'b', 0.5, 0.15, 0.9), p2('c', 'd', 0.5, 0.15, 0.9), p2('e', 'f', 0.5, 0.15, 0.9)];
+    const ests = [
+      p2('a', 'b', 0.25, 0.15, 0.9),
+      p2('c', 'd', 0.25, 0.15, 0.9),
+      p2('e', 'f', 0.25, 0.15, 0.9),
+    ];
 
-    const { offsets } = computeBiasOffsets(edges, ests);
+    const { offsets, warnings } = computeBiasOffsets(edges, ests);
     expect(offsets.strength_mean).toBe(0);
+    expect(warnings).toEqual([]);
   });
 });
 
