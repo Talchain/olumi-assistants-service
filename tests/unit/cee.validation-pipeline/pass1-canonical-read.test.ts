@@ -61,6 +61,49 @@ function compare(edge: EdgeV3T, est: LintedPass2Estimate) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 0. The canonical reader itself. This is the single owner of "what values does
+//    the model currently use for this edge"; the validation pipeline consumes it
+//    rather than re-implementing one shape each.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('readEdgeParams — the canonical, shape-agnostic read', () => {
+  it('reads V1_FLAT (the shape present when the validation pipeline runs)', () => {
+    expect(readEdgeParams({ strength_mean: 0.55, strength_std: 0.132, belief_exists: 0.8 }))
+      .toEqual({ mean: 0.55, std: 0.132, existence: 0.8 });
+  });
+
+  it('reads canonical nested V3', () => {
+    expect(readEdgeParams({ strength: { mean: 0.55, std: 0.132 }, exists_probability: 0.8 }))
+      .toEqual({ mean: 0.55, std: 0.132, existence: 0.8 });
+  });
+
+  it('reads LEGACY, and reports the absent std as undefined rather than 0', () => {
+    expect(readEdgeParams({ weight: 0.55, belief: 0.8 }))
+      .toEqual({ mean: 0.55, std: undefined, existence: 0.8 });
+  });
+
+  it('prefers V1_FLAT over nested per field, so a mixed edge reads consistently', () => {
+    // Real shape: a repair that spreads `{...edge, strength_mean}` over a nested
+    // edge leaves both fields present.
+    expect(readEdgeParams({ strength_mean: 0.9, strength: { mean: 0.1, std: 0.2 } }).mean).toBe(0.9);
+  });
+
+  it('returns undefined — never 0 — for an edge carrying no numbers', () => {
+    expect(readEdgeParams({ from: 'a', to: 'b' }))
+      .toEqual({ mean: undefined, std: undefined, existence: undefined });
+  });
+
+  it('rejects non-finite and non-numeric values instead of passing them through', () => {
+    expect(readEdgeParams({ strength_mean: NaN, strength_std: Infinity, belief_exists: '0.8' }))
+      .toEqual({ mean: undefined, std: undefined, existence: undefined });
+  });
+
+  it('preserves a genuine 0, which is a legitimate negligible strength', () => {
+    expect(readEdgeParams({ strength_mean: 0, strength_std: 0.1, belief_exists: 0.6 }).mean).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 1. The witnessed defect
 // ─────────────────────────────────────────────────────────────────────────────
 
