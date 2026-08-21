@@ -7,6 +7,7 @@
  */
 
 import type { EdgeV3T, NodeV3T } from '../../schemas/cee-v3.js';
+import { readEdgeParams } from '../unified-pipeline/utils/edge-format.js';
 import type { Pass2NodeInput, Pass2EdgeInput } from './types.js';
 
 // ============================================================================
@@ -20,19 +21,35 @@ import type { Pass2NodeInput, Pass2EdgeInput } from './types.js';
  * They are excluded from the validation pipeline because o4-mini should not
  * be asked to independently estimate these — they carry no epistemic content.
  *
- * Detection is based on parameter values rather than node kinds because at the
- * point the validation pipeline runs, we work with the V3 edge shape which
- * carries nested strength.mean / strength.std / exists_probability.
+ * Detection is based on parameter values rather than node kinds, so it reads
+ * through `readEdgeParams` — the canonical owner of "which fields on this edge
+ * hold its numbers".
+ *
+ * ⚠ THIS COMMENT USED TO ASSERT THE OPPOSITE, AND THE ASSERTION WAS FALSE:
+ * "at the point the validation pipeline runs, we work with the V3 edge shape
+ * which carries nested strength.mean". It does not. This pipeline runs at
+ * Stage 4b, where the graph is still V1_FLAT; the nested shape is produced
+ * later by `transformResponseToV3`. The old body read `edge.strength?.mean ?? 0`
+ * on that false premise and therefore matched NOTHING on a real graph:
+ * measured on the 19 Aug capture it skipped 0 of 7 structural edges in flat
+ * shape against 7 of 7 in nested shape. The consequence is not cosmetic —
+ * this predicate gates `index.ts:135` (which edges are sent to o4-mini) and
+ * `index.ts:250` (which are skipped in comparison), so seven scaffolding edges
+ * were being sent to a model the design says must never be asked to estimate
+ * them. The comment is recorded here rather than deleted because a stale
+ * premise left in place is what licenses the next reader to reintroduce
+ * the `?? 0`.
  */
 export function isStructuralEdge(edge: EdgeV3T): boolean {
-  const mean = edge.strength?.mean ?? 0;
-  const std = edge.strength?.std ?? 1;
-  const ep = edge.exists_probability ?? 0;
+  const p = readEdgeParams(edge);
 
+  // Each field must be READABLE as well as sentinel-valued. This preserves the
+  // old defaults' fail-closed behaviour (`std ?? 1` made an absent std
+  // non-structural) without reintroducing a fabricated value to compare against.
   return (
-    Math.abs(mean - 1.0) < 0.001 &&
-    std < 0.02 &&
-    ep > 0.99
+    p.mean !== undefined && Math.abs(p.mean - 1.0) < 0.001 &&
+    p.std !== undefined && p.std < 0.02 &&
+    p.existence !== undefined && p.existence > 0.99
   );
 }
 

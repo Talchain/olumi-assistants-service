@@ -26,6 +26,7 @@ import {
   buildMissingPass2Metadata,
 } from '../../../src/cee/validation-pipeline/comparison.js';
 import { computeBiasOffsets } from '../../../src/cee/validation-pipeline/bias-correction.js';
+import { isStructuralEdge } from '../../../src/cee/validation-pipeline/utils.js';
 import { readEdgeParams } from '../../../src/cee/unified-pipeline/utils/edge-format.js';
 import type { LintedPass2Estimate } from '../../../src/cee/validation-pipeline/types.js';
 import type { EdgeV3T } from '../../../src/schemas/cee-v3.js';
@@ -269,6 +270,136 @@ describe('bias offsets are computed from real pass1 values', () => {
     const { offsets, warnings } = computeBiasOffsets(edges, ests);
     expect(offsets.strength_mean).toBe(0);
     expect(warnings).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4a. THE FOURTH READER. `isStructuralEdge` carried the same nested-only read,
+//     and its doc comment asserted the very premise this PR refutes. It reads
+//     the SAME objects as compareEdge and gates two decisions: which edges are
+//     sent to o4-mini (index.ts:135) and which are skipped in comparison
+//     (index.ts:250) — so on a real flat graph it matched nothing and seven
+//     scaffolding edges were sent to a model the design says must never be
+//     asked to estimate them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isStructuralEdge reads through the canonical owner too', () => {
+  it('detects a V1_FLAT structural edge — the shape that actually reaches it', () => {
+    expect(isStructuralEdge(
+      { from: 's1', to: 's2', strength_mean: 1, strength_std: 0.01, belief_exists: 1 } as unknown as EdgeV3T,
+    )).toBe(true);
+  });
+
+  it('still detects a nested V3 structural edge (no regression)', () => {
+    expect(isStructuralEdge(
+      { from: 's1', to: 's2', strength: { mean: 1, std: 0.01 }, exists_probability: 1 } as unknown as EdgeV3T,
+    )).toBe(true);
+  });
+
+  it('does not classify a genuine causal edge as structural', () => {
+    expect(isStructuralEdge(
+      { from: 'c1', to: 'c2', strength_mean: 0.55, strength_std: 0.132, belief_exists: 0.8 } as unknown as EdgeV3T,
+    )).toBe(false);
+  });
+
+  it('fails CLOSED on an edge with no readable numbers, as the old defaults did', () => {
+    // The previous body used `std ?? 1`, which made an absent std non-structural.
+    // That behaviour is preserved deliberately — an unreadable edge must not be
+    // silently promoted into the "carries no epistemic content" bucket.
+    expect(isStructuralEdge({ from: 'u1', to: 'u2' } as unknown as EdgeV3T)).toBe(false);
+  });
+
+  it('fails CLOSED on a LEGACY edge, which has no std to check', () => {
+    expect(isStructuralEdge(
+      { from: 'l1', to: 'l2', weight: 1, belief: 1 } as unknown as EdgeV3T,
+    )).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4b. KNOWN GAPS — pinned, NOT fixed.
+//
+// These assert the CURRENT behaviour of two defects this PR deliberately does
+// not close. A gap recorded in the suite is honest; a gap invisible to it is how
+// the next round happens. Each case REDs if someone CLOSES the gap (good — come
+// delete the pin) or WIDENS it (bad). Every value below was measured by
+// execution before it was written here, not predicted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('KNOWN GAP 1 — a PARTIAL read still leaks the fabrication into max_divergence', () => {
+  // `pass1Missing` requires ALL THREE fields to be undefined, so the per-field
+  // rule skips protect the contested VERDICT but not the ORDERING SCORE. That
+  // score is not cosmetic: judgement-signals.ts collects contested edges with
+  // their maxDivergence and lens-selector.ts orders the I-DISAGREE / T2 lens by
+  // the highest one, so it helps decide WHICH disagreement the product raises.
+  //
+  // ⚠ AND THIS IS THE SHARPER FORM OF THE UI RESIDUAL. `pass1_missing` is FALSE
+  // in exactly the partial case where the UI prints an unflagged `0.00` under
+  // "What the model currently uses" — the flag meant to catch that is off
+  // precisely when it is needed. Latent: 0 of 22 edges in the 19 Aug capture.
+
+  it('scores 0.6667 when only the existence is unreadable, and does not flag it', () => {
+    const md = compare(
+      { from: 'k1a', to: 'k1b', strength_mean: 0.5, strength_std: 0.15 } as unknown as EdgeV3T,
+      p2('k1a', 'k1b', 0.5, 0.15, 0.9),
+    );
+    expect(md.pass1_missing).toBe(false);          // the flag is OFF...
+    expect(md.pass1.exists_probability).toBe(0);   // ...while a fabricated 0 is reported
+    expect(md.max_divergence).toBeCloseTo(0.6667, 4);
+  });
+
+  it('scores a maximal 1.0 when only the mean is unreadable, on an edge with no disagreement', () => {
+    const md = compare(
+      { from: 'k2a', to: 'k2b', strength_std: 0.15, belief_exists: 0.9 } as unknown as EdgeV3T,
+      p2('k2a', 'k2b', 0.5, 0.15, 0.9),
+    );
+    expect(md.pass1_missing).toBe(false);
+    expect(md.pass1.strength_mean).toBe(0);
+    // Top of the calibration tray, for an edge whose real values agree.
+    expect(md.max_divergence).toBe(1);
+    expect(md.status).toBe('agreed');
+  });
+
+  it('is correctly suppressed only when ALL THREE are unreadable (the boundary)', () => {
+    const md = compare({ from: 'k3a', to: 'k3b' } as unknown as EdgeV3T, p2('k3a', 'k3b', 0.5, 0.15, 0.9));
+    expect(md.pass1_missing).toBe(true);
+    expect(md.max_divergence).toBe(0);
+  });
+});
+
+describe('KNOWN GAP 2 — readEdgeParams does not apply effect_direction', () => {
+  // transforms/schema-v3.ts:791 negates a POSITIVE raw value when
+  // effect_direction === "negative". readEdgeParams does not, and Stage 4's
+  // SIGN_MISMATCH repair cannot cover the legacy case: deterministic-sweep.ts:153
+  // requires `strength_mean !== undefined`, so an unsigned LEGACY `weight` is
+  // skipped by the repair AND unsigned by the reader. The result is a FABRICATED
+  // sign_flip against a Pass 2 estimate that actually agrees.
+  //
+  // ⚠ THIS IS THE BLIND SPOT ONE FIELD OVER FROM THE ONE THIS PR DIAGNOSED:
+  // `effect_direction` appears nowhere else in this file and `legacyEdge()` never
+  // sets it, so nothing else here could observe it. Not fixed in this PR —
+  // applying sign inside the canonical reader would change what Stage 4 repair
+  // and the V3 transform each see, which is a wider blast radius than this lane.
+
+  it('fabricates a sign_flip on a LEGACY weight carrying a negative effect_direction', () => {
+    const md = compare(
+      { from: 'k4a', to: 'k4b', weight: 0.5, belief: 0.9, effect_direction: 'negative' } as unknown as EdgeV3T,
+      p2('k4a', 'k4b', -0.5, 0.15, 0.9),
+    );
+    // The model's value, once transformed, is -0.5 and AGREES with Pass 2.
+    expect(md.pass1.strength_mean).toBe(0.5);   // sign not applied
+    expect(md.status).toBe('contested');        // ...so a flip is invented
+    expect(md.contested_reasons).toContain('sign_flip');
+    expect(md.sign_unstable).toBe(true);
+  });
+
+  it('reads an already-signed LEGACY weight correctly (the gap is unsigned values only)', () => {
+    const md = compare(
+      { from: 'k5a', to: 'k5b', weight: -0.5, belief: 0.9, effect_direction: 'negative' } as unknown as EdgeV3T,
+      p2('k5a', 'k5b', -0.5, 0.15, 0.9),
+    );
+    expect(md.pass1.strength_mean).toBe(-0.5);
+    expect(md.status).toBe('agreed');
   });
 });
 

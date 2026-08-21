@@ -79,6 +79,15 @@ export function compareEdge(
   const contestedReasons: ContestedReason[] = [];
 
   // ── Rule 1: Sign flip ────────────────────────────────────────────────────
+  // ⚠ `p1.mean !== undefined` IS REDUNDANT WITH `p1Mean !== 0` BY CONSTRUCTION,
+  // AND THAT IS RECORDED HERE SO NOBODY DELETES HALF A GUARD. An unreadable mean
+  // falls back to `p1Mean = 0`, and `0 !== 0` is already false, so a mutant that
+  // removes the undefined check is EQUIVALENT — demonstrated, not assumed. It is
+  // kept because it states the intent directly rather than relying on the
+  // fallback value, and because the redundancy is only true while that fallback
+  // is 0: change `?? 0` and this conjunct becomes load-bearing. Remove BOTH or
+  // NEITHER; removing `p1Mean !== 0` alone would let an unreadable mean
+  // manufacture a sign flip against any negative Pass 2 estimate.
   const signFlip =
     p1.mean !== undefined &&
     p1Mean !== 0 &&
