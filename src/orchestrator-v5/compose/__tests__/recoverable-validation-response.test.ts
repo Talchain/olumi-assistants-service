@@ -117,6 +117,12 @@ function sampleError(code: ValidationErrorCode): ValidationError {
         message: 'Option intervention implied',
         details: { handler_id: 'set_factor_value', factor_label: 'Annual Support Cost' },
       };
+    case 'EXPIRED_OFFER_REPLAY':
+      return {
+        code,
+        message: 'Offer no longer available',
+        details: { handler_id: 'set_factor_value' },
+      };
     case 'VALUE_UNIT_UNRESOLVED':
       return {
         code,
@@ -140,6 +146,7 @@ const ALL_CODES: readonly ValidationErrorCode[] = [
   'ENTITY_RESOLUTION_SUSPICIOUS',
   'PARAMETER_INVALID',
   'OPTION_INTERVENTION_MISROUTE',
+  'EXPIRED_OFFER_REPLAY',
   'VALUE_UNIT_UNRESOLVED',
   'PRECONDITION_UNMET',
 ];

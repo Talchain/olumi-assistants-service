@@ -178,6 +178,18 @@ export type ValidationErrorCode =
   // path so the turn composes a clarify and commits a direct_answer, graph
   // unchanged.
   | 'VALUE_UNIT_UNRESOLVED'
+  // ⭐⭐ The turn's message is the PRODUCT'S OWN offer copy (the content-free
+  // demotion chips, `compose/warrant-demotion.ts`), and NO pending action was
+  // consumed — so the offer that copy belonged to is no longer available. The
+  // copy carries no content by design, so any proposal built from it is
+  // reconstructed from conversation history rather than from anything the user
+  // said; executing it writes a field the user never named. Synthesised at the
+  // turn-executor execute chokepoint like its two siblings above (the check
+  // needs the raw user message AND the consumed-pending fact, neither of which
+  // validateToolCall receives) and routed through the same recoverable path, so
+  // the turn composes an honest decline and commits a direct_answer with the
+  // graph UNCHANGED.
+  | 'EXPIRED_OFFER_REPLAY'
   | 'PRECONDITION_UNMET';
 
 export interface ValidationError {

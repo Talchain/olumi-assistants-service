@@ -52,6 +52,56 @@ const CHIP_COPY: Readonly<Record<ProposedChangeIntent, { label: string; message:
   adjust_edge_strength: { label: 'Adjust this link', message: 'Adjust that link in my model.' },
 };
 
+/**
+ * ⭐⭐ IS THIS MESSAGE THE PRODUCT'S OWN OFFER COPY?
+ *
+ * The recogniser lives HERE, beside `CHIP_COPY`, because the producer is the
+ * only honest owner of the question. Deriving the set from the constants this
+ * module emits — rather than re-spelling the three strings at the consumer —
+ * is what stops it becoming the hand-maintained mirror CLAUDE.md trap 12 is
+ * about: edit the copy and the recogniser moves with it, in the same commit,
+ * with no second list to remember.
+ *
+ * ⚠ WHAT MAKES AN EXACT MATCH SOUND HERE, DERIVED AT THE BYTES RATHER THAN
+ * ASSUMED. `emitProposedChange` passes the message through VERBATIM to both the
+ * wire chip (`compose/proposed-change.ts:260`) and the persisted pending's
+ * `public_message` (`:289`) — no templating, no interpolation, no value folded
+ * in. These three strings are digit-free and content-free BY DESIGN (see
+ * `CHIP_COPY`'s own header), which is exactly why they are stable enough to
+ * match on. A chip whose copy carried a value could not be recognised this way,
+ * and none of these does.
+ *
+ * ⚠ AND WHAT THIS IS **NOT**. It is not a claim about routing, provenance or
+ * transport, and it must never be confused with `payload.source` — that field
+ * answers "does this turn carry a CEE-routable action_type?" and four CEE
+ * readers already misread it as provenance. This asks one narrow question about
+ * a STRING: *did we write it?* It is also NOT a field-targeting authority and
+ * joins none of the five that exist; it never looks at a graph, a pair or a
+ * handler.
+ *
+ * Normalisation matches the estate's own (`option-effect-write.ts`'s reader and
+ * `outstanding-effect-ask-misroute.ts::readUserValue` both lower-case, collapse
+ * runs of whitespace and trim), so a transport that re-wraps the copy cannot
+ * make the product fail to recognise a sentence it wrote itself.
+ */
+export const PRODUCT_MINTED_OFFER_MESSAGES: readonly string[] = Object.freeze(
+  Object.values(CHIP_COPY).map((c) => c.message),
+);
+
+/** The one normalisation, applied to both sides so they cannot diverge. */
+function normaliseOfferCopy(message: string): string {
+  return message.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+const PRODUCT_MINTED_OFFER_MESSAGE_SET: ReadonlySet<string> = new Set(
+  PRODUCT_MINTED_OFFER_MESSAGES.map(normaliseOfferCopy),
+);
+
+export function isProductMintedOfferCopy(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  return PRODUCT_MINTED_OFFER_MESSAGE_SET.has(normaliseOfferCopy(message));
+}
+
 /** Read a named parameter off a proposal action. */
 function param(action: ProposalAction, name: string): ProposalAction['parameters'][number] | undefined {
   return action.parameters.find((p) => p.name === name);

@@ -38,6 +38,8 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/a
 import { safeLabel } from '../compose/helpers.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
+import { isProposedChangeActionType } from '../types/proposed-change.js';
 import { makeMessagePayload } from './fixtures.js';
 import type {
   ChatWithToolsArgs,
@@ -269,6 +271,15 @@ function setFactorValueAdapter(
 /** Every graph write this turn made. Empty === the model is untouched. */
 function graphWrites(): AppendWrite[] {
   return appendCalls.filter((c) => c.graph !== undefined && c.graph !== null);
+}
+
+/** Any node's own value, by IDENTITY. */
+function nodeValue(g: unknown, id: string): unknown {
+  const nodes = (g as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
+  const node = nodes.find((n) => n.id === id) as
+    | { observed_state?: { value?: unknown } }
+    | undefined;
+  return node?.observed_state?.value;
 }
 
 /** TRAP 19 — the factor by IDENTITY, never "the node whose value is 0.8". */
@@ -549,18 +560,39 @@ describe('THE REVIEW N=2 — the demotion chip the prose gate could not see', ()
     expect(graphWrites().length).toBeGreaterThan(0);
   });
 
-  it('AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand still writes', async () => {
-    // ⭐ THE PROOF THAT THIS IS SYMMETRY, NOT WIDENING: the gate is on the
-    // PROVENANCE of the turn, not on the string. The identical bytes with no
-    // pending to consume are the user's own words, and they write.
+  /**
+   * ⚠⚠ THIS PIN WAS DELIBERATELY REVERSED, AND THE REASON MATTERS MORE THAN THE
+   * ASSERTION. It read:
+   *
+   *   "AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand still
+   *    writes … the gate is on the PROVENANCE of the turn, not on the string.
+   *    The identical bytes with no pending to consume are the user's own words,
+   *    and they write."
+   *
+   * That reasoning is sound about `payload.source`, which is a field someone
+   * ELSE fills in. It is NOT sound about a string CEE MINTS ITSELF. Measured at
+   * `1647d99b` from a real round trip, this exact case is the witnessed defect:
+   * the factor's own value moved 0.5 → 0.8 under *"Updated Sales Headcount -
+   * Hybrid Maintained from 0.5 to 0.8."* — because the copy is CONTENT-FREE by
+   * design, so the proposal was rebuilt from conversation history, not from
+   * anything anybody typed.
+   *
+   * "The user's own words" was the premise, and it is false for these three
+   * sentences specifically: nobody types them. The load-bearing opposite
+   * direction — free-typed prose still writes — is not weakened by declining
+   * them; it is pinned below by the NEAR-MISS twin, which differs by one word
+   * and must still write.
+   */
+  it('THE TYPED TWIN IS DECLINED — nobody types the product\'s own content-free copy', async () => {
     const before = factorValue(graph());
-    await runTurnExecutor(
+    const { response } = await runTurnExecutor(
       payload('Set that value in my model.'),
       'req-effect-ask-chip-typed-twin',
       { routingAdapter: setFactorValueAdapter(), graphState: graph() },
     );
-    expect(graphWrites().length).toBeGreaterThan(0);
-    expect(factorValue(persistedGraph)).not.toBe(before);
+    expect(graphWrites()).toHaveLength(0);
+    expect(factorValue(stateAfterTurn())).toBe(before);
+    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
   });
 });
 
@@ -710,5 +742,283 @@ describe('⭐⭐ THE CORRECTION CHIP CARRIES THE OPTION IT NAMED — it does not
     expect(
       resolveOptionEffectWrite({ message: full, graph: g as unknown as GraphV3T }),
     ).toMatchObject({ matched: true, optionId: OTHER_OPTION_ID });
+  });
+});
+
+/**
+ * ⭐⭐ THE OFFER IS GONE — AND THE PRODUCT SAYS SO INSTEAD OF GUESSING.
+ *
+ * #1067 gated the factor arm on a CONSUMED PENDING ACTION, which is genuine
+ * provenance, and stated the residual it left in prose. This battery closes it,
+ * from a REAL round trip: every chip message below comes out of
+ * `emitRealDemotion`, never out of my head.
+ *
+ * ⚠ AND IT CORRECTS THE MECHANISM THE RESIDUAL NAMED. The bound is NOT
+ * `isExpired`: a WALL-EXPIRED pending that is still carried forward is still
+ * resumed (pinned below), because the label-pick resume filters
+ * `most_recent_pending_actions` on KIND ONLY. The turn that WRITES is the one
+ * where the pending is ABSENT — carry-forward drops the row once
+ * `expires_at_turn_count` is spent, and `readMostRecentPendingActions` reads
+ * only the most recent turn. So the guard asks neither question: it asks
+ * whether ANY pending was consumed.
+ */
+describe('⭐⭐ THE EXPIRED OFFER — a chip whose offer is gone is declined, never honoured', () => {
+  /** The real pending with only the CLOCK moved — still carried, wall-expired. */
+  function wallExpire(pendings: readonly unknown[]): readonly unknown[] {
+    return pendings.map((p) => ({
+      ...(p as Record<string, unknown>),
+      expires_at_iso: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    }));
+  }
+
+  it('⭐⭐ THE WITNESSED WRITE NEVER LANDS — pending ABSENT, nothing is written', async () => {
+    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
+    // POSITIVE CONTROLS on the fixture (trap 13): the round trip really produced
+    // the content-free chip and a pending, else the replay proves nothing.
+    expect(chipMessage).toBe('Set that value in my model.');
+    expect(pendings).toHaveLength(1);
+
+    pendingActionsForRead = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+
+    const { response } = await runTurnExecutor(
+      routingFlagPayload(chipMessage),
+      'req-expired-offer-replay',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT — read BACK, bound by identity,
+    // through the SAME canonical readiness the on-screen blocker is composed
+    // from. This is the assertion the witnessed "Updated … from 0.5 to 0.8"
+    // receipt could not survive.
+    expect(factorValue(stateAfterTurn())).toBe(0.5);
+    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
+    // …and the decline is HONEST about why, and offers a route onward.
+    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
+    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
+    expect(response.assistant_text).not.toContain('0.8');
+    expect(response.suggested_actions ?? []).toHaveLength(1);
+  });
+
+  it('⭐ POSITIVE CONTROL — the SAME replay WITH its pending present is NOT declined', async () => {
+    // Without this the assertion above could pass because the harness cannot
+    // write at all. Same chip, same factor, same adapter — only the pending
+    // differs, so the decline is provably the pending's absence and nothing else.
+    const { chipMessage, pendings } = await emitRealDemotion(
+      UNBLOCKED_FACTOR_ID,
+      UNBLOCKED_FACTOR_LABEL,
+    );
+    pendingActionsForRead = pendings;
+    appendCalls.length = 0;
+    persistedGraph = null;
+    const { response } = await runTurnExecutor(
+      routingFlagPayload(chipMessage),
+      'req-expired-offer-control-live',
+      {
+        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
+        graphState: graph(),
+      },
+    );
+    expect(graphWrites().length).toBeGreaterThan(0);
+    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
+  });
+
+  it('⭐ THE DISCRIMINATING TWIN — the SAME chip on the SAME factor, pending REMOVED, declines', async () => {
+    // The pair, on the LIVENESS axis alone: the case above writes, this one
+    // does not, and the only difference between the two runs is the pending.
+    const { chipMessage } = await emitRealDemotion(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL);
+    pendingActionsForRead = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+    const { response } = await runTurnExecutor(
+      routingFlagPayload(chipMessage),
+      'req-expired-offer-twin-dead',
+      {
+        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
+        graphState: graph(),
+      },
+    );
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
+  });
+
+  it('⚠ MEASURED MECHANISM — a WALL-EXPIRED pending is STILL RESUMED, and still refused as wrong-field', async () => {
+    // Recorded because the obvious reading of the TTL is wrong and the next
+    // reader will otherwise "fix" the guard to consult `isExpired`. The
+    // label-pick resume at turn-executor.ts:4684 filters on KIND ONLY (its local
+    // is named `liveProposals` — a misnomer), so this pending is consumed, the
+    // #1067 identity arm fires, and the refusal names the FIELD rather than the
+    // expiry. Both outcomes are safe; they are DIFFERENT, and the difference is
+    // evidence about which bound actually applies.
+    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
+    pendingActionsForRead = wallExpire(pendings);
+    appendCalls.length = 0;
+    persistedGraph = null;
+    const { response } = await runTurnExecutor(
+      routingFlagPayload(chipMessage),
+      'req-expired-offer-wall-expired',
+      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
+    );
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain("I haven't changed anything");
+    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
+  });
+
+  it('⭐⭐ OPPOSITE DIRECTION — a legitimate free-typed baseline edit STILL WRITES, no pending anywhere', async () => {
+    // THE LOAD-BEARING HALF. A user typing an ordinary instruction with no offer
+    // in flight is the common case, and it must be untouched.
+    const before = factorValue(graph());
+    pendingActionsForRead = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+    await runTurnExecutor(payload(BASELINE_EDIT), 'req-expired-offer-opposite-prose', {
+      routingAdapter: setFactorValueAdapter(),
+      graphState: graph(),
+    });
+    expect(graphWrites().length).toBeGreaterThan(0);
+    expect(factorValue(persistedGraph)).toBe(0.8);
+    expect(factorValue(persistedGraph)).not.toBe(before);
+  });
+
+  it('⭐⭐ SCOPE PIN — a NON-MUTATING proposal on the same expired replay is NOT declined', async () => {
+    // The guard's handler set is DERIVED (`isProposedChangeActionType` — the
+    // three mutations the demotion path can offer) and this is what makes that
+    // conjunct load-bearing rather than decorative: identical turn, identical
+    // absent pending, a handler that cannot write. It must pass through.
+    //
+    // ⚠ TWO EARLIER CHOICES FOR THIS PIN WERE REJECTED BY MEASUREMENT, because
+    // each would have passed for the WRONG REASON: `explain_result` and
+    // `analysis_readiness` are NOT in this harness's registry and both return
+    // HANDLER_NOT_FOUND, so `validationResult.valid` is false and the guard
+    // could never have fired. `explain_from_structure` validates (measured:
+    // `validator_outcome: "valid"`), so the proposal genuinely reaches the
+    // chokepoint and genuinely is not claimed.
+    pendingActionsForRead = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () =>
+          mkToolUseResult({
+            intent_class: 'execute',
+            action: {
+              handler_id: 'explain_from_structure',
+              entity: {
+                id: FACTOR_ID,
+                kind: 'node',
+                label: J18.ids.factor_label,
+                resolution_status: 'resolved',
+                resolution_method: 'label_match',
+              },
+              parameters: [],
+              cited_context_fields: [],
+            },
+          }),
+        ),
+    };
+    const { response } = await runTurnExecutor(
+      routingFlagPayload('Set that value in my model.'),
+      'req-expired-offer-nonmutating',
+      { routingAdapter: adapter, graphState: graph() },
+    );
+    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
+    // ⚠ MEASURED: this handler DOES append a graph row (an explain turn commits
+    // the unchanged graph), so `graphWrites().length === 0` is NOT the property
+    // here — asserting it would have made the pin fail for a reason unrelated to
+    // the guard. The property is that nothing was MUTATED, bound by identity.
+    expect(factorValue(stateAfterTurn())).toBe(0.5);
+  });
+
+  /**
+   * ⭐⭐⭐ THE COVERAGE UNION — the ONE way this guard degrades in silence.
+   *
+   * The scope conjunct is `isProposedChangeActionType` and the estate's set of
+   * handlers that can MUTATE THE GRAPH is `GRAPH_MUTATING_HANDLER_IDS`
+   * (`routing/mutation-consent.ts:87`). They are **two hand-maintained lists**
+   * that happen to hold the same three members today, and **nothing fails loud
+   * if the mutating set grows**. Add a fourth graph-mutating handler tomorrow
+   * and this guard silently UNDER-COVERS it: the false-`Applied` route reopens
+   * on that handler, and no test anywhere REDs.
+   *
+   * ⭐ THIS IS THE SAME DISCIPLINE APPLIED ONE LEVEL OVER. The recogniser spec
+   * beside `warrant-demotion.ts` refuses to derive its corpus from `CHIP_COPY`
+   * because that would be *the constant agreeing with itself*; it asserts a
+   * DERIVED union against the producer instead. Here the producer of the
+   * obligation is `GRAPH_MUTATING_HANDLER_IDS` — both lists live in this repo
+   * and are importable, so this is genuinely derivable and NOT a third mirror
+   * (CLAUDE.md trap 12d: derivation moves the risk, so the completeness check
+   * must come from a source the guard does not own).
+   *
+   * ⚠ THE DIRECTION IS DELIBERATE AND IS **⊇**, NOT **=**. Every graph-mutating
+   * handler must be admitted by the scope predicate. The converse is NOT
+   * asserted: the predicate is allowed to admit a handler that is not (yet)
+   * graph-mutating, because over-scoping this guard costs a clarify turn on a
+   * content-free sentence, while under-scoping it writes a field the user never
+   * named and badges it "Applied". Asserting equality would RED on a harmless
+   * divergence and teach the next reader to loosen it.
+   */
+  it('⭐⭐⭐ COVERAGE UNION — the scope predicate admits EVERY graph-mutating handler', () => {
+    // ⚠ THE VACUITY CONTROL IS A **COUNT**, NOT A MEMBERSHIP LIST, AND THE
+    // FIRST DRAFT OF THIS TEST GOT IT WRONG IN A WAY WORTH RECORDING. It
+    // asserted `[...GRAPH_MUTATING_HANDLER_IDS].sort()` against three hardcoded
+    // strings — which is (a) a THIRD copy of a list this test exists to stop
+    // mirroring, and (b) self-defeating: growing the set is exactly the
+    // mutation this test must catch, and that literal would have RED first, so
+    // the union loop below would never have run under it. A control that
+    // pre-empts its own discriminator asserts nothing (trap 13b).
+    //
+    // The membership of the set is owned by `routing/__tests__/
+    // mutation-consent.test.ts`. What THIS test needs is only that the loop was
+    // not empty — asserted by counting iterations, which cannot mirror anything.
+    expect(GRAPH_MUTATING_HANDLER_IDS.size).toBeGreaterThan(0);
+
+    // THE UNION. Bound by identity to each member, named in the failure message.
+    let checked = 0;
+    for (const handlerId of GRAPH_MUTATING_HANDLER_IDS) {
+      expect(
+        isProposedChangeActionType(handlerId),
+        `${handlerId} can MUTATE THE GRAPH but the expired-offer guard's scope `
+          + 'predicate does not admit it — the false-"Applied" route is reopened '
+          + 'for that handler. Add it to isProposedChangeActionType, or justify '
+          + 'the exception at the bytes.',
+      ).toBe(true);
+      checked += 1;
+    }
+    expect(checked, 'the union loop asserted nothing').toBe(GRAPH_MUTATING_HANDLER_IDS.size);
+
+    // CONTRAST CONTROL — without it, a predicate rewritten to `return true`
+    // would satisfy the union above while scoping the guard to everything.
+    // `explain_from_structure` is the same handler the SCOPE PIN above drives
+    // through the real executor, so the two agree by construction.
+    expect(isProposedChangeActionType('explain_from_structure')).toBe(false);
+    expect(GRAPH_MUTATING_HANDLER_IDS.has('explain_from_structure')).toBe(false);
+  });
+
+  it('⭐⭐ THE NEAR-MISS TWIN — one extra word and it is a real sentence again, and it WRITES', async () => {
+    // The sharpest proof that the recogniser is EXACT rather than fuzzy: these
+    // bytes differ from the chip copy by the single word "please", and the
+    // product must treat them as the user's own instruction.
+    const before = factorValue(graph());
+    pendingActionsForRead = [];
+    appendCalls.length = 0;
+    persistedGraph = null;
+    await runTurnExecutor(
+      payload('Set that value in my model please.'),
+      'req-expired-offer-near-miss',
+      {
+        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
+        graphState: graph(),
+      },
+    );
+    expect(graphWrites().length).toBeGreaterThan(0);
+    // TRAP 19 — bound by IDENTITY to the node the adapter named, never "the
+    // node whose value is 0.8".
+    expect(nodeValue(persistedGraph, UNBLOCKED_FACTOR_ID)).toBe(0.8);
+    // …and the outstanding factor this file is otherwise about is untouched.
+    expect(factorValue(stateAfterTurn())).toBe(before);
   });
 });
