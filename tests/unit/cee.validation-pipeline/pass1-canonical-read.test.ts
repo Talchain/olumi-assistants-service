@@ -196,10 +196,17 @@ describe('bias offsets are computed from real pass1 values', () => {
   });
 
   it('excludes unreadable edges rather than entering them as 0', () => {
+    // ⚠ THE SHAPE OF THIS FIXTURE IS LOAD-BEARING. An earlier version used one
+    // unreadable edge among two readable ones; the median of [0, -0.5, 0] is
+    // still 0, so it agreed with the defect and could never bite (a mutant
+    // entering unreadable edges as 0 survived it). TWO unreadable edges against
+    // one readable edge move the median iff the defect is present:
+    //   skipping  -> deltas [0]              -> median  0
+    //   `?? 0`    -> deltas [0, -0.5, -0.5]  -> median -0.5
     const edges = [
       flatEdge('a', 'b', 0.5, 0.15, 0.9),
       { from: 'c', to: 'd' } as unknown as EdgeV3T, // no readable numbers
-      flatEdge('e', 'f', 0.5, 0.15, 0.9),
+      { from: 'e', to: 'f' } as unknown as EdgeV3T, // no readable numbers
     ];
     const ests = [p2('a', 'b', 0.5, 0.15, 0.9), p2('c', 'd', 0.5, 0.15, 0.9), p2('e', 'f', 0.5, 0.15, 0.9)];
 
