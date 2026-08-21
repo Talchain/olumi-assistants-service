@@ -23,6 +23,7 @@
 import { VALIDATION_CONSTANTS } from './constants.js';
 import type { BiasOffsets, LintedPass2Estimate } from './types.js';
 import type { EdgeV3T } from '../../schemas/cee-v3.js';
+import { readEdgeParams } from '../unified-pipeline/utils/edge-format.js';
 
 // ============================================================================
 // Public API
@@ -56,9 +57,20 @@ export function computeBiasOffsets(
     const p2 = pass2ByKey.get(edgeKey(p1.from, p1.to));
     if (!p2) continue;
 
-    meanDeltas.push((p1.strength?.mean ?? 0) - p2.strength.mean);
-    stdDeltas.push((p1.strength?.std ?? 0) - p2.strength.std);
-    epDeltas.push((p1.exists_probability ?? 0) - p2.exists_probability);
+    // ⚠ CANONICAL READ, AND UNREADABLE EDGES ARE EXCLUDED RATHER THAN ENTERED
+    // AS 0. This used to read the nested V3 shape with `?? 0` while the graph
+    // was still V1_FLAT, so every delta became `0 - pass2` and the offsets
+    // collapsed to `-median(pass2)`. That is not a small error: bias offsets are
+    // ADDED to every Pass 2 estimate before comparison, so a fabricated offset
+    // moved pass2_adjusted away from what the reviewer actually said. In the
+    // 19 Aug capture it produced strength_mean_offset -0.2667 and
+    // strength_std_offset -0.15 — the latter zeroing pass2_adjusted.strength_std
+    // outright. A missing value contributes NO evidence about systematic bias;
+    // entering it as 0 invents evidence that the medians then treat as real.
+    const p1v = readEdgeParams(p1);
+    if (p1v.mean !== undefined) meanDeltas.push(p1v.mean - p2.strength.mean);
+    if (p1v.std !== undefined) stdDeltas.push(p1v.std - p2.strength.std);
+    if (p1v.existence !== undefined) epDeltas.push(p1v.existence - p2.exists_probability);
   }
 
   const rawMeanOffset = meanDeltas.length > 0 ? median(meanDeltas) : 0;

@@ -155,6 +155,23 @@ export interface ValidationMetadata {
   /** True when sign_flip is a contested reason. Convenience flag for UI. */
   sign_unstable: boolean;
   /**
+   * True when this edge carried NO readable causal parameters at all, in any
+   * supported shape, so Pass 1 could not be read.
+   *
+   * ⚠ THIS EXISTS SO THAT "0" CAN NEVER AGAIN MEAN "UNKNOWN". `strength_mean: 0`
+   * is a legitimate value (`strengthBand(0)` → 'negligible'), so a consumer
+   * cannot tell a real zero from a missing one by looking at the number. The UI
+   * renders the `pass1` block under the label "What the model currently uses";
+   * when this flag is true it must say the value is not available rather than
+   * print `0.00`, which would assert something about the model that is not true.
+   *
+   * When true, no contested reason may be derived from Pass 1 and
+   * `max_divergence` is 0 — a comparison against an absent value is not a
+   * disagreement, and presenting it as one asks the user to adjudicate a gap
+   * that does not exist.
+   */
+  pass1_missing: boolean;
+  /**
    * True when Pass 2 did not return an estimate for this edge.
    * When true, status is forced to 'agreed' and pass2 fields are zeroed defaults.
    */
