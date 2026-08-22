@@ -28,6 +28,7 @@ import type {
   ValidationMetadata,
 } from './types.js';
 import type { EdgeV3T } from '../../schemas/cee-v3.js';
+import { readEdgeParams } from '../unified-pipeline/utils/edge-format.js';
 import type { LintedPass2Estimate } from './types.js';
 
 // ============================================================================
@@ -51,9 +52,25 @@ export function compareEdge(
   lintLog: LintEntry[],
   distanceToGoal: number,
 ): ValidationMetadata {
-  const p1Mean = pass1Edge.strength?.mean ?? 0;
-  const p1Std = pass1Edge.strength?.std ?? 0;
-  const p1Ep = pass1Edge.exists_probability ?? 0;
+  // ⚠ READ THROUGH THE CANONICAL OWNER, NOT THROUGH ONE SHAPE. This used to be
+  // `pass1Edge.strength?.mean ?? 0` — the nested V3 shape — while this pipeline
+  // runs at Stage 4b, where the graph is still V1_FLAT. Every read missed, every
+  // `?? 0` fired, and `pass1` shipped as {0, 0, 0} on every edge of every graph.
+  // See `readEdgeParams` for the full derivation.
+  const p1 = readEdgeParams(pass1Edge);
+
+  // `undefined` means UNREADABLE, which is NOT the same as 0 — 0 is a legitimate
+  // strength ('negligible' band). Each rule below is therefore skipped when ITS
+  // OWN input is unreadable, per field rather than all-or-nothing: a LEGACY edge
+  // carries a mean and an existence but has no std equivalent, and defaulting
+  // that std to 0 would fabricate a 'high' confidence band and fire rule 3 on
+  // nothing at all.
+  const pass1Missing =
+    p1.mean === undefined && p1.std === undefined && p1.existence === undefined;
+
+  const p1Mean = p1.mean ?? 0;
+  const p1Std = p1.std ?? 0;
+  const p1Ep = p1.existence ?? 0;
 
   const p2Mean = pass2Adjusted.strength.mean;
   const p2Std = pass2Adjusted.strength.std;
@@ -62,13 +79,17 @@ export function compareEdge(
   const contestedReasons: ContestedReason[] = [];
 
   // ── Rule 1: Sign flip ────────────────────────────────────────────────────
-  const signFlip = p1Mean !== 0 && p2Mean !== 0 && Math.sign(p1Mean) !== Math.sign(p2Mean);
+  const signFlip =
+    p1.mean !== undefined &&
+    p1Mean !== 0 &&
+    p2Mean !== 0 &&
+    Math.sign(p1Mean) !== Math.sign(p2Mean);
   if (signFlip) {
     contestedReasons.push('sign_flip');
   }
 
   // ── Rule 2: Strength band change ─────────────────────────────────────────
-  const p1StrengthBand = strengthBand(Math.abs(p1Mean));
+  const p1StrengthBand = p1.mean === undefined ? null : strengthBand(Math.abs(p1Mean));
   const p2StrengthBand = strengthBand(Math.abs(p2Mean));
   if (
     p1StrengthBand !== null &&
@@ -79,7 +100,7 @@ export function compareEdge(
   }
 
   // ── Rule 3: Confidence band change ───────────────────────────────────────
-  const p1ConfBand = confidenceBand(p1Std);
+  const p1ConfBand = p1.std === undefined ? null : confidenceBand(p1Std);
   const p2ConfBand = confidenceBand(p2Std);
   if (
     p1ConfBand !== null &&
@@ -90,13 +111,14 @@ export function compareEdge(
   }
 
   // ── Rule 4: EP boundary crossing ─────────────────────────────────────────
-  if (crossesEpBoundary(p1Ep, p2Ep)) {
+  if (p1.existence !== undefined && crossesEpBoundary(p1Ep, p2Ep)) {
     contestedReasons.push('existence_boundary_crossing');
   }
 
   // ── Rule 5: Raw magnitude catch-all ──────────────────────────────────────
   if (
     contestedReasons.length === 0 &&
+    p1.mean !== undefined &&
     Math.abs(p1Mean - p2Mean) > VALIDATION_CONSTANTS.RAW_DELTA_THRESHOLD
   ) {
     contestedReasons.push('raw_magnitude');
@@ -106,7 +128,7 @@ export function compareEdge(
   const signUnstable = contestedReasons.includes('sign_flip');
 
   // ── Max divergence score ──────────────────────────────────────────────────
-  const maxDivergence = computeMaxDivergence(
+  const maxDivergence = pass1Missing ? 0 : computeMaxDivergence(
     p1Mean,
     p2Mean,
     p1StrengthBand,
@@ -158,6 +180,7 @@ export function compareEdge(
     distance_to_goal: distanceToGoal,
 
     sign_unstable: signUnstable,
+    pass1_missing: pass1Missing,
     pass2_missing: false,
 
     evoi_rank: null,
@@ -181,9 +204,13 @@ export function buildMissingPass2Metadata(
   pass1Edge: EdgeV3T,
   distanceToGoal: number,
 ): ValidationMetadata {
-  const p1Mean = pass1Edge.strength?.mean ?? 0;
-  const p1Std = pass1Edge.strength?.std ?? 0;
-  const p1Ep = pass1Edge.exists_probability ?? 0;
+  // Same canonical read as compareEdge — this was the third site carrying the
+  // `?? 0` fabrication, and it is the one that served the AGREED edges (which
+  // is why pass1-zero was universal rather than a property of contestedness).
+  const p1 = readEdgeParams(pass1Edge);
+  const p1Mean = p1.mean ?? 0;
+  const p1Std = p1.std ?? 0;
+  const p1Ep = p1.existence ?? 0;
 
   return {
     status: 'agreed',
@@ -221,6 +248,8 @@ export function buildMissingPass2Metadata(
     distance_to_goal: distanceToGoal,
 
     sign_unstable: false,
+    pass1_missing:
+      p1.mean === undefined && p1.std === undefined && p1.existence === undefined,
     pass2_missing: true,
 
     evoi_rank: null,
