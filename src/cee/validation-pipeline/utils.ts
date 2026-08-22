@@ -8,6 +8,7 @@
 
 import type { EdgeV3T, NodeV3T } from '../../schemas/cee-v3.js';
 import type { Pass2NodeInput, Pass2EdgeInput } from './types.js';
+import { readEdgeParams } from '../unified-pipeline/utils/edge-format.js';
 
 // ============================================================================
 // Structural edge detection
@@ -20,19 +21,33 @@ import type { Pass2NodeInput, Pass2EdgeInput } from './types.js';
  * They are excluded from the validation pipeline because o4-mini should not
  * be asked to independently estimate these — they carry no epistemic content.
  *
- * Detection is based on parameter values rather than node kinds because at the
+ * Detection is based on parameter values rather than node kinds.
+ *
+ * ⚠ THE SHAPE IS NOT KNOWN HERE, AND THE PREVIOUS COMMENT CLAIMED IT WAS.
+ * It read `edge.strength?.mean ?? 0` on the stated assumption that "at the
  * point the validation pipeline runs, we work with the V3 edge shape which
- * carries nested strength.mean / strength.std / exists_probability.
+ * carries nested strength.mean". That is FALSE: this stage runs while the
+ * graph is still V1_FLAT (`strength_mean` / `belief_exists`), because
+ * `transformResponseToV3` converts flat->nested AFTER metadata is attached.
+ * Measured on real captured bytes: on flat edges the nested read skipped
+ * 0 of 7 structural edges instead of 7, so scaffolding edges were sent to
+ * o4-mini which the design says must never be asked to estimate them.
+ *
+ * `readEdgeParams` is the canonical answer to "which fields hold this edge's
+ * numbers" and is shape-blind. Absence stays `undefined` and is NEVER coerced
+ * to 0 — coercing it is what fabricated the zeros this module exists to
+ * compare against.
  */
 export function isStructuralEdge(edge: EdgeV3T): boolean {
-  const mean = edge.strength?.mean ?? 0;
-  const std = edge.strength?.std ?? 1;
-  const ep = edge.exists_probability ?? 0;
+  const p = readEdgeParams(edge);
 
   return (
-    Math.abs(mean - 1.0) < 0.001 &&
-    std < 0.02 &&
-    ep > 0.99
+    p.mean !== undefined &&
+    Math.abs(p.mean - 1.0) < 0.001 &&
+    p.std !== undefined &&
+    p.std < 0.02 &&
+    p.existence !== undefined &&
+    p.existence > 0.99
   );
 }
 
