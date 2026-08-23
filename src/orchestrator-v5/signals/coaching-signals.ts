@@ -50,6 +50,7 @@ import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
+import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
 
 export type { CoachingSignalId };
 
@@ -76,9 +77,8 @@ export interface CoachingSignalInput {
   readonly interventionControlledFactorIds?: ReadonlySet<string>;
   /**
    * Facts from prior turns in this scenario. Used to distinguish "first
-   * successful run_analysis" from subsequent ones. Failed handler turns
-   * throw and never emit facts, so absence of a prior run_analysis fact
-   * correctly means "no prior success" per Paul's Task C correction.
+   * successful run_analysis" from subsequent ones. A refused attempt now
+   * emits a continuity fact, but it never counts as a displayed analysis.
    */
   readonly priorFacts: readonly HandlerFact[];
   /**
@@ -574,6 +574,8 @@ function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean 
       f.fact_type === 'run_analysis' &&
       // (a) DID IT RUN? Owned here — see the `noop` note above.
       f.noop !== true &&
+      // A persisted refusal records an attempt, not a result shown to the user.
+      !isAnalysisRefusalFact(f) &&
       // (b) WAS ITS RESULT DELIVERED? Owned by `context/run-initiator.ts`, the
       //     one authority on run initiation AND delivery. This used to read
       //     `!isAutoInitiatedRunAnalysisFact(f)` — the PROVENANCE question —
@@ -629,7 +631,9 @@ function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean 
  * correct either way). Rowed rather than widened into this change.
  */
 function hasPriorRunAnalysisFactToStale(facts: readonly HandlerFact[]): boolean {
-  return facts.some((f) => f.fact_type === 'run_analysis');
+  return facts.some(
+    (f) => f.fact_type === 'run_analysis' && !isAnalysisRefusalFact(f),
+  );
 }
 
 /**

@@ -226,8 +226,492 @@ const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
   /\bdoes\b[^.?!\n]{0,80}\bresult\b[^.?!\n]{0,80}\bjustify\b/i,
 ];
 
-const EXPLICIT_NO_CHANGE_SCOPE =
-  /(?:\band\s+)?\b(?:please\s+)?(?:do\s+not|don['’]?t|without)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
+/**
+ * A bounded token recognizer for explicit model-change vetoes.
+ *
+ * This deliberately does not grow another edit-intent regex. Text is first
+ * normalized and split into clauses; exact lexemes then establish three facts
+ * inside one clause: a prohibitive cue, a mutation word, and an exact
+ * model/graph object. Exact tokens keep `model`/`graph` prefix collisions out,
+ * while the small bridge vocabulary admits ordinary grammatical permutations
+ * such as "without edits being made to my current causal graph".
+ */
+const MUTATION_VERB_LEXEMES = new Set([
+  'change', 'changes', 'changed', 'changing',
+  'edit', 'edits', 'edited', 'editing',
+  'update', 'updates', 'updated', 'updating',
+  'modify', 'modifies', 'modified', 'modifying',
+  'mutate', 'mutates', 'mutated', 'mutating',
+  'touch', 'touches', 'touched', 'touching',
+  'adjust', 'adjusts', 'adjusted', 'adjusting',
+  'alter', 'alters', 'altered', 'altering',
+  'rewrite', 'rewrites', 'rewrote', 'rewritten', 'rewriting',
+]);
+
+const MUTATION_NOUN_LEXEMES = new Set([
+  'change', 'changes',
+  'edit', 'edits',
+  'update', 'updates',
+  'modification', 'modifications',
+  'mutation', 'mutations',
+  'adjustment', 'adjustments',
+  'alteration', 'alterations',
+  'rewrite', 'rewrites',
+]);
+
+const MUTATION_LEXEMES = new Set([
+  ...MUTATION_VERB_LEXEMES,
+  ...MUTATION_NOUN_LEXEMES,
+]);
+
+const MODEL_OBJECT_LEXEMES = new Set(['model', 'models', 'graph', 'graphs']);
+const MODEL_QUALIFIER_LEXEMES = new Set([
+  'a', 'an', 'the', 'this', 'that',
+  'my', 'our', 'your', 'their', 'its',
+  'current', 'existing', 'working', 'underlying',
+  'causal', 'shared', 'strategic', 'decision',
+]);
+const CUE_FILLER_LEXEMES = new Set([
+  'please', 'just', 'ever', 'directly', 'deliberately', 'accidentally',
+  'now', 'immediately', 'under', 'a', 'an', 'any', 'circumstances', 'in', 'way',
+  'additional', 'further', 'other',
+]);
+const MUTATION_OBJECT_BRIDGE_LEXEMES = new Set([
+  ...MODEL_QUALIFIER_LEXEMES,
+  'any', 'no', 'to', 'of', 'in', 'on', 'for', 'about', 'within', 'from',
+  'be', 'being', 'been', 'is', 'are', 'was', 'were',
+  'get', 'gets', 'getting', 'got',
+  'make', 'making', 'made', 'apply', 'applying', 'applied',
+  'at', 'all', 'it', 'itself', 'them', 'themselves',
+  'additional', 'further', 'other',
+]);
+const MUTATION_OPERATORS = new Set(['make', 'making', 'apply', 'applying']);
+const MUTATION_CONTROLS = new Set(['let', 'allow', 'have']);
+const SCOPED_TAIL_LEXEMES = new Set(['additional', 'further', 'other']);
+const MODEL_CONNECTOR_LEXEMES = new Set(['to', 'of', 'in', 'on', 'within']);
+const MAX_CUE_WINDOW_TOKENS = 14;
+const MAX_MODEL_QUALIFIERS = 5;
+
+interface NoChangeCandidate {
+  readonly start: number;
+  readonly end: number;
+  readonly scopedTail: boolean;
+  readonly cue: 'do_not' | 'never' | 'without' | 'no';
+}
+
+interface NoChangeClause {
+  readonly tokens: readonly string[];
+  readonly question: boolean;
+}
+
+function isWordCharacter(character: string | undefined): boolean {
+  if (!character) return false;
+  const code = character.toLowerCase().charCodeAt(0);
+  return (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+}
+
+function isCompleteQuotedNoChangePhrase(quoted: string): boolean {
+  const normalized = quoted
+    .normalize('NFKC')
+    .replace(/[‘’]/g, "'")
+    .replace(/\bdon\s*'\s*t\b/gi, 'do not')
+    .toLowerCase();
+  const tokens = tokenizeNoChangeClause(normalized);
+  const hasCue = tokens.some((token, index) =>
+    token === 'without' || token === 'never' || token === 'no' ||
+    (token === 'do' && tokens[index + 1] === 'not'));
+  return hasCue && tokens.some((token) => MUTATION_LEXEMES.has(token)) &&
+    tokens.some((token) => MODEL_OBJECT_LEXEMES.has(token));
+}
+
+/** Remove complete quoted mentions; an unmatched quote is left untouched. */
+function maskQuotedMentions(message: string): string {
+  const characters = [...message];
+  for (let start = 0; start < characters.length; start += 1) {
+    const opening = characters[start];
+    const doubleQuote = opening === '"' || opening === '“';
+    const singleQuote = (opening === "'" || opening === '‘') &&
+      !isWordCharacter(characters[start - 1]) && isWordCharacter(characters[start + 1]);
+    if (!doubleQuote && !singleQuote) continue;
+    const closing = opening === '“' ? '”' : opening === '‘' ? '’' : opening;
+    let end = start + 1;
+    while (end < characters.length) {
+      const matchesDelimiter = characters[end] === closing;
+      const contractionApostrophe = singleQuote &&
+        isWordCharacter(characters[end - 1]) && isWordCharacter(characters[end + 1]);
+      if (matchesDelimiter && !contractionApostrophe) break;
+      end += 1;
+    }
+    if (end >= characters.length) continue;
+    const quoted = characters.slice(start + 1, end).join('');
+    const hasOutsideContext = characters.slice(0, start).some(isWordCharacter) ||
+      characters.slice(end + 1).some(isWordCharacter);
+    if (hasOutsideContext && isCompleteQuotedNoChangePhrase(quoted)) {
+      for (let cursor = start; cursor <= end; cursor += 1) characters[cursor] = ' ';
+    }
+    start = end;
+  }
+  return characters.join('');
+}
+
+function tokenizeNoChangeClause(clause: string): readonly string[] {
+  return clause.match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+}
+
+function splitNoChangeClauses(message: string): NoChangeClause[] {
+  const normalized = maskQuotedMentions(message)
+    .normalize('NFKC')
+    .replace(/[‘’]/g, "'")
+    .replace(/\bdon\s*'\s*t\b/gi, 'do not')
+    .toLowerCase();
+  const clauses: NoChangeClause[] = [];
+  let buffer = '';
+  const pushClause = (question: boolean): void => {
+    const tokens = tokenizeNoChangeClause(buffer);
+    if (tokens.length > 0) clauses.push({ tokens, question });
+    buffer = '';
+  };
+  for (const character of normalized) {
+    if (character === '?') {
+      pushClause(true);
+    } else if (character === '.' || character === '!' || character === ';' ||
+      character === '\n' || character === '\r') {
+      pushClause(false);
+    } else {
+      buffer += character === ':' || character === '—' || character === '–' ? ' ' : character;
+    }
+  }
+  pushClause(false);
+  return clauses;
+}
+
+function skipCueFillers(tokens: readonly string[], from: number, limit: number): number {
+  let cursor = from;
+  while (cursor < limit && CUE_FILLER_LEXEMES.has(tokens[cursor]!)) cursor += 1;
+  return cursor;
+}
+
+function findModelObjectAfter(
+  tokens: readonly string[],
+  from: number,
+  limit: number,
+): number | null {
+  for (let cursor = from; cursor < limit; cursor += 1) {
+    if (MODEL_OBJECT_LEXEMES.has(tokens[cursor]!)) return cursor;
+    if (!MUTATION_OBJECT_BRIDGE_LEXEMES.has(tokens[cursor]!)) return null;
+  }
+  return null;
+}
+
+function parseModelObjectAt(
+  tokens: readonly string[],
+  from: number,
+  limit: number,
+): number | null {
+  const objectLimit = Math.min(limit, from + MAX_MODEL_QUALIFIERS + 1);
+  for (let cursor = from; cursor < objectLimit; cursor += 1) {
+    const token = tokens[cursor]!;
+    if (MODEL_OBJECT_LEXEMES.has(token)) return cursor;
+    if (!MODEL_QUALIFIER_LEXEMES.has(token)) return null;
+  }
+  return null;
+}
+
+function findMutationAfter(
+  tokens: readonly string[],
+  from: number,
+  limit: number,
+  nounsOnly = false,
+): number | null {
+  const lexemes = nounsOnly ? MUTATION_NOUN_LEXEMES : MUTATION_LEXEMES;
+  for (let cursor = from; cursor < limit; cursor += 1) {
+    if (lexemes.has(tokens[cursor]!)) return cursor;
+    if (!MUTATION_OBJECT_BRIDGE_LEXEMES.has(tokens[cursor]!)) return null;
+  }
+  return null;
+}
+
+function hasScopedTailMarker(
+  tokens: readonly string[],
+  start: number,
+  end: number,
+): boolean {
+  for (let cursor = start; cursor <= end; cursor += 1) {
+    if (SCOPED_TAIL_LEXEMES.has(tokens[cursor]!)) return true;
+    if (tokens[cursor] === 'anything' && tokens[cursor + 1] === 'else') return true;
+  }
+  return false;
+}
+
+function makeCandidate(
+  tokens: readonly string[],
+  start: number,
+  end: number,
+  cue: NoChangeCandidate['cue'],
+): NoChangeCandidate {
+  return {
+    start,
+    end,
+    cue,
+    scopedTail: hasScopedTailMarker(tokens, start, tokens.length - 1),
+  };
+}
+
+function findDirectNoChangeCandidate(
+  tokens: readonly string[],
+  cueStart: number,
+  cueEnd: number,
+  cue: 'do_not' | 'never' | 'without',
+): NoChangeCandidate | null {
+  const limit = Math.min(tokens.length, cueEnd + MAX_CUE_WINDOW_TOKENS);
+  const first = skipCueFillers(tokens, cueEnd, limit);
+  if (first >= limit) return null;
+  const firstToken = tokens[first]!;
+
+  if (MUTATION_LEXEMES.has(firstToken)) {
+    const object = findModelObjectAfter(tokens, first + 1, limit);
+    return object === null ? null : makeCandidate(tokens, cueStart, object, cue);
+  }
+
+  if (MUTATION_OPERATORS.has(firstToken)) {
+    const afterOperator = skipCueFillers(tokens, first + 1, limit);
+    const mutation = findMutationAfter(tokens, afterOperator, limit, true);
+    if (mutation !== null) {
+      const object = findModelObjectAfter(tokens, mutation + 1, limit);
+      if (object !== null) return makeCandidate(tokens, cueStart, object, cue);
+    }
+    const object = parseModelObjectAt(tokens, afterOperator, limit);
+    if (object !== null) {
+      const noun = findMutationAfter(tokens, object + 1, limit, true);
+      if (noun !== null) return makeCandidate(tokens, cueStart, noun, cue);
+    }
+    return null;
+  }
+
+  if (MUTATION_CONTROLS.has(firstToken)) {
+    const objectStart = skipCueFillers(tokens, first + 1, limit);
+    const mutationFirst = findMutationAfter(tokens, objectStart, limit);
+    if (mutationFirst !== null) {
+      const objectAfter = findModelObjectAfter(tokens, mutationFirst + 1, limit);
+      if (objectAfter !== null) return makeCandidate(tokens, cueStart, objectAfter, cue);
+    }
+    const object = parseModelObjectAt(tokens, objectStart, limit);
+    if (object === null) return null;
+    const mutation = findMutationAfter(tokens, object + 1, limit);
+    return mutation === null ? null : makeCandidate(tokens, cueStart, mutation, cue);
+  }
+
+  const object = parseModelObjectAt(tokens, first, limit);
+  if (object === null) return null;
+  const mutation = findMutationAfter(tokens, object + 1, limit);
+  return mutation === null ? null : makeCandidate(tokens, cueStart, mutation, cue);
+}
+
+/**
+ * The bare `no` form is intentionally narrower than `do not` / `without`.
+ * It must be the compact noun construction "no changes to/of/in/on/within
+ * [model]", or the symmetric object-first fragment "no model changes".
+ * Directive-vs-description classification happens after the bounded phrase is
+ * found, so merely mentioning that such changes were recorded is not a veto.
+ */
+function findNarrowNoCandidate(
+  tokens: readonly string[],
+  noIndex: number,
+): NoChangeCandidate | null {
+  const limit = Math.min(tokens.length, noIndex + MAX_CUE_WINDOW_TOKENS);
+  let cursor = noIndex + 1;
+  while (cursor < limit && (tokens[cursor] === 'any' || SCOPED_TAIL_LEXEMES.has(tokens[cursor]!))) {
+    cursor += 1;
+  }
+
+  if (MUTATION_NOUN_LEXEMES.has(tokens[cursor]!)) {
+    const connector = tokens[cursor + 1];
+    if (!MODEL_CONNECTOR_LEXEMES.has(connector!)) return null;
+    const object = parseModelObjectAt(tokens, cursor + 2, limit);
+    if (object === null) return null;
+    const start = MUTATION_OPERATORS.has(tokens[noIndex - 1]!) ? noIndex - 1 : noIndex;
+    return makeCandidate(tokens, start, object, 'no');
+  }
+
+  const object = parseModelObjectAt(tokens, cursor, limit);
+  if (object === null) return null;
+  const noun = findMutationAfter(tokens, object + 1, limit, true);
+  if (noun === null) return null;
+  const start = MUTATION_OPERATORS.has(tokens[noIndex - 1]!) ? noIndex - 1 : noIndex;
+  return makeCandidate(tokens, start, noun, 'no');
+}
+
+function findNoChangeCandidates(tokens: readonly string[]): NoChangeCandidate[] {
+  const candidates: NoChangeCandidate[] = [];
+  for (let cursor = 0; cursor < tokens.length; cursor += 1) {
+    let candidate: NoChangeCandidate | null = null;
+    if (tokens[cursor] === 'do' && tokens[cursor + 1] === 'not') {
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 2, 'do_not');
+    } else if (tokens[cursor] === 'never') {
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'never');
+    } else if (tokens[cursor] === 'without') {
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'without');
+    } else if (tokens[cursor] === 'no') {
+      candidate = findNarrowNoCandidate(tokens, cursor);
+    }
+    if (candidate) candidates.push(candidate);
+  }
+  return candidates;
+}
+
+const IMPERATIVE_MAIN_LEXEMES = new Set([
+  'answer', 'analyse', 'analyze', 'assess', 'calculate', 'challenge', 'check',
+  'clarify', 'compare', 'continue', 'critique', 'ensure', 'evaluate', 'explain',
+  'find', 'give', 'help', 'identify', 'keep', 'make', 'proceed', 'run', 'set',
+  'show', 'tell', 'use', 'verify',
+]);
+const QUESTION_MAIN_LEXEMES = new Set([
+  'can', 'could', 'do', 'does', 'how', 'is', 'may', 'should', 'what', 'which',
+  'will', 'would', 'why',
+]);
+const MAIN_CLAUSE_FILLERS = new Set(['and', 'then', 'please']);
+const NO_FRAGMENT_FILLERS = new Set(['and', 'only', 'please', 'with']);
+const DEONTIC_DIRECTIVE_LEXEMES = new Set(['must', 'need', 'needs', 'shall', 'should']);
+
+function noChangeRemainderTokens(
+  tokens: readonly string[],
+  candidate: NoChangeCandidate,
+): readonly string[] {
+  return tokens.filter(
+    (_, tokenIndex) => tokenIndex < candidate.start || tokenIndex > candidate.end,
+  );
+}
+
+function hasDirectiveMainClause(tokens: readonly string[]): boolean {
+  let first = 0;
+  while (first < tokens.length && MAIN_CLAUSE_FILLERS.has(tokens[first]!)) first += 1;
+  if (first >= tokens.length) return true;
+  const firstToken = tokens[first]!;
+  return IMPERATIVE_MAIN_LEXEMES.has(firstToken) || QUESTION_MAIN_LEXEMES.has(firstToken);
+}
+
+/**
+ * `without` also introduces historical adjuncts ("the team ran it without
+ * changing the model"). It is a veto only when its containing clause is
+ * itself directive/question-shaped, or when the no-change phrase stands alone.
+ */
+function isDirectiveNoChangeCandidate(
+  clause: NoChangeClause,
+  candidate: NoChangeCandidate,
+): boolean {
+  if (candidate.cue === 'without') {
+    if (clause.question) return true;
+    return hasDirectiveMainClause(noChangeRemainderTokens(clause.tokens, candidate));
+  }
+  if (candidate.cue !== 'no') return true;
+
+  const remainder = noChangeRemainderTokens(clause.tokens, candidate)
+    .filter((token) => !NO_FRAGMENT_FILLERS.has(token));
+  if (remainder.length === 0) return true;
+  return hasDirectiveMainClause(remainder) ||
+    remainder.some((token) => DEONTIC_DIRECTIVE_LEXEMES.has(token));
+}
+
+const EPISTEMIC_BRIDGE_LEXEMES = new Set([
+  'understand', 'know', 'explain', 'clarify', 'confirm', 'check', 'verify',
+  'tell', 'show', 'why', 'whether', 'how', 'what',
+]);
+
+function hasInstructionalPassiveBridge(tokens: readonly string[], setIndex: number): boolean {
+  const from = Math.max(0, setIndex - 14);
+  const beforeSet = tokens.slice(from, setIndex);
+  const ensureIndex = beforeSet.lastIndexOf('ensure');
+  let makeSureIndex = -1;
+  for (let index = 0; index < beforeSet.length - 1; index += 1) {
+    if (beforeSet[index] === 'make' && beforeSet[index + 1] === 'sure') {
+      makeSureIndex = index;
+    }
+  }
+  const seeIndex = beforeSet.lastIndexOf('see');
+  const bridgeIndex = Math.max(ensureIndex, makeSureIndex, seeIndex);
+  if (bridgeIndex < 0) return false;
+  return !beforeSet.slice(bridgeIndex + 1).some((token) => EPISTEMIC_BRIDGE_LEXEMES.has(token));
+}
+
+/** Mask a descriptive "is/was/has been set to" in the scoped-tail remainder. */
+function maskDescriptivePassiveSet(tokens: readonly string[]): string[] {
+  return tokens.map((token, index) => {
+    if (token !== 'set') return token;
+    const directPassive = ['is', 'are', 'was', 'were'].includes(tokens[index - 1]!);
+    const perfectPassive = tokens[index - 1] === 'been' &&
+      ['has', 'have', 'had'].includes(tokens[index - 2]!);
+    if ((!directPassive && !perfectPassive) || hasInstructionalPassiveBridge(tokens, index)) {
+      return token;
+    }
+    return 'equals';
+  });
+}
+
+interface LocatedNoChangeCandidate {
+  readonly clauseIndex: number;
+  readonly candidate: NoChangeCandidate;
+}
+
+function hasAffirmativeMutationOutsideCandidates(
+  clauses: readonly NoChangeClause[],
+  candidates: readonly LocatedNoChangeCandidate[],
+): boolean {
+  const omittedByClause = new Map<number, Set<number>>();
+  for (const { clauseIndex, candidate } of candidates) {
+    const omitted = omittedByClause.get(clauseIndex) ?? new Set<number>();
+    for (let index = candidate.start; index <= candidate.end; index += 1) {
+      omitted.add(index);
+    }
+    omittedByClause.set(clauseIndex, omitted);
+  }
+  const remainderClauses = clauses
+    .map(({ tokens }, index) => {
+      const omitted = omittedByClause.get(index);
+      return omitted ? tokens.filter((_, tokenIndex) => !omitted.has(tokenIndex)) : [...tokens];
+    })
+    .map(maskDescriptivePassiveSet);
+  const remainder = remainderClauses
+    .map((tokens) => tokens.join(' '))
+    .join('. ');
+  return hasMutationWarrantSignal(remainder) || remainderClauses.some(hasImperativeMakeValueEdit);
+}
+
+function hasImperativeMakeValueEdit(tokens: readonly string[]): boolean {
+  let first = 0;
+  while (first < tokens.length && MAIN_CLAUSE_FILLERS.has(tokens[first]!)) first += 1;
+  if (tokens[first] !== 'make' || tokens[first + 1] === 'sure') return false;
+  for (let cursor = first + 2; cursor < tokens.length; cursor += 1) {
+    if (Number.isFinite(Number(tokens[cursor]))) return true;
+  }
+  return false;
+}
+
+/**
+ * Did the user explicitly withhold model-change authority, with no affirmative
+ * edit left after that protective clause is removed?
+ *
+ * The contrast is load-bearing: "do not change the model" is a veto, while
+ * "Set X to 0.7 and do not change anything else" remains an authorised edit.
+ * Deterministic mutation pre-routes reuse this predicate so the action-layer
+ * warrant and the fast path cannot disagree about the same sentence.
+ */
+export function hasExplicitNoModelChangeIntent(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  const clauses = splitNoChangeClauses(trimmed);
+  const scopedCandidates: LocatedNoChangeCandidate[] = [];
+  for (let clauseIndex = 0; clauseIndex < clauses.length; clauseIndex += 1) {
+    const clause = clauses[clauseIndex]!;
+    for (const candidate of findNoChangeCandidates(clause.tokens)) {
+      if (!isDirectiveNoChangeCandidate(clause, candidate)) continue;
+      if (!candidate.scopedTail) return true;
+      scopedCandidates.push({ clauseIndex, candidate });
+    }
+  }
+  if (scopedCandidates.length === 0) return false;
+  return !hasAffirmativeMutationOutsideCandidates(clauses, scopedCandidates);
+}
 
 export function isBoundedNonMutationAnalyticalRequest(message: string): boolean {
   if (typeof message !== 'string') return false;
@@ -237,12 +721,11 @@ export function isBoundedNonMutationAnalyticalRequest(message: string): boolean 
     return false;
   }
 
-  const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
-  if (affirmativeRemainder.length === 0) return true;
+  if (hasExplicitNoModelChangeIntent(trimmed)) return true;
   return !(
-    hasMutationSignal(affirmativeRemainder) ||
-    hasConstraintMutationSignal(affirmativeRemainder) ||
-    isEditRequestShape(affirmativeRemainder)
+    hasMutationSignal(trimmed) ||
+    hasConstraintMutationSignal(trimmed) ||
+    isEditRequestShape(trimmed)
   );
 }
 

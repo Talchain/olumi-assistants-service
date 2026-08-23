@@ -151,6 +151,41 @@ describe('tryCompoundValueUpdate — the pinned live phrasing', () => {
   });
 });
 
+describe('tryCompoundValueUpdate — explicit no-model-change authority', () => {
+  it.each([
+    'Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8, without making any changes to the current model?',
+    'Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8, without my current causal model being modified?',
+    "Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8. DON'T let our causal graph be updated.",
+  ])('blocks the semantic no-change class before compound pairing: %s', (message) => {
+    const result = tryCompoundValueUpdate(
+      message,
+      PARSED_06_08,
+      TWO_FACTORS,
+      new Set(['fac_a', 'fac_b']),
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('preserves a genuine compound edit with only the remainder protected', () => {
+    const message =
+      'Set Factor A to 0.6 and Factor B to 0.8 without making any other changes.';
+    const result = tryCompoundValueUpdate(
+      message,
+      spanned06And08(message),
+      TWO_FACTORS,
+      new Set(['fac_a', 'fac_b']),
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('compound_value_update');
+  });
+});
+
 describe('tryCompoundValueUpdate — O-1 segment pairing (the F2 fix)', () => {
   it('a stray leading number (date/budget/age) is IGNORED, never paired: "Using the 2026 forecast, set A to 0.6 and B to 0.8"', () => {
     const message = 'Using the 2026 forecast, set Factor A to 0.6 and Factor B to 0.8';

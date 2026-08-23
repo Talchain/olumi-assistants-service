@@ -336,6 +336,10 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import {
+  buildAnalysisRefusalFact,
+  isAnalysisRefusalContinuityCause,
+} from './context/analysis-refusal-continuity.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
 import {
@@ -1953,6 +1957,8 @@ export async function runTurnExecutor(
       boundedAnalytical && holdForDegrade === undefined
         ? buildSourceBoundAnalyticalRecovery({
             message: payload.message,
+            latestRunAttemptRefused:
+              coachingPromptCanonical?.degraded_fact_status === 'refused',
             readiness: contextPackForLog?.readiness,
             analysis: contextPackForLog?.analysis,
             graph: contextPackForLog?.graph,
@@ -10000,6 +10006,7 @@ export async function runTurnExecutor(
           // `explain_from_structure`) READ an analysis rather than run one, so
           // their failures are deliberately out of scope too.
           let analyseShapedRecoveryResponse: OlumiResponse | null = null;
+          let analysisRefusalFact: HandlerFact | null = null;
           if (proposedHandlerId === ANALYSE_HANDLER_ID) {
             // ⭐ THE STRUCTURAL PROJECTION IS HANDED IN, NOT DISCARDED (measured
             // on staging 18 Aug 2026: 4 of 13 core-journey runs).
@@ -10021,10 +10028,18 @@ export async function runTurnExecutor(
             // hand-maintained mirror this estate keeps paying for, and the exact
             // shape of the two-arms-disagreeing defect (trap 21) that produced
             // this bug in the first place.
+            const blockedReason = blockedReasonForHandlerFailure(error);
             analysisReadyForTurn = buildAnalysisRefusalReadiness(
-              blockedReasonForHandlerFailure(error),
+              blockedReason,
               analysisReadyForTurn,
             );
+            if (isAnalysisRefusalContinuityCause(error.cause_kind)) {
+              analysisRefusalFact = buildAnalysisRefusalFact({
+                scenarioId: context.session_id,
+                reasonCode: blockedReason,
+                graphHash: currentAnalysisGraphHashForTurn,
+              });
+            }
             // R1 — THE REFUSAL MUST BE ANALYSE-SHAPED. `composeRecoverable-
             // HandlerResponse` stamps `stage_indicator` from the REQUEST's
             // stage, and an analyse turn can legitimately arrive at
@@ -10102,11 +10117,12 @@ export async function runTurnExecutor(
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
-              handler_id: null,
+              handler_id: analysisRefusalFact === null ? null : ANALYSE_HANDLER_ID,
               request_hash: computeRequestHash(payload),
               llm_calls_used: llmCallsUsed,
               duration_ms: Date.now() - startedAt,
-              handler_facts: [],
+              handler_facts:
+                analysisRefusalFact === null ? [] : [analysisRefusalFact],
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
@@ -10776,6 +10792,8 @@ export async function runTurnExecutor(
         if (boundedUnsafe) {
           confirmationForCompose = buildSourceBoundAnalyticalRecovery({
             message: payload.message,
+            latestRunAttemptRefused:
+              coachingPromptCanonical?.degraded_fact_status === 'refused',
             readiness: contextPackForLog?.readiness,
             analysis: contextPackForLog?.analysis,
             graph: contextPackForLog?.graph,

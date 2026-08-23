@@ -244,6 +244,135 @@ describe('tryDeterministicValueUpdate — negative gates (hypothetical phrasing)
   });
 });
 
+describe('tryDeterministicValueUpdate — explicit no-model-change authority', () => {
+  const PRODUCT_PROMPT =
+    'Challenge the 53% result directly: what is the strongest reason it could be misleading? Refer specifically to Team Capacity Consumed and unknown willingness to pay, and explain the causal path. Do not change the model.';
+  const PRODUCT_GRAPH = makeGraph([
+    { id: 'fac_capacity', label: 'Team Capacity Consumed' },
+    { id: 'fac_wtp', label: 'Willingness to pay' },
+  ]);
+
+  it('does not bind a result percentage to named factors when the user explicitly forbids a model change', () => {
+    const result = tryDeterministicValueUpdate(
+      PRODUCT_PROMPT,
+      [quantity(0.53, '53%')],
+      PRODUCT_GRAPH,
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it.each([
+    ['gerund + model', 'without changing the model?'],
+    ['gerund + current graph + case/punctuation', 'WITHOUT EDITING THE CURRENT GRAPH?!'],
+    ['gerund + determiner', 'without modifying this model.'],
+    ['gerund + qualified object', 'without updating our working graph?'],
+    ['gerund + reflexive object', 'without mutating the model itself?'],
+    ['gerund + existing object', 'without touching the existing model?'],
+    ['gerund + adjustment', 'without adjusting the graph?'],
+    ['make + any changes + current object', 'without making any changes to the current model?'],
+    ['make + singular change', 'without making a change to this graph?'],
+    ['apply + noun change', 'without applying modifications to the model?'],
+    ['base prohibition', 'and do not alter the model.'],
+    ['contracted prohibition + curly apostrophe', 'and DON’T rewrite your current graph!'],
+    ['no + noun change', 'with no changes to the model.'],
+    ['no + noun edit + connector', 'No edits to current graph.'],
+    ['without + noun modification', 'without any modifications to our model.'],
+    ['noun + of connector', 'without any modification of the model?'],
+    ['object-before-noun', 'without current model changes.'],
+    ['make no + noun update', 'make no updates to the graph.'],
+    ['punctuated causal qualifier', 'and do not, PLEASE, alter my current causal model.'],
+    ['controlled passive object order', "DON'T let our causal graph be mutated."],
+    ['object-first passive', 'without my current causal model being modified.'],
+    ['noun-first passive', 'without edits being made to my underlying causal graph.'],
+    ['imperative object-first noun', 'make no current causal model updates.'],
+    ['standalone scoped negative', 'do not make further changes to the current causal model.'],
+  ])('keeps the numeric safety question non-mutating: %s', (_caseName, noChangeClause) => {
+    const result = tryDeterministicValueUpdate(
+      `Is it safe to run given Team Capacity is set to 53%, ${noChangeClause}`,
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it.each([
+    'Set Team Capacity to 53% without changing anything else.',
+    'Set Team Capacity to 53% without making any other changes.',
+    'Set Team Capacity to 53%, no other changes.',
+    'Set Team Capacity to 53% and do not apply further edits.',
+    'Set Team Capacity to 53% without making other changes to the model.',
+    'Set Team Capacity to 53% without making other updates to my current causal model.',
+    'Without additional changes to our current causal graph, set Team Capacity to 53%.',
+    'Make Team Capacity 53% without making any other changes to the current causal model.',
+    'Ensure Team Capacity is set to 53% without changing anything else.',
+    'Team Capacity should be set to 53% without making other changes.',
+  ])('keeps the scoped affirmative edit authorised: %s', (message) => {
+    const result = tryDeterministicValueUpdate(
+      message,
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+  });
+
+  it.each([
+    'Is it safe to run given that factor is set to 53%, without applying changes to the graph?',
+    'Is it safe to run given that factor is set to 53%, without my current causal graph being modified?',
+    "Is it safe to run given that factor is set to 53%. DON'T let our causal model be updated.",
+  ])('blocks the semantic no-change class on the deictic fast path: %s', (message) => {
+    const result = tryDeicticValueUpdate(
+      message,
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+      ['fac_team'],
+      () => 'Team Capacity',
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('does not mistake an epistemic "ensure I understand" bridge for an edit instruction', () => {
+    const result = tryDeterministicValueUpdate(
+      'Is it safe to run, and can you ensure I understand why Team Capacity is set to 53%, without changing the model?',
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('preserves the corresponding scoped deictic edit', () => {
+    const result = tryDeicticValueUpdate(
+      'Set that factor to 53% without making any other changes.',
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+      ['fac_team'],
+      () => 'Team Capacity',
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+  });
+});
+
 describe('tryDeterministicValueUpdate — fall-through cases', () => {
   it('no edit verb → falls through with skip_reason=no_edit_verb', () => {
     const result = tryDeterministicValueUpdate(

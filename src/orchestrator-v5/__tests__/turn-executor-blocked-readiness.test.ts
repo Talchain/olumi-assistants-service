@@ -270,6 +270,27 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the routed analyse arm must not repor
     expect((result.analysisReady as { blocked_reason?: string }).blocked_reason).toBe(
       'mixed_scale_unresolved',
     );
+
+    // Continuity pin: the 200 recovery is still a durable turn. It records the
+    // refused attempt as a non-result fact so the next answer cannot forget the
+    // refusal and claim that running is safe.
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]).toMatchObject({
+      handler_id: 'run_analysis',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis',
+          noop: false,
+          result: {
+            leading_option_id: null,
+            enrichment: {
+              analysis_status: 'refused',
+              refusal_reason_code: 'mixed_scale_unresolved',
+            },
+          },
+        },
+      ],
+    });
   });
 
   /**

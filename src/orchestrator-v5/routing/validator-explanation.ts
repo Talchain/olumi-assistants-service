@@ -44,6 +44,8 @@
 import { hasFabricatedResultReference } from './fabricated-result-reference.js';
 import { containsMutationLanguage } from './mutation-language.js';
 import { EXPLANATION_HANDLER_IDS, type ProposalExplanation } from './types.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 const MIN_ANSWER_TEXT_LENGTH = 80;
 
@@ -95,6 +97,17 @@ const HANDLERS_REQUIRING_ANALYSIS_FACT: ReadonlySet<string> = new Set([
 export interface SideBandPriorFact {
   readonly fact_type: string;
   readonly noop?: boolean;
+  readonly result?: unknown;
+}
+
+function isSuccessfulSideBandRunAnalysisFact(fact: SideBandPriorFact): boolean {
+  if (fact.fact_type !== 'run_analysis' || fact.noop === true) return false;
+  // The side-band validator historically accepts a deliberately minimal
+  // legacy marker in tests/callers. A real persisted HandlerFact always carries
+  // `result`; when present, defer to the canonical success-status authority so
+  // a refused/failed attempt cannot authorise result explanation.
+  if (fact.result === undefined) return true;
+  return isSuccessfulRunAnalysisFact(fact as HandlerFact);
 }
 
 export type ExplanationAnswerErrorReason =
@@ -218,9 +231,7 @@ export function validateExplanationAnswer(
   // run_analysis fact in priorFacts. The handler's existing path renders the
   // "no analysis yet" template; skip ALL answer-text validation.
   const requiresAnalysis = HANDLERS_REQUIRING_ANALYSIS_FACT.has(handlerId);
-  const hasAnalysisFact = priorFacts.some(
-    (f) => f.fact_type === 'run_analysis' && f.noop !== true,
-  );
+  const hasAnalysisFact = priorFacts.some(isSuccessfulSideBandRunAnalysisFact);
   if (requiresAnalysis && !hasAnalysisFact) {
     return { skip: true };
   }

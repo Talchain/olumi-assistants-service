@@ -357,6 +357,25 @@ describe('flag ON — capture scope', () => {
     expect(storeMock.getStoreCalls).toBe(0);
   });
 
+  it('refused run_analysis attempt → no decision-record capture', async () => {
+    setStagingEnv();
+    await commitDirectAnswer(
+      composed(),
+      meta([
+        makeRunAnalysisFact({
+          result: {
+            leading_option_id: null,
+            enrichment: { analysis_status: 'refused' },
+          },
+        }),
+      ]),
+      ownedStore(),
+    );
+    await drainMicrotasks();
+    expect(storeMock.createRecord).not.toHaveBeenCalled();
+    expect(storeMock.getStoreCalls).toBe(0);
+  });
+
   it('turn without a run_analysis fact → no capture', async () => {
     setStagingEnv();
     await commitDirectAnswer(composed(), meta([]), ownedStore());

@@ -98,6 +98,7 @@ const SKIP_REASONS = new Set<string | null>([
   'no_quantity',
   'no_graph',
   'hypothetical_gate',
+  'explicit_no_model_change',
   'no_candidate_match',
   'ambiguous_quantity',
 ]);

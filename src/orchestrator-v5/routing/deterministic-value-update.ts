@@ -69,6 +69,7 @@ import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
 } from './option-intervention-guard.js';
+import { hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
 
 /**
  * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
@@ -375,6 +376,7 @@ export type SkipReason =
    */
   | 'degraded_extraction'
   | 'no_edit_verb'
+  | 'explicit_no_model_change'
   | 'no_quantity'
   | 'no_graph'
   | 'hypothetical_gate'
@@ -530,6 +532,9 @@ export function tryDeterministicValueUpdate(
   }
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  if (hasExplicitNoModelChangeIntent(message)) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
   // F.6: code computes, LLM doesn't. CQE is the canonical numeric
@@ -871,6 +876,7 @@ export interface CompoundUpdatePart {
 export type CompoundSkipReason =
   | 'degraded_extraction'
   | 'no_edit_verb'
+  | 'explicit_no_model_change'
   | 'no_graph'
   | 'hypothetical_gate'
   | 'option_intervention_edit'
@@ -963,6 +969,9 @@ export function tryCompoundValueUpdate(
   }
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  if (hasExplicitNoModelChangeIntent(message)) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
   const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
@@ -1149,6 +1158,7 @@ export type DeicticDispatch =
   | { readonly matched: false; readonly skip_reason: 'degraded_extraction' }
   | { readonly matched: false; readonly skip_reason: 'no_deictic' }
   | { readonly matched: false; readonly skip_reason: 'no_edit_verb' }
+  | { readonly matched: false; readonly skip_reason: 'explicit_no_model_change' }
   | { readonly matched: false; readonly skip_reason: 'no_quantity' }
   | { readonly matched: false; readonly skip_reason: 'no_graph' }
   | { readonly matched: false; readonly skip_reason: 'hypothetical_gate' }
@@ -1202,6 +1212,9 @@ export function tryDeicticValueUpdate(
   }
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  if (hasExplicitNoModelChangeIntent(message)) {
+    return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
   for (const pat of HYPOTHETICAL_PATTERNS) {
     if (pat.test(message)) {

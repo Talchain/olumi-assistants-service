@@ -32,7 +32,15 @@ import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-ca
 // Mutable turn-budget holder so the budget-precedence test can shrink the
 // turn_ms to make `turnAbort` fire before a (deliberately slow) handler throws.
 // `vi.hoisted` guarantees it is initialised before the hoisted `vi.mock` factory.
-const { budgetHolder } = vi.hoisted(() => ({ budgetHolder: { turnMs: 30000 } }));
+const { budgetHolder, commitDirectAnswerMock } = vi.hoisted(() => ({
+  budgetHolder: { turnMs: 30000 },
+  commitDirectAnswerMock: vi.fn(),
+}));
+
+vi.mock('../../commit.js', async () => {
+  const actual = await vi.importActual<typeof import('../../commit.js')>('../../commit.js');
+  return { ...actual, commitDirectAnswer: commitDirectAnswerMock };
+});
 
 // `dispatchChipClickRunAnalysis` calls `buildTurnContext` unconditionally at
 // the top (even on the injected-registry test path), which would hit Supabase.
@@ -178,6 +186,12 @@ let errorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   events = [];
+  commitDirectAnswerMock.mockResolvedValue({
+    response: {},
+    performed: true,
+    persisted_row_id: 'row-refusal',
+    graphPersisted: false,
+  });
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});

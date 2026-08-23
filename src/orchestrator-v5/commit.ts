@@ -65,6 +65,7 @@ import { getModelManagementService } from './model-management/index.js';
 import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
+import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -1238,7 +1239,7 @@ export async function commitDirectAnswer(
   // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted (was
   // live `true` on staging); capture now runs whenever the qualifying fact exists.
   const decisionRecordFact = metadata.handler_facts.find(
-    (f): f is RunAnalysisHandlerFact => f.fact_type === 'run_analysis' && f.noop === false,
+    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
   );
   if (decisionRecordFact !== undefined) {
     void recordDecisionRecordForCommit({
