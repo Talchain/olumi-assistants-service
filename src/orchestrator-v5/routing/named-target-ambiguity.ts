@@ -90,6 +90,14 @@
  *
  *  (d) **TWO OR MORE SURVIVING CANDIDATES.** One is not an ambiguity.
  *
+ *      ⚠ AND THERE IS NO SECOND, EARLIER FORM OF THIS CHECK. A
+ *      `candidateTargets.length < 2` fast-path was written here and DELETED
+ *      after its mutant SURVIVED: with fewer than two targets `named` can
+ *      never exceed one, so (d) already subsumes it. A survivor is a claim
+ *      either way (CLAUDE.md trap 13c) — this one was demonstrated
+ *      equivalent and removed, rather than left as a line a later reader
+ *      would mistake for a guard.
+ *
  * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ WHY THE FACTOR PRE-ROUTE DOES NOT ALREADY COVER THIS — MEASURED AT
  * PRISTINE `53eb8d03`, NOT REASONED. `tryDeterministicValueUpdate` DOES return
@@ -214,7 +222,6 @@ export function findNamedTargetAmbiguity(params: {
   if (typeof params.proposedEntityId !== 'string' || params.proposedEntityId.length === 0) {
     return null;
   }
-  if (params.candidateTargets.length < 2) return null;
 
   const padded = ` ${params.message.toLowerCase().replace(/\s+/g, ' ').trim()} `;
   const messageTokens = new Set(

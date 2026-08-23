@@ -216,6 +216,10 @@ import {
   buildVerifiedCorrectionReplay,
   findOutstandingEffectAskCollision,
 } from './routing/outstanding-effect-ask-misroute.js';
+import {
+  findNamedTargetAmbiguity,
+  type NamedTargetCandidate,
+} from './routing/named-target-ambiguity.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
@@ -8773,6 +8777,124 @@ export async function runTurnExecutor(
                 setFactorValueEffectAskCollision,
                 setFactorValueVerifiedReplay,
               ),
+            },
+          },
+        };
+      }
+
+      // ⭐⭐ SENDABLE FAILURE 2 — TWO ENTITIES NAMED IN ONE SENTENCE, ONE
+      // SILENTLY CHOSEN, AND AN "Applied" RECEIPT.
+      //
+      // Witnessed, fresh guest, deployed staging: *"Key Account Renewal Risk
+      // AND Key Account Churn Exposure both look off to me — set it to 0.8."*
+      // The product wrote the first and badged it Applied. ⚠ THE RECEIPT WAS
+      // TRUTHFUL — it named what it changed and the persisted state matched —
+      // so this is the CLARIFY-VS-GUESS class, not the false-receipt class.
+      //
+      // WHY IT LIVES HERE AND NOT IN THE PRE-ROUTE. Measured at pristine
+      // `53eb8d03`: `tryDeterministicValueUpdate` DOES clarify when both
+      // labels appear in FULL. It SKIPS (`no_candidate_match` on a partial
+      // reference, `ambiguous_quantity` on a second number) on the sentences a
+      // real user types — and on every skip the LLM router resolves the
+      // reference perfectly well and picks ONE. **The pre-route's ambiguity
+      // verdict is only ever computed when the pre-route OWNS the turn.** This
+      // execute chokepoint is where the LLM and deterministic producers
+      // converge before any handler runs, so asking the question here asks it
+      // once, for every dispatch path — the same placement argument the
+      // option-intervention guard above makes.
+      //
+      // ORDER IS LOAD-BEARING: it runs AFTER the misroute guard, gated on
+      // `validationResult.valid`, so a WRONG-FIELD refusal always wins. A
+      // write to the wrong field of the right entity and a write to the wrong
+      // entity are different harms; the first is the worse one and it keeps
+      // its own copy.
+      const namedTargetCandidates: readonly NamedTargetCandidate[] = (
+        graphStateForTurn?.nodes ?? []
+      )
+        .filter((node) => (node as { kind?: unknown }).kind === 'factor')
+        .map((node) => node as { id?: unknown; label?: unknown })
+        .filter(
+          (node): node is { id: string; label: string } =>
+            typeof node.id === 'string'
+            && typeof node.label === 'string'
+            && node.label.trim().length > 0,
+        )
+        .map((node) => ({ id: node.id, label: node.label }));
+      // ⚠ COMPLETE, NOT BEST-EFFORT. `deriveOptionDistinctiveTokens` documents
+      // an incomplete subtraction list as failing SAFE for its own caller
+      // (fewer subtractions ⇒ more cues ⇒ the containment guard fires more
+      // often). For THIS caller the direction is INVERTED: more cues ⇒ more
+      // clarifying questions on sentences that were never ambiguous, which is
+      // the defect on the other side. So every non-factor named entity goes in.
+      const nonFactorEntityLabels: readonly string[] = (() => {
+        const out: string[] = [];
+        for (const node of graphStateForTurn?.nodes ?? []) {
+          const record = node as { kind?: unknown; label?: unknown };
+          if (record.kind === 'factor') continue;
+          if (typeof record.label === 'string' && record.label.trim().length > 0) {
+            out.push(record.label);
+          }
+        }
+        if (graphLookupForValidate) {
+          for (const kind of ['option', 'goal'] as const) {
+            for (const entity of graphLookupForValidate.listEntitiesByKind(kind)) {
+              if (typeof entity.label === 'string' && entity.label.trim().length > 0) {
+                out.push(entity.label);
+              }
+            }
+          }
+        }
+        return out;
+      })();
+      const namedTargetAmbiguity =
+        validationResult.valid && proposedHandlerId === 'set_factor_value'
+          ? findNamedTargetAmbiguity({
+              message: userMessageForTurn ?? '',
+              proposedEntityId: action.entity.id,
+              candidateTargets: namedTargetCandidates,
+              otherEntityLabels: nonFactorEntityLabels,
+            })
+          : null;
+      if (namedTargetAmbiguity !== null) {
+        // ⭐ THE PROPOSAL'S OWN VALUE TRAVELS WITH THE REFUSAL, because losing
+        // the user's number across the clarify turn is a defect this estate has
+        // already paid for (`outstanding-ask-clarify.ts`: the witnessed user
+        // answered correctly and *"the 0.8 they had given one turn earlier was
+        // gone from the conversation"*).
+        //
+        // It is the PROPOSAL's value, not a re-read of the sentence: this is
+        // the exact number the write was about to apply, so the chip cannot
+        // disagree with what would have happened — and a sentence carrying two
+        // numbers needs no second guess here, because the proposal already
+        // resolved which one it meant. The composer renders it with
+        // `formatValueWithUnit`, which it already imports.
+        // Read exactly as every other consumer of this proposal reads it
+        // (`set-factor-value.ts:315`, `validator.ts:710`) — a named-parameter
+        // lookup, never a positional or reshaped one.
+        const valueParamForAmbiguity = action.parameters.find((p) => p.name === 'value');
+        const proposedValue = valueParamForAmbiguity?.value;
+        const proposedUnit = valueParamForAmbiguity?.unit;
+        validationResult = {
+          valid: false,
+          error: {
+            code: 'ENTITY_RESOLUTION_AMBIGUOUS',
+            message:
+              'set_factor_value refused — the message names more than one factor this value could set',
+            details: {
+              entity_kind: 'factor',
+              // Branches the composer onto the copy that says WHY it is asking.
+              // The pre-existing validator path reaches the same code having
+              // failed to resolve an id, which is a different sentence and must
+              // keep its own (trap 21 — two questions, one code, named apart in
+              // the payload rather than reconciled).
+              ambiguity_source: 'named_in_message',
+              ...(typeof proposedValue === 'number' && Number.isFinite(proposedValue)
+                ? { proposed_value: proposedValue }
+                : {}),
+              ...(typeof proposedUnit === 'string' ? { proposed_unit: proposedUnit } : {}),
+              candidates: namedTargetAmbiguity.candidates.map((candidate) => ({
+                label: candidate.label,
+              })),
             },
           },
         };

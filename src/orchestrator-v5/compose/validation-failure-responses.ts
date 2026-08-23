@@ -151,10 +151,74 @@ function composeHandlerNotFound(error: ValidationError, ctx: ComposeContext): Br
   };
 }
 
+/**
+ * ⭐⭐ SENDABLE FAILURE 2 — THE USER NAMED TWO ENTITIES AND THE PRODUCT MUST ASK
+ * WHICH, CARRYING THEIR NUMBER FORWARD.
+ *
+ * ⚠ TWO QUESTIONS REACH `ENTITY_RESOLUTION_AMBIGUOUS`, AND THEY GET DIFFERENT
+ * SENTENCES (trap 21 — named apart in the payload rather than reconciled into
+ * one copy):
+ *
+ *   · the VALIDATOR's own path — the proposal's entity id did not resolve to
+ *     exactly one thing. The product is confused about the GRAPH. Copy: the
+ *     pre-existing *"Which {kind} do you mean?"*, unchanged.
+ *   · `ambiguity_source: 'named_in_message'` — the turn-executor's named-target
+ *     guard. Nothing is confused about the graph: the product understood BOTH
+ *     entities and simply may not choose between them. Copy must say so, and
+ *     must state that nothing changed, because the alternative the user just
+ *     lived through was a silent write with an "Applied" receipt.
+ *
+ * ⭐ THE VALUE TRAVELS. `proposed_value` is the number the write was about to
+ * apply, so each chip replays a COMPLETE instruction ("Set X to 0.8.") rather
+ * than a bare *"I meant X."* that drops it. The witnessed cost of dropping it
+ * is on the record one module over (`outstanding-ask-clarify.ts`): the user
+ * answered the question correctly and *"the 0.8 they had given one turn
+ * earlier was gone from the conversation"*.
+ *
+ * ⚠ WITHOUT A VALUE THE CHIP DEGRADES TO THE BARE LABEL rather than inventing
+ * one — the same "ask, never fabricate" restraint applied everywhere on this
+ * seam. That is a real, reachable degradation and it is asserted in the spec,
+ * not assumed.
+ */
 function composeEntityResolutionAmbiguous(error: ValidationError): BranchResult {
   const details = error.details ?? {};
   const kind = pickKind(details.entity_kind);
   const candidates = readCandidates(details.candidates);
+  const namedInMessage = details.ambiguity_source === 'named_in_message';
+  if (namedInMessage && candidates.length > 0) {
+    const proposedValue = details.proposed_value;
+    const proposedUnit = readString(details.proposed_unit);
+    const valueText =
+      typeof proposedValue === 'number' && Number.isFinite(proposedValue)
+        ? formatValueWithUnit(proposedValue, proposedUnit)
+        : null;
+    const named = candidates.slice(0, AMBIGUOUS_CANDIDATE_CAP).map(
+      (c, i): SuggestedAction => {
+        const label = safeLabel({ label: c.label, kind: kind ?? undefined });
+        return {
+          id: chipId('entity', `named-${kind ?? 'item'}-${i}`),
+          label,
+          message: valueText === null ? `I meant ${label}.` : `Set ${label} to ${valueText}.`,
+        };
+      },
+    );
+    const labels = named.map((chip) => `"${chip.label}"`);
+    const listed =
+      labels.length === 2
+        ? `${labels[0]} and ${labels[1]}`
+        : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+    return {
+      body: {
+        assistant_text:
+          `You named ${listed}, and ${valueText === null ? 'that value' : valueText} `
+          + `could belong to ${labels.length === 2 ? 'either' : 'any of them'}. `
+          + `I have not changed the model — tell me which one you mean.`,
+        suggested_actions: named,
+      },
+      template_id: 'ambiguous_named_in_message',
+      chip_type: 'entity_suggestion',
+    };
+  }
   if (candidates.length > 0) {
     const chips = candidates.slice(0, AMBIGUOUS_CANDIDATE_CAP).map(
       (c, i): SuggestedAction => {
