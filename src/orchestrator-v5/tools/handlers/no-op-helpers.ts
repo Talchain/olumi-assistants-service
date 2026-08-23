@@ -15,6 +15,11 @@ import {
   selectDegradedRunAnalysisFact,
   type AnalysisFreshness,
 } from '../../context/freshness.js';
+import {
+  projectReadinessRecovery,
+  type ReadinessRecoveryInput,
+  type ReadinessRecoveryNode,
+} from '../../coaching/readiness-recovery.js';
 
 /**
  * Source-of-truth for `option_count` in the no-op handlers' result body
@@ -98,9 +103,10 @@ function renderQuotedLabelList(labels: readonly string[]): string {
  * Statuses recognised:
  *   - `ready` → "and is ready to analyse" (run-analysis chip will follow).
  *     Unchanged, byte for byte.
- *   - `needs_user_input` → the roll-up for FEWER THAN TWO options
- *     (`analysis-ready-helper.ts`: `options.length < 2`). Says exactly that;
- *     it is not an effect-values problem and never was.
+ *   - `needs_user_input` → a whole-model input gate. Fewer than two options
+ *     is one producer, but canonical missing/ambiguous value blockers can use
+ *     the same status with two or more options. Count proves only the former;
+ *     otherwise the canonical recovery projection names the actual blocker.
  *   - `needs_user_mapping` / `needs_encoding` → the option(s) have no effect
  *     values. Names them when the caller knows them, in the same words the
  *     UI's own blocked reason uses ("has no effect values yet"), and never an
@@ -109,19 +115,41 @@ function renderQuotedLabelList(labels: readonly string[]): string {
  *     analyse" wording. The chip generator's own readiness gate prevents
  *     a misleading executable chip in that case.
  *
- * `blockedOptionLabels` is optional so the two-argument callers that cannot
- * reach the option list (the coaching postcheck) keep compiling and still get
- * non-contradicting copy.
+ * `blockedOptionLabels` and the full readiness are optional so callers without
+ * the canonical carrier keep compiling and still get non-contradicting copy.
  */
 export function buildAnalysisAbsentTemplate(
   optionCount: number,
   readinessStatus: string | undefined,
   blockedOptionLabels: readonly string[] = [],
+  analysisReady?: ReadinessRecoveryInput,
+  readinessNodes: readonly ReadinessRecoveryNode[] = [],
 ): string {
   const optionsLabel = optionCount === 1 ? 'option' : 'options';
   const head = `No analysis has been run on your model yet. `;
 
   if (readinessStatus === 'needs_user_input') {
+    // `needs_user_input` is a whole-model status, not an option-count enum.
+    // The canonical producer also uses it for concrete missing/ambiguous
+    // values while two or more options already exist.  Count is independently
+    // authoritative, so only the actually-too-few arm may make the old claim.
+    if (optionCount >= 2) {
+      if (analysisReady !== undefined) {
+        const recovery = projectReadinessRecovery(analysisReady, readinessNodes);
+        if (recovery.kind !== 'run') {
+          const detail = recovery.nextStep
+            .replace(/^Next,\s*/i, '')
+            .replace(/^./u, (first) => first.toUpperCase());
+          return head + detail;
+        }
+      }
+      if (blockedOptionLabels.length > 0) {
+        const named = renderQuotedLabelList(blockedOptionLabels);
+        const verb = blockedOptionLabels.length === 1 ? 'needs' : 'need';
+        return head + `${named} ${verb} more information before analysis can run.`;
+      }
+      return head + 'The current model still needs more information before analysis can run.';
+    }
     return (
       head +
       `Your model has ${optionCount} ${optionsLabel}, and analysis needs at ` +
@@ -261,10 +289,18 @@ export function buildPreconditionAssistantText(
   optionCount: number,
   readinessStatus: string | undefined,
   blockedOptionLabels: readonly string[] = [],
+  analysisReady?: ReadinessRecoveryInput,
+  readinessNodes: readonly ReadinessRecoveryNode[] = [],
 ): string {
   switch (verdict) {
     case 'missing':
-      return buildAnalysisAbsentTemplate(optionCount, readinessStatus, blockedOptionLabels)
+      return buildAnalysisAbsentTemplate(
+        optionCount,
+        readinessStatus,
+        blockedOptionLabels,
+        analysisReady,
+        readinessNodes,
+      )
     case 'stale':
       return buildAnalysisStaleTemplate()
     case 'unconfirmed':

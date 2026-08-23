@@ -133,6 +133,8 @@ import {
 import {
   detectMutationWarrant,
   buildMutationWarrantDemotionText,
+  isBoundedNonMutationAnalyticalRequest,
+  selectBoundedNonMutationHandler,
   type MutationWarrant,
 } from './routing/mutation-warrant.js';
 import {
@@ -404,6 +406,8 @@ import { summariseGraphCounts } from './context/build-context-summary.js';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
+  buildSourceBoundAnalyticalRecovery,
+  hasMutationProposalOnNonMutatingTurn,
   selectLiveHoldForDegrade,
 } from './coaching/coaching-output-postcheck.js';
 import {
@@ -1876,8 +1880,23 @@ export async function runTurnExecutor(
     prose: string,
     baseChips: readonly SuggestedAction[],
   ): { assistant_text: string; suggested_actions: readonly SuggestedAction[] } => {
+    const boundedAnalytical = isBoundedNonMutationAnalyticalRequest(payload.message);
     if (coachingPromptCanonical === null) {
-      return { assistant_text: prose, suggested_actions: baseChips };
+      if (boundedAnalytical && hasMutationProposalOnNonMutatingTurn(prose)) {
+        return {
+          assistant_text: buildSourceBoundAnalyticalRecovery({
+            message: payload.message,
+            readiness: contextPackForLog?.readiness,
+            analysis: contextPackForLog?.analysis,
+            graph: contextPackForLog?.graph,
+          }),
+          suggested_actions: [],
+        };
+      }
+      return {
+        assistant_text: prose,
+        suggested_actions: boundedAnalytical ? [] : baseChips,
+      };
     }
     const pack = summariseCoachingStatePack(coachingPromptCanonical);
     // Supply the turn's live decision labels (raw, case-preserved) so the
@@ -1894,9 +1913,19 @@ export async function runTurnExecutor(
         if (typeof label === 'string') decisionLabels.push(label);
       }
     }
-    const verdict = checkCoachingOutput(prose, pack, { decisionLabels });
+    const verdict = checkCoachingOutput(prose, pack, {
+      decisionLabels,
+      ...(boundedAnalytical ? { enforceNonMutationAnswer: true } : {}),
+    });
     if (verdict.safe) {
-      return { assistant_text: prose, suggested_actions: baseChips };
+      return {
+        assistant_text: prose,
+        // The frozen B2 prompts explicitly request an answer and no model
+        // change.  A chip is an unsolicited second action and, in the two
+        // failures, was itself the mutation offer.  Preserve the answer and
+        // close the action channel for this narrowly-classified turn.
+        suggested_actions: boundedAnalytical ? [] : baseChips,
+      };
     }
     emit(TelemetryEvents.V5CoachingOutputPostcheck, {
       request_id: requestId,
@@ -1920,8 +1949,30 @@ export async function runTurnExecutor(
       context.most_recent_pending_actions,
       Date.now(),
     );
+    const sourceBoundRecovery =
+      boundedAnalytical && holdForDegrade === undefined
+        ? buildSourceBoundAnalyticalRecovery({
+            message: payload.message,
+            readiness: contextPackForLog?.readiness,
+            analysis: contextPackForLog?.analysis,
+            graph: contextPackForLog?.graph,
+          })
+        : undefined;
     const degrade = buildCoachingDegradeResponse(pack, {
       optionCount: contextPackForLog?.graph.counts.options ?? 0,
+      ...(analysisReadyForTurn !== undefined
+        ? { analysisReady: analysisReadyForTurn }
+        : {}),
+      ...(contextPackForLog !== null
+        ? {
+            readinessNodes: contextPackForLog.graph.nodes as readonly {
+              id?: string;
+              kind?: string;
+              label?: string;
+            }[],
+          }
+        : {}),
+      ...(sourceBoundRecovery !== undefined ? { sourceBoundRecovery } : {}),
       ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
     });
     return {
@@ -8003,7 +8054,10 @@ export async function runTurnExecutor(
               reason: electionOutcome.reason,
             });
           }
-          if (electionOutcome.kind === 'demoted') {
+          if (
+            electionOutcome.kind === 'demoted' &&
+            !isBoundedNonMutationAnalyticalRequest(payload.message)
+          ) {
             routingResult = {
               type: 'tool_call',
               proposal: {
@@ -8019,6 +8073,11 @@ export async function runTurnExecutor(
               droppedActions: [],
             };
           }
+          // B2: on the narrow answer-only analytical class, retain the
+          // rejected run_analysis proposal for a few more lines. The shared
+          // convergence seam below replaces it with a forced explanation
+          // before validation/execution. Ordinary no-consent run elections
+          // still take the byte-identical deterministic demotion above.
         }
         // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
         // Capture only after the real router successfully consumed the FINAL
@@ -8211,6 +8270,54 @@ export async function runTurnExecutor(
         sonnetTextForLog =
           routingResult.type === 'tool_call' ? routingResult.orientationText : routingResult.text;
         stagesCompleted.push('orient');
+      }
+
+      // B2 — ONE bounded non-mutating re-election at the proposal convergence
+      // seam.  This placement is broader than the ordinary LLM-routing seam on
+      // purpose: the 53% challenge was first mistaken for a deterministic
+      // set-factor-value request, while the CRM turn was claimed by the legacy
+      // edit lane.  Every proposal is visible here, before validation or any
+      // handler can run.  Any execute action that is not already an explanation
+      // is replaced: graph edits are the witnessed failure, while run_analysis
+      // would also act before answering the user's safety question.  An
+      // affirmative edit never enters the narrow class and keeps its route. The
+      // second call is pinned to one non-mutating explanation tool.
+      if (
+        routingResult.type === 'tool_call' &&
+        routingResult.proposal.intent_class === 'execute' &&
+        !EXPLANATION_HANDLER_IDS.has(
+          routingResult.proposal.action.handler_id as V5ActionType,
+        ) &&
+        contextPackForLog !== null
+      ) {
+        const boundedHandler = selectBoundedNonMutationHandler(
+          payload.message,
+          contextPackForLog.analysis !== null,
+        );
+        if (boundedHandler !== null) {
+          const firstElectionCalls = routingResult.llmCallCount;
+          const reElected = await routeWithToolUse(
+            contextPackForLog,
+            payload.message,
+            {
+              requestId,
+              sessionId: context.session_id,
+              signal: turnAbort.signal,
+              adapter: options.routingAdapter,
+              forcedExplanationHandlerId: boundedHandler,
+              forcedExplanationReason: 'bounded_non_mutation',
+            },
+          );
+          routingResult = {
+            ...reElected,
+            llmCallCount: firstElectionCalls + reElected.llmCallCount,
+          };
+          llmCallsUsed = routingResult.llmCallCount;
+          sonnetTextForLog =
+            routingResult.type === 'tool_call'
+              ? routingResult.orientationText
+              : routingResult.text;
+        }
       }
     } catch (error) {
       if (turnAbort.signal.aborted) {
@@ -10480,6 +10587,8 @@ export async function runTurnExecutor(
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
       // run_analysis fact already exists in the conversation.
+      const boundedAnalyticalExecute =
+        isBoundedNonMutationAnalyticalRequest(payload.message);
       let executeChips = generateChips({
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
@@ -10507,6 +10616,9 @@ export async function runTurnExecutor(
           ? { excludedOptions: handlerOutcome.__excluded_options }
           : {}),
       });
+      if (boundedAnalyticalExecute) {
+        executeChips = [];
+      }
 
       // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
       // what_would_flip turn, offer a deterministic, provenance-safe
@@ -10645,6 +10757,28 @@ export async function runTurnExecutor(
             constraint_verdict_state: verdictState ?? 'unreadable',
             original_length: confirmationText.length,
             projected_length: projected.text.length,
+          });
+        }
+      }
+      // Run the bounded answer-only guard LAST among pre-compose prose
+      // projectors.  The withheld-result projector above is independently
+      // authoritative for result claims; placing this earlier would let that
+      // projector overwrite a source-bound B2 recovery with the original
+      // mutation offer.  Nothing may rewrite this text before compose.
+      if (boundedAnalyticalExecute) {
+        const boundedUnsafe = coachingPromptCanonical === null
+          ? hasMutationProposalOnNonMutatingTurn(confirmationForCompose)
+          : !checkCoachingOutput(
+              confirmationForCompose,
+              summariseCoachingStatePack(coachingPromptCanonical),
+              { enforceNonMutationAnswer: true },
+            ).safe;
+        if (boundedUnsafe) {
+          confirmationForCompose = buildSourceBoundAnalyticalRecovery({
+            message: payload.message,
+            readiness: contextPackForLog?.readiness,
+            analysis: contextPackForLog?.analysis,
+            graph: contextPackForLog?.graph,
           });
         }
       }

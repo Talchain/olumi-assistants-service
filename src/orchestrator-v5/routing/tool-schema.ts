@@ -446,8 +446,13 @@ export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
   } as typeof OLUMI_ACTION_TOOL;
 }
 
-/** The two forced-explanation handler ids a typed analytical pill can pin. */
+/** The two handler ids currently authored by typed analytical pills. */
 export type ForcedPillHandlerId = 'explain_results' | 'what_would_flip';
+
+/** Every non-mutating explanation destination the shared forced route can pin. */
+export type ForcedExplanationHandlerId =
+  | 'explain_from_structure'
+  | ForcedPillHandlerId;
 
 /**
  * The served-tool shape with the two NARROWABLE enums widened to
@@ -519,7 +524,7 @@ export type OlumiActionToolDefinition = Omit<typeof OLUMI_ACTION_TOOL, 'input_sc
  * which fails LOUD if the model somehow returns another intent regardless.
  */
 export function buildForcedPillTool(
-  forcedHandlerId: ForcedPillHandlerId,
+  forcedHandlerId: ForcedExplanationHandlerId,
 ): OlumiActionToolDefinition {
   const base = buildOlumiActionTool();
   const props = base.input_schema.properties;
@@ -909,7 +914,7 @@ export interface ParseTelemetryContext {
    * class (e): a MISSING / INVALID-TYPE intent_class is coerced to 'execute'.
    * Absent on every non-pill turn (the coercion behaves exactly as before).
    */
-  readonly forcedHandlerId?: ForcedPillHandlerId;
+  readonly forcedHandlerId?: ForcedExplanationHandlerId;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
