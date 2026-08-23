@@ -1407,6 +1407,7 @@ export const COACHING_CONTEXT_INSTRUCTION = [
   // before analysis" stance is retained here deliberately (a phase-② design
   // question, out of scope for this fix).
   '- If `freshness` is "none": no analysis has been run yet — say so plainly, and do not recommend one option over another as though a result already existed.',
+  '- If `latest_run_attempt_refused` is true: the latest attempt was refused before computation. Do not say running is safe, that the current model can produce a result, or that a run would show probabilities unless a newer successful run is present. Answer the user’s question directly, preserve the refusal caveat, and give one useful next fact or remedy.',
   '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
   '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
   '- Never quote hashes, identifiers, or internal field names.',

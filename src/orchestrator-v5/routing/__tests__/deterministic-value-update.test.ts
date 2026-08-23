@@ -244,6 +244,40 @@ describe('tryDeterministicValueUpdate — negative gates (hypothetical phrasing)
   });
 });
 
+describe('tryDeterministicValueUpdate — explicit no-model-change authority', () => {
+  const PRODUCT_PROMPT =
+    'Challenge the 53% result directly: what is the strongest reason it could be misleading? Refer specifically to Team Capacity Consumed and unknown willingness to pay, and explain the causal path. Do not change the model.';
+  const PRODUCT_GRAPH = makeGraph([
+    { id: 'fac_capacity', label: 'Team Capacity Consumed' },
+    { id: 'fac_wtp', label: 'Willingness to pay' },
+  ]);
+
+  it('does not bind a result percentage to named factors when the user explicitly forbids a model change', () => {
+    const result = tryDeterministicValueUpdate(
+      PRODUCT_PROMPT,
+      [quantity(0.53, '53%')],
+      PRODUCT_GRAPH,
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('keeps an affirmative edit when only the remainder of the model is protected', () => {
+    const result = tryDeterministicValueUpdate(
+      'Set Team Capacity Consumed to 53% and do not change anything else.',
+      [quantity(0.53, '53%')],
+      PRODUCT_GRAPH,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+  });
+});
+
 describe('tryDeterministicValueUpdate — fall-through cases', () => {
   it('no edit verb → falls through with skip_reason=no_edit_verb', () => {
     const result = tryDeterministicValueUpdate(

@@ -13,6 +13,16 @@ import {
 
 const RUN_ANALYSIS_FACT: SideBandPriorFact = { fact_type: 'run_analysis', noop: false };
 const NOOP_RUN_ANALYSIS_FACT: SideBandPriorFact = { fact_type: 'run_analysis', noop: true };
+const REFUSED_RUN_ANALYSIS_FACT: SideBandPriorFact = {
+  fact_type: 'run_analysis',
+  noop: false,
+  result: {
+    scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    leading_option_id: null,
+    summary: 'Analysis attempt was refused before computation.',
+    enrichment: { analysis_status: 'refused' },
+  },
+};
 
 const VALID_LONG_ANSWER =
   'Engineering Capacity is the leading driver of your Q3 throughput goal because it has the strongest causal footprint across the model at 0.65 strength.';
@@ -56,6 +66,16 @@ describe('validateExplanationAnswer', () => {
     expect(verdict.payload?.answer_text_valid).toBe(false);
     expect(verdict.payload?.answer_validation_error).toBe('missing');
     expect(verdict.payload?.answer_text).toBe('');
+  });
+
+  it('a refused attempt does not satisfy the result-explanation precondition', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_results',
+      { answer_text: VALID_LONG_ANSWER },
+      [REFUSED_RUN_ANALYSIS_FACT],
+    );
+
+    expect(verdict).toEqual({ skip: true });
   });
 
   it('marks invalid (too_short) when answer_text is < 80 chars', () => {

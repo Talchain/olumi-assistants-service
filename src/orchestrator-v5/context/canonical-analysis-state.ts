@@ -174,6 +174,7 @@ const KNOWN_DEGRADED_STATUSES: ReadonlySet<string> = new Set([
   'timeout',
   'cancelled',
   'unknown',
+  'refused',
 ]);
 
 function normaliseDegradedStatus(raw: string | null): string | null {
@@ -669,6 +670,12 @@ export interface CoachingStatePack {
   readonly blocked: boolean;
   /** Count of ACTIONABLE blockers (number only — never the blocker objects). */
   readonly actionable_blocker_count: number;
+  /**
+   * Present only when the newest non-success run_analysis fact records a
+   * refusal and no newer successful run supersedes it. Optional-true keeps the
+   * ready/no-attempt prompt shape unchanged while carrying refusal continuity.
+   */
+  readonly latest_run_attempt_refused?: true;
 }
 
 /**
@@ -693,5 +700,8 @@ export function summariseCoachingStatePack(
     usable_for_chips: state.usableForChips,
     blocked: state.blockedUnusable,
     actionable_blocker_count: actionableBlockerCount,
+    ...(state.degraded_fact_status === 'refused'
+      ? { latest_run_attempt_refused: true as const }
+      : {}),
   };
 }

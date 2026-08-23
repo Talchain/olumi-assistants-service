@@ -285,6 +285,54 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
   });
 
+  it('persists a structured refused run attempt so the next turn cannot forget it', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-refusal-continuity',
+    });
+
+    expect(out.outcome).toBe('handler_recovered');
+    expect(out.commitPerformed).toBe(true);
+    expect(commitDirectAnswerMock).toHaveBeenCalledTimes(1);
+    const metadata = commitDirectAnswerMock.mock.calls[0]?.[1] as {
+      handler_id?: unknown;
+      handler_facts?: Array<{
+        fact_type?: unknown;
+        noop?: unknown;
+        result?: { enrichment?: Record<string, unknown> };
+      }>;
+    };
+    expect(metadata.handler_id).toBe('run_analysis');
+    expect(metadata.handler_facts).toHaveLength(1);
+    expect(metadata.handler_facts?.[0]).toMatchObject({
+      fact_type: 'run_analysis',
+      noop: false,
+      result: {
+        enrichment: {
+          analysis_status: 'refused',
+          refusal_reason_code: 'mixed_scale_unresolved',
+        },
+      },
+    });
+  });
+
+  it('fails closed when the refusal marker cannot be committed', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+    commitDirectAnswerMock.mockRejectedValueOnce(new Error('append unavailable'));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-refusal-commit-failed',
+    });
+
+    expect(out.outcome).toBe('commit_failed');
+    expect(out.commitPerformed).toBe(false);
+  });
+
   /**
    * ⚠ THIS TEST WAS INVERTED BY AN ADVERSARIAL REVIEW, AND THE INVERSION IS
    * THE POINT. It used to assert the refusal CARRIED the real options. The

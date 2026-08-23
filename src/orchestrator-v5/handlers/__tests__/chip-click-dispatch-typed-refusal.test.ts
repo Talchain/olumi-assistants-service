@@ -33,6 +33,15 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { setTestSink, log } from '../../../utils/telemetry.js';
 import { isRecoverableHandlerCause } from '../../compose/recoverable-handler-causes.js';
 
+const { commitDirectAnswerMock } = vi.hoisted(() => ({
+  commitDirectAnswerMock: vi.fn(),
+}));
+
+vi.mock('../../commit.js', async () => {
+  const actual = await vi.importActual<typeof import('../../commit.js')>('../../commit.js');
+  return { ...actual, commitDirectAnswer: commitDirectAnswerMock };
+});
+
 vi.mock('../../build-turn-context.js', async () => {
   const actual = await vi.importActual<typeof import('../../build-turn-context.js')>(
     '../../build-turn-context.js',
@@ -108,6 +117,12 @@ function realRegistryRejecting(error: () => Error): HandlerRegistry {
 }
 
 beforeEach(() => {
+  commitDirectAnswerMock.mockResolvedValue({
+    response: {},
+    performed: true,
+    persisted_row_id: 'row-refusal',
+    graphPersisted: false,
+  });
   setTestSink(() => {});
   vi.spyOn(log, 'warn').mockImplementation(() => {});
   vi.spyOn(log, 'error').mockImplementation(() => {});
@@ -201,6 +216,7 @@ describe('chip-click run_analysis — a PLoT 503 reaches the USER as a 200, not 
     expect(out.outcome).toBe('handler_recovered');
     if (out.outcome !== 'handler_recovered') throw new Error('unreachable');
     expect(out.causeKind).toBe('analysis_blocked');
+    expect(out.commitPerformed).toBe(true);
 
     // The acceptance condition is a DISJUNCTION and this is its second arm: an
     // honest typed refusal carrying a SPECIFIC reason (REPRODUCTION-NOTE.md).

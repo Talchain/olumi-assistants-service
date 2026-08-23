@@ -228,6 +228,21 @@ function partialPriorRunAnalysisFact(): HandlerFact {
   } as unknown as HandlerFact;
 }
 
+/** A run attempt was made but refused before any result existed. */
+function refusedPriorRunAnalysisFact(): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: null,
+      summary: 'Analysis attempt was refused before computation.',
+      enrichment: { analysis_status: 'refused' },
+    },
+  } as HandlerFact;
+}
+
 /** A prior fact that is NOT a run_analysis — decoy padding for position tests. */
 function priorEditFact(targetId: string): HandlerFact {
   return {
@@ -685,6 +700,28 @@ describe('detectCoachingSignal', () => {
   // turns it RED, including a DISCRIMINATING PAIR for the position claim.
   // ══════════════════════════════════════════════════════════════════════
   describe('the coaching layer’s predicate is DELIBERATELY broader than the freshness authority’s', () => {
+    it('a refusal marker is neither a displayed prior result nor an analysis an edit can stale', () => {
+      const refusal = refusedPriorRunAnalysisFact();
+
+      const nextRun = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [refusal],
+      });
+      expect(nextRun?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+
+      const edit = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [refusal],
+      });
+      expect(edit).toBeNull();
+    });
+
     /**
      * The distinction 2.842 exists to stop being folklore: `partial` /
      * `degraded` run_analysis facts count for the coaching layer and do NOT

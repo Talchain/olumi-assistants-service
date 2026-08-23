@@ -55,7 +55,11 @@ import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 import { config } from '../../config/index.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
-import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  type CommitMetadata,
+} from '../commit.js';
 import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
@@ -73,6 +77,10 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import {
+  buildAnalysisRefusalFact,
+  isAnalysisRefusalContinuityCause,
+} from '../context/analysis-refusal-continuity.js';
 import { clampRefusalFreshness } from '../compose/analysis-ready-emit.js';
 import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
 // T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
@@ -363,7 +371,9 @@ export type DispatchChipClickRunAnalysisResult =
       // analysis). The dispatcher composes a clean graceful body via the SAME
       // composeRecoverableHandlerResponse machinery the Sonnet path uses;
       // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
-      // `commitPerformed:false` — no analysis ran and no graph mutated.
+      // `commitPerformed:true` only for a science/readiness refusal, whose
+      // continuity marker is durably recorded. Other recovery classes preserve
+      // the historical false/no-commit shape.
       //
       // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
       // "no analysis ran, so the UI retains its prior store value". ROADMAP
@@ -380,7 +390,7 @@ export type DispatchChipClickRunAnalysisResult =
       // a new producer cannot silently re-open the gap.
       readonly outcome: 'handler_recovered';
       readonly response: OlumiResponse;
-      readonly commitPerformed: false;
+      readonly commitPerformed: boolean;
       readonly causeKind: string;
       readonly analysisReady: AnalysisReadyPayload;
       /**
@@ -519,7 +529,8 @@ function pickWireSafeFailureDetails(
  * how the verdict is computed. They differ only in WHICH facts they pass: the
  * `ok` exit passes the post-dispatch chain (including the fact this turn just
  * produced, which is what makes a rerun report `fresh`); the recovered exit
- * passes the prior chain alone, because a refused turn produced no fact.
+ * derives against the prior chain because its refusal marker is persisted only
+ * after this verdict and must never masquerade as a computed result.
  *
  * Hash from the RAW persisted graph (parsed via GraphStateIngressSchema, the
  * same parser turn-executor uses on follow-up explain turns). `snapshot.graph`
@@ -570,7 +581,7 @@ function deriveChipClickFreshness(
   );
 }
 
-function tryComposeRecoverableChipOutcome(
+async function tryComposeRecoverableChipOutcome(
   err: HandlerInvocationFailedError,
   graph: GraphV3T | null,
   stage: StageType,
@@ -578,7 +589,16 @@ function tryComposeRecoverableChipOutcome(
   scenarioId: string,
   aborted: boolean,
   freshness: FreshnessDerivation | undefined,
-): Extract<DispatchChipClickRunAnalysisResult, { outcome: 'handler_recovered' }> | null {
+  payload: MessageTurnPayload,
+  startedAt: number,
+  coachingState: CommitMetadata['coaching_state'],
+): Promise<
+  | Extract<
+      DispatchChipClickRunAnalysisResult,
+      { outcome: 'handler_recovered' | 'commit_failed' }
+    >
+  | null
+> {
   // Budget-abort precedence (parity with TurnExecutor's
   // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit):
   // if the turn budget already aborted, a recoverable cause MUST fail loud
@@ -686,10 +706,54 @@ function tryComposeRecoverableChipOutcome(
     'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
   );
 
+  const persistsRefusal = isAnalysisRefusalContinuityCause(err.cause_kind);
+  if (persistsRefusal) {
+    const refusalFact = buildAnalysisRefusalFact({
+      scenarioId,
+      reasonCode: blockedReason,
+      graphHash: freshness?.current_graph_hash ?? null,
+    });
+    try {
+      await commitDirectAnswer(recovered.response, {
+        scenario_id: scenarioId,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [refusalFact],
+        coaching_state: coachingState,
+        userMessage: payload.message,
+        contentGraph: graph,
+      });
+    } catch (commitError) {
+      log.error(
+        {
+          event: 'v5.state_commit_failed',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          failure_origin: 'analysis_refusal_continuity',
+          err:
+            commitError instanceof Error
+              ? { name: commitError.name, message: commitError.message }
+              : { message: String(commitError) },
+        },
+        'V5 chip_click run_analysis refusal could not be persisted',
+      );
+      return {
+        outcome: 'commit_failed',
+        response: recovered.response,
+        commitPerformed: false,
+        graph,
+      };
+    }
+  }
+
   return {
     outcome: 'handler_recovered',
     response: recovered.response,
-    commitPerformed: false,
+    commitPerformed: persistsRefusal,
     causeKind: err.cause_kind,
     analysisReady,
     // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR
@@ -942,7 +1006,7 @@ export async function dispatchChipClickRunAnalysis(
         // graceful 200 via the shared machinery instead of a 500. Cause-gated,
         // and budget-gated (an aborted turn fails loud, parity with TurnExecutor).
         // Fatal/aborted causes fall through to the handler_failure → 500 path.
-        const recovered = tryComposeRecoverableChipOutcome(
+        const recovered = await tryComposeRecoverableChipOutcome(
           err,
           snapshotGraph,
           // Source-consistency only: `tryComposeRecoverableChipOutcome`
@@ -957,8 +1021,9 @@ export async function dispatchChipClickRunAnalysis(
           requestId,
           payload.scenario_id,
           turnAbort.signal.aborted,
-          // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR facts only: this turn refused and
-          // produced none. Same derivation function the `ok` exit uses.
+          // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR computed-result facts only:
+          // this turn's refusal marker is committed after this derivation and
+          // is not analysis output. Same derivation function the `ok` exit uses.
           // Defect 4 — this refusal path derives from the PRIOR chain alone, so a
           // degraded read here is exactly the "cannot tell" case that must not
           // become "never analysed".
@@ -969,6 +1034,9 @@ export async function dispatchChipClickRunAnalysis(
                 context.prior_facts_read_ok,
               )
             : undefined,
+          payload,
+          startedAt,
+          context.coaching_state,
         );
         if (recovered) return recovered;
         log.warn(

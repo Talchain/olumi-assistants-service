@@ -117,7 +117,8 @@ export type CoachingViolation =
   // which is about an EXISTING result presented as current. See
   // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
   | 'fabricated_result_reference'
-  | 'mutation_proposal_on_non_mutating_question';
+  | 'mutation_proposal_on_non_mutating_question'
+  | 'run_availability_claim_after_refusal';
 
 export interface CoachingPostcheckResult {
   readonly safe: boolean;
@@ -445,6 +446,24 @@ const STALENESS_SIGNAL_PATTERN =
   /\b(?:stale|out[- ]of[- ]date|re[- ]?run|refresh|since\s+(?:the\s+)?(?:last\s+|latest\s+)?analysis|may\s+be\s+out\s+of\s+date|model\s+has\s+changed|no\s+longer\s+reflects?|can(?:'|’)?t\s+confirm|cannot\s+confirm)\b/i;
 
 /**
+ * Claims that a run is currently available or would produce a result. These
+ * are ordinary prose on a ready/successful path, but contradict a structured
+ * latest-attempt refusal. Kept semantic and bounded to run/result predicates;
+ * it does not reject general discussion of why analysis is useful.
+ */
+const RUN_AVAILABILITY_AFTER_REFUSAL_PATTERNS: readonly RegExp[] = [
+  /\brunning(?:\s+(?:the\s+)?analysis|\s+now)?\s+(?:is|would\s+be)\s+safe\b/i,
+  /\b(?:it|the\s+(?:model|analysis))\s+is\s+safe\s+to\s+(?:run|analyse)\b/i,
+  /\b(?:running|re[- ]?running)\s+(?:the\s+)?analysis\s+(?:would|will|can)\s+(?:show|produce|yield|give)\b/i,
+  /\b(?:the\s+)?(?:analysis|simulation|current\s+model)\s+(?:would|will|can)\s+(?:show|produce|yield|give)\b/i,
+  /\benough\s+to\s+(?:produce|yield|give)\s+(?:a\s+)?(?:worthwhile\s+)?result\b/i,
+];
+
+function hasRunAvailabilityClaimAfterRefusal(text: string): boolean {
+  return RUN_AVAILABILITY_AFTER_REFUSAL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
  * Pre-analysis fabricated-RESULT reference (review r2) — the detector now
  * lives in `../routing/fabricated-result-reference.js` so the explanation
  * validator polices the SAME class with the SAME rules (it previously had no
@@ -478,6 +497,7 @@ function isStateUnsafe(pack: CoachingStatePack): boolean {
  */
 export interface SourceBoundAnalyticalRecoveryInput {
   readonly message: string;
+  readonly latestRunAttemptRefused?: boolean;
   readonly readiness?: {
     readonly status?: unknown;
     readonly open_items?: readonly unknown[];
@@ -610,8 +630,17 @@ export function buildSourceBoundAnalyticalRecovery(
   const lower = message.toLocaleLowerCase('en-GB');
   const isSafetyQuestion = /\b(?:safe|safest)\b/i.test(message);
   const status = recoveryString(input.readiness?.status);
+  const refusalSuffix = input.latestRunAttemptRefused === true
+    ? ' The latest analysis attempt was refused before computation, so no newer result or option probabilities can be claimed until that run blocker is resolved.'
+    : '';
 
   if (isSafetyQuestion) {
+    if (input.latestRunAttemptRefused === true) {
+      return (
+        'No — the latest analysis attempt was refused before computation, so it is not safe to claim that the current model can produce a result yet. ' +
+        'Resolve the run blocker named in that refusal, then try the analysis again.'
+      );
+    }
     const blocker = readinessDescription(input.readiness);
     if (status !== null && status !== 'ready') {
       if (blocker !== null) {
@@ -652,19 +681,19 @@ export function buildSourceBoundAnalyticalRecovery(
         : `A source-bound challenge is ${primary}`;
       return (
         `${lead} because the current analysis identifies it as a top driver and the current model links ` +
-        `${path.join(' → ')}. The structured facts do not attest the evidence quality behind that path; provide a source or plausible range for ${primary} before acting.`
+        `${path.join(' → ')}. The structured facts do not attest the evidence quality behind that path; provide a source or plausible range for ${primary} before acting.${refusalSuffix}`
       );
     }
     if (evidenceGap && path !== null) {
       return (
         `The next fact to gather is ${primary} because the current analysis identifies it as an evidence gap and the current model links ` +
-        `${path.join(' → ')}. Provide an observed value or defensible range before acting.`
+        `${path.join(' → ')}. Provide an observed value or defensible range before acting.${refusalSuffix}`
       );
     }
     if (path !== null) {
       return (
         `The clearest current-model challenge is ${primary} because the model links ${path.join(' → ')}. ` +
-        `The current analysis does not attest how sensitive the result is to that path; provide an observed value or plausible range for ${primary}.`
+        `The current analysis does not attest how sensitive the result is to that path; provide an observed value or plausible range for ${primary}.${refusalSuffix}`
       );
     }
   }
@@ -677,7 +706,7 @@ export function buildSourceBoundAnalyticalRecovery(
     : 'Tell me which current factor-to-outcome connection you want inspected.';
   return (
     `I cannot give a source-bound causal challenge for ${subject} because the current structured facts do not carry ` +
-    `an attested path or analysis signal for it. ${requestedAction}`
+    `an attested path or analysis signal for it. ${requestedAction}${refusalSuffix}`
   );
 }
 
@@ -737,6 +766,12 @@ export function checkCoachingOutput(
     hasMutationProposalOnNonMutatingTurn(text)
   ) {
     return { safe: false, violation: 'mutation_proposal_on_non_mutating_question' };
+  }
+  if (
+    pack.latest_run_attempt_refused === true &&
+    hasRunAvailabilityClaimAfterRefusal(text)
+  ) {
+    return { safe: false, violation: 'run_availability_claim_after_refusal' };
   }
 
   // State-conditional rules: only when the analysis is not safe to present as

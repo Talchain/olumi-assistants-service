@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { V5ActionType } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import type {
   ChatWithToolsArgs,
@@ -14,6 +14,7 @@ import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 const writes: Array<Record<string, unknown>> = [];
 let persistedGraph: unknown = null;
+let priorFacts: readonly HandlerFact[] = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -22,8 +23,25 @@ vi.mock('../session/index.js', () => ({
       if (write.graph !== undefined) persistedGraph = write.graph;
       return { id: `row-${randomUUID()}` };
     },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    readRecent: async () =>
+      priorFacts.length === 0
+        ? []
+        : [
+            {
+              id: 'b2000000-0000-4000-8000-000000000099',
+              scenario_id: SCENARIO_ID,
+              user_id: null,
+              turn_id: 'b2000000-0000-4000-8000-000000000098',
+              turn_class: 'handler',
+              handler_id: 'run_analysis',
+              request_hash: 'sha256:prior-analysis-attempt',
+              response_emitted: true,
+              llm_calls_used: 0,
+              duration_ms: 10,
+              created_at: '2026-08-23T19:40:14.000Z',
+            },
+          ],
+    readFactsFor: async () => priorFacts,
     readFactsWithTurnFor: async () => [],
     readMostRecentPendingActions: async () => [],
     invalidateScoped: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
@@ -231,6 +249,7 @@ function registry() {
 beforeEach(() => {
   writes.length = 0;
   persistedGraph = structuredClone(GRAPH);
+  priorFacts = [];
   setTestSink(() => undefined);
 });
 
@@ -243,7 +262,7 @@ describe('B2 real executor convergence', () => {
   it.each([
     [CRM_UNCERTAINTY, 'No — use the current missing input first because the model cannot attest reliable adoption evidence yet.', 2],
     [CRM_NO_CHANGE, 'No — treat the result as exploratory because Sales Rep Adoption Rate is not backed by reliable evidence yet.', 2],
-    [PRODUCT_CHALLENGE, 'The strongest challenge is Team Capacity Consumed because the model links it directly to the paid-team goal.', 1],
+    [PRODUCT_CHALLENGE, 'The strongest challenge is Team Capacity Consumed because the model links it directly to the paid-team goal.', 2],
   ])('re-elects one bounded explanation and never runs the mutator for %s', async (message, answer, expectedCalls) => {
     const adapter = mutatingThenAnsweringAdapter(answer);
     const { handlers, mutationSpy, explanationSpy } = registry();
@@ -278,7 +297,10 @@ describe('B2 real executor convergence', () => {
       },
     );
 
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    // One unsafe mutation election, then exactly one forced answer-only
+    // re-election. The deterministic value-update route must stand down on
+    // the explicit no-change clause rather than manufacturing clarify chips.
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
     expect(mutationSpy).not.toHaveBeenCalled();
     expect(explanationSpy).toHaveBeenCalledTimes(1);
     expect(response.assistant_text).toContain('Team Capacity Consumed');
@@ -341,5 +363,95 @@ describe('B2 real executor convergence', () => {
     expect(response.assistant_text).toContain(evidenceLabel);
     expect(response.suggested_actions ?? []).toEqual([]);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      CRM_NO_CHANGE,
+      'Running now is safe, and the working numbers are enough to produce a worthwhile result.',
+      /^No\b/,
+    ],
+    [
+      BURN_CONTROL_PROMPT,
+      'The Q1 Renewal Rate is worth checking next. Running the analysis would show how these relationships translate into option-level probabilities.',
+      /Q1 Renewal Rate/,
+    ],
+  ])('carries a refused run forward into the next answer-only turn: %s', async (message, unsafeAnswer, expectedGrounding) => {
+    priorFacts = [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: null,
+          summary: 'Analysis attempt was refused before computation.',
+          enrichment: {
+            analysis_status: 'refused',
+            refusal_reason_code: 'mixed_scale_unresolved',
+          },
+          computed_at: '2026-08-23T19:40:14.000Z',
+        },
+      },
+    ];
+    const adapter = answeringAdapter(unsafeAnswer);
+    const { handlers, mutationSpy } = registry();
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toMatch(expectedGrounding);
+    expect(response.assistant_text).toMatch(/latest analysis attempt|latest run attempt/i);
+    expect(response.assistant_text).not.toMatch(/running now is safe|would show .*probabilit|enough to produce/i);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('a newer successful run supersedes an older refusal and leaves the ready positive control unchanged', async () => {
+    priorFacts = [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: 'opt_new',
+          summary: 'Replace CRM leads in the latest analysis.',
+          enrichment: { analysis_status: 'completed' },
+          computed_at: '2026-08-23T20:00:00.000Z',
+        },
+      },
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: null,
+          summary: 'Analysis attempt was refused before computation.',
+          enrichment: { analysis_status: 'refused' },
+          computed_at: '2026-08-23T19:40:14.000Z',
+        },
+      },
+    ];
+    const answer =
+      'No, not on its own. Local Pipeline Conversion Rate could reverse the result; the current model excludes first-year budget and hub-cost figures.';
+    const adapter = answeringAdapter(answer);
+    const { handlers, mutationSpy } = registry();
+
+    const { response } = await runTurnExecutor(payload(GEO_CONTROL_PROMPT), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toContain('Local Pipeline Conversion Rate');
+    expect(response.assistant_text).not.toMatch(/latest analysis attempt|latest run attempt/i);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(mutationSpy).not.toHaveBeenCalled();
   });
 });

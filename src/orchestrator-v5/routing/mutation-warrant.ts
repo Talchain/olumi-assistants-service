@@ -229,6 +229,29 @@ const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
 const EXPLICIT_NO_CHANGE_SCOPE =
   /(?:\band\s+)?\b(?:please\s+)?(?:do\s+not|don['’]?t|without)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
 
+/**
+ * Did the user explicitly withhold model-change authority, with no affirmative
+ * edit left after that protective clause is removed?
+ *
+ * The contrast is load-bearing: "do not change the model" is a veto, while
+ * "Set X to 0.7 and do not change anything else" remains an authorised edit.
+ * Deterministic mutation pre-routes reuse this predicate so the action-layer
+ * warrant and the fast path cannot disagree about the same sentence.
+ */
+export function hasExplicitNoModelChangeIntent(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
+  if (affirmativeRemainder === trimmed) return false;
+  if (affirmativeRemainder.length === 0) return true;
+  return !(
+    hasMutationSignal(affirmativeRemainder) ||
+    hasConstraintMutationSignal(affirmativeRemainder) ||
+    isEditRequestShape(affirmativeRemainder)
+  );
+}
+
 export function isBoundedNonMutationAnalyticalRequest(message: string): boolean {
   if (typeof message !== 'string') return false;
   const trimmed = message.trim();
@@ -237,12 +260,11 @@ export function isBoundedNonMutationAnalyticalRequest(message: string): boolean 
     return false;
   }
 
-  const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
-  if (affirmativeRemainder.length === 0) return true;
+  if (hasExplicitNoModelChangeIntent(trimmed)) return true;
   return !(
-    hasMutationSignal(affirmativeRemainder) ||
-    hasConstraintMutationSignal(affirmativeRemainder) ||
-    isEditRequestShape(affirmativeRemainder)
+    hasMutationSignal(trimmed) ||
+    hasConstraintMutationSignal(trimmed) ||
+    isEditRequestShape(trimmed)
   );
 }
 

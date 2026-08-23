@@ -431,6 +431,7 @@ const CoachingStatePackSchema = z
     usable_for_chips: z.boolean(),
     blocked: z.boolean(),
     actionable_blocker_count: z.number().int().nonnegative(),
+    latest_run_attempt_refused: z.literal(true).optional(),
   })
   .strict();
 
