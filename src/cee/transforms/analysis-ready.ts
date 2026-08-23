@@ -743,6 +743,42 @@ export function buildAnalysisReadyPayload(
       });
     }
 
+    // The records projector's direct-binding reasoning marks the subset of its
+    // numeric raw carriers that claim an explicit stated-option magnitude. Such
+    // a magnitude cannot license analysis unless the corresponding rich V3
+    // intervention still carries the same raw value and brief authority.
+    for (const [factorId, rawValue] of Object.entries(v3Option.raw_interventions ?? {})) {
+      if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) continue;
+      // Zero is already represented exactly on the analysis scale and is the
+      // valid status-quo control in the motivating record. It needs no inferred
+      // denominator and must never be relabelled as the stated switch cost.
+      if (rawValue === 0) continue;
+
+      const intervention = v3Option.interventions?.[factorId];
+      const isDirectStatedMagnitude =
+        v3Option.provenance?.source === "brief_extraction" &&
+        /^Direct causal value (?:bound by edge|has unresolved stated-item binding)/.test(
+          intervention?.reasoning ?? "",
+        );
+      if (!isDirectStatedMagnitude) continue;
+      const bindingResolved =
+        intervention !== undefined &&
+        intervention.source === "brief_extraction" &&
+        intervention.raw_value === rawValue;
+      if (bindingResolved) continue;
+
+      const factorLabel = factorNodeMap.get(factorId)?.label ?? factorId;
+      blockers.push({
+        option_id: v3Option.id,
+        option_label: v3Option.label,
+        factor_id: factorId,
+        factor_label: factorLabel,
+        blocker_type: "ambiguous_value",
+        message: `Option "${v3Option.label}" states ${rawValue} for "${factorLabel}", but its analysis-scale source binding is unresolved`,
+        suggested_action: "confirm_value",
+      });
+    }
+
     // ⛔ NOTHING RE-EVALUATES STATUS HERE ANY MORE, AND THAT IS THE POINT.
     //
     // A promotion block stood here: when the fallback had filled interventions
