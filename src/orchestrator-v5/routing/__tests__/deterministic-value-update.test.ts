@@ -266,18 +266,29 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
   });
 
   it.each([
-    'changing',
-    'editing',
-    'modifying',
-    'updating',
-    'altering',
-    'touching',
-    'applying changes to',
-    'rewriting',
-    'mutating',
-  ])('keeps a numeric safety question non-mutating when phrased as "without %s the model"', (gerund) => {
+    ['gerund + model', 'without changing the model?'],
+    ['gerund + current graph + case/punctuation', 'WITHOUT EDITING THE CURRENT GRAPH?!'],
+    ['gerund + determiner', 'without modifying this model.'],
+    ['gerund + qualified object', 'without updating our working graph?'],
+    ['gerund + reflexive object', 'without mutating the model itself?'],
+    ['gerund + existing object', 'without touching the existing model?'],
+    ['gerund + adjustment', 'without adjusting the graph?'],
+    ['make + any changes + current object', 'without making any changes to the current model?'],
+    ['make + singular change', 'without making a change to this graph?'],
+    ['apply + noun change', 'without applying modifications to the model?'],
+    ['base prohibition', 'and do not alter the model.'],
+    ['contracted prohibition + curly apostrophe', 'and DON’T rewrite your current graph!'],
+    ['no + noun change', 'with no changes to the model.'],
+    ['no + noun edit + optional to', 'No edits current graph.'],
+    ['without + noun modification', 'without any modifications to our model.'],
+    ['noun + of connector', 'without any modification of the model?'],
+    ['object-before-noun', 'without current model changes.'],
+    ['make no + noun update', 'make no updates to the graph.'],
+    ['no + gerund', 'No touching the model.'],
+    ['no making + any changes', 'No making any changes to current graph.'],
+  ])('keeps the numeric safety question non-mutating: %s', (_caseName, noChangeClause) => {
     const result = tryDeterministicValueUpdate(
-      `Is it safe to run given Team Capacity is set to 53%, without ${gerund} the model?`,
+      `Is it safe to run given Team Capacity is set to 53%, ${noChangeClause}`,
       [quantity(0.53, '53%')],
       makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
     );
@@ -288,11 +299,61 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
     });
   });
 
-  it('keeps an affirmative edit when only the remainder of the model is protected', () => {
+  it.each([
+    'Set Team Capacity to 53% without changing anything else.',
+    'Set Team Capacity to 53% without making any other changes.',
+    'Set Team Capacity to 53%, no other changes.',
+    'Set Team Capacity to 53% and do not apply further edits.',
+    'Set Team Capacity to 53% without making other changes to the model.',
+    'Ensure Team Capacity is set to 53% without changing anything else.',
+    'Team Capacity should be set to 53% without making other changes.',
+  ])('keeps the scoped affirmative edit authorised: %s', (message) => {
     const result = tryDeterministicValueUpdate(
-      'Set Team Capacity to 53% without changing anything else.',
+      message,
       [quantity(0.53, '53%')],
       makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+  });
+
+  it('blocks the same no-change grammar on the deictic fast path', () => {
+    const result = tryDeicticValueUpdate(
+      'Is it safe to run given that factor is set to 53%, without applying changes to the graph?',
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+      ['fac_team'],
+      () => 'Team Capacity',
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('does not mistake an epistemic "ensure I understand" bridge for an edit instruction', () => {
+    const result = tryDeterministicValueUpdate(
+      'Is it safe to run, and can you ensure I understand why Team Capacity is set to 53%, without changing the model?',
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
+  it('preserves the corresponding scoped deictic edit', () => {
+    const result = tryDeicticValueUpdate(
+      'Set that factor to 53% without making any other changes.',
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+      ['fac_team'],
+      () => 'Team Capacity',
     );
 
     expect(result.matched).toBe(true);

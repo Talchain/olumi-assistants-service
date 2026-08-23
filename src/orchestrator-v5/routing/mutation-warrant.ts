@@ -226,8 +226,88 @@ const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
   /\bdoes\b[^.?!\n]{0,80}\bresult\b[^.?!\n]{0,80}\bjustify\b/i,
 ];
 
-const EXPLICIT_NO_CHANGE_SCOPE =
-  /(?:\band\s+)?\b(?:please\s+)?(?:(?:do\s+not|don['’]?t)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)\b|without\s+(?:(?:changing|editing|modifying|updating|altering|touching|rewriting|mutating)|applying(?:\s+changes?\s+to)?|(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate))\b)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
+/**
+ * Explicit no-change grammar.  Keep the model/graph object load-bearing: a
+ * bare phrase such as "without changing the agenda" must not acquire model
+ * veto semantics merely because it contains an edit verb.  The separate
+ * remainder-protection patterns cover the scoped-edit idiom ("set X … without
+ * changing anything else") so its protective tail can be removed before the
+ * affirmative warrant is evaluated.
+ */
+const NO_CHANGE_PREFIX = String.raw`(?:\band\s+)?\b(?:please\s+)?`;
+const MODEL_OR_GRAPH_OBJECT = String.raw`(?:(?:the|this|that|our|my|your)\s+)?(?:(?:current|existing|working|underlying)\s+)?(?:model|graph)s?\b(?:\s+(?:itself|themselves))?`;
+const DIRECT_CHANGE_BASE = String.raw`(?:change|edit|modify|update|adjust|alter|touch|rewrite|mutate)`;
+const DIRECT_CHANGE_GERUND = String.raw`(?:changing|editing|modifying|updating|adjusting|altering|touching|rewriting|mutating)`;
+const CHANGE_NOUN = String.raw`(?:changes?|edits?|updates?|adjustments?|modifications?|alterations?|rewrites?|mutations?)`;
+const CHANGE_NOUN_PHRASE = String.raw`(?:(?:a|any)\s+)?(?:(?:other|further)\s+)?${CHANGE_NOUN}`;
+const OPTIONAL_CHANGE_OBJECT_CONNECTOR = String.raw`(?:(?:to|of|in)\s+)?`;
+const PROHIBITION = String.raw`(?:do\s+not|don['’]?t|never)`;
+
+const EXPLICIT_NO_MODEL_CHANGE_PATTERNS: readonly RegExp[] = [
+  // "do not change the model" · "without editing the current graph"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:${PROHIBITION}\\s+${DIRECT_CHANGE_BASE}|without\\s+(?:${DIRECT_CHANGE_GERUND}|${DIRECT_CHANGE_BASE})|(?:with\\s+)?no\\s+${DIRECT_CHANGE_GERUND})\\s+${MODEL_OR_GRAPH_OBJECT}`,
+    'gi',
+  ),
+  // "do not make changes to the model" · "without applying changes to this graph"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:${PROHIBITION}\\s+(?:make|apply)|without\\s+(?:make|making|apply|applying)|(?:with\\s+)?no\\s+(?:making|applying))\\s+${CHANGE_NOUN_PHRASE}\\s+${OPTIONAL_CHANGE_OBJECT_CONNECTOR}${MODEL_OR_GRAPH_OBJECT}`,
+    'gi',
+  ),
+  // "make no changes to the model" · "apply no edits to this graph"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:make|apply)\\s+no\\s+${CHANGE_NOUN}\\s+${OPTIONAL_CHANGE_OBJECT_CONNECTOR}${MODEL_OR_GRAPH_OBJECT}`,
+    'gi',
+  ),
+  // "no changes to the model" · "without any modification to our graph"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:(?:with\\s+)?no|without)\\s+${CHANGE_NOUN_PHRASE}\\s+${OPTIONAL_CHANGE_OBJECT_CONNECTOR}${MODEL_OR_GRAPH_OBJECT}`,
+    'gi',
+  ),
+  // Object-before-noun form: "no model changes" · "without current graph edits"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:(?:with\\s+)?no|without)\\s+(?:any\\s+)?${MODEL_OR_GRAPH_OBJECT}\\s+${CHANGE_NOUN}`,
+    'gi',
+  ),
+];
+
+const SCOPED_REMAINDER_PROTECTION_PATTERNS: readonly RegExp[] = [
+  // "do not change anything else" · "without touching anything"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:${PROHIBITION}\\s+${DIRECT_CHANGE_BASE}|without\\s+(?:${DIRECT_CHANGE_GERUND}|${DIRECT_CHANGE_BASE}))\\s+anything(?:\\s+else)?`,
+    'gi',
+  ),
+  // "without making any other changes" · "do not apply further edits"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:${PROHIBITION}\\s+(?:make|apply)|without\\s+(?:making|applying))\\s+(?:any\\s+)?(?:other|further)\\s+${CHANGE_NOUN}`,
+    'gi',
+  ),
+  // "no other changes" · "without any further edits"
+  new RegExp(
+    `${NO_CHANGE_PREFIX}(?:(?:with\\s+)?no|without)\\s+(?:any\\s+)?(?:other|further)\\s+${CHANGE_NOUN}`,
+    'gi',
+  ),
+];
+
+const EXPLICIT_NO_CHANGE_PATTERNS: readonly RegExp[] = [
+  ...EXPLICIT_NO_MODEL_CHANGE_PATTERNS,
+  ...SCOPED_REMAINDER_PROTECTION_PATTERNS,
+];
+
+function stripExplicitNoChangeScope(message: string): {
+  readonly matched: boolean;
+  readonly remainder: string;
+} {
+  let matched = false;
+  let remainder = message;
+  for (const pattern of EXPLICIT_NO_CHANGE_PATTERNS) {
+    remainder = remainder.replace(pattern, () => {
+      matched = true;
+      return ' ';
+    });
+  }
+  return { matched, remainder: remainder.trim() };
+}
 
 /**
  * A present/past state description is not an instruction merely because it
@@ -240,8 +320,16 @@ const EXPLICIT_NO_CHANGE_SCOPE =
 const PASSIVE_SET_STATE =
   /\b(?:(?:is|are|was|were)|(?:has|have|had)\s+been)\s+set\s+to\b/gi;
 
+const EPISTEMIC_PASSIVE_SET_BRIDGE =
+  '(?:understand|know|explain|clarify|confirm|check|verify|tell|show|why|whether|how|what)';
+
 const PASSIVE_SET_INSTRUCTION =
-  /\b(?:ensure|make\s+sure|see\s+that|see\s+to\s+it\s+that)\b[^.?!\n]{0,80}\b(?:(?:is|are|was|were)|(?:has|have|had)\s+been)\s+set\s+to\b/i;
+  new RegExp(
+    `\\b(?:ensure|make\\s+sure|see\\s+that|see\\s+to\\s+it\\s+that)\\b` +
+      `(?![^.?!\\n]{0,80}\\b${EPISTEMIC_PASSIVE_SET_BRIDGE}\\b)` +
+      '[^.?!\\n]{0,80}\\b(?:(?:is|are|was|were)|(?:has|have|had)\\s+been)\\s+set\\s+to\\b',
+    'i',
+  );
 
 /**
  * Did the user explicitly withhold model-change authority, with no affirmative
@@ -256,8 +344,9 @@ export function hasExplicitNoModelChangeIntent(message: string): boolean {
   if (typeof message !== 'string') return false;
   const trimmed = message.trim();
   if (trimmed.length === 0) return false;
-  const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
-  if (affirmativeRemainder === trimmed) return false;
+  const stripped = stripExplicitNoChangeScope(trimmed);
+  if (!stripped.matched) return false;
+  const affirmativeRemainder = stripped.remainder;
   if (affirmativeRemainder.length === 0) return true;
   const warrantRemainder = PASSIVE_SET_INSTRUCTION.test(affirmativeRemainder)
     ? affirmativeRemainder

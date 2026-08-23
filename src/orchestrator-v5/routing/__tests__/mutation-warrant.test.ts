@@ -29,6 +29,7 @@ import {
   CONSTRAINT_MUTATION_SIGNAL_PATTERNS,
   buildMutationWarrantDemotionText,
   buildResidualConstraintDisclosure,
+  hasExplicitNoModelChangeIntent,
 } from '../mutation-warrant.js';
 import { hasMutationSignal } from '../analytical-intent.js';
 import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
@@ -146,6 +147,34 @@ describe('NEGATIVE CORPUS — a read, a question or a forecast must NEVER author
   it('a deontic frame with no quantity grants nothing — there is no value to write', () => {
     expect(hasConstraintMutationSignal('Keep churn low.')).toBe(false);
     expect(hasConstraintMutationSignal("Churn can't get out of hand.")).toBe(false);
+  });
+});
+
+describe('EXPLICIT NO-MODEL-CHANGE GRAMMAR — bounded class and semantic mutants', () => {
+  it.each([
+    [true, 'Do not change the model.'],
+    [true, 'DON’T UPDATE THE CURRENT GRAPH!'],
+    [true, 'Without modifying this model, please.'],
+    [true, 'Without making any changes to the current model.'],
+    [true, 'Without applying edits to our graph.'],
+    [true, 'Make no updates to the existing model.'],
+    [true, 'No changes to current model.'],
+    [true, 'Without current model changes.'],
+    [true, 'No touching the graph.'],
+    [false, 'Without changing the agenda.'],
+    [false, 'Without making changes to the meeting plan.'],
+    [false, 'The current model changes weekly.'],
+    [false, 'No change-management updates are needed.'],
+    [false, 'Show me the model changes.'],
+    [false, 'No graph-paper edits are required.'],
+    [false, 'Without changing the modelling approach.'],
+    [false, 'No graphical updates are required.'],
+    [false, 'Set Team Capacity to 53% without changing anything else.'],
+    [false, 'Set Team Capacity to 53% without making any other changes.'],
+    [false, 'Ensure Team Capacity is set to 53% without changing anything else.'],
+    [false, 'Team Capacity should be set to 53% without making other changes.'],
+  ])('%s for: %s', (expected, message) => {
+    expect(hasExplicitNoModelChangeIntent(message)).toBe(expected);
   });
 });
 
