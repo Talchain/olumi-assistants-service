@@ -1369,6 +1369,242 @@ function bindDirectStatedMagnitude(args: {
 }
 
 /**
+ * Tokens that cannot identify one option reliably. This list is intentionally
+ * limited to function words and generic option-language; domain nouns and names
+ * remain available as discriminators. Exact-token matching is conservative —
+ * there is no stemming, fuzzy overlap or substring inference here.
+ */
+const OPTION_QUOTE_NON_DISCRIMINATIVE_TOKENS: ReadonlySet<string> = new Set([
+  "the", "and", "but", "for", "from", "with", "into", "onto", "without", "about",
+  "that", "this", "these", "those", "what", "which", "when", "where", "who", "why",
+  "how", "our", "your", "their", "its", "his", "her", "have", "has", "had", "would",
+  "should", "could", "will", "can", "may", "might", "must", "are", "was", "were", "been",
+  "being", "not", "nor", "any", "all", "some", "one", "two", "per", "each", "than", "then",
+  "option", "options", "alternative", "alternatives", "choice", "choices", "plan", "plans",
+  "approach", "approaches", "current", "existing", "new", "next", "now", "quarter", "year",
+  "adopt", "adopting", "choose", "choosing", "continue", "continuing", "keep", "keeping",
+  "migrate", "migrating", "move", "moving", "replace", "replacing", "retain", "retaining",
+  "select", "selecting", "switch", "switching", "use", "using",
+]);
+
+function substantiveOptionQuoteTokens(quote: string): ReadonlySet<string> {
+  const tokens = quote.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(
+    tokens.filter(
+      (token) =>
+        token.length >= 3 &&
+        !/^\p{N}+$/u.test(token) &&
+        !OPTION_QUOTE_NON_DISCRIMINATIVE_TOKENS.has(token),
+    ),
+  );
+}
+
+/**
+ * Veto a typed option/figure relation only when its own source text contradicts
+ * it: a figure quote names a substantive token unique to a different stated
+ * option. Naming both options is therefore also a contradiction. A quote that
+ * names only the selected option, names only tokens shared by several options,
+ * or names no option-specific token is not vetoed.
+ *
+ * This is not proof of semantic ownership. The exact typed factor-and-edge basis
+ * remains the positive evidence; this predicate merely prevents that evidence
+ * from overriding an explicit cross-option contradiction in the source quote.
+ */
+function figureQuoteContradictsOptionBasis(args: {
+  readonly selectedOptionIndex: number;
+  readonly figureQuote: string;
+  readonly statedItems: readonly DraftStatedItem[];
+}): boolean {
+  const { selectedOptionIndex, figureQuote, statedItems } = args;
+  const ownersByToken = new Map<string, Set<number>>();
+  for (const [index, item] of statedItems.entries()) {
+    if (item.kind !== "option") continue;
+    for (const token of substantiveOptionQuoteTokens(item.source_quote)) {
+      const owners = ownersByToken.get(token) ?? new Set<number>();
+      owners.add(index);
+      ownersByToken.set(token, owners);
+    }
+  }
+
+  for (const token of substantiveOptionQuoteTokens(figureQuote)) {
+    const owners = ownersByToken.get(token);
+    if (owners?.size === 1 && !owners.has(selectedOptionIndex)) return true;
+  }
+  return false;
+}
+
+function normaliseRoleMarkerText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Bounded phrases that explicitly describe retaining the baseline. These are
+ * role markers, not label-overlap tokens: punctuation is normalised, but no
+ * stemming, fuzzy similarity or free-word scoring is performed.
+ */
+const BASELINE_REFERENCE_PATTERNS: readonly RegExp[] = [
+  /\bstatus\s+quo\b/u,
+  /\bas\s+is\b/u,
+  /\b(?:current|existing)\s+(?:setup|system|approach)\b/u,
+  /\bdo\s+nothing\b/u,
+  /\b(?:keep|keeps|kept|keeping)\s+what\s+(?:we|you|they)\s+(?:have|had)\b/u,
+];
+
+/** Bounded phrases that explicitly describe changing to a different system. */
+const CHANGE_REFERENCE_PATTERNS: readonly RegExp[] = [
+  /\bswitch(?:es|ed|ing)?\s+(?:to|from|away|over|would|will)\b/u,
+  /\bmigrat(?:e|es|ed|ing|ion)\s+(?:to|from|away|over|would|will)\b/u,
+  /\breplac(?:e|es|ed|ing|ement)\s+(?:a|an|the|our|your|their|current|existing|legacy|old|with)\b/u,
+  /\badopt(?:s|ed|ing|ion)?\s+(?:a|an|the|our|your|their|new|another|[\p{L}\p{N}]+)\b/u,
+  /\b(?:rollout|roll\s+out|rolls\s+out|rolled\s+out|rolling\s+out)(?:\s+of)?\s+(?:a|an|the|our|your|their|new|another|[\p{L}\p{N}]+)\b/u,
+  /\bnew\s+(?:setup|system|approach|platform|solution|tool|software|service|crm)\b/u,
+];
+
+/**
+ * Reject only an explicit role contradiction against the stated option's typed
+ * `is_baseline` value. A compatible marker and a role-neutral quote prove
+ * nothing by themselves; the exact typed factor-and-edge basis remains the
+ * positive authority. An absent baseline flag is never guessed.
+ */
+function figureQuoteContradictsTypedOptionRole(args: {
+  readonly isBaseline: boolean | undefined;
+  readonly figureQuote: string;
+}): boolean {
+  const { isBaseline, figureQuote } = args;
+  if (typeof isBaseline !== "boolean") return false;
+  const normalised = normaliseRoleMarkerText(figureQuote);
+  const baselineReference = BASELINE_REFERENCE_PATTERNS.some((pattern) => pattern.test(normalised));
+  const changeReference = CHANGE_REFERENCE_PATTERNS.some((pattern) => pattern.test(normalised));
+  return isBaseline ? changeReference : baselineReference;
+}
+
+/**
+ * Recover the narrow mounted shape where the model puts an option magnitude on
+ * the FACTOR claim instead of the option→factor causal link.
+ *
+ * This is deliberately stricter than the direct-link carrier. A factor value is
+ * normally a current level, not an option intervention, so it may cross that
+ * semantic boundary only when the producer supplied one complete typed chain:
+ *
+ * - finite, identical `value` and `sets_to` on exactly one factor claim;
+ * - basis containing exactly one stated option and one numeric figure;
+ * - the figure has a declared unit and its quote/value/unit verify in the brief;
+ * - the structural edge repeats that exact option-and-figure basis; and
+ * - the stated option is the source of this already-existing option→factor edge.
+ *
+ * Nothing is inferred for sibling or baseline options. Missing/ambiguous
+ * evidence returns `undefined`, leaving analysis-readiness to ask for the value.
+ */
+function bindFactorCarriedStatedMagnitude(args: {
+  readonly edgeId: string;
+  readonly optionId: string;
+  readonly factorId: string;
+  readonly edgeClaim: DraftInferenceClaim;
+  readonly statedItems: readonly DraftStatedItem[];
+  readonly claims: readonly DraftInferenceClaim[];
+  readonly statedIdByIndex: ReadonlyMap<number, string>;
+  readonly claimIdByIndex: ReadonlyMap<number, string>;
+  readonly brief: string | undefined;
+}): { readonly setsTo: number; readonly binding: ProjectedInterventionBinding } | undefined {
+  const {
+    edgeId,
+    optionId,
+    factorId,
+    edgeClaim,
+    statedItems,
+    claims,
+    statedIdByIndex,
+    claimIdByIndex,
+    brief,
+  } = args;
+  const targetClaims = [...claimIdByIndex.entries()].filter(
+    ([index, id]) => id === factorId && claims[index]?.claim_kind === "factor",
+  );
+  if (targetClaims.length !== 1) return undefined;
+
+  const [factorClaimIndex] = targetClaims[0]!;
+  const factorClaim = claims[factorClaimIndex]!;
+  const { value, sets_to: setsTo } = factorClaim;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    typeof setsTo !== "number" ||
+    !Number.isFinite(setsTo) ||
+    value !== setsTo
+  ) {
+    return undefined;
+  }
+
+  const basis = [...new Set(factorClaim.basis ?? [])];
+  if (basis.length !== 2) return undefined;
+  if (edgeClaim.claim_kind !== "causal_link") return undefined;
+  const edgeBasis = [...new Set(edgeClaim.basis ?? [])];
+  if (edgeBasis.length !== basis.length || edgeBasis.some((index) => !basis.includes(index))) {
+    return undefined;
+  }
+  const entries = basis.map((index) => ({ index, item: statedItems[index] }));
+  if (entries.some(({ item }) => item === undefined)) return undefined;
+  const options = entries.filter(({ item }) => item?.kind === "option");
+  const figures = entries.filter(({ item }) => item?.kind === "figure");
+  if (options.length !== 1 || figures.length !== 1) return undefined;
+
+  const option = options[0]!;
+  const figure = figures[0]!;
+  if (statedIdByIndex.get(option.index) !== optionId) return undefined;
+  if (figure.item?.kind !== "figure" || figure.item.value !== setsTo) return undefined;
+  if (typeof figure.item.unit !== "string" || figure.item.unit.trim().length === 0) {
+    return undefined;
+  }
+  if (
+    !bindingEarnsBriefClaim(
+      bindStatedItemToBrief({
+        quote: figure.item.source_quote,
+        value: figure.item.value,
+        unit: figure.item.unit,
+        brief,
+      }),
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    figureQuoteContradictsOptionBasis({
+      selectedOptionIndex: option.index,
+      figureQuote: figure.item.source_quote,
+      statedItems,
+    })
+  ) {
+    return undefined;
+  }
+  if (
+    figureQuoteContradictsTypedOptionRole({
+      isBaseline: option.item?.kind === "option" ? option.item.is_baseline : undefined,
+      figureQuote: figure.item.source_quote,
+    })
+  ) {
+    return undefined;
+  }
+
+  return {
+    setsTo,
+    binding: {
+      raw_value: setsTo,
+      unit: figure.item.unit,
+      source: "brief_extraction",
+      // Preserve the established verified-carrier grammar consumed by the V3
+      // projector. Admission above is what proves this edge may borrow the
+      // magnitude from the one factor claim; this receipt identifies the exact
+      // structural edge and brief-verified figure without widening that parser.
+      reasoning: `Direct causal value bound by edge ${edgeId} to stated_items[${figure.index}]: ${figure.item.source_quote}`,
+    },
+  };
+}
+
+/**
  * ONE projection pass. `demoted` names claim indices withdrawn by a previous
  * pass: they mint no node, they are not merge candidates, and links naming them
  * are disclosed as `endpoint_demoted_duplicate`.
@@ -2382,28 +2618,68 @@ function projectOnce(
       binding?: ProjectedInterventionBinding;
     };
     const candidatesByPair = new Map<string, InterventionCandidate[]>();
+    // A factor-carried recovery is a fallback, never a competitor. If any edge
+    // for the same option/factor pair already carries a real `sets_to`, the
+    // existing direct-link authority/conflict rules remain the owner.
+    const explicitMagnitudePairs = new Set(
+      edges
+        .filter(
+          (edge) =>
+            kindById.get(edge.from) === "option" &&
+            kindById.get(edge.to) === "factor" &&
+            typeof setsToByEdgeId.get(edge.id) === "number" &&
+            Number.isFinite(setsToByEdgeId.get(edge.id)),
+        )
+        .map((edge) => JSON.stringify([edge.from, edge.to])),
+    );
     for (const edge of edges) {
       if (kindById.get(edge.from) !== "option") continue;
       if (kindById.get(edge.to) !== "factor") continue;
       const setsTo = setsToByEdgeId.get(edge.id);
-      if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
-
-      const origin = claimOriginByEdgeId.get(edge.id);
-      const claim = origin === undefined ? undefined : claims[origin.index];
-      const isDirectStatedOption =
-        claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-      const binding =
-        claim === undefined
-          ? undefined
-          : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+      let candidate: InterventionCandidate;
+      if (typeof setsTo === "number" && Number.isFinite(setsTo)) {
+        const origin = claimOriginByEdgeId.get(edge.id);
+        const claim = origin === undefined ? undefined : claims[origin.index];
+        const isDirectStatedOption =
+          claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
+        const binding =
+          claim === undefined
+            ? undefined
+            : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+        candidate = {
+          edgeId: edge.id,
+          setsTo,
+          authority: isDirectStatedOption ? "direct_stated_option" : "ai_claim",
+          ...(binding !== undefined ? { binding } : {}),
+        };
+      } else {
+        const pair = JSON.stringify([edge.from, edge.to]);
+        if (explicitMagnitudePairs.has(pair)) continue;
+        const origin = claimOriginByEdgeId.get(edge.id);
+        const edgeClaim = origin === undefined ? undefined : claims[origin.index];
+        if (edgeClaim === undefined) continue;
+        const factorCarried = bindFactorCarriedStatedMagnitude({
+          edgeId: edge.id,
+          optionId: edge.from,
+          factorId: edge.to,
+          edgeClaim,
+          statedItems,
+          claims,
+          statedIdByIndex,
+          claimIdByIndex,
+          brief,
+        });
+        if (factorCarried === undefined) continue;
+        candidate = {
+          edgeId: edge.id,
+          setsTo: factorCarried.setsTo,
+          authority: "direct_stated_option",
+          binding: factorCarried.binding,
+        };
+      }
       const key = `${edge.from} ${edge.to}`;
       const list = candidatesByPair.get(key) ?? [];
-      list.push({
-        edgeId: edge.id,
-        setsTo,
-        authority: isDirectStatedOption ? "direct_stated_option" : "ai_claim",
-        ...(binding !== undefined ? { binding } : {}),
-      });
+      list.push(candidate);
       candidatesByPair.set(key, list);
     }
     for (const [key, candidates] of [...candidatesByPair.entries()].sort(([a], [b]) =>
