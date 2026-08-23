@@ -32,6 +32,7 @@ const FULL_SWITCH = "replace our current CRM with HubSpot next quarter";
 const STATUS_QUO = "keep what we have";
 const PILOT = "Phased HubSpot Pilot (subset of team first)";
 const COST = "One-Off Migration Cost";
+const FACTOR_CARRIED_BRIEF = BRIEF.replace("£20,000", "£25,000");
 
 function records(args: {
   fullSwitchCost?: number;
@@ -112,6 +113,130 @@ function records(args: {
         effect: "negative",
       },
     ],
+  };
+}
+
+/**
+ * Exact mounted `acea592` carrier class, reduced only by removing unrelated CRM
+ * outcomes. The £25k magnitude is emitted on the factor claim itself; the only
+ * option→factor edge comes from a basis-linked refinement and carries no
+ * `sets_to`. A second factor keeps the stated option connected when a negative
+ * removes the target edge.
+ */
+function factorCarriedRecords(): DraftRecordSet {
+  return {
+    stated_items: [
+      { kind: "option", source_quote: FULL_SWITCH, is_baseline: false },
+      { kind: "option", source_quote: STATUS_QUO, is_baseline: true },
+      {
+        kind: "goal",
+        source_quote: "higher sales productivity without blowing the budget",
+        role: "target",
+      },
+      { kind: "figure", source_quote: "37-person B2B sales team", value: 37, unit: "people" },
+      {
+        kind: "figure",
+        source_quote: "switching would cost roughly £25,000 one-off",
+        value: 25_000,
+        unit: "£",
+      },
+    ],
+    claims: [
+      {
+        claim_kind: "factor",
+        label: COST,
+        basis: [0, 4],
+        value: 25_000,
+        sets_to: 25_000,
+      },
+      {
+        claim_kind: "factor",
+        label: "CRM Adoption and Usability",
+        basis: [0, 3],
+        value: 0.5,
+      },
+      {
+        claim_kind: "option_refinement",
+        label: "Phased HubSpot Rollout (Pilot Team First)",
+        basis: [0],
+        is_baseline: false,
+      },
+      {
+        claim_kind: "causal_link",
+        label: "Factor-carried target edge",
+        basis: [0, 4],
+        from_claim: 2,
+        to_claim: 0,
+        effect: "positive",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "Keep full-switch option connected",
+        basis: [0, 3],
+        from_claim: 2,
+        to_claim: 1,
+        effect: "positive",
+        sets_to: 0.6,
+      },
+      {
+        claim_kind: "causal_link",
+        label: "Explicitly magnitude-less baseline edge",
+        basis: [1],
+        from_stated: 1,
+        to_claim: 0,
+        effect: "positive",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "Migration investment affects the goal",
+        basis: [2, 4],
+        from_claim: 0,
+        to_stated: 2,
+        effect: "negative",
+      },
+      {
+        claim_kind: "causal_link",
+        label: "Adoption affects the goal",
+        basis: [2, 3],
+        from_claim: 1,
+        to_stated: 2,
+        effect: "positive",
+      },
+    ],
+  };
+}
+
+function optionNamedFactorCarrier(args: {
+  readonly selectedOption: string;
+  readonly otherOption: string;
+  readonly figureQuote: string;
+  readonly selectedIsBaseline?: boolean;
+}): { readonly records: DraftRecordSet; readonly brief: string } {
+  const named = factorCarriedRecords();
+  const selectedIsBaseline = args.selectedIsBaseline ?? false;
+  named.stated_items[0] = {
+    kind: "option",
+    source_quote: args.selectedOption,
+    is_baseline: selectedIsBaseline,
+  };
+  named.stated_items[1] = {
+    kind: "option",
+    source_quote: args.otherOption,
+    is_baseline: !selectedIsBaseline,
+  };
+  named.stated_items[4] = {
+    kind: "figure",
+    source_quote: args.figureQuote,
+    value: 25_000,
+    unit: "£",
+  };
+  named.claims[2] = {
+    ...named.claims[2]!,
+    is_baseline: selectedIsBaseline,
+  };
+  return {
+    records: named,
+    brief: `${args.selectedOption}. ${args.otherOption}. ${args.figureQuote}.`,
   };
 }
 
@@ -334,6 +459,345 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
       source: "cee_hypothesis",
       reasoning: expect.stringContaining("unresolved stated-item binding"),
     });
+  });
+
+  it("binds the mounted factor-carried £25k shape without inventing a status-quo zero", () => {
+    const runtimeShape = factorCarriedRecords();
+    expect(
+      runtimeShape.claims.some(
+        (claim) =>
+          claim.claim_kind === "causal_link" &&
+          claim.from_stated === 0 &&
+          claim.to_claim === 0 &&
+          claim.sets_to !== undefined,
+      ),
+    ).toBe(false);
+    expect(runtimeShape.claims[0]).toMatchObject({
+      claim_kind: "factor",
+      basis: [0, 4],
+      value: 25_000,
+      sets_to: 25_000,
+    });
+
+    const projected = projectRecordsToGraph(runtimeShape, FACTOR_CARRIED_BRIEF);
+    expect(interventionOf(projected, FULL_SWITCH)).toBe(0.5);
+    expect(rawInterventionOf(projected, FULL_SWITCH)).toBe(25_000);
+    expect(bindingOf(projected, FULL_SWITCH)).toMatchObject({
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+      reasoning: expect.stringContaining("to stated_items[4]"),
+    });
+
+    // The brief never stated the status-quo switch investment. Preserve that
+    // absence and the exact blocker; zero must come from an explicit record.
+    expect(rawInterventionOf(projected, STATUS_QUO)).toBeUndefined();
+    expect(bindingOf(projected, STATUS_QUO)).toBeUndefined();
+
+    const normalised = normaliseDraftResponse(structuredClone(projected.graph));
+    const v3 = projectGraphAndOptionsToV3(normalised as never, {
+      brief: FACTOR_CARRIED_BRIEF,
+    });
+    const factor = v3.graph.nodes.find((node) => node.label === COST)!;
+    const fullSwitch = v3OptionByLabel(v3.options, FULL_SWITCH);
+    const statusQuo = v3OptionByLabel(v3.options, STATUS_QUO);
+    expect(fullSwitch.interventions[factor.id]).toMatchObject({
+      value: 0.5,
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+      value_confidence: "high",
+    });
+    expect(statusQuo.interventions[factor.id]).toBeUndefined();
+
+    const readiness = buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph);
+    expect(readiness.status).toBe("needs_user_input");
+    expect(readiness.blockers).toContainEqual(
+      expect.objectContaining({
+        option_id: statusQuo.id,
+        factor_id: factor.id,
+        blocker_type: "missing_value",
+        message: `Factor "${COST}" is currently 0.5. What should option "${STATUS_QUO}" set it to?`,
+        suggested_action: "add_value",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: "Aurora basis contradicted by a Legacy-only figure quote",
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote: "Legacy CRM would cost £25,000 one-off",
+    },
+    {
+      name: "Legacy basis contradicted by an Aurora-only figure quote",
+      selectedOption: "Retain Legacy CRM next quarter",
+      otherOption: "Adopt Aurora CRM next quarter",
+      figureQuote: "Aurora CRM would cost £25,000 one-off",
+    },
+    {
+      name: "Aurora basis made ambiguous by a quote naming Aurora and Legacy",
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote: "Aurora or Legacy CRM would cost £25,000 one-off",
+    },
+  ])("declines factor-carried authority when $name", ({ selectedOption, otherOption, figureQuote }) => {
+    const collision = optionNamedFactorCarrier({ selectedOption, otherOption, figureQuote });
+    const projected = projectRecordsToGraph(collision.records, collision.brief);
+
+    expect(rawInterventionOf(projected, selectedOption)).toBeUndefined();
+    expect(bindingOf(projected, selectedOption)).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: "the figure quote exclusively names the selected Aurora option",
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote: "Aurora CRM would cost £25,000 one-off",
+    },
+    {
+      name: "the figure quote uses only the CRM token shared by both options",
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote: "The CRM switch would cost £25,000 one-off",
+    },
+  ])("keeps exact typed factor-and-edge authority when $name", ({ selectedOption, otherOption, figureQuote }) => {
+    const supported = optionNamedFactorCarrier({ selectedOption, otherOption, figureQuote });
+    const projected = projectRecordsToGraph(supported.records, supported.brief);
+
+    expect(rawInterventionOf(projected, selectedOption)).toBe(25_000);
+    expect(bindingOf(projected, selectedOption)).toMatchObject({
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+    });
+  });
+
+  it.each([
+    {
+      name: "a STATUS-QUO system reference",
+      figureQuote: "The STATUS-QUO system would cost £25,000 one-off",
+    },
+    {
+      name: "an AS-IS approach reference with punctuation and case variation",
+      figureQuote: "The AS-IS approach costs £25,000 one-off",
+    },
+    {
+      name: "an existing_system reference",
+      figureQuote: "The existing_system costs £25,000 one-off",
+    },
+    {
+      name: "a current APPROACH reference",
+      figureQuote: "The current APPROACH costs £25,000 one-off",
+    },
+    {
+      name: "a do-nothing reference with punctuation variation",
+      figureQuote: "The do—nothing setup costs £25,000 one-off",
+    },
+    {
+      name: "a keeping-what-we-have morphological reference",
+      figureQuote: "KEEPING—what—we HAVE costs £25,000 one-off",
+    },
+  ])("declines a non-baseline factor carrier contradicted by $name", ({ figureQuote }) => {
+    const contradicted = optionNamedFactorCarrier({
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote,
+    });
+    const projected = projectRecordsToGraph(contradicted.records, contradicted.brief);
+
+    expect(rawInterventionOf(projected, "Adopt Aurora CRM next quarter")).toBeUndefined();
+    expect(bindingOf(projected, "Adopt Aurora CRM next quarter")).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: "SWITCHING with punctuation and case variation",
+      figureQuote: "SWITCHING—would cost £25,000 one-off",
+    },
+    {
+      name: "a migrating-to-new-system reference",
+      figureQuote: "MIGRATING-to a new system would cost £25,000 one-off",
+    },
+    {
+      name: "a replacing-the-system reference",
+      figureQuote: "Replacing—the system would cost £25,000 one-off",
+    },
+    {
+      name: "a roll-out reference",
+      figureQuote: "The roll-out of a new platform would cost £25,000 one-off",
+    },
+    {
+      name: "an adopting-another-platform reference",
+      figureQuote: "Adopting—another platform would cost £25,000 one-off",
+    },
+    {
+      name: "a NEW-SYSTEM reference",
+      figureQuote: "A NEW-SYSTEM rollout would cost £25,000 one-off",
+    },
+  ])("declines a baseline factor carrier contradicted by $name", ({ figureQuote }) => {
+    const contradicted = optionNamedFactorCarrier({
+      selectedOption: "Retain Legacy CRM next quarter",
+      otherOption: "Adopt Aurora CRM next quarter",
+      figureQuote,
+      selectedIsBaseline: true,
+    });
+    const projected = projectRecordsToGraph(contradicted.records, contradicted.brief);
+
+    expect(rawInterventionOf(projected, "Retain Legacy CRM next quarter")).toBeUndefined();
+    expect(bindingOf(projected, "Retain Legacy CRM next quarter")).toBeUndefined();
+  });
+
+  it("admits a genuine baseline-role quote only for its typed baseline option", () => {
+    const supported = optionNamedFactorCarrier({
+      selectedOption: "Retain Legacy CRM next quarter",
+      otherOption: "Adopt Aurora CRM next quarter",
+      figureQuote: "The CURRENT-system setup would cost £25,000 one-off",
+      selectedIsBaseline: true,
+    });
+    const projected = projectRecordsToGraph(supported.records, supported.brief);
+
+    expect(rawInterventionOf(projected, "Retain Legacy CRM next quarter")).toBe(25_000);
+    expect(bindingOf(projected, "Retain Legacy CRM next quarter")).toMatchObject({
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+    });
+    expect(rawInterventionOf(projected, "Adopt Aurora CRM next quarter")).toBeUndefined();
+  });
+
+  it("admits a role-neutral verified quote through the exact typed factor-and-edge basis", () => {
+    const supported = optionNamedFactorCarrier({
+      selectedOption: "Adopt Aurora CRM next quarter",
+      otherOption: "Retain Legacy CRM next quarter",
+      figureQuote: "The one-off implementation cost is £25,000",
+    });
+    const projected = projectRecordsToGraph(supported.records, supported.brief);
+
+    expect(rawInterventionOf(projected, "Adopt Aurora CRM next quarter")).toBe(25_000);
+    expect(bindingOf(projected, "Adopt Aurora CRM next quarter")).toMatchObject({
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+    });
+    expect(rawInterventionOf(projected, "Retain Legacy CRM next quarter")).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: "two stated options in the factor basis",
+      mutate: (set: DraftRecordSet) => {
+        set.claims[0]!.basis = [0, 1, 4];
+      },
+    },
+    {
+      name: "two matching figures in the factor basis",
+      mutate: (set: DraftRecordSet) => {
+        set.stated_items.push({
+          kind: "figure",
+          source_quote: "switching would cost roughly £25,000 one-off",
+          value: 25_000,
+          unit: "£",
+        });
+        set.claims[0]!.basis = [0, 4, 5];
+      },
+    },
+    {
+      name: "an unverified figure quote",
+      mutate: (set: DraftRecordSet) => {
+        set.stated_items[4] = {
+          kind: "figure",
+          source_quote: "a different sentence says the switch costs £25,000",
+          value: 25_000,
+          unit: "£",
+        };
+      },
+    },
+    {
+      name: "an unverified figure unit",
+      mutate: (set: DraftRecordSet) => {
+        set.stated_items[4] = {
+          kind: "figure",
+          source_quote: "switching would cost roughly £25,000 one-off",
+          value: 25_000,
+          unit: "%",
+        };
+      },
+    },
+    {
+      name: "no structural option-to-target-factor edge",
+      mutate: (set: DraftRecordSet) => {
+        set.claims = set.claims.filter((claim) => claim.label !== "Factor-carried target edge");
+      },
+    },
+    {
+      name: "a structural target edge with no basis",
+      mutate: (set: DraftRecordSet) => {
+        const edge = set.claims.find((claim) => claim.label === "Factor-carried target edge")!;
+        delete edge.basis;
+      },
+    },
+    {
+      name: "a structural target edge citing the status quo instead",
+      mutate: (set: DraftRecordSet) => {
+        const edge = set.claims.find((claim) => claim.label === "Factor-carried target edge")!;
+        edge.basis = [1, 4];
+      },
+    },
+    {
+      name: "a structural target edge citing a different figure",
+      mutate: (set: DraftRecordSet) => {
+        const edge = set.claims.find((claim) => claim.label === "Factor-carried target edge")!;
+        edge.basis = [0, 3];
+      },
+    },
+    {
+      name: "a structural target edge with an extra basis record",
+      mutate: (set: DraftRecordSet) => {
+        const edge = set.claims.find((claim) => claim.label === "Factor-carried target edge")!;
+        edge.basis = [0, 4, 3];
+      },
+    },
+    {
+      name: "mismatched factor value and sets_to",
+      mutate: (set: DraftRecordSet) => {
+        set.claims[0]!.value = 24_000;
+      },
+    },
+    {
+      name: "a factor hypothesis with no numeric figure",
+      mutate: (set: DraftRecordSet) => {
+        set.claims[0]!.basis = [0];
+      },
+    },
+  ])("declines factor-carried authority for $name", ({ mutate }) => {
+    const unsafe = factorCarriedRecords();
+    mutate(unsafe);
+    const projected = projectRecordsToGraph(unsafe, FACTOR_CARRIED_BRIEF);
+
+    expect(rawInterventionOf(projected, FULL_SWITCH)).toBeUndefined();
+    expect(bindingOf(projected, FULL_SWITCH)).toBeUndefined();
+  });
+
+  it("keeps an explicit finite same-pair magnitude authoritative over the factor fallback", () => {
+    const withExplicitMagnitude = factorCarriedRecords();
+    withExplicitMagnitude.claims.push({
+      claim_kind: "causal_link",
+      label: "Explicit full-switch magnitude wins",
+      basis: [0, 4],
+      from_stated: 0,
+      to_claim: 0,
+      effect: "positive",
+      sets_to: 30_000,
+    });
+
+    const projected = projectRecordsToGraph(withExplicitMagnitude, FACTOR_CARRIED_BRIEF);
+    expect(rawInterventionOf(projected, FULL_SWITCH)).toBe(30_000);
+    // Its £30k basis is unresolved against the £25k figure, so the unchanged
+    // direct path keeps the value but does not mislabel it as brief-extracted.
+    expect(bindingOf(projected, FULL_SWITCH)).toBeUndefined();
   });
 
   it("preserves the genuine identical-refinement consolidation control", () => {
