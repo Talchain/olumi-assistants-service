@@ -140,6 +140,22 @@ export const MAX_SCENARIO_CONTEXTS = 2;
 //     prior conversation ("above" dropped from the staleness pattern);
 //   - "in this analysis" — intra-artefact self-reference (never matched).
 //
+// ⚠ NOT THE SAME PREDICATE AS `orchestrator-v5/routing/fabricated-result-reference.ts`
+// (CLAUDE.md trap #21 — write down the question each authority answers):
+//   R-CONT here            → "does this REVIEW reference a prior exchange?"
+//                            UNCONDITIONAL (the input carries no history at
+//                            all), ENFORCE-DROP, biased to false-NEGATIVE.
+//   `hasFabricatedResultReference` → "does this COACHING / EXPLANATION prose
+//                            reference an analysis?" Gated on the turn's
+//                            ENTITLEMENT (no completed analysis exists),
+//                            degrades to a deterministic fallback, screened,
+//                            biased to false-POSITIVE.
+// Its arm (e) covers the SEEN-BEFORE class ("the analysis you have already
+// seen"). The two vocabularies are kept DISJOINT rather than merged: importing
+// that module's screens into an ENFORCE-DROP rule would change what drops a
+// legitimate review. Add a conversational-callback phrase HERE; add a
+// seen-before/result-attribution phrase THERE. Do not duplicate across them.
+//
 // Sources: amendment delta TRUTH_DISCIPLINE rule 7 (exact banned examples:
 // "as you mentioned", "as we discussed", "the pre-mortem you asked for",
 // "the exercise you did"); the amendment's recommended detector tokens
