@@ -291,6 +291,22 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     noOptionJoin.claims[0] = { ...noOptionJoin.claims[0]!, basis: [4] };
     expect(bindingOf(projectRecordsToGraph(noOptionJoin, twinBrief), FULL_SWITCH)).toBeUndefined();
 
+    // A target factor that cites two options cannot lend one option's figure to
+    // the other. This is the authority-collision mutant: both basis-less links
+    // set the same £25k value and the target cites both options plus the one
+    // verified £25k figure. The old includes(thisOption) rule falsely certified
+    // both links as brief extraction, including the status quo.
+    const twoOptionJoin = structuredClone(liveShape);
+    twoOptionJoin.claims[0] = { ...twoOptionJoin.claims[0]!, basis: [0, 1, 4] };
+    const statusQuoLink = twoOptionJoin.claims.find(
+      (claim) => claim.claim_kind === "causal_link" && claim.from_stated === 1 && claim.to_claim === 0,
+    )!;
+    delete statusQuoLink.basis;
+    statusQuoLink.sets_to = 25_000;
+    const collided = projectRecordsToGraph(twoOptionJoin, twinBrief);
+    expect(bindingOf(collided, FULL_SWITCH)).toBeUndefined();
+    expect(bindingOf(collided, STATUS_QUO)).toBeUndefined();
+
     // An explicit (but incomplete) link basis remains authoritative; target
     // inheritance must not silently repair or reinterpret it.
     const explicitIncompleteBasis = structuredClone(liveShape);

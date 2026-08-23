@@ -1304,13 +1304,19 @@ function bindDirectStatedMagnitude(args: {
   // the target FACTOR claim carried both the same option record and the exact
   // numeric figure. That is still one typed evidence chain, not a whole-brief
   // numeric scan. Inherit it only when the link has no competing basis of its
-  // own and the target explicitly joins this exact option; a factor citing only
-  // a figure cannot tell us which option owns the magnitude and stays unbound.
+  // own and the target explicitly joins exactly this one option. A factor
+  // citing no option cannot tell us which option owns the magnitude; a factor
+  // citing two options cannot tell us which one owns a shared figure. Both stay
+  // unbound rather than borrowing another option's evidence.
   const targetBasis = [...new Set(targetClaim?.basis ?? [])];
+  const targetBasisOptions = targetBasis.filter(
+    (index) => Number.isInteger(index) && statedItems[index]?.kind === "option",
+  );
   const mayInheritTargetBasis =
     directBasis.length === 0 &&
     targetClaim?.claim_kind === "factor" &&
-    targetBasis.includes(claim.from_stated);
+    targetBasisOptions.length === 1 &&
+    targetBasisOptions[0] === claim.from_stated;
   const bindingBasis = directBasis.length > 0
     ? directBasis
     : mayInheritTargetBasis
