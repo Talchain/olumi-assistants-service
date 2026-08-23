@@ -111,7 +111,11 @@
  * (CLAUDE.md trap 22b — a fix that closes a gap and opens its inverse).
  *
  * ⚠ A PHRASE SET IS A HAND-MAINTAINED MIRROR (trap 12) and this one will never
- * be complete. It is deliberately NOT the guarantee — the entitlement gate is.
+ * be complete. ⚠ NOTHING HERE IS A GUARANTEE. Both consumers are CONJUNCTIONS
+ * (`!analysisResultExists && hasFabricatedResultReference(...)`), so the
+ * entitlement gate only decides WHETHER to consult this set — when the set
+ * misses, the fabrication SHIPS. The gate bounds the false-POSITIVE cost; it
+ * does not bound the false-NEGATIVE one.
  * Arm (e) is bounded to the PAST-TENSE VIEWING class ("already seen", "saw",
  * "viewed", "showed you") because past-tense delivery is the unambiguous marker;
  * future and conditional framings are legitimate pre-analysis coaching and are
@@ -127,7 +131,8 @@
  * screens into an enforce-drop rule and change what drops a legitimate review.
  * Named apart here and there; no phrase is duplicated between them.
  */
-const FABRICATED_RESULT_NOUN = '(?:analysis|results?|simulation|monte\\s+carlo)';
+const FABRICATED_RESULT_NOUN =
+  '(?:analysis(?!\\s+paralysis)|results?|simulation|monte\\s+carlo)';
 const FABRICATED_RESULT_VERB =
   '(?:shows?|says?|found|indicates?|points?\\s+to|came\\s+out|reveals?' +
   '|suggests?|concludes?|predicts?|estimates?|recommends?|confirms?|favou?rs?' +
@@ -200,7 +205,8 @@ const SEEN_BEFORE_SUBJECT = "you(?:'ve|\u2019ve|'d|\u2019d)?";
 const SEEN_BEFORE_AUX = '(?:(?:have|had)\\s+)?';
 /** Determiner opening the noun phrase, then ≤2 modifiers before the noun. */
 const SEEN_BEFORE_DET = '(?:the|this|that|these|those|an?|our|your|its|my)';
-const SEEN_BEFORE_MODS = "(?:[\\w'\u2019-]+\\s+){0,2}?";
+const SEEN_BEFORE_MODS =
+  "(?:(?!(?:the|this|that|these|those|an?|our|your|its|my|his|her|their)\\b)[\\w'\u2019-]+\\s+){0,2}?";
 
 const FABRICATED_SEEN_BEFORE_PATTERNS: readonly RegExp[] = [
   /* e1 — post-modified: "the analysis (that) you have already seen". */
@@ -238,13 +244,17 @@ const FABRICATED_SEEN_BEFORE_PATTERNS: readonly RegExp[] = [
       `(?:in|from|on)\\s+${SEEN_BEFORE_DET}\\s+${SEEN_BEFORE_MODS}${FABRICATED_RESULT_NOUN}\\b`,
     'i',
   ),
+  /* e5 — definite back-reference with NO pronoun: "the previous analysis".
+   *      Same phrase R-CONT already bans at `cee/decision-review/contract-gate.ts`
+   *      (v15 staleness). Screened, so "the previous analysis you did" ships. */
+  new RegExp(`\\b(?:previous|prior|earlier)\\s+${FABRICATED_RESULT_NOUN}\\b`, 'i'),
 ];
 
 /** r3 FIX 4 screens — hypothetical / offer / user-own-analysis contexts. */
 const CONDITIONAL_BEFORE_MATCH_PATTERN = /\b(?:if|whether|once|when|after)\b/i;
 const RUN_OFFER_PATTERN = /\b(?:want\s+me\s+to\s+run|shall\s+i\s+run|i\s+can\s+run)\b/i;
 const USER_OWN_ANALYSIS_PATTERN =
-  /\b(?:analysis\s+you\s+(?:shared|ran|did)|your\s+(?:own\s+)?(?:analysis|spreadsheet|numbers))\b/i;
+  /\b(?:analysis\s+you\s+(?:shared|ran|did)|your\s+(?:own\s+)?(?:[\w'\u2019-]+\s+){0,2}?(?:analysis|spreadsheet|numbers))\b/i;
 
 /** Sentence split for the per-sentence arms/screens. Coarse on purpose. */
 function splitIntoSentences(text: string): string[] {
@@ -259,7 +269,10 @@ function isFabricationScreened(sentence: string, matchIndex: number): boolean {
   return CONDITIONAL_BEFORE_MATCH_PATTERN.test(sentence.slice(0, matchIndex));
 }
 
-export function hasFabricatedResultReference(text: string): boolean {
+export function hasFabricatedResultReference(
+  text: string,
+  opts: { readonly allowSeenBefore?: boolean } = {},
+): boolean {
   for (const sentence of splitIntoSentences(text)) {
     // Unscreened arms: first-person run claim / inherently result-claiming figure.
     if (FABRICATED_RUN_CLAIM_PATTERN.test(sentence)) return true;
@@ -269,7 +282,7 @@ export function hasFabricatedResultReference(text: string): boolean {
     for (const re of [
       FABRICATED_ATTRIBUTION_VERB_PATTERN,
       FABRICATED_ATTRIBUTION_PREP_PATTERN,
-      ...FABRICATED_SEEN_BEFORE_PATTERNS,
+      ...(opts.allowSeenBefore === true ? [] : FABRICATED_SEEN_BEFORE_PATTERNS),
     ]) {
       const m = re.exec(sentence);
       if (m !== null && !isFabricationScreened(sentence, m.index)) return true;

@@ -532,7 +532,10 @@ export function checkCoachingOutput(
   // exists to legitimately present); attribution-anchored so it never trips on
   // the user's own echoed figures. Placed AFTER the always-unsafe rules so a
   // genuine mutation / value / evidence claim keeps its more-specific verdict.
-  if (!analysisResultExists && hasFabricatedResultReference(text)) {
+  if (
+    !analysisResultExists &&
+    hasFabricatedResultReference(text, { allowSeenBefore: pack.blocked })
+  ) {
     return { safe: false, violation: 'fabricated_result_reference' };
   }
 
