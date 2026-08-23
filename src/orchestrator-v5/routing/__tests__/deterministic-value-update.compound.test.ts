@@ -152,9 +152,13 @@ describe('tryCompoundValueUpdate — the pinned live phrasing', () => {
 });
 
 describe('tryCompoundValueUpdate — explicit no-model-change authority', () => {
-  it('blocks the same natural no-change grammar before compound pairing', () => {
+  it.each([
+    'Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8, without making any changes to the current model?',
+    'Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8, without my current causal model being modified?',
+    "Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8. DON'T let our causal graph be updated.",
+  ])('blocks the semantic no-change class before compound pairing: %s', (message) => {
     const result = tryCompoundValueUpdate(
-      'Is it safe to run given Factor A is set to 0.6 and Factor B is set to 0.8, without making any changes to the current model?',
+      message,
       PARSED_06_08,
       TWO_FACTORS,
       new Set(['fac_a', 'fac_b']),

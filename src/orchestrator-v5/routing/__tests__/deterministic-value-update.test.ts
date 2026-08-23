@@ -279,13 +279,17 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
     ['base prohibition', 'and do not alter the model.'],
     ['contracted prohibition + curly apostrophe', 'and DON’T rewrite your current graph!'],
     ['no + noun change', 'with no changes to the model.'],
-    ['no + noun edit + optional to', 'No edits current graph.'],
+    ['no + noun edit + connector', 'No edits to current graph.'],
     ['without + noun modification', 'without any modifications to our model.'],
     ['noun + of connector', 'without any modification of the model?'],
     ['object-before-noun', 'without current model changes.'],
     ['make no + noun update', 'make no updates to the graph.'],
-    ['no + gerund', 'No touching the model.'],
-    ['no making + any changes', 'No making any changes to current graph.'],
+    ['punctuated causal qualifier', 'and do not, PLEASE, alter my current causal model.'],
+    ['controlled passive object order', "DON'T let our causal graph be mutated."],
+    ['object-first passive', 'without my current causal model being modified.'],
+    ['noun-first passive', 'without edits being made to my underlying causal graph.'],
+    ['imperative object-first noun', 'make no current causal model updates.'],
+    ['standalone scoped negative', 'do not make further changes to the current causal model.'],
   ])('keeps the numeric safety question non-mutating: %s', (_caseName, noChangeClause) => {
     const result = tryDeterministicValueUpdate(
       `Is it safe to run given Team Capacity is set to 53%, ${noChangeClause}`,
@@ -305,6 +309,9 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
     'Set Team Capacity to 53%, no other changes.',
     'Set Team Capacity to 53% and do not apply further edits.',
     'Set Team Capacity to 53% without making other changes to the model.',
+    'Set Team Capacity to 53% without making other updates to my current causal model.',
+    'Without additional changes to our current causal graph, set Team Capacity to 53%.',
+    'Make Team Capacity 53% without making any other changes to the current causal model.',
     'Ensure Team Capacity is set to 53% without changing anything else.',
     'Team Capacity should be set to 53% without making other changes.',
   ])('keeps the scoped affirmative edit authorised: %s', (message) => {
@@ -319,9 +326,13 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
     expect(result.dispatch).toBe('set_factor_value');
   });
 
-  it('blocks the same no-change grammar on the deictic fast path', () => {
+  it.each([
+    'Is it safe to run given that factor is set to 53%, without applying changes to the graph?',
+    'Is it safe to run given that factor is set to 53%, without my current causal graph being modified?',
+    "Is it safe to run given that factor is set to 53%. DON'T let our causal model be updated.",
+  ])('blocks the semantic no-change class on the deictic fast path: %s', (message) => {
     const result = tryDeicticValueUpdate(
-      'Is it safe to run given that factor is set to 53%, without applying changes to the graph?',
+      message,
       [quantity(0.53, '53%')],
       makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
       ['fac_team'],
