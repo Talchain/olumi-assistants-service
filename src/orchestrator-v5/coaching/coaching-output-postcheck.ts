@@ -98,6 +98,10 @@ import {
   RERUN_ACTION,
   type StaleRerunSuggestedAction,
 } from '../routing/stale-rerun-guard.js';
+import type {
+  ReadinessRecoveryInput,
+  ReadinessRecoveryNode,
+} from './readiness-recovery.js';
 
 /** Closed set of coaching-output boundary violations. Telemetry-safe enum. */
 export type CoachingViolation =
@@ -112,7 +116,8 @@ export type CoachingViolation =
   // fabricated-result honesty guarantee — distinct from `stale_presented_as_fresh`,
   // which is about an EXISTING result presented as current. See
   // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
-  | 'fabricated_result_reference';
+  | 'fabricated_result_reference'
+  | 'mutation_proposal_on_non_mutating_question';
 
 export interface CoachingPostcheckResult {
   readonly safe: boolean;
@@ -255,6 +260,17 @@ const COACHING_VALUE_CHANGE = new RegExp(
  */
 const EVIDENCE_CONFIDENCE_PATTERN =
   /\b(?:peer[- ]reviewed|statistically\s+significant|p\s*[<=]\s*0?\.\d|confidence\s+interval|scientifically\s+(?:proven|valid|sound|rigorous)|the\s+evidence\s+(?:shows|suggests|strongly|clearly|supports|indicates)|strong\s+evidence|robust\s+evidence|provenance|cognitive\s+bias|confirmation\s+bias|anchoring\s+bias|availability\s+bias|with\s+high\s+confidence|high(?:ly)?\s+confiden(?:t|ce))\b/i;
+
+/** Proposal language is harmless in ordinary coaching but violates an
+ * explicit non-mutating analytical turn.  Scoped by the caller option below. */
+const NON_MUTATING_TURN_PROPOSAL_PATTERN =
+  /(?:\b(?:setting|changing|editing|updating|adding|removing)\b[^.!?]{0,100}\b(?:would|could|looks?\s+like|help)\b|\b(?:tell\s+me|say\s+the\s+word)\b[^.!?]{0,100}\b(?:change|edit|apply|make\s+it)\b)/i;
+
+/** Narrow B2 proposal detector, independently usable when the broader
+ * flag-gated coaching state pack is unavailable. */
+export function hasMutationProposalOnNonMutatingTurn(text: string): boolean {
+  return NON_MUTATING_TURN_PROPOSAL_PATTERN.test(text);
+}
 
 /**
  * Confident DIRECTIONAL / SUPERLATIVE advice about an OPTION — the brief's
@@ -454,6 +470,217 @@ function isStateUnsafe(pack: CoachingStatePack): boolean {
   );
 }
 
+/**
+ * Narrow structured inputs available at the coaching egress seam.  This is a
+ * projection interface rather than a second context-pack contract: callers
+ * pass the existing readiness, analysis and graph objects verbatim and this
+ * composer reads only attested labels, blocker descriptions and topology.
+ */
+export interface SourceBoundAnalyticalRecoveryInput {
+  readonly message: string;
+  readonly readiness?: {
+    readonly status?: unknown;
+    readonly open_items?: readonly unknown[];
+  };
+  readonly analysis?: {
+    readonly top_drivers?: readonly unknown[];
+    readonly evidence_gaps?: readonly unknown[];
+  } | null;
+  readonly graph?: {
+    readonly nodes?: readonly unknown[];
+    readonly edges?: readonly unknown[];
+  } | null;
+}
+
+interface RecoveryNode {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: string | null;
+}
+
+function recoveryRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function recoveryString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function recoveryNodes(graph: SourceBoundAnalyticalRecoveryInput['graph']): RecoveryNode[] {
+  const result: RecoveryNode[] = [];
+  for (const raw of graph?.nodes ?? []) {
+    const node = recoveryRecord(raw);
+    if (node === null) continue;
+    const id = recoveryString(node.id);
+    const label = recoveryString(node.label);
+    if (id === null || label === null) continue;
+    result.push({ id, label, kind: recoveryString(node.kind) });
+  }
+  return result;
+}
+
+function requestedLabel(message: string, nodes: readonly RecoveryNode[]): string | null {
+  const lower = message.toLocaleLowerCase('en-GB');
+  const matches = nodes
+    .filter((node) => lower.includes(node.label.toLocaleLowerCase('en-GB')))
+    .sort((a, b) => b.label.length - a.label.length);
+  if (matches.length > 0) return matches[0]!.label;
+
+  // A precise limitation must preserve the user's referent even when it is
+  // absent from canonical state.  This extracts only the explicit
+  // "refer specifically to …" slot; it does not treat arbitrary prose as a
+  // model fact.
+  const explicit = /\brefer\s+specifically\s+to\s+(.+?)(?:\s+and\s+unknown\b|\s+and\s+explain\b|[,.;?!]|$)/i.exec(message);
+  return explicit?.[1]?.trim() || null;
+}
+
+function factorLabel(raw: unknown): string | null {
+  const record = recoveryRecord(raw);
+  return record === null ? null : recoveryString(record.factor_label);
+}
+
+function causalPath(
+  graph: SourceBoundAnalyticalRecoveryInput['graph'],
+  startLabel: string,
+): readonly string[] | null {
+  const nodes = recoveryNodes(graph);
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const start = nodes.find(
+    (node) => node.label.toLocaleLowerCase('en-GB') === startLabel.toLocaleLowerCase('en-GB'),
+  );
+  if (start === undefined) return null;
+  const goalIds = new Set(nodes.filter((node) => node.kind === 'goal').map((node) => node.id));
+  if (goalIds.size === 0) return null;
+
+  const outgoing = new Map<string, string[]>();
+  for (const raw of graph?.edges ?? []) {
+    const edge = recoveryRecord(raw);
+    if (edge === null) continue;
+    const from = recoveryString(edge.from) ?? recoveryString(edge.from_id);
+    const to = recoveryString(edge.to) ?? recoveryString(edge.to_id);
+    if (from === null || to === null || !byId.has(from) || !byId.has(to)) continue;
+    const targets = outgoing.get(from) ?? [];
+    targets.push(to);
+    outgoing.set(from, targets);
+  }
+
+  const queue: Array<readonly string[]> = [[start.id]];
+  const seen = new Set<string>([start.id]);
+  while (queue.length > 0) {
+    const ids = queue.shift()!;
+    const last = ids[ids.length - 1]!;
+    if (goalIds.has(last) && ids.length > 1) {
+      return ids.map((id) => byId.get(id)!.label);
+    }
+    // A short path is enough to answer the causal question and prevents a
+    // pathological graph consuming unbounded work at egress.
+    if (ids.length >= 6) continue;
+    for (const next of outgoing.get(last) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push([...ids, next]);
+    }
+  }
+  return null;
+}
+
+function readinessDescription(
+  readiness: SourceBoundAnalyticalRecoveryInput['readiness'],
+): string | null {
+  const first = readiness?.open_items?.[0];
+  const record = recoveryRecord(first);
+  const description = record === null ? null : recoveryString(record.description);
+  return description?.replace(/[.!?]+$/u, '') ?? null;
+}
+
+/**
+ * Build the deterministic recovery used only after an unsafe analytical
+ * answer has been withheld.  It never invents evidence: it either composes a
+ * because-clause from canonical readiness / analysis / graph facts, or names
+ * the exact missing carrier and asks for one useful input.
+ */
+export function buildSourceBoundAnalyticalRecovery(
+  input: SourceBoundAnalyticalRecoveryInput,
+): string {
+  const message = input.message ?? '';
+  const nodes = recoveryNodes(input.graph);
+  const referent = requestedLabel(message, nodes);
+  const lower = message.toLocaleLowerCase('en-GB');
+  const isSafetyQuestion = /\b(?:safe|safest)\b/i.test(message);
+  const status = recoveryString(input.readiness?.status);
+
+  if (isSafetyQuestion) {
+    const blocker = readinessDescription(input.readiness);
+    if (status !== null && status !== 'ready') {
+      if (blocker !== null) {
+        return `No — the current model is not ready to run because ${blocker}. Resolve that input before treating an analysis as decision-ready.`;
+      }
+      return (
+        `No — the current model is not ready to run because readiness is ${status.replaceAll('_', ' ')} ` +
+        'and no specific blocker description is available. Ask which current model input is still unresolved.'
+      );
+    }
+    if (status === 'ready') {
+      const subject = referent ?? 'the named uncertainty';
+      return (
+        `It is safe to run the current model as an exploratory analysis, but not to treat the result as settled because ` +
+        `the structured facts do not attest evidence quality for ${subject}. Provide a source or plausible range for ${subject} before acting.`
+      );
+    }
+    return (
+      `I cannot verify that it is safe to run because the current readiness facts are unavailable. ` +
+      'Provide the unresolved factor or reload the model readiness before running analysis.'
+    );
+  }
+
+  const primary = referent;
+  if (primary !== null) {
+    const drivers = input.analysis?.top_drivers ?? [];
+    const driverIndex = drivers.findIndex(
+      (driver) => factorLabel(driver)?.toLocaleLowerCase('en-GB') === primary.toLocaleLowerCase('en-GB'),
+    );
+    const evidenceGap = (input.analysis?.evidence_gaps ?? []).some(
+      (gap) => factorLabel(gap)?.toLocaleLowerCase('en-GB') === primary.toLocaleLowerCase('en-GB'),
+    );
+    const path = causalPath(input.graph, primary);
+
+    if (driverIndex >= 0 && path !== null) {
+      const lead = driverIndex === 0
+        ? `The strongest source-bound challenge is ${primary}`
+        : `A source-bound challenge is ${primary}`;
+      return (
+        `${lead} because the current analysis identifies it as a top driver and the current model links ` +
+        `${path.join(' → ')}. The structured facts do not attest the evidence quality behind that path; provide a source or plausible range for ${primary} before acting.`
+      );
+    }
+    if (evidenceGap && path !== null) {
+      return (
+        `The next fact to gather is ${primary} because the current analysis identifies it as an evidence gap and the current model links ` +
+        `${path.join(' → ')}. Provide an observed value or defensible range before acting.`
+      );
+    }
+    if (path !== null) {
+      return (
+        `The clearest current-model challenge is ${primary} because the model links ${path.join(' → ')}. ` +
+        `The current analysis does not attest how sensitive the result is to that path; provide an observed value or plausible range for ${primary}.`
+      );
+    }
+  }
+
+  const subject = primary ?? (/\b(?:challenge|critique|misleading)\b/i.test(message)
+    ? 'the requested factor'
+    : 'the requested evidence');
+  const requestedAction = /\b(?:fact|evidence|gather)\b/i.test(lower)
+    ? 'Provide the factor label and the observation or source you can gather.'
+    : 'Tell me which current factor-to-outcome connection you want inspected.';
+  return (
+    `I cannot give a source-bound causal challenge for ${subject} because the current structured facts do not carry ` +
+    `an attested path or analysis signal for it. ${requestedAction}`
+  );
+}
+
 /** Optional detection context for {@link checkCoachingOutput}. */
 export interface CheckCoachingOutputOptions {
   /**
@@ -464,6 +691,8 @@ export interface CheckCoachingOutputOptions {
    * type-noun / named-entity detection only.
    */
   readonly decisionLabels?: readonly string[];
+  /** The user requested analysis only and explicitly/semantically no edit. */
+  readonly enforceNonMutationAnswer?: boolean;
 }
 
 /**
@@ -502,6 +731,12 @@ export function checkCoachingOutput(
   }
   if (EVIDENCE_CONFIDENCE_PATTERN.test(text)) {
     return { safe: false, violation: 'unsupported_evidence_or_confidence_claim' };
+  }
+  if (
+    opts.enforceNonMutationAnswer === true &&
+    hasMutationProposalOnNonMutatingTurn(text)
+  ) {
+    return { safe: false, violation: 'mutation_proposal_on_non_mutating_question' };
   }
 
   // State-conditional rules: only when the analysis is not safe to present as
@@ -603,6 +838,11 @@ export interface CoachingDegradeResponse {
 export interface BuildCoachingDegradeOptions {
   /** Graph option count, for the "no analysis yet" absent copy. Defaults to 0. */
   readonly optionCount?: number;
+  /** Full canonical readiness used to avoid status-literal reconstruction. */
+  readonly analysisReady?: ReadinessRecoveryInput;
+  readonly readinessNodes?: readonly ReadinessRecoveryNode[];
+  /** Direct, source-bound analytical recovery composed from current facts. */
+  readonly sourceBoundRecovery?: string;
   /**
    * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
    * state-unsafe degrade restates the held offer + its confirm chip instead
@@ -739,6 +979,9 @@ export function buildCoachingDegradeResponse(
   // outranks the held-aware branch: with a fine analysis there is no
   // competing rerun offer to suppress, and neutral copy misstates nothing.
   if (!isStateUnsafe(pack)) {
+    if (opts.sourceBoundRecovery?.trim()) {
+      return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
+    }
     return { assistant_text: NEUTRAL_DEGRADE_TEXT, suggested_actions: [] };
   }
   // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
@@ -760,6 +1003,9 @@ export function buildCoachingDegradeResponse(
       ],
     };
   }
+  if (opts.sourceBoundRecovery?.trim()) {
+    return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
+  }
   const optionCount = opts.optionCount ?? 0;
   let assistant_text: string;
   if (!pack.analysis_present || pack.freshness === 'none') {
@@ -767,6 +1013,9 @@ export function buildCoachingDegradeResponse(
     assistant_text = buildAnalysisAbsentTemplate(
       optionCount,
       pack.readiness_status ?? undefined,
+      [],
+      opts.analysisReady,
+      opts.readinessNodes,
     );
   } else if (pack.blocked) {
     // A fact exists but is unusable (blocked / hard contradiction) → honest

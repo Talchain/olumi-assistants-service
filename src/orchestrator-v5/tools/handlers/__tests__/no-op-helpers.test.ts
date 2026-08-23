@@ -131,11 +131,18 @@ describe('buildAnalysisAbsentTemplate', () => {
   // contradicted in the same sentence. They now assert the per-status copy
   // that replaced it. The contradiction itself is pinned as a property in
   // `analysis-absent-template-contradiction.test.ts`.
-  it('says what needs_user_input actually means — too few options to compare', () => {
-    const text = buildAnalysisAbsentTemplate(2, 'needs_user_input');
+  it('uses the option-count copy only when the independent count is actually below two', () => {
+    const text = buildAnalysisAbsentTemplate(1, 'needs_user_input');
     expect(text).toContain('at least two to compare');
     expect(text).not.toContain('ready to analyse');
     expect(text).not.toContain('still need to be set up');
+  });
+
+  it('does not reconstruct needs_user_input as too few options when two options exist', () => {
+    const text = buildAnalysisAbsentTemplate(2, 'needs_user_input');
+    expect(text).toContain('needs more information');
+    expect(text).not.toContain('at least two to compare');
+    expect(text).not.toContain('ready to analyse');
   });
 
   it('says the options have no effect values when readinessStatus === "needs_user_mapping"', () => {

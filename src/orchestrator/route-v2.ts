@@ -215,6 +215,7 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { isBoundedNonMutationAnalyticalRequest } from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
@@ -4460,7 +4461,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
       return persistedGraphMemo.value;
     };
-    const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
+    const boundedNonMutationAnalytical =
+      isBoundedNonMutationAnalyticalRequest(ingress.message);
+    const analyticalQuestionDetected =
+      isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     // Part-accounting conservation law (2026-07-20): the suppressor stands
@@ -4669,7 +4673,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Stage-4A edit intercepts below — otherwise tryVagueEditGuard /
     // chip-simplify / label-intercept would claim the turn before it can be
     // applied (proposal) or answered (state-query guard in TurnExecutor).
-    const bypassEditHandling = proposalConfirmSuppressed || stateQuerySuppressed;
+    // B2 — an answer-seeking safety/evidence/challenge turn can contain the
+    // literal phrase "do not change the model".  The old vague-edit intercept
+    // read that final word as an edit and returned its change-clarification
+    // template before TurnExecutor or the analytical router ran.  Once the
+    // shared bounded classifier owns the turn, every legacy edit intercept
+    // stands down; the normal router gets exactly one chance to answer it.
+    const bypassEditHandling =
+      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical;
 
     const chipSimplify = tryChipSimplifyIntercept(ingress.message);
     if (chipSimplify.matched && !bypassEditHandling) {

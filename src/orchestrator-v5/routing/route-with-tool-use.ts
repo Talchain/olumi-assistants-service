@@ -129,7 +129,7 @@ import {
   ToolCallParseError,
   parseToolCallResponse,
   sanitiseLoggedKeyName,
-  type ForcedPillHandlerId,
+  type ForcedExplanationHandlerId,
   type ParseTelemetryContext,
   type ToolCallResponse,
 } from './tool-schema.js';
@@ -542,10 +542,10 @@ export interface RouteWithToolUseOptions {
    */
   readonly systemPromptOverride?: string;
   /**
-   * F2 CHANGE A — FORCED explanation intent for a typed analytical pill
-   * (`explain_results` / `what_would_flip`). Set by TurnExecutor when route-v2
-   * detected a `source==='chip_click'` turn whose typed `chip.action_type` is
-   * an explanation intent (`chipClickForcedIntent`). When present this call:
+   * FORCED explanation intent. Used by F2 typed analytical pills
+   * (`explain_results` / `what_would_flip`) and by B2's one bounded
+   * non-mutating re-election (`explain_from_structure` / `explain_results`).
+   * When present this call:
    *   1. DISABLES thinking on this routing turn (reuses the existing
    *      `{ thinking: { type: 'disabled' } }` mechanism — ~9s median vs ~26s —
    *      NOT a new flag; per-call, unconditional for the pill path), and
@@ -553,13 +553,18 @@ export interface RouteWithToolUseOptions {
    *      appends a forced-intent directive to the user turn, and
    *   3. PINS the resulting proposal's `handler_id` to this value at interpret
    *      time so the coach AUTHORS the answer (with full conversation sight)
-   *      but CANNOT re-route the typed pill to a different handler.
+   *      but CANNOT re-route the bounded request to a different handler.
    * The coach still sees the verbatim conversation window (it rides on the
    * ContextPack serialised by `buildUserMessage`), so the pill answer references
    * what the user just said; the deterministic explanation fallback stays in
    * place downstream when the authored `answer_text` is invalid.
    */
-  readonly forcedExplanationHandlerId?: ForcedPillHandlerId;
+  readonly forcedExplanationHandlerId?: ForcedExplanationHandlerId;
+  /**
+   * Why the route is forced.  The default preserves typed-pill prompt copy;
+   * B2 uses the bounded analytical form after a mutating first election.
+   */
+  readonly forcedExplanationReason?: 'typed_pill' | 'bounded_non_mutation';
 }
 
 export async function routeWithToolUse(
@@ -595,7 +600,10 @@ export async function routeWithToolUse(
   const forcedHandlerId = options.forcedExplanationHandlerId;
   const base = buildUserMessage(contextPack, message);
   const userMessage = forcedHandlerId
-    ? `${base}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
+    ? `${base}\n\n${buildForcedIntentDirective(
+        forcedHandlerId,
+        options.forcedExplanationReason ?? 'typed_pill',
+      )}`
     : base;
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
@@ -1095,7 +1103,7 @@ function tryInterpret(
  */
 function enforceForcedExecute(
   interp: Interpretation,
-  forcedHandlerId: ForcedPillHandlerId | undefined,
+  forcedHandlerId: ForcedExplanationHandlerId | undefined,
   telemetry: ParseTelemetryContext,
 ): Interpretation {
   if (forcedHandlerId === undefined) return interp;
@@ -1269,7 +1277,8 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
  * Human-readable label for a forced explanation handler, used only inside the
  * forced-intent directive prose (never a wire value).
  */
-const FORCED_INTENT_QUESTION: Record<'explain_results' | 'what_would_flip', string> = {
+const FORCED_INTENT_QUESTION: Record<ForcedExplanationHandlerId, string> = {
+  explain_from_structure: 'answer the user’s analytical question from the current model structure',
   explain_results: 'explain the current analysis results',
   what_would_flip: 'explain what would change (flip) the current analysis result',
 };
@@ -1284,8 +1293,15 @@ const FORCED_INTENT_QUESTION: Record<'explain_results' | 'what_would_flip', stri
  * on-topic. British English, no internal field names leaked to the model.
  */
 export function buildForcedIntentDirective(
-  handlerId: 'explain_results' | 'what_would_flip',
+  handlerId: ForcedExplanationHandlerId,
+  reason: 'typed_pill' | 'bounded_non_mutation' = 'typed_pill',
 ): string {
+  if (reason === 'bounded_non_mutation') {
+    return [
+      '## Requested answer (non-mutating)',
+      `The user asked an analytical question and did not authorise a model change. Answer the verbatim question directly from the supplied current model or analysis facts. Do not propose or apply an edit. Call the olumi_action tool with handler_id "${handlerId}" and put your complete, plain-language answer in the explanation.answer_text field. If the requested evidence or causal carrier is absent, say exactly what is unavailable and ask for one useful input.`,
+    ].join('\n');
+  }
   return [
     '## Requested action (explicit)',
     `The user clicked a button to ${FORCED_INTENT_QUESTION[handlerId]}. Answer THAT specific question directly, using the conversation above and the analysis context. Call the olumi_action tool with handler_id "${handlerId}" and put your complete, plain-language answer in the explanation.answer_text field.`,
@@ -1309,7 +1325,7 @@ export function buildForcedIntentDirective(
  */
 export function applyForcedExplanationHandler(
   result: RoutingResult,
-  forcedHandlerId: 'explain_results' | 'what_would_flip' | undefined,
+  forcedHandlerId: ForcedExplanationHandlerId | undefined,
 ): RoutingResult {
   if (forcedHandlerId === undefined) return result;
   if (result.type !== 'tool_call') return result;

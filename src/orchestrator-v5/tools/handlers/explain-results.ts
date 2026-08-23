@@ -119,6 +119,8 @@ export function createExplainResultsHandler(): HandlerFn {
         invocation.analysisReady?.status,
         // ROADMAP 2.308 / S3 — name the option(s) actually blocking readiness.
         resolveBlockedOptionLabels(invocation),
+        invocation.analysisReady,
+        (invocation.graphForTurn as { nodes?: readonly never[] } | null | undefined)?.nodes ?? [],
       );
       const fact: ExplainResultsHandlerFact = {
         fact_type: 'explain_results',

@@ -204,6 +204,60 @@ export function hasMutationWarrantSignal(message: string): boolean {
 }
 
 /**
+ * The small, answer-seeking class that must never be converted into an edit.
+ *
+ * These are analytical questions whose wording is not covered by the older
+ * what-would-flip taxonomy: safety under missing information, a request for
+ * the next fact to gather, or a direct challenge to an existing result.  The
+ * browser-witnessed prompts often finish with "do not change the model";
+ * `hasMutationSignal` sees the bare word "change" and therefore cannot be the
+ * discriminator by itself.
+ *
+ * We first require an answer-seeking shape, then remove only the explicit
+ * negative-scope clause and ask the existing mutation authorities whether an
+ * affirmative edit remains.  That last step is the contrast guard for
+ * "Set X to 0.7 and do not change anything else": it remains an edit.
+ */
+const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
+  /\b(?:is\s+it\s+safe|safest\s+way|safe\s+to\s+run|safe\s+way)\b/i,
+  /\b(?:challenge|critique)\b[^.?!\n]{0,120}\b(?:result|analysis|outcome)\b/i,
+  /\b(?:strongest\s+reason|strongest\s+challenge)\b[^.?!\n]{0,120}\b(?:misleading|result|analysis|outcome)\b/i,
+  /\b(?:which|what)\s+(?:single\s+)?(?:missing\s+)?(?:fact|piece\s+of\s+evidence)\b/i,
+  /\bdoes\b[^.?!\n]{0,80}\bresult\b[^.?!\n]{0,80}\bjustify\b/i,
+];
+
+const EXPLICIT_NO_CHANGE_SCOPE =
+  /(?:\band\s+)?\b(?:please\s+)?(?:do\s+not|don['’]?t|without)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
+
+export function isBoundedNonMutationAnalyticalRequest(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  if (!BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+    return false;
+  }
+
+  const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
+  if (affirmativeRemainder.length === 0) return true;
+  return !(
+    hasMutationSignal(affirmativeRemainder) ||
+    hasConstraintMutationSignal(affirmativeRemainder) ||
+    isEditRequestShape(affirmativeRemainder)
+  );
+}
+
+export type BoundedNonMutationHandler = 'explain_from_structure' | 'explain_results';
+
+/** One state-dependent, non-mutating destination for the bounded re-election. */
+export function selectBoundedNonMutationHandler(
+  message: string,
+  analysisPresent: boolean,
+): BoundedNonMutationHandler | null {
+  if (!isBoundedNonMutationAnalyticalRequest(message)) return null;
+  return analysisPresent ? 'explain_results' : 'explain_from_structure';
+}
+
+/**
  * Term 3 of the warrant union — the product's own edit-intent door.
  * Exported so the spec can assert it against the SAME regexes route-v2 uses
  * rather than against a copy of them.

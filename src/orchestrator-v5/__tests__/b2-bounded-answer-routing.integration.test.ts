@@ -1,0 +1,345 @@
+/** Real TurnExecutor wiring for the B2 bounded non-mutation re-election. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { V5ActionType } from '@talchain/schemas/orchestrator';
+
+import type {
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ToolResponseBlock,
+} from '../../adapters/llm/types.js';
+import { setTestSink } from '../../utils/telemetry.js';
+import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
+
+const writes: Array<Record<string, unknown>> = [];
+let persistedGraph: unknown = null;
+
+vi.mock('../session/index.js', () => ({
+  getSessionStore: () => ({
+    append: async (write: Record<string, unknown>) => {
+      writes.push(write);
+      if (write.graph !== undefined) persistedGraph = write.graph;
+      return { id: `row-${randomUUID()}` };
+    },
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    readFactsWithTurnFor: async () => [],
+    readMostRecentPendingActions: async () => [],
+    invalidateScoped: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' }, entries_invalidated: [] }),
+    storeDraftGraph: async () => undefined,
+    loadGraph: async () => persistedGraph,
+    loadGraphAndBriefText: async () => ({ graph: persistedGraph, briefText: null }),
+    ensureScenarioExists: async () => ({ user_id: null }),
+  }),
+  resetSessionStoreForTests: () => undefined,
+}));
+
+const { runTurnExecutor } = await import('../turn-executor.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+
+const SCENARIO_ID = 'b2000000-0000-4000-8000-000000000002';
+const CRM_UNCERTAINTY =
+  "I don't know what value to use. We have no reliable adoption data yet. What is the safest way to proceed?";
+const CRM_NO_CHANGE =
+  'I do not know the Sales Rep Adoption Rate or CRM Feature Fit for B2B Sales. Is it safe to run analysis anyway? Answer directly first and do not change the model.';
+const PRODUCT_CHALLENGE =
+  'Challenge the 53% result directly: what is the strongest reason it could be misleading? Refer specifically to Team Capacity Consumed and unknown willingness to pay, and explain the causal path. Do not change the model.';
+const BURN_CONTROL_PROMPT =
+  'Answer directly first: which single missing fact should we gather next, and why? Refer specifically to Q1 Renewal Rate and explain the causal path. Do not change the model.';
+const GEO_CONTROL_PROMPT =
+  'Answer directly: does an 86% result justify acting despite unknown Local Pipeline Conversion Rate? Name the strongest challenge and state which first-year budget or hub-cost figures were excluded from the numerical model. Do not change the model.';
+
+const GRAPH = {
+  nodes: [
+    { id: 'goal', kind: 'goal', label: 'Reach 1,500 paid teams' },
+    { id: 'adoption', kind: 'factor', label: 'Sales Rep Adoption Rate', observed_state: { value: 0.5 } },
+    { id: 'capacity', kind: 'factor', label: 'Team Capacity Consumed', observed_state: { value: 0.5 } },
+    { id: 'opt_new', kind: 'option', label: 'Replace CRM', interventions: { adoption: 0.8 } },
+    { id: 'opt_keep', kind: 'option', label: 'Keep CRM', is_baseline: true, interventions: { adoption: 0 } },
+  ],
+  edges: [
+    { from: 'adoption', to: 'goal', strength: { mean: 0.8, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'capacity', to: 'goal', strength: { mean: -0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' },
+    { from: 'opt_new', to: 'adoption', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_keep', to: 'adoption', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+  goal_node_id: 'goal',
+};
+
+function payload(message: string): MessageTurnPayload {
+  return {
+    kind: 'message',
+    source: 'composer',
+    turn_id: randomUUID(),
+    scenario_id: SCENARIO_ID,
+    message,
+    turn_class: 'decide',
+    stage: 'analyse',
+  };
+}
+
+function toolResult(input: unknown): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [
+    {
+      type: 'tool_use',
+      id: `tu-${randomUUID()}`,
+      name: OLUMI_ACTION_TOOL_NAME,
+      input: input as Record<string, unknown>,
+    },
+  ];
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 20 } as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-5',
+    latencyMs: 10,
+  };
+}
+
+const MUTATING_ELECTION = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'set_factor_value',
+    entity: {
+      id: 'capacity',
+      kind: 'node',
+      label: 'Team Capacity Consumed',
+      resolution_status: 'resolved',
+      resolution_method: 'id_match',
+    },
+    parameters: [{ name: 'value', value: { value: 0.53 }, source: 'inferred' }],
+    cited_context_fields: ['graph.nodes'],
+  },
+};
+
+function mutatingThenAnsweringAdapter(answer: string) {
+  const chatWithTools = vi.fn(
+    async (args: ChatWithToolsArgs): Promise<ChatWithToolsResult> => {
+      const forced = (args.tool_choice as { type?: string } | undefined)?.type === 'tool';
+      if (!forced) return toolResult(MUTATING_ELECTION);
+      return toolResult({
+        intent_class: 'execute',
+        action: {
+          handler_id: 'explain_from_structure',
+          entity: {
+            id: 'goal',
+            kind: 'goal',
+            label: 'Reach 1,500 paid teams',
+            resolution_status: 'resolved',
+            resolution_method: 'id_match',
+          },
+          parameters: [],
+          cited_context_fields: ['graph.nodes', 'graph.edges'],
+          explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
+        },
+      });
+    },
+  );
+  return { chatWithTools };
+}
+
+function runThenAnsweringAdapter(answer: string) {
+  const chatWithTools = vi.fn(
+    async (args: ChatWithToolsArgs): Promise<ChatWithToolsResult> => {
+      const forced = (args.tool_choice as { type?: string } | undefined)?.type === 'tool';
+      if (!forced) {
+        return toolResult({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'goal',
+              kind: 'goal',
+              label: 'Reach 1,500 paid teams',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: ['graph.nodes'],
+          },
+        });
+      }
+      return toolResult({
+        intent_class: 'execute',
+        action: {
+          handler_id: 'explain_from_structure',
+          entity: {
+            id: 'goal',
+            kind: 'goal',
+            label: 'Reach 1,500 paid teams',
+            resolution_status: 'resolved',
+            resolution_method: 'id_match',
+          },
+          parameters: [],
+          cited_context_fields: ['graph.nodes', 'graph.edges'],
+          explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
+        },
+      });
+    },
+  );
+  return { chatWithTools };
+}
+
+function answeringAdapter(answer: string) {
+  return {
+    chatWithTools: vi.fn(async (): Promise<ChatWithToolsResult> => toolResult({
+      intent_class: 'execute',
+      action: {
+        handler_id: 'explain_from_structure',
+        entity: {
+          id: 'goal',
+          kind: 'goal',
+          label: 'Reach 1,500 paid teams',
+          resolution_status: 'resolved',
+          resolution_method: 'id_match',
+        },
+        parameters: [],
+        cited_context_fields: ['graph.nodes', 'graph.edges'],
+        explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
+      },
+    })),
+  };
+}
+
+function registry() {
+  const mutationSpy = vi.fn(async () => ({
+    assistant_text: 'MUTATION-HANDLER-RAN',
+    handler_facts: [],
+    llm_calls_used: 0,
+  }));
+  const explanationSpy = vi.fn(async (invocation: { explanation?: { answer_text: string } }) => ({
+    assistant_text: invocation.explanation?.answer_text ?? 'NO-ANSWER',
+    handler_facts: [],
+    llm_calls_used: 0,
+    suppress_orientation: true,
+  }));
+  const runAnalysisSpy = vi.fn(async () => ({
+    assistant_text: 'ANALYSIS-HANDLER-RAN',
+    handler_facts: [],
+    llm_calls_used: 0,
+  }));
+  const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+    ['set_factor_value' as V5ActionType, mutationSpy as unknown as HandlerFn],
+    ['explain_from_structure' as V5ActionType, explanationSpy as unknown as HandlerFn],
+    ['run_analysis' as V5ActionType, runAnalysisSpy as unknown as HandlerFn],
+  ]);
+  return { handlers, mutationSpy, explanationSpy, runAnalysisSpy };
+}
+
+beforeEach(() => {
+  writes.length = 0;
+  persistedGraph = structuredClone(GRAPH);
+  setTestSink(() => undefined);
+});
+
+afterEach(() => {
+  setTestSink(null);
+  vi.restoreAllMocks();
+});
+
+describe('B2 real executor convergence', () => {
+  it.each([
+    [CRM_UNCERTAINTY, 'No — use the current missing input first because the model cannot attest reliable adoption evidence yet.', 2],
+    [CRM_NO_CHANGE, 'No — treat the result as exploratory because Sales Rep Adoption Rate is not backed by reliable evidence yet.', 2],
+    [PRODUCT_CHALLENGE, 'The strongest challenge is Team Capacity Consumed because the model links it directly to the paid-team goal.', 1],
+  ])('re-elects one bounded explanation and never runs the mutator for %s', async (message, answer, expectedCalls) => {
+    const adapter = mutatingThenAnsweringAdapter(answer);
+    const { handlers, mutationSpy, explanationSpy } = registry();
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(adapter.chatWithTools, response.assistant_text).toHaveBeenCalledTimes(expectedCalls);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(explanationSpy, response.assistant_text).toHaveBeenCalledTimes(1);
+    expect(response.assistant_text).toContain(answer.split(' because ')[0]!);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('replaces a second unsafe mutation offer with a source-bound causal recovery', async () => {
+    const unsafeAnswer =
+      'Nothing has been changed, but setting "Team Capacity Consumed" to 53% looks like it would help. Say the word and I will make it.';
+    const adapter = mutatingThenAnsweringAdapter(unsafeAnswer);
+    const { handlers, mutationSpy, explanationSpy } = registry();
+
+    const { response } = await runTurnExecutor(
+      payload(PRODUCT_CHALLENGE),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+      },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(explanationSpy).toHaveBeenCalledTimes(1);
+    expect(response.assistant_text).toContain('Team Capacity Consumed');
+    expect(response.assistant_text).toContain('Reach 1,500 paid teams');
+    expect(response.assistant_text).not.toContain('53%');
+    expect(response.assistant_text).not.toMatch(/say the word|setting .* would help/i);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('answers a safety question before run_analysis and does not execute the run', async () => {
+    const answer =
+      'It is safe only as an exploratory run because the current facts do not attest adoption evidence quality.';
+    const adapter = runThenAnsweringAdapter(answer);
+    const { handlers, mutationSpy, explanationSpy, runAnalysisSpy } = registry();
+
+    const { response } = await runTurnExecutor(
+      payload(CRM_UNCERTAINTY),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+      },
+    );
+
+    // One ordinary run election plus the single forced answer-only re-election.
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(runAnalysisSpy).not.toHaveBeenCalled();
+    expect(explanationSpy, response.assistant_text).toHaveBeenCalledTimes(1);
+    expect(response.assistant_text).toContain('because');
+    expect(response.suggested_actions ?? []).toEqual([]);
+  });
+
+  it.each([
+    [
+      BURN_CONTROL_PROMPT,
+      'The Q1 Renewal Rate is the single most useful fact to gather next because it links renewal to churn loss and then to the burn target.',
+      'Q1 Renewal Rate',
+    ],
+    [
+      GEO_CONTROL_PROMPT,
+      'No, not on its own. Local Pipeline Conversion Rate feeds New ARR Generated, so an unverified conversion assumption could flip the result; the current model excludes the first-year budget and hub-cost figures.',
+      'Local Pipeline Conversion Rate',
+    ],
+  ])('preserves an already-correct source-bound control for %s', async (message, answer, evidenceLabel) => {
+    const adapter = answeringAdapter(answer);
+    const { handlers, mutationSpy, explanationSpy } = registry();
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(explanationSpy).toHaveBeenCalledTimes(1);
+    expect(response.assistant_text).toContain(evidenceLabel);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+});

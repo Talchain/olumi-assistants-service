@@ -90,6 +90,8 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
         invocation.analysisReady?.status,
         // ROADMAP 2.308 / S3 — name the option(s) actually blocking readiness.
         resolveBlockedOptionLabels(invocation),
+        invocation.analysisReady,
+        (invocation.graphForTurn as { nodes?: readonly never[] } | null | undefined)?.nodes ?? [],
       );
       const fact: WhatWouldFlipHandlerFact = {
         fact_type: 'what_would_flip',

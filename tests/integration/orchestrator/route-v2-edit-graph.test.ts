@@ -330,6 +330,29 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     expect([200, 500]).toContain(res.statusCode);
   });
 
+  it('B2 exact safety question bypasses every legacy edit intercept and reaches TurnExecutor', async () => {
+    const directAnswer =
+      'No — treat the result as exploratory until the named inputs have defensible evidence.';
+    turnExecutorMock.mockResolvedValueOnce(
+      makeTurnExecutorMockResult({ assistantText: directAnswer }),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        turn_id: '11111111-1111-4111-8111-11111111bb02',
+        message:
+          'I do not know the Sales Rep Adoption Rate or CRM Feature Fit for B2B Sales. Is it safe to run analysis anyway? Answer directly first and do not change the model.',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(turnExecutorMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(res.body).assistant_text).toBe(directAnswer);
+  });
+
   it('no graph_state → NOT dispatched (nothing to edit)', async () => {
     const res = await app.inject({
       method: 'POST',
