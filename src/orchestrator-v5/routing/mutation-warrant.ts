@@ -227,7 +227,21 @@ const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
 ];
 
 const EXPLICIT_NO_CHANGE_SCOPE =
-  /(?:\band\s+)?\b(?:please\s+)?(?:do\s+not|don['’]?t|without)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
+  /(?:\band\s+)?\b(?:please\s+)?(?:(?:do\s+not|don['’]?t)\s+(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate)\b|without\s+(?:(?:changing|editing|modifying|updating|altering|touching|rewriting|mutating)|applying(?:\s+changes?\s+to)?|(?:change|edit|modify|update|alter|touch|apply|rewrite|mutate))\b)(?:\s+(?:the\s+)?(?:model|graph|anything(?:\s+else)?|anything|it|them))?/gi;
+
+/**
+ * A present/past state description is not an instruction merely because it
+ * contains the canonical edit verb "set": "Team Capacity is set to 53%".
+ * Mask only these explicit passive forms after a no-change clause has been
+ * found. Imperatives ("Set Team Capacity …") and modal instructions
+ * ("should be set …") remain untouched, so the affirmative contrast keeps
+ * its mutation warrant.
+ */
+const PASSIVE_SET_STATE =
+  /\b(?:(?:is|are|was|were)|(?:has|have|had)\s+been)\s+set\s+to\b/gi;
+
+const PASSIVE_SET_INSTRUCTION =
+  /\b(?:ensure|make\s+sure|see\s+that|see\s+to\s+it\s+that)\b[^.?!\n]{0,80}\b(?:(?:is|are|was|were)|(?:has|have|had)\s+been)\s+set\s+to\b/i;
 
 /**
  * Did the user explicitly withhold model-change authority, with no affirmative
@@ -245,10 +259,13 @@ export function hasExplicitNoModelChangeIntent(message: string): boolean {
   const affirmativeRemainder = trimmed.replace(EXPLICIT_NO_CHANGE_SCOPE, ' ').trim();
   if (affirmativeRemainder === trimmed) return false;
   if (affirmativeRemainder.length === 0) return true;
+  const warrantRemainder = PASSIVE_SET_INSTRUCTION.test(affirmativeRemainder)
+    ? affirmativeRemainder
+    : affirmativeRemainder.replace(PASSIVE_SET_STATE, ' equals ');
   return !(
-    hasMutationSignal(affirmativeRemainder) ||
-    hasConstraintMutationSignal(affirmativeRemainder) ||
-    isEditRequestShape(affirmativeRemainder)
+    hasMutationSignal(warrantRemainder) ||
+    hasConstraintMutationSignal(warrantRemainder) ||
+    isEditRequestShape(warrantRemainder)
   );
 }
 

@@ -265,11 +265,34 @@ describe('tryDeterministicValueUpdate — explicit no-model-change authority', (
     });
   });
 
+  it.each([
+    'changing',
+    'editing',
+    'modifying',
+    'updating',
+    'altering',
+    'touching',
+    'applying changes to',
+    'rewriting',
+    'mutating',
+  ])('keeps a numeric safety question non-mutating when phrased as "without %s the model"', (gerund) => {
+    const result = tryDeterministicValueUpdate(
+      `Is it safe to run given Team Capacity is set to 53%, without ${gerund} the model?`,
+      [quantity(0.53, '53%')],
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
+    );
+
+    expect(result).toEqual({
+      matched: false,
+      skip_reason: 'explicit_no_model_change',
+    });
+  });
+
   it('keeps an affirmative edit when only the remainder of the model is protected', () => {
     const result = tryDeterministicValueUpdate(
-      'Set Team Capacity Consumed to 53% and do not change anything else.',
+      'Set Team Capacity to 53% without changing anything else.',
       [quantity(0.53, '53%')],
-      PRODUCT_GRAPH,
+      makeGraph([{ id: 'fac_team', label: 'Team Capacity' }]),
     );
 
     expect(result.matched).toBe(true);
