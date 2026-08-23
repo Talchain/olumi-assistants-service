@@ -255,6 +255,87 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     expect(buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph).status).toBe("ready");
   });
 
+  it("binds the live £25k shape when the direct link omits basis but its target factor carries the same option and figure", () => {
+    const twinBrief = BRIEF.replace("£20,000", "£25,000");
+    const liveShape = structuredClone(records({ fullSwitchCost: 25_000 }));
+    // Exact mounted 3a54d3e shape: the factor cites both the full-switch option
+    // and £25k figure, while the direct option→factor link carries sets_to but
+    // omits its own basis array.
+    liveShape.claims[0] = { ...liveShape.claims[0]!, basis: [0, 4] };
+    const fullSwitchLink = liveShape.claims.find(
+      (claim) => claim.claim_kind === "causal_link" && claim.from_stated === 0 && claim.to_claim === 0,
+    )!;
+    delete fullSwitchLink.basis;
+
+    const projected = projectRecordsToGraph(liveShape, twinBrief);
+    expect(bindingOf(projected, FULL_SWITCH)).toMatchObject({
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+    });
+
+    const normalised = normaliseDraftResponse(structuredClone(projected.graph));
+    const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: twinBrief });
+    const factor = v3.graph.nodes.find((node) => node.label === COST)!;
+    expect(v3OptionByLabel(v3.options, FULL_SWITCH).interventions[factor.id]).toMatchObject({
+      value: 0.5,
+      raw_value: 25_000,
+      unit: "£",
+      source: "brief_extraction",
+      value_confidence: "high",
+    });
+
+    // A target factor that cites only the figure does not establish which
+    // option owns it; that weaker shape must remain unbound.
+    const noOptionJoin = structuredClone(liveShape);
+    noOptionJoin.claims[0] = { ...noOptionJoin.claims[0]!, basis: [4] };
+    expect(bindingOf(projectRecordsToGraph(noOptionJoin, twinBrief), FULL_SWITCH)).toBeUndefined();
+
+    // A target factor that cites two options cannot lend one option's figure to
+    // the other. This is the authority-collision mutant: both basis-less links
+    // set the same £25k value and the target cites both options plus the one
+    // verified £25k figure. The old includes(thisOption) rule falsely certified
+    // both links as brief extraction, including the status quo.
+    const twoOptionJoin = structuredClone(liveShape);
+    twoOptionJoin.claims[0] = { ...twoOptionJoin.claims[0]!, basis: [0, 1, 4] };
+    const statusQuoLink = twoOptionJoin.claims.find(
+      (claim) => claim.claim_kind === "causal_link" && claim.from_stated === 1 && claim.to_claim === 0,
+    )!;
+    delete statusQuoLink.basis;
+    statusQuoLink.sets_to = 25_000;
+    const collided = projectRecordsToGraph(twoOptionJoin, twinBrief);
+    expect(bindingOf(collided, FULL_SWITCH)).toBeUndefined();
+    expect(bindingOf(collided, STATUS_QUO)).toBeUndefined();
+
+    // An explicit (but incomplete) link basis remains authoritative; target
+    // inheritance must not silently repair or reinterpret it.
+    const explicitIncompleteBasis = structuredClone(liveShape);
+    const explicitLink = explicitIncompleteBasis.claims.find(
+      (claim) => claim.claim_kind === "causal_link" && claim.from_stated === 0 && claim.to_claim === 0,
+    )!;
+    explicitLink.basis = [0];
+    expect(
+      bindingOf(projectRecordsToGraph(explicitIncompleteBasis, twinBrief), FULL_SWITCH),
+    ).toBeUndefined();
+
+    // Two same-valued candidate figures are ambiguous even when only one quote
+    // happens to verify against this brief. Preserve the existing fail-closed
+    // source instead of choosing a convenient candidate.
+    const ambiguous = structuredClone(liveShape);
+    ambiguous.stated_items.push({
+      kind: "figure",
+      source_quote: "A separate contingency is also £25,000",
+      value: 25_000,
+      unit: "£",
+    });
+    ambiguous.claims[0] = { ...ambiguous.claims[0]!, basis: [0, 4, 7] };
+    expect(bindingOf(projectRecordsToGraph(ambiguous, twinBrief), FULL_SWITCH)).toMatchObject({
+      raw_value: 25_000,
+      source: "cee_hypothesis",
+      reasoning: expect.stringContaining("unresolved stated-item binding"),
+    });
+  });
+
   it("preserves the genuine identical-refinement consolidation control", () => {
     const projection = projectRecordsToGraph(records({ identicalRefinement: true }), BRIEF);
 
