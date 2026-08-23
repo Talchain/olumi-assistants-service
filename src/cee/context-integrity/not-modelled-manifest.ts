@@ -946,8 +946,83 @@ const briefCurrencyCode = (symbol: string | null): string | null =>
  * non-skip top-level key); edge VALUES are not.
  */
 const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
+
+/**
+ * Read the real-world side of a canonical option intervention.
+ *
+ * `value` is deliberately excluded: it is the analysis encoding (for example
+ * 0.4), not necessarily the quantity the user stated (for example £20,000).
+ * The provenance tuple below is the fail-closed source-binding contract emitted
+ * by the draft projector. A hypothesis — even one that happens to repeat the
+ * same number — is not evidence that the amount was carried from the brief.
+ */
+function collectSourceBoundInterventionCandidates(
+  option: Record<string, unknown>,
+  factorLabels: ReadonlyMap<string, string>,
+): Candidate[] {
+  const interventions = option.interventions;
+  if (interventions === null || typeof interventions !== "object" || Array.isArray(interventions)) {
+    return [];
+  }
+
+  const out: Candidate[] = [];
+  for (const [factorId, raw] of Object.entries(interventions as Record<string, unknown>)) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const intervention = raw as Record<string, unknown>;
+    const targetMatch = intervention.target_match;
+    if (targetMatch === null || typeof targetMatch !== "object" || Array.isArray(targetMatch)) {
+      continue;
+    }
+    const target = targetMatch as Record<string, unknown>;
+    if (
+      intervention.source !== "brief_extraction" ||
+      intervention.value_confidence !== "high" ||
+      target.node_id !== factorId ||
+      target.confidence !== "high" ||
+      target.match_type !== "exact_id"
+    ) {
+      continue;
+    }
+
+    const rawValue = intervention.raw_value;
+    const declaredUnit = intervention.unit;
+    const label = factorLabels.get(factorId);
+    if (
+      typeof rawValue !== "number" ||
+      !Number.isFinite(rawValue) ||
+      typeof declaredUnit !== "string" ||
+      declaredUnit.trim().length === 0 ||
+      label === undefined
+    ) {
+      continue;
+    }
+
+    const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+    out.push({
+      nodeId: factorId,
+      label,
+      value: rawValue * multiplier,
+      unitKind: kind,
+      currencyCode: currencyCode ?? null,
+      declaredUnit,
+    });
+  }
+  return out;
+}
+
 function collectCandidates(graph: Record<string, unknown>): Candidate[] {
   const out: Candidate[] = [];
+  const factorLabels = new Map<string, string>();
+  if (Array.isArray(graph.nodes)) {
+    for (const raw of graph.nodes) {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const node = raw as Record<string, unknown>;
+      if (node.kind !== "factor" || typeof node.id !== "string" || typeof node.label !== "string") {
+        continue;
+      }
+      factorLabels.set(node.id, node.label);
+    }
+  }
   for (const key of CANDIDATE_COLLECTIONS) {
     const entries = graph[key];
     if (!Array.isArray(entries)) continue;
@@ -975,6 +1050,7 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
           });
         }
       }
+      out.push(...collectSourceBoundInterventionCandidates(node, factorLabels));
     }
   }
   return out;
