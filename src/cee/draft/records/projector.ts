@@ -1290,13 +1290,34 @@ function bindDirectStatedMagnitude(args: {
   readonly claim: DraftInferenceClaim;
   readonly edgeId: string;
   readonly statedItems: readonly DraftStatedItem[];
+  readonly claims: readonly DraftInferenceClaim[];
   readonly brief: string | undefined;
 }): ProjectedInterventionBinding | undefined {
-  const { claim, edgeId, statedItems, brief } = args;
+  const { claim, edgeId, statedItems, claims, brief } = args;
   if (claim.from_stated === undefined || typeof claim.sets_to !== "number") return undefined;
   if (statedItems[claim.from_stated]?.kind !== "option") return undefined;
 
-  const matches = [...new Set(claim.basis ?? [])]
+  const directBasis = [...new Set(claim.basis ?? [])];
+  const targetClaim = claim.to_claim === undefined ? undefined : claims[claim.to_claim];
+  // The mounted £25k twin exposed a valid producer shape the original carrier
+  // fixture did not cover: the direct option→factor link omitted `basis`, while
+  // the target FACTOR claim carried both the same option record and the exact
+  // numeric figure. That is still one typed evidence chain, not a whole-brief
+  // numeric scan. Inherit it only when the link has no competing basis of its
+  // own and the target explicitly joins this exact option; a factor citing only
+  // a figure cannot tell us which option owns the magnitude and stays unbound.
+  const targetBasis = [...new Set(targetClaim?.basis ?? [])];
+  const mayInheritTargetBasis =
+    directBasis.length === 0 &&
+    targetClaim?.claim_kind === "factor" &&
+    targetBasis.includes(claim.from_stated);
+  const bindingBasis = directBasis.length > 0
+    ? directBasis
+    : mayInheritTargetBasis
+      ? targetBasis
+      : [];
+
+  const matches = bindingBasis
     .filter((index) => Number.isInteger(index))
     .map((index) => ({ index, item: statedItems[index] }))
     .filter(
@@ -2368,7 +2389,7 @@ function projectOnce(
       const binding =
         claim === undefined
           ? undefined
-          : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, brief });
+          : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
       const key = `${edge.from} ${edge.to}`;
       const list = candidatesByPair.get(key) ?? [];
       list.push({
