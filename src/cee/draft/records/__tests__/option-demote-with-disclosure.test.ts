@@ -402,40 +402,27 @@ describe("what the demote deliberately does NOT touch", () => {
     expect(demote?.duplicate_of_label).toBe("keep what we have");
   });
 
-  it("keeps its disclosure RESOLVABLE when the survivor itself later merges away", () => {
-    // ⭐⭐ THE REVIEWER'S SHAPE (round-11 review, B1). Two refinements name the
-    // SAME single stated option, so the choice-set guard refuses both merges and
-    // they stand as rivals — and they duplicate EACH OTHER. R2 is demoted
-    // against R1 (lowest claim index). On the next pass R2's withdrawal leaves
-    // R1 the ONLY refinement of that parent, so R1 MERGES and mints no node.
-    //
-    // The disclosure written in round 1 pointed at R1's minted id, and after
-    // round 2 that id names nothing on the graph — a record referring to a node
-    // the user cannot find. The projector's whole premise is that a disclosure
-    // is better than a silent loss, and a dangling disclosure is neither.
-        const { graph, dropped, provenance } = projectRecordsToGraph(SURVIVOR_MERGES_SHAPE);
+  it("keeps a conflicting-content survivor distinct and its disclosure RESOLVABLE", () => {
+    // The two refinements duplicate each other, so R2 is demoted against R1.
+    // R1 then becomes the sole refinement, but it sets the parent's factor to 1
+    // while the parent sets it to 0.5. The source-authority merge veto therefore
+    // keeps R1 as a distinct alternative.
+    const { graph, dropped, provenance } = projectRecordsToGraph(SURVIVOR_MERGES_SHAPE);
 
-    // Precondition, pinned in-test: this really is the (model, model) path AND
-    // the survivor really did merge away. Without both, the assertion below
-    // passes for the wrong reason (trap 13b).
+    // Precondition: this is the (model, model) path and the conflicting survivor
+    // is not falsely reported as merged into the stated parent.
     const demote = dropped.find((d) => d.reason === "undeveloped_duplicate_of_model");
     expect(demote?.label).toBe("Germany via Partner");
-    expect(dropped.find((d) => d.claim_index === 2)?.reason).toBe(
-      "refinement_merged_into_stated_option",
-    );
+    expect(dropped.find((d) => d.claim_index === 2)).toBeUndefined();
 
     // THE INVARIANT: the disclosure names a node that is ON THE FINAL GRAPH.
-    const parent = idOf(graph, "push into Germany next year");
-    expect(demote?.duplicate_of).toBe(parent);
-    expect(demote?.duplicate_of_label).toBe("push into Germany next year");
-    // …and the option it ORIGINALLY duplicated is not lost from the record.
-    expect(demote?.merged_survivor_label).toBe("Germany Direct");
+    const survivor = idOf(graph, "Germany Direct");
+    expect(demote?.duplicate_of).toBe(survivor);
+    expect(demote?.duplicate_of_label).toBe("Germany Direct");
+    expect(demote?.merged_survivor_label).toBeUndefined();
 
-    // The withdrawal is recorded on the node that absorbed the survivor, not
-    // dropped on the floor because the survivor's own provenance had gone.
-    expect(provenance[parent]?.undeveloped_duplicates).toEqual(["Germany via Partner"]);
-    expect(provenance[parent]?.provenance_class).toBe("stated");
-    expect(provenance[parent]?.source_quote).toBe("push into Germany next year");
+    expect(provenance[survivor]?.undeveloped_duplicates).toEqual(["Germany via Partner"]);
+    expect(provenance[survivor]?.provenance_class).toBe("ai_inferred");
   });
 
   it("NEVER leaves a dangling id in any disclosure, across every demoting shape in this spec", () => {

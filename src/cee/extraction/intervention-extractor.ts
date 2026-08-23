@@ -23,6 +23,10 @@ import {
   classifyAmountAgainstBrief,
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
+import {
+  bindStatedItemToBrief,
+  bindingEarnsBriefClaim,
+} from "../provenance/brief-binding.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
@@ -59,6 +63,14 @@ export interface EdgeHint {
   to_factor_id: string;
   /** Edge weight from V1 (can indicate strength of relationship) */
   weight?: number;
+}
+
+/** Existing intervention fields carried from the deterministic records projector. */
+export interface V4InterventionBinding {
+  raw_value: number;
+  unit?: string;
+  source: "brief_extraction" | "cee_hypothesis";
+  reasoning: string;
 }
 
 /**
@@ -532,9 +544,12 @@ function buildInterventionsFromV4Data(
   optionLabel: string,
   v4Interventions: Record<string, number>,
   factors: NodeV3T[],
-  briefText?: string
+  briefText?: string,
+  v4RawInterventions?: Record<string, number>,
+  v4InterventionBindings?: Record<string, V4InterventionBinding>,
 ): ExtractedOption {
   const interventions: Record<string, InterventionV3T> = {};
+  const rawInterventions: Record<string, RawInterventionValueT> = {};
   const factorIds = new Set(factors.map((f) => f.id));
   const missingFactors: string[] = [];
 
@@ -627,23 +642,65 @@ function buildInterventionsFromV4Data(
     const verdict = classifyAmountAgainstBrief(value, unit, briefText, scale);
     const statedInBrief = verdict === "stated";
 
-    interventions[factorId] = {
-      value,
-      unit,
-      source: statedInBrief ? "brief_extraction" : "cee_hypothesis",
-      target_match: {
-        node_id: factorId,
-        match_type: "exact_id", // LLM provided exact ID
-        confidence: "high", // Direct from V4 prompt = high confidence
-      },
-      value_confidence: statedInBrief ? "high" : "low",
-      reasoning:
-        verdict === "stated"
-          ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
-          : verdict === "not_stated"
-            ? "Model-chosen intervention level; this amount is not stated in the brief"
-            : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
-    };
+    const binding = v4InterventionBindings?.[factorId];
+    const carriedRaw = v4RawInterventions?.[factorId];
+    const boundQuote = binding?.reasoning.match(
+      /^Direct causal value bound by edge \S+ to stated_items\[\d+\]: (.+)$/s,
+    )?.[1];
+    const bindingIsVerified =
+      binding !== undefined &&
+      binding.source === "brief_extraction" &&
+      carriedRaw === binding.raw_value &&
+      bindingEarnsBriefClaim(
+        bindStatedItemToBrief({
+          quote: boundQuote,
+          value: binding.raw_value,
+          unit: binding.unit,
+          brief: briefText,
+        }),
+      );
+
+    if (typeof carriedRaw === "number" && Number.isFinite(carriedRaw)) {
+      rawInterventions[factorId] = carriedRaw;
+    }
+
+    if (bindingIsVerified) {
+      interventions[factorId] = {
+        value,
+        raw_value: binding.raw_value,
+        ...(binding.unit !== undefined ? { unit: binding.unit } : {}),
+        source: "brief_extraction",
+        target_match: {
+          node_id: factorId,
+          match_type: "exact_id",
+          confidence: "high",
+        },
+        value_confidence: "high",
+        reasoning: binding.reasoning,
+      };
+    } else {
+      interventions[factorId] = {
+        value,
+        ...(typeof carriedRaw === "number" && Number.isFinite(carriedRaw)
+          ? { raw_value: carriedRaw }
+          : {}),
+        unit: binding?.unit ?? unit,
+        source: binding === undefined && statedInBrief ? "brief_extraction" : "cee_hypothesis",
+        target_match: {
+          node_id: factorId,
+          match_type: "exact_id", // LLM provided exact ID
+          confidence: "high", // Direct from V4 prompt = high confidence
+        },
+        value_confidence: binding === undefined && statedInBrief ? "high" : "low",
+        reasoning:
+          binding?.reasoning ??
+          (verdict === "stated"
+            ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+            : verdict === "not_stated"
+              ? "Model-chosen intervention level; this amount is not stated in the brief"
+              : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
+      };
+    }
   }
 
   const hasInterventions = Object.keys(interventions).length > 0;
@@ -653,6 +710,7 @@ function buildInterventionsFromV4Data(
     id: optionId,
     label: optionLabel,
     interventions,
+    ...(Object.keys(rawInterventions).length > 0 ? { raw_interventions: rawInterventions } : {}),
     status,
     unresolved_targets: missingFactors.length > 0 ? missingFactors : undefined,
     provenance: {
@@ -691,7 +749,9 @@ export function extractInterventionsForOption(
   edgeHints: EdgeHint[] = [],
   v4Interventions?: Record<string, number>,
   nodeId?: string,
-  briefText?: string
+  briefText?: string,
+  v4RawInterventions?: Record<string, number>,
+  v4InterventionBindings?: Record<string, V4InterventionBinding>,
 ): ExtractedOption {
   // Use node ID if provided (ensures option.id matches graph node.id)
   // Fallback to normalized label for backwards compatibility
@@ -700,7 +760,15 @@ export function extractInterventionsForOption(
   // V4 prompt: If interventions are provided directly, use them (high confidence)
   if (v4Interventions && Object.keys(v4Interventions).length > 0) {
     const factors = nodes.filter((n) => n.kind === "factor");
-    return buildInterventionsFromV4Data(id, optionLabel, v4Interventions, factors, briefText);
+    return buildInterventionsFromV4Data(
+      id,
+      optionLabel,
+      v4Interventions,
+      factors,
+      briefText,
+      v4RawInterventions,
+      v4InterventionBindings,
+    );
   }
 
   // Fallback: Extract interventions from text (legacy path)
@@ -1089,6 +1157,8 @@ export function extractOptionsFromNodes(
     description?: string;
     body?: string;
     v4Interventions?: Record<string, number>;
+    v4RawInterventions?: Record<string, number>;
+    v4InterventionBindings?: Record<string, V4InterventionBinding>;
     is_baseline?: boolean;
   }>,
   allNodes: NodeV3T[],
@@ -1117,7 +1187,9 @@ export function extractOptionsFromNodes(
       hintsForOption,
       node.v4Interventions,
       node.id,
-      briefText
+      briefText,
+      node.v4RawInterventions,
+      node.v4InterventionBindings,
     );
     // Carry is_baseline from the source node (v191+)
     if (node.is_baseline !== undefined) {

@@ -1204,6 +1204,143 @@ interface OneProjection extends RecordProjection {
   readonly optionClaimIndexById: ReadonlyMap<string, number>;
 }
 
+interface ProjectedInterventionBinding {
+  readonly raw_value: number;
+  readonly unit?: string;
+  readonly source: "brief_extraction" | "cee_hypothesis";
+  readonly reasoning: string;
+}
+
+export interface CanonicalInterventionCandidate {
+  readonly edgeId: string;
+  readonly setsTo: number;
+  readonly authority: "direct_stated_option" | "ai_claim";
+}
+
+/** Authority first; magnitude is only a tie-break within the same authority. */
+export function compareCanonicalInterventionCandidates(
+  a: CanonicalInterventionCandidate,
+  b: CanonicalInterventionCandidate,
+): number {
+  const authorityRank = (candidate: CanonicalInterventionCandidate): number =>
+    candidate.authority === "direct_stated_option" ? 0 : 1;
+  return (
+    authorityRank(a) - authorityRank(b) ||
+    a.setsTo - b.setsTo ||
+    (a.edgeId < b.edgeId ? -1 : a.edgeId > b.edgeId ? 1 : 0)
+  );
+}
+
+/** Identity of one typed causal-link target, before claim nodes are minted. */
+function causalTargetKey(claim: DraftInferenceClaim): string | null {
+  const targets = [
+    ...(claim.to_stated !== undefined ? [`stated:${claim.to_stated}`] : []),
+    ...(claim.to_claim !== undefined ? [`claim:${claim.to_claim}`] : []),
+  ];
+  return targets.length === 1 ? targets[0]! : null;
+}
+
+/**
+ * A refinement is not the same alternative when it assigns a different value
+ * to a factor the stated option already assigns. Compare the raw record values,
+ * before either route aliases to a minted option id.
+ */
+function refinementConflictsWithStatedOption(
+  claims: readonly DraftInferenceClaim[],
+  parentStatedIndex: number,
+  refinementClaimIndex: number,
+): boolean {
+  const magnitudesByTarget = (
+    ownsSource: (claim: DraftInferenceClaim) => boolean,
+  ): Map<string, Set<number>> => {
+    const result = new Map<string, Set<number>>();
+    for (const claim of claims) {
+      if (claim.claim_kind !== "causal_link" || !ownsSource(claim)) continue;
+      if (typeof claim.sets_to !== "number" || !Number.isFinite(claim.sets_to)) continue;
+      const target = causalTargetKey(claim);
+      if (target === null) continue;
+      const values = result.get(target) ?? new Set<number>();
+      values.add(claim.sets_to);
+      result.set(target, values);
+    }
+    return result;
+  };
+
+  const stated = magnitudesByTarget((claim) => claim.from_stated === parentStatedIndex);
+  const refinement = magnitudesByTarget((claim) => claim.from_claim === refinementClaimIndex);
+  for (const [target, statedValues] of stated) {
+    const refinementValues = refinement.get(target);
+    if (refinementValues === undefined) continue;
+    if (
+      statedValues.size !== refinementValues.size ||
+      [...statedValues].some((value) => !refinementValues.has(value))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Describe a direct stated-option magnitude only when its basis names numeric
+ * stated-item evidence for that exact value. Verified evidence earns brief
+ * authority; unresolved evidence remains marked so readiness can fail closed.
+ */
+function bindDirectStatedMagnitude(args: {
+  readonly claim: DraftInferenceClaim;
+  readonly edgeId: string;
+  readonly statedItems: readonly DraftStatedItem[];
+  readonly brief: string | undefined;
+}): ProjectedInterventionBinding | undefined {
+  const { claim, edgeId, statedItems, brief } = args;
+  if (claim.from_stated === undefined || typeof claim.sets_to !== "number") return undefined;
+  if (statedItems[claim.from_stated]?.kind !== "option") return undefined;
+
+  const matches = [...new Set(claim.basis ?? [])]
+    .filter((index) => Number.isInteger(index))
+    .map((index) => ({ index, item: statedItems[index] }))
+    .filter(
+      (entry): entry is { index: number; item: DraftStatedItem } =>
+        entry.item !== undefined &&
+        entry.item.kind === "figure" &&
+        entry.item.value === claim.sets_to,
+    );
+  if (matches.length === 0) return undefined;
+
+  const verified = matches.filter(({ item }) =>
+    bindingEarnsBriefClaim(
+      bindStatedItemToBrief({
+        quote: item.source_quote,
+        value: item.value,
+        unit: item.unit,
+        brief,
+      }),
+    ),
+  );
+
+  if (matches.length !== 1 || verified.length !== 1) {
+    const units = [
+      ...new Set(matches.map(({ item }) => item.unit).filter((unit) => unit !== undefined)),
+    ];
+    return {
+      raw_value: claim.sets_to,
+      ...(units.length === 1 ? { unit: units[0] } : {}),
+      source: "cee_hypothesis",
+      reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; candidates ${matches
+        .map(({ index }) => `stated_items[${index}]`)
+        .join(", ")}`,
+    };
+  }
+
+  const { index, item } = verified[0]!;
+  return {
+    raw_value: claim.sets_to,
+    ...(item.unit !== undefined ? { unit: item.unit } : {}),
+    source: "brief_extraction",
+    reasoning: `Direct causal value bound by edge ${edgeId} to stated_items[${index}]: ${item.source_quote}`,
+  };
+}
+
 /**
  * ONE projection pass. `demoted` names claim indices withdrawn by a previous
  * pass: they mint no node, they are not merge candidates, and links naming them
@@ -1719,9 +1856,15 @@ function projectOnce(
     });
     for (const [parent, claimIndices] of candidates) {
       // Exactly one refinement for this option ⇒ one alternative under two
-      // names. Two or more ⇒ distinct alternatives; leave every one of them
-      // standing.
-      if (claimIndices.length === 1) refinementParentStatedIndex.set(claimIndices[0], parent);
+      // names, unless its option-owned causal content contradicts the stated
+      // option. Two or more, or one conflicting refinement, are distinct
+      // alternatives; leave them standing.
+      if (
+        claimIndices.length === 1 &&
+        !refinementConflictsWithStatedOption(claims, parent, claimIndices[0]!)
+      ) {
+        refinementParentStatedIndex.set(claimIndices[0]!, parent);
+      }
     }
   }
 
@@ -2183,6 +2326,11 @@ function projectOnce(
   {
     const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
     const interventionsByOption = new Map<string, Record<string, number>>();
+    const rawInterventionsByOption = new Map<string, Record<string, number>>();
+    const interventionBindingsByOption = new Map<
+      string,
+      Record<string, ProjectedInterventionBinding>
+    >();
     // ⭐⭐ ROOT 2(c) — CANONICAL, NOT POSITIONAL.
     //
     // This was `bucket[edge.to] = setsTo`: an unconditional write, so when two
@@ -2194,35 +2342,48 @@ function projectOnce(
     //
     // Candidates are now gathered first and resolved by a rule that reads only
     // their CONTENT, so any permutation of the same claims yields the same
-    // projection. Where they disagree, the smallest magnitude wins: among
-    // contradictory claims about how far an option moves a factor, that is the
-    // least extravagant one, and over-claiming an option's effect is the harm
-    // that matters here. `edge.id` (a content hash) breaks an exact tie so the
-    // rule is total.
+    // projection. Direct content attached to a stated option outranks a model
+    // refinement remapped onto it; only within equal authority does the smallest
+    // magnitude win as the least extravagant claim. `edge.id` (a content hash)
+    // breaks an exact tie so the rule is total.
     //
     // ⚠ The choice is CANONICAL, not correct — nothing here can know which claim
     // the user meant. So it is DISCLOSED rather than absorbed: the conflict and
     // the discarded levels are named, which is the difference between a decision
     // and a silent overwrite.
-    const candidatesByPair = new Map<string, { edgeId: string; setsTo: number }[]>();
+    type InterventionCandidate = CanonicalInterventionCandidate & {
+      binding?: ProjectedInterventionBinding;
+    };
+    const candidatesByPair = new Map<string, InterventionCandidate[]>();
     for (const edge of edges) {
       if (kindById.get(edge.from) !== "option") continue;
       if (kindById.get(edge.to) !== "factor") continue;
       const setsTo = setsToByEdgeId.get(edge.id);
       if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
+
+      const origin = claimOriginByEdgeId.get(edge.id);
+      const claim = origin === undefined ? undefined : claims[origin.index];
+      const isDirectStatedOption =
+        claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
+      const binding =
+        claim === undefined
+          ? undefined
+          : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, brief });
       const key = `${edge.from} ${edge.to}`;
       const list = candidatesByPair.get(key) ?? [];
-      list.push({ edgeId: edge.id, setsTo });
+      list.push({
+        edgeId: edge.id,
+        setsTo,
+        authority: isDirectStatedOption ? "direct_stated_option" : "ai_claim",
+        ...(binding !== undefined ? { binding } : {}),
+      });
       candidatesByPair.set(key, list);
     }
     for (const [key, candidates] of [...candidatesByPair.entries()].sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     )) {
       const [optionId, factorId] = key.split(" ") as [string, string];
-      const ordered = [...candidates].sort(
-        (a, b) =>
-          a.setsTo - b.setsTo || (a.edgeId < b.edgeId ? -1 : a.edgeId > b.edgeId ? 1 : 0),
-      );
+      const ordered = [...candidates].sort(compareCanonicalInterventionCandidates);
       const chosen = ordered[0]!;
       const rejected = ordered.slice(1).filter((c) => c.setsTo !== chosen.setsTo);
       if (rejected.length > 0) {
@@ -2240,6 +2401,18 @@ function projectOnce(
       const bucket = interventionsByOption.get(optionId) ?? {};
       bucket[factorId] = chosen.setsTo;
       interventionsByOption.set(optionId, bucket);
+
+      // Every selected record magnitude remains reversible after Pass 3d. Only
+      // a separately verified binding earns human/brief authority below.
+      const raw = rawInterventionsByOption.get(optionId) ?? {};
+      raw[factorId] = chosen.setsTo;
+      rawInterventionsByOption.set(optionId, raw);
+
+      if (chosen.binding !== undefined) {
+        const details = interventionBindingsByOption.get(optionId) ?? {};
+        details[factorId] = chosen.binding;
+        interventionBindingsByOption.set(optionId, details);
+      }
     }
     for (const node of nodes) {
       const built = interventionsByOption.get(node.id);
@@ -2254,7 +2427,14 @@ function projectOnce(
       // unreachable guard is a branch no test can ever kill, which is the same
       // "guard that cannot fail" shape this module's tests exist to hunt.
       if (built === undefined) continue;
-      node.data = { ...(node.data ?? {}), interventions: built };
+      const raw = rawInterventionsByOption.get(node.id);
+      const details = interventionBindingsByOption.get(node.id);
+      node.data = {
+        ...(node.data ?? {}),
+        interventions: built,
+        ...(raw !== undefined ? { raw_interventions: raw } : {}),
+        ...(details !== undefined ? { intervention_details: details } : {}),
+      };
     }
   }
 

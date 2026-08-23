@@ -61,6 +61,15 @@ export interface V1FactorData {
  */
 export interface V1OptionData {
   interventions: Record<string, number>;
+  /** Selected raw record magnitudes, using the existing V3 carrier. */
+  raw_interventions?: Record<string, number>;
+  /** Existing intervention detail fields carried through the V1 passthrough seam. */
+  intervention_details?: Record<string, {
+    raw_value: number;
+    unit?: string;
+    source: "brief_extraction" | "cee_hypothesis";
+    reasoning: string;
+  }>;
   /** Marks the status-quo / baseline option (v191+). Exactly one option should have true. */
   is_baseline?: boolean;
 }

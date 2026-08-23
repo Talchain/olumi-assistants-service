@@ -1213,6 +1213,12 @@ export function projectGraphAndOptionsToV3(
   const extractedOptions = extractOptionsFromNodes(
     extractOptionNodes(graph.nodes).map((node) => {
       const sourceInterventions = isOptionData(node.data) ? node.data.interventions : undefined;
+      const sourceRawInterventions = isOptionData(node.data)
+        ? node.data.raw_interventions
+        : undefined;
+      const sourceInterventionBindings = isOptionData(node.data)
+        ? node.data.intervention_details
+        : undefined;
       const canonicalInterventions = sourceInterventions
         ? Object.fromEntries(
             Object.entries(sourceInterventions).map(([sourceFactorId, value]) => [
@@ -1221,11 +1227,29 @@ export function projectGraphAndOptionsToV3(
             ]),
           )
         : undefined;
+      const canonicalRawInterventions = sourceRawInterventions
+        ? Object.fromEntries(
+            Object.entries(sourceRawInterventions).map(([sourceFactorId, value]) => [
+              projectedIdBySourceId.get(sourceFactorId) ?? sourceFactorId,
+              value,
+            ]),
+          )
+        : undefined;
+      const canonicalInterventionBindings = sourceInterventionBindings
+        ? Object.fromEntries(
+            Object.entries(sourceInterventionBindings).map(([sourceFactorId, binding]) => [
+              projectedIdBySourceId.get(sourceFactorId) ?? sourceFactorId,
+              binding,
+            ]),
+          )
+        : undefined;
       return {
         id: projectedIdBySourceId.get(node.id) ?? node.id,
         label: node.label ?? node.id,
         description: node.body,
         v4Interventions: canonicalInterventions,
+        v4RawInterventions: canonicalRawInterventions,
+        v4InterventionBindings: canonicalInterventionBindings,
         is_baseline: resolveOptionIsBaseline(node),
       };
     }),
