@@ -22,6 +22,7 @@ import { matchInterventionToFactor } from "./factor-matcher.js";
 import {
   classifyAmountAgainstBrief,
   findStatedAmounts,
+  readUnit,
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import {
@@ -570,8 +571,50 @@ function formatRelativeDescription(value: ParsedValue): string {
 function resolveStatedDenominationForRawMagnitude(
   rawMagnitude: number,
   briefText: string | null | undefined,
+  declaredUnit: string | null | undefined,
 ): { readonly unit: string; readonly matchedText: string } | null {
   if (typeof rawMagnitude !== "number" || !Number.isFinite(rawMagnitude)) return null;
+
+  // ⚠ THE FACTOR'S OWN DENOMINATION IS EVIDENCE, AND THE FIRST VERSION OF THIS
+  // FUNCTION THREW IT AWAY. That defect is worth stating precisely, because it is
+  // the exact MIRROR of the one this route exists to fix.
+  //
+  // `magnitudeAppearsInBrief` enforces three rules that all key off the unit the
+  // CALLER declares: it scales the target by `readUnit(unit).multiplier`; it
+  // requires `amount.currencyCode === reading.currencyCode`; and it skips every
+  // currency amount when the unit reads as `plain`. The first version asked that
+  // authority about a currency code DERIVED FROM THE BRIEF instead of the
+  // factor's own, so all three rules were answered about a denomination the
+  // factor never claimed — and the authority dutifully said "stated".
+  // Measured on that head, brief "£20,000" throughout:
+  //   unit "USD"/"$"    -> brief_extraction, unit "$"  (cross-currency fabrication)
+  //   unit "£m"         -> brief_extraction            (raw 20000 under £m denotes
+  //                                                     £20,000,000,000 — 10^6 out)
+  //   unit "%"/"customers" -> brief_extraction         (a different quantity entirely)
+  // The user would be shown the "from brief" badge, the low-confidence warning
+  // would disappear, and the reasoning would tell them they wrote £20,000 on a
+  // dollar-denominated factor. Delegating to an authority does not inherit its
+  // guarantees unless you hand it the evidence those guarantees are computed from.
+  const declared = readUnit(declaredUnit);
+  const hasDeclaredUnit = typeof declaredUnit === "string" && declaredUnit.trim().length > 0;
+  if (hasDeclaredUnit) {
+    // A magnitude letter means the raw is NOT in magnitude space, so comparing it
+    // against the brief is a 10^n error rather than a comparison.
+    if (declared.multiplier !== 1) return null;
+    // A brief amount carrying £/$/€ is an explicit statement of denomination. A
+    // percent, a count, or any unit this estate cannot read tells us nothing about
+    // whether the two are the same quantity — so it can never license the claim.
+    if (declared.kind !== "currency") return null;
+  }
+
+  // ⚠ ZERO IS THE MODEL'S COMMONEST DEFAULT AND MAY NOT BE RELABELLED.
+  // `transforms/analysis-ready.ts` already rules on exactly this question — "Zero
+  // is already represented exactly on the analysis scale and is the valid
+  // status-quo control ... and must never be relabelled as the stated switch
+  // cost" — and skips zero for that reason. A brief that happens to write "£0"
+  // would otherwise let every status-quo zero in the model claim the user's
+  // authorship. Adopted from that ruling rather than invented here.
+  if (rawMagnitude === 0) return null;
 
   // The magnitude IS the magnitude — say so to the shared classifier.
   const IDENTITY = { kind: "identity" } as const;
@@ -595,6 +638,10 @@ function resolveStatedDenominationForRawMagnitude(
 
   const hits: { readonly unit: string; readonly matchedText: string }[] = [];
   for (const [code, unit] of denominations) {
+    // CURRENCY IDENTITY IS REQUIRED — a £-denominated value is not made
+    // brief-backed by a $-denominated statement. Where the factor declares its
+    // own currency, only that currency may license the claim.
+    if (hasDeclaredUnit && declared.currencyCode !== code) continue;
     if (classifyAmountAgainstBrief(rawMagnitude, code, briefText, IDENTITY) !== "stated") continue;
     const quoted = findStatedAmounts(briefText).find(
       (a) =>
@@ -775,9 +822,18 @@ function buildInterventionsFromV4Data(
       // it cannot invent a value (the value is unchanged either way), cannot
       // fire without a brief, and refuses on any ambiguity of denomination.
       const rawIsFinite = typeof carriedRaw === "number" && Number.isFinite(carriedRaw);
+      // ⚠ THE GATE IS `undecidable`, NOT `!statedInBrief`. The justification for
+      // this whole route is that an UNKNOWN denominator makes the question
+      // unanswerable — never that a decided answer may be overturned. `not_stated`
+      // IS a decided answer: the authority had the denominator, did the
+      // comparison, and found the magnitude absent from the brief. Firing there
+      // would overturn a correct refusal, which is the fabrication direction.
+      // The first version gated on `!statedInBrief`, which lumps the two together
+      // — the invariant written against the failure mode instead of the spec
+      // (CLAUDE.md trap 13d).
       const statedDenomination =
-        binding === undefined && !statedInBrief && rawIsFinite
-          ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText)
+        binding === undefined && verdict === "undecidable" && rawIsFinite
+          ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText, unit)
           : null;
 
       const earnsBriefClaim =
