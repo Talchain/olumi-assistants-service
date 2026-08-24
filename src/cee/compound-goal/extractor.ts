@@ -1146,7 +1146,29 @@ function extractNounFormConstraints(
         value,
         unit,
         label: buildBoundDisplayName(targetName, "<=", valueStr),
-        sourceQuote: match[0].slice(0, 200),
+        // ⚠ THE GOVERNING SENTENCE, NOT THE MATCHED SPAN — AND THE ASYMMETRY IS
+        // SPECIFIC TO THIS PATH. The four verb-path quotes above stay `match[0]`
+        // and are correct there: the verb IS the commitment, so the span carries
+        // it ("We must not exceed £250,000", "Spend is capped at £250,000").
+        //
+        // A noun carries no commitment — that is the premise this whole path is
+        // built on — so the span is exactly the wrong unit to quote. Measured on
+        // the residual leaks: "Deals in this segment typically run on a £90,000
+        // budget" produced the quote "£90,000 budget", and a GENUINE "We have a
+        // £250,000 budget for whichever route we pick" produced "£250,000
+        // budget". BYTE-IDENTICAL. The clause that disqualifies the first —
+        // `typically run on`, `The regulator sets` — is precisely what the span
+        // omits, so a fabricated row and a real one are indistinguishable in the
+        // one channel whose job is showing the user our evidence.
+        //
+        // That is what makes the seven KNOWN_WIRE_LEAKS acceptable to carry:
+        // "prefer visible failure over confident wrongness" licenses a wrong row
+        // only while the failure is LEGIBLE AS failure. Quoting the span made it
+        // read as the product faithfully honouring something the user said. This
+        // does not close the leaks and is not meant to — it makes them visible.
+        //
+        // `sentence` is already derived above for S2/S3/S4; no new derivation.
+        sourceQuote: sentence.trim().slice(0, 200),
         // Below the 0.85 the verb forms carry: the noun states the limit but
         // the commitment is read off the surrounding clause, which is a weaker
         // reading than a verb that states it outright.

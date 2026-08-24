@@ -289,3 +289,104 @@ describe("real corpus (164, unlabelled) — regression count only", () => {
     ]);
   });
 });
+
+/**
+ * THE DISCLOSURE — can a user SEE that a spurious row is spurious?
+ *
+ * ⚠⚠ THE ARGUMENT FOR CARRYING SEVEN KNOWN LEAKS DEPENDS ENTIRELY ON THIS FILE.
+ * "Prefer visible failure over confident wrongness" licenses a wrong row only
+ * while the failure is LEGIBLE AS failure. Measured, it was not:
+ *
+ *   "Deals in this segment typically run on a £90,000 budget"  -> quote "£90,000 budget"
+ *   "We have a £250,000 budget for whichever route we pick"    -> quote "£250,000 budget"
+ *
+ * A fabrication and a genuine constraint, BYTE-INDISTINGUISHABLE in the one
+ * channel whose job is showing the user our evidence. `sourceQuote` was the
+ * matched SPAN, and the span is exactly the wrong unit for this path: a noun
+ * carries no commitment — that is the premise the whole path rests on — so the
+ * clause that disqualifies the row (`typically run on`, `The regulator sets`)
+ * is precisely what the span omits.
+ *
+ * The noun path now quotes the GOVERNING SENTENCE. This closes nothing; it makes
+ * the seven visible. The FP count is unchanged on all five corpora, verified.
+ *
+ * ⚠ THE VERB PATH IS DELIBERATELY UNTOUCHED AND IS THE CONTRAST CONTROL. There
+ * the verb IS the commitment, so the span carries it and is correct. A test that
+ * only checked the noun path could pass with `match[0]` replaced everywhere;
+ * the verb assertion below is what proves the change is SCOPED.
+ */
+describe("disclosure — a spurious row must not read like a faithful one", () => {
+  function rowFor(brief: string, nodeId: string, value: number): any {
+    const ctx = makeCtx(brief);
+    runCompoundGoals(ctx);
+    runLateStrp(ctx);
+    const wire = CEEGraphResponseV3.parse(
+      transformResponseToV3({ graph: ctx.graph, goal_constraints: ctx.goalConstraints } as never, { brief }),
+    );
+    const gc = ((wire as any).goal_constraints ?? []) as any[];
+    // Bound by IDENTITY (node + value), never "the first row" (trap 19).
+    return gc.find((r) => r.node_id === nodeId && r.value === value);
+  }
+
+  // Every residual leak, with the clause that disqualifies it.
+  const LEAKS: Array<[string, string, string, number, string]> = [
+    ["AD-DESC-05", "Deals in this segment typically run on a £90,000 budget.", "fac_budget", 90000, "typically run on"],
+    ["AD-DESC-06", "The previous programme ran to a £1.2m budget and delivered late.", "fac_budget", 1200000, "previous programme ran to"],
+    ["AD-DESC-07", "We spent against a £250,000 cap last quarter and came in under.", "fac_cost", 250000, "spent against"],
+    ["AD-OTH-02", "The regulator sets a cost ceiling: £50,000 per claim.", "fac_cost", 50000, "The regulator sets"],
+    ["AD-OTH-04", "The incumbent operates on a £2m budget.", "fac_budget", 2000000, "The incumbent operates on"],
+    ["AD-OTH-07", "The parent group imposes a budget of £120,000 on every subsidiary.", "fac_budget", 120000, "The parent group imposes"],
+    ["AD-Q-03", "I am wondering whether a budget of £120,000 is realistic.", "fac_budget", 120000, "I am wondering whether"],
+  ];
+
+  for (const [id, brief, node, value, disqualifier] of LEAKS) {
+    it(`${id}: the quote carries the clause that makes it NOT the user's limit`, () => {
+      const row = rowFor(brief, node, value);
+      expect(row, `${id} did not produce the expected row`).toBeDefined();
+      expect(
+        row.source_quote,
+        `${id}: quote hides the disqualifying clause — a fabrication reading as a faithful record`,
+      ).toContain(disqualifier);
+    });
+  }
+
+  const GENUINE: Array<[string, string, string, number, string]> = [
+    ["genuine-have", "We have a £250,000 budget for whichever route we pick.", "fac_budget", 250000, "We have"],
+    ["genuine-is", "Our budget is £50,000.", "fac_budget", 50000, "Our budget is"],
+    ["genuine-limit", "We have a hard limit of £250,000 on the whole programme.", "fac_cost", 250000, "We have a hard limit"],
+  ];
+
+  for (const [id, brief, node, value, commitment] of GENUINE) {
+    it(`${id}: a genuine row still quotes its own commitment`, () => {
+      const row = rowFor(brief, node, value);
+      expect(row, `${id} did not produce the expected row`).toBeDefined();
+      expect(row.source_quote).toContain(commitment);
+    });
+  }
+
+  it("the once-indistinguishable PAIR is now distinguishable — the whole point", () => {
+    // These two produced the SAME quote before this change.
+    const spurious = rowFor("Deals in this segment typically run on a £90,000 budget.", "fac_budget", 90000);
+    const genuine = rowFor("We have a £250,000 budget for whichever route we pick.", "fac_budget", 250000);
+    expect(spurious.source_quote).not.toBe(genuine.source_quote);
+    expect(spurious.source_quote).toContain("typically run on");
+    expect(genuine.source_quote).not.toContain("typically");
+  });
+
+  it("CONTRAST CONTROL — the VERB path still quotes the SPAN, not the sentence", () => {
+    // ⚠ This is what proves the change is scoped to the noun path. The brief is
+    // deliberately multi-clause so the span and the sentence DIFFER: if the verb
+    // path had been changed too, the quote would carry the trailing clause.
+    // `fac_budget` (not "Spend") because this harness's graph carries a budget
+    // node — a target the remap can actually bind, so the control DISCRIMINATES
+    // instead of vanishing. A control that returns nothing proves nothing.
+    const brief = "Budget is capped at £250,000, which the board agreed last week.";
+    const row = rowFor(brief, "fac_budget", 250000);
+    expect(row, "verb-path row missing — the control cannot discriminate").toBeDefined();
+    expect(row.source_quote).toContain("capped at £250,000");
+    expect(
+      row.source_quote,
+      "the verb path was changed too — this fix must be noun-path only",
+    ).not.toContain("the board agreed last week");
+  });
+});
