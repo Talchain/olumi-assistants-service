@@ -104,6 +104,35 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // it cannot invent a claim about the user, and it cannot put a number on screen.
   "cee/graph-readiness/obligation-provenance.ts":
     "reader only — classifies the stamp as user_stated for the INV-P6 obligation rule; the literal is a lookup key, the module has no write path",
+  // ── The decision-review sampling-width mapping. Reviewed 24 Aug 2026 against
+  // ── this guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, and for the same structural reason as the entry
+  // above: the literal appears exactly once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, ExtractionType>` that classifies a
+  // stamp someone else already wrote. The module takes a stamp and returns a
+  // multiplier bucket. It has no write path, it never touches
+  // `observed_state.source`, and it cannot cause `user_override` to appear on
+  // any value.
+  //
+  // ⚠ THE DIRECTION OF HARM IS DIFFERENT FROM obligation-provenance's, so it is
+  // stated rather than inherited. A wrong classification here does not withdraw
+  // an obligation and does not put a number on screen — it changes a DERIVED
+  // `value_std` multiplier, i.e. how widely a sampler may draw the value. That
+  // is a claim about PRECISION, never a claim about authorship, so it cannot
+  // produce the "you told us this number" untruth 2.714 was reverted for. What
+  // it CAN do is inherit an untruthful stamp from a writer above and sample a
+  // fabricated value too tightly — which is an argument for keeping THEIR
+  // entries honest, exactly as the previous entry says, not for giving this one
+  // a write path it does not have.
+  //
+  // This file exists because the code it replaced read `source` through a
+  // hand-written TWO-member mirror of the twelve-member contract enum and
+  // bucketed every user-authored literal — `user_override` included — as
+  // `inferred`, sampling a user's own figure 50% WIDER than the model's reading
+  // of the brief. The `Record<…>` is what stops that mirror re-forming.
+  "cee/decision-review/value-source-extraction-type.ts":
+    "reader only — maps the stamp to a sampling-width bucket (ExtractionType); the literal is a lookup key, the module has no write path and makes no authorship claim",
 };
 
 /**
