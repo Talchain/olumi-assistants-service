@@ -187,6 +187,73 @@ describe('deterministic semantic categories and coverage', () => {
     expect(() => compareVersionRecords(record({ graph: duplicateEdges }), record({ graph_identity_hash: HASH_B }))).toThrow(/duplicate edge identity/);
   });
 
+  it('fails closed on dangling connectors and malformed recognised collections', () => {
+    const dangling = {
+      nodes: [{ id: 'a' }],
+      edges: [{ id: 'e1', from: 'a', to: 'missing' }],
+    };
+    expect(() =>
+      compareVersionRecords(
+        record({ graph: dangling }),
+        record({ graph_identity_hash: HASH_B }),
+      ),
+    ).toThrow(/references a missing node/);
+
+    const idlessOption = {
+      nodes: [{ id: 'a' }],
+      edges: [],
+      options: [{ label: 'No stable identity' }],
+    };
+    expect(() =>
+      compareVersionRecords(
+        record({ graph: idlessOption }),
+        record({ graph_identity_hash: HASH_B }),
+      ),
+    ).toThrow(/options item without a stable identity/);
+  });
+
+  it('uses constraint_id rather than target node as constraint authority', () => {
+    const graphA = {
+      nodes: [{ id: 'target' }],
+      edges: [],
+      goal_constraints: [
+        { constraint_id: 'minimum', node_id: 'target', operator: '>=', value: 10 },
+        { constraint_id: 'maximum', node_id: 'target', operator: '<=', value: 20 },
+      ],
+    };
+    const graphB = {
+      ...graphA,
+      goal_constraints: [
+        graphA.goal_constraints[0],
+        { ...graphA.goal_constraints[1], value: 30 },
+      ],
+    };
+    const result = compareVersionRecords(
+      record({ graph: graphA }),
+      record({ graph: graphB, graph_identity_hash: HASH_B }),
+    );
+    expect(result.relation).toBe('different');
+    if (result.relation !== 'different') throw new Error('precondition');
+    expect(result.categories.goals_constraints_options).toEqual([
+      expect.objectContaining({
+        entity_id: 'maximum',
+        path: '/goal_constraints/maximum/value',
+        change_kind: 'changed',
+      }),
+    ]);
+
+    const duplicateConstraint = {
+      ...graphA,
+      goal_constraints: [graphA.goal_constraints[0], graphA.goal_constraints[0]],
+    };
+    expect(() =>
+      compareVersionRecords(
+        record({ graph: duplicateConstraint }),
+        record({ graph_identity_hash: HASH_B }),
+      ),
+    ).toThrow(/duplicate goal_constraints identity minimum/);
+  });
+
   it('compares distinct parallel connectors by stable id or connector type', () => {
     const graphA = {
       nodes: [{ id: 'a' }, { id: 'b' }],
