@@ -91,6 +91,32 @@ interface ValidatedGraph {
   readonly edges: Map<string, Record<string, unknown>>;
 }
 
+function stableEdgeIdentity(
+  edge: Record<string, unknown>,
+  side: 'from' | 'to',
+  index: number,
+): string {
+  const id = edge.id;
+  if (typeof id === 'string' && id.length > 0) return id;
+
+  const from = edge.from;
+  const to = edge.to;
+  if (typeof from !== 'string' || from.length === 0 || typeof to !== 'string' || to.length === 0) {
+    throw new ModelVersionDiffInputError(
+      `${side} version has an edge without stable id or from/to at index ${index}`,
+    );
+  }
+
+  // GraphV3 permits parallel connectors. A producer-supplied id is the
+  // preferred authority; for older id-less rows, a connector type can still
+  // distinguish two otherwise-equal endpoint pairs. Two id-less connectors
+  // with the same endpoints and type remain ambiguous and fail closed below.
+  const edgeType = edge.edge_type;
+  return typeof edgeType === 'string' && edgeType.length > 0
+    ? `${from}→${to}#${edgeType}`
+    : `${from}→${to}`;
+}
+
 function validateGraph(graph: unknown, side: 'from' | 'to'): ValidatedGraph {
   const raw = asRecord(graph);
   if (raw === null || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
@@ -111,12 +137,10 @@ function validateGraph(graph: unknown, side: 'from' | 'to'): ValidatedGraph {
   const edges = new Map<string, Record<string, unknown>>();
   for (const [index, candidate] of raw.edges.entries()) {
     const edge = asRecord(candidate);
-    const from = edge?.from;
-    const to = edge?.to;
-    if (edge === null || typeof from !== 'string' || from.length === 0 || typeof to !== 'string' || to.length === 0) {
-      throw new ModelVersionDiffInputError(`${side} version has an edge without stable from/to at index ${index}`);
+    if (edge === null) {
+      throw new ModelVersionDiffInputError(`${side} version has a malformed edge at index ${index}`);
     }
-    const key = `${from}→${to}`;
+    const key = stableEdgeIdentity(edge, side, index);
     if (edges.has(key)) throw new ModelVersionDiffInputError(`${side} version has duplicate edge identity ${key}`);
     edges.set(key, edge);
   }
