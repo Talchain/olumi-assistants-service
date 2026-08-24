@@ -92,6 +92,7 @@ import {
 } from '../model-management/mutation-receipt.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
+import { buildDraftFramingBlocks } from './draft-framing-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
 import {
   buildV5DiagnosticTrace,
@@ -439,6 +440,34 @@ export function draftResultToOlumiResponse(
           analysisReady: result.analysisReady ?? null,
           biasSignals: result.coachingBiasSignals,
           graph: result.graphOutput,
+          createdAt: blocksCreatedAt,
+        }),
+        // FRAME/IDEATE visibility (draft-framing-blocks): the COMPLEMENT of the
+        // two projectors above. Both of them, and the post-draft narrative's
+        // freeform coaching, are gated on `analysisReady.status === 'ready'`, so
+        // a team whose model is not yet analysis-ready — which is precisely the
+        // team still framing the problem or still generating possibilities —
+        // receives no coaching at all, only an instruction to go and finish
+        // their option set. This emitter serves that half and ONLY that half:
+        // its gate is the exact inverse (`=== 'ready'` returns []), so it can
+        // never double-emit with the widening card, the bias card, or the
+        // narrative. Ready and not-ready partition the space; each half now has
+        // a producer. It reads `strengthen_items.action_type` — a
+        // contract-typed field the drafter has always written and nothing on
+        // either side of the wire has ever read — and surfaces only the two
+        // members that do work before a complete option set exists:
+        // `reframe_goal` (FRAME) and `add_option` (IDEATE).
+        ...buildDraftFramingBlocks({
+          analysisReady: result.analysisReady ?? null,
+          // `result.strengthenItems` — the SAME field `buildPostDraftNarrative`
+          // is handed at :261. There is no `coachingStrengthenItems` on this
+          // result (the widening sibling's `coachingWideningLogObject` is a
+          // differently-named field, and reaching for the parallel name here
+          // yields `undefined`, which gate 2 turns into a permanently silent
+          // card — a dark ship with a green suite).
+          strengthenItems: result.strengthenItems ?? null,
+          graph: result.graphOutput,
+          briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
           createdAt: blocksCreatedAt,
         }),
         ...buildDraftOptionWideningBlocks({
