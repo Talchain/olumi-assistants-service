@@ -30,14 +30,20 @@ import {
   remapConstraintTargets,
 } from "../index.js";
 import { partitionUnprovenDirection } from "../direction-gate.js";
-import corpus from "./fixtures/intake-constraint-reviewer-corpus.json" with { type: "json" };
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 interface ReviewerCase {
   id: string;
   brief: string;
   expect: "fire" | "silent";
 }
-const CASES = (corpus as { cases: ReviewerCase[] }).cases;
+/** Read, not imported — see the note in `noun-form-constraint-corpus.test.ts`. */
+const CASES = (
+  JSON.parse(
+    readFileSync(join(__dirname, "fixtures", "intake-constraint-reviewer-corpus.json"), "utf8"),
+  ) as { cases: ReviewerCase[] }
+).cases;
 
 function throughPipeline(brief: string) {
   const extracted = extractCompoundGoals(brief, { includeProxies: false });

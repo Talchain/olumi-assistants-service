@@ -34,7 +34,8 @@ import {
   toGoalConstraints,
   normaliseConstraintUnits,
 } from "../index.js";
-import corpus from "./fixtures/intake-constraint-reviewer-corpus.json" with { type: "json" };
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 interface ReviewerCase {
   id: string;
@@ -45,7 +46,19 @@ interface ReviewerCase {
   source?: string;
 }
 
-const CASES = (corpus as { cases: ReviewerCase[] }).cases;
+/**
+ * Read, not imported. A `with { type: "json" }` import attribute is rejected by
+ * the ROOT tsconfig (`error TS2823`), which is what the `Typecheck Drift
+ * (ratchet)` job runs — and NOT by `tsconfig.build.json`, which excludes test
+ * files entirely. So the local `pnpm build` gate is structurally blind to it and
+ * the first version of this file passed every local check and failed CI.
+ * `readFileSync` + `join(__dirname, …)` is the repo's dominant convention.
+ */
+const CASES = (
+  JSON.parse(
+    readFileSync(join(__dirname, "fixtures", "intake-constraint-reviewer-corpus.json"), "utf8"),
+  ) as { cases: ReviewerCase[] }
+).cases;
 
 /** Does the drafter mint at least one `goal_constraints[]` row for this brief? */
 function drafterFires(brief: string): { fired: boolean; rows: string[] } {
