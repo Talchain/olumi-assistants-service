@@ -298,6 +298,74 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /assist/v1/explain-diff:
+    post:
+      summary: Explain changes in a graph patch (v1 surface)
+      description: |
+        Browser-reachable alias of `/assist/explain-diff`. Identical handler,
+        identical request and response schemas — the two paths cannot fork
+        (single handler, single derived path list in
+        `src/routes/assist.explain-diff.ts`).
+
+        This path exists because the UI's only CEE seam is the `/bff/cee/*` edge
+        function, which rewrites `/bff/cee/<x>` to `/assist/v1/<x>`. The legacy
+        `/assist/explain-diff` path is therefore unreachable from a browser, and
+        the capability was dark despite a complete server half.
+
+        The legacy path is retained for the published TypeScript SDK and is not
+        deprecated.
+
+        **Features:**
+        - Non-mutating (does not modify the graph)
+        - Deterministic ordering (rationales sorted alphabetically by target)
+        - Structured output with target IDs, explanations, and optional provenance
+        - Requires at least one change in the patch
+      tags:
+        - Explain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExplainDiffInput'
+            examples:
+              applied_edit_receipt:
+                summary: V5 applied-edit receipt (the shape the UI sends)
+                value:
+                  patch:
+                    adds:
+                      nodes: []
+                      edges: []
+                    updates:
+                      - target_id: "factor_7"
+                        operation: "set_factor_value"
+                        before:
+                          value: 0.2
+                        after:
+                          value: 0.45
+                    removes: []
+                  graph_summary:
+                    node_count: 6
+                    edge_count: 5
+      responses:
+        '200':
+          description: Rationales explaining the patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExplainDiffOutput'
+        '400':
+          description: Invalid input, or a patch with no changes to explain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorV1'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorV1'
   /assist/explain-diff:
     post:
       summary: Explain changes in a graph patch
