@@ -1323,13 +1323,9 @@ const ConfigSchema = z.object({
     // batch, ROADMAP 1.25 item C): this previously said "the module has
     // zero production call sites this slice; nothing is wired into routes
     // or the turn-executor" — no longer true as of Lane 8 (2026-07-07): the
-    // ONE sanctioned production call site is the flag-gated commit-seam
-    // version hook in src/orchestrator-v5/commit.ts (fires after a durable,
-    // graph-bearing commit; failures never affect the turn result — see
-    // model-management/index.ts header + commit.ts's
-    // `recordModelVersionForCommit`). Routes/turn-executor/restore-compare
-    // surfaces remain unwired; isolation-guards.test.ts enforces the exact
-    // call-site set. STALE-COMMENT FIX (CEE hygiene batch
+    // sanctioned commit seam is now `append_turn_atomic_v5`: accepted semantic
+    // graph mutation, version/head/event and public receipt commit together.
+    // Restore uses its own atomic RPC. STALE-COMMENT FIX (CEE hygiene batch
     // FIX 2, 2026-07-08): this previously said the backing migration
     // (20260705120000_v5_model_versions.sql) "is AUTHORED-NOT-EXECUTED" —
     // it has since been EXECUTED on staging under Paul-gated approval

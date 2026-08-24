@@ -39,8 +39,10 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  type AtomicCommittedModelVersionReceipt,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
+  type SessionAppendOutcome,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
@@ -92,6 +94,76 @@ import {
 } from '../coaching/coaching-state-snapshot.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
+
+function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new StateCommitFailedError(
+      `append_turn_atomic_v5 returned non-object receipt: ${JSON.stringify(data)}`,
+    );
+  }
+  const row = data as Record<string, unknown>;
+  const receiptRaw = row.model_version_receipt;
+  if (typeof row.turn_row_id !== 'string') {
+    throw new StateCommitFailedError(
+      `append_turn_atomic_v5 returned malformed receipt: ${JSON.stringify(data)}`,
+    );
+  }
+  if (receiptRaw === null) return { id: row.turn_row_id };
+  if (typeof receiptRaw !== 'object' || Array.isArray(receiptRaw)) {
+    throw new StateCommitFailedError(
+      `append_turn_atomic_v5 returned malformed receipt: ${JSON.stringify(data)}`,
+    );
+  }
+  const receipt = receiptRaw as Record<string, unknown>;
+  for (const key of [
+    'mutation_id',
+    'version_id',
+    'graph_identity_hash',
+    'analysis_affecting_hash',
+    'hash_algorithm',
+    'identity_projection_version',
+    'identity_normaliser_version',
+    'graph_schema_version',
+    'creation_kind',
+    'source_turn_id',
+    'event_id',
+  ] as const) {
+    if (typeof receipt[key] !== 'string' || receipt[key].length === 0) {
+      throw new StateCommitFailedError(
+        `append_turn_atomic_v5 returned malformed ${key}: ${JSON.stringify(data)}`,
+      );
+    }
+  }
+  if (
+    !/^[0-9a-f]{64}$/.test(receipt.graph_identity_hash as string) ||
+    !/^[0-9a-f]{64}$/.test(receipt.analysis_affecting_hash as string) ||
+    typeof receipt.version_number !== 'number' ||
+    !Number.isInteger(receipt.version_number) ||
+    receipt.version_number < 1 ||
+    !Object.prototype.hasOwnProperty.call(receipt, 'graph') ||
+    (receipt.parent_version_id !== null && typeof receipt.parent_version_id !== 'string') ||
+    (receipt.root_version_id !== null && typeof receipt.root_version_id !== 'string') ||
+    (receipt.undo_version_id !== null && typeof receipt.undo_version_id !== 'string') ||
+    receipt.source_version_id !== null ||
+    (receipt.creation_kind !== 'initial' && receipt.creation_kind !== 'committed_mutation') ||
+    (receipt.actor_kind !== 'known' &&
+      receipt.actor_kind !== 'system' &&
+      receipt.actor_kind !== 'unknown') ||
+    !(
+      (receipt.actor_kind === 'known' && typeof receipt.authored_by === 'string') ||
+      ((receipt.actor_kind === 'system' || receipt.actor_kind === 'unknown') &&
+        receipt.authored_by === null)
+    )
+  ) {
+    throw new StateCommitFailedError(
+      `append_turn_atomic_v5 returned malformed model-version receipt: ${JSON.stringify(data)}`,
+    );
+  }
+  return {
+    id: row.turn_row_id,
+    modelVersionReceipt: receipt as unknown as AtomicCommittedModelVersionReceipt,
+  };
+}
 
 // V5 Conversation Context Reliability: user_message / assistant_message added
 // by migration 20260609120000. They are SELECTed here but parsed OUTSIDE the
@@ -161,7 +233,7 @@ export class SupabaseSessionStore implements SessionStore {
     private readonly options: SupabaseSessionStoreOptions,
   ) {}
 
-  async append(write: SessionTurnWrite): Promise<{ id: string }> {
+  async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
     // SELECTs and the RPC call below is byte-identical to today. In observe
@@ -259,6 +331,17 @@ export class SupabaseSessionStore implements SessionStore {
     // that path. Everything else (unfenced / unclaimed / v4-missing
     // fallback) keeps the pre-v4 evaluate-then-append behaviour exactly.
     const fencePlan = await this.enforceTurnFence(write);
+
+    // A semantic version carrier is load-bearing: turn + graph +
+    // version/head/event must share v5's transaction. No legacy fallback is
+    // safe when the migration is absent.
+    if (write.modelVersion !== undefined) {
+      return await this.appendAtomicVersioned(
+        write,
+        baseRpcArgs,
+        fencePlan.path === 'atomic' ? fencePlan.generation : null,
+      );
+    }
 
     if (fencePlan.path === 'atomic') {
       return await this.appendAtomicFenced(write, baseRpcArgs, rpcMode, fencePlan.generation);
@@ -1101,6 +1184,108 @@ export class SupabaseSessionStore implements SessionStore {
     return { id: data };
   }
 
+  /** Version-bearing canonical append. No legacy fallback is safe. */
+  private async appendAtomicVersioned(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    generation: number | null,
+  ): Promise<SessionAppendOutcome> {
+    const version = write.modelVersion;
+    if (version === undefined || write.graph == null) {
+      throw new StateCommitFailedError(
+        'append_turn_atomic_v5 requires both graph and model-version carrier',
+      );
+    }
+
+    let trustedExpectedHash = write.expectedGraphIdentityHash;
+    if (trustedExpectedHash === undefined) {
+      const { data: scenario, error: readError } = await this.client
+        .from('scenarios')
+        .select('graph_identity_hash')
+        .eq('id', write.scenario_id)
+        .maybeSingle();
+      if (readError) {
+        throw new StateCommitFailedError(
+          `append_turn_atomic_v5 could not read the trusted CAS base: ${errMsg(readError)}`,
+          { cause: readError, rpc_code: errCode(readError) },
+        );
+      }
+      const raw = (scenario as { graph_identity_hash?: unknown } | null)?.graph_identity_hash;
+      if (
+        raw !== null &&
+        raw !== undefined &&
+        (typeof raw !== 'string' || !/^[0-9a-f]{64}$/.test(raw))
+      ) {
+        throw new StateCommitFailedError(
+          'append_turn_atomic_v5 read a malformed trusted CAS base',
+        );
+      }
+      trustedExpectedHash = typeof raw === 'string' ? raw : null;
+    }
+
+    const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
+      ...baseRpcArgs,
+      p_expected_graph_identity_hash: trustedExpectedHash,
+      p_incoming_graph_identity_hash: version.graph_identity_hash,
+      p_cas_enforce: true,
+      p_fence_generation: generation,
+      p_version_mutation_id: version.mutation_id,
+      p_version_analysis_affecting_hash: version.analysis_affecting_hash,
+      p_version_hash_algorithm: version.hash_algorithm,
+      p_version_projection_version: version.identity_projection_version,
+      p_version_normaliser_version: version.identity_normaliser_version,
+      p_version_graph_schema_version: version.graph_schema_version,
+      p_version_actor_kind: version.actor_kind,
+      p_version_authored_by: version.authored_by,
+      p_version_creation_kind: version.creation_kind,
+      p_version_source_turn_id: version.source_turn_id,
+    });
+
+    if (error) {
+      const fenceEvaluation = classifyAtomicFenceError(error);
+      if (fenceEvaluation !== null) {
+        this.emitFenceEvaluated(
+          write,
+          fenceEvaluation.verdict,
+          fenceEvaluation.generation,
+          fenceEvaluation.maxGeneration,
+          'atomic_append',
+        );
+        await this.markGraphWriteFailed(
+          write.scenario_id,
+          currentTurnFenceSlot()?.turnId ?? write.turn_id,
+          fenceEvaluation.verdict,
+          'draft_loss',
+        );
+        this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
+      }
+      if (errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
+        this.emitRpcCasConflict(write, 'enforce', errCode(error));
+        throw new GraphStaleWriteError(
+          `append_turn_atomic_v5 rejected a stale graph write for scenario ${write.scenario_id}; ` +
+            'the turn and version both rolled back.',
+          {
+            conflict_category: 'rpc_cas_conflict',
+            cause: error,
+            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
+          },
+        );
+      }
+      throw new StateCommitFailedError(
+        `append_turn_atomic_v5 RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) },
+      );
+    }
+
+    const parsed = parseAtomicVersionedAppend(data);
+    if (generation !== null) {
+      this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
+    }
+    this.cache.invalidateAll(write.scenario_id);
+    await this.resolveDraftLossAfterGraphCommit(write);
+    return parsed;
+  }
+
   /**
    * ROADMAP 2.709, REWRITTEN BY 2.736 — the OLTF2 replay passthrough.
    *
@@ -1733,6 +1918,29 @@ export class SupabaseSessionStore implements SessionStore {
     if (data == null) return null;
     const userId = (data as { user_id?: unknown }).user_id;
     return typeof userId === 'string' && userId.length > 0 ? userId : null;
+  }
+
+  async readAnalysisInvalidatedAt(scenarioId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('analysis_invalidated_at')
+      .eq('id', scenarioId)
+      .maybeSingle();
+    if (error) {
+      throw new SessionReadError(
+        `readAnalysisInvalidatedAt failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    if (data === null) return null;
+    const raw = (data as { analysis_invalidated_at?: unknown }).analysis_invalidated_at;
+    if (raw === null) return null;
+    if (typeof raw !== 'string' || !Number.isFinite(Date.parse(raw))) {
+      throw new SessionReadError(
+        `readAnalysisInvalidatedAt returned malformed timestamp for scenario ${scenarioId}`,
+      );
+    }
+    return raw;
   }
 
   async readMostRecentPendingActions(
