@@ -82,8 +82,10 @@ describe("router task provider capability", () => {
       "ROUTER_TASK_PROVIDER_CAPABILITIES is empty; this guard would be vacuous.",
     ).toBeGreaterThan(0);
 
+    type Offender = { task: string; problem: string };
+
     const offenders = constrained
-      .map((task) => {
+      .map((task): Offender | null => {
         const outcome = resolveConfiguredRouterPlan(task);
         if (outcome.kind !== "single") {
           return {
@@ -104,7 +106,7 @@ describe("router task provider capability", () => {
               problem: `resolved provider '${outcome.assignment.provider}' not in [${supported.join(", ")}]`,
             };
       })
-      .filter((entry): entry is { task: string; problem: string } => entry !== null);
+      .filter((entry): entry is Offender => entry !== null);
 
     expect(
       offenders,
