@@ -153,9 +153,30 @@ describe("POST /assist/explain-diff", () => {
    * asserting "the handler works" is not enough — the PATH is the claim.
    */
   describe("POST /assist/v1/explain-diff (browser-reachable surface)", () => {
+    /**
+     * THREE adds, not one, and the ids are deliberately NOT in sorted order.
+     *
+     * ⚠ An independent review measured this fixture as the parity test's blind
+     * spot. With a single add the response is a ONE-ELEMENT array, and a
+     * one-element array is identical under every reordering — so a genuine
+     * per-path fork (v1 sorting its rationales descending) SURVIVED at 10/10
+     * green while a probe with its precondition pinned went RED. The comment
+     * below claimed "a future edit that forks them REDs here"; with one add
+     * that claim was false.
+     *
+     * `zebra` / `mid` / `alpha` make the array both multi-element and
+     * order-bearing, so the parity assertion can observe a divergence at all.
+     */
     const VALID_PATCH = {
       patch: {
-        adds: { nodes: [{ id: "goal_1", kind: "goal", label: "Increase revenue" }], edges: [] },
+        adds: {
+          nodes: [
+            { id: "zebra_1", kind: "goal", label: "Increase revenue" },
+            { id: "mid_1", kind: "factor", label: "Sales headcount" },
+            { id: "alpha_1", kind: "option", label: "Hire two reps" },
+          ],
+          edges: [],
+        },
         updates: [],
         removes: [],
       },
