@@ -76,6 +76,17 @@ export const RestoreVersionRequestSchema = z
   })
   .strict();
 
+/** Public restore intent: target, idempotency identity and exact working CAS. */
+export const AtomicRestoreRouteRequestSchema = z
+  .object({
+    scenario_id: ScenarioId,
+    version_id: VersionId,
+    mutation_id: z.string().uuid(),
+    label: Label.optional(),
+    expected_graph_identity_hash: Sha256Hex.nullable(),
+  })
+  .strict();
+
 export const ListVersionsRequestSchema = z
   .object({
     scenario_id: ScenarioId,
@@ -135,6 +146,32 @@ export const VersionWriteOutcomeResponseSchema = z
   })
   .strict();
 
+export const AtomicRestoreVersionOutcomeResponseSchema = z
+  .object({
+    mutation_id: z.string().uuid(),
+    version_id: z.string().uuid(),
+    version_number: z.number().int().positive(),
+    graph_identity_hash: Sha256Hex,
+    analysis_affecting_hash: Sha256Hex,
+    hash_algorithm: z.string().min(1),
+    identity_projection_version: z.string().min(1),
+    identity_normaliser_version: z.string().min(1),
+    graph_schema_version: z.string().min(1),
+    restored_from_version_id: z.string().uuid(),
+    undo_version_id: z.string().uuid().nullable(),
+    parent_version_id: z.string().uuid().nullable(),
+    root_version_id: z.string().uuid().nullable(),
+    actor_kind: z.enum(['known', 'system', 'unknown']),
+    authored_by: z.string().nullable(),
+    creation_kind: z.literal('restore'),
+    source_version_id: z.string().uuid(),
+    source_turn_id: z.string().min(1).nullable(),
+    graph: GraphStateIngressSchema,
+    analysis_invalidated_at: z.string().datetime(),
+    event_id: z.string().min(1),
+  })
+  .strict();
+
 const VersionDiffSummaryResponseSchema = z
   .object({
     nodes_added: z.number().int().nonnegative(),
@@ -175,7 +212,13 @@ export const CurrentVersionResponseSchema = z
 
 export const ModelManagementErrorResponseSchema = z
   .object({
-    code: z.enum(['sign_in_required', 'version_not_found', 'empty_graph', 'store_error']),
+    code: z.enum([
+      'sign_in_required',
+      'version_not_found',
+      'empty_graph',
+      'mutation_id_reused',
+      'store_error',
+    ]),
     recoverable: z.boolean(),
     message: z.string().min(1),
   })
@@ -195,11 +238,15 @@ export const VersionCasConflictResponseSchema = z
 
 export type CreateVersionRequest = z.infer<typeof CreateVersionRequestSchema>;
 export type RestoreVersionRequestContract = z.infer<typeof RestoreVersionRequestSchema>;
+export type AtomicRestoreRouteRequest = z.infer<typeof AtomicRestoreRouteRequestSchema>;
 export type ListVersionsRequest = z.infer<typeof ListVersionsRequestSchema>;
 export type GetCurrentVersionRequest = z.infer<typeof GetCurrentVersionRequestSchema>;
 export type ModelVersionSummaryResponse = z.infer<typeof ModelVersionSummaryResponseSchema>;
 export type ModelVersionRecordResponse = z.infer<typeof ModelVersionRecordResponseSchema>;
 export type VersionWriteOutcomeResponse = z.infer<typeof VersionWriteOutcomeResponseSchema>;
+export type AtomicRestoreVersionOutcomeResponse = z.infer<
+  typeof AtomicRestoreVersionOutcomeResponseSchema
+>;
 export type VersionComparisonResponse = z.infer<typeof VersionComparisonResponseSchema>;
 export type ListVersionsResponse = z.infer<typeof ListVersionsResponseSchema>;
 export type CurrentVersionResponse = z.infer<typeof CurrentVersionResponseSchema>;

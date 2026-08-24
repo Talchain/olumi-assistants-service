@@ -38,7 +38,10 @@ import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
+import {
+  computeAnalysisAffectingGraphHash,
+  computeAnalysisAffectingGraphHashSha256,
+} from './graph-hash.js';
 
 // ---------------------------------------------------------------------------
 // Versioned projection metadata (contract §8 "Normalisation must be versioned",
@@ -363,6 +366,26 @@ export function computeAnalysisAffectingHashRecord(
   graph: GraphStateIngress | null | undefined,
 ): AnalysisAffectingHash | null {
   const value = computeAnalysisAffectingGraphHash(graph);
+  if (value === null) return null;
+  return {
+    kind: 'analysis_affecting_hash',
+    value,
+    algorithm: HASH_ALGORITHM,
+    projection_version: ANALYSIS_PROJECTION_VERSION,
+    graph_schema_version: GRAPH_SCHEMA_VERSION,
+    normaliser_version: ANALYSIS_NORMALISER_VERSION,
+  };
+}
+
+/**
+ * Durable-version form of the analysis-affecting identity. It uses the same
+ * projection/normaliser as freshness but retains the complete SHA-256 rather
+ * than the established 16-hex freshness token.
+ */
+export function computeVersionAnalysisAffectingHashRecord(
+  graph: GraphStateIngress | null | undefined,
+): AnalysisAffectingHash | null {
+  const value = computeAnalysisAffectingGraphHashSha256(graph);
   if (value === null) return null;
   return {
     kind: 'analysis_affecting_hash',

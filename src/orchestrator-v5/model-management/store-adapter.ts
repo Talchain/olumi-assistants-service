@@ -26,7 +26,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { ModelVersionRecord, ModelVersionSummary, VersionWriteOutcome } from './types.js';
+import type {
+  AtomicRestoreVersionOutcome,
+  ModelVersionRecord,
+  ModelVersionSummary,
+  VersionWriteOutcome,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Typed errors (session-store idiom: adapter throws typed, service maps).
@@ -52,6 +57,13 @@ export class ModelVersionCasConflictError extends Error {
     super(message, options);
     this.name = 'ModelVersionCasConflictError';
     this.expectedHash = expectedHash;
+  }
+}
+
+export class ModelVersionMutationIdReusedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ModelVersionMutationIdReusedError';
   }
 }
 
@@ -93,6 +105,28 @@ export interface RestoreVersionWrite {
   readonly expected_graph_identity_hash?: string;
 }
 
+export interface AtomicRestoreVersionWrite {
+  readonly scenario_id: string;
+  readonly version_id: string;
+  readonly mutation_id: string;
+  readonly graph: unknown;
+  readonly graph_identity_hash: string;
+  readonly analysis_affecting_hash: string;
+  readonly hash_algorithm: string;
+  readonly identity_projection_version: string;
+  readonly identity_normaliser_version: string;
+  readonly graph_schema_version: string;
+  readonly source_graph_identity_hash: string;
+  readonly current_graph: unknown;
+  readonly current_graph_identity_hash: string | null;
+  readonly current_analysis_affecting_hash: string | null;
+  readonly expected_graph_identity_hash: string | null;
+  readonly actor_kind: 'known' | 'system' | 'unknown';
+  readonly authored_by: string | null;
+  readonly source_turn_id: string | null;
+  readonly label?: string;
+}
+
 /** Store port — the service depends on this interface, not the class, so
  *  tests inject hand-rolled fakes without a Supabase client. */
 export interface ModelVersionStorePort {
@@ -100,6 +134,9 @@ export interface ModelVersionStorePort {
   listVersions(scenarioId: string, limit?: number): Promise<readonly ModelVersionSummary[]>;
   getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null>;
   restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
+  restoreVersionAtomic?(
+    write: AtomicRestoreVersionWrite,
+  ): Promise<AtomicRestoreVersionOutcome>;
   getCurrentVersionId(scenarioId: string): Promise<string | null>;
 }
 
@@ -171,6 +208,35 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       throw mapRpcError('restore_model_version', error, write.expected_graph_identity_hash ?? null);
     }
     return parseWriteOutcome('restore_model_version', data);
+  }
+
+  async restoreVersionAtomic(
+    write: AtomicRestoreVersionWrite,
+  ): Promise<AtomicRestoreVersionOutcome> {
+    const rpc = 'restore_model_version_atomic_v1';
+    const { data, error } = await this.client.rpc(rpc, {
+      p_scenario_id: write.scenario_id,
+      p_version_id: write.version_id,
+      p_mutation_id: write.mutation_id,
+      p_graph: write.graph,
+      p_graph_identity_hash: write.graph_identity_hash,
+      p_analysis_affecting_hash: write.analysis_affecting_hash,
+      p_projection_version: write.identity_projection_version,
+      p_normaliser_version: write.identity_normaliser_version,
+      p_graph_schema_version: write.graph_schema_version,
+      p_hash_algorithm: write.hash_algorithm,
+      p_source_graph_identity_hash: write.source_graph_identity_hash,
+      p_current_graph: write.current_graph,
+      p_current_graph_identity_hash: write.current_graph_identity_hash,
+      p_current_analysis_affecting_hash: write.current_analysis_affecting_hash,
+      p_expected_graph_identity_hash: write.expected_graph_identity_hash,
+      p_actor_kind: write.actor_kind,
+      p_authored_by: write.authored_by,
+      p_source_turn_id: write.source_turn_id,
+      p_label: write.label ?? null,
+    });
+    if (error) throw mapRpcError(rpc, error, write.expected_graph_identity_hash);
+    return parseAtomicRestoreOutcome(rpc, data);
   }
 
   async listVersions(
@@ -300,6 +366,87 @@ function parseWriteOutcome(rpc: string, data: unknown): VersionWriteOutcome {
   };
 }
 
+function parseAtomicRestoreOutcome(
+  rpc: string,
+  data: unknown,
+): AtomicRestoreVersionOutcome {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new ModelVersionStoreError(`${rpc} returned non-object outcome: ${JSON.stringify(data)}`);
+  }
+  const row = data as Record<string, unknown>;
+  const requiredStrings = [
+    'mutation_id',
+    'version_id',
+    'graph_identity_hash',
+    'analysis_affecting_hash',
+    'hash_algorithm',
+    'identity_projection_version',
+    'identity_normaliser_version',
+    'graph_schema_version',
+    'restored_from_version_id',
+    'event_id',
+    'analysis_invalidated_at',
+    'actor_kind',
+    'creation_kind',
+    'source_version_id',
+  ] as const;
+  for (const key of requiredStrings) {
+    if (typeof row[key] !== 'string' || row[key].length === 0) {
+      throw new ModelVersionStoreError(`${rpc} returned malformed ${key}: ${JSON.stringify(data)}`);
+    }
+  }
+  if (
+    typeof row.version_number !== 'number' ||
+    !Number.isInteger(row.version_number) ||
+    row.version_number < 1 ||
+    typeof row.deduped !== 'boolean' ||
+    typeof row.replayed !== 'boolean' ||
+    !Number.isFinite(Date.parse(row.analysis_invalidated_at as string)) ||
+    !Object.prototype.hasOwnProperty.call(row, 'graph')
+  ) {
+    throw new ModelVersionStoreError(`${rpc} returned malformed outcome: ${JSON.stringify(data)}`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(row.analysis_affecting_hash as string)) {
+    throw new ModelVersionStoreError(`${rpc} returned malformed analysis_affecting_hash: ${JSON.stringify(data)}`);
+  }
+  if (row.undo_version_id !== null && typeof row.undo_version_id !== 'string') {
+    throw new ModelVersionStoreError(`${rpc} returned malformed undo_version_id: ${JSON.stringify(data)}`);
+  }
+  if (
+    (row.parent_version_id !== null && typeof row.parent_version_id !== 'string') ||
+    (row.root_version_id !== null && typeof row.root_version_id !== 'string') ||
+    (row.authored_by !== null && typeof row.authored_by !== 'string') ||
+    (row.source_turn_id !== null && typeof row.source_turn_id !== 'string')
+  ) {
+    throw new ModelVersionStoreError(`${rpc} returned malformed provenance: ${JSON.stringify(data)}`);
+  }
+  return {
+    mutation_id: row.mutation_id as string,
+    version_id: row.version_id as string,
+    version_number: row.version_number,
+    graph_identity_hash: row.graph_identity_hash as string,
+    analysis_affecting_hash: row.analysis_affecting_hash as string,
+    hash_algorithm: row.hash_algorithm as string,
+    identity_projection_version: row.identity_projection_version as string,
+    identity_normaliser_version: row.identity_normaliser_version as string,
+    graph_schema_version: row.graph_schema_version as string,
+    restored_from_version_id: row.restored_from_version_id as string,
+    undo_version_id: row.undo_version_id as string | null,
+    parent_version_id: row.parent_version_id as string | null,
+    root_version_id: row.root_version_id as string | null,
+    actor_kind: row.actor_kind as 'known' | 'system' | 'unknown',
+    authored_by: row.authored_by as string | null,
+    creation_kind: 'restore',
+    source_version_id: row.source_version_id as string,
+    source_turn_id: row.source_turn_id as string | null,
+    graph: row.graph,
+    deduped: row.deduped,
+    replayed: row.replayed,
+    analysis_invalidated_at: row.analysis_invalidated_at as string,
+    event_id: row.event_id as string,
+  };
+}
+
 function mapRpcError(rpc: string, error: unknown, expectedHash: string | null): Error {
   const code = errCode(error);
   const message = `${rpc} RPC failed: ${errMsg(error)}`;
@@ -310,6 +457,8 @@ function mapRpcError(rpc: string, error: unknown, expectedHash: string | null): 
       return new ModelVersionNotFoundError(message, { cause: error });
     case 'MV409':
       return new ModelVersionCasConflictError(message, expectedHash, { cause: error });
+    case 'MV422':
+      return new ModelVersionMutationIdReusedError(message, { cause: error });
     default:
       return new ModelVersionStoreError(message, { cause: error });
   }

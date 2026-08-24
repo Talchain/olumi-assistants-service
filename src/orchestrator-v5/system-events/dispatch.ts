@@ -541,7 +541,7 @@ export async function dispatchSystemEvent(
   }
 
   try {
-    await commitDirectAnswer(response, {
+    const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
@@ -573,7 +573,7 @@ export async function dispatchSystemEvent(
         ? 'V5 system event refused by compatibility reader — no graph/fact write or new pending action'
         : 'V5 system event committed',
     );
-    return { response, commitPerformed: true, graph: null };
+    return { response: commitResult.response, commitPerformed: true, graph: null };
   } catch (err) {
     log.error(
       {
@@ -1442,6 +1442,7 @@ async function dispatchFactorValueEdit(
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -1473,6 +1474,7 @@ async function dispatchFactorValueEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    committedResponse = commitResult.response;
   } catch (err) {
     log.error(
       {
@@ -1520,8 +1522,8 @@ async function dispatchFactorValueEdit(
   // of the graph the store received disagreed until this was threaded.
   const response: OlumiResponse =
     persistedAnalysisGraphHash !== null
-      ? { ...result.response, graph_hash: persistedAnalysisGraphHash }
-      : result.response;
+      ? { ...committedResponse, graph_hash: persistedAnalysisGraphHash }
+      : committedResponse;
 
   // Readiness from the bytes that LANDED, not from our pre-projection copy.
   //

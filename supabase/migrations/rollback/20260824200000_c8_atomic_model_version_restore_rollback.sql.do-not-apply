@@ -1,0 +1,34 @@
+-- DO NOT APPLY without explicit approval. Existing atomic-restore rows may
+-- depend on these columns; dropping them destroys receipt/lineage metadata.
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(
+  UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
+  JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
+  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+);
+
+DROP FUNCTION IF EXISTS public.restore_model_version_atomic_v1(
+  UUID, UUID, UUID, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
+  TEXT, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+);
+
+DROP INDEX IF EXISTS public.model_versions_scenario_source_turn_id_uidx;
+DROP INDEX IF EXISTS public.model_versions_scenario_mutation_id_uidx;
+
+ALTER TABLE public.v5_conversation_turns
+  DROP COLUMN IF EXISTS model_version_created,
+  DROP COLUMN IF EXISTS model_version_mutation_id;
+
+ALTER TABLE public.scenarios
+  DROP COLUMN IF EXISTS analysis_invalidated_at;
+
+ALTER TABLE public.model_versions
+  DROP COLUMN IF EXISTS source_turn_id,
+  DROP COLUMN IF EXISTS source_version_id,
+  DROP COLUMN IF EXISTS creation_kind,
+  DROP COLUMN IF EXISTS authored_by,
+  DROP COLUMN IF EXISTS actor_kind,
+  DROP COLUMN IF EXISTS root_version_id,
+  DROP COLUMN IF EXISTS parent_version_id,
+  DROP COLUMN IF EXISTS mutation_id,
+  DROP COLUMN IF EXISTS analysis_affecting_hash;

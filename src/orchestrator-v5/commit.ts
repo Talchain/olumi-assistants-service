@@ -36,7 +36,13 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import { getSessionStore } from './session/index.js';
-import type { SessionStore } from './session/store.js';
+import type {
+  AtomicCommittedModelVersionReceipt,
+  AtomicCommittedModelVersionWrite,
+  SessionStore,
+  VersionAuthoredBy,
+} from './session/store.js';
+import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import {
   checkPersistedGraphInvariants,
@@ -61,8 +67,15 @@ import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
-import { getModelManagementService } from './model-management/index.js';
-import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
+import {
+  computeGraphIdentityHash,
+  computeVersionAnalysisAffectingHashRecord,
+} from './context/graph-identity.js';
+import { decideModelVersionCreation } from './model-management/version-creation-policy.js';
+import {
+  attachModelVersionMutationReceipt,
+  toModelVersionMutationReceiptV1,
+} from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
@@ -218,6 +231,10 @@ export interface CommitMetadata {
    * undefined/null convention.
    */
   readonly expectedGraphAnalysisHash?: string | null;
+  /** Explicit producer-attested actor; absence persists Unknown. */
+  readonly versionActor?:
+    | { readonly kind: 'known'; readonly authored_by: VersionAuthoredBy }
+    | { readonly kind: 'system' };
 }
 
 /**
@@ -330,6 +347,7 @@ export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
+  readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
    * True when CommitMetadata.graph was provided and the atomic commit
    * succeeded (both graph and turn row written). False when graph was absent.
@@ -674,6 +692,69 @@ function buildHeldLapseNotice(pa: PendingAction): string {
     : 'A held change has lapsed, say the word if you still want it.';
 }
 
+const PersistedGraphV3 = GraphV3.passthrough();
+
+interface AtomicCommittedModelVersionPlan {
+  readonly graph: unknown;
+  readonly write: AtomicCommittedModelVersionWrite;
+}
+
+function deterministicMutationId(scenarioId: string, turnId: string): string {
+  const hex = createHash('sha256')
+    .update(`olumi:model-version:committed-mutation:${scenarioId}:${turnId}`)
+    .digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** Build the carrier and the exact graph bytes it content-addresses. */
+function buildAtomicCommittedModelVersion(
+  graph: unknown,
+  metadata: CommitMetadata,
+): AtomicCommittedModelVersionPlan | undefined {
+  if (config.cee.modelVersionsEnabled !== true || !graphWasProvided(graph)) {
+    return undefined;
+  }
+  const policy = decideModelVersionCreation(metadata.baseGraphForInvariants, graph);
+  if (!policy.create) return undefined;
+
+  // Shared GraphV3 is root-passthrough. Preserve top-level options,
+  // goal_node_id and additive persisted fields in hash, DB and receipt.
+  const parsed = PersistedGraphV3.safeParse(graph);
+  if (!parsed.success) {
+    throw new StateCommitFailedError(
+      'Model version carrier requires a valid persisted GraphV3; refusing a split semantic commit.',
+    );
+  }
+  const full = computeGraphIdentityHash(parsed.data);
+  const analysis = computeVersionAnalysisAffectingHashRecord(parsed.data);
+  if (full === null || analysis === null) {
+    throw new StateCommitFailedError(
+      'Model version carrier could not derive both durable identities; refusing a split semantic commit.',
+    );
+  }
+  return {
+    graph: parsed.data,
+    write: {
+      mutation_id: deterministicMutationId(metadata.scenario_id, metadata.turn_id),
+      graph_identity_hash: full.value,
+      analysis_affecting_hash: analysis.value,
+      hash_algorithm: full.algorithm,
+      identity_projection_version: full.projection_version,
+      identity_normaliser_version: full.normaliser_version,
+      graph_schema_version: full.graph_schema_version,
+      // CEE ingress is service-authenticated, not end-user authenticated:
+      // payload user ids and event kinds cannot attest the author of reasoning.
+      // Producers may supply `versionActor` only when they hold that explicit
+      // fact (the restore route does); every ordinary carrier stays Unknown.
+      actor_kind: metadata.versionActor?.kind ?? 'unknown',
+      authored_by:
+        metadata.versionActor?.kind === 'known' ? metadata.versionActor.authored_by : null,
+      creation_kind: 'committed_mutation',
+      source_turn_id: metadata.turn_id,
+    },
+  };
+}
+
 /**
  * True when `metadata.graph` counts as "a graph was provided for this
  * commit" — MM hygiene batch fix (ROADMAP 1.25 MM P1 set, item 1).
@@ -746,12 +827,17 @@ export async function commitDirectAnswer(
   // fired, freshness, the pending's re-pin and the held thread were all decided
   // against a graph we did not store. Ordering is the whole fix: project first,
   // then derive every hash-dependent decision from the projected bytes.
-  const graphForStore = projectGraphForPersistence(metadata.graph, {
+  const projectedGraphForStore = projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   });
+  const atomicVersionPlan = buildAtomicCommittedModelVersion(
+    projectedGraphForStore,
+    metadata,
+  );
+  const graphForStore = atomicVersionPlan?.graph ?? projectedGraphForStore;
 
   // The authoritative hash for this turn: RECOMPUTED on the bytes above, never
   // the caller's advertised value. Callers compute their hash before the
@@ -1090,7 +1176,7 @@ export async function commitDirectAnswer(
     );
   }
 
-  const { id: persistedRowId } = await store.append({
+  const appendOutcome = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
     turn_class: metadata.turn_class,
@@ -1110,7 +1196,22 @@ export async function commitDirectAnswer(
     // expected-base hashes (undefined when the path is not instrumented).
     expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
     expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
+    ...(atomicVersionPlan !== undefined
+      ? { modelVersion: atomicVersionPlan.write }
+      : {}),
   });
+  const persistedRowId = appendOutcome.id;
+  const publicModelVersionReceipt =
+    appendOutcome.modelVersionReceipt === undefined
+      ? null
+      : toModelVersionMutationReceiptV1(
+          metadata.scenario_id,
+          appendOutcome.modelVersionReceipt,
+        );
+  const responseWithModelVersionReceipt =
+    publicModelVersionReceipt === null
+      ? responseForCommit
+      : attachModelVersionMutationReceipt(responseForCommit, publicModelVersionReceipt);
 
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist
@@ -1195,34 +1296,6 @@ export async function commitDirectAnswer(
     );
   }
 
-  // Lane 8 — Model Management version hook (CEE_MODEL_VERSIONS_ENABLED).
-  // Fires ONLY after the durable append succeeded AND a graph was persisted
-  // this commit. Fire-and-forget under the version-event-sink non-blocking
-  // contract: any MM failure logs and NEVER affects the turn result. Flag
-  // off ⇒ byte-identical commit path (no service construction, no env reads
-  // — pinned by commit-model-version-hook.test.ts). The graph handed to MM
-  // is `graphForStore` — the EXACT object the store just persisted — so the
-  // Group A identity envelope MM computes (computeGraphIdentityHash inside
-  // ModelManagementService.saveVersion) matches the store's own identity
-  // read of scenarios.graph.
-  if (config.cee.modelVersionsEnabled === true && graphWasProvided(metadata.graph)) {
-    void recordModelVersionForCommit({
-      scenarioId: metadata.scenario_id,
-      turnId: metadata.turn_id,
-      turnClass: metadata.turn_class,
-      handlerId: metadata.handler_id,
-      graph: graphForStore,
-      persistedRowId,
-      // MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): thread the SAME
-      // server-read expected-base hash the A3 graph-CAS observe hook uses,
-      // verbatim (null/undefined both collapse to "no expectation" —
-      // service.saveVersion only accepts a string). See
-      // recordModelVersionForCommit's doc comment for the bootstrap caveat.
-      expectedGraphIdentityHash: metadata.expectedGraphIdentityHash ?? undefined,
-      sessionStore: store,
-    });
-  }
-
   // ROADMAP 3.1 (CEE half) — decision-record capture hook
   // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
   // the durable append succeeded AND this commit carries a successful
@@ -1286,13 +1359,14 @@ export async function commitDirectAnswer(
   return {
     persistedAnalysisGraphHash,
     persistedGraph: writesGraph ? graphForStore : null,
+    modelVersionReceipt: appendOutcome.modelVersionReceipt ?? null,
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume
     // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
     // caller that threads `priorPendingActions`) surface it on the wire, so
     // wire copy == durable copy.
-    response: responseForCommit,
+    response: responseWithModelVersionReceipt,
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,
@@ -1300,161 +1374,6 @@ export async function commitDirectAnswer(
   };
 }
 
-/**
- * MM P1 (ROADMAP 1.25 hygiene batch, item 2): true when a `saveVersion`
- * result is the EXPECTED "guest scenario, no version history" outcome
- * (SQLSTATE MV001 / error code `sign_in_required`) rather than a genuine MM
- * fault.
- *
- * `sign_in_required` fires on EVERY commit for an unowned (guest) scenario
- * — `scenarios.user_id IS NULL` (D3 Branch A, "guests refused" — see
- * `supabase/migrations/20260705120000_v5_model_versions.sql`). That is the
- * DESIGNED, EXPECTED outcome for guest traffic, not a fault: logging it at
- * `warn` meant every guest commit logged a warning for behaviour working
- * exactly as specified, drowning out genuine MM faults (`store_error`, real
- * CAS conflicts). `recordModelVersionForCommit` uses this to demote that
- * one case to `debug` — every other error/conflict status stays `warn`
- * (still actionable).
- */
-export function isExpectedGuestVersionRefusal(
-  result: ModelManagementResult<VersionWriteOutcome>,
-): boolean {
-  return result.status === 'error' && result.error.code === 'sign_in_required';
-}
-
-/**
- * Lane 8 — commit-seam Model Management version hook (flag-gated caller).
- *
- * Non-blocking contract (mirrors version-event-sink.ts): every failure —
- * service construction (missing SUPABASE_* env), RPC error, telemetry fault
- * — is caught and logged at warn (except the expected guest-refusal case,
- * see `isExpectedGuestVersionRefusal`); nothing propagates to the turn
- * result. Idempotency: `event_id` is DETERMINISTIC on the turn id, so a
- * retried turn (same scenario_id + turn_id) re-drives the same journey
- * event, which the RPC dedupes by event_id; an identical graph additionally
- * no-op-dedupes against the current head inside the RPC.
- *
- * MM P1 (ROADMAP 1.25, item 2 completion — Brief H guest pre-check): before
- * spending the `saveVersion` RPC, do a plain read of `scenarios.user_id`
- * (`SessionStore.getScenarioOwner`, when the store implements it) and skip
- * the RPC entirely when the scenario is unowned (guest). `saveVersion`
- * ALWAYS fails `sign_in_required` (MV001) for a guest scenario — this was
- * previously a wasted RPC round trip on every guest commit. The pre-check
- * is best-effort: a missing implementation, a read failure, or a scenario
- * row that no longer exists all fail OPEN to the pre-fix behaviour (attempt
- * the write; let the RPC answer MV001 authoritatively) rather than silently
- * skip a version write that might actually be owned.
- *
- * MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): when the caller
- * threaded an `expectedGraphIdentityHash` (the SAME server-read pre-turn
- * base the A3 graph-CAS observe hook uses), pass it through to
- * `saveVersion`'s optional write-time CAS. The RPC then rejects the write
- * with a `cas_conflict` (MV409) if the scenario's current MM version head
- * no longer matches that base — catching two concurrent commits racing the
- * `current_model_version_id` pointer forward from the same starting point.
- * KNOWN BOOTSTRAP CAVEAT (documented, not fixed here — a DB-migration-class
- * change, out of scope for this hygiene batch): the RPC's CAS compares
- * against the scenario's MM version HEAD, not `scenarios.graph` itself; for
- * a scenario with pre-existing graph history whose FIRST MM-tracked commit
- * carries a non-empty expected hash, the RPC sees no head yet (`v_head IS
- * NULL`) and raises the same MV409 — a false conflict, not a real race.
- * This degrades exactly like any other non-ok status here: logged at warn,
- * turn result unaffected, no version row written for that turn. Filed as a
- * residual for a future MM-hardening lane (mirrors ROADMAP 2.17).
- */
-async function recordModelVersionForCommit(args: {
-  readonly scenarioId: string;
-  readonly turnId: string;
-  readonly turnClass: ConversationTurnClass;
-  readonly handlerId: V5ActionType | null;
-  readonly graph: unknown;
-  readonly persistedRowId: string;
-  readonly expectedGraphIdentityHash?: string;
-  readonly sessionStore: SessionStore;
-}): Promise<void> {
-  try {
-    if (typeof args.sessionStore.getScenarioOwner === 'function') {
-      try {
-        const owner = await args.sessionStore.getScenarioOwner(args.scenarioId);
-        if (owner === null) {
-          log.debug(
-            { scenario_id: args.scenarioId, turn_id: args.turnId },
-            'ModelManagement — commit-seam saveVersion skipped pre-emptively (guest scenario, sign-in required; expected, not a fault)',
-          );
-          return;
-        }
-      } catch (precheckErr) {
-        // Fail OPEN: an unreadable owner is not evidence of guest status —
-        // fall through to the real RPC, which answers authoritatively.
-        log.debug(
-          {
-            scenario_id: args.scenarioId,
-            turn_id: args.turnId,
-            err: precheckErr instanceof Error ? precheckErr.message : String(precheckErr),
-          },
-          'ModelManagement — guest pre-check read failed; proceeding to saveVersion (fail-open)',
-        );
-      }
-    }
-    const service = getModelManagementService();
-    const result = await service.saveVersion({
-      scenario_id: args.scenarioId,
-      graph: args.graph,
-      // Content-free label from turn context (handler id / turn class only).
-      label: `commit:${args.handlerId ?? args.turnClass}`,
-      provenance: 'commit',
-      event_id: `model_version_created_turn_${args.turnId}`,
-      ...(args.expectedGraphIdentityHash !== undefined
-        ? { expected_graph_identity_hash: args.expectedGraphIdentityHash }
-        : {}),
-    });
-    emit(TelemetryEvents.V5ModelVersionCreated, {
-      scenario_id: args.scenarioId,
-      turn_id: args.turnId,
-      turn_row_id: args.persistedRowId,
-      status:
-        result.status === 'ok'
-          ? result.value.deduped
-            ? 'deduped'
-            : 'ok'
-          : result.status,
-      version_number: result.status === 'ok' ? result.value.version_number : null,
-      graph_identity_hash_prefix:
-        result.status === 'ok' ? result.value.graph_identity_hash.slice(0, 16) : null,
-      error_code: result.status === 'error' ? result.error.code : null,
-      provenance: 'commit',
-    });
-    if (result.status === 'error' || result.status === 'conflict') {
-      const isExpectedGuestRefusal = isExpectedGuestVersionRefusal(result);
-      const logPayload = {
-        scenario_id: args.scenarioId,
-        turn_id: args.turnId,
-        status: result.status,
-        error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
-      };
-      if (isExpectedGuestRefusal) {
-        log.debug(
-          logPayload,
-          'ModelManagement — commit-seam saveVersion skipped (guest scenario, sign-in required; expected, not a fault)',
-        );
-      } else {
-        log.warn(
-          logPayload,
-          'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
-        );
-      }
-    }
-  } catch (err) {
-    log.warn(
-      {
-        scenario_id: args.scenarioId,
-        turn_id: args.turnId,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      'ModelManagement — version event sink emit failed (commit-seam version hook threw; turn result unaffected)',
-    );
-  }
-}
 
 /**
  * Compute a stable per-request hash for the `request_hash` column. The

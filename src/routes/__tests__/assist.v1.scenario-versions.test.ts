@@ -37,32 +37,11 @@
  *     captured by any version would be unrecoverable. The snapshot's outcome is
  *     also the `undo_version_id` the response carries.
  *
- *  5. RESTORE IS RPC-FIRST, APPEND-SECOND, AND HONEST ABOUT THE SEAM. Every
- *     refusal (guest MV001, missing version MV404, stale-head MV409) happens
- *     BEFORE the working graph is touched. If the append then fails, the
- *     response says so (`version_recorded: true` in details) rather than
- *     claiming success or pretending nothing happened. ⚠ This header used to
- *     add "and a retried restore converges (the RPC dedupes, the append
- *     re-runs)" — CORRECTED 2026-08-17: the pre-restore snapshot moves the head
- *     back to the current graph's hash on the retry, so the RPC's head-vs-target
- *     dedupe cannot fire; a same-hash retry 409s and a refreshed one completes
- *     at +2 version rows. The route header carries the derivation.
+ *  5. RESTORE IS ONE ATOMIC RPC. Refusals happen before any state change; graph,
+ *     version/head, event, undo and invalidation either all commit or all roll
+ *     back. Mutation-id replay returns the same public receipt and no new rows.
  *
- *     THE APPEND SEAM FAILS IN TWO DISTINGUISHABLE WAYS, and the two tests that
- *     pin them are a DISCRIMINATING PAIR at one seam: a `GraphStaleWriteError`
- *     (the working graph moved under the write) is a RECOVERABLE 409
- *     `VERSION_STALE`; any other throw is a 503 `RESTORE_INCOMPLETE`. Both carry
- *     `version_recorded: true`. The 409 limb was UNCOVERED until this pack —
- *     deleting the whole `instanceof GraphStaleWriteError` branch left the
- *     27-test suite fully green (measured), i.e. the route could have silently
- *     downgraded a recoverable conflict to an outage with nothing going red.
- *
- *  6. THE APPEND IS THE SANCTIONED ATOMIC WRITER. `store.append` with a
- *     `direct_answer` / null-handler turn (the graph-registration precedent) —
- *     never `store_draft_graph`, which does not move the identity hash with
- *     the graph and would poison every later CAS compare.
- *
- *  7. AUTHENTICATION PRECEDES BODY VALIDATION. All three routes run the shared
+ *  6. AUTHENTICATION PRECEDES BODY VALIDATION. All three routes run the shared
  *     pre-flight BEFORE parsing their route-local body, so an unauthenticated
  *     caller with an invalid body sees 401, never 422 — the principle
  *     route-v2-preflight.ts states in its own header and the register route
@@ -82,10 +61,12 @@ const VERSION_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 const VERSION_B = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
 const SNAPSHOT_VERSION = "cccccccc-3333-4333-8333-cccccccccccc";
 const RESTORED_VERSION = "dddddddd-4444-4444-8444-dddddddddddd";
+const MUTATION_ID = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_SNAPSHOT = "c".repeat(64);
+const ANALYSIS_HASH = "d".repeat(64);
 
 // Same hoisted-config idiom as assist.v1.scenario-graph.test.ts — spread the
 // REAL config (a hand-listed stub silently drops every key added since —
@@ -129,6 +110,8 @@ const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
 const loadGraph = vi.fn();
 const appendSpy = vi.fn();
+const readRecent = vi.fn();
+const readFactsFor = vi.fn();
 
 const store = {
   scenarioExists,
@@ -136,6 +119,8 @@ const store = {
   getScenarioOwner,
   loadGraph,
   append: appendSpy,
+  readRecent,
+  readFactsFor,
 };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
@@ -146,6 +131,7 @@ const listVersions = vi.fn();
 const getVersion = vi.fn();
 const saveVersion = vi.fn();
 const restoreVersion = vi.fn();
+const restoreVersionAtomic = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
@@ -158,15 +144,12 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       getVersion,
       saveVersion,
       restoreVersion,
+      restoreVersionAtomic,
       getCurrentVersionPointer,
     }),
   };
 });
 
-// The REAL error class the route discriminates on (`session/store.js` is NOT
-// mocked — only `session/index.js` is), so `instanceof` binds to the same
-// constructor the route imports. A locally-declared look-alike would not.
-import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
 
 /** A stored version graph — distinct labels so identity-bound assertions can
@@ -176,7 +159,13 @@ const STORED_VERSION_GRAPH = {
     { id: "n1", label: "Take the job", kind: "option" },
     { id: "n2", label: "Commute time", kind: "factor" },
   ],
-  edges: [{ from: "n1", to: "n2" }],
+  edges: [{
+    from: "n1",
+    to: "n2",
+    strength: { mean: 0.4, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: "positive",
+  }],
 };
 
 /** The CURRENT working graph — differs from the stored version. */
@@ -185,7 +174,13 @@ const CURRENT_GRAPH = {
     { id: "n1", label: "Take the job", kind: "option" },
     { id: "n3", label: "Salary offer", kind: "factor" },
   ],
-  edges: [{ from: "n1", to: "n3" }],
+  edges: [{
+    from: "n1",
+    to: "n3",
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 0.8,
+    effect_direction: "positive",
+  }],
 };
 
 function summary(overrides: Record<string, unknown> = {}) {
@@ -219,10 +214,18 @@ async function post(
   path: string,
   body: Record<string, unknown> = {},
 ) {
+  const payload =
+    path === "/versions/restore"
+      ? {
+          mutation_id: MUTATION_ID,
+          expected_graph_identity_hash: HASH_B,
+          ...body,
+        }
+      : body;
   return await app.inject({
     method: "POST",
     url: `/assist/v1/scenarios/${SCENARIO}${path}`,
-    payload: body,
+    payload,
   });
 }
 
@@ -236,6 +239,8 @@ beforeEach(() => {
   getScenarioOwner.mockResolvedValue(OWNER);
   loadGraph.mockResolvedValue(CURRENT_GRAPH);
   appendSpy.mockResolvedValue({ id: "row-1" });
+  readRecent.mockResolvedValue([]);
+  readFactsFor.mockResolvedValue([]);
   listVersions.mockResolvedValue({
     status: "ok",
     value: [summary({ id: VERSION_B, version_number: 2, graph_identity_hash: HASH_B }), summary()],
@@ -264,6 +269,34 @@ beforeEach(() => {
       deduped: false,
       event_id: "evt-restore",
       restored_from_version_id: VERSION_A,
+    },
+  });
+  restoreVersionAtomic.mockResolvedValue({
+    status: "ok",
+    value: {
+      mutation_id: MUTATION_ID,
+      version_id: RESTORED_VERSION,
+      version_number: 4,
+      graph_identity_hash: HASH_A,
+      analysis_affecting_hash: ANALYSIS_HASH,
+      hash_algorithm: "sha256",
+      identity_projection_version: "identity.v1",
+      identity_normaliser_version: "1",
+      graph_schema_version: "graph_v3",
+      restored_from_version_id: VERSION_A,
+      undo_version_id: SNAPSHOT_VERSION,
+      parent_version_id: SNAPSHOT_VERSION,
+      root_version_id: SNAPSHOT_VERSION,
+      actor_kind: "known",
+      authored_by: "owner",
+      creation_kind: "restore",
+      source_version_id: VERSION_A,
+      source_turn_id: null,
+      graph: STORED_VERSION_GRAPH,
+      deduped: false,
+      replayed: false,
+      analysis_invalidated_at: "2026-08-24T10:05:00.000Z",
+      event_id: `model_version_restored_mutation_${MUTATION_ID}`,
     },
   });
 });
@@ -476,133 +509,124 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
 // RESTORE
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("POST /versions/restore — the guarded restore", () => {
-  it("restores: snapshot-then-RPC-then-append, and answers with the restored graph + undo id", async () => {
+describe("POST /versions/restore — C8-A atomic restore", () => {
+  it("returns the one-transaction receipt with exact graph, undo and two hashes", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
       user_id: OWNER,
       version_id: VERSION_A,
-      expected_graph_identity_hash: HASH_B,
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.schema).toBe("model_version_restore.v1");
+    expect(body.schema).toBe("model_version_restore.v2");
     expect(body.restored).toBe(true);
-    expect(body.version.version_id).toBe(RESTORED_VERSION);
-    expect(body.undo_version_id).toBe(SNAPSHOT_VERSION);
-    // The restored graph rides the response for the client-side reconcile.
-    const nodeIds = (body.graph.nodes as Array<{ id: string }>).map((n) => n.id);
-    expect(nodeIds).toEqual(["n1", "n2"]);
-    expect(body.graph_identity_hash).not.toBeNull();
+    expect(body.receipt.mutation_id).toBe(MUTATION_ID);
+    expect(body.receipt.version_id).toBe(RESTORED_VERSION);
+    expect(body.receipt.undo_version_id).toBe(SNAPSHOT_VERSION);
+    expect(body.receipt.full_hash).toBe(HASH_A);
+    expect(body.receipt.analysis_affecting_hash).toBe(ANALYSIS_HASH);
+    expect(body.receipt.sequence).toBe(4);
+    expect(body.receipt.actor).toEqual({ kind: "known", authored_by: "owner" });
+    expect(body.receipt.creation).toEqual({
+      kind: "restore",
+      source_version_id: VERSION_A,
+    });
+    expect(body.receipt.lineage).toEqual({
+      kind: "known",
+      parent_version_id: SNAPSHOT_VERSION,
+      root_version_id: SNAPSHOT_VERSION,
+    });
+    expect(body.receipt.graph).toEqual(STORED_VERSION_GRAPH);
+    expect(body).toHaveProperty("analysis_state");
+    expect(Object.keys(body).sort()).toEqual([
+      "analysis_state",
+      "receipt",
+      "request_id",
+      "restored",
+      "scenario_id",
+      "schema",
+    ]);
     await app.close();
   });
 
-  it("PIN 4 — snapshots the CURRENT graph (provenance pre_restore) BEFORE the restore RPC", async () => {
-    const order: string[] = [];
-    saveVersion.mockImplementation(async () => {
-      order.push("snapshot");
-      return {
-        status: "ok",
-        value: {
-          version_id: SNAPSHOT_VERSION,
-          version_number: 3,
-          graph_identity_hash: HASH_SNAPSHOT,
-          deduped: false,
-          event_id: "evt-snap",
-        },
-      };
-    });
-    restoreVersion.mockImplementation(async () => {
-      order.push("restore");
-      return {
-        status: "ok",
-        value: {
-          version_id: RESTORED_VERSION,
-          version_number: 4,
-          graph_identity_hash: HASH_A,
-          deduped: false,
-          event_id: "evt-restore",
-          restored_from_version_id: VERSION_A,
-        },
-      };
-    });
-    appendSpy.mockImplementation(async () => {
-      order.push("append");
-      return { id: "row-1" };
-    });
-
-    const app = await buildApp();
-    await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
-
-    expect(order).toEqual(["snapshot", "restore", "append"]);
-    const snapArg = saveVersion.mock.calls[0][0];
-    // Identity-bound: the snapshot captures the CURRENT graph (n3 present),
-    // not the target version's.
-    expect(snapArg.graph).toEqual(CURRENT_GRAPH);
-    expect(snapArg.provenance).toBe("pre_restore");
-    await app.close();
-  });
-
-  it("threads the CAS chain: client expected hash → snapshot; snapshot hash → restore RPC", async () => {
+  it("makes exactly one atomic service write — no snapshot RPC and no post-version append", async () => {
     const app = await buildApp();
     await post(app, "/versions/restore", {
       user_id: OWNER,
       version_id: VERSION_A,
-      expected_graph_identity_hash: HASH_B,
     });
 
-    expect(saveVersion.mock.calls[0][0].expected_graph_identity_hash).toBe(HASH_B);
-    expect(restoreVersion.mock.calls[0][0].expected_graph_identity_hash).toBe(HASH_SNAPSHOT);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+    expect(saveVersion).not.toHaveBeenCalled();
+    expect(restoreVersion).not.toHaveBeenCalled();
+    expect(appendSpy).not.toHaveBeenCalled();
+    const write = restoreVersionAtomic.mock.calls[0][0];
+    expect(write.scenario_id).toBe(SCENARIO);
+    expect(write.version_id).toBe(VERSION_A);
+    expect(write.mutation_id).toBe(MUTATION_ID);
+    expect(write.current_graph).toEqual(CURRENT_GRAPH);
+    expect(write.expected_graph_identity_hash).toBe(HASH_B);
+    expect(write.source_graph_identity_hash).toBe(HASH_A);
     await app.close();
   });
 
-  it("PIN 3 — a smuggled body `graph` never reaches the append; the STORED version's graph does", async () => {
+  it("never accepts a client graph — the atomic carrier receives the stored version projection", async () => {
     const app = await buildApp();
     await post(app, "/versions/restore", {
       user_id: OWNER,
       version_id: VERSION_A,
-      graph: { nodes: [{ id: "evil", label: "Fabricated", kind: "factor" }], edges: [] },
+      graph: {
+        nodes: [{ id: "evil", label: "Fabricated", kind: "factor" }],
+        edges: [],
+      },
     });
 
-    expect(appendSpy).toHaveBeenCalledTimes(1);
-    const write = appendSpy.mock.calls[0][0];
+    const write = restoreVersionAtomic.mock.calls[0][0];
     const ids = (write.graph.nodes as Array<{ id: string }>).map((n) => n.id);
     expect(ids).toEqual(["n1", "n2"]);
     expect(JSON.stringify(write.graph)).not.toContain("Fabricated");
     await app.close();
   });
 
-  it("PIN 6 — the append is the sanctioned direct_answer / null-handler turn write", async () => {
+  it("requires mutation identity and an explicit nullable working-state CAS", async () => {
     const app = await buildApp();
-    await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
-
-    const write = appendSpy.mock.calls[0][0];
-    expect(write.scenario_id).toBe(SCENARIO);
-    expect(write.turn_class).toBe("direct_answer");
-    expect(write.handler_id).toBeNull();
-    expect(write.turn_id).toMatch(/^version_restore:/);
-    expect(write.llm_calls_used).toBe(0);
-    await app.close();
-  });
-
-  it("PIN 5 — every version-level refusal happens BEFORE the working graph is touched", async () => {
-    getVersion.mockResolvedValue({
-      status: "error",
-      error: { code: "version_not_found", recoverable: true, message: "not found" },
+    const missingMutation = await app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
+      payload: {
+        user_id: OWNER,
+        version_id: VERSION_A,
+        expected_graph_identity_hash: HASH_B,
+      },
     });
-    const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
+    expect(missingMutation.statusCode).toBe(422);
 
-    expect(res.statusCode).toBe(404);
-    expect(res.json().details.code).toBe("VERSION_NOT_FOUND");
-    expect(appendSpy).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
+    const missingCas = await app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
+      payload: {
+        user_id: OWNER,
+        version_id: VERSION_A,
+        mutation_id: MUTATION_ID,
+      },
+    });
+    expect(missingCas.statusCode).toBe(422);
+
+    const nullCas = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+      expected_graph_identity_hash: null,
+    });
+    expect(nullCas.statusCode).toBe(200);
+    expect(
+      restoreVersionAtomic.mock.calls.at(-1)?.[0].expected_graph_identity_hash
+    ).toBeNull();
     await app.close();
   });
 
-  it("a snapshot CAS conflict aborts the restore with 409 and touches nothing", async () => {
-    saveVersion.mockResolvedValue({
+  it("maps the atomic working-state CAS conflict to 409 with no second write seam", async () => {
+    restoreVersionAtomic.mockResolvedValue({
       status: "conflict",
       conflict: {
         kind: "graph_identity_cas_conflict",
@@ -614,100 +638,117 @@ describe("POST /versions/restore — the guarded restore", () => {
     const res = await post(app, "/versions/restore", {
       user_id: OWNER,
       version_id: VERSION_A,
-      expected_graph_identity_hash: HASH_B,
     });
     expect(res.statusCode).toBe(409);
-    expect(restoreVersion).not.toHaveBeenCalled();
+    expect(res.json().details.code).toBe("VERSION_STALE");
+    expect(saveVersion).not.toHaveBeenCalled();
     expect(appendSpy).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it("PIN 5 — an append failure AFTER the RPC answers an honest 503 naming version_recorded", async () => {
-    appendSpy.mockRejectedValue(new Error("db down"));
+  it("returns an idempotent replay receipt without any route-level follow-up write", async () => {
     const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
+    const original = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+    });
+    expect(original.statusCode).toBe(200);
+    const originalReceipt = original.json().receipt;
 
-    expect(res.statusCode).toBe(503);
-    const body = res.json();
-    expect(body.details.code).toBe("RESTORE_INCOMPLETE");
-    expect(body.details.version_recorded).toBe(true);
-    // Half of the DISCRIMINATING PAIR: a NON-CAS throw is the 503 limb. Its
-    // twin below sends a GraphStaleWriteError through the same seam and must
-    // get 409 — one test alone cannot show the route discriminates.
+    restoreVersionAtomic.mockResolvedValue({
+      status: "ok",
+      value: {
+        mutation_id: MUTATION_ID,
+        version_id: RESTORED_VERSION,
+        version_number: 4,
+        graph_identity_hash: HASH_A,
+        analysis_affecting_hash: ANALYSIS_HASH,
+        hash_algorithm: "sha256",
+        identity_projection_version: "identity.v1",
+        identity_normaliser_version: "1",
+        graph_schema_version: "graph_v3",
+        restored_from_version_id: VERSION_A,
+        undo_version_id: SNAPSHOT_VERSION,
+        parent_version_id: SNAPSHOT_VERSION,
+        root_version_id: SNAPSHOT_VERSION,
+        actor_kind: "known",
+        authored_by: "owner",
+        creation_kind: "restore",
+        source_version_id: VERSION_A,
+        source_turn_id: null,
+        graph: STORED_VERSION_GRAPH,
+        deduped: false,
+        replayed: true,
+        analysis_invalidated_at: "2026-08-24T10:05:00.000Z",
+        event_id: `model_version_restored_mutation_${MUTATION_ID}`,
+      },
+    });
+    const res = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+    });
+    expect(res.statusCode).toBe(200);
+    const replayReceipt = res.json().receipt;
+    expect("deduped" in replayReceipt).toBe(false);
+    expect("replayed" in replayReceipt).toBe(false);
+    expect(replayReceipt).toEqual(originalReceipt);
+    expect(replayReceipt).toEqual({
+      schema: "model_version_mutation_receipt.v1",
+      scenario_id: SCENARIO,
+      mutation_id: MUTATION_ID,
+      version_id: RESTORED_VERSION,
+      sequence: 4,
+      graph: STORED_VERSION_GRAPH,
+      full_hash: HASH_A,
+      hash_algorithm: "sha256",
+      identity_projection_version: "identity.v1",
+      identity_normaliser_version: "1",
+      graph_schema_version: "graph_v3",
+      analysis_affecting_hash: ANALYSIS_HASH,
+      actor: { kind: "known", authored_by: "owner" },
+      creation: { kind: "restore", source_version_id: VERSION_A },
+      source_turn_id: null,
+      lineage: {
+        kind: "known",
+        parent_version_id: SNAPSHOT_VERSION,
+        root_version_id: SNAPSHOT_VERSION,
+      },
+      undo_version_id: SNAPSHOT_VERSION,
+      event_id: `model_version_restored_mutation_${MUTATION_ID}`,
+    });
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(saveVersion).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it("PIN 5 — an append CAS conflict AFTER the RPC answers 409 VERSION_STALE, version_recorded", async () => {
-    // The working graph moved between the restore RPC and the append. Nothing
-    // was overwritten and the version row IS recorded, so this is RECOVERABLE
-    // (refresh and retry), not the outage the 503 limb reports.
-    appendSpy.mockRejectedValue(
-      new GraphStaleWriteError("graph_identity CAS rejected the restore append", {
-        conflict_category: "analysis_affecting_conflict",
-      }),
-    );
+  it("refuses mutation-id reuse for another target with a typed 409", async () => {
+    restoreVersionAtomic.mockResolvedValue({
+      status: "error",
+      error: {
+        code: "mutation_id_reused",
+        recoverable: false,
+        message: "reused",
+      },
+    });
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
       user_id: OWNER,
       version_id: VERSION_A,
-      expected_graph_identity_hash: HASH_B,
     });
-
     expect(res.statusCode).toBe(409);
-    const body = res.json();
-    expect(body.details.code).toBe("VERSION_STALE");
-    expect(body.details.version_recorded).toBe(true);
-    // PRECONDITION, PINNED IN-TEST: the conflict really is the one AFTER the
-    // RPC. Both earlier stages ran to completion, so a 409 produced by an
-    // earlier CAS limb (snapshot MV409, RPC MV409) cannot masquerade as this.
-    expect(saveVersion).toHaveBeenCalledTimes(1);
-    expect(restoreVersion).toHaveBeenCalledTimes(1);
-    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(res.json().details.code).toBe("MUTATION_ID_REUSED");
     await app.close();
   });
 
-  it("a deduped restore (head already IS the target) skips the append and says deduped", async () => {
-    // Snapshot dedupes (current == head) and the restore RPC dedupes
-    // (head == target): nothing to write.
-    saveVersion.mockResolvedValue({
-      status: "ok",
-      value: {
-        version_id: VERSION_B,
-        version_number: 2,
-        graph_identity_hash: HASH_B,
-        deduped: true,
-        event_id: null,
-      },
-    });
-    restoreVersion.mockResolvedValue({
-      status: "ok",
-      value: {
-        version_id: VERSION_B,
-        version_number: 2,
-        graph_identity_hash: HASH_B,
-        deduped: true,
-        event_id: null,
-        restored_from_version_id: VERSION_A,
-      },
-    });
-    const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.json().deduped).toBe(true);
-    expect(appendSpy).not.toHaveBeenCalled();
-    await app.close();
-  });
-
-  it("fails CLOSED when the current graph cannot be read — the guard cannot be skipped blind", async () => {
+  it("fails closed when the current graph cannot be read", async () => {
     loadGraph.mockRejectedValue(new Error("unreadable"));
     const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
-
+    const res = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+    });
     expect(res.statusCode).toBe(503);
-    expect(saveVersion).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
-    expect(appendSpy).not.toHaveBeenCalled();
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -719,19 +760,19 @@ describe("POST /versions/restore — the guarded restore", () => {
     await app.close();
   });
 
-  it("a version graph that no longer parses is refused honestly, before any write", async () => {
+  it("refuses an incompatible stored graph before the atomic write", async () => {
     getVersion.mockResolvedValue({
       status: "ok",
       value: { ...summary(), graph: { nodes: "not-an-array" } },
     });
     const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_A });
-
+    const res = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+    });
     expect(res.statusCode).toBe(422);
     expect(res.json().details.code).toBe("VERSION_GRAPH_INCOMPATIBLE");
-    expect(saveVersion).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
-    expect(appendSpy).not.toHaveBeenCalled();
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
     await app.close();
   });
 });
@@ -743,7 +784,9 @@ describe("POST /versions/restore — the guarded restore", () => {
 describe("ordering — an unauthenticated caller learns nothing about payload validity", () => {
   /** One invalid body per route, each already proven to 422 elsewhere in this
    *  suite (list `limit`, save `label`, restore `version_id`). */
-  const INVALID_BODY_PER_ROUTE: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+  const INVALID_BODY_PER_ROUTE: ReadonlyArray<
+    readonly [string, Record<string, unknown>]
+  > = [
     ["/versions", { limit: -2 }],
     ["/versions/save", { label: 42 }],
     ["/versions/restore", { version_id: "not-a-uuid" }],
@@ -752,7 +795,10 @@ describe("ordering — an unauthenticated caller learns nothing about payload va
   it.each(INVALID_BODY_PER_ROUTE)(
     "%s — an UNAUTHENTICATED caller with an invalid body gets 401, never 422",
     async (path, body) => {
-      resolveUserIdentity.mockResolvedValue({ mode: "refused", reason: "invalid_token" });
+      resolveUserIdentity.mockResolvedValue({
+        mode: "refused",
+        reason: "invalid_token",
+      });
       const app = await buildApp();
       const res = await post(app, path, body);
 
@@ -765,7 +811,7 @@ describe("ordering — an unauthenticated caller learns nothing about payload va
       expect(saveVersion).not.toHaveBeenCalled();
       expect(getVersion).not.toHaveBeenCalled();
       await app.close();
-    },
+    }
   );
 
   it.each(INVALID_BODY_PER_ROUTE)(
@@ -778,6 +824,6 @@ describe("ordering — an unauthenticated caller learns nothing about payload va
 
       expect(res.statusCode).toBe(422);
       await app.close();
-    },
+    }
   );
 });

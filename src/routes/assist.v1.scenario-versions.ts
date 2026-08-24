@@ -49,61 +49,15 @@
  * (`computeGraphIdentityHash`); the contracts have nowhere to put a client
  * hash by design.
  *
- * ── WHAT A RESTORE IS: GUARDED, RPC-FIRST, HONEST ABOUT ITS SEAM ───────────
- * Restore overwrites the working graph, so it is guarded twice:
- *
- *   1. THE PRE-RESTORE SNAPSHOT. The CURRENT graph is saved (provenance
- *      `pre_restore`) BEFORE anything changes, so the state being replaced is
- *      always recoverable — the response carries it as `undo_version_id`.
- *      The RPC's no-op dedupe makes this free when the head version already
- *      captures the current graph (the steady state with the commit-seam hook
- *      on), and it is exactly the guard that matters when it does NOT (drift
- *      accumulated while versioning was off would otherwise be unrecoverable).
- *      If the current graph cannot be READ, the restore is REFUSED (503) — an
- *      unverifiable precondition is refused, not assumed.
- *   2. THE CAS CHAIN. The client's `expected_graph_identity_hash` (the head it
- *      showed the user) gates the snapshot; the snapshot's own resulting head
- *      hash gates the restore RPC. A concurrent commit moving the head fails
- *      the chain with 409 BEFORE the working graph is touched.
- *
- * Order is RPC-first, append-second: every refusal the RPC can raise (guest
- * MV001, absent version MV404, stale head MV409) lands before the working
- * graph moves. The append then writes the restored graph through the ONE
- * sanctioned atomic writer — `store.append` as a `direct_answer` / null-handler
- * turn (the graph-registration precedent; `store_draft_graph` is banned here
- * because it does not move `graph_identity_hash` with the graph and would
- * poison every later CAS compare). If the append fails AFTER the RPC, the
- * response says so honestly (`RESTORE_INCOMPLETE`, `version_recorded: true`).
- *
- * ⚠ WHAT A RETRY ACTUALLY DOES — CORRECTED 2026-08-17. This header claimed "a
- * retried restore CONVERGES: the RPC dedupes (the head already carries the
- * target's envelope) and the append re-runs". Measured by the #1001 review and
- * re-derived here at the RPC bytes (migration 20260705120000), BOTH halves are
- * false on the RESTORE_INCOMPLETE path — and the thing that falsifies them is
- * the snapshot guard one step above:
- *   · NO DEDUPE IS REACHABLE. `restore_model_version`'s dedupe compares the
- *     HEAD against the TARGET. The failed attempt left the head carrying the
- *     target's envelope but the working graph UNMOVED (the append is what
- *     failed), so the retry's step 7 snapshots that unchanged current graph and
- *     the head becomes the CURRENT hash again — the head-vs-target compare can
- *     no longer match. The snapshot guard defeats the dedupe by construction.
- *   · A RETRY WITH THE SAME `expected_graph_identity_hash` NEVER REACHES THE
- *     RPC. `create_model_version`'s CAS compares that hash against the head the
- *     first attempt already moved ⇒ MV409 ⇒ this route answers 409
- *     `VERSION_STALE`. Its copy ("Refresh to see the latest, then try again")
- *     is the honest next step; replaying the same bytes is not.
- *   · A REFRESHED RETRY (or one carrying no expected hash — no CAS to fail)
- *     DOES complete, and costs TWO new version rows per attempt: a
- *     `pre_restore` snapshot plus a `restore` row, because neither RPC can
- *     dedupe. NO DATA IS LOST — `model_versions` rows are immutable and each
- *     attempt's own pre-restore snapshot still holds the state it replaced.
- * So convergence is real, but it is 409-then-refresh, not a silent dedupe.
+ * ── WHAT A RESTORE IS: ONE GUARDED TRANSACTION ──────────────────────────────
+ * Restore atomically replaces the working graph and records its immutable
+ * version, head, journey event, undo pointer and analysis invalidation marker.
+ * Exact full-identity CAS runs while the scenario is locked. Any refusal or
+ * write failure rolls back the entire mutation; a same-mutation retry returns
+ * the original canonical receipt without adding rows or moving state.
  *
  * Restore accepts NO client graph either: the bytes appended are the STORED
- * version's, re-validated against the ingress contract and re-projected
- * through `projectGraphForPersistence` (idempotent by design; a version saved
- * under an older projection is normalised to today's persisted form, and a
- * version that no longer parses is refused honestly rather than written).
+ * version's, re-validated against the GraphV3 contract before the atomic RPC.
  *
  * ── GUESTS ─────────────────────────────────────────────────────────────────
  * Guest (unowned) scenarios cannot hold server-side versions — DB-level
@@ -116,39 +70,40 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { AnalysisStateV1Schema } from "@talchain/schemas/boundary";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
-import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import {
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
-import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
-import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
-import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import {
   getModelManagementService,
   ModelVersionSummaryResponseSchema,
   VersionWriteOutcomeResponseSchema,
   SIGN_IN_REQUIRED_MESSAGE,
 } from "../orchestrator-v5/model-management/index.js";
+import {
+  ModelVersionMutationReceiptV1LocalSchema,
+  toModelVersionMutationReceiptV1,
+} from "../orchestrator-v5/model-management/mutation-receipt.js";
 import type {
   ModelManagementResult,
   ModelVersionRecord,
-  VersionWriteOutcome,
 } from "../orchestrator-v5/model-management/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
+import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
 export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v1" as const;
 export const MODEL_VERSION_SAVE_SCHEMA = "model_version_save.v1" as const;
-export const MODEL_VERSION_RESTORE_SCHEMA = "model_version_restore.v1" as const;
+export const MODEL_VERSION_RESTORE_SCHEMA = "model_version_restore.v2" as const;
 
 /** `scenarios.id` is a UUID column, so a non-UUID id cannot name a row. */
 const UUID_PATTERN =
@@ -172,20 +127,22 @@ const SaveBodySchema = z.object({
   label: z.string().min(1).max(200).optional(),
   expected_graph_identity_hash: Sha256Hex.optional(),
 });
+const AtomicRestoreRouteResponseSchema = z
+  .object({
+    schema: z.literal(MODEL_VERSION_RESTORE_SCHEMA),
+    scenario_id: z.string().uuid(),
+    restored: z.literal(true),
+    receipt: ModelVersionMutationReceiptV1LocalSchema,
+    analysis_state: AnalysisStateV1Schema.nullable(),
+    request_id: z.string().min(1),
+  })
+  .strict();
 const RestoreBodySchema = z.object({
   version_id: z.string().uuid(),
+  mutation_id: z.string().uuid(),
   label: z.string().min(1).max(200).optional(),
-  expected_graph_identity_hash: Sha256Hex.optional(),
+  expected_graph_identity_hash: Sha256Hex.nullable(),
 });
-
-/**
- * `turn_id` for the restore commit — prefixed so the turn log says WHY the
- * graph moved, unique per request so the idempotency key never collides.
- * (The graph-registration precedent, verbatim.)
- */
-function restoreTurnId(): string {
-  return `version_restore:${globalThis.crypto.randomUUID()}`;
-}
 
 export default async function route(app: FastifyInstance) {
   // Tiers DERIVED from RATE_BUCKET_REGISTRY (drift-tested both directions).
@@ -561,7 +518,6 @@ export default async function route(app: FastifyInstance) {
     { config: { rateLimit: { max: WRITE_RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
     async (req, reply) => {
       const requestId = getRequestId(req);
-      const startedAt = Date.now();
 
       const ctx = await preflight(req, reply);
       if (ctx === null) return;
@@ -571,17 +527,16 @@ export default async function route(app: FastifyInstance) {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const parsedBody = RestoreBodySchema.safeParse({
         version_id: body.version_id,
+        mutation_id: body.mutation_id,
         ...(body.label !== undefined ? { label: body.label } : {}),
-        ...(body.expected_graph_identity_hash !== undefined
-          ? { expected_graph_identity_hash: body.expected_graph_identity_hash }
-          : {}),
+        expected_graph_identity_hash: body.expected_graph_identity_hash,
       });
       if (!parsedBody.success) {
         return invalid(
           reply,
           requestId,
           "RESTORE_PAYLOAD_INVALID",
-          "`version_id` must be a UUID; `label` 1–200 chars; `expected_graph_identity_hash` a 64-hex sha256.",
+          "`version_id` and `mutation_id` must be UUIDs; `label` 1–200 chars; `expected_graph_identity_hash` is required and must be null or a 64-hex sha256.",
         );
       }
 
@@ -622,9 +577,7 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
-      // ── 6. The current graph — the thing the snapshot guard protects ────
-      // Unreadable ⇒ REFUSE (503). Restoring blind would overwrite a state no
-      // version captures; an unverifiable precondition is refused, not assumed.
+      // ── 6. Current graph — server-read input to atomic CAS + undo capture ─
       const store = getSessionStore();
       let currentGraph: unknown;
       try {
@@ -637,57 +590,32 @@ export default async function route(app: FastifyInstance) {
             scenario_id: ctx.scenarioId,
             err: err instanceof Error ? err.message : String(err),
           },
-          "Scenario versions — current graph unreadable; refusing restore (the snapshot guard cannot run blind)",
+          "Scenario versions — current graph unreadable; refusing atomic restore",
         );
         return unavailable(reply, requestId, "The version could not be restored right now.");
       }
 
-      // ── 7. THE PRE-RESTORE SNAPSHOT GUARD ───────────────────────────────
-      // Client's expected hash gates THIS write (the head the user saw).
-      // `undo_version_id` is the snapshot's id — deduped or not, it names the
-      // version that holds the pre-restore state.
-      let undoVersionId: string | null = null;
-      let expectedForRestore: string | undefined =
-        parsedBody.data.expected_graph_identity_hash;
-      if (currentGraph !== null && currentGraph !== undefined) {
-        const snapshot = await service.saveVersion({
-          scenario_id: ctx.scenarioId,
-          graph: currentGraph,
-          label: "Before restore",
-          provenance: "pre_restore",
-          ...(parsedBody.data.expected_graph_identity_hash !== undefined
-            ? {
-                expected_graph_identity_hash:
-                  parsedBody.data.expected_graph_identity_hash,
-              }
-            : {}),
-        });
-        if (snapshot.status === "disabled") return disabled(reply, requestId);
-        if (snapshot.status === "conflict") return stale(reply, requestId);
-        if (snapshot.status === "error") {
-          if (snapshot.error.code === "sign_in_required") {
-            return signInRequired(reply, requestId);
-          }
-          if (snapshot.error.code !== "empty_graph") {
-            // A real failure to capture the current state aborts the restore:
-            // the guard IS the feature.
-            return unavailable(reply, requestId, "The version could not be restored right now.");
-          }
-          // empty_graph: identity-empty current graph — nothing to lose,
-          // nothing to snapshot. The restore proceeds unguarded by design.
-        } else {
-          undoVersionId = snapshot.value.version_id;
-          expectedForRestore = snapshot.value.graph_identity_hash;
-        }
-      }
+      // ── 7. Normalise the stored target; still no client graph authority ──
+      const graphForStore = projectGraphForPersistence(parsedGraph.data, {
+        scenarioId: ctx.scenarioId,
+        turnClass: "direct_answer",
+        source: "version_restore",
+      });
 
-      // ── 8. The restore RPC — every refusal BEFORE the working graph moves ─
-      const restored = await service.restoreVersion({
+      // ── 8. ONE RPC owns graph + undo + version + head + event ───────────
+      const restored = await service.restoreVersionAtomic({
         scenario_id: ctx.scenarioId,
         version_id: parsedBody.data.version_id,
-        ...(parsedBody.data.label !== undefined ? { label: parsedBody.data.label } : {}),
-        ...(expectedForRestore !== undefined
-          ? { expected_graph_identity_hash: expectedForRestore }
+        mutation_id: parsedBody.data.mutation_id,
+        graph: graphForStore,
+        source_graph_identity_hash: targetRecord.graph_identity_hash,
+        current_graph: currentGraph,
+        expected_graph_identity_hash: parsedBody.data.expected_graph_identity_hash,
+        actor_kind: "known",
+        authored_by: "owner",
+        source_turn_id: null,
+        ...(parsedBody.data.label !== undefined
+          ? { label: parsedBody.data.label }
           : {}),
       });
       if (restored.status === "disabled") return disabled(reply, requestId);
@@ -707,130 +635,63 @@ export default async function route(app: FastifyInstance) {
                   requestId,
                 ),
               );
-          default:
-            return unavailable(reply, requestId, "The version could not be restored right now.");
-        }
-      }
-      const restoredOutcome: VersionWriteOutcome = restored.value;
-
-      // ── 9. The append — the sanctioned atomic writer, skipped on dedupe ──
-      // A deduped restore means the head ALREADY carries the target's identity
-      // envelope AND the snapshot step proved the current graph matches that
-      // head — the working graph is already the target state. Nothing to write.
-      const graphForStore = projectGraphForPersistence(parsedGraph.data, {
-        scenarioId: ctx.scenarioId,
-        turnClass: "direct_answer",
-        source: "version_restore",
-      });
-
-      if (!restoredOutcome.deduped) {
-        // CAS base from the SERVER's own current bytes (the register-route
-        // rule: never from the request).
-        let expectedGraphIdentityHash: string | null | undefined;
-        let expectedGraphAnalysisHash: string | null | undefined;
-        try {
-          const hashes = computeExpectedGraphCasHashes(currentGraph);
-          expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
-          expectedGraphAnalysisHash = hashes.expectedGraphAnalysisHash;
-        } catch {
-          expectedGraphIdentityHash = undefined;
-          expectedGraphAnalysisHash = undefined;
-        }
-
-        const turnId = restoreTurnId();
-        try {
-          await store.append({
-            scenario_id: ctx.scenarioId,
-            turn_id: turnId,
-            turn_class: "direct_answer",
-            handler_id: null,
-            request_hash: turnId,
-            response_emitted: false,
-            llm_calls_used: 0,
-            duration_ms: Date.now() - startedAt,
-            handler_facts: [],
-            graph: graphForStore,
-            expectedGraphIdentityHash,
-            expectedGraphAnalysisHash,
-          });
-        } catch (err) {
-          if (err instanceof GraphStaleWriteError) {
-            // The working graph moved between the RPC and the append. Nothing
-            // was overwritten; the version row IS recorded. Honest 409.
-            log.warn(
-              {
-                event: "v5.scenario_versions.restore_append_cas_conflict",
-                request_id: requestId,
-                scenario_id: ctx.scenarioId,
-              },
-              "Scenario versions — restore append CAS conflict; version recorded, working graph untouched",
-            );
+          case "mutation_id_reused":
             return reply
               .code(409)
               .send(
                 buildErrorV1(
                   "BAD_INPUT",
-                  "This model changed while restoring. Nothing was overwritten — refresh and try again.",
-                  { code: "VERSION_STALE", version_recorded: true },
+                  "This restore identity was already used for another version.",
+                  { code: "MUTATION_ID_REUSED" },
                   requestId,
                 ),
               );
-          }
-          log.error(
-            {
-              event: "v5.scenario_versions.restore_append_failed",
-              request_id: requestId,
-              scenario_id: ctx.scenarioId,
-              err: err instanceof Error ? err.message : String(err),
-            },
-            "Scenario versions — restore recorded but the working graph write failed; a retry must REFRESH first (the snapshot guard defeats the RPC dedupe — see the header)",
-          );
-          return reply
-            .code(503)
-            .send(
-              buildErrorV1(
-                "INTERNAL",
-                "The restore did not complete. The version was recorded but the working model was not updated — try again.",
-                { code: "RESTORE_INCOMPLETE", version_recorded: true },
-                requestId,
-              ),
+          case "empty_graph":
+            return invalid(
+              reply,
+              requestId,
+              "VERSION_GRAPH_INCOMPATIBLE",
+              "This version has no restorable model content.",
             );
+          default:
+            return unavailable(reply, requestId, "The version could not be restored right now.");
         }
       }
 
-      const outcome = VersionWriteOutcomeResponseSchema.safeParse(restoredOutcome);
+      const replayed = restored.value.replayed;
+      const analysis = await readScenarioAnalysis({
+        scenarioId: ctx.scenarioId,
+        graph: restored.value.graph,
+        requestId,
+        analysisInvalidatedAt: restored.value.analysis_invalidated_at,
+      });
+      const outcome = AtomicRestoreRouteResponseSchema.safeParse({
+        schema: MODEL_VERSION_RESTORE_SCHEMA,
+        scenario_id: ctx.scenarioId,
+        restored: true,
+        receipt: toModelVersionMutationReceiptV1(ctx.scenarioId, restored.value),
+        analysis_state: analysis.analysis_state,
+        request_id: requestId,
+      });
       if (!outcome.success) {
         return unavailable(reply, requestId, "The version could not be restored right now.");
       }
-
-      const identity = computeGraphIdentityHash(graphForStore as GraphStateIngress);
 
       log.info(
         {
           event: "v5.scenario_versions.restored",
           request_id: requestId,
           scenario_id: ctx.scenarioId,
-          version_id: restoredOutcome.version_id,
+          mutation_id: outcome.data.receipt.mutation_id,
+          version_id: outcome.data.receipt.version_id,
           restored_from_version_id: parsedBody.data.version_id,
-          deduped: restoredOutcome.deduped,
-          undo_version_id: undoVersionId,
+          replayed,
+          undo_version_id: outcome.data.receipt.undo_version_id,
         },
         "Scenario versions — version restored to the working graph",
       );
 
-      return reply.code(200).send({
-        schema: MODEL_VERSION_RESTORE_SCHEMA,
-        scenario_id: ctx.scenarioId,
-        restored: true,
-        deduped: restoredOutcome.deduped,
-        version: outcome.data,
-        undo_version_id: undoVersionId,
-        // The restored graph, exactly as persisted — for the client-side
-        // receipt-class reconcile (adds + updates + deletions, layout local).
-        graph: graphForStore,
-        graph_identity_hash: identity,
-        request_id: requestId,
-      });
+      return reply.code(200).send(outcome.data);
     },
   );
 }
