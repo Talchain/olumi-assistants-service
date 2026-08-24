@@ -214,7 +214,29 @@ export const LLMCritiqueResponse = z.object({
     z.object({
       level: z.enum(["BLOCKER", "IMPROVEMENT", "OBSERVATION"]),
       note: z.string().min(10).max(280),
-      target: z.string().optional(),
+      /**
+       * The node or edge this finding is about.
+       *
+       * A GRAPH-WIDE finding has no single target — "both options converge to
+       * the same generic outcome" is a criticism of the topology, not of one
+       * node — and the model spells that as JSON `null`. `null` and ABSENT
+       * therefore mean the same thing here, so `null` is accepted and
+       * NORMALISED TO ABSENT rather than given a second name: `target?: string`
+       * is already this estate's spelling of an untargeted critique (see
+       * `CritiqueIssue` in ../types.ts and `CritiqueGraphOutput` in
+       * ../../schemas/assist.ts; the published contract expresses the same
+       * concept as an absent `affected_node_ids`). Nothing downstream ever sees
+       * a `null` target, and nothing new is minted.
+       *
+       * ⚠ Do NOT "fix" this by compelling the model to always name a target.
+       * That attributes a graph-wide criticism to a node that did not cause it
+       * — fabricated provenance, which is worse than the 500 this replaced.
+       *
+       * Nullability is scoped to THIS field alone: a null `note` or `level`
+       * remains a hard rejection, as does a non-string target (number, object,
+       * array, boolean). Closing the null case must not open the schema to junk.
+       */
+      target: z.string().nullish().transform((v) => v ?? undefined),
     }).passthrough()
   ),
   suggested_fixes: z.array(z.string()).max(5),
