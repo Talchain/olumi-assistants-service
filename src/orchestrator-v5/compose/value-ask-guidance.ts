@@ -43,6 +43,7 @@
  */
 
 import { unitFamilyOf, type UnitFamily } from '../routing/value-unit-resolution.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 
 /**
  * The scale phrase for a factor PROVABLY recorded without a unit. Deliberately
@@ -51,8 +52,22 @@ import { unitFamilyOf, type UnitFamily } from '../routing/value-unit-resolution.
  */
 export const UNITLESS_VALUE_SCALE_PHRASE = 'on the same scale the factor already uses' as const;
 
-/** Currency symbols we can render directly; anything else falls back to `£`. */
-const RENDERABLE_CURRENCY_SYMBOLS: ReadonlySet<string> = new Set(['£', '$', '€']);
+/**
+ * ⭐ DERIVED, NOT MIRRORED (trap 12, and caught by this repo's own
+ * `currency-vocabulary.union` guard when the first draft of this file spelled
+ * its own three-symbol set). Whether a symbol is a renderable currency is
+ * asked of THE canonical vocabulary — `CURRENCY_SYMBOL_TO_CODE` in
+ * `cee/extraction/numeric-parser.ts`, the same list the provenance locator
+ * derives from. A second hand-written currency list here would drift, and a
+ * symbol missing from the copy would silently render the wrong currency to a
+ * user. This module only READS that constant; it owns nothing in `cee/`.
+ */
+function isKnownCurrencySymbol(symbol: string): boolean {
+  return Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOL_TO_CODE, symbol);
+}
+
+/** Fallback when the family is currency but the symbol is unknown/absent. */
+const DEFAULT_CURRENCY_SYMBOL = '£';
 
 /**
  * An example value for a factor whose unit FAMILY is known.
@@ -73,7 +88,9 @@ export function valueExampleForFamily(
   switch (family) {
     case 'currency': {
       const rendered =
-        symbol !== undefined && RENDERABLE_CURRENCY_SYMBOLS.has(symbol) ? symbol : '£';
+        symbol !== undefined && isKnownCurrencySymbol(symbol)
+          ? symbol
+          : DEFAULT_CURRENCY_SYMBOL;
       return `${rendered}100,000`;
     }
     case 'percent':
