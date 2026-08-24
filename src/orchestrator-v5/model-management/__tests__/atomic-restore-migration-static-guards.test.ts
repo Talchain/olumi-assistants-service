@@ -43,6 +43,9 @@ const appendBody = code.slice(
   code.indexOf("CREATE OR REPLACE FUNCTION public.append_turn_atomic_v5"),
   code.indexOf("REVOKE EXECUTE ON FUNCTION public.append_turn_atomic_v5")
 );
+const appendV4Delegation = appendBody.match(
+  /v_turn_id := public\.append_turn_atomic_v4\(([\s\S]*?)\);/
+);
 
 describe("C8-A atomic restore migration — authority and atomic structure", () => {
   it("is explicitly unexecuted and additive, with mutation uniqueness + two hash carriers", () => {
@@ -154,45 +157,92 @@ describe("C8-A atomic semantic append migration", () => {
     );
   });
 
-  it("locks scenarios before replay/CAS and carries every v4 turn side effect", () => {
+  it("locks version state, then delegates every canonical turn carrier to v4 in exact order", () => {
     const lock = appendBody.indexOf("FOR UPDATE");
-    const turn = appendBody.indexOf("INSERT INTO public.v5_conversation_turns");
-    const graph = appendBody.indexOf("UPDATE public.scenarios");
-    const facts = appendBody.indexOf("INSERT INTO public.v5_handler_facts");
-    const brief = appendBody.indexOf("SET brief_text = p_brief_text");
+    const replayLookup = appendBody.indexOf(
+      "SELECT id, model_version_mutation_id, model_version_created"
+    );
+    const replayFound = appendBody.indexOf("v_turn_preexisting := FOUND");
+    const delegation = appendBody.indexOf(
+      "v_turn_id := public.append_turn_atomic_v4"
+    );
+    const marker = appendBody.indexOf("UPDATE public.v5_conversation_turns");
     expect(lock).toBeGreaterThan(0);
-    expect(turn).toBeGreaterThan(lock);
-    expect(graph).toBeGreaterThan(turn);
-    expect(facts).toBeGreaterThan(graph);
-    expect(brief).toBeGreaterThan(facts);
-    for (const carrier of [
-      "pending_actions",
-      "coaching_state",
-      "user_message",
-      "assistant_message",
-      "handler_facts",
-      "brief_text",
-    ]) {
-      expect(appendBody).toContain(carrier);
-    }
+    expect(replayLookup).toBeGreaterThan(lock);
+    expect(replayFound).toBeGreaterThan(replayLookup);
+    expect(delegation).toBeGreaterThan(replayFound);
+    expect(marker).toBeGreaterThan(delegation);
+    expect(appendV4Delegation).not.toBeNull();
+    expect(appendV4Delegation![1]!.split(",").map((arg) => arg.trim())).toEqual(
+      [
+        "p_scenario_id",
+        "p_turn_id",
+        "p_turn_class",
+        "p_handler_id",
+        "p_request_hash",
+        "p_response_emitted",
+        "p_llm_calls_used",
+        "p_duration_ms",
+        "p_handler_facts",
+        "p_graph",
+        "p_brief_text",
+        "p_pending_actions",
+        "p_coaching_state",
+        "p_user_message",
+        "p_assistant_message",
+        "p_expected_graph_identity_hash",
+        "p_incoming_graph_identity_hash",
+        "p_cas_enforce",
+        "p_fence_generation",
+      ]
+    );
   });
 
-  it("uses null-safe exact CAS with only the current-state self-noop exception", () => {
-    expect(oneLine).toMatch(
-      /IF v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash AND p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash THEN RAISE EXCEPTION USING ERRCODE = 'OLGC1'/
+  it("contains no second fence, CAS, turn, graph, facts or brief authority", () => {
+    expect(appendBody.match(/public\.append_turn_atomic_v4\(/g)).toHaveLength(
+      1
     );
-    expect(appendBody).not.toMatch(
-      /p_expected_graph_identity_hash IS NOT NULL/
+    expect(appendBody).not.toContain(
+      "INSERT INTO public.v5_conversation_turns"
     );
+    expect(appendBody).not.toContain("INSERT INTO public.v5_handler_facts");
+    expect(appendBody).not.toContain("SET graph = p_graph");
+    expect(appendBody).not.toContain("SET brief_text = p_brief_text");
+    expect(appendBody).not.toContain("public.v5_turn_fence");
+    expect(appendBody).not.toMatch(/ERRCODE = 'OLTF[123]'/);
+    expect(appendBody).not.toMatch(/ERRCODE = 'OLGC1'/);
+    expect(appendBody.match(/p_expected_graph_identity_hash/g)).toHaveLength(2);
+    expect(appendBody.match(/p_cas_enforce/g)).toHaveLength(2);
   });
 
   it("durably distinguishes guest/no-op null receipts from missing owned versions", () => {
     expect(oneLine).toMatch(
       /model_version_mutation_id UUID NULL, ADD COLUMN IF NOT EXISTS model_version_created BOOLEAN NULL/
     );
-    expect(appendBody).toContain("p_version_mutation_id, v_should_create");
+    expect(appendBody).toMatch(
+      /v_should_create := v_user_id IS NOT NULL\s+AND v_current_hash IS DISTINCT FROM p_incoming_graph_identity_hash/
+    );
+    expect(appendBody).toMatch(
+      /UPDATE public\.v5_conversation_turns\s+SET model_version_mutation_id = p_version_mutation_id,\s*model_version_created = v_should_create\s+WHERE id = v_turn_id\s+AND scenario_id = p_scenario_id\s+AND turn_id = p_turn_id\s+AND model_version_mutation_id IS NULL\s+AND model_version_created IS NULL;\s*GET DIAGNOSTICS v_updated = ROW_COUNT;\s*IF v_updated <> 1 THEN[\s\S]*?USING ERRCODE = 'MV409'/
+    );
     expect(appendBody).toContain("IF v_turn_version_created = FALSE THEN");
     expect(appendBody).toContain("IF NOT v_should_create THEN");
+  });
+
+  it("cannot swallow delegated writes and orders marker, version, then head/event composition", () => {
+    const delegation = appendBody.indexOf(
+      "v_turn_id := public.append_turn_atomic_v4"
+    );
+    const marker = appendBody.indexOf("UPDATE public.v5_conversation_turns");
+    const version = appendBody.indexOf("INSERT INTO public.model_versions");
+    const headEvent = appendBody.indexOf(
+      "UPDATE public.scenarios SET",
+      version
+    );
+    expect(marker).toBeGreaterThan(delegation);
+    expect(version).toBeGreaterThan(marker);
+    expect(headEvent).toBeGreaterThan(version);
+    expect(appendBody).not.toMatch(/\n\s*EXCEPTION\s+(?:WHEN|\n)/);
   });
 
   it("creates initial only when no version row exists and carries actor/undo metadata", () => {
@@ -201,7 +251,9 @@ describe("C8-A atomic semantic append migration", () => {
     );
     expect(appendBody).toContain("WHEN NOT v_has_versions THEN 'initial'");
     expect(appendBody).toContain("'undo_version_id', v_head_id");
-    expect(appendBody).toContain("'undo_version_id', v_version.parent_version_id");
+    expect(appendBody).toContain(
+      "'undo_version_id', v_version.parent_version_id"
+    );
     expect(appendBody).toContain("'actor_kind', p_version_actor_kind");
     expect(appendBody).toContain("'authored_by', p_version_authored_by");
   });
@@ -212,6 +264,8 @@ describe("C8-A atomic semantic append migration", () => {
     );
     expect(appendBody).not.toMatch(/UPDATE public\.model_versions/);
     expect(appendBody).not.toMatch(/DELETE FROM public\.model_versions/);
-    expect(functionBody).toContain("analysis_invalidated_at = v_analysis_invalidated_at");
+    expect(functionBody).toContain(
+      "analysis_invalidated_at = v_analysis_invalidated_at"
+    );
   });
 });

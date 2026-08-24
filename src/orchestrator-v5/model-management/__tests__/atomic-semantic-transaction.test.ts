@@ -14,6 +14,7 @@ interface Write {
   analysis: string;
   graph: unknown;
   owned?: boolean;
+  casEnforce: boolean;
 }
 
 interface Receipt {
@@ -73,13 +74,25 @@ class AtomicAppendModel {
     if (replay) {
       if (replay.mutation !== write.mutation) throw new Error("MV422");
       if (!replay.versionCreated) return null;
-      return tx.versions.find((version) => version.mutation_id === write.mutation)!;
+      return tx.versions.find(
+        (version) => version.mutation_id === write.mutation
+      )!;
     }
 
-    if (tx.graphHash !== write.expected && write.incoming !== tx.graphHash) {
-      throw new Error("MV409");
+    // append_turn_atomic_v4 is the sole CAS authority. Its compatibility
+    // contract deliberately skips comparison when enforcement is off, the
+    // expectation is null, or the current persisted hash is null.
+    if (
+      write.casEnforce &&
+      write.expected !== null &&
+      tx.graphHash !== null &&
+      tx.graphHash !== write.expected &&
+      write.incoming !== tx.graphHash
+    ) {
+      throw new Error("OLGC1");
     }
-    const createVersion = write.owned !== false && tx.graphHash !== write.incoming;
+    const createVersion =
+      write.owned !== false && tx.graphHash !== write.incoming;
     tx.turns.push({
       id: write.turn,
       mutation: write.mutation,
@@ -117,9 +130,18 @@ function write(
   mutation: string,
   expected: string | null,
   incoming: string,
-  analysis: string
+  analysis: string,
+  casEnforce = true
 ): Write {
-  return { turn, mutation, expected, incoming, analysis, graph: { incoming } };
+  return {
+    turn,
+    mutation,
+    expected,
+    incoming,
+    analysis,
+    graph: { incoming },
+    casEnforce,
+  };
 }
 
 describe("C8 atomic semantic append behaviour", () => {
@@ -129,33 +151,64 @@ describe("C8 atomic semantic append behaviour", () => {
       const db = new AtomicAppendModel(HASH_A);
       const before = db.snapshot();
       await expect(
-        db.append(write("turn-1", "mutation-1", HASH_A, HASH_B, ANALYSIS_B), failAt)
+        db.append(
+          write("turn-1", "mutation-1", HASH_A, HASH_B, ANALYSIS_B),
+          failAt
+        )
       ).rejects.toThrow("injected");
       expect(db.state).toEqual(before);
     }
   );
 
-  it.each([
-    [null, HASH_A, HASH_B],
-    [HASH_A, HASH_B, HASH_C],
-  ] as const)(
-    "serializes writers from base %s: one atomic success and one total rollback",
-    async (base, firstIncoming, secondIncoming) => {
-      const db = new AtomicAppendModel(base);
-      const results = await Promise.allSettled([
-        db.append(write("turn-1", "mutation-1", base, firstIncoming, ANALYSIS_A)),
-        db.append(write("turn-2", "mutation-2", base, secondIncoming, ANALYSIS_B)),
-      ]);
-      expect(results.map((result) => result.status)).toEqual([
-        "fulfilled",
-        "rejected",
-      ]);
-      expect(db.state.turns).toHaveLength(1);
-      expect(db.state.versions).toHaveLength(1);
-      expect(db.state.events).toHaveLength(1);
-      expect(db.state.graphHash).toBe(firstIncoming);
-    }
-  );
+  it("serializes enforced writers from a non-null base: one success and one total rollback", async () => {
+    const db = new AtomicAppendModel(HASH_A);
+    const results = await Promise.allSettled([
+      db.append(write("turn-1", "mutation-1", HASH_A, HASH_B, ANALYSIS_A)),
+      db.append(write("turn-2", "mutation-2", HASH_A, HASH_C, ANALYSIS_B)),
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    expect(db.state.turns).toHaveLength(1);
+    expect(db.state.versions).toHaveLength(1);
+    expect(db.state.events).toHaveLength(1);
+    expect(db.state.graphHash).toBe(HASH_B);
+  });
+
+  it("preserves v4 first-write/null-expectation compatibility instead of inventing a v5 CAS", async () => {
+    const db = new AtomicAppendModel(null);
+    const results = await Promise.allSettled([
+      db.append(write("turn-1", "mutation-1", null, HASH_A, ANALYSIS_A)),
+      db.append(write("turn-2", "mutation-2", null, HASH_B, ANALYSIS_B)),
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "fulfilled",
+    ]);
+    expect(db.state.turns).toHaveLength(2);
+    expect(db.state.versions).toHaveLength(2);
+    expect(db.state.events).toHaveLength(2);
+    expect(db.state.graphHash).toBe(HASH_B);
+  });
+
+  it("preserves v4's first-write guard when current is null but expectation is stale", async () => {
+    const db = new AtomicAppendModel(null);
+    const receipt = await db.append(
+      write("turn-1", "mutation-1", HASH_C, HASH_A, ANALYSIS_A)
+    );
+    expect(receipt?.graph_identity_hash).toBe(HASH_A);
+    expect(db.state.graphHash).toBe(HASH_A);
+  });
+
+  it("preserves v4's p_cas_enforce=false compatibility path", async () => {
+    const db = new AtomicAppendModel(HASH_A);
+    const receipt = await db.append(
+      write("turn-1", "mutation-1", HASH_C, HASH_B, ANALYSIS_B, false)
+    );
+    expect(receipt?.graph_identity_hash).toBe(HASH_B);
+    expect(db.state.graphHash).toBe(HASH_B);
+  });
 
   it("returns the byte-identical original receipt on replay with zero writes", async () => {
     const db = new AtomicAppendModel(HASH_A);
@@ -169,13 +222,22 @@ describe("C8 atomic semantic append behaviour", () => {
 
   it("commits exact self-noop and guest turns with no version/head/event, including replay", async () => {
     const db = new AtomicAppendModel(HASH_A);
-    const noop = write("turn-noop", "mutation-noop", HASH_A, HASH_A, ANALYSIS_A);
+    const noop = write(
+      "turn-noop",
+      "mutation-noop",
+      HASH_A,
+      HASH_A,
+      ANALYSIS_A
+    );
     expect(await db.append(noop)).toBeNull();
     const afterNoop = db.snapshot();
     expect(await db.append(noop)).toBeNull();
     expect(db.state).toEqual(afterNoop);
 
-    const guest = { ...write("turn-guest", "mutation-guest", HASH_A, HASH_B, ANALYSIS_B), owned: false };
+    const guest = {
+      ...write("turn-guest", "mutation-guest", HASH_A, HASH_B, ANALYSIS_B),
+      owned: false,
+    };
     expect(await db.append(guest)).toBeNull();
     expect(db.state.turns).toHaveLength(2);
     expect(db.state.versions).toHaveLength(0);
