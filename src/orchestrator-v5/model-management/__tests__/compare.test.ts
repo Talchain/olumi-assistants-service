@@ -182,9 +182,48 @@ describe('deterministic semantic categories and coverage', () => {
     expect(() => compareVersionRecords(record({ graph: duplicateNodes }), record({ graph_identity_hash: HASH_B }))).toThrow(/duplicate node id/);
     const duplicateEdges = {
       nodes: [{ id: 'a' }, { id: 'b' }],
-      edges: [{ from: 'a', to: 'b' }, { id: 'another', from: 'a', to: 'b' }],
+      edges: [{ from: 'a', to: 'b' }, { from: 'a', to: 'b' }],
     };
     expect(() => compareVersionRecords(record({ graph: duplicateEdges }), record({ graph_identity_hash: HASH_B }))).toThrow(/duplicate edge identity/);
+  });
+
+  it('compares distinct parallel connectors by stable id or connector type', () => {
+    const graphA = {
+      nodes: [{ id: 'a' }, { id: 'b' }],
+      edges: [
+        { id: 'direct', from: 'a', to: 'b', edge_type: 'directed', strength: { mean: 0.2 } },
+        { id: 'confounded', from: 'a', to: 'b', edge_type: 'bidirected', strength: { mean: 0.1 } },
+      ],
+    };
+    const graphB = {
+      nodes: [{ id: 'a' }, { id: 'b' }],
+      edges: [
+        { id: 'direct', from: 'a', to: 'b', edge_type: 'directed', strength: { mean: 0.8 } },
+        { id: 'confounded', from: 'a', to: 'b', edge_type: 'bidirected', strength: { mean: 0.1 } },
+      ],
+    };
+    const result = compareVersionRecords(
+      record({ graph: graphA }),
+      record({ graph: graphB, graph_identity_hash: HASH_B }),
+    );
+    expect(result.relation).toBe('different');
+    if (result.relation !== 'different') throw new Error('precondition');
+    expect(result.categories.values_uncertainty.map((item) => item.entity_id)).toEqual(['direct']);
+
+    const idlessA = {
+      ...graphA,
+      edges: graphA.edges.map(({ id: _id, ...edge }) => edge),
+    };
+    const idlessB = {
+      ...graphB,
+      edges: graphB.edges.map(({ id: _id, ...edge }) => edge),
+    };
+    expect(() =>
+      compareVersionRecords(
+        record({ graph: idlessA }),
+        record({ graph: idlessB, graph_identity_hash: HASH_B }),
+      ),
+    ).not.toThrow();
   });
 
   it('classifies every category deterministically in both directions', () => {
