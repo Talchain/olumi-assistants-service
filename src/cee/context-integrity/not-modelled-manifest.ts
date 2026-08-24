@@ -450,6 +450,30 @@ const TOP_KEY_CLASS: ReadonlyMap<string, TopKeyClass> = new Map<string, TopKeyCl
  * missed a value-bearing key would do the opposite and manufacture a false
  * "we dropped this". Under-reporting is recoverable; a false accusation about
  * the user's own words is not.
+ *
+ * ⚠⚠ ONE MEMBER IS ADDED AGAINST THAT DIRECTION, DELIBERATELY — `source_quote`.
+ * The argument above is right about every OTHER key, and it is why this stayed
+ * a deny-list. But `source_quote` is defined at its producer
+ * (`NodeV3.source_quote`, `schemas/cee-v3.ts:229`, written onto wire nodes at
+ * `transforms/schema-v3.ts:1145`) as THE USER'S EXACT WORDS carried through
+ * unchanged. Nothing computes with it.
+ *
+ * Counting it as model surface is itself the false statement. It let the
+ * product quote the user's own sentence back at them and score that as having
+ * modelled their number — journey-witnessed on CEE `4e88390`, where a stated
+ * £20,000 that reached no factor, option or intervention was reported
+ * `in_model` purely because the sentence containing it was echoed onto a node.
+ * That is a false "we kept this" on the one surface whose entire job is saying
+ * what was kept.
+ *
+ * The flip lands on `prose_only`, not `absent`, so it still makes no "I could
+ * not find it" accusation and the anti-false-accusation rule above is
+ * preserved intact.
+ *
+ * ⚠ LIMIT: where a stated node's LABEL is itself the verbatim sentence
+ * (`label_authored` absent — "the label IS the user's own text",
+ * `cee-v3.ts:231-236`), the label is genuinely model surface and this does not
+ * reach it. That case is carried, so reporting it `in_model` is correct.
  */
 const PROSE_KEYS: ReadonlySet<string> = new Set([
   "validation",
@@ -462,6 +486,7 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
   "evidence_note",
   "fix_hint",
   "commentary",
+  "source_quote", // the user's own words, carried verbatim; nothing computes with it
 ]);
 
 /**
