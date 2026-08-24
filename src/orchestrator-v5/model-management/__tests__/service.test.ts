@@ -328,10 +328,20 @@ describe('compareVersions wiring', () => {
     });
     const service = makeService(store);
     const result = await service.compareVersions(SCENARIO, TARGET_ID, NEW_ID);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: 'ok',
-      value: { relation: 'identical', short_circuit: true },
+      value: {
+        relation: 'identical',
+        short_circuit: true,
+        from_version_id: TARGET_ID,
+        to_version_id: NEW_ID,
+        from_full_hash: 'a'.repeat(64),
+        to_full_hash: 'a'.repeat(64),
+        analysis_equivalent: true,
+      },
     });
+    if (result.status !== 'ok') throw new Error('expected comparison');
+    expect(Object.values(result.value.categories).flat()).toEqual([]);
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, TARGET_ID);
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, NEW_ID);
   });

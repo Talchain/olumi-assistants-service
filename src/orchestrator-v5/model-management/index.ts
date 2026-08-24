@@ -67,7 +67,12 @@ export type {
   SaveVersionWrite,
   RestoreVersionWrite,
 } from './store-adapter.js';
-export { compareVersionRecords, summariseGraphDiff } from './compare.js';
+export {
+  compareVersionRecords,
+  summariseGraphDiff,
+  KNOWN_UNDETECTABLE_MODEL_VERSION_CHANGES,
+  ModelVersionDiffInputError,
+} from './compare.js';
 export { journeyRpcVersionEventSink, notifyVersionEventSink } from './version-event-sink.js';
 export { CAS_CONFLICT_KIND, SIGN_IN_REQUIRED_MESSAGE } from './types.js';
 export type {
@@ -79,6 +84,12 @@ export type {
   ModelManagementErrorCode,
   VersionCasConflict,
   VersionComparison,
+  ModelVersionDiffCategory,
+  ModelVersionDiffChangeKind,
+  ModelVersionDiffEntityKind,
+  ModelVersionDiffItem,
+  ModelVersionDiffCategories,
+  ModelVersionDiffCoverage,
   VersionDiffSummary,
   ModelVersionEvent,
   VersionEventSink,

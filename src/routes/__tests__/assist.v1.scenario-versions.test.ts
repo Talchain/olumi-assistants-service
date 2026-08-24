@@ -147,6 +147,7 @@ const getVersion = vi.fn();
 const saveVersion = vi.fn();
 const restoreVersion = vi.fn();
 const getCurrentVersionPointer = vi.fn();
+const compareVersions = vi.fn();
 
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
   const actual =
@@ -159,6 +160,7 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       saveVersion,
       restoreVersion,
       getCurrentVersionPointer,
+      compareVersions,
     }),
   };
 });
@@ -241,6 +243,50 @@ beforeEach(() => {
     value: [summary({ id: VERSION_B, version_number: 2, graph_identity_hash: HASH_B }), summary()],
   });
   getCurrentVersionPointer.mockResolvedValue({ status: "ok", value: VERSION_B });
+  compareVersions.mockResolvedValue({
+    status: "ok",
+    value: {
+      relation: "different",
+      short_circuit: false,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+      from_full_hash: HASH_A,
+      to_full_hash: HASH_B,
+      analysis_equivalent: false,
+      categories: {
+        structure: [{
+          path: "/nodes/n2",
+          change_kind: "added",
+          entity_kind: "node",
+          entity_id: "n2",
+          label: "Revenue",
+          before_display: null,
+          after_display: "{\"id\":\"n2\"}",
+          summary: "Added Revenue",
+          why_it_matters: "Changes what the shared reasoning model contains.",
+        }],
+        relationships: [],
+        values_uncertainty: [],
+        evidence_provenance: [],
+        goals_constraints_options: [],
+        assumptions_claims: [],
+        presentation: [],
+        other_model_fields: [],
+      },
+      coverage: {
+        known_undetectable: ["conversation_or_discussion_not_committed_to_the_shared_graph"],
+        known_uninterpreted_paths: [],
+      },
+      diff: {
+        nodes_added: 1,
+        nodes_removed: 0,
+        nodes_changed: 0,
+        edges_added: 0,
+        edges_removed: 0,
+        edges_changed: 0,
+      },
+    },
+  });
   getVersion.mockResolvedValue({
     status: "ok",
     value: { ...summary(), graph: STORED_VERSION_GRAPH },
@@ -372,6 +418,118 @@ describe("POST /versions — list", () => {
     const app = await buildApp();
     const res = await post(app, "/versions", { user_id: OWNER });
     expect(res.statusCode).toBe(503);
+    await app.close();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARE
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("POST /versions/compare — authoritative stored-version diff", () => {
+  it("compares only the two addressed server versions and omits internal count telemetry", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.schema).toBe("model_version_diff.v1");
+    expect(body.scenario_id).toBe(SCENARIO);
+    expect(body.categories.structure[0].summary).toBe("Added Revenue");
+    expect(body.diff).toBeUndefined();
+    expect(body.short_circuit).toBeUndefined();
+    expect(compareVersions).toHaveBeenCalledWith(SCENARIO, VERSION_A, VERSION_B);
+    await app.close();
+  });
+
+  it("omits the internal short-circuit marker from identical wire responses", async () => {
+    compareVersions.mockResolvedValue({
+      status: "ok",
+      value: {
+        relation: "identical",
+        short_circuit: true,
+        from_version_id: VERSION_A,
+        to_version_id: VERSION_B,
+        from_full_hash: HASH_A,
+        to_full_hash: HASH_A,
+        analysis_equivalent: true,
+        categories: {
+          structure: [],
+          relationships: [],
+          values_uncertainty: [],
+          evidence_provenance: [],
+          goals_constraints_options: [],
+          assumptions_claims: [],
+          presentation: [],
+          other_model_fields: [],
+        },
+        coverage: {
+          known_undetectable: ["conversation_or_discussion_not_committed_to_the_shared_graph"],
+          known_uninterpreted_paths: [],
+        },
+      },
+    });
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().relation).toBe("identical");
+    expect(res.json().short_circuit).toBeUndefined();
+    await app.close();
+  });
+
+  it("rejects client graph or alleged hash truth", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+      graph: { nodes: [{ id: "fabricated" }], edges: [] },
+      from_full_hash: HASH_A,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("VERSION_COMPARE_SERVER_AUTHORITY_REQUIRED");
+    expect(compareVersions).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("refuses malformed ids before comparison", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: "not-a-version",
+      to_version_id: VERSION_B,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("VERSION_COMPARE_PAYLOAD_INVALID");
+    expect(compareVersions).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("fails closed when a stored graph is incompatible", async () => {
+    compareVersions.mockResolvedValue({
+      status: "error",
+      error: {
+        code: "version_graph_incompatible",
+        recoverable: false,
+        message: "duplicate node id",
+      },
+    });
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("VERSION_GRAPH_INCOMPATIBLE");
     await app.close();
   });
 });

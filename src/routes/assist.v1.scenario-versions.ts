@@ -11,6 +11,7 @@
  * make the SHARED model's history reachable from any browser with access.
  *
  *   POST /assist/v1/scenarios/:scenario_id/versions          — list (read tier)
+ *   POST /assist/v1/scenarios/:scenario_id/versions/compare  — compare two stored versions (read tier)
  *   POST /assist/v1/scenarios/:scenario_id/versions/save     — named save (write tier)
  *   POST /assist/v1/scenarios/:scenario_id/versions/restore  — restore (write tier)
  *
@@ -21,7 +22,7 @@
  *   `authorizeScenarioOwnership` UPSERTS and none of these routes may create the
  *   row it addresses (the read route's pin; restore is a write to the GRAPH but
  *   must still never mint a scenario).
- * · ⚠ THE BODY PARSE IS LAST, NOT FIRST (corrected 2026-08-17). These three
+ * · ⚠ THE BODY PARSE IS LAST, NOT FIRST (corrected 2026-08-17). These four
  *   routes originally validated their route-local body BEFORE `preflight`,
  *   which inverts the family principle the shared pre-flight states in its own
  *   header and enforces for every turn: *authentication precedes body
@@ -132,6 +133,7 @@ import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import {
   getModelManagementService,
   ModelVersionSummaryResponseSchema,
+  VersionComparisonResponseSchema,
   VersionWriteOutcomeResponseSchema,
   SIGN_IN_REQUIRED_MESSAGE,
 } from "../orchestrator-v5/model-management/index.js";
@@ -147,6 +149,7 @@ import { log } from "../utils/telemetry.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
 export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v1" as const;
+export const MODEL_VERSION_DIFF_SCHEMA = "model_version_diff.v1" as const;
 export const MODEL_VERSION_SAVE_SCHEMA = "model_version_save.v1" as const;
 export const MODEL_VERSION_RESTORE_SCHEMA = "model_version_restore.v1" as const;
 
@@ -172,6 +175,15 @@ const SaveBodySchema = z.object({
   label: z.string().min(1).max(200).optional(),
   expected_graph_identity_hash: Sha256Hex.optional(),
 });
+const CompareBodySchema = z.object({
+  from_version_id: z.string().uuid(),
+  to_version_id: z.string().uuid(),
+});
+const COMPARE_BODY_ALLOWED_KEYS = new Set([
+  "user_id",
+  "from_version_id",
+  "to_version_id",
+]);
 const RestoreBodySchema = z.object({
   version_id: z.string().uuid(),
   label: z.string().min(1).max(200).optional(),
@@ -269,7 +281,7 @@ export default async function route(app: FastifyInstance) {
       );
 
   /**
-   * Steps 0–3 of the family order, shared by all three routes: identity →
+   * Steps 0–3 of the family order, shared by all four routes: identity →
    * UUID syntax → EXISTENCE (fail closed; a missing probe is refused, never
    * assumed — the read route's create-on-read fence) → ownership (the SAME
    * shared pre-flight the turn route runs; no second ownership rule here).
@@ -445,6 +457,97 @@ export default async function route(app: FastifyInstance) {
         scenario_id: ctx.scenarioId,
         versions,
         current_version_id: pointer.value,
+        request_id: requestId,
+      });
+    },
+  );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // COMPARE — POST /assist/v1/scenarios/:scenario_id/versions/compare
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post<{ Params: { scenario_id: string } }>(
+    "/assist/v1/scenarios/:scenario_id/versions/compare",
+    { config: { rateLimit: { max: LIST_RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      const requestId = getRequestId(req);
+      const ctx = await preflight(req, reply);
+      if (ctx === null) return;
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => !COMPARE_BODY_ALLOWED_KEYS.has(key))) {
+        return invalid(
+          reply,
+          requestId,
+          "VERSION_COMPARE_SERVER_AUTHORITY_REQUIRED",
+          "Compare accepts version IDs only; graph and hash truth are loaded by the server.",
+        );
+      }
+      const parsedBody = CompareBodySchema.safeParse({
+        from_version_id: body.from_version_id,
+        to_version_id: body.to_version_id,
+      });
+      if (!parsedBody.success) {
+        return invalid(
+          reply,
+          requestId,
+          "VERSION_COMPARE_PAYLOAD_INVALID",
+          "`from_version_id` and `to_version_id` must be UUIDs.",
+        );
+      }
+
+      const service = getModelManagementService();
+      const result = await service.compareVersions(
+        ctx.scenarioId,
+        parsedBody.data.from_version_id,
+        parsedBody.data.to_version_id,
+      );
+      if (result.status === "disabled") return disabled(reply, requestId);
+      if (result.status === "conflict") return stale(reply, requestId);
+      if (result.status === "error") {
+        if (result.error.code === "version_not_found") {
+          return reply.code(404).send(
+            buildErrorV1(
+              "NOT_FOUND",
+              "One of those versions is no longer available.",
+              { code: "VERSION_NOT_FOUND" },
+              requestId,
+            ),
+          );
+        }
+        if (result.error.code === "version_graph_incompatible") {
+          return invalid(
+            reply,
+            requestId,
+            "VERSION_GRAPH_INCOMPATIBLE",
+            "One of those versions cannot be compared safely.",
+          );
+        }
+        if (result.error.code === "sign_in_required") return signInRequired(reply, requestId);
+        return unavailable(reply, requestId, "Those versions could not be compared right now.");
+      }
+
+      const validated = VersionComparisonResponseSchema.safeParse(result.value);
+      if (!validated.success) {
+        log.error(
+          {
+            event: "v5.scenario_versions.compare_egress_invalid",
+            request_id: requestId,
+            scenario_id: ctx.scenarioId,
+            issues: validated.error.issues.slice(0, 5),
+          },
+          "Scenario versions — comparison failed the egress contract; failing closed",
+        );
+        return unavailable(reply, requestId, "Those versions could not be compared right now.");
+      }
+
+      const comparison = validated.data;
+      const wireComparison = comparison.relation === "different"
+        ? (({ diff: _internalCounts, short_circuit: _internalShortCircuit, ...wire }) => wire)(comparison)
+        : (({ short_circuit: _internalShortCircuit, ...wire }) => wire)(comparison);
+      return reply.code(200).send({
+        schema: MODEL_VERSION_DIFF_SCHEMA,
+        scenario_id: ctx.scenarioId,
+        ...wireComparison,
         request_id: requestId,
       });
     },

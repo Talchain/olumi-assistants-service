@@ -19,7 +19,7 @@
 import { config } from '../../config/index.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { compareVersionRecords } from './compare.js';
+import { compareVersionRecords, ModelVersionDiffInputError } from './compare.js';
 import {
   ModelVersionCasConflictError,
   ModelVersionNotFoundError,
@@ -248,8 +248,8 @@ export class ModelManagementService {
 
   /**
    * Compare two persisted versions (direction: `from` → `to`), CEE-side:
-   * identity-hash short-circuit, else analysis-affecting equivalence + a
-   * compact structural diff summary (compare.ts).
+   * identity-hash short-circuit, else analysis-affecting equivalence plus a
+   * deterministic semantic diff and explicit coverage ledgers (compare.ts).
    */
   async compareVersions(
     scenarioId: string,
@@ -311,6 +311,16 @@ export class ModelManagementService {
 
 /** Fail-closed typed mapping — the service never rethrows. */
 function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
+  if (err instanceof ModelVersionDiffInputError) {
+    return {
+      status: 'error',
+      error: {
+        code: 'version_graph_incompatible',
+        recoverable: false,
+        message: err.message,
+      },
+    };
+  }
   if (err instanceof ModelVersionSignInRequiredError) {
     return {
       status: 'error',
