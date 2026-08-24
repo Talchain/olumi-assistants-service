@@ -1,10 +1,8 @@
 /**
- * Model Management v1 — strict boundary contracts (Layer 2, DARK; prep-only).
+ * Model Management v1 — strict boundary contracts.
  *
- * Zod request/response schemas for the model-management entry points. NOTHING
- * here is wired to a route or exported as a public API this slice — these are
- * the strict shapes a later, separately-reviewed wiring slice will parse
- * ingress / validate egress with (the request-extensions.ts safeParse idiom).
+ * Zod request/response schemas for the model-management entry points. The
+ * scenario-version routes parse ingress and validate egress with these shapes.
  *
  * LOAD-BEARING SECURITY PROPERTY — the server owns graph + hash truth:
  *   - The identity envelope of a saved version (graph_identity_hash + its
@@ -19,10 +17,9 @@
  *   - Restore accepts NO client graph: it copies the target version's graph
  *     server-side. The restore schema is `.strict()` with no `graph` field.
  *
- * Compare has NO request contract here on purpose: the product-facing
- * compare/timeline surface waits for #341 merged to staging (the internal
- * compare helper stays dark). Only create/list/current/restore + the response
- * and safe-error shapes are contracted this slice.
+ * Compare ingress is route-local because authenticated identity shares the
+ * POST body. Its egress is validated here and accepts only server-loaded
+ * stored-version facts; client graph/hash truth is rejected at the route.
  */
 import { z } from 'zod';
 
@@ -146,13 +143,65 @@ const VersionDiffSummaryResponseSchema = z
   })
   .strict();
 
+const ModelVersionDiffItemResponseSchema = z
+  .object({
+    path: z.string().min(1),
+    change_kind: z.enum(['added', 'removed', 'changed']),
+    entity_kind: z.enum(['model', 'node', 'edge', 'option', 'constraint']),
+    entity_id: z.string().nullable(),
+    label: z.string().nullable(),
+    before_display: z.string().nullable(),
+    after_display: z.string().nullable(),
+    summary: z.string().min(1),
+    why_it_matters: z.string().min(1),
+  })
+  .strict();
+
+const ModelVersionDiffCategoriesResponseSchema = z
+  .object({
+    structure: z.array(ModelVersionDiffItemResponseSchema),
+    relationships: z.array(ModelVersionDiffItemResponseSchema),
+    values_uncertainty: z.array(ModelVersionDiffItemResponseSchema),
+    evidence_provenance: z.array(ModelVersionDiffItemResponseSchema),
+    goals_constraints_options: z.array(ModelVersionDiffItemResponseSchema),
+    assumptions_claims: z.array(ModelVersionDiffItemResponseSchema),
+    presentation: z.array(ModelVersionDiffItemResponseSchema),
+    other_model_fields: z.array(ModelVersionDiffItemResponseSchema),
+  })
+  .strict();
+
+const ModelVersionDiffCoverageResponseSchema = z
+  .object({
+    known_undetectable: z.array(z.string().min(1)),
+    known_uninterpreted_paths: z.array(z.string().min(1)),
+  })
+  .strict();
+
 export const VersionComparisonResponseSchema = z.discriminatedUnion('relation', [
-  z.object({ relation: z.literal('identical'), short_circuit: z.literal(true) }).strict(),
+  z
+    .object({
+      relation: z.literal('identical'),
+      short_circuit: z.literal(true),
+      from_version_id: z.string().uuid(),
+      to_version_id: z.string().uuid(),
+      from_full_hash: Sha256Hex,
+      to_full_hash: Sha256Hex,
+      analysis_equivalent: z.literal(true),
+      categories: ModelVersionDiffCategoriesResponseSchema,
+      coverage: ModelVersionDiffCoverageResponseSchema,
+    })
+    .strict(),
   z
     .object({
       relation: z.literal('different'),
       short_circuit: z.literal(false),
-      analysis_equivalent: z.boolean().nullable(),
+      from_version_id: z.string().uuid(),
+      to_version_id: z.string().uuid(),
+      from_full_hash: Sha256Hex,
+      to_full_hash: Sha256Hex,
+      analysis_equivalent: z.boolean(),
+      categories: ModelVersionDiffCategoriesResponseSchema,
+      coverage: ModelVersionDiffCoverageResponseSchema,
       diff: VersionDiffSummaryResponseSchema,
     })
     .strict(),
@@ -175,7 +224,7 @@ export const CurrentVersionResponseSchema = z
 
 export const ModelManagementErrorResponseSchema = z
   .object({
-    code: z.enum(['sign_in_required', 'version_not_found', 'empty_graph', 'store_error']),
+    code: z.enum(['sign_in_required', 'version_not_found', 'version_graph_incompatible', 'empty_graph', 'store_error']),
     recoverable: z.boolean(),
     message: z.string().min(1),
   })

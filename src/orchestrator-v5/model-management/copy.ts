@@ -68,6 +68,10 @@ export const MODEL_MANAGEMENT_ERROR_COPY: Record<ModelManagementErrorCode, CopyB
     headline: 'Version not found',
     body: 'That version is no longer available. It may have been removed.',
   },
+  version_graph_incompatible: {
+    headline: 'Versions cannot be compared',
+    body: 'One of these stored versions cannot be interpreted safely. The model has not been changed.',
+  },
   empty_graph: {
     headline: 'Nothing to save',
     body: 'There is no model content to version yet. Add to your model, then save a version.',
