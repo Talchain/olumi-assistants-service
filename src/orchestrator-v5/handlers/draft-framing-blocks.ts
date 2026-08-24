@@ -206,13 +206,6 @@ function truncateAtWordBoundary(text: string, budget: number): string {
   return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd();
 }
 
-function isFramingActionType(value: unknown): value is FramingActionType {
-  return (
-    typeof value === 'string' &&
-    (FRAMING_ACTION_TYPE_PRECEDENCE as readonly string[]).includes(value)
-  );
-}
-
 /** A stable, id-safe segment derived from the item's own identity. */
 function signalIdSegment(item: Record<string, unknown>, label: string): string {
   const rawId = readTrimmedString(item.id);
