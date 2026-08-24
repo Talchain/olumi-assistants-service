@@ -104,6 +104,34 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // it cannot invent a claim about the user, and it cannot put a number on screen.
   "cee/graph-readiness/obligation-provenance.ts":
     "reader only — classifies the stamp as user_stated for the INV-P6 obligation rule; the literal is a lookup key, the module has no write path",
+  // ── The LLM-context compaction projector. Reviewed 25 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // COMMENT ONLY — weaker even than the reader entry above. The literal appears
+  // exactly ONCE, inside the prose that records what
+  // `canonicalise-value-ops.ts stampUserEditProvenance` writes and why this
+  // projector must therefore consult `observed_state.source` rather than
+  // `observed_state.extractionType`. There is no lookup key: the module's
+  // membership set is DERIVED from `OBSERVED_STATE_SOURCE_LITERALS`, and the
+  // classification is delegated wholesale to `classifyValueSource`, so the
+  // literal is not load-bearing anywhere in the module.
+  //
+  // The truth condition is satisfied vacuously in the only direction available
+  // to a projector: it cannot cause `user_override` to appear on any value. It
+  // reads a stamp a consented writer already made and turns it into a
+  // description ("user" / "user_set") for a compact projection. If a writer
+  // above ever stamped untruthfully, this module would inherit the untruth —
+  // an argument for keeping THEIR entries honest, not for giving this one a
+  // write path it does not have.
+  //
+  // ⚠ Direction of harm, for completeness: at this tip the projection is not
+  // read by anything on a live path (`route-with-tool-use.ts buildUserMessage`
+  // substitutes `display_graph`, which carries no node provenance;
+  // `context/budget.ts:206` deletes the field; the two production readers of
+  // `CompactNode.source` sit behind functions with no production caller). So it
+  // cannot put a claim about the user on screen or in a prompt today either.
+  "orchestrator/context/graph-compact.ts":
+    "comment only — the prose recording what stampUserEditProvenance writes, explaining why this projector reads observed_state.source; no lookup key, no write path, and the projection reaches no live consumer at this tip",
 };
 
 /**
