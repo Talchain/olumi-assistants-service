@@ -294,15 +294,28 @@ const LIMIT_ADJECTIVE_ONLY_RE = new RegExp(`^${LIMIT_ADJECTIVE}$`, "i");
 const AMT_CURRENCY = String.raw`[£$€]\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}`;
 
 /**
- * ⚠ THE CURRENCY REQUIREMENT IS A SUPPRESSION, NOT AN OVERSIGHT.
- * Every noun-form case the reviewer adjudicated `fire` carries a currency
- * symbol. Two it adjudicated SILENT do not — "The current ceiling of 30 seats
- * … has now lapsed" and "We manage 12 capital projects" — and requiring the
- * symbol drops both without needing a tense or aspect predicate. A bare-number
- * noun form ("a hard limit of 12 hires") is therefore NOT extracted. That is a
- * deliberate, recorded gap: this file's doctrine is that an unextracted limit
- * is a gap and an invented one is a lie, and no corpus case demands the
- * bare-number reading.
+ * ⚠ THE CURRENCY REQUIREMENT IS A RECOGNITION BOUNDARY. IT IS NOT A SCREEN,
+ * AND AN EARLIER VERSION OF THIS COMMENT CLAIMED IT DID A SCREEN'S JOB.
+ *
+ * That claim — "requiring the symbol drops both without needing a tense or
+ * aspect predicate" — was FALSE, and the twin that appeared to prove it passed
+ * for a reason unrelated to the property it tested (CLAUDE.md trap 13b). The two
+ * corpus cases behind it ("the current ceiling of 30 seats … has now lapsed",
+ * "we manage 12 capital projects") merely happened to carry no `£`. Add one —
+ * "The old cost ceiling: £50,000 was lifted in January" — and the entire
+ * descriptive class walks through untouched. There was no tense screen; there
+ * was a currency filter being credited with work it was not doing. The real one
+ * is {@link PAST_TENSE_DESCRIPTIVE_RE}, added once an 88-case corpus over this
+ * path's actual input space made the gap visible.
+ *
+ * What the requirement genuinely does is bound RECOGNITION: a bare-number noun
+ * form ("a hard limit of 12 hires", "a 4% cap on attrition", "a 200ms latency
+ * ceiling") is not extracted, and neither is word-denominated currency ("50,000
+ * GBP", "five hundred thousand pounds") — a real brief typed into the UI spells
+ * money that way. Those are deliberate, recorded gaps, pinned in
+ * `noun-form-wire-corpora.test.ts`: an unextracted limit is a gap and an
+ * invented one is a lie, and the boundary is blind in BOTH directions, which is
+ * the only reason it is safe to leave.
  */
 const NOUN_FORM_PATTERNS: ReadonlyArray<{
   re: RegExp;
@@ -390,16 +403,44 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
 const NEGATION_PROPER_RE =
   /\b(?:must\s+not|will\s+not|should\s+not|shall\s+not|would\s+not|could\s+not|do\s+not|does\s+not|did\s+not|is\s+not|are\s+not|was\s+not|were\s+not|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|without|never|not|no(?=\s))/i;
 
-/** Subordinators that put the whole clause in an unasserted, hypothetical mood. */
+/**
+ * Subordinators that put the whole clause in an unasserted, hypothetical mood.
+ *
+ * ⚠ READ ON THE WHOLE SENTENCE, NOT ON THE TEXT BEFORE THE NOUN. The first cut
+ * read the pre-noun window, for no stated reason, while its S2 and S4 siblings
+ * read the sentence — so a conditional that happened to sit AFTER the noun was
+ * invisible and "A budget of £120,000 would be workable IF THE BOARD AGREED"
+ * minted a hard limit on a sum nobody had agreed to. A conditional anywhere in
+ * the sentence is a conditional; word order is not the concept.
+ */
 const CONDITIONAL_LEAD_RE =
-  /\b(?:if|unless|suppose|supposing|imagine|assuming|hypothetically|were\s+we\s+to|had\s+we)\b/i;
+  /\b(?:if|unless|suppose|supposing|imagine|assuming|hypothetically|in\s+the\s+event\s+that|were\s+we\s+to|had\s+we)\b/i;
+
+/**
+ * PAST TENSE — a limit that WAS is not a limit that IS.
+ *
+ * ⚠⚠ THE COMMENT THIS REPLACES CLAIMED THE CURRENCY REQUIREMENT SUBSTITUTED FOR
+ * A DESCRIPTIVE SCREEN. IT DID NOT, AND THE TWIN THAT "PROVED" IT PASSED FOR A
+ * REASON UNRELATED TO THE PROPERTY IT TESTED (CLAUDE.md trap 13b).
+ * The two corpus cases behind that claim merely happened to lack a `£`. Add one
+ * — "The old cost ceiling: £50,000 was lifted in January" — and the whole class
+ * walks straight through. There was no descriptive screen at all; there was a
+ * currency filter being credited with work it was not doing.
+ *
+ * ⚠ SUBJECT-INDEPENDENT, AND THAT IS THE WHOLE POINT. `THIRD_PARTY_POSSESSION_RE`
+ * already matched `had`, then ADMITTED it whenever the subject was first-person —
+ * so "In 2024 we had a cap of £30,000" minted a live limit BECAUSE of the word
+ * `we`. Tense and ownership are two different questions (trap 21); the screen
+ * that answers one must not be asked the other. Three closed forms, no lexicon.
+ */
+const PAST_TENSE_DESCRIPTIVE_RE = /\b(?:had|was|were|used\s+to\s+be)\b/i;
 
 /**
  * Preference and approximation markers. A limit the user would LIKE is not a
  * limit the user HAS, and an approximated one is not a stated threshold.
  */
 const SOFT_INTENT_RE =
-  /\b(?:prefer(?:red|s|able|ably)?|ideally|nice\s+to\s+have|would\s+like|hoping|hopes?|aspire|wish|thereabouts|ballpark|roughly|approximately|around|circa|or\s+so|somewhere\s+near)\b/i;
+  /\b(?:prefer(?:red|s|able|ably)?|ideal(?:ly)?|nice\s+to\s+have|would\s+like|hop(?:ing|es?|efully)|aspir(?:e|ing)|wish|target(?:ing)?|aiming\s+for|indicative|provisional|notional|soft|thereabouts|ballpark|roughly|approximately|around|circa|or\s+so|somewhere\s+near)\b/i;
 
 /**
  * A POSSESSION VERB WHOSE SUBJECT IS NOT THE USER — "our competitor HAS a
@@ -1077,7 +1118,11 @@ function extractNounFormConstraints(
       // S2 — asked, not told. "Would a budget of £250,000 be enough?"
       if (/\?\s*$/.test(sentence.trim())) continue;
       // S3 — supposed.        "If we had a cap of £50,000 we would…"
-      if (CONDITIONAL_LEAD_RE.test(head)) continue;
+      //                        SENTENCE-scoped, like S2 and S4: a conditional
+      //                        after the noun governs it just as much.
+      if (CONDITIONAL_LEAD_RE.test(sentence)) continue;
+      // S7 — past, not present. "In 2024 we had a cap of £30,000 on consultancy."
+      if (PAST_TENSE_DESCRIPTIVE_RE.test(sentence)) continue;
       // S4 — preferred.       "Nice to have: a budget of £50,000 or thereabouts."
       if (SOFT_INTENT_RE.test(sentence)) continue;
       // S5 — somebody else's. "Our main competitor has a budget of £2m."

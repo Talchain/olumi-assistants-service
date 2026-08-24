@@ -1,0 +1,101 @@
+{
+ "_provenance": "THE ADVERSARIAL REVIEWER'S EDGE CORPUS FOR CEE PR #1087, lifted verbatim. 16 cases probing target resolution and qualifier selection. ORACLE — append-only, never re-authored.",
+ "cases": [
+  {
+   "id": "E-TGT-01",
+   "expect": "fire",
+   "note": "qualifier picks a junk word?",
+   "brief": "We should increase our marketing budget: £50,000."
+  },
+  {
+   "id": "E-TGT-02",
+   "expect": "fire",
+   "note": "qualifier is a verb",
+   "brief": "Reduce headcount cap: £50,000."
+  },
+  {
+   "id": "E-TGT-03",
+   "expect": "fire",
+   "note": "no qualifier, colon form",
+   "brief": "Cap: £50,000."
+  },
+  {
+   "id": "E-TGT-04",
+   "expect": "fire",
+   "note": "adjective-only qualifier must not become the target",
+   "brief": "Annual ceiling: £400,000."
+  },
+  {
+   "id": "E-TGT-05",
+   "expect": "fire",
+   "note": "two-word qualifier — only last word captured",
+   "brief": "Total programme ceiling: £400,000."
+  },
+  {
+   "id": "E-VAL-01",
+   "expect": "fire",
+   "note": "decimal + magnitude",
+   "brief": "We have a £1.5m cap."
+  },
+  {
+   "id": "E-VAL-02",
+   "expect": "fire",
+   "note": "billion",
+   "brief": "We have a £2.5bn budget."
+  },
+  {
+   "id": "E-VAL-03",
+   "expect": "fire",
+   "note": "no separators",
+   "brief": "We have a £50000 cap."
+  },
+  {
+   "id": "E-VAL-04",
+   "expect": "fire",
+   "note": "sentence-final period adjacent to magnitude",
+   "brief": "Our budget is £1.5m. We must decide by June."
+  },
+  {
+   "id": "E-VAL-05",
+   "expect": "fire",
+   "note": "amount then period then digit — number split risk",
+   "brief": "Our budget is £1,500,000. Option 2 is cheaper."
+  },
+  {
+   "id": "E-XSENT-01",
+   "expect": "silent",
+   "note": "amount and noun straddle a sentence boundary",
+   "brief": "The total is £50,000. Capacity is the real issue."
+  },
+  {
+   "id": "E-XSENT-02",
+   "expect": "silent",
+   "note": "amount ends one sentence, 'cap' starts the next",
+   "brief": "We raised £50,000. Cap on hiring is separate."
+  },
+  {
+   "id": "E-DUP-01",
+   "expect": "fire",
+   "note": "same limit stated twice — must not double",
+   "brief": "Our budget is £50,000. The budget of £50,000 is hard."
+  },
+  {
+   "id": "E-CONF-01",
+   "expect": "fire",
+   "note": "two DIFFERENT values for the same target",
+   "brief": "Our budget is £50,000 and the budget of £120,000 was approved."
+  },
+  {
+   "id": "E-NEWLINE-01",
+   "expect": "fire",
+   "note": "markdown bullet",
+   "brief": "Decision: replace the CRM.\n- Budget: £50,000\n- Deadline: June"
+  },
+  {
+   "id": "E-NEWLINE-02",
+   "expect": "silent",
+   "note": "third-party across a newline",
+   "brief": "Notes from the call:\nThe vendor's budget is £90,000."
+  }
+ ]
+}
