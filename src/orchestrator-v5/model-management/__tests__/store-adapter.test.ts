@@ -123,6 +123,56 @@ const SAVE_WRITE = {
   graph_schema_version: 'graph_v3',
 };
 
+function atomicRestoreOutcome(overrides: Record<string, unknown> = {}) {
+  return {
+    mutation_id: '22222222-2222-4222-8222-222222222222',
+    version_id: '33333333-3333-4333-8333-333333333333',
+    version_number: 4,
+    graph_identity_hash: HASH_B,
+    analysis_affecting_hash: HASH_A,
+    hash_algorithm: 'sha256',
+    identity_projection_version: 'identity.v1',
+    identity_normaliser_version: '1',
+    graph_schema_version: 'graph_v3',
+    restored_from_version_id: VERSION_ID,
+    undo_version_id: null,
+    parent_version_id: VERSION_ID,
+    root_version_id: VERSION_ID,
+    actor_kind: 'known',
+    authored_by: 'owner',
+    creation_kind: 'restore',
+    source_version_id: VERSION_ID,
+    source_turn_id: null,
+    graph: SAVE_WRITE.graph,
+    deduped: false,
+    replayed: false,
+    analysis_invalidated_at: '2026-08-24T20:00:00.000Z',
+    event_id: 'model_version_restored_33333333-3333-4333-8333-333333333333',
+    ...overrides,
+  };
+}
+
+const ATOMIC_RESTORE_WRITE = {
+  scenario_id: SCENARIO,
+  version_id: VERSION_ID,
+  mutation_id: '22222222-2222-4222-8222-222222222222',
+  graph: SAVE_WRITE.graph,
+  graph_identity_hash: HASH_B,
+  analysis_affecting_hash: HASH_A,
+  hash_algorithm: 'sha256',
+  identity_projection_version: 'identity.v1',
+  identity_normaliser_version: '1',
+  graph_schema_version: 'graph_v3',
+  source_graph_identity_hash: HASH_A,
+  current_graph: SAVE_WRITE.graph,
+  current_graph_identity_hash: HASH_A,
+  current_analysis_affecting_hash: HASH_A,
+  expected_graph_identity_hash: HASH_A,
+  actor_kind: 'known' as const,
+  authored_by: 'owner',
+  source_turn_id: null,
+};
+
 describe('SupabaseModelVersionStore.saveVersion', () => {
   it('calls create_model_version with ALL named args (identity envelope stored verbatim)', async () => {
     const { client, rpcCalls } = makeClient();
@@ -261,6 +311,48 @@ describe('SupabaseModelVersionStore.restoreVersion', () => {
     await expect(
       store.restoreVersion({ scenario_id: SCENARIO, version_id: VERSION_ID }),
     ).rejects.toBeInstanceOf(ModelVersionNotFoundError);
+  });
+});
+
+describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
+  it('accepts an attested known actor from the guarded restore RPC', async () => {
+    const { client } = makeClient({
+      rpcResult: { data: atomicRestoreOutcome(), error: null },
+    });
+    const store = new SupabaseModelVersionStore(client);
+    const result = await store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    expect(result.actor_kind).toBe('known');
+    expect(result.authored_by).toBe('owner');
+  });
+
+  it.each(['system', 'unknown'] as const)(
+    'rejects contradictory %s attribution before receipt projection',
+    async (actorKind) => {
+      const { client } = makeClient({
+        rpcResult: {
+          data: atomicRestoreOutcome({ actor_kind: actorKind, authored_by: 'owner' }),
+          error: null,
+        },
+      });
+      const store = new SupabaseModelVersionStore(client);
+      await expect(store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE)).rejects.toBeInstanceOf(
+        ModelVersionStoreError,
+      );
+    },
+  );
+
+  it('rejects a known actor without authored_by and contradictory restore provenance', async () => {
+    for (const outcome of [
+      atomicRestoreOutcome({ authored_by: null }),
+      atomicRestoreOutcome({ creation_kind: 'committed_mutation' }),
+      atomicRestoreOutcome({ source_version_id: '44444444-4444-4444-8444-444444444444' }),
+    ]) {
+      const { client } = makeClient({ rpcResult: { data: outcome, error: null } });
+      const store = new SupabaseModelVersionStore(client);
+      await expect(store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE)).rejects.toBeInstanceOf(
+        ModelVersionStoreError,
+      );
+    }
   });
 });
 
