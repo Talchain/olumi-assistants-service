@@ -173,7 +173,7 @@ describe('deterministic semantic categories and coverage', () => {
     expect(KNOWN_UNDETECTABLE_MODEL_VERSION_CHANGES).toEqual([
       'conversation_or_discussion_not_committed_to_the_shared_graph',
       'private_contributions_not_revealed_into_the_shared_graph',
-      'transient_ui_state_excluded_from_graph_persistence',
+      'scenario_brief_text_outside_the_graph_version_snapshot',
     ]);
   });
 
