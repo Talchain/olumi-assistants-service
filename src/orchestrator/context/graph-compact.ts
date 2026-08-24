@@ -11,9 +11,30 @@
  * (vs 3000–5000 for full GraphV3).
  */
 
+import { OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
+import { classifyValueSource } from "../../cee/graph-readiness/obligation-provenance.js";
+
+/**
+ * The declared vocabulary for `observed_state.source`, DERIVED from the shared
+ * contract rather than re-typed (CLAUDE.md trap 12). A stamp outside this set is
+ * exactly the "unknown" the contract tells consumers to treat as neutral, so it
+ * does not override the `extractionType` fallback below.
+ */
+const DECLARED_OBSERVED_STATE_SOURCES: ReadonlySet<string> = new Set(
+  OBSERVED_STATE_SOURCE_LITERALS,
+);
+
+/** The four `extractionType` values the projection recognises. */
+const CANONICAL_EXTRACTION_TYPES: ReadonlySet<string> = new Set([
+  'explicit',
+  'inferred',
+  'observed',
+  'range',
+]);
 
 // ============================================================================
 // Output Types
@@ -275,29 +296,105 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
           n.cap = obsState.cap;
         }
 
-        // Provenance: derive both legacy `source` (for context-pack-assembler
-        // / telemetry consumers) and the new `provenance` projection (for the
-        // UI/coaching layer). Raw upstream value is retained on
-        // `_raw_provenance` for diagnostics.
+        // ⭐ WHO AUTHORED THIS VALUE? `observed_state.source` ANSWERS FIRST.
         //
-        // source mapping (unchanged):
-        //   explicit  → user
-        //   inferred  → assumption
-        //   range/observed/anything-else → system
+        // ## THE DEFECT THIS REPLACES
         //
-        // provenance mapping (new):
-        //   explicit, observed → from_brief   (value came from the brief / observation)
-        //   inferred, range    → ai_inferred  (LLM-derived / range estimate)
-        //   anything-else      → ai_inferred  (safe default per brief)
-        //   user_specified path: not currently emitted by upstream nodes;
-        //     reserved for future user-edit pipelines.
-        // `_raw_provenance` is debug-only and only emitted when the upstream
-        // value falls OUTSIDE the four canonical extractionType values — i.e.
-        // when something would be lost by the projection. For the canonical
-        // values the raw is fully recoverable from `provenance` + the mapping
-        // table, so emitting it would just burn LLM context tokens.
+        // This derivation read `observed_state.extractionType` ONLY. Every
+        // user-edit writer in the estate stamps `observed_state.source` and
+        // DELIBERATELY LEAVES `extractionType` ALONE — measured at the real
+        // writers, not assumed:
+        //   • `canonicalise-value-ops.ts` `stampUserEditProvenance` (the chat
+        //     edit path, live at `tools/edit-graph.ts:2823` and
+        //     `orchestrator-v5/handlers/gm-held-execute.ts:481`) writes
+        //     `{ value, source: 'user_override' }` — and the applier's
+        //     whole-object replace means the drafted `extractionType` does not
+        //     survive the edit at all.
+        //   • `orchestrator-v5/tools/handlers/set-factor-value.ts:482` writes
+        //     `source` over any producer stamp and says so at the bytes:
+        //     "Overrides any producer stamp deliberately: this write IS the
+        //     user's."
+        // So a value the user typed arrived here with an ABSENT or stale
+        // `extractionType` and fell to `system` / `ai_inferred` — the product
+        // describing the user's own evidence as the model's guess. The
+        // opposite inversion was live too: a `cee_inference` stamp sitting
+        // beside a drafted `extractionType: 'explicit'` projected as `user` /
+        // `from_brief`.
+        //
+        // ## WHICH INPUT WINS, AND WHY — DERIVED FROM THE WRITERS
+        //
+        // `source` outranks `extractionType` because `source` is the LATEST and
+        // most specific statement of authorship: the edit writers set it
+        // precisely and leave extraction metadata untouched. `extractionType`
+        // is draft-time extraction metadata that nobody refreshes.
+        //
+        // ## ONE AUTHORITY, NOT A THIRD TABLE (CLAUDE.md traps 12 and 21)
+        //
+        // The classification comes from `classifyValueSource`
+        // (`cee/graph-readiness/obligation-provenance.ts`), the estate's
+        // existing authority on "who authored this value?" over the whole
+        // twelve-member contract vocabulary. Nothing is re-classified here.
+        // That module then answers a SECOND question on top of the class
+        // ("may this gap be DEMANDED of the user?", INV-P6) which is none of
+        // this file's business; this file asks only "how do I DESCRIBE the
+        // authorship of this value?" — the same question, a different
+        // downstream use, so the classifier is shared and the projection is
+        // local. `NodeV3.provenance` is deliberately NOT consulted: the
+        // contract declares it RESPONSE-ONLY and recomputed on every response
+        // (`schemas/cee-v3.ts:203-208`), i.e. a display value, not a record.
+        //
+        // ## ABSENCE IS NOT A CLASS — SO THE FALLBACK IS BYTE-UNCHANGED
+        //
+        // The shared contract: "Absence means the producer stamped no
+        // provenance — a consumer MUST NOT read absence as any particular
+        // class; classify unknown/absent as neutral, never guess." An absent
+        // or undeclared `source` therefore overrides nothing and the original
+        // `extractionType` mapping below runs unmodified. Every node in the
+        // pre-existing `graph-compact-provenance.test.ts` corpus is in exactly
+        // that state, which is why that suite is untouched by this change.
+        //
+        // extractionType fallback (UNCHANGED):
+        //   explicit  → user / from_brief
+        //   inferred  → assumption / ai_inferred
+        //   observed  → system / from_brief
+        //   range     → system / ai_inferred
+        //   anything else / absent → system / ai_inferred
+        //
+        // `_raw_provenance` is debug-only and emitted when `extractionType`
+        // falls OUTSIDE the four canonical values — i.e. when something would
+        // be lost by the projection. It is derived independently of which axis
+        // decided the projection, so a source-stamped node does not lose the
+        // diagnostic.
         const et = obsState.extractionType;
-        if (et === 'explicit') {
+        if (
+          typeof et === 'string' &&
+          et.length > 0 &&
+          !CANONICAL_EXTRACTION_TYPES.has(et)
+        ) {
+          n._raw_provenance = et; // unrecognised value — preserved for debug
+        }
+
+        const rawSource = obsState.source;
+        const authored =
+          typeof rawSource === 'string' && DECLARED_OBSERVED_STATE_SOURCES.has(rawSource)
+            ? classifyValueSource(rawSource)
+            : 'unattributed';
+
+        if (authored === 'user_stated') {
+          n.source = 'user';
+          // `brief_extraction` is the one declared literal that means "the
+          // value came from the brief" — the same split this file already
+          // applies on the EDGE axis below (`brief_extraction → from_brief`,
+          // `user_specified → user_set`). Every other user literal is the
+          // user setting a value directly.
+          n.provenance = rawSource === 'brief_extraction' ? 'from_brief' : 'user_set';
+        } else if (authored === 'ai_drafted') {
+          n.source = 'assumption';
+          n.provenance = 'ai_inferred';
+        } else if (authored === 'system_repaired') {
+          n.source = 'system';
+          n.provenance = 'ai_inferred';
+        } else if (et === 'explicit') {
           n.source = 'user';
           n.provenance = 'from_brief';
         } else if (et === 'inferred') {
@@ -312,9 +409,6 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         } else {
           n.source = 'system';
           n.provenance = 'ai_inferred';
-          if (typeof et === 'string' && et.length > 0) {
-            n._raw_provenance = et; // unrecognised value — preserved for debug
-          }
         }
       } else {
         // No observed_state — treat as system-derived / ai_inferred.
