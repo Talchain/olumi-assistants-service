@@ -96,16 +96,16 @@ function stableEdgeIdentity(
   side: 'from' | 'to',
   index: number,
 ): string {
-  const id = edge.id;
-  if (typeof id === 'string' && id.length > 0) return id;
-
   const from = edge.from;
   const to = edge.to;
   if (typeof from !== 'string' || from.length === 0 || typeof to !== 'string' || to.length === 0) {
     throw new ModelVersionDiffInputError(
-      `${side} version has an edge without stable id or from/to at index ${index}`,
+      `${side} version has an edge without valid from/to at index ${index}`,
     );
   }
+
+  const id = edge.id;
+  if (typeof id === 'string' && id.length > 0) return id;
 
   // GraphV3 permits parallel connectors. A producer-supplied id is the
   // preferred authority; for older id-less rows, a connector type can still
@@ -142,6 +142,13 @@ function validateGraph(graph: unknown, side: 'from' | 'to'): ValidatedGraph {
     }
     const key = stableEdgeIdentity(edge, side, index);
     if (edges.has(key)) throw new ModelVersionDiffInputError(`${side} version has duplicate edge identity ${key}`);
+    const from = edge.from as string;
+    const to = edge.to as string;
+    if (!nodes.has(from) || !nodes.has(to)) {
+      throw new ModelVersionDiffInputError(
+        `${side} version edge ${key} references a missing node`,
+      );
+    }
     edges.set(key, edge);
   }
 
@@ -305,19 +312,38 @@ function diffEntityMap(
   }
 }
 
-function collectionKey(value: unknown, index: number): string {
+function collectionKey(
+  value: unknown,
+  side: string,
+  name: 'options' | 'goal_constraints',
+  index: number,
+): string {
   const record = asRecord(value);
-  for (const field of ['id', 'node_id', 'option_id'] as const) {
+  if (record === null) {
+    throw new ModelVersionDiffInputError(
+      `${side} version has a malformed ${name} item at index ${index}`,
+    );
+  }
+  const identityFields = name === 'goal_constraints'
+    ? (['constraint_id'] as const)
+    : (['id', 'option_id'] as const);
+  for (const field of identityFields) {
     const candidate = record?.[field];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
-  return `${String(index).padStart(6, '0')}:${serialise(value)}`;
+  throw new ModelVersionDiffInputError(
+    `${side} version has a ${name} item without a stable identity at index ${index}`,
+  );
 }
 
-function collectionMap(values: unknown[], side: string, name: string): Map<string, unknown> {
+function collectionMap(
+  values: unknown[],
+  side: string,
+  name: 'options' | 'goal_constraints',
+): Map<string, unknown> {
   const map = new Map<string, unknown>();
   for (const [index, value] of values.entries()) {
-    const key = collectionKey(value, index);
+    const key = collectionKey(value, side, name, index);
     if (map.has(key)) throw new ModelVersionDiffInputError(`${side} version has duplicate ${name} identity ${key}`);
     map.set(key, value);
   }
