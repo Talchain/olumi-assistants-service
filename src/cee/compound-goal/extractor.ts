@@ -143,8 +143,105 @@ const GOAL_VERB_PATTERNS = [
   new RegExp(String.raw`\b(grow|increase|boost)\s+(\w+(?:\s+\w+){0,3})\s+(?:from\s+${AMT}\s+)?to\s+(${AMT})`, "gi"),
 ];
 
+/* ===========================================================================
+ * THE WORD-UNIT ALPHABET — ONE list, and it now says which members are TIME.
+ *
+ * ⚠ THIS WAS TWO HAND-MAINTAINED COPIES. The pattern fragment `_VAL` and the
+ * parser `parseValue` each spelled `hours?|months?|days?|weeks?|years?|percent`
+ * independently — the same drift pair the magnitude alphabet above was folded
+ * onto one map to abolish. Both are now derived from this list, so a future
+ * rung is added once.
+ *
+ * The `temporal` flag is not decoration and not a taxonomy invented here: it
+ * is what `DURATIVE_OVER_RE` needs to tell "revenue over £2m" (a threshold)
+ * from "output over 12 months" (a span). Adding a member forces the author to
+ * answer that question, and `word-unit alphabet` in
+ * `durative-over-not-a-bound.test.ts` REDs if a member is left unclassified.
+ * ========================================================================= */
+export const WORD_UNITS = [
+  { alt: String.raw`hours?`, temporal: true },
+  { alt: String.raw`months?`, temporal: true },
+  { alt: String.raw`days?`, temporal: true },
+  { alt: String.raw`weeks?`, temporal: true },
+  { alt: String.raw`years?`, temporal: true },
+  { alt: String.raw`percent`, temporal: false },
+] as const;
+
+/** Every word-unit spelling, in declaration order (no shared prefixes, so order is inert). */
+export const WORD_UNIT_ALT = WORD_UNITS.map((u) => u.alt).join("|");
+
+/** The time-denominated subset — the complement class that makes `over` durative. */
+export const TIME_UNIT_ALT = WORD_UNITS.filter((u) => u.temporal).map((u) => u.alt).join("|");
+
+/** A trailing word-unit on an already-cleaned amount ("12 months"). Derived, not spelled. */
+const WORD_UNIT_TAIL_RE = new RegExp(`\\s+(${WORD_UNIT_ALT})$`, "i");
+
+/* ===========================================================================
+ * `over` IS TWO PREPOSITIONS WEARING ONE SPELLING.
+ *
+ *   COMPARATIVE — "revenue over £2m". The complement measures the SUBJECT and
+ *                 `over` means "more than". A genuine bound.
+ *   DURATIVE    — "maximise engineering output over 12 months". The complement
+ *                 is a SPAN OF TIME and `over` means "across". Not a bound on
+ *                 anything, and certainly not on the goal.
+ *
+ * Read as a bound, the second produced — live, and byte-identical to a wire
+ * capture dated 15-19 March 2026 —
+ *
+ *   fac_maximise_engineering_output  >= 12  unit ""  0.85  provenance EXPLICIT
+ *
+ * i.e. a floor on the goal, attributed to a user who stated a duration. The
+ * same shape sits in the `multi-option` golden fixture ("minimising total cost
+ * of ownership over 3 years"), which carries no currency at all.
+ *
+ * ── THE DISCRIMINATOR IS GRAMMAR, NOT A TUNING CONSTANT ───────────────────
+ * `above` is NOT ambiguous — English has no durative `above` — so "keep average
+ * tenure above 12 months" is a threshold and stays one. This regex therefore
+ * names `over` alone, and requires a BARE number (a currency symbol or a `%`
+ * cannot precede a time unit) followed immediately by a time word. Three
+ * jointly-necessary conjuncts of ONE question ("is this `over` durative here?"),
+ * not three stacked heuristics.
+ *
+ * ── AND THE HONEST OUTPUT IS NOTHING ──────────────────────────────────────
+ * Capturing the unit instead would leave an explicit floor the user never
+ * stated sitting in `goal_constraints[]` and in the constraints panel, merely
+ * shaped so a DOWNSTREAM filter could drop it. That relocates the defect. This
+ * file's standing doctrine decides it: a missing constraint is a gap, an
+ * invented one is a lie, and ROADMAP 2.653 drops mis-directed rows rather than
+ * repairing them. A row whose DIMENSION is wrong is at least as false as one
+ * whose OPERATOR is wrong.
+ *
+ * ⚠ THE GAP THIS BUYS, RECORDED RATHER THAN CHASED: a genuine threshold
+ * phrased with a bare `over` and a time unit ("runway over 12 months") is
+ * suppressed. The comparative-VERB forms are untouched — "delivery must be over
+ * 12 months" still mints, from the `must be` pattern — and `within`/`by`
+ * deadlines were never on this path at all: `extractDeadline` owns them and
+ * emits `delivery_time_months` as an INFERRED `<=`, which is why the three
+ * "£20k MRR within 12 months" fixtures never carried this defect.
+ * ========================================================================= */
+const DURATIVE_OVER_RE = new RegExp(
+  String.raw`\bover\s+\d+(?:,\d{3})*(?:\.\d+)?\s+(?:${TIME_UNIT_ALT})\b`,
+  "i",
+);
+
+/**
+ * Does this match's OWN `over` read as a duration?
+ *
+ * The time word can sit outside the match (the simple `X over Y` form captures
+ * only up to the number when its value fragment carries no unit), so the test
+ * runs against the brief from the match onwards — and then asserts the `over`
+ * it found STARTS INSIDE the match. Without that bound, a durative `over` later
+ * in the brief would suppress an unrelated comparative one earlier, which is a
+ * false negative with no red anywhere. There is no window-length constant to
+ * drift out of step with the alphabet.
+ */
+function isDurativeOver(brief: string, matchIndex: number, matchText: string): boolean {
+  const found = DURATIVE_OVER_RE.exec(brief.slice(matchIndex));
+  return found !== null && found.index < matchText.length;
+}
+
 /** Extended value pattern fragment — captures numeric value with optional composite unit suffix */
-const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:hours?|months?|days?|weeks?|years?|percent))?`;
+const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:${WORD_UNIT_ALT}))?`;
 
 /** Upper bound constraint patterns (operator: <=) */
 const UPPER_BOUND_PATTERNS = [
@@ -226,22 +323,41 @@ const NEGATED_FLOOR_PATTERNS = [
   ),
 ];
 
-/** Lower bound constraint patterns (operator: >=) */
-const LOWER_BOUND_PATTERNS = [
+/**
+ * Lower bound constraint patterns (operator: >=).
+ *
+ * ⚠ `barePreposition` IS DECLARED AT THE PATTERN, NOT IN A SIDE LIST. It marks
+ * the two forms whose `above|over` stands alone, with no comparative verb to
+ * fix its sense — the only two that can be read duratively (see
+ * {@link DURATIVE_OVER_RE}). The other five carry `while ensuring`, `maintain`,
+ * `must be`/`should be`, `no less than` or `minimum of`, and a comparative verb
+ * settles the preposition's meaning before the screen is even asked. Keeping
+ * the flag beside its regex is what stops the two drifting apart, which a
+ * parallel `Set` of patterns could not (CLAUDE.md trap 12).
+ */
+const LOWER_BOUND_PATTERNS: ReadonlyArray<{ re: RegExp; barePreposition?: true }> = [
   // "while ensuring X stays above/at least Y"
-  new RegExp(String.raw`while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+(${AMT})`, "gi"),
+  { re: new RegExp(String.raw`while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+(${AMT})`, "gi") },
   // "maintain at least Y"
-  new RegExp(String.raw`maintain\s+(?:at\s+least\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi"),
+  { re: new RegExp(String.raw`maintain\s+(?:at\s+least\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi") },
   // "X must be at least Y"
-  new RegExp(String.raw`(\w+(?:\s+\w+){0,3})\s+(?:must be|should be)\s+(?:at least|above|over)\s+(${AMT})`, "gi"),
+  { re: new RegExp(String.raw`(\w+(?:\s+\w+){0,3})\s+(?:must be|should be)\s+(?:at least|above|over)\s+(${AMT})`, "gi") },
   // "no less than Y"
-  new RegExp(String.raw`no\s+less\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
+  { re: new RegExp(String.raw`no\s+less\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi") },
   // "minimum of Y X"
-  new RegExp(String.raw`minimum\s+(?:of\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi"),
+  { re: new RegExp(String.raw`minimum\s+(?:of\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi") },
   // "X above Y" (simple form)
-  new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:above|over)\s+(${AMT})`, "gi"),
+  //
+  // ⚠ `_VAL`, NOT `AMT` — THIS IS THE OTHER HALF OF THE DEFECT AND A DIFFERENT
+  // QUESTION FROM THE SCREEN (CLAUDE.md trap 21). With `AMT` the capture stopped
+  // at the number, so ONE SENTENCE produced two rows that disagreed about the
+  // unit: "keep average tenure above 12 months" gave `fac_keep_average_tenure
+  // >= 12 unit ""` beside the subject-optional sibling's `>= 12 unit "months"`.
+  // The sibling below had used `_VAL` all along; this line is brought into line
+  // with it, so every row that SURVIVES the screen carries its unit.
+  { re: new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:above|over)\s+(${_VAL})`, "gi"), barePreposition: true },
   // Subject-optional: "above/over Y [unit]" (bare phrase — subject defaults to "unspecified")
-  new RegExp(`(?:^|\\s)(?:above|over)\\s+(${_VAL})`, "gi"),
+  { re: new RegExp(`(?:^|\\s)(?:above|over)\\s+(${_VAL})`, "gi"), barePreposition: true },
 ];
 
 /** "Between X and Y" pattern (generates two constraints) */
@@ -570,7 +686,7 @@ export function parseValue(valueStr: string): { value: number; unit: string } {
   }
 
   // Extract trailing word-unit: "hours", "months", "days", "percent", etc.
-  const wordUnitMatch = cleaned.match(/\s+(hours?|months?|days?|weeks?|years?|percent)$/i);
+  const wordUnitMatch = cleaned.match(WORD_UNIT_TAIL_RE);
   let wordUnit = "";
   if (wordUnitMatch) {
     wordUnit = wordUnitMatch[1].toLowerCase();
@@ -1010,12 +1126,23 @@ function extractLowerBoundConstraints(
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
-  for (const pattern of LOWER_BOUND_PATTERNS) {
+  for (const spec of LOWER_BOUND_PATTERNS) {
+    const pattern = spec.re;
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      // ── A TIME HORIZON IS NOT A FLOOR ──────────────────────────────────
+      // "maximise engineering output over 12 months" states a DURATION. Read
+      // as a bound it becomes a floor on the goal stamped `explicit` — a claim
+      // about what the user said. Only the bare-preposition forms can be read
+      // duratively, and only for `over`; see DURATIVE_OVER_RE for why the
+      // honest output here is NOTHING rather than a re-united row.
+      if (spec.barePreposition && isDurativeOver(brief, match.index ?? 0, match[0])) {
+        continue;
+      }
       let targetName: string;
       let valueStr: string;
 
