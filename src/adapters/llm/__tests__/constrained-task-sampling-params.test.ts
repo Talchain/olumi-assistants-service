@@ -26,13 +26,12 @@ vi.mock('@anthropic-ai/sdk', () => {
     messages = {
       create: (body: Record<string, unknown>) => {
         h.bodies.push(body);
+        // The critique limb sends a `system` block; explain-diff does not.
+        const text = body.system
+          ? '{"issues":[{"level":"OBSERVATION","note":"the graph omits a cost factor"}],"suggested_fixes":[],"overall_quality":"good"}'
+          : '{"rationales":[{"target":"n1","why":"added to represent the option","provenance_source":"user_brief"}]}';
         return Promise.resolve({
-          content: [
-            {
-              type: 'text',
-              text: '{"rationales":[{"target":"n1","why":"added to represent the option","provenance_source":"user_brief"}]}',
-            },
-          ],
+          content: [{ type: 'text', text }],
           usage: { input_tokens: 10, output_tokens: 5 },
           stop_reason: 'end_turn',
         });
@@ -46,7 +45,16 @@ const REJECTS_SAMPLING_MODEL = 'claude-sonnet-5';
 const ACCEPTS_SAMPLING_MODEL = 'claude-sonnet-4-5-20250929';
 
 let explainDiffWithAnthropic: typeof import('../anthropic.js').explainDiffWithAnthropic;
+let critiqueGraphWithAnthropic: typeof import('../anthropic.js').critiqueGraphWithAnthropic;
 let priorKey: string | undefined;
+
+const GRAPH = {
+  nodes: [
+    { id: 'n1', kind: 'factor', label: 'Price' },
+    { id: 'n2', kind: 'outcome', label: 'Margin' },
+  ],
+  edges: [{ id: 'e1', from: 'n1', to: 'n2' }],
+};
 
 const PATCH = {
   adds: { nodes: [{ id: 'n1', kind: 'factor', label: 'N1' }], edges: [] },
@@ -59,7 +67,7 @@ beforeAll(async () => {
   process.env.ANTHROPIC_API_KEY = 'sk-ant-test-sampling-gate';
   const { _resetConfigCache } = await import('../../../config/index.js');
   _resetConfigCache();
-  ({ explainDiffWithAnthropic } = await import('../anthropic.js'));
+  ({ explainDiffWithAnthropic, critiqueGraphWithAnthropic } = await import('../anthropic.js'));
 });
 
 afterAll(async () => {
@@ -91,6 +99,28 @@ describe('provider-constrained task sampling-param gate', () => {
 
   it('still sends temperature 0 for explain_diff on a model that accepts sampling params', async () => {
     await explainDiffWithAnthropic({ patch: PATCH, model: ACCEPTS_SAMPLING_MODEL });
+    expect(h.bodies).toHaveLength(1);
+    const body = h.bodies[0]!;
+    expect(body.model).toBe(ACCEPTS_SAMPLING_MODEL);
+    expect(body.temperature).toBe(0);
+  });
+
+  it('omits temperature entirely for critique_graph on a rejects-sampling-params model', async () => {
+    await critiqueGraphWithAnthropic({
+      graph: GRAPH,
+      model: REJECTS_SAMPLING_MODEL,
+    } as Parameters<typeof critiqueGraphWithAnthropic>[0]);
+    expect(h.bodies).toHaveLength(1);
+    const body = h.bodies[0]!;
+    expect(body.model).toBe(REJECTS_SAMPLING_MODEL);
+    expect(body.temperature).toBeUndefined();
+  });
+
+  it('still sends temperature 0 for critique_graph on a model that accepts sampling params', async () => {
+    await critiqueGraphWithAnthropic({
+      graph: GRAPH,
+      model: ACCEPTS_SAMPLING_MODEL,
+    } as Parameters<typeof critiqueGraphWithAnthropic>[0]);
     expect(h.bodies).toHaveLength(1);
     const body = h.bodies[0]!;
     expect(body.model).toBe(ACCEPTS_SAMPLING_MODEL);
