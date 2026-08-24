@@ -161,6 +161,24 @@ describe('D1 — the stated reason must be the actual blocker (unit_redeclares_s
     expect(response.assistant_text).toMatch(/plain number on this factor's own scale/i);
   });
 
+  /**
+   * The `renderedLabel !== 'that item'` limb is NOT redundant with the byte
+   * equality beside it, and this is the input that proves it: a factor a user
+   * has literally labelled "that item" satisfies `renderedLabel ===
+   * factorLabel`, so without the limb we would emit `Say "Set that item to
+   * 0.7"` — the bare deictic `repair-value-binding.ts` documents as unable to
+   * anchor. Written because the limb's mutant SURVIVED a first kit run: an
+   * undemonstrated survivor is a claim of equivalence, not evidence of it
+   * (trap 13c).
+   */
+  it('F2: a factor literally LABELLED "that item" still gets no verbatim restatement', () => {
+    const error = repAdoptionQualityRefusal();
+    (error.details as Record<string, unknown>).factor_label = 'that item';
+    const { response } = compose(error, ctx(WITNESSED_MESSAGE));
+    expect(response.assistant_text).not.toContain('Say "Set');
+    expect(response.assistant_text).toMatch(/Tell me the value again as a plain number/i);
+  });
+
   it('F2: an OVER-LONG label gets no verbatim restatement (truncation would unclose the quote)', () => {
     const error = repAdoptionQualityRefusal();
     const longLabel = 'Rep Adoption Quality across every enterprise territory and segment worldwide';
