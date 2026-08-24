@@ -529,6 +529,61 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
+ * CLAUSE BOUNDARIES, for deciding what a negation GOVERNS.
+ *
+ * A sentence is too coarse. The frozen B1 brief settles it: "Staying on
+ * Salesforce costs us nothing extra up front, and our annual Salesforce
+ * licensing is £45,000." A sentence-scoped window puts "nothing" in front of
+ * £45,000 and would refuse the one figure the product already gets RIGHT.
+ * Coordinators are therefore boundaries too.
+ *
+ * ⚠ `(?<!\d)\.(?!\d)` is load-bearing: an unguarded `.` treats the decimal point
+ * of "£1.5m" as a sentence end, shrinking the window and so LOSING a negation
+ * that really does govern — the unsafe direction. This is the same decimal-point
+ * cut that truncated a magnitude guard's input in CLAUDE.md trap 22.
+ */
+const CLAUSE_BOUNDARY = /(?<!\d)\.(?!\d)|[!?;\n]|,\s*(?:and|or|but)\b|\s(?:and|or|but)\s/gi;
+
+/**
+ * Negation markers. DELIBERATELY INCOMPLETE — see the caller's note.
+ */
+const NEGATION_MARKER =
+  /\b(?:not|no|never|without|avoid(?:ing)?|instead\s+of|rather\s+than|refus\w*|declin\w*|nothing|neither|nor|exclud\w*)\b|\b\w+n['\u2019]?t\b/i;
+
+/**
+ * Does a negation govern the clause this amount sits in?
+ *
+ * ⚠ WHY THIS IS A REFUSAL AND NOT A PARSE (coordinator ruling, 2026-08-24).
+ * Three residual classes reach this route, and they are NOT one class:
+ *   · wrong-factor  ("Q4 bookings lost" takes the migration cost)   — accepted
+ *   · third-party   ("a competitor paid £20,000")                   — accepted
+ *   · NEGATED       ("we will NOT spend £20,000")                   — REFUSED here
+ * The first two put a real number on the wrong object; the user's own figure
+ * still reaches the model. The third MANUFACTURES USER EVIDENCE OUT OF THE
+ * USER'S EXPLICIT DENIAL — it reads their refusal as their statement, which is
+ * the one case where this fix would be worse than the loss it repairs.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A NEGATION PREDICATE. This estate oscillated
+ * FOUR consecutive rounds on exactly that shape, each round fixing one
+ * direction and opening the other, and the ruling that ended it was: where
+ * direction cannot be determined, make the ambiguity the product rather than
+ * guess (CLAUDE.md trap 22f). So this detector is allowed to MISS, and is not
+ * to be extended case-by-case when it does. It may only ever cause a REFUSAL:
+ * refusing costs a disownment this product already tolerates on most draws,
+ * while attributing costs a fabricated user statement. The asymmetry decides
+ * the direction, so a miss degrades to today's behaviour and never to a lie.
+ */
+function negationGovernsAmount(briefText: string, amountIndex: number): boolean {
+  const before = briefText.slice(0, amountIndex);
+  const boundary = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  let start = 0;
+  for (let m = boundary.exec(before); m !== null; m = boundary.exec(before)) {
+    start = m.index + m[0].length;
+  }
+  return NEGATION_MARKER.test(before.slice(start));
+}
+
+/**
  * THE CARRIED RAW MAGNITUDE IS ALREADY IN MAGNITUDE SPACE — IT NEEDS NO DENOMINATOR.
  *
  * WHY THIS EXISTS (B1-b, derived at CEE `d1da670` against live wire captures).
@@ -649,13 +704,23 @@ function resolveStatedDenominationForRawMagnitude(
     // own currency, only that currency may license the claim.
     if (hasDeclaredUnit && declared.currencyCode !== code) continue;
     if (classifyAmountAgainstBrief(rawMagnitude, code, briefText, IDENTITY) !== "stated") continue;
-    const quoted = findStatedAmounts(briefText).find(
+    const occurrences = findStatedAmounts(briefText).filter(
       (a) =>
         a.kind === "currency" &&
         a.currencyCode === code &&
         Math.abs(a.magnitude - rawMagnitude) <=
           Math.max(Number.EPSILON, Math.abs(rawMagnitude) * 1e-9),
     );
+    // FAIL-CLOSED ACROSS OCCURRENCES: if ANY statement of this magnitude is
+    // negated, the brief does not unambiguously assert it, so nothing here may
+    // claim the user did. One denial is enough to withdraw the claim.
+    if (
+      typeof briefText === "string" &&
+      occurrences.some((a) => negationGovernsAmount(briefText, a.index))
+    ) {
+      return null;
+    }
+    const quoted = occurrences[0];
     hits.push({ unit, matchedText: quoted?.matchedText.trim() ?? `${unit}${rawMagnitude}` });
   }
 
