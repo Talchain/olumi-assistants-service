@@ -534,7 +534,8 @@ function formatRelativeDescription(value: ParsedValue): string {
  * WHY THIS EXISTS (B1-b, derived at CEE `d1da670` against live wire captures).
  * `classifyAmountAgainstBrief` is asked about the NORMALISED level, so it must
  * de-normalise through the factor's `observed_state` to recover a magnitude.
- * Measured on the deployed build across 12 fresh-guest draws of one frozen brief:
+ * Measured on the deployed build across 11 VALID fresh-guest draws of one frozen
+ * brief (12 run; one excluded for using an earlier classifier):
  * the factors CEE mints carry `observed_state = {value: 0.5, source:
  * "cee_inference"}` — no `cap`, no `raw_value` — so `resolveMagnitudeScale`
  * returns `unknown`, the level cannot be de-normalised, and the verdict is
