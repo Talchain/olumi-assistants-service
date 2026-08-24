@@ -5,15 +5,62 @@ import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js
 import { EXPLAIN_DIFF_TIMEOUT_MS } from "../config/timeouts.js";
 
 /**
- * POST /assist/explain-diff
- * 
+ * POST /assist/explain-diff  (legacy surface)
+ * POST /assist/v1/explain-diff  (browser-reachable surface)
+ *
  * Explains why changes were made in a graph patch.
  * Non-mutating: does not modify the graph, only provides rationales.
- * 
+ *
  * Enforces deterministic ordering of rationales (by target alphabetically).
+ *
+ * ── WHY TWO PATHS ───────────────────────────────────────────────────────────
+ * This handler was complete, correct and tested from the day it shipped, and
+ * was still unreachable from any browser. It mounted ONLY on the legacy
+ * `/assist/*` surface, while the UI's sole CEE seam is the `/bff/cee/*` edge
+ * function, which rewrites `/bff/cee/<x>` -> `/assist/v1/<x>` unconditionally.
+ * No value of `<x>` can produce `/assist/explain-diff`, so the capability was
+ * dark with a finished server half — the estate's "we build more than we plug
+ * in" failure in miniature.
+ *
+ * Measured rather than reasoned: a live probe of the client's assumed seam
+ * `/bff/assist/explain-diff` returned the Netlify SPA catch-all, byte-identical
+ * (3449 bytes) to a deliberately fabricated path, while `/bff/cee/graph-readiness`
+ * returned live CEE JSON in the same run — a discriminating probe, not a blind one.
+ *
+ * ── WHY ADDITIVE, NOT A MOVE ────────────────────────────────────────────────
+ * The legacy path has live consumers — most importantly the published SDK
+ * (`sdk/typescript/src/client.ts`), plus `openapi.yaml` and `scripts/smoke-fixtures.sh`.
+ * Moving it would be a breaking change to a shipped client for no gain.
+ *
+ * ── WHY ONE HANDLER AND NOT TWO ─────────────────────────────────────────────
+ * Both paths share a single handler reference and a single derived path list.
+ * Two copies would be the hand-maintained-mirror defect: they drift, and the
+ * drift reads green on whichever path the suite happens to exercise. A parity
+ * test pins this.
+ *
+ * NOTE ON THE COLLAB PRECEDENT (server.ts, `collabRoundsRouteV1`): an
+ * `/assist/v1/collab/*` alias was deliberately WITHDRAWN there, on the grounds
+ * that "two entrances to one room is one too many when the room is a privacy
+ * boundary." That reasoning is specific to the collab privacy boundary and does
+ * not transfer: this route is a non-mutating explanation of a patch the caller
+ * already holds, and carries no participant-scoped data. The divergence is
+ * deliberate and stated so it is not read as an oversight.
  */
+
+/**
+ * The paths this handler answers on. Single source of truth — the registration
+ * loop below derives from it, so a path cannot be added without being registered.
+ */
+export const EXPLAIN_DIFF_PATHS = [
+  "/assist/explain-diff",
+  "/assist/v1/explain-diff",
+] as const;
+
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/explain-diff", async (req, reply) => {
+  const handler = async (
+    req: Parameters<Parameters<FastifyInstance["post"]>[1]>[0],
+    reply: Parameters<Parameters<FastifyInstance["post"]>[1]>[1],
+  ) => {
     const startTime = Date.now();
     const parsed = ExplainDiffInput.safeParse(req.body);
     
@@ -116,5 +163,11 @@ export default async function route(app: FastifyInstance) {
         message: err.message || "internal"
       }));
     }
-  });
+  };
+
+  // Derived from the path list above — one handler reference, so the two
+  // surfaces cannot fork.
+  for (const path of EXPLAIN_DIFF_PATHS) {
+    app.post(path, handler);
+  }
 }
