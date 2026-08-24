@@ -57,6 +57,10 @@ function makeClient(cfg: MockConfig = {}): {
           filters[`order:${col}`] = opts;
           return chain;
         },
+        lt: (col: string, val: unknown) => {
+          filters[`lt:${col}`] = val;
+          return chain;
+        },
         limit: (n: number) => {
           filters.limit = n;
           return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
@@ -91,9 +95,19 @@ function summaryRow(overrides: Record<string, unknown> = {}) {
     identity_projection_version: 'identity.v1',
     identity_normaliser_version: '1',
     graph_schema_version: 'graph_v3',
+    analysis_affecting_hash: HASH_B,
+    mutation_id: null,
+    parent_version_id: null,
+    root_version_id: null,
+    actor_kind: null,
+    authored_by: null,
+    creation_kind: null,
+    source_version_id: null,
+    source_turn_id: null,
     label: null,
     provenance: 'user_save',
     restored_from_version_id: null,
+    graph: { nodes: [{ id: 'n1', kind: 'factor', label: 'Price' }], edges: [] },
     created_at: '2026-07-05T10:00:00.000+00:00',
     ...overrides,
   };
@@ -251,7 +265,7 @@ describe('SupabaseModelVersionStore.restoreVersion', () => {
 });
 
 describe('SupabaseModelVersionStore.listVersions', () => {
-  it('reads summaries newest-first by version_number (NOT created_at), graph column excluded', async () => {
+  it('reads newest-first and discards the internal legacy-hash graph from summaries', async () => {
     const rows = [summaryRow({ version_number: 2 }), summaryRow({ id: '44444444-4444-4444-8444-444444444444', version_number: 1 })];
     const { client, selectCalls } = makeClient({ selectResult: { data: rows, error: null } });
     const store = new SupabaseModelVersionStore(client);
@@ -259,12 +273,25 @@ describe('SupabaseModelVersionStore.listVersions', () => {
     const versions = await store.listVersions(SCENARIO, 10);
 
     expect(selectCalls[0]!.table).toBe('model_versions');
-    expect(selectCalls[0]!.cols).not.toContain('graph,');
-    expect(selectCalls[0]!.cols).not.toMatch(/,\s*graph\b/);
+    expect(selectCalls[0]!.cols).toMatch(/,\s*graph\b/);
     expect(selectCalls[0]!.filters['eq:scenario_id']).toBe(SCENARIO);
     expect(selectCalls[0]!.filters['order:version_number']).toEqual({ ascending: false });
     expect(selectCalls[0]!.filters.limit).toBe(10);
     expect(versions.map((v) => v.version_number)).toEqual([2, 1]);
+    expect(versions.every((version) => !Object.hasOwn(version, 'graph'))).toBe(true);
+  });
+
+  it('applies an exclusive sequence cursor and derives a missing legacy analysis hash', async () => {
+    const legacy = summaryRow({ analysis_affecting_hash: null });
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [legacy], error: null },
+    });
+    const store = new SupabaseModelVersionStore(client);
+
+    const [version] = await store.listVersions(SCENARIO, 6, 10);
+
+    expect(selectCalls[0]!.filters['lt:version_number']).toBe(10);
+    expect(version!.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('throws ModelVersionStoreError on read failure', async () => {

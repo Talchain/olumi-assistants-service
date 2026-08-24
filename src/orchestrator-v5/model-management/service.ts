@@ -241,13 +241,14 @@ export class ModelManagementService {
   async listVersions(
     scenarioId: string,
     limit?: number,
+    beforeSequence?: number,
   ): Promise<ModelManagementResult<readonly ModelVersionSummary[]>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
       const versions =
-        limit === undefined
+        limit === undefined && beforeSequence === undefined
           ? await this.store.listVersions(scenarioId)
-          : await this.store.listVersions(scenarioId, limit);
+          : await this.store.listVersions(scenarioId, limit, beforeSequence);
       return { status: 'ok', value: versions };
     } catch (err) {
       return mapThrownError(err);

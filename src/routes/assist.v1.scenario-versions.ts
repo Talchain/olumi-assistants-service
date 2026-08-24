@@ -83,7 +83,7 @@ import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-p
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import {
   getModelManagementService,
-  ModelVersionSummaryResponseSchema,
+  MODEL_VERSION_LIST_DEFAULT_LIMIT,
   VersionComparisonResponseSchema,
   VersionWriteOutcomeResponseSchema,
   SIGN_IN_REQUIRED_MESSAGE,
@@ -92,9 +92,17 @@ import {
   ModelVersionMutationReceiptV1LocalSchema,
   toModelVersionMutationReceiptV1,
 } from "../orchestrator-v5/model-management/mutation-receipt.js";
+import {
+  decodeModelVersionsCursor,
+  encodeModelVersionsCursor,
+  ModelVersionSummaryV2LocalSchema,
+  ModelVersionsListV2LocalSchema,
+  type ModelVersionSummaryV2Local,
+} from "../orchestrator-v5/model-management/history-v2.js";
 import type {
   ModelManagementResult,
   ModelVersionRecord,
+  ModelVersionSummary,
 } from "../orchestrator-v5/model-management/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
@@ -103,7 +111,7 @@ import { log } from "../utils/telemetry.js";
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
-export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v1" as const;
+export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v2" as const;
 export const MODEL_VERSION_DIFF_SCHEMA = "model_version_diff.v1" as const;
 export const MODEL_VERSION_SAVE_SCHEMA = "model_version_save.v1" as const;
 export const MODEL_VERSION_RESTORE_SCHEMA = "model_version_restore.v2" as const;
@@ -125,6 +133,7 @@ const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
  */
 const ListBodySchema = z.object({
   limit: z.number().int().positive().max(200).optional(),
+  cursor: z.string().min(1).optional(),
 });
 const SaveBodySchema = z.object({
   label: z.string().min(1).max(200).optional(),
@@ -155,6 +164,83 @@ const RestoreBodySchema = z.object({
   label: z.string().min(1).max(200).optional(),
   expected_graph_identity_hash: Sha256Hex.nullable(),
 });
+
+function summaryV2(row: ModelVersionSummary): ModelVersionSummaryV2Local | null {
+  let actor: ModelVersionSummaryV2Local["actor"];
+  if (row.actor_kind === "known") {
+    if (row.authored_by === null) return null;
+    actor = { kind: "known", authored_by: row.authored_by };
+  } else if (row.actor_kind === "system") {
+    if (row.authored_by !== null) return null;
+    actor = { kind: "system" };
+  } else {
+    if (row.actor_kind === "unknown" && row.authored_by !== null) return null;
+    if (row.actor_kind === null && row.authored_by !== null) return null;
+    actor = { kind: "unknown" };
+  }
+
+  const mutation_id = row.mutation_id;
+  const source_turn_id = row.source_turn_id;
+  const sourceVersionId = row.source_version_id ?? row.restored_from_version_id;
+  let creation: ModelVersionSummaryV2Local["creation"];
+  switch (row.creation_kind) {
+    case "initial":
+    case "committed_mutation":
+    case "unknown":
+      if (sourceVersionId !== null) return null;
+      creation = { kind: row.creation_kind, mutation_id, source_turn_id };
+      break;
+    case "restore":
+    case "variant_creation":
+    case "variant_promotion":
+      if (sourceVersionId === null) return null;
+      creation = {
+        kind: row.creation_kind,
+        source_version_id: sourceVersionId,
+        mutation_id,
+        source_turn_id,
+      };
+      break;
+    case null:
+      // The legacy restore RPC persisted an exact source pointer before it
+      // persisted creation_kind. That named pointer licenses restore, but no
+      // provenance/event-type string is used to invent creation metadata.
+      if (row.source_version_id !== null) return null;
+      creation =
+        row.restored_from_version_id === null
+          ? { kind: "unknown", mutation_id, source_turn_id }
+          : {
+              kind: "restore",
+              source_version_id: row.restored_from_version_id,
+              mutation_id,
+              source_turn_id,
+            };
+      break;
+  }
+
+  const lineage: ModelVersionSummaryV2Local["lineage"] =
+    row.root_version_id === null
+      ? { kind: "unknown" }
+      : {
+          kind: "known",
+          parent_version_id: row.parent_version_id,
+          root_version_id: row.root_version_id,
+        };
+
+  const parsed = ModelVersionSummaryV2LocalSchema.safeParse({
+    version_id: row.id,
+    scenario_id: row.scenario_id,
+    sequence: row.version_number,
+    label: row.label,
+    created_at: row.created_at,
+    actor,
+    creation,
+    lineage,
+    full_hash: row.graph_identity_hash,
+    analysis_affecting_hash: row.analysis_affecting_hash,
+  });
+  return parsed.success ? parsed.data : null;
+}
 
 export default async function route(app: FastifyInstance) {
   // Tiers DERIVED from RATE_BUCKET_REGISTRY (drift-tested both directions).
@@ -355,17 +441,36 @@ export default async function route(app: FastifyInstance) {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const parsedBody = ListBodySchema.safeParse({
         ...(body.limit !== undefined ? { limit: body.limit } : {}),
+        ...(body.cursor !== undefined ? { cursor: body.cursor } : {}),
       });
       if (!parsedBody.success) {
-        return invalid(reply, requestId, "LIMIT_INVALID", "`limit` must be a positive integer (max 200).");
+        return invalid(
+          reply,
+          requestId,
+          "HISTORY_PAGE_INVALID",
+          "`limit` must be a positive integer (max 200) and `cursor` must be non-empty.",
+        );
       }
+      const beforeSequence =
+        parsedBody.data.cursor === undefined
+          ? undefined
+          : decodeModelVersionsCursor(parsedBody.data.cursor);
+      if (beforeSequence === null) {
+        return invalid(
+          reply,
+          requestId,
+          "HISTORY_CURSOR_INVALID",
+          "That history cursor is not valid. Reload the version history and try again.",
+        );
+      }
+      const pageLimit = parsedBody.data.limit ?? MODEL_VERSION_LIST_DEFAULT_LIMIT;
 
       const service = getModelManagementService();
       let listed: Awaited<ReturnType<typeof service.listVersions>>;
       let pointer: ModelManagementResult<string | null>;
       try {
         [listed, pointer] = await Promise.all([
-          service.listVersions(ctx.scenarioId, parsedBody.data.limit),
+          service.listVersions(ctx.scenarioId, pageLimit + 1, beforeSequence),
           service.getCurrentVersionPointer(ctx.scenarioId),
         ]);
       } catch (err) {
@@ -389,33 +494,51 @@ export default async function route(app: FastifyInstance) {
         return unavailable(reply, requestId, "Versions could not be read right now.");
       }
 
-      // Egress validation with the prepared strict contract — a malformed row
-      // is REFUSED (fail closed), never emitted for a consumer to choke on.
-      const versions: unknown[] = [];
-      for (const row of listed.value) {
-        const validated = ModelVersionSummaryResponseSchema.safeParse(row);
-        if (!validated.success) {
+      const hasNextPage = listed.value.length > pageLimit;
+      const pageRows = listed.value.slice(0, pageLimit);
+      const versions: ModelVersionSummaryV2Local[] = [];
+      for (const row of pageRows) {
+        const validated = summaryV2(row);
+        if (validated === null) {
           log.error(
             {
               event: "v5.scenario_versions.summary_egress_invalid",
               request_id: requestId,
               scenario_id: ctx.scenarioId,
-              issues: validated.error.issues.slice(0, 5),
+              version_id: row.id,
             },
             "Scenario versions — a summary row failed the egress contract; failing closed",
           );
           return unavailable(reply, requestId, "Versions could not be read right now.");
         }
-        versions.push(validated.data);
+        versions.push(validated);
       }
-
-      return reply.code(200).send({
+      const lastSequence = versions.at(-1)?.sequence;
+      const nextCursor =
+        hasNextPage && lastSequence !== undefined
+          ? encodeModelVersionsCursor(lastSequence)
+          : null;
+      const outcome = ModelVersionsListV2LocalSchema.safeParse({
         schema: MODEL_VERSIONS_LIST_SCHEMA,
         scenario_id: ctx.scenarioId,
         versions,
         current_version_id: pointer.value,
         request_id: requestId,
+        next_cursor: nextCursor,
       });
+      if (!outcome.success) {
+        log.error(
+          {
+            event: "v5.scenario_versions.list_egress_invalid",
+            request_id: requestId,
+            scenario_id: ctx.scenarioId,
+            issues: outcome.error.issues.slice(0, 5),
+          },
+          "Scenario versions — list failed the v2 egress contract; failing closed",
+        );
+        return unavailable(reply, requestId, "Versions could not be read right now.");
+      }
+      return reply.code(200).send(outcome.data);
     },
   );
 

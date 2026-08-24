@@ -39,6 +39,23 @@ export interface ModelVersionSummary {
   readonly identity_projection_version: string;
   readonly identity_normaliser_version: string;
   readonly graph_schema_version: string;
+  /** Derived for legacy rows; later provenance fields remain explicitly nullable. */
+  readonly analysis_affecting_hash: string;
+  readonly mutation_id: string | null;
+  readonly parent_version_id: string | null;
+  readonly root_version_id: string | null;
+  readonly actor_kind: 'known' | 'system' | 'unknown' | null;
+  readonly authored_by: string | null;
+  readonly creation_kind:
+    | 'initial'
+    | 'committed_mutation'
+    | 'restore'
+    | 'variant_creation'
+    | 'variant_promotion'
+    | 'unknown'
+    | null;
+  readonly source_version_id: string | null;
+  readonly source_turn_id: string | null;
   readonly label: string | null;
   readonly provenance: string | null;
   /** Restore lineage: the version whose graph this row copied, or null. */

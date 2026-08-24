@@ -26,6 +26,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
+
 import type {
   AtomicRestoreVersionOutcome,
   ModelVersionRecord,
@@ -131,7 +133,11 @@ export interface AtomicRestoreVersionWrite {
  *  tests inject hand-rolled fakes without a Supabase client. */
 export interface ModelVersionStorePort {
   saveVersion(write: SaveVersionWrite): Promise<VersionWriteOutcome>;
-  listVersions(scenarioId: string, limit?: number): Promise<readonly ModelVersionSummary[]>;
+  listVersions(
+    scenarioId: string,
+    limit?: number,
+    beforeSequence?: number,
+  ): Promise<readonly ModelVersionSummary[]>;
   getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null>;
   restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
   restoreVersionAtomic?(
@@ -157,14 +163,18 @@ function errCode(e: unknown): string | undefined {
   return (e as SupabaseErrorLike | null)?.code ?? undefined;
 }
 
-/** Summary columns — deliberately excludes `graph` (list reads must not
- *  ship N full snapshots). Kept as ONE string literal: concatenation would
+/** Summary columns — the public projection excludes `graph`. Kept as ONE
+ *  string literal: concatenation would
  *  widen the type to `string` and break supabase-js's type-level column
  *  parser (rows would type as GenericStringError). */
 const MODEL_VERSION_SUMMARY_COLUMNS =
-  'id, scenario_id, owner_user_id, version_number, graph_identity_hash, hash_algorithm, identity_projection_version, identity_normaliser_version, graph_schema_version, label, provenance, restored_from_version_id, created_at';
+  'id, scenario_id, owner_user_id, version_number, graph_identity_hash, analysis_affecting_hash, hash_algorithm, identity_projection_version, identity_normaliser_version, graph_schema_version, label, provenance, restored_from_version_id, mutation_id, parent_version_id, root_version_id, actor_kind, authored_by, creation_kind, source_version_id, source_turn_id, created_at';
 
 const MODEL_VERSION_RECORD_COLUMNS = `${MODEL_VERSION_SUMMARY_COLUMNS}, graph`;
+// Legacy rows predate analysis-affecting-hash persistence. The list reads the
+// stored snapshot only to derive that one missing server-owned fact; `graph`
+// is discarded by parseSummaryRow and can never enter the list wire shape.
+const MODEL_VERSION_LIST_COLUMNS = MODEL_VERSION_RECORD_COLUMNS;
 
 export const MODEL_VERSION_LIST_DEFAULT_LIMIT = 50;
 
@@ -242,17 +252,21 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
   async listVersions(
     scenarioId: string,
     limit: number = MODEL_VERSION_LIST_DEFAULT_LIMIT,
+    beforeSequence?: number,
   ): Promise<readonly ModelVersionSummary[]> {
     // Newest-first by the monotonic per-scenario ordering identity —
     // version_number, NOT created_at (fixture/same-ms timestamps must never
     // reorder history; the unique (scenario_id, version_number) index makes
     // this a stable total order).
-    const { data, error } = await this.client
+    let query = this.client
       .from('model_versions')
-      .select(MODEL_VERSION_SUMMARY_COLUMNS)
+      .select(MODEL_VERSION_LIST_COLUMNS)
       .eq('scenario_id', scenarioId)
-      .order('version_number', { ascending: false })
-      .limit(limit);
+      .order('version_number', { ascending: false });
+    if (beforeSequence !== undefined) {
+      query = query.lt('version_number', beforeSequence);
+    }
+    const { data, error } = await query.limit(limit);
     if (error) {
       throw new ModelVersionStoreError(
         `listVersions(${scenarioId}) failed: ${errMsg(error)}`,
@@ -321,11 +335,52 @@ function optionalString(row: Record<string, unknown>, key: string): string | nul
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+function explicitNullableString(
+  row: Record<string, unknown>,
+  key: string,
+  ctx: string,
+): string | null {
+  const value = row[key];
+  if (value === null) return null;
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new ModelVersionStoreError(`${ctx}: row field '${key}' must be non-empty or null`);
+}
+
 function parseSummaryRow(scenarioId: string, row: Record<string, unknown>): ModelVersionSummary {
   const ctx = `model_versions row (scenario ${scenarioId})`;
   const versionNumber = row.version_number;
   if (typeof versionNumber !== 'number' || !Number.isInteger(versionNumber) || versionNumber < 1) {
     throw new ModelVersionStoreError(`${ctx}: version_number missing or invalid`);
+  }
+  const storedAnalysisHash = explicitNullableString(row, 'analysis_affecting_hash', ctx);
+  const computedAnalysisHash =
+    storedAnalysisHash === null
+      ? computeVersionAnalysisAffectingHashRecord(row.graph)
+      : null;
+  const analysisHash = storedAnalysisHash ?? computedAnalysisHash?.value ?? null;
+  if (analysisHash === null || !/^[0-9a-f]{64}$/.test(analysisHash)) {
+    throw new ModelVersionStoreError(`${ctx}: analysis-affecting identity is unavailable`);
+  }
+  const actorKind = row.actor_kind;
+  if (
+    actorKind !== null &&
+    actorKind !== 'known' &&
+    actorKind !== 'system' &&
+    actorKind !== 'unknown'
+  ) {
+    throw new ModelVersionStoreError(`${ctx}: actor_kind is invalid`);
+  }
+  const creationKind = row.creation_kind;
+  if (
+    creationKind !== null &&
+    creationKind !== 'initial' &&
+    creationKind !== 'committed_mutation' &&
+    creationKind !== 'restore' &&
+    creationKind !== 'variant_creation' &&
+    creationKind !== 'variant_promotion' &&
+    creationKind !== 'unknown'
+  ) {
+    throw new ModelVersionStoreError(`${ctx}: creation_kind is invalid`);
   }
   return {
     id: requireString(row, 'id', ctx),
@@ -337,6 +392,15 @@ function parseSummaryRow(scenarioId: string, row: Record<string, unknown>): Mode
     identity_projection_version: requireString(row, 'identity_projection_version', ctx),
     identity_normaliser_version: requireString(row, 'identity_normaliser_version', ctx),
     graph_schema_version: requireString(row, 'graph_schema_version', ctx),
+    analysis_affecting_hash: analysisHash,
+    mutation_id: explicitNullableString(row, 'mutation_id', ctx),
+    parent_version_id: explicitNullableString(row, 'parent_version_id', ctx),
+    root_version_id: explicitNullableString(row, 'root_version_id', ctx),
+    actor_kind: actorKind,
+    authored_by: explicitNullableString(row, 'authored_by', ctx),
+    creation_kind: creationKind,
+    source_version_id: explicitNullableString(row, 'source_version_id', ctx),
+    source_turn_id: explicitNullableString(row, 'source_turn_id', ctx),
     label: optionalString(row, 'label'),
     provenance: optionalString(row, 'provenance'),
     restored_from_version_id: optionalString(row, 'restored_from_version_id'),

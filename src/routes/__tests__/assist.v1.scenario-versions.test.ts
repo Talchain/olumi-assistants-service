@@ -196,6 +196,15 @@ function summary(overrides: Record<string, unknown> = {}) {
     identity_projection_version: "identity.v1",
     identity_normaliser_version: "normaliser.v1",
     graph_schema_version: "graph.v1",
+    analysis_affecting_hash: ANALYSIS_HASH,
+    mutation_id: null,
+    parent_version_id: null,
+    root_version_id: null,
+    actor_kind: null,
+    authored_by: null,
+    creation_kind: null,
+    source_version_id: null,
+    source_turn_id: null,
     label: "First cut",
     provenance: "user_save",
     restored_from_version_id: null,
@@ -358,11 +367,15 @@ describe("POST /versions — list", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.schema).toBe("model_versions_list.v1");
+    expect(body.schema).toBe("model_versions_list.v2");
     expect(body.scenario_id).toBe(SCENARIO);
     expect(body.versions).toHaveLength(2);
-    expect(body.versions[0].id).toBe(VERSION_B);
+    expect(body.versions[0].version_id).toBe(VERSION_B);
+    expect(body.versions[0].actor).toEqual({ kind: "unknown" });
+    expect(body.versions[0].analysis_affecting_hash).toBe(ANALYSIS_HASH);
+    expect(body.versions[0]).not.toHaveProperty("graph");
     expect(body.current_version_id).toBe(VERSION_B);
+    expect(body.next_cursor).toBeNull();
     expect(typeof body.request_id).toBe("string");
     await app.close();
   });
@@ -370,19 +383,92 @@ describe("POST /versions — list", () => {
   it("lists the ADDRESSED scenario — identity-bound to the path param", async () => {
     const app = await buildApp();
     await post(app, "/versions", { user_id: OWNER });
-    expect(listVersions).toHaveBeenCalledWith(SCENARIO, undefined);
+    expect(listVersions).toHaveBeenCalledWith(SCENARIO, 51, undefined);
     await app.close();
   });
 
   it("passes a valid limit through and refuses an invalid one without a service call", async () => {
     const app = await buildApp();
     await post(app, "/versions", { user_id: OWNER, limit: 5 });
-    expect(listVersions).toHaveBeenCalledWith(SCENARIO, 5);
+    expect(listVersions).toHaveBeenCalledWith(SCENARIO, 6, undefined);
 
     listVersions.mockClear();
     const res = await post(app, "/versions", { user_id: OWNER, limit: -2 });
     expect(res.statusCode).toBe(422);
     expect(listVersions).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("returns an opaque exclusive cursor and keeps the authoritative head on later pages", async () => {
+    listVersions.mockResolvedValueOnce({
+      status: "ok",
+      value: [
+        summary({ id: SNAPSHOT_VERSION, version_number: 3 }),
+        summary({ id: VERSION_B, version_number: 2 }),
+        summary({ id: VERSION_A, version_number: 1 }),
+      ],
+    });
+    const app = await buildApp();
+    const first = await post(app, "/versions", { user_id: OWNER, limit: 2 });
+
+    expect(first.statusCode).toBe(200);
+    const firstBody = first.json();
+    expect(firstBody.versions.map((row: { sequence: number }) => row.sequence)).toEqual([3, 2]);
+    expect(firstBody.next_cursor).toEqual(expect.any(String));
+    expect(firstBody.next_cursor).not.toBe("2");
+
+    listVersions.mockResolvedValueOnce({
+      status: "ok",
+      value: [summary({ id: VERSION_A, version_number: 1 })],
+    });
+    const second = await post(app, "/versions", {
+      user_id: OWNER,
+      limit: 2,
+      cursor: firstBody.next_cursor,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().current_version_id).toBe(VERSION_B);
+    expect(listVersions).toHaveBeenLastCalledWith(SCENARIO, 3, 2);
+    await app.close();
+  });
+
+  it("fails closed on a forged history cursor", async () => {
+    const app = await buildApp();
+    const res = await post(app, "/versions", {
+      user_id: OWNER,
+      cursor: "not-a-server-cursor",
+    });
+    expect(res.statusCode).toBe(422);
+    expect(listVersions).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    ["owner", { actor_kind: "known", authored_by: "owner" }, { kind: "known", authored_by: "owner" }],
+    ["assistant", { actor_kind: "known", authored_by: "assistant" }, { kind: "known", authored_by: "assistant" }],
+    ["participant", { actor_kind: "known", authored_by: OWNER }, { kind: "known", authored_by: OWNER }],
+    ["system", { actor_kind: "system", authored_by: null }, { kind: "system" }],
+    ["unknown", { actor_kind: null, authored_by: null }, { kind: "unknown" }],
+  ])("renders producer-attested %s attribution without inference", async (_label, metadata, expected) => {
+    listVersions.mockResolvedValueOnce({
+      status: "ok",
+      value: [summary(metadata)],
+    });
+    const app = await buildApp();
+    const res = await post(app, "/versions", { user_id: OWNER });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().versions[0].actor).toEqual(expected);
+    await app.close();
+  });
+
+  it("refuses authored_by when no producer-attested actor kind travelled", async () => {
+    listVersions.mockResolvedValueOnce({
+      status: "ok",
+      value: [summary({ actor_kind: null, authored_by: "owner" })],
+    });
+    const app = await buildApp();
+    const res = await post(app, "/versions", { user_id: OWNER });
+    expect(res.statusCode).toBe(503);
     await app.close();
   });
 
