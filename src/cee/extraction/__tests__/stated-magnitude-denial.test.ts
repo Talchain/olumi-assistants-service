@@ -54,7 +54,7 @@ const F = "fd255d32";
  * Bound to the factor ID, never to "the intervention whose value is 20000"
  * (trap 19) — two fixtures here carry the same magnitude.
  */
-function emit(brief: string, raw: number, label = "Migration and Training Cost") {
+function wireIntervention(brief: string, raw: number, label = "Migration and Training Cost") {
   const nodes: NodeV3T[] = [
     { id: GOAL, kind: "goal", label: "Goal", provenance: "from_brief" } as unknown as NodeV3T,
     {
@@ -76,7 +76,7 @@ function emit(brief: string, raw: number, label = "Migration and Training Cost")
 
 /** Did the product claim the USER stated this magnitude? */
 function attributed(brief: string, raw: number, label?: string): boolean {
-  return emit(brief, raw, label)?.source === "brief_extraction";
+  return wireIntervention(brief, raw, label)?.source === "brief_extraction";
 }
 
 interface Case { readonly id: string; readonly brief: string; readonly raw: number; }
@@ -159,7 +159,7 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
     it.each(DENIALS.filter((c) => !KNOWN_DROPPED.includes(c.id)))(
       "refuses $id — $brief",
       ({ brief, raw }) => {
-        const iv = emit(brief, raw);
+        const iv = wireIntervention(brief, raw);
         expect(iv?.source).toBe("cee_hypothesis");
         expect(iv?.value_confidence).toBe("low");
         expect(iv?.reasoning).not.toContain("the brief states");
@@ -177,7 +177,7 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
 
   describe("opposite-direction twins — the same sentences WITHOUT the denial", () => {
     it.each(TWINS)("attributes $id — $brief", ({ brief, raw }) => {
-      const iv = emit(brief, raw);
+      const iv = wireIntervention(brief, raw);
       expect(iv?.source).toBe("brief_extraction");
       expect(iv?.value_confidence).toBe("high");
       expect(iv?.unit).toBe("£");
@@ -189,16 +189,16 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
     // two differ ONLY in the order of two amounts, so any answer that differs
     // between them is an answer about the WINDOW, not about the sentence.
     it("refuses when the denied amount is the FIRST coordinand", () => {
-      expect(emit("We will not approve £20,000 or £45,000.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We will not approve £20,000 or £45,000.", 20000)?.source).toBe("cee_hypothesis");
     });
 
     it("refuses when the denied amount is the SECOND coordinand", () => {
-      expect(emit("We will not approve £45,000 or £20,000.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We will not approve £45,000 or £20,000.", 20000)?.source).toBe("cee_hypothesis");
     });
 
     it("refuses BOTH coordinands of one governing negation", () => {
-      expect(emit("We will not approve £45,000 or £20,000.", 45000)?.source).toBe("cee_hypothesis");
-      expect(emit("We will not approve £20,000 or £45,000.", 45000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We will not approve £45,000 or £20,000.", 45000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We will not approve £20,000 or £45,000.", 45000)?.source).toBe("cee_hypothesis");
     });
 
     it("a POSTPOSED denial reaches back across a coordinand", () => {
@@ -208,33 +208,33 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
       // asserted: with the forward coordinand rule this refuses, without it the
       // same sentence returns `brief_extraction`. The corpus was short, and the
       // instrument said so before a reviewer had to.
-      expect(emit("£45,000 or £20,000 was never approved.", 45000)?.source).toBe("cee_hypothesis");
-      expect(emit("£45,000 or £20,000 was never approved.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("£45,000 or £20,000 was never approved.", 45000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("£45,000 or £20,000 was never approved.", 20000)?.source).toBe("cee_hypothesis");
     });
 
     it("...and a THREE-way coordination is not a special case", () => {
       const brief = "We will not approve £45,000, £30,000 or £20,000.";
       for (const raw of [45000, 30000, 20000]) {
-        expect(emit(brief, raw)?.source).toBe("cee_hypothesis");
+        expect(wireIntervention(brief, raw)?.source).toBe("cee_hypothesis");
       }
     });
   });
 
   describe("BOTH SIDES — a denial that follows the amount governs it too", () => {
     it("refuses a postposed passive denial", () => {
-      expect(emit("The £20,000 migration budget was declined by finance.", 20000)?.source).toBe(
+      expect(wireIntervention("The £20,000 migration budget was declined by finance.", 20000)?.source).toBe(
         "cee_hypothesis",
       );
     });
 
     it("refuses a postposed 'never'", () => {
-      expect(emit("The £20,000 migration was never approved.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("The £20,000 migration was never approved.", 20000)?.source).toBe("cee_hypothesis");
     });
 
     it("DISCRIMINATOR: a denial in the NEXT sentence does not reach backwards", () => {
       // The forward window must stop at the sentence boundary, or every brief
       // that mentions a figure and later declines something else loses it.
-      const iv = emit("The migration costs £20,000. We will not switch vendors.", 20000);
+      const iv = wireIntervention("The migration costs £20,000. We will not switch vendors.", 20000);
       expect(iv?.source).toBe("brief_extraction");
     });
   });
@@ -244,7 +244,7 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
       // The second coordinand here is an INDEPENDENT CLAUSE, not a coordinand of
       // the amount, so 'nothing' does not govern it. Refusing here would destroy
       // the one figure the product already gets right.
-      const iv = emit(
+      const iv = wireIntervention(
         "Staying on Salesforce costs us nothing extra up front, and our annual Salesforce licensing is £45,000.",
         45000,
         "Annual CRM Licensing Cost",
@@ -254,7 +254,7 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
     });
 
     it("a negation in a PRECEDING sentence does not govern", () => {
-      expect(emit("We are not switching vendors. The migration quote is £20,000.", 20000)?.source).toBe(
+      expect(wireIntervention("We are not switching vendors. The migration quote is £20,000.", 20000)?.source).toBe(
         "brief_extraction",
       );
     });
@@ -269,13 +269,13 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
     });
 
     it("...while a REAL contracted negation still refuses, in both apostrophe forms", () => {
-      expect(emit("We won't spend £20,000 on migration.", 20000)?.source).toBe("cee_hypothesis");
-      expect(emit("We won’t spend £20,000 on migration.", 20000)?.source).toBe("cee_hypothesis");
-      expect(emit("We don’t have £20,000 for migration.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We won't spend £20,000 on migration.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We won’t spend £20,000 on migration.", 20000)?.source).toBe("cee_hypothesis");
+      expect(wireIntervention("We don’t have £20,000 for migration.", 20000)?.source).toBe("cee_hypothesis");
     });
 
     it("the decimal point of £1.5m still does not end the clause and hide a negation", () => {
-      expect(emit("We will not approve a £1.5m budget for a £20,000 migration.", 20000)?.source).toBe(
+      expect(wireIntervention("We will not approve a £1.5m budget for a £20,000 migration.", 20000)?.source).toBe(
         "cee_hypothesis",
       );
     });
@@ -287,11 +287,11 @@ describe("B1-b — a denied magnitude is never attributed to the user", () => {
       // money — so with a forward window a denial in the NEXT sentence reached
       // backwards. Both directions are pinned here: the decimal must NOT cut,
       // and the sentence end MUST.
-      expect(emit("We cannot delay past Q3. The migration budget is £20,000.", 20000)?.source).toBe(
+      expect(wireIntervention("We cannot delay past Q3. The migration budget is £20,000.", 20000)?.source).toBe(
         "brief_extraction",
       );
       expect(
-        emit("Our annual licensing is £45,000. We will not switch vendors.", 45000)?.source,
+        wireIntervention("Our annual licensing is £45,000. We will not switch vendors.", 45000)?.source,
       ).toBe("brief_extraction");
     });
   });
