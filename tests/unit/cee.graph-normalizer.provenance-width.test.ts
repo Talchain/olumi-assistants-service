@@ -8,10 +8,21 @@
  *
  *     source === 'brief_extraction' ? 'explicit' : 'inferred'
  *
- * The shared contract declares TWELVE literals. Ten of them fell to the
- * `: 'inferred'` arm, so a server-verified named participant's panel answer
- * (`panel_elicited`) was sampled 50% WIDER than the model's own reading of the
- * brief. The polarity was inverted.
+ * The shared contract declares TWELVE literals. ELEVEN of them fell to the
+ * `: 'inferred'` arm — every literal except `brief_extraction` — and SEVEN of
+ * those eleven belonged in the TIGHT bucket: `explicit`, `user`,
+ * `user_override`, `user_confirmed`, `user_edited`, `user_calibration` and
+ * `panel_elicited`. The other four (`cee_inference`, `inferred`, `cee_repair`,
+ * `user_assumption`) were correctly wide and are byte-unchanged by this change.
+ * So a server-verified named participant's panel answer (`panel_elicited`) was
+ * sampled 50% WIDER than the model's own reading of the brief. The polarity was
+ * inverted for SEVEN literals, not for all eleven that took the arm.
+ *
+ * (11 took the arm · 7 changed · 4 already correct · 1 took the `? 'explicit'`
+ * arm. Derived by executing `SOURCE_EXTRACTION_TYPE_TABLE` against
+ * `OBSERVED_STATE_SOURCE_LITERALS` at the 0.48.0 pin versus the merge-base
+ * ternary, not counted by hand — an earlier draft of this header said "ten",
+ * which is not a count of anything here.)
  *
  * Every case below is an OPPOSITE-DIRECTION TWIN pair (CLAUDE.md trap 22b):
  * the user-authored literals must TIGHTEN, and `cee_inference`,
@@ -88,6 +99,35 @@ function widthOf(source: string | undefined): {
   };
 }
 
+/**
+ * The same factor with NO `data` block at all — no `confidence`, no
+ * `extractionType`, no `value_std` — so `normalizeGraphForISL` falls to its
+ * conservative `CONSERVATIVE_DEFAULT_CV` branch. See TWIN 5 for why this shape
+ * is the one that matters.
+ */
+function graphWithSourceNoConfidence(source: string | undefined): GraphV1 {
+  const observed_state: Record<string, unknown> = { value: 100, unit: '£' };
+  if (source !== undefined) observed_state.source = source;
+
+  return {
+    version: '1',
+    default_seed: 42,
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Goal' },
+      {
+        id: 'fac_target',
+        kind: 'factor',
+        label: 'Target factor',
+        observed_state,
+      } as unknown as GraphV1['nodes'][0],
+    ],
+    edges: [],
+  } as unknown as GraphV1;
+}
+
+/** `CONSERVATIVE_DEFAULT_CV` (0.2) * |100|, the no-extraction-metadata branch. */
+const CONSERVATIVE_DEFAULT_STD = 20;
+
 describe('normalizeGraphForISL — provenance→width polarity', () => {
   // ── TWIN 1: user-authored literals must reach the TIGHT bucket ──────────
   // Every literal the shared contract declares as the user speaking. At
@@ -151,6 +191,84 @@ describe('normalizeGraphForISL — provenance→width polarity', () => {
     const { extractionType, valueStd } = widthOf('user_assumption');
     expect(extractionType).toBe('inferred');
     expect(valueStd).toBeCloseTo(WIDE_STD, 10);
+  });
+
+  // ── TWIN 5: the NO-`data.confidence` branch is BYTE-UNCHANGED ────────────
+  //
+  // ⚠ WHY THIS CASE EXISTS. Every arithmetic case above pairs an
+  // `observed_state` stamp with a bare `data.confidence` and NO
+  // `data.extractionType`, which switches `normalizeGraphForISL` onto
+  // `deriveValueUncertainty`. That shape exercises the derivation FORMULA. It
+  // is not the shape a factor carries when it arrives with a provenance stamp
+  // and no extraction metadata at all — the state a value-writing edit leaves
+  // behind — which takes the THIRD branch instead: the conservative
+  // `CONSERVATIVE_DEFAULT_CV` default, `max(0.01, 0.2 * |value|)`, a branch
+  // that never consults `extractionType`.
+  //
+  // Without this case the PR's "this re-tunes nothing" claim would be a
+  // statement about a fixture rather than about a branch that actually runs.
+  //
+  // THE CLAIM PROVED HERE IS NARROW AND EXACT: on the no-`confidence` branch
+  // the derived `value_std` and the `parameter_uncertainties` std are
+  // BYTE-IDENTICAL — 0.2 * 100 = 20 — for ALL TWELVE contract literals, for an
+  // absent stamp and for an unrecognised one. The corrected polarity moves no
+  // sampling width on this path.
+  //
+  // ⚠ BOUND, stated rather than glossed: the `data.extractionType` STAMP this
+  // branch writes DOES change for the seven corrected literals. That is the
+  // intended correction, and it feeds no arithmetic INSIDE
+  // `normalizeGraphForISL` — this case makes no claim about consumers of the
+  // normalized graph downstream of it.
+  const ALL_TWELVE_PLUS_UNSTAMPED: readonly (string | undefined)[] = [
+    ...OBSERVED_STATE_SOURCE_LITERALS,
+    undefined,
+    'some_future_producer_stamp',
+  ];
+
+  for (const source of ALL_TWELVE_PLUS_UNSTAMPED) {
+    it(`no data.confidence — source ${JSON.stringify(source)} keeps the conservative default std, byte-unchanged`, () => {
+      const graph = graphWithSourceNoConfidence(source);
+
+      // Pin the precondition on the INPUT (CLAUDE.md trap 13b): this must
+      // really be the no-metadata branch, or the assertions below say nothing
+      // about it.
+      //
+      // ⚠ IT MUST BE READ OFF THE INPUT. The normalizer REBUILDS `data` from
+      // `observed_state` on this path, so `confidence` is absent from the
+      // OUTPUT whichever branch ran. An earlier draft of this line asserted
+      // `output.data.confidence === undefined` and was measured
+      // NON-DISCRIMINATING: a rot-mutant that put `data: { confidence: 0.8 }`
+      // back on the fixture left it GREEN while the case had silently moved
+      // onto the derivation branch.
+      const inputNode = graph.nodes[1] as unknown as {
+        data?: Record<string, unknown>;
+      };
+      expect(inputNode.data).toBeUndefined();
+
+      const normalized = normalizeGraphForISL(graph);
+      const node = normalized.nodes.find((n) => n.id === 'fac_target');
+      const data = node?.data as Record<string, unknown> | undefined;
+      const uncertainty = normalized.parameter_uncertainties?.find(
+        (u) => u.node_id === 'fac_target',
+      );
+
+      expect(data?.value_std).toBeCloseTo(CONSERVATIVE_DEFAULT_STD, 10);
+      expect(uncertainty?.std).toBeCloseTo(CONSERVATIVE_DEFAULT_STD, 10);
+    });
+  }
+
+  it('no data.confidence — every one of the twelve literals yields the IDENTICAL std', () => {
+    // The per-literal cases above could each be right while the set as a whole
+    // hid a divergence; this asserts the set has exactly ONE member.
+    const stds = new Set(
+      ALL_TWELVE_PLUS_UNSTAMPED.map((source) => {
+        const normalized = normalizeGraphForISL(graphWithSourceNoConfidence(source));
+        const node = normalized.nodes.find((n) => n.id === 'fac_target');
+        return (node?.data as Record<string, unknown> | undefined)?.value_std;
+      }),
+    );
+    expect([...stds]).toEqual([CONSERVATIVE_DEFAULT_STD]);
+    expect(ALL_TWELVE_PLUS_UNSTAMPED.length).toBe(14);
   });
 
   // ── Precedence: the pipeline's own stamp still wins ─────────────────────

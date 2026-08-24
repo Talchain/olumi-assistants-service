@@ -15,14 +15,22 @@
  * beside a LOCAL `ObservedStateV3` interface declaring
  * `source?: 'brief_extraction' | 'cee_inference'` — a hand-maintained TWO-member
  * mirror of a TWELVE-member contract enum (CLAUDE.md trap 12). The ternary
- * looked exhaustive against the mirror and was blind to ten literals.
+ * looked exhaustive against the mirror, which OMITTED ten of the twelve
+ * literals; the ternary itself sent ELEVEN of the twelve to `inferred`.
  *
  * ⚠ THE CONSEQUENCE WAS AN INVERTED SIGN, NOT A MISSING CASE.
- * `user_confirmed`, `user_override`, `user_edited`, `user_calibration`, `user`
- * and `panel_elicited` all fell to the `: 'inferred'` arm — the SAME arm as
- * `cee_inference`. A server-verified named participant's panel answer was
- * therefore sampled **50% WIDER** than the model's own reading of the brief.
- * Not "the same weight as a model guess": *worse than* a model guess.
+ * SEVEN literals — `explicit`, `user`, `user_override`, `user_confirmed`,
+ * `user_edited`, `user_calibration` and `panel_elicited` — fell to the
+ * `: 'inferred'` arm, the SAME arm as `cee_inference`. A server-verified named
+ * participant's panel answer was therefore sampled **50% WIDER** than the
+ * model's own reading of the brief. Not "the same weight as a model guess":
+ * *worse than* a model guess.
+ *
+ * Eleven literals took that arm in total; the other four (`cee_inference`,
+ * `inferred`, `cee_repair`, `user_assumption`) belonged there and are
+ * byte-unchanged. Seven is the changed-literal count, derived by executing this
+ * table against `OBSERVED_STATE_SOURCE_LITERALS` at the 0.48.0 pin — never
+ * counted by hand.
  *
  * ## THE RULE, AND WHY IT IS THE ONLY DEFENSIBLE DIRECTION
  *
