@@ -69,7 +69,7 @@ import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
 } from './option-intervention-guard.js';
-import { hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
+import { EDIT_VERB_BASES, hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
 
 /**
  * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
@@ -77,8 +77,46 @@ import { hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
  * means one path treats "Set X to pretty likely" as an edit and the other
  * does not (CLAUDE.md trap 12 — the hand-maintained mirror).
  */
-export const EDIT_VERB_PATTERN =
-  /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
+/**
+ * DERIVED from `EDIT_VERB_BASES`, never re-listed. The veto in
+ * `mutation-warrant.ts` reads the same vocabulary, so a verb that can authorise
+ * a write here is always a verb that can forbid one there. They drifted apart
+ * once — overlapping on three of ten — and that gap was SENDABLE P0.
+ */
+/**
+ * The model's OWN ENTITY LABELS, handed to the no-change veto so a prohibition
+ * naming a factor is recognised as a prohibition about the model.
+ *
+ * ⭐ This closes the asymmetry that was SENDABLE P0 (24 Aug 2026): this file
+ * already resolves these very labels to AUTHORISE a write (see the
+ * `normMessage.includes(normLabel)` candidate scan below), while the veto could
+ * only see the four tokens {model, models, graph, graphs}. So
+ * "Whatever you do, don't set Rep Adoption Quality to 0.2" produced no veto
+ * candidate at all, the write went through, and the product replied
+ * "Updated Rep Adoption Quality from 0.7 to 0.2."
+ *
+ * The same graph, read the same way, for both directions.
+ */
+function modelEntityLabels(graphLookup: GraphLookup | undefined): readonly string[] {
+  if (!graphLookup) return [];
+  try {
+    const out: string[] = [];
+    for (const entity of graphLookup.listEntitiesByKind('node')) {
+      const label = (entity as { label?: unknown }).label;
+      if (typeof label === 'string' && label.trim().length > 0) out.push(label);
+    }
+    return out;
+  } catch {
+    // A lookup that cannot enumerate must not take the turn down; the veto
+    // simply falls back to its model-object vocabulary.
+    return [];
+  }
+}
+
+export const EDIT_VERB_PATTERN = new RegExp(
+  `\\b(${EDIT_VERB_BASES.join('|')})\\b`,
+  'i',
+);
 
 /**
  * P0 V5 golden-path repair (Wave 2, Path B) — deictic reference patterns.
@@ -533,7 +571,7 @@ export function tryDeterministicValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message)) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -970,7 +1008,7 @@ export function tryCompoundValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message)) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -1213,7 +1251,7 @@ export function tryDeicticValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message)) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
   for (const pat of HYPOTHETICAL_PATTERNS) {

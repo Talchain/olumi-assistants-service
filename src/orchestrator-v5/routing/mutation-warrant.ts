@@ -236,14 +236,57 @@ const BOUNDED_NON_MUTATION_ANALYTICAL_PATTERNS: readonly RegExp[] = [
  * while the small bridge vocabulary admits ordinary grammatical permutations
  * such as "without edits being made to my current causal graph".
  */
+/**
+ * ⭐⭐ THE VERBS THAT AUTHORISE A WRITE ARE THE VERBS THAT CAN FORBID ONE.
+ *
+ * This is the canonical base vocabulary, and `deterministic-value-update.ts`
+ * builds its `EDIT_VERB_PATTERN` from it rather than keeping a second copy.
+ *
+ * ⚠ WHY IT IS DERIVED AND NOT MIRRORED (SENDABLE P0, 24 Aug 2026). The grant
+ * side dispatched on ten verbs; this veto knew nine, and they OVERLAPPED ON
+ * THREE — change, update, adjust. So `increase`, `decrease`, `reduce`, `raise`,
+ * `lower`, `set` and `make` could each authorise a canonical write while no
+ * prohibition using them could stop one.
+ *
+ * `set` is the worst of the seven, because it is not an edge case: the product
+ * dispatches `set_factor_value`, and its own coaching copy tells the user to
+ * type "Set the … option's effect on Rep Adoption Quality to 0.6". So the
+ * product taught a verb its own prohibition vocabulary could not hear. Measured
+ * on staging: "Whatever you do, don't set Rep Adoption Quality to 0.2" wrote the
+ * value and replied "Updated Rep Adoption Quality from 0.7 to 0.2."
+ *
+ * Two lists standing for one concept is this estate's dominant defect. One list,
+ * two consumers.
+ */
+export const EDIT_VERB_BASES = [
+  'increase', 'decrease', 'reduce', 'raise', 'lower',
+  'set', 'change', 'update', 'make', 'adjust',
+] as const;
+
+/**
+ * Inflections stay local to the token matcher: English morphology is irregular
+ * (`set`→`set`, `make`→`made`) and generating it would be a worse mirror than
+ * writing it. What must AGREE across the two sides is the base vocabulary
+ * above, and that is imported, not copied.
+ */
 const MUTATION_VERB_LEXEMES = new Set([
-  'change', 'changes', 'changed', 'changing',
+  ...EDIT_VERB_BASES,
+  'increases', 'increased', 'increasing',
+  'decreases', 'decreased', 'decreasing',
+  'reduces', 'reduced', 'reducing',
+  'raises', 'raised', 'raising',
+  'lowers', 'lowered', 'lowering',
+  'sets', 'setting',
+  'changes', 'changed', 'changing',
+  'updates', 'updated', 'updating',
+  'makes', 'made', 'making',
+  'adjusts', 'adjusted', 'adjusting',
+  // Retained beyond the grant vocabulary: these forbid writes the LLM route can
+  // still perform even where the deterministic path never dispatches on them.
   'edit', 'edits', 'edited', 'editing',
-  'update', 'updates', 'updated', 'updating',
   'modify', 'modifies', 'modified', 'modifying',
   'mutate', 'mutates', 'mutated', 'mutating',
   'touch', 'touches', 'touched', 'touching',
-  'adjust', 'adjusts', 'adjusted', 'adjusting',
   'alter', 'alters', 'altered', 'altering',
   'rewrite', 'rewrites', 'rewrote', 'rewritten', 'rewriting',
 ]);
@@ -391,13 +434,70 @@ function skipCueFillers(tokens: readonly string[], from: number, limit: number):
   return cursor;
 }
 
+/**
+ * The model's OWN ENTITY LABELS, tokenised, so a prohibition naming a factor is
+ * recognised as a prohibition about the model.
+ *
+ * ⭐ WHY THIS EXISTS. `MODEL_OBJECT_LEXEMES` is four tokens standing in for an
+ * unbounded class: every entity label in the user's graph. The GRANT side
+ * already resolves those labels against the live graph
+ * (`deterministic-value-update.ts` — `normMessage.indexOf(normLabel)`); the
+ * VETO side did not. That asymmetry was the whole of SENDABLE P0 (24 Aug 2026):
+ * "Whatever you do, don't set Rep Adoption Quality to 0.2" produced NO veto
+ * candidate at all, because the walk in `findModelObjectAfter` hit "rep" —
+ * neither a model object nor a bridge lexeme — and aborted. The product then
+ * performed the edit and reported "Updated Rep Adoption Quality from 0.7 to 0.2".
+ *
+ * The same sentence was specific enough to AUTHORISE a write and not specific
+ * enough to FORBID one. This closes that, using the caller's own graph rather
+ * than a fifth hand-maintained lexeme — the tail vocabulary is an open class and
+ * a longer list is the next round of the same mistake.
+ */
+type LabelRun = readonly string[];
+
+function tokeniseEntityLabels(labels: readonly string[] | undefined): readonly LabelRun[] {
+  if (!labels || labels.length === 0) return EMPTY_LABEL_RUNS;
+  const runs: LabelRun[] = [];
+  for (const raw of labels) {
+    if (typeof raw !== 'string') continue;
+    const run = tokenizeNoChangeClause(raw.toLowerCase());
+    if (run.length === 0) continue;
+    runs.push(run);
+  }
+  return runs;
+}
+
+const EMPTY_LABEL_RUNS: readonly LabelRun[] = [];
+
+/** Does one of the model's entity labels start exactly at `cursor`? */
+function labelRunEndAt(
+  tokens: readonly string[],
+  cursor: number,
+  labelRuns: readonly LabelRun[],
+): number | null {
+  for (const run of labelRuns) {
+    if (cursor + run.length > tokens.length) continue;
+    let hit = true;
+    for (let offset = 0; offset < run.length; offset += 1) {
+      if (tokens[cursor + offset] !== run[offset]) { hit = false; break; }
+    }
+    // Return the LAST token of the label, so any scoped-tail scan that follows
+    // starts after the whole object rather than inside it.
+    if (hit) return cursor + run.length - 1;
+  }
+  return null;
+}
+
 function findModelObjectAfter(
   tokens: readonly string[],
   from: number,
   limit: number,
+  labelRuns: readonly LabelRun[] = EMPTY_LABEL_RUNS,
 ): number | null {
   for (let cursor = from; cursor < limit; cursor += 1) {
     if (MODEL_OBJECT_LEXEMES.has(tokens[cursor]!)) return cursor;
+    const labelEnd = labelRunEndAt(tokens, cursor, labelRuns);
+    if (labelEnd !== null) return labelEnd;
     if (!MUTATION_OBJECT_BRIDGE_LEXEMES.has(tokens[cursor]!)) return null;
   }
   return null;
@@ -407,11 +507,14 @@ function parseModelObjectAt(
   tokens: readonly string[],
   from: number,
   limit: number,
+  labelRuns: readonly LabelRun[] = EMPTY_LABEL_RUNS,
 ): number | null {
   const objectLimit = Math.min(limit, from + MAX_MODEL_QUALIFIERS + 1);
   for (let cursor = from; cursor < objectLimit; cursor += 1) {
     const token = tokens[cursor]!;
     if (MODEL_OBJECT_LEXEMES.has(token)) return cursor;
+    const labelEnd = labelRunEndAt(tokens, cursor, labelRuns);
+    if (labelEnd !== null) return labelEnd;
     if (!MODEL_QUALIFIER_LEXEMES.has(token)) return null;
   }
   return null;
@@ -462,6 +565,7 @@ function findDirectNoChangeCandidate(
   cueStart: number,
   cueEnd: number,
   cue: 'do_not' | 'never' | 'without',
+  labelRuns: readonly LabelRun[] = EMPTY_LABEL_RUNS,
 ): NoChangeCandidate | null {
   const limit = Math.min(tokens.length, cueEnd + MAX_CUE_WINDOW_TOKENS);
   const first = skipCueFillers(tokens, cueEnd, limit);
@@ -469,18 +573,27 @@ function findDirectNoChangeCandidate(
   const firstToken = tokens[first]!;
 
   if (MUTATION_LEXEMES.has(firstToken)) {
-    const object = findModelObjectAfter(tokens, first + 1, limit);
-    return object === null ? null : makeCandidate(tokens, cueStart, object, cue);
+    const object = findModelObjectAfter(tokens, first + 1, limit, labelRuns);
+    if (object !== null) return makeCandidate(tokens, cueStart, object, cue);
+    // ⚠ FALL THROUGH, do not return null. A verb can be BOTH a mutation lexeme
+    // and an operator over a mutation noun: "make any changes to the model"
+    // reads `make` as the verb here, finds no model object directly after it,
+    // and must still be parsed by the operator/noun route below. Returning null
+    // at this point silently un-vetoed all three of
+    // "Never make any changes to our causal graph.",
+    // "Do not make further changes to the current causal model." and
+    // "Without making any changes to the current model." the moment `make`
+    // joined the shared edit vocabulary — caught by the existing suite.
   }
 
   if (MUTATION_OPERATORS.has(firstToken)) {
     const afterOperator = skipCueFillers(tokens, first + 1, limit);
     const mutation = findMutationAfter(tokens, afterOperator, limit, true);
     if (mutation !== null) {
-      const object = findModelObjectAfter(tokens, mutation + 1, limit);
+      const object = findModelObjectAfter(tokens, mutation + 1, limit, labelRuns);
       if (object !== null) return makeCandidate(tokens, cueStart, object, cue);
     }
-    const object = parseModelObjectAt(tokens, afterOperator, limit);
+    const object = parseModelObjectAt(tokens, afterOperator, limit, labelRuns);
     if (object !== null) {
       const noun = findMutationAfter(tokens, object + 1, limit, true);
       if (noun !== null) return makeCandidate(tokens, cueStart, noun, cue);
@@ -495,7 +608,7 @@ function findDirectNoChangeCandidate(
       const objectAfter = findModelObjectAfter(tokens, mutationFirst + 1, limit);
       if (objectAfter !== null) return makeCandidate(tokens, cueStart, objectAfter, cue);
     }
-    const object = parseModelObjectAt(tokens, objectStart, limit);
+    const object = parseModelObjectAt(tokens, objectStart, limit, labelRuns);
     if (object === null) return null;
     const mutation = findMutationAfter(tokens, object + 1, limit);
     return mutation === null ? null : makeCandidate(tokens, cueStart, mutation, cue);
@@ -517,6 +630,7 @@ function findDirectNoChangeCandidate(
 function findNarrowNoCandidate(
   tokens: readonly string[],
   noIndex: number,
+  labelRuns: readonly LabelRun[] = EMPTY_LABEL_RUNS,
 ): NoChangeCandidate | null {
   const limit = Math.min(tokens.length, noIndex + MAX_CUE_WINDOW_TOKENS);
   let cursor = noIndex + 1;
@@ -527,13 +641,13 @@ function findNarrowNoCandidate(
   if (MUTATION_NOUN_LEXEMES.has(tokens[cursor]!)) {
     const connector = tokens[cursor + 1];
     if (!MODEL_CONNECTOR_LEXEMES.has(connector!)) return null;
-    const object = parseModelObjectAt(tokens, cursor + 2, limit);
+    const object = parseModelObjectAt(tokens, cursor + 2, limit, labelRuns);
     if (object === null) return null;
     const start = MUTATION_OPERATORS.has(tokens[noIndex - 1]!) ? noIndex - 1 : noIndex;
     return makeCandidate(tokens, start, object, 'no');
   }
 
-  const object = parseModelObjectAt(tokens, cursor, limit);
+  const object = parseModelObjectAt(tokens, cursor, limit, labelRuns);
   if (object === null) return null;
   const noun = findMutationAfter(tokens, object + 1, limit, true);
   if (noun === null) return null;
@@ -541,18 +655,21 @@ function findNarrowNoCandidate(
   return makeCandidate(tokens, start, noun, 'no');
 }
 
-function findNoChangeCandidates(tokens: readonly string[]): NoChangeCandidate[] {
+function findNoChangeCandidates(
+  tokens: readonly string[],
+  labelRuns: readonly LabelRun[] = EMPTY_LABEL_RUNS,
+): NoChangeCandidate[] {
   const candidates: NoChangeCandidate[] = [];
   for (let cursor = 0; cursor < tokens.length; cursor += 1) {
     let candidate: NoChangeCandidate | null = null;
     if (tokens[cursor] === 'do' && tokens[cursor + 1] === 'not') {
-      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 2, 'do_not');
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 2, 'do_not', labelRuns);
     } else if (tokens[cursor] === 'never') {
-      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'never');
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'never', labelRuns);
     } else if (tokens[cursor] === 'without') {
-      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'without');
+      candidate = findDirectNoChangeCandidate(tokens, cursor, cursor + 1, 'without', labelRuns);
     } else if (tokens[cursor] === 'no') {
-      candidate = findNarrowNoCandidate(tokens, cursor);
+      candidate = findNarrowNoCandidate(tokens, cursor, labelRuns);
     }
     if (candidate) candidates.push(candidate);
   }
@@ -695,15 +812,19 @@ function hasImperativeMakeValueEdit(tokens: readonly string[]): boolean {
  * Deterministic mutation pre-routes reuse this predicate so the action-layer
  * warrant and the fast path cannot disagree about the same sentence.
  */
-export function hasExplicitNoModelChangeIntent(message: string): boolean {
+export function hasExplicitNoModelChangeIntent(
+  message: string,
+  modelEntityLabels?: readonly string[],
+): boolean {
   if (typeof message !== 'string') return false;
   const trimmed = message.trim();
   if (trimmed.length === 0) return false;
   const clauses = splitNoChangeClauses(trimmed);
+  const labelRuns = tokeniseEntityLabels(modelEntityLabels);
   const scopedCandidates: LocatedNoChangeCandidate[] = [];
   for (let clauseIndex = 0; clauseIndex < clauses.length; clauseIndex += 1) {
     const clause = clauses[clauseIndex]!;
-    for (const candidate of findNoChangeCandidates(clause.tokens)) {
+    for (const candidate of findNoChangeCandidates(clause.tokens, labelRuns)) {
       if (!isDirectiveNoChangeCandidate(clause, candidate)) continue;
       if (!candidate.scopedTail) return true;
       scopedCandidates.push({ clauseIndex, candidate });
