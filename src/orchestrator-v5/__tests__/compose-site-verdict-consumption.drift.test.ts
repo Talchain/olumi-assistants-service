@@ -1581,7 +1581,31 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // `constraint_verdict_state` untouched (CLAUDE.md trap 21: two authorities,
     // two questions, named apart rather than aligned).
     expect(RUN_ANALYSIS).toContain('projectClaimSafety(constraintVerdict),');
-    expect(RUN_ANALYSIS).toContain('constraint_verdict: applyIntakeToLeaderPermission(');
+    // ⚠ ROADMAP 2.579's SECOND intake axis (constraint) wraps the first
+    // (option). Two functions one word apart — `applyIntakeToLeaderPermission`
+    // and `applyIntakeConstraintToLeaderPermission` — so a substring pin on the
+    // shorter name would match the INNER call and keep passing however the
+    // outer one drifted. CLAUDE.md trap 21: differently-named twins are this
+    // estate's chronic defect, and the pin must name the level it is about.
+    //
+    // The WHOLE nested expression is pinned, exactly, so all three properties
+    // fail loud: dropping either axis, reordering them, or re-pointing the
+    // inner call at something other than `projectClaimSafety(constraintVerdict)`.
+    // Order is irrelevant to CORRECTNESS (a conjunction of monotone withholds
+    // commutes, as the compose site's own comment derives) but it is pinned
+    // anyway — an unreviewed reorder is a signal about the seam even when it is
+    // semantically inert.
+    expect(RUN_ANALYSIS).toContain(
+      [
+        '        constraint_verdict: applyIntakeConstraintToLeaderPermission(',
+        '          applyIntakeToLeaderPermission(',
+        '            projectClaimSafety(constraintVerdict),',
+        '            intakeReconciliation,',
+        '          ),',
+        '          intakeConstraintReconciliation,',
+        '        ),',
+      ].join('\n'),
+    );
   });
 
   it('chip-click confirmationText: HOP 4 — EVERY withholding verdict state withholds the headline', () => {
