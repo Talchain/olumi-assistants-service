@@ -230,10 +230,19 @@ describe('2.349 — the length budget covers the COMBINED shape', () => {
 
   it('the budget accounts for EVERY declared voice (trap 12d — the list itself)', () => {
     // Derivation proves the copies agree; it can never prove the LIST is
-    // complete. This is the union check: a fourth voice added to the type and
-    // to `ALL_VOICES` without a decision about how it composes fails here.
+    // complete. This is the union check: a voice added to the type and to
+    // `ALL_VOICES` without a decision about how it composes fails here.
+    //
+    // ⭐ THE GUARD FIRED AS DESIGNED, AND HERE IS THE DECISION IT ASKED FOR.
+    // `intake_unrecorded` (the fourth voice: "your brief states a limit that is
+    // not recorded on your model") is ADDED to the budget, not maxed in — the
+    // published grammar admits it riding after a state voice and/or the
+    // out-of-scope voice, so the slot's worst case is the SUM, not the longest
+    // single voice. That decision is implemented in
+    // `CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS` and re-asserted behaviourally by
+    // the combined-shape test in `intake-constraint-disclosure.test.ts`.
     expect([...DISCLOSURE_VOICES_FOR_BUDGET].sort()).toEqual(
-      ['identity_unresolved', 'out_of_scope', 'unevaluated'].sort(),
+      ['identity_unresolved', 'intake_unrecorded', 'out_of_scope', 'unevaluated'].sort(),
     );
   });
 

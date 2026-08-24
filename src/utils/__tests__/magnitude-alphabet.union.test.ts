@@ -453,6 +453,32 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // already numeric, and renders integer percentages via Math.round.
     'orchestrator-v5/coaching/objective-contradiction.ts':
       'incidental — comment only; spells no alphabet and parses no numbers',
+    // Intake-constraint axis — INCIDENTAL, and THE FIFTH file carrying the
+    // identical comment-only mention. Its two `million`s are both inside the
+    // `£1.5 million` note explaining why the cue windows are measured OUTSIDE
+    // the matched amount's span: the decimal point is also a full stop, and a
+    // window cut at the first `[.!?]` is the shape that shipped six live
+    // defects (CLAUDE.md trap 22).
+    //
+    // ⭐ THE PREDICTION ABOVE HAS NOW COME TRUE TWICE MORE. Three entries in
+    // this manifest already say the decimal-split hazard should be stated once
+    // in a shared place; this is the fifth file to restate it. Extracting it is
+    // again deliberately NOT done here ("while we're here" work is prohibited,
+    // and it is unrelated to this lane) — but at five occurrences the cost of
+    // NOT rowing it is that every future text-windowing module pays the same
+    // review tax, and the shared note is the only thing that would stop a sixth
+    // author cutting at `[.!?]` because they never read one of these five.
+    //
+    // The module holds no magnitude list and performs no numeric parsing of its
+    // own: it DELEGATES every magnitude reading to `findStatedAmounts`
+    // (`cee/provenance/stated-amounts.ts`), whose currency alternations are
+    // themselves derived from the shared symbol map, precisely so this file
+    // cannot drift from it. It multiplies nothing and resolves no magnitude
+    // word to a value.
+    // ⚠ If it ever maps a magnitude word to a NUMBER, that makes it a genuine
+    // sibling lookup and it must move to SIBLING_VALUE_LOOKUPS.
+    'orchestrator/context/intake-constraint-reconciliation.ts':
+      'incidental — comment only; delegates all magnitude reading to findStatedAmounts and spells no alphabet',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
     // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is
