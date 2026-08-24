@@ -19,8 +19,11 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
+import { NEGATION_SCREEN_RE } from "../compound-goal/direction-gate.js";
 import {
   classifyAmountAgainstBrief,
+  findStatedAmounts,
+  readUnit,
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import {
@@ -527,6 +530,376 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
+ * CLAUSE BOUNDARIES, for deciding what a denial GOVERNS.
+ *
+ * A sentence is too coarse. The frozen B1 brief settles it: "Staying on
+ * Salesforce costs us nothing extra up front, and our annual Salesforce
+ * licensing is £45,000." A sentence-scoped window puts "nothing" in front of
+ * £45,000 and would refuse the one figure the product already gets RIGHT.
+ * Coordinators are therefore boundaries too — but only SOMETIMES, and the
+ * exception is the whole of {@link clauseWindow}.
+ *
+ * ⚠ THE LOOKAHEAD `\.(?!\d)` IS LOAD-BEARING: an unguarded `.` treats the
+ * decimal point of "£1.5m" as a sentence end, shrinking the window and so
+ * LOSING a denial that really does govern — the unsafe direction. This is the
+ * same decimal-point cut that truncated a magnitude guard's input in CLAUDE.md
+ * trap 22.
+ *
+ * ⚠⚠ AND THE MATCHING LOOKBEHIND HAD TO GO, BECAUSE IT DELETED SENTENCE ENDS.
+ * This was spelled `(?<!\d)\.(?!\d)` — guarded on BOTH sides. The lookahead
+ * alone already excludes every decimal point (in "1.5" the `.` is followed by a
+ * digit); the lookbehind adds nothing to that and instead swallows the full
+ * stop of every sentence that ENDS in a number — which is most sentences that
+ * state money. Measured on this module's own frozen brief: in
+ * "…licensing is £45,000. We will not switch." the `.` after £45,000 was NOT a
+ * boundary, so with a forward window a denial in the NEXT sentence reached
+ * backwards into this one. Caught by an over-refusal control
+ * ("We cannot delay past Q3. The migration budget is £20,000."), not by
+ * inspection — the two guards look symmetrical and only one of them is doing a
+ * job.
+ */
+const HARD_BOUNDARY_SRC = String.raw`\.(?!\d)|[!?;\n]`;
+const COORDINATOR_SRC = String.raw`,\s*(?:and|or|but)\b|\s(?:and|or|but)\s`;
+const CLAUSE_BOUNDARY = new RegExp(`${HARD_BOUNDARY_SRC}|${COORDINATOR_SRC}`, "gi");
+const IS_COORDINATOR = new RegExp(`^(?:${COORDINATOR_SRC})$`, "i");
+
+/**
+ * THE DENIAL SCREEN — CONSUMED FROM THE ESTATE'S AUTHORITY, NOT MINTED HERE.
+ *
+ * ⚠ WHY THIS IS NOT A NEW LEXICON (CLAUDE.md trap 21 / the two
+ * `generateGraphHash` twins). `compound-goal/direction-gate.ts` already owns
+ * this estate's negation-and-prevention alphabet. It is the survivor of the
+ * FOUR-ROUND oscillation on exactly this shape of predicate, it carries the
+ * contraction forms three outside corpora in a row missed, it narrows `no` to
+ * `no(?=\s)` so `no-show` is not a negation, and it is guarded BOTH by a union
+ * assertion against the extractor's two lead lists AND by an external
+ * vocabulary sweep with its own KNOWN set. Re-typing any of that here would
+ * mint a twin that drifts. It is composed by SOURCE, so an alternative added
+ * there is live here the instant it lands, with nothing to sync.
+ *
+ * ⚠ THE LOCAL ADDITIONS ARE THE THREE THINGS THAT AUTHORITY DOES NOT COVER,
+ * and each is required by a case measured at the wire, not imagined:
+ *   · `nothing|neither|nor|exclud*` — `no(?=\s)` cannot match "nothing", and
+ *     the frozen brief's own "costs us nothing extra up front" is the
+ *     discriminator that stops this window being sentence-scoped;
+ *   · `declin*|instead of|rather than` — this module's original marker carried
+ *     them and they are load-bearing ("the budget was declined by finance");
+ *   · `\w+n['’]t` — the estate's list spells contractions with the STRAIGHT
+ *     apostrophe only, and real briefs are typed with the curly one.
+ *
+ * ⚠⚠ THE APOSTROPHE IS MANDATORY, AND ITS OPTIONALITY WAS A LIVE DEFECT.
+ * This module previously spelled that alternative `\b\w+n['’]?t\b`. With the
+ * apostrophe OPTIONAL it matches every English word ending in "nt" —
+ * *Procurement*, *amount*, *payment*, *current*, *percent*, *investment*,
+ * *commitment*, *segment*, *client*, *point*. Measured at the wire on
+ * `419a9684`: "Procurement authorised the £20,000 migration purchase" — a
+ * plain, unnegated assertion of the user's own figure — was REFUSED, because
+ * the word *Procurement* read as a contracted negation. It cost coverage
+ * silently and it would have cost far more once the window widened.
+ */
+const LOCAL_DENIAL_SRC = String.raw`\b(?:nothing|neither|nor|exclud\w*|declin\w*|instead\s+of|rather\s+than)\b|\b\w+n['’]t\b`;
+
+/** Any token that makes an amount's clause unsafe to read as the user's own assertion. */
+export const DENIAL_SCREEN_RE = new RegExp(
+  `${NEGATION_SCREEN_RE.source}|${LOCAL_DENIAL_SRC}`,
+  "i",
+);
+
+/**
+ * Does an amount END at `position` (ignoring trailing whitespace)?
+ * Used to recognise a COORDINAND — see {@link clauseWindow}.
+ */
+function amountEndsAt(
+  amounts: readonly { readonly index: number; readonly matchedText: string }[],
+  text: string,
+  position: number,
+): boolean {
+  let end = position;
+  while (end > 0 && /\s/.test(text.charAt(end - 1))) end--;
+  return amounts.some((a) => a.index + a.matchedText.length === end);
+}
+
+/** Does an amount BEGIN at `position` (ignoring leading whitespace)? */
+function amountStartsAt(
+  amounts: readonly { readonly index: number }[],
+  text: string,
+  position: number,
+): boolean {
+  let start = position;
+  while (start < text.length && /\s/.test(text.charAt(start))) start++;
+  return amounts.some((a) => a.index === start);
+}
+
+/**
+ * THE CLAUSE THIS AMOUNT SITS IN — SPANNING BOTH SIDES OF IT.
+ *
+ * ⚠ BOTH SIDES, BECAUSE ENGLISH DENIES IN BOTH DIRECTIONS. A backward-only
+ * window is blind to every postposed denial, and those are ordinary English,
+ * not edge cases: "The £20,000 migration budget was declined by finance", "The
+ * £20,000 migration was never approved", "A £20,000 migration is off the
+ * table". Measured at the wire on `419a9684`, all three were attributed to the
+ * user at `value_confidence: high`.
+ *
+ * ⚠⚠ A COORDINATOR MUST NOT CUT A GOVERNING DENIAL OFF A COORDINAND, AND THAT
+ * IS THE DECISIVE CASE. Measured at `419a9684`, these two sentences — the same
+ * words, the same governing negation, only the ORDER of two figures changed —
+ * produced OPPOSITE provenance for £20,000:
+ *
+ *     "We will not approve £20,000 or £45,000."   ->  cee_hypothesis   (right)
+ *     "We will not approve £45,000 or £20,000."   ->  brief_extraction (a lie)
+ *
+ * because `\s(?:and|or|but)\s` cut "not" off the second coordinand. An answer
+ * that changes when only the ORDER changes is an answer about the WINDOW, not
+ * about the sentence.
+ *
+ * ⚠⚠⚠ AND THE DISCRIMINATOR IS STRUCTURAL, NOT A LENGTH CLIFF. The estate
+ * ended its four-round oscillation on a natural-language predicate whose only
+ * discriminators were "two arbitrary length constants with hard cliffs on
+ * either side" (trap 22f), so a character budget is the one thing this must
+ * not be. The question a coordinator poses is grammatical and has a
+ * grammatical answer: IS THE THING IT JOINS A COORDINAND OF THIS AMOUNT, OR AN
+ * INDEPENDENT CLAUSE? A coordinand of an amount is an amount — so the test is
+ * simply whether an amount sits against the coordinator's far side, and it is
+ * answered by this module's OWN authority ({@link findStatedAmounts}), with no
+ * lexicon and nothing to keep in sync:
+ *
+ *     "not approve £45,000 | or | £20,000"          far side IS an amount  -> join
+ *     "nothing extra up front | , and | our ..."    far side is a CLAUSE   -> cut
+ *
+ * The second is the frozen brief's own £45,000 sentence, and cutting there is
+ * what keeps the one figure the product already gets right.
+ */
+function clauseWindow(
+  text: string,
+  amountIndex: number,
+  amountLength: number,
+): { readonly start: number; readonly end: number } {
+  const amounts = findStatedAmounts(text);
+
+  // ── BACKWARDS: the last boundary that is not joining a coordinand ────────
+  const before = text.slice(0, amountIndex);
+  const backward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  const hits: { index: number; text: string }[] = [];
+  for (let m = backward.exec(before); m !== null; m = backward.exec(before)) {
+    hits.push({ index: m.index, text: m[0] });
+  }
+  let start = 0;
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const hit = hits[i]!;
+    if (IS_COORDINATOR.test(hit.text) && amountEndsAt(amounts, text, hit.index)) continue;
+    start = hit.index + hit.text.length;
+    break;
+  }
+
+  // ── FORWARDS: the first boundary that is not joining a coordinand ────────
+  const afterFrom = amountIndex + amountLength;
+  const after = text.slice(afterFrom);
+  const forward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  let end = text.length;
+  for (let m = forward.exec(after); m !== null; m = forward.exec(after)) {
+    const at = afterFrom + m.index;
+    if (IS_COORDINATOR.test(m[0]) && amountStartsAt(amounts, text, at + m[0].length)) continue;
+    end = at;
+    break;
+  }
+
+  return { start, end };
+}
+
+/**
+ * Does a denial govern the clause this amount sits in?
+ *
+ * ⚠ WHY THIS IS A REFUSAL AND NOT A PARSE (coordinator ruling, 2026-08-24).
+ * Three residual classes reach this route, and they are NOT one class:
+ *   · wrong-factor  ("Q4 bookings lost" takes the migration cost)   — accepted
+ *   · third-party   ("a competitor paid £20,000")                   — accepted
+ *   · DENIED        ("we will NOT spend £20,000")                   — REFUSED here
+ * The first two put a real number on the wrong object; the user's own figure
+ * still reaches the model. The third MANUFACTURES USER EVIDENCE OUT OF THE
+ * USER'S EXPLICIT DENIAL — it reads their refusal as their statement, which is
+ * the one case where this fix would be worse than the loss it repairs.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A NEGATION PREDICATE. This estate oscillated
+ * FOUR consecutive rounds on exactly that shape, each round fixing one
+ * direction and opening the other, and the ruling that ended it was: where
+ * direction cannot be determined, make the ambiguity the product rather than
+ * guess (CLAUDE.md trap 22f). So this detector is ALLOWED TO MISS. It is not
+ * extended verb-by-verb when it does: the residual misses are recorded instead,
+ * in the frozen KNOWN-DROPPED set in
+ * `__tests__/stated-magnitude-denial.test.ts`, whose pin is DERIVED by running
+ * the corpus and therefore REDs if that set grows OR shrinks. A gap recorded in
+ * the suite is honest; a gap invisible to it is how four rounds happened.
+ *
+ * ⚠⚠ THE ASYMMETRY, STATED THE RIGHT WAY ROUND. An earlier version of this
+ * comment said "a miss degrades to today's behaviour, never to a lie" and used
+ * that to license the direction. THAT IS INVERTED, and it is inverted about the
+ * one thing the comment exists to settle:
+ *   · a FALSE POSITIVE — refusing an amount the user did assert — degrades to
+ *     today's behaviour (`cee_hypothesis` / low), a disownment this product
+ *     already serves on most draws. That is the cheap direction.
+ *   · a FALSE NEGATIVE — MISSING a denial — is exactly the lie: it stamps
+ *     `brief_extraction` / high on a figure the user refused.
+ * So a MISS is the expensive failure, not the safe one, and the asymmetry
+ * argues for refusing WIDELY rather than for tolerating misses. The inverted
+ * sentence survived into the code and was being used to justify the unsafe
+ * direction — which is why it is corrected here at the source and not only in a
+ * PR description nobody inherits.
+ */
+function denialGovernsAmount(
+  briefText: string,
+  amountIndex: number,
+  amountLength: number,
+): boolean {
+  const { start, end } = clauseWindow(briefText, amountIndex, amountLength);
+  return DENIAL_SCREEN_RE.test(briefText.slice(start, end));
+}
+
+/**
+ * THE CARRIED RAW MAGNITUDE IS ALREADY IN MAGNITUDE SPACE — IT NEEDS NO DENOMINATOR.
+ *
+ * WHY THIS EXISTS (B1-b, derived at CEE `d1da670` against live wire captures).
+ * `classifyAmountAgainstBrief` is asked about the NORMALISED level, so it must
+ * de-normalise through the factor's `observed_state` to recover a magnitude.
+ * Measured on the deployed build across 11 VALID fresh-guest draws of one frozen
+ * brief (12 run; one excluded for using an earlier classifier):
+ * the factors CEE mints carry `observed_state = {value: 0.5, source:
+ * "cee_inference"}` — no `cap`, no `raw_value` — so `resolveMagnitudeScale`
+ * returns `unknown`, the level cannot be de-normalised, and the verdict is
+ * `undecidable` for EVERY factor in the model. That makes the `statedInBrief`
+ * route to `brief_extraction` STRUCTURALLY DEAD for this class of brief, leaving
+ * the LLM-emitted `v4InterventionBindings` as the only surviving route — an
+ * unpinned per-factor model judgement. So whether the user's own stated figure is
+ * attributed to them is settled by a coin flip, while the figure itself sits in
+ * `carriedRaw`, unread, a few lines away.
+ *
+ * The asymmetry this estate already states is the whole justification: "a MATCH is
+ * decisive whatever the denominator — if the number appears in the text, the user
+ * wrote it". A RAW magnitude is the case where the denominator is not merely
+ * unknown but IRRELEVANT.
+ *
+ * ⚠ THIS FUNCTION INVENTS NOTHING. It answers one question — "did the user write
+ * THIS magnitude, and in which denomination?" — and answers it by asking the
+ * estate's EXISTING authority ({@link classifyAmountAgainstBrief}) once per
+ * candidate denomination rather than re-implementing magnitude comparison beside
+ * it (CLAUDE.md trap 21 / the two `generateGraphHash` twins). The
+ * `{kind: "identity"}` scale is not a claim about the factor's encoding; it is how
+ * this module spells "the number I am handing you IS the magnitude".
+ *
+ * FAIL-CLOSED IN THREE DIRECTIONS, each a refusal rather than a guess:
+ *   · no brief, or no stated amount of this magnitude ⇒ `null` — the user did not
+ *     write it, the model chose it, and the caller keeps saying so;
+ *   · a PLAIN or percent amount of the same magnitude also appears ("20,000
+ *     licences" beside "£20,000") ⇒ `null`. The kind is genuinely ambiguous and a
+ *     currency claim would be a fabrication about which quantity the user meant;
+ *   · two different currencies of the same magnitude ("£20,000" and "$20,000")
+ *     ⇒ `null`, for the same reason.
+ * Returning `null` always leaves the caller exactly where it already was.
+ */
+function resolveStatedDenominationForRawMagnitude(
+  rawMagnitude: number,
+  briefText: string | null | undefined,
+  declaredUnit: string | null | undefined,
+): { readonly unit: string; readonly matchedText: string } | null {
+  if (typeof rawMagnitude !== "number" || !Number.isFinite(rawMagnitude)) return null;
+
+  // ⚠ THE FACTOR'S OWN DENOMINATION IS EVIDENCE, AND THE FIRST VERSION OF THIS
+  // FUNCTION THREW IT AWAY. That defect is worth stating precisely, because it is
+  // the exact MIRROR of the one this route exists to fix.
+  //
+  // `magnitudeAppearsInBrief` enforces three rules that all key off the unit the
+  // CALLER declares: it scales the target by `readUnit(unit).multiplier`; it
+  // requires `amount.currencyCode === reading.currencyCode`; and it skips every
+  // currency amount when the unit reads as `plain`. The first version asked that
+  // authority about a currency code DERIVED FROM THE BRIEF instead of the
+  // factor's own, so all three rules were answered about a denomination the
+  // factor never claimed — and the authority dutifully said "stated".
+  // Measured on that head, brief "£20,000" throughout:
+  //   unit "USD"/"$"    -> brief_extraction, unit "$"  (cross-currency fabrication)
+  //   unit "£m"         -> brief_extraction            (raw 20000 under £m denotes
+  //                                                     £20,000,000,000 — 10^6 out)
+  //   unit "%"/"customers" -> brief_extraction         (a different quantity entirely)
+  // The user would be shown the "from brief" badge, the low-confidence warning
+  // would disappear, and the reasoning would tell them they wrote £20,000 on a
+  // dollar-denominated factor. Delegating to an authority does not inherit its
+  // guarantees unless you hand it the evidence those guarantees are computed from.
+  const declared = readUnit(declaredUnit);
+  const hasDeclaredUnit = typeof declaredUnit === "string" && declaredUnit.trim().length > 0;
+  if (hasDeclaredUnit) {
+    // A magnitude letter means the raw is NOT in magnitude space, so comparing it
+    // against the brief is a 10^n error rather than a comparison.
+    if (declared.multiplier !== 1) return null;
+    // NOTE — a non-currency declared unit ("%", "customers", "headcount") needs no
+    // guard of its own HERE: `readUnit` leaves `currencyCode` undefined for every
+    // such unit, so the currency-identity refusal below rejects it on every
+    // candidate. An explicit `declared.kind !== "currency"` check was written here
+    // first and MEASURED EQUIVALENT — removing it left the percent and
+    // unreadable-unit cases (R4/R5) green — so it is removed rather than shipped as
+    // a branch no test can kill, following this module's own precedent for the
+    // unreachable confidence boost. If the identity refusal below is ever narrowed,
+    // this duty must be picked up again explicitly.
+  }
+
+  // ⚠ ZERO IS THE MODEL'S COMMONEST DEFAULT AND MAY NOT BE RELABELLED.
+  // `transforms/analysis-ready.ts` already rules on exactly this question — "Zero
+  // is already represented exactly on the analysis scale and is the valid
+  // status-quo control ... and must never be relabelled as the stated switch
+  // cost" — and skips zero for that reason. A brief that happens to write "£0"
+  // would otherwise let every status-quo zero in the model claim the user's
+  // authorship. Adopted from that ruling rather than invented here.
+  if (rawMagnitude === 0) return null;
+
+  // The magnitude IS the magnitude — say so to the shared classifier.
+  const IDENTITY = { kind: "identity" } as const;
+
+  // A same-magnitude PLAIN (or percent) statement makes the KIND ambiguous.
+  // `readUnit(undefined)` reads as `plain`, which is exactly the question asked.
+  if (classifyAmountAgainstBrief(rawMagnitude, undefined, briefText, IDENTITY) === "stated") {
+    return null;
+  }
+
+  // Candidate denominations are only those the BRIEF ITSELF spells — never a
+  // default, and never one this module chose.
+  const denominations = new Map<string, string>();
+  for (const amount of findStatedAmounts(briefText)) {
+    if (amount.kind !== "currency" || amount.currencyCode === undefined) continue;
+    if (denominations.has(amount.currencyCode)) continue;
+    // The user's OWN spelling of the denomination, taken from the text they wrote.
+    const symbol = /^\s*([^\d\s.,-]+)/.exec(amount.matchedText)?.[1];
+    denominations.set(amount.currencyCode, symbol ?? amount.currencyCode);
+  }
+
+  const hits: { readonly unit: string; readonly matchedText: string }[] = [];
+  for (const [code, unit] of denominations) {
+    // CURRENCY IDENTITY IS REQUIRED — a £-denominated value is not made
+    // brief-backed by a $-denominated statement. Where the factor declares its
+    // own currency, only that currency may license the claim.
+    if (hasDeclaredUnit && declared.currencyCode !== code) continue;
+    if (classifyAmountAgainstBrief(rawMagnitude, code, briefText, IDENTITY) !== "stated") continue;
+    const occurrences = findStatedAmounts(briefText).filter(
+      (a) =>
+        a.kind === "currency" &&
+        a.currencyCode === code &&
+        Math.abs(a.magnitude - rawMagnitude) <=
+          Math.max(Number.EPSILON, Math.abs(rawMagnitude) * 1e-9),
+    );
+    // FAIL-CLOSED ACROSS OCCURRENCES: if ANY statement of this magnitude is
+    // denied, the brief does not unambiguously assert it, so nothing here may
+    // claim the user did. One denial is enough to withdraw the claim.
+    if (
+      typeof briefText === "string" &&
+      occurrences.some((a) => denialGovernsAmount(briefText, a.index, a.matchedText.length))
+    ) {
+      return null;
+    }
+    const quoted = occurrences[0];
+    hits.push({ unit, matchedText: quoted?.matchedText.trim() ?? `${unit}${rawMagnitude}` });
+  }
+
+  // Exactly one denomination, or we cannot honestly name one.
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * Build interventions directly from V4 prompt data.
  *
  * V4 prompt instructs LLM to return option nodes with `data.interventions`
@@ -679,26 +1052,55 @@ function buildInterventionsFromV4Data(
         reasoning: binding.reasoning,
       };
     } else {
+      // B1-b — THE STATED MAGNITUDE ROUTE.
+      //
+      // Reached only when there is no verified edge binding. `statedInBrief`
+      // above asks about the NORMALISED level and is therefore silent whenever
+      // the factor records no scale — which, measured on the deployed build, is
+      // every factor minted for a fresh brief. `carriedRaw` is the magnitude the
+      // model actually emitted for this factor and needs no denominator, so it
+      // can be checked directly. This ONLY EVER UPGRADES A DISOWNMENT INTO AN
+      // ATTRIBUTION, and only when the user demonstrably wrote that magnitude:
+      // it cannot invent a value (the value is unchanged either way), cannot
+      // fire without a brief, and refuses on any ambiguity of denomination.
+      const rawIsFinite = typeof carriedRaw === "number" && Number.isFinite(carriedRaw);
+      // ⚠ THE GATE IS `undecidable`, NOT `!statedInBrief`. The justification for
+      // this whole route is that an UNKNOWN denominator makes the question
+      // unanswerable — never that a decided answer may be overturned. `not_stated`
+      // IS a decided answer: the authority had the denominator, did the
+      // comparison, and found the magnitude absent from the brief. Firing there
+      // would overturn a correct refusal, which is the fabrication direction.
+      // The first version gated on `!statedInBrief`, which lumps the two together
+      // — the invariant written against the failure mode instead of the spec
+      // (CLAUDE.md trap 13d).
+      const statedDenomination =
+        binding === undefined && verdict === "undecidable" && rawIsFinite
+          ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText, unit)
+          : null;
+
+      const earnsBriefClaim =
+        binding === undefined && (statedInBrief || statedDenomination !== null);
+
       interventions[factorId] = {
         value,
-        ...(typeof carriedRaw === "number" && Number.isFinite(carriedRaw)
-          ? { raw_value: carriedRaw }
-          : {}),
-        unit: binding?.unit ?? unit,
-        source: binding === undefined && statedInBrief ? "brief_extraction" : "cee_hypothesis",
+        ...(rawIsFinite ? { raw_value: carriedRaw } : {}),
+        unit: binding?.unit ?? unit ?? statedDenomination?.unit,
+        source: earnsBriefClaim ? "brief_extraction" : "cee_hypothesis",
         target_match: {
           node_id: factorId,
           match_type: "exact_id", // LLM provided exact ID
           confidence: "high", // Direct from V4 prompt = high confidence
         },
-        value_confidence: binding === undefined && statedInBrief ? "high" : "low",
+        value_confidence: earnsBriefClaim ? "high" : "low",
         reasoning:
           binding?.reasoning ??
           (verdict === "stated"
             ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
-            : verdict === "not_stated"
-              ? "Model-chosen intervention level; this amount is not stated in the brief"
-              : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
+            : statedDenomination !== null
+              ? `Stated magnitude carried for this factor; the brief states ${statedDenomination.matchedText}`
+              : verdict === "not_stated"
+                ? "Model-chosen intervention level; this amount is not stated in the brief"
+                : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
       };
     }
   }
