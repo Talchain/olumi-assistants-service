@@ -517,9 +517,10 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   v_turn_id             UUID;
+  v_existing_turn_id    UUID;
+  v_turn_preexisting    BOOLEAN;
   v_user_id             UUID;
   v_current_hash        TEXT;
-  v_has_graph           BOOLEAN;
   v_head_id             UUID;
   v_head_root           UUID;
   v_has_versions        BOOLEAN;
@@ -528,12 +529,7 @@ DECLARE
   v_turn_version_created BOOLEAN;
   v_events              JSONB;
   v_event_seq           INTEGER;
-  v_fact                JSONB;
   v_updated             INTEGER;
-  v_fence_generation    BIGINT;
-  v_fence_stopped_at    TIMESTAMPTZ;
-  v_fence_max           BIGINT;
-  v_already_committed   BOOLEAN;
   v_version             public.model_versions%ROWTYPE;
   v_version_id          UUID;
   v_version_number      INTEGER;
@@ -566,10 +562,12 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  SELECT user_id, graph_identity_hash, (graph IS NOT NULL),
-         current_model_version_id, events, event_seq
-    INTO v_user_id, v_current_hash, v_has_graph,
-         v_head_id, v_events, v_event_seq
+  -- Capture only the version-composition state under the scenario lock. The
+  -- canonical turn/fence/CAS/graph/facts/brief authority remains v4 below;
+  -- this read exists solely so v5 can decide and compose the version in the
+  -- same transaction from the pre-write head and identities.
+  SELECT user_id, graph_identity_hash, current_model_version_id, events, event_seq
+    INTO v_user_id, v_current_hash, v_head_id, v_events, v_event_seq
     FROM public.scenarios
     WHERE id = p_scenario_id
     FOR UPDATE;
@@ -579,58 +577,47 @@ BEGIN
   v_should_create := v_user_id IS NOT NULL
     AND v_current_hash IS DISTINCT FROM p_incoming_graph_identity_hash;
 
-  SELECT EXISTS (
-    SELECT 1 FROM public.v5_conversation_turns
-    WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id
-  ) INTO v_already_committed;
+  -- Remember whether this was already a durable turn before delegating. v4
+  -- decides replay first and returns that row without any side effect; this
+  -- marker lets v5 distinguish that replay from the new NULL-marker row v4
+  -- inserts for us in this transaction.
+  SELECT id, model_version_mutation_id, model_version_created
+    INTO v_existing_turn_id, v_turn_version_mutation_id, v_turn_version_created
+    FROM public.v5_conversation_turns
+    WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
+  v_turn_preexisting := FOUND;
 
-  -- Latest v4 fence semantics, including replay-first and first-write exemption.
-  IF p_fence_generation IS NOT NULL AND NOT v_already_committed THEN
-    SELECT generation, stopped_at
-      INTO v_fence_generation, v_fence_stopped_at
-      FROM public.v5_turn_fence
-      WHERE scenario_id = p_scenario_id AND generation = p_fence_generation
-      FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION USING ERRCODE = 'OLTF3',
-        MESSAGE = 'append_turn_atomic_v5: admitted fence row unavailable';
-    END IF;
-    SELECT MAX(generation) INTO v_fence_max
-      FROM public.v5_turn_fence WHERE scenario_id = p_scenario_id;
-    IF v_fence_stopped_at IS NOT NULL THEN
-      RAISE EXCEPTION USING ERRCODE = 'OLTF1',
-        MESSAGE = 'append_turn_atomic_v5: admitted turn was stopped',
-        DETAIL = format('{"generation": %s, "max_generation": %s}',
-                        v_fence_generation, v_fence_max);
-    END IF;
-    IF p_fence_generation < v_fence_max AND v_has_graph THEN
-      RAISE EXCEPTION USING ERRCODE = 'OLTF2',
-        MESSAGE = 'append_turn_atomic_v5: admitted turn was superseded',
-        DETAIL = format('{"generation": %s, "max_generation": %s}',
-                        v_fence_generation, v_fence_max);
-    END IF;
-  END IF;
+  -- ONE turn authority. The nested call shares this transaction: if version,
+  -- head or event composition below fails, v4's turn/graph/facts/brief writes
+  -- roll back with it. p_cas_enforce and every nullable CAS case are therefore
+  -- exactly v4's semantics, not a second approximation in v5.
+  v_turn_id := public.append_turn_atomic_v4(
+    p_scenario_id,
+    p_turn_id,
+    p_turn_class,
+    p_handler_id,
+    p_request_hash,
+    p_response_emitted,
+    p_llm_calls_used,
+    p_duration_ms,
+    p_handler_facts,
+    p_graph,
+    p_brief_text,
+    p_pending_actions,
+    p_coaching_state,
+    p_user_message,
+    p_assistant_message,
+    p_expected_graph_identity_hash,
+    p_incoming_graph_identity_hash,
+    p_cas_enforce,
+    p_fence_generation
+  );
 
-  INSERT INTO public.v5_conversation_turns (
-    scenario_id, user_id, turn_id, turn_class, handler_id,
-    request_hash, response_emitted, llm_calls_used, duration_ms,
-    pending_actions, coaching_state, user_message, assistant_message,
-    model_version_mutation_id, model_version_created
-  ) VALUES (
-    p_scenario_id, v_user_id, p_turn_id, p_turn_class, p_handler_id,
-    p_request_hash, p_response_emitted, p_llm_calls_used, p_duration_ms,
-    COALESCE(p_pending_actions, '[]'::jsonb), p_coaching_state,
-    p_user_message, p_assistant_message,
-    p_version_mutation_id, v_should_create
-  )
-  ON CONFLICT (scenario_id, turn_id) DO NOTHING
-  RETURNING id INTO v_turn_id;
-
-  IF NOT FOUND THEN
-    SELECT id, model_version_mutation_id, model_version_created
-      INTO v_turn_id, v_turn_version_mutation_id, v_turn_version_created
-      FROM public.v5_conversation_turns
-      WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
+  IF v_turn_preexisting THEN
+    IF v_turn_id IS DISTINCT FROM v_existing_turn_id THEN
+      RAISE EXCEPTION 'append_turn_atomic_v5: canonical replay returned another turn row'
+        USING ERRCODE = 'MV409';
+    END IF;
     IF v_turn_version_mutation_id IS DISTINCT FROM p_version_mutation_id THEN
       RAISE EXCEPTION 'append_turn_atomic_v5: turn replay reused with another mutation id'
         USING ERRCODE = 'MV422';
@@ -676,38 +663,21 @@ BEGIN
     );
   END IF;
 
-  IF v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
-     AND p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash THEN
-    RAISE EXCEPTION USING ERRCODE = 'OLGC1',
-      MESSAGE = 'append_turn_atomic_v5: stale graph write';
-  END IF;
-
-  UPDATE public.scenarios
-    SET graph = p_graph, graph_identity_hash = p_incoming_graph_identity_hash
-    WHERE id = p_scenario_id;
+  -- v4 intentionally knows nothing about C8's idempotency marker. Claim the
+  -- new row once, after v4 returns, so replays can recover the durable receipt
+  -- without duplicating any canonical turn side effect.
+  UPDATE public.v5_conversation_turns
+    SET model_version_mutation_id = p_version_mutation_id,
+        model_version_created = v_should_create
+    WHERE id = v_turn_id
+      AND scenario_id = p_scenario_id
+      AND turn_id = p_turn_id
+      AND model_version_mutation_id IS NULL
+      AND model_version_created IS NULL;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
-  IF v_updated = 0 THEN
-    RAISE EXCEPTION 'append_turn_atomic_v5: scenario vanished under lock';
-  END IF;
-
-  IF jsonb_array_length(COALESCE(p_handler_facts, '[]'::jsonb)) > 0 THEN
-    FOR v_fact IN SELECT * FROM jsonb_array_elements(p_handler_facts)
-    LOOP
-      INSERT INTO public.v5_handler_facts (
-        v5_conversation_turn_id, scenario_id, user_id,
-        handler_id, action_type, noop, payload
-      ) VALUES (
-        v_turn_id, p_scenario_id, v_user_id,
-        v_fact->>'handler_id', v_fact->>'action_type',
-        COALESCE((v_fact->>'noop')::boolean, FALSE),
-        COALESCE(v_fact->'payload', '{}'::jsonb)
-      );
-    END LOOP;
-  END IF;
-
-  IF p_brief_text IS NOT NULL THEN
-    UPDATE public.scenarios SET brief_text = p_brief_text, updated_at = NOW()
-      WHERE id = p_scenario_id AND (brief_text IS NULL OR brief_text = '');
+  IF v_updated <> 1 THEN
+    RAISE EXCEPTION 'append_turn_atomic_v5: canonical append returned an unclaimable turn row'
+      USING ERRCODE = 'MV409';
   END IF;
 
   -- Guest compatibility and authoritative under-lock no-op suppression: graph,
