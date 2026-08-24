@@ -97,11 +97,23 @@ import { EDIT_VERB_BASES, hasExplicitNoModelChangeIntent } from './mutation-warr
  *
  * The same graph, read the same way, for both directions.
  */
-function modelEntityLabels(graphLookup: GraphLookup | undefined): readonly string[] {
+function modelEntityLabels(
+  graphLookup: GraphLookup | undefined,
+  factorNodeIds?: ReadonlySet<string>,
+): readonly string[] {
   if (!graphLookup) return [];
   try {
     const out: string[] = [];
     for (const entity of graphLookup.listEntitiesByKind('node')) {
+      // ⚠ NARROWED TO THE SAME POOL THE GRANT SIDE USES. `listEntitiesByKind`
+      // buckets factor together with outcome/decision/risk/action, and the
+      // candidate scan below narrows to `factorNodeIds` before matching. Handing
+      // the veto the WIDER pool made its domain strictly larger than the grant's,
+      // so naming a risk or outcome in a negative aside — "Don't increase Churn
+      // — set Growth to 0.9." — cancelled an edit to an unrelated factor that
+      // `set_factor_value` could never have targeted anyway.
+      const id = (entity as { id?: unknown }).id;
+      if (factorNodeIds && (typeof id !== 'string' || !factorNodeIds.has(id))) continue;
       const label = (entity as { label?: unknown }).label;
       if (typeof label === 'string' && label.trim().length > 0) out.push(label);
     }
@@ -571,7 +583,7 @@ export function tryDeterministicValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -1008,7 +1020,7 @@ export function tryCompoundValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -1251,7 +1263,12 @@ export function tryDeicticValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup))) {
+  // ⚠ NO LABEL DOMAIN ON THE DEICTIC PATH, deliberately. This route resolves its
+  // target by POINTER ("that factor", "this one"), never by label, and it has no
+  // factor-kind information to narrow with — so handing it every node label
+  // would give the veto a domain strictly wider than anything this path can
+  // write, which is exactly the over-trigger the narrowing above exists to stop.
+  if (hasExplicitNoModelChangeIntent(message)) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
   for (const pat of HYPOTHETICAL_PATTERNS) {

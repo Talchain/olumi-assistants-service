@@ -53,6 +53,9 @@ import { hasExplicitNoModelChangeIntent } from '../mutation-warrant.js';
 /** The labels a real graph would supply. */
 const GRAPH_LABELS = ['Rep Adoption Quality', 'Annual CRM Licensing Cost', 'Sales Team Productivity'];
 
+/** Labels short enough, or grammatical enough, to collide with English. */
+const JUNK_LABELS = ['It', 'A', 'Me', 'the current'];
+
 describe('no-change veto — a factor named in a prohibition is a model object', () => {
   it('THE P0: a prohibition whose object is a factor in the live graph vetoes the write', () => {
     const message =
@@ -103,6 +106,16 @@ describe('no-change veto — a factor named in a prohibition is a model object',
     // …and the P0 sentence is still unvetoed WITHOUT labels, which is exactly
     // why the labels have to be threaded from the call site rather than guessed.
     expect(hasExplicitNoModelChangeIntent("Whatever you do, don't set Rep Adoption Quality to 0.2.")).toBe(false);
+  });
+
+  it('CONTROL — a label that is a pronoun, an article or a stopword phrase is refused as an object', () => {
+    // This repo's own fixtures carry labels `A`, `X`, `y` and `a`. Without a
+    // floor, ordinary English becomes a prohibition.
+    expect(hasExplicitNoModelChangeIntent('Never reduce it below 0.3.', JUNK_LABELS)).toBe(false);
+    expect(hasExplicitNoModelChangeIntent('Set Growth to 0.9, and do not change a thing.', JUNK_LABELS)).toBe(false);
+    expect(hasExplicitNoModelChangeIntent('Do not update me on this.', JUNK_LABELS)).toBe(false);
+    // …while a real multi-word label alongside them still works.
+    expect(hasExplicitNoModelChangeIntent("Don't set Rep Adoption Quality to 0.2.", [...JUNK_LABELS, 'Rep Adoption Quality'])).toBe(true);
   });
 
   it('CONTROL — an empty or junk label list cannot widen or narrow the predicate', () => {

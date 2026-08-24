@@ -21,6 +21,11 @@ import { extractQuantities } from '../../context/cqe/extract-quantities.js';
 const NODES = [
   { id: 'fac_adopt', kind: 'factor', label: 'Rep Adoption Quality', observed_state: { value: 0.7 } },
   { id: 'fac_lic', kind: 'factor', label: 'Annual CRM Licensing Cost', observed_state: { value: 0.9 } },
+  { id: 'fac_growth', kind: 'factor', label: 'Growth', observed_state: { value: 0.5 } },
+  // Non-factor kinds. `set_factor_value` can never target these, so naming one
+  // must not cancel an edit to a factor.
+  { id: 'risk_churn', kind: 'risk', label: 'Churn' },
+  { id: 'out_rev', kind: 'outcome', label: 'Revenue' },
 ];
 
 function lookupOrThrow(): GraphLookupWithOptions {
@@ -29,7 +34,7 @@ function lookupOrThrow(): GraphLookupWithOptions {
   return built.lookup;
 }
 
-const factorIds = new Set(NODES.map((n) => n.id));
+const factorIds = new Set(NODES.filter((n) => n.kind === 'factor').map((n) => n.id));
 
 function dispatchFor(message: string) {
   return tryDeterministicValueUpdate(
@@ -66,8 +71,59 @@ describe('no-change veto reaches the dispatch path', () => {
   });
 
   it('TWIN — a prohibition naming a factor that is NOT in this graph does not veto', () => {
-    // Binds the veto to the model's own entities by identity.
+    // Binds the veto to the model's own entities by identity. Asserts the EXACT
+    // skip_reason rather than `.not.toBe(...)`, which would pass for any
+    // unrelated early return (trap 19).
     const d = dispatchFor("Whatever you do, don't set Brand Equity to 0.2.");
+    expect(!d.matched ? d.skip_reason : 'matched').toBe('no_candidate_match');
+  });
+
+  // ⭐⭐ THE CLASS THAT REGRESSED, and the reason it is a class and not a case.
+  // Widening the prohibition's object domain without also making an
+  // entity-scoped prohibition defer to the affirmative-edit check turned every
+  // negative aside into a whole-turn refusal. Found by adversarial review, not
+  // by the first version of this suite — which had no opposite-direction twin
+  // for "forbid A, authorise B" at all.
+  it.each([
+    ["Don't increase Churn — set Growth to 0.9.", 'a risk named in an aside'],
+    ['Never touch Revenue. Set Growth to 0.9.', 'an outcome named in a prior sentence'],
+    ['Do not change the Rep Adoption Quality. Set Growth to 0.9.', 'a FACTOR named in a prior sentence'],
+    ['Set Growth to 0.9, and do not change Rep Adoption Quality.', 'the prohibition trailing the edit'],
+  ])('TWIN — forbidding one entity leaves an authorised edit to another intact: %s', (message) => {
+    const d = dispatchFor(message);
+    expect(
+      d.matched,
+      'naming one entity in a prohibition cancelled an edit the user plainly authorised on a different entity',
+    ).toBe(true);
+  });
+
+  it('CONTROL — an UNBOUNDED prohibition beside an affirmative edit still vetoes', () => {
+    // The distinction the entity-scoped path must NOT erase. "Do not change the
+    // model. Set Growth to 0.9." is self-contradictory on its face; the
+    // documented exit for that class is to ask, not to guess, so the
+    // conservative veto stands and this stays unchanged from base.
+    const d = dispatchFor('Do not change the model. Set Growth to 0.9.');
+    expect(!d.matched ? d.skip_reason : 'matched').toBe('explicit_no_model_change');
+  });
+
+  it.each([
+    ['Do not change Churn.', 'a risk'],
+    ['Do not change Revenue.', 'an outcome'],
+  ])('CONTROL — a prohibition naming a NON-FACTOR entity is not this path\'s business: %s', (message) => {
+    // Pins the factor-kind narrowing in `modelEntityLabels`. `set_factor_value`
+    // can never target a risk or an outcome, so handing the veto those labels
+    // would give it a domain strictly wider than anything this path can write —
+    // the asymmetry, inverted. Without the narrowing this vetoes; with it, the
+    // turn is simply not the value-update path's to refuse.
+    const d = dispatchFor(message);
+    expect(!d.matched ? d.skip_reason : 'matched').not.toBe('explicit_no_model_change');
+  });
+
+  it.each([
+    ['Never reduce it below 0.3.', 'a node called "It" must not turn a pronoun into a prohibition'],
+    ['Do not update me on this. Set Growth to 0.9.', 'a node called "Me" likewise'],
+  ])('CONTROL — short/stopword labels cannot become prohibition objects: %s', (message) => {
+    const d = dispatchFor(message);
     expect(!d.matched ? d.skip_reason : 'matched').not.toBe('explicit_no_model_change');
   });
 });
