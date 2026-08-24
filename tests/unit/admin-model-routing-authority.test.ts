@@ -101,24 +101,29 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  it('reports the unsupported critique default before runtime without changing it', () => {
+  // INVERTED. This test used to assert that critique_graph's checked-in default
+  // was UNSERVICEABLE ("reports the unsupported critique default before runtime
+  // without changing it"): the default was gpt-5.2, an OpenAI model, while the
+  // task is provider-constrained to Anthropic/Fixtures, so it resolved to
+  // MODEL_PROVIDER_MISMATCH and was absent from the effective task models. The
+  // default is now an Anthropic model, so the task is serviceable with no env
+  // override — and the assertion inverts with it. The unsupported-provider path
+  // itself is still covered, by the env-override test immediately below.
+  it('reports a serviceable critique default that needs no env override', () => {
     process.env.LLM_PROVIDER = 'openai';
     _resetConfigCache();
 
     expect(resolveTaskRouting('critique_graph')).toMatchObject({
       model: TASK_MODEL_DEFAULTS.critique_graph,
-      provider: 'openai',
-      availability: 'configuration_error',
-      registry_model_id: 'gpt-5.2',
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      registry_model_id: 'claude-sonnet-5',
       source: 'default',
       source_key: 'TASK_MODEL_DEFAULTS.critique_graph',
-      configuration_error: {
-        code: 'MODEL_PROVIDER_MISMATCH',
-      },
     });
     expect(
       buildEffectiveTaskModels(resolveModelRoutingSnapshot()),
-    ).not.toHaveProperty('critique_graph');
+    ).toHaveProperty('critique_graph');
   });
 
   it('reports critique env overrides through the shared provider capability', () => {
@@ -181,6 +186,12 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
+  // Vehicle changed from explain_diff to clarify_brief. providers.json is
+  // OUTRANKED by a checked-in task default (router precedence: task_default >
+  // providers_json), so once explain_diff gained a default it stopped being a
+  // "router fallback task" and could no longer demonstrate this precedence.
+  // clarify_brief is a genuine one: declared in ROUTER_ENV_ONLY_TASKS, no entry
+  // in TASK_MODEL_DEFAULTS. The precedence under test is unchanged.
   it('consumes the real providers config for router fallback tasks', () => {
     const directory = mkdtempSync(join(tmpdir(), 'olumi-provider-routing-'));
     const configPath = join(directory, 'providers.json');
@@ -188,7 +199,7 @@ describe('admin runtime model-routing authority', () => {
       configPath,
       JSON.stringify({
         overrides: {
-          explain_diff: {
+          clarify_brief: {
             provider: 'anthropic',
             model: 'claude-sonnet-4-6',
           },
@@ -202,12 +213,12 @@ describe('admin runtime model-routing authority', () => {
       _resetConfigCache();
       resetAdapterCache();
 
-      expect(resolveTaskRouting('explain_diff')).toMatchObject({
+      expect(resolveTaskRouting('clarify_brief')).toMatchObject({
         model: 'claude-sonnet-4-6',
         provider: 'anthropic',
         availability: 'registry_enabled',
         source: 'providers_config',
-        source_key: 'providers.json.overrides.explain_diff.model',
+        source_key: 'providers.json.overrides.clarify_brief.model',
       });
 
       writeFileSync(
@@ -222,7 +233,7 @@ describe('admin runtime model-routing authority', () => {
       _resetConfigCache();
       resetAdapterCache();
 
-      expect(resolveTaskRouting('explain_diff')).toMatchObject({
+      expect(resolveTaskRouting('clarify_brief')).toMatchObject({
         model: 'claude-sonnet-4-20250514',
         provider: 'anthropic',
         availability: 'registry_enabled',
@@ -439,12 +450,18 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  it('reports explain_diff global and provider fallbacks, including unsupported-provider configuration errors', () => {
+  // SPLIT AND RETARGETED. explain_diff is no longer governed by the global
+  // model/provider: it now carries a checked-in Anthropic task default, and
+  // task_default outranks both global_model and provider_default. The
+  // global/provider-default fallback behaviour this test existed to cover is
+  // therefore demonstrated on clarify_brief, a task that genuinely has no
+  // checked-in default (declared in ROUTER_ENV_ONLY_TASKS).
+  it('reports global and provider fallbacks for a task with no checked-in default', () => {
     process.env.LLM_PROVIDER = 'anthropic';
     process.env.LLM_MODEL = 'claude-sonnet-4-6';
     _resetConfigCache();
 
-    expect(resolveTaskRouting('explain_diff')).toMatchObject({
+    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
       model: 'claude-sonnet-4-6',
       provider: 'anthropic',
       availability: 'registry_enabled',
@@ -458,34 +475,50 @@ describe('admin runtime model-routing authority', () => {
     delete process.env.LLM_MODEL;
     _resetConfigCache();
 
-    expect(resolveTaskRouting('explain_diff')).toMatchObject({
+    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
       model: PROVIDER_DEFAULT_MODELS.anthropic,
       provider: 'anthropic',
       availability: 'registry_enabled',
       source: 'provider_default',
       source_key: 'PROVIDER_DEFAULT_MODELS.anthropic',
     });
+  });
 
+  // The opposite-direction twin of the defect this lane closed: the checked-in
+  // Anthropic default must win even under the most hostile global posture. This
+  // is what makes explain_diff correct BY CONSTRUCTION rather than by luck of
+  // deployment env — previously this exact posture produced
+  // MODEL_PROVIDER_MISMATCH on gpt-4o-mini and the route returned HTTP 500.
+  it('keeps explain_diff on its checked-in Anthropic default against a hostile global posture', () => {
     process.env.LLM_PROVIDER = 'openai';
+    process.env.LLM_MODEL = 'gpt-4o';
     _resetConfigCache();
 
     expect(resolveTaskRouting('explain_diff')).toMatchObject({
-      model: PROVIDER_DEFAULT_MODELS.openai,
-      provider: 'openai',
-      availability: 'configuration_error',
-      registry_model_id: 'gpt-4o-mini',
-      source: 'provider_default',
-      source_key: 'PROVIDER_DEFAULT_MODELS.openai',
-      configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
+      model: TASK_MODEL_DEFAULTS.explain_diff,
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.explain_diff',
+      executable: true,
+      has_executable_path: true,
+      runtime_availability: 'available',
+    });
+    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+      explain_diff: TASK_MODEL_DEFAULTS.explain_diff,
     });
   });
 
-  it('surfaces an invalid explain_diff global model without making an adapter call', () => {
+  // Retargeted for the same reason as above: explain_diff no longer reads the
+  // global model, so it can no longer surface an invalid one. The property —
+  // an unregistered global model becomes a typed configuration error without
+  // constructing an adapter — is preserved on a genuinely global-governed task.
+  it('surfaces an invalid global model without making an adapter call', () => {
     process.env.LLM_PROVIDER = 'anthropic';
     process.env.LLM_MODEL = 'unregistered-explainer';
     _resetConfigCache();
 
-    expect(resolveTaskRouting('explain_diff')).toMatchObject({
+    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
       model: 'unregistered-explainer',
       provider: 'unresolved',
       availability: 'configuration_error',
