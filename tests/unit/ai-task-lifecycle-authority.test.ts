@@ -8,6 +8,7 @@ import {
   getAiTaskRuntimeAvailability,
   hasAiTaskExecutablePath,
   RUNTIME_AI_TASK_AUTHORITY,
+  TASK_MODEL_DEFAULTS,
 } from '../../src/config/model-routing.js';
 import { resolveModelAssignment } from '../../src/config/model-assignment.js';
 import { CeeTaskIdSchema } from '../../src/prompts/schema.js';
@@ -262,9 +263,14 @@ describe('AI task lifecycle authority', () => {
     expect(RUNTIME_AI_TASK_AUTHORITY.clarify_brief.promptAuthority).toBe(
       'provider_specific_pms_or_inline_constant',
     );
-    expect(RUNTIME_AI_TASK_AUTHORITY.explain_diff.modelAuthority).toBe(
-      'router_global_fallback',
-    );
+    // Was 'router_global_fallback' with checkedInModel: null — the state that
+    // let the global provider decide explain_diff's provider, and therefore the
+    // state in which the task could never serve (the global fallback is OpenAI,
+    // which does not implement explainDiff).
+    expect(RUNTIME_AI_TASK_AUTHORITY.explain_diff).toMatchObject({
+      modelAuthority: 'router_task_chain',
+      checkedInModel: TASK_MODEL_DEFAULTS.explain_diff,
+    });
     expect(
       Object.entries(RUNTIME_AI_TASK_AUTHORITY)
         .filter(([, authority]) => authority.promotionGate !== 'none_no_real_pack')

@@ -229,8 +229,17 @@ describe("LLM Router", () => {
       resetAdapterCache();
     });
 
-    it("fails the unsupported critique default before constructing a serving adapter", () => {
-      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+    // INVERTED: the checked-in critique default is now an Anthropic model, so it
+    // is serviceable under an OpenAI global provider without any env override.
+    // The mismatch path itself stays covered by the env-override test below.
+    it("serves the critique default under an OpenAI global provider without an override", () => {
+      const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+      expect(adapter.name).toBe("anthropic");
+      expect(resolution).toMatchObject({
+        provider: "anthropic",
+        resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+        resolution_source: "task_default",
+      });
     });
 
     it("accepts an Anthropic critique env override and rejects an OpenAI override", () => {

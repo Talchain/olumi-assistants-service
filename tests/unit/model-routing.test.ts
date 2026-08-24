@@ -207,7 +207,10 @@ describe("Task-to-Model Routing", () => {
       expect(TASK_MODEL_DEFAULTS.decision_review).toBe("gpt-4.1-2025-04-14");
       // Other complex tasks use premium tier (gpt-5.2)
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-5.2");
-      expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("gpt-5.2");
+      // critique_graph is NOT premium-tier gpt-5.2 any more: it is
+      // provider-constrained to Anthropic/Fixtures, so an OpenAI model made the
+      // task unserviceable regardless of tier.
+      expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("claude-sonnet-5");
     });
 
     it("tasks use appropriate provider models", () => {
