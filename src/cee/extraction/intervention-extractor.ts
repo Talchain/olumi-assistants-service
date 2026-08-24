@@ -601,10 +601,15 @@ function resolveStatedDenominationForRawMagnitude(
     // A magnitude letter means the raw is NOT in magnitude space, so comparing it
     // against the brief is a 10^n error rather than a comparison.
     if (declared.multiplier !== 1) return null;
-    // A brief amount carrying £/$/€ is an explicit statement of denomination. A
-    // percent, a count, or any unit this estate cannot read tells us nothing about
-    // whether the two are the same quantity — so it can never license the claim.
-    if (declared.kind !== "currency") return null;
+    // NOTE — a non-currency declared unit ("%", "customers", "headcount") needs no
+    // guard of its own HERE: `readUnit` leaves `currencyCode` undefined for every
+    // such unit, so the currency-identity refusal below rejects it on every
+    // candidate. An explicit `declared.kind !== "currency"` check was written here
+    // first and MEASURED EQUIVALENT — removing it left the percent and
+    // unreadable-unit cases (R4/R5) green — so it is removed rather than shipped as
+    // a branch no test can kill, following this module's own precedent for the
+    // unreachable confidence boost. If the identity refusal below is ever narrowed,
+    // this duty must be picked up again explicitly.
   }
 
   // ⚠ ZERO IS THE MODEL'S COMMONEST DEFAULT AND MAY NOT BE RELABELLED.

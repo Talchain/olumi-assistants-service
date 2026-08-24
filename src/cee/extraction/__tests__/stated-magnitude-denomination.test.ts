@@ -112,7 +112,22 @@ describe("REFUTATION — the currency-identity refusal must survive the raw-magn
     expect(iv?.unit).toBe("£");
   });
 
-  it("R6: a DECIDED not_stated verdict on a fully-scaled factor must NOT be overturned", () => {
+  it("R9 (THE GATE DISCRIMINATOR): a DECIDED not_stated verdict is not overturned even when the factor's currency MATCHES", () => {
+    // ⚠ R6 BELOW DOES NOT PIN THE GATE, AND THAT WAS ONLY FOUND BY MUTATION.
+    // Widening the gate back to `!statedInBrief` leaves R6 GREEN, because its
+    // "headcount" unit is refused by the denomination guard long before the gate
+    // matters — a guard agreeing with itself (CLAUDE.md trap 13b). This case
+    // removes that masking: the factor declares "£", the brief states £20,000, and
+    // the ONLY thing preventing attribution is that the verdict is `not_stated`
+    // (cap 100,000 × level 0.5 = £50,000, which the brief does not state) rather
+    // than `undecidable`. Measured: at HEAD this is cee_hypothesis; under the
+    // gate-widening mutant it flips to brief_extraction. R6 does not move either way.
+    const iv = run({ value: 0.5, cap: 100000, raw_value: 50000, unit: "£" }, 20000, 0.5);
+    expect(iv?.source).toBe("cee_hypothesis");
+    expect(iv?.reasoning).toContain("not stated in the brief");
+  });
+
+  it("R6: a decided not_stated verdict on a non-currency capped factor stays disowned", () => {
     // cap present ⇒ resolveMagnitudeScale = {kind:"cap"}; magnitude 20000 is
     // decidable and the authority answers not_stated (unit 'headcount' vs a £
     // statement). At pristine this reads: "this amount is not stated in the brief".
