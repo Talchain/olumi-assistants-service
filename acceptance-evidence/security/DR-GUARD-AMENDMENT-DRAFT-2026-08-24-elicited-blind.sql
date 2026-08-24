@@ -1,0 +1,59 @@
+-- ============================================================
+-- DR GUARD AMENDMENT — ROADMAP 2.757 `elicited_blind`
+-- Authored 2026-08-24. Target: STAGING Supabase. STATUS: NOT EXECUTED.
+--
+-- Precedent: DR-GUARD-AMENDMENT-DRAFT-2026-07-12.sql (live-first amendment
+-- of create_decision_record's key whitelists, executed 2026-07-11T18:46Z).
+-- This draft follows it exactly: single transaction, CREATE OR REPLACE of the
+-- one function, no ALTER of any table, no CHECK-constraint change.
+--
+-- WHAT CHANGES: the `p_prediction` key whitelist gains `elicited_blind`,
+-- value-guarded as a CLOSED enum 'blind' | 'not_blind' | 'unknown'.
+--
+-- WHY THREE VALUES: 'unknown' is a first-class answer, distinct from
+-- 'not_blind'. Collapsing them would put back exactly the ambiguity the
+-- marker exists to remove (a belief we KNOW was anchored vs one whose
+-- conditions we could not establish are different facts).
+--
+-- BACKWARD COMPATIBLE: the key is OPTIONAL in the guard. Every existing
+-- caller — and every record already stored — remains valid. NOTHING IS
+-- BACKFILLED: records written before the producer ships genuinely do not
+-- carry the marker, and inventing a value for them would be fabrication.
+--
+-- ⭐ ORDER OF OPERATIONS (binding):
+--   1. Execute THIS amendment on staging and run the post-checks below.
+--   2. Only then merge/deploy the CEE producer half.
+-- Reversed, create_decision_record raises 22023 on every write and the
+-- fire-and-forget capture hook swallows it: decision records stop being
+-- written, silently.
+--
+-- PRE-CHECK (expect: the 0.16.0-era whitelist, WITHOUT elicited_blind):
+--   SELECT pg_get_functiondef(p.oid)
+--   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+--   WHERE n.nspname = 'public' AND p.proname = 'create_decision_record';
+--   -- capture sha256 of the body before and after.
+--
+-- POST-CHECK (all three must hold):
+--   a) a write WITHOUT elicited_blind still succeeds  (backward compatible)
+--   b) a write WITH elicited_blind='unknown' succeeds  (three-way admitted)
+--   c) a write WITH elicited_blind='maybe'  RAISES 22023 (closed enum bites)
+--   (c) is the positive control: without it, (a) and (b) are also consistent
+--   with a guard that admits ANY value — CLAUDE.md trap 13.
+--
+-- ⚠ EXECUTION IS PAUL-GATED (credentials). This lane does not execute it.
+-- ============================================================
+--
+-- The amendment body is the `create_decision_record` function as it stands in
+-- supabase/migrations/20260710113000_v5_decision_records.sql AT THIS COMMIT,
+-- which already contains the 2.757 whitelist change. Apply it by executing
+-- that file's CREATE OR REPLACE FUNCTION create_decision_record(...) block
+-- byte-for-byte inside a single transaction:
+--
+--   BEGIN;
+--   <paste the CREATE OR REPLACE FUNCTION create_decision_record block from
+--    20260710113000_v5_decision_records.sql at this commit>
+--   COMMIT;
+--
+-- Reproducing the body inline here would create a SECOND copy that must be
+-- kept in sync by hand — the hand-maintained-mirror defect this estate keeps
+-- paying for (CLAUDE.md trap 12). One source, quoted by reference.

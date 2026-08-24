@@ -76,6 +76,7 @@ import {
   AUTO_CAPTURE_RECORD_ID_NAMESPACE,
   deterministicRecordUuid,
 } from './record-id.js';
+import { deriveElicitedBlind } from './elicitation-blindness.js';
 import { getDecisionRecordStore } from './index.js';
 import { DecisionRecordSignInRequiredError } from './store-adapter.js';
 import type { CreateDecisionRecordWrite } from './store-adapter.js';
@@ -309,6 +310,12 @@ export function buildDecisionRecordWrite(
         ...(probabilityOfJointGoal !== undefined
           ? { probability_of_joint_goal: probabilityOfJointGoal }
           : {}),
+        // ROADMAP 2.757. DERIVED from the path, not defaulted: the confidence
+        // this seam records IS the analysis's own win probability, so it is
+        // not independent of the analysis by construction. `not_blind` is a
+        // measurement here, not an assumption — there is no elicitation and
+        // therefore nothing uncertain to represent.
+        elicited_blind: deriveElicitedBlind({ path: 'ambient_auto_capture' }),
       },
       review_date: new Date(computedAtMs + REVIEW_HORIZON_MS).toISOString(),
       record_id: recordId,

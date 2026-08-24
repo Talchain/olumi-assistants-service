@@ -75,6 +75,7 @@ import {
   deterministicRecordUuid,
 } from './record-id.js';
 import { AAG_V1_GRAPH_HASH_PREFIX, DECISION_RECORD_REVIEW_HORIZON_DAYS } from './capture.js';
+import { deriveElicitedBlind } from './elicitation-blindness.js';
 
 const REVIEW_HORIZON_MS = DECISION_RECORD_REVIEW_HORIZON_DAYS * 24 * 60 * 60 * 1000;
 
@@ -270,6 +271,17 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
         statement,
         confidence,
         confidence_source: 'user_stated',
+        // ROADMAP 2.757. DERIVED from THIS write's own anchor evidence, never
+        // from a literal: the route refuses 409 `no_analysed_graph` unless CEE
+        // already holds a completed run_analysis fact for the scenario, so an
+        // anchored write is one where the analysis provably existed before the
+        // user stated this number. An UNANCHORED call cannot establish that —
+        // and cannot establish blindness either — so it reads `unknown`.
+        // A default here would be a fabrication, not a measurement.
+        elicited_blind: deriveElicitedBlind({
+          path: 'user_commit',
+          analysisAnchored: input.graphHashAtRun.trim() !== '',
+        }),
       },
       review_date: reviewDate.toISOString(),
       record_id: recordId,

@@ -33,7 +33,13 @@ const WRITE: CreateDecisionRecordWrite = {
     chosen_option_label: 'Option A',
     graph_hash: 'aag_v1:sha256:abcdef0123456789',
   },
-  prediction: { statement: 'Option A currently leads.', confidence: 0.62 },
+  prediction: {
+    statement: 'Option A currently leads.',
+    confidence: 0.62,
+    // ROADMAP 2.757 — REQUIRED on the write, deliberately: a capture path that
+    // does not state what it can prove must not compile.
+    elicited_blind: 'not_blind',
+  },
   review_date: '2026-10-08T12:00:00.000Z',
   record_id: '11111111-1111-5111-8111-111111111111',
   event_id: 'decision_recorded_11111111-1111-5111-8111-111111111111',

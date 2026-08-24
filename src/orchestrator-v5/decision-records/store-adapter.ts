@@ -42,6 +42,8 @@ import type {
   DecisionRecordOutcomeResultLiteral,
 } from '@talchain/schemas/boundary';
 
+import type { ElicitedBlind } from './elicitation-blindness.js';
+
 // ---------------------------------------------------------------------------
 // Typed errors (adapter throws typed, callers map — session-store idiom).
 // ---------------------------------------------------------------------------
@@ -132,6 +134,23 @@ export interface CreateDecisionRecordWrite {
      *  constraint_analysis.joint_probability via PLoT, recorded VERBATIM
      *  (D-N Option-B derisk; 0.16.0). Absent when unscored — never 0. */
     readonly probability_of_joint_goal?: number;
+    /**
+     * Was this belief stated INDEPENDENTLY of the analysis and of any other
+     * participant's position? (ROADMAP 2.757.) Three-way — `unknown` is a
+     * first-class value, never collapsed into `not_blind`.
+     *
+     * ⭐ REQUIRED, DELIBERATELY, while the contract field is optional-forward.
+     * Every writer in this service must DECIDE, and a new capture path cannot
+     * compile without stating what it can prove — the fail-loud mechanism that
+     * a hand-maintained "remember to stamp it" note would not give us
+     * (CLAUDE.md trap 12). Absence in the STORE therefore means exactly one
+     * thing: the record predates this marker. Never backfilled.
+     *
+     * ⚠ LIVE ON THE RPC WHITELIST ONLY AFTER THE 2.757 GUARD AMENDMENT — see
+     * the merge gate in `…decision_records.sql`. An off-whitelist key is a
+     * 22023 refusal of the WHOLE record, not a dropped field.
+     */
+    readonly elicited_blind: ElicitedBlind;
   };
   /** ISO timestamptz. */
   readonly review_date: string;

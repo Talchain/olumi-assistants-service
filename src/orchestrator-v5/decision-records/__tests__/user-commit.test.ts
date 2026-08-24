@@ -387,6 +387,7 @@ describe('dormancy control — buildDecisionRecordWrite is unchanged by this sli
         statement: 'Option A currently leads.',
         confidence: 0.62,
         confidence_source: 'model_derived',
+        elicited_blind: 'not_blind',
       },
       review_date: '2026-10-08T12:00:00.000Z',
       record_id: deriveDecisionRecordId(SCENARIO_ID, GRAPH_HASH, COMPUTED_AT),

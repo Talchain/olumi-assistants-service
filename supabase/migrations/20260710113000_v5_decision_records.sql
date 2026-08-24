@@ -60,6 +60,26 @@
 --     stays clean; they join the envelope only when the contract
 --     adds them. No RLS policy change here: 'workspace' visibility
 --     is read via a Phase-2 additive policy, not this file.
+--   - 2026-08-24 (ROADMAP 2.757, elicitation-blindness marker):
+--     ⚠⚠ AUTHORED, **NOT YET EXECUTED**. This entry is the ONLY one in
+--     this file describing an amendment that is not live — do not read
+--     the neighbouring "EXECUTED" entries as covering it.
+--     Widens the p_prediction whitelist to admit `elicited_blind`, a
+--     CLOSED THREE-VALUE enum 'blind'|'not_blind'|'unknown'. Three, not
+--     two: 'unknown' must stay distinguishable from 'not_blind' or the
+--     database re-creates the ambiguity the marker exists to remove.
+--     Execution draft (byte-for-byte, ALTER-free, single transaction):
+--     acceptance-evidence/security/DR-GUARD-AMENDMENT-DRAFT-2026-08-24-elicited-blind.sql
+--     ⭐⭐ MERGE GATE — BINDING, AND IT IS AN ORDERING HAZARD, NOT A
+--     PREFERENCE. The CEE producer half in this same PR stamps
+--     `elicited_blind` on EVERY create_decision_record call. Until this
+--     amendment is live on staging, that key is OFF-WHITELIST and the
+--     RPC raises 22023, which refuses the WHOLE RECORD rather than
+--     dropping the field — and `recordDecisionRecordForCommit` is
+--     fire-and-forget, so it CATCHES AND LOGS. The visible effect of
+--     merging out of order is therefore not an error: it is decision
+--     records SILENTLY CEASING TO BE WRITTEN. Execute this amendment
+--     FIRST, verify, then merge.
 --   - 2026-07-12 (calibration pack / D-N derisk, schemas 0.16.0):
 --     widen create_decision_record key whitelists — p_decision admits
 --     committed_by_user (boolean), p_prediction admits
@@ -446,9 +466,14 @@ BEGIN
   -- 0.16.0 amendment: prediction whitelist widened; new keys value-guarded
   -- (confidence_source closed enum per DecisionRecordConfidenceSource; the
   -- two probabilities recorded verbatim but must be numbers in [0,1]).
+  -- 2.757 amendment: `elicited_blind` admitted, as a CLOSED THREE-VALUE enum.
+  --   'unknown' is a first-class value and is NOT interchangeable with
+  --   'not_blind' — a two-value guard here would re-create at the database
+  --   layer exactly the ambiguity the marker exists to prevent.
   IF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
      OR p_prediction - 'statement' - 'confidence' - 'confidence_source'
-        - 'probability_of_goal' - 'probability_of_joint_goal' <> '{}'::jsonb
+        - 'probability_of_goal' - 'probability_of_joint_goal'
+        - 'elicited_blind' <> '{}'::jsonb
      OR jsonb_typeof(p_prediction->'statement') IS DISTINCT FROM 'string'
      OR p_prediction->>'statement' = ''
      OR (p_prediction ? 'confidence'
@@ -462,8 +487,12 @@ BEGIN
               OR (p_prediction->>'probability_of_goal')::numeric NOT BETWEEN 0 AND 1))
      OR (p_prediction ? 'probability_of_joint_goal'
          AND (jsonb_typeof(p_prediction->'probability_of_joint_goal') <> 'number'
-              OR (p_prediction->>'probability_of_joint_goal')::numeric NOT BETWEEN 0 AND 1)) THEN
-    RAISE EXCEPTION 'create_decision_record: p_prediction must be {statement: non-empty string, confidence?: number in [0,1], confidence_source?: ''model_derived''|''user_stated'', probability_of_goal?: number in [0,1], probability_of_joint_goal?: number in [0,1]} and nothing else'
+              OR (p_prediction->>'probability_of_joint_goal')::numeric NOT BETWEEN 0 AND 1))
+     OR (p_prediction ? 'elicited_blind'
+         AND (jsonb_typeof(p_prediction->'elicited_blind') <> 'string'
+              OR p_prediction->>'elicited_blind'
+                 NOT IN ('blind', 'not_blind', 'unknown'))) THEN
+    RAISE EXCEPTION 'create_decision_record: p_prediction must be {statement: non-empty string, confidence?: number in [0,1], confidence_source?: ''model_derived''|''user_stated'', probability_of_goal?: number in [0,1], probability_of_joint_goal?: number in [0,1], elicited_blind?: ''blind''|''not_blind''|''unknown''} and nothing else'
       USING ERRCODE = '22023';
   END IF;
   IF p_review_date IS NULL OR NOT isfinite(p_review_date) THEN

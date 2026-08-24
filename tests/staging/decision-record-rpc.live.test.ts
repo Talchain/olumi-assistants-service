@@ -79,7 +79,17 @@ describe.skip('staging live poke — create_decision_record RPC (post-execution)
         chosen_option_label: 'Live poke option',
         graph_hash: graphHash,
       },
-      prediction: { statement: 'Live poke prediction (test row, cleaned up).', confidence: 0.5 },
+      prediction: {
+        statement: 'Live poke prediction (test row, cleaned up).',
+        confidence: 0.5,
+        // ROADMAP 2.757. ⭐ THIS IS THE LIVE VERIFICATION INSTRUMENT FOR THE
+        // GUARD AMENDMENT. Until the 2.757 whitelist widening is executed on
+        // staging, `elicited_blind` is off-whitelist and the RPC raises 22023,
+        // so THIS TEST REDS — loudly, against the real function, which is
+        // exactly what the fire-and-forget capture hook cannot do for us.
+        // A red here means "execute the amendment", not "the code is wrong".
+        elicited_blind: 'not_blind',
+      },
       review_date: new Date(Date.parse(computedAt) + 90 * 86400000).toISOString(),
       record_id: recordId,
       event_id: `decision_recorded_${recordId}`,

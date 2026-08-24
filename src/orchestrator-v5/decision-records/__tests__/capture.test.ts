@@ -106,7 +106,15 @@ describe('buildDecisionRecordWrite — happy path', () => {
         chosen_option_label: 'Option A',
         graph_hash: expectedGraphHash,
       },
-      prediction: { statement: SUMMARY, confidence: 0.62, confidence_source: 'model_derived' },
+      prediction: {
+        statement: SUMMARY,
+        confidence: 0.62,
+        confidence_source: 'model_derived',
+        // ROADMAP 2.757 — the ambient seam's number IS the analysis output, so it
+        // is not independent of it. Pinned here so a silent change to the
+        // stamped value REDs the payload pin, not just the 2.757 spec.
+        elicited_blind: 'not_blind',
+      },
       review_date: '2026-10-08T12:00:00.000Z', // computed_at + 90 days
       record_id: expectedRecordId,
       event_id: `decision_recorded_${expectedRecordId}`,
@@ -145,6 +153,7 @@ describe('buildDecisionRecordWrite — happy path', () => {
     expect(built.write.prediction).toEqual({
       statement: SUMMARY,
       confidence_source: 'model_derived',
+      elicited_blind: 'not_blind',
     });
   });
 
@@ -373,6 +382,7 @@ describe('buildDecisionRecordWrite — D-N scoring probabilities (0.16.0 addendu
       statement: SUMMARY,
       confidence: 0.62,
       confidence_source: 'model_derived',
+      elicited_blind: 'not_blind',
       probability_of_goal: 0.31, // the leader's, not opt_b's 0.22
       probability_of_joint_goal: 0.293, // verbatim [0,1] float — no percent rescale
     });
