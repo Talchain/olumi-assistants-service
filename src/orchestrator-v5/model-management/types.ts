@@ -65,47 +65,6 @@ export interface VersionWriteOutcome {
   readonly restored_from_version_id?: string;
 }
 
-/**
- * Component 4 — the receipt of an ATOMIC restore.
- *
- * Deliberately a DIFFERENT type from `VersionWriteOutcome`, not an extension
- * of it, because it answers a different question. `VersionWriteOutcome`
- * describes one version-row write and carries `deduped` (did the version
- * insert no-op against the head?). This describes a WHOLE committed
- * operation: the snapshot, the restore row, the head move and the working
- * graph, all of which happened or none of which did. There is no
- * partial-success field here and there cannot be one — that is the point.
- *
- * ⚠ `graph` is the bytes now held by BOTH `scenarios.graph` and the new head
- * version. A reload that disagrees with it is a defect, not a race.
- */
-export interface AtomicRestoreOutcome {
-  /** The new head version created by this restore (or the replayed one). */
-  readonly version_id: string;
-  readonly version_number: number;
-  /** Identity of the restored graph — the working graph AND the head. */
-  readonly graph_identity_hash: string;
-  /** The version whose bytes were restored. */
-  readonly restored_from_version_id: string;
-  /**
-   * The version holding the state this restore replaced. NULL only when the
-   * scenario held no working graph at all — there was nothing to undo TO.
-   * When the head already captured the working graph, this is that head
-   * (the RPC's no-op dedupe), not a duplicate snapshot.
-   */
-  readonly undo_version_id: string | null;
-  /** The restored graph, exactly as persisted. */
-  readonly graph: unknown;
-  /**
-   * True when this call replayed a previously-committed mutation_id and
-   * returned its ORIGINAL receipt. Nothing was written. Distinct from
-   * `VersionWriteOutcome.deduped`, which is about identity equality rather
-   * than about the mutation having already happened.
-   */
-  readonly replayed: boolean;
-  readonly event_id: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Typed errors / results — every entry point resolves to one of these;
 // the service layer never throws.
@@ -144,15 +103,6 @@ export type ModelManagementErrorCode =
   | 'version_not_found'
   /** The supplied graph is absent or identity-empty — nothing to version. */
   | 'empty_graph'
-  /**
-   * Component 4 (SQLSTATE MV412): the scenario holds a working graph whose
-   * identity was never recorded, so neither the CAS nor the pre-restore
-   * snapshot can be evaluated honestly. Refused, never assumed — the same
-   * principle as the pre-existing "current graph unreadable ⇒ 503".
-   * Reachable only under CEE_V5_GRAPH_CAS_RPC='off', where the append RPC
-   * stamps scenarios.graph_identity_hash NULL on every graph write.
-   */
-  | 'base_unverifiable'
   /** Any other store/RPC failure (fail-closed catch-all). */
   | 'store_error';
 

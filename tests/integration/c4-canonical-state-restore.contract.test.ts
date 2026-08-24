@@ -25,7 +25,10 @@
  * ── HOW TO RUN (local only — never staging) ────────────────────────────────
  *   docker run -d --name c4pg -e POSTGRES_PASSWORD=c4test -e POSTGRES_DB=cee \
  *     -p 55432:5432 postgres:15
- *   # apply the repo's migrations (see tests/integration/README-c4-local-db.md)
+ *   # apply the repo's migrations AND Codex's carrier migration
+ *   # (20260824200000, on codex/c8-a-integration — NOT on this branch).
+ *   # See tests/integration/README-c4-local-db.md — including the
+ *   # mutation_id column-type collision check, which is not optional.
  *   RUN_C4_CANONICAL_STATE=1 \
  *   DATABASE_URL='postgres://postgres:c4test@localhost:55432/cee' \
  *     pnpm vitest run tests/integration/c4-canonical-state-restore.contract.test.ts
@@ -51,7 +54,8 @@
  * The suite runs against TWO carriers on purpose:
  *   · `pristineCarrier` — the pre-atomic three-transaction sequence, exactly
  *     as the route issued it (snapshot RPC → restore RPC → graph append).
- *   · `atomicCarrier`   — the carrier under test.
+ *   · `codexCarrier`   — the carrier under test:
+ *     `restore_model_version_atomic_v1` (CEE codex/c8-a-integration @ 8e6de866).
  * The pins MUST go RED on the pristine carrier and GREEN on the atomic one.
  * A pin that passes for both is not measuring atomicity, and the
  * discrimination test at the bottom fails loudly if that ever happens. This
@@ -60,7 +64,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 
 const SHOULD_RUN =
@@ -128,28 +132,73 @@ function errState(e: unknown): string | null {
 }
 
 /**
- * THE CARRIER UNDER TEST. Rebind this one object to point the whole suite at
- * a different implementation.
+ * THE CARRIER UNDER TEST — Codex's `restore_model_version_atomic_v1`
+ * (CEE `codex/c8-a-integration` @ 8e6de866, migration
+ * `20260824200000_c8_atomic_model_version_restore.sql`).
+ *
+ * This is the ONLY implementation-specific code in the file. Everything below
+ * it asserts properties, not mechanics.
+ *
+ * Shape notes, so a failure here is never misread as a defect:
+ *  · `p_mutation_id` is a UUID, not free text — the harness derives a STABLE
+ *    UUID from its string key so a replay presents the same identity.
+ *  · The carrier takes the current graph AND re-reads it under its own lock.
+ *    The harness supplies the caller's view; the RPC's own read is what wins.
+ *  · `p_actor_kind`/`p_authored_by` are constrained together
+ *    (`model_versions_actor_consistency_ck`). 'system' + NULL is the valid
+ *    pairing for a fixture with no human actor.
+ *  · `p_source_turn_id` is uniquely indexed per scenario, so it is derived
+ *    from the mutation key rather than shared.
  */
-const atomicCarrier: RestoreCarrier = {
-  name: 'restore_model_version_atomic (single transaction)',
+function stableUuidFrom(key: string): string {
+  const h = createHash('sha256').update(key).digest('hex');
+  // RFC-4122 v4-shaped so it satisfies the actor/UUID regex family.
+  return [
+    h.slice(0, 8),
+    h.slice(8, 12),
+    `4${h.slice(13, 16)}`,
+    ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20),
+    h.slice(20, 32),
+  ].join('-');
+}
+
+/** A second 64-hex hash standing in for the analysis-affecting hash. The
+ *  carrier requires it NOT NULL and distinct in role from the identity hash. */
+function analysisHashOf(graph: unknown): string {
+  return hashOf({ __analysis: graph });
+}
+
+const codexCarrier: RestoreCarrier = {
+  name: 'restore_model_version_atomic_v1 (Codex C8, single transaction)',
   claimsAtomic: true,
   async restore(db, req) {
     try {
+      const cur = await db`
+        SELECT graph, graph_identity_hash FROM public.scenarios
+         WHERE id = ${req.scenarioId}::uuid`;
+      const curGraph = cur[0]?.graph ?? null;
+      const curHash = (cur[0]?.graph_identity_hash as string | null) ?? null;
       const rows = await db`
-        SELECT public.restore_model_version_atomic(
+        SELECT public.restore_model_version_atomic_v1(
           ${req.scenarioId}::uuid,
           ${req.versionId}::uuid,
-          ${req.mutationId}::text,
+          ${stableUuidFrom(req.mutationId)}::uuid,
           ${db.json(req.graph as never)}::jsonb,
           ${hashOf(req.graph)}::text,
+          ${analysisHashOf(req.graph)}::text,
           ${ENVELOPE.projection}::text,
           ${ENVELOPE.normaliser}::text,
           ${ENVELOPE.schema}::text,
-          ${req.sourceHash}::text,
           ${ENVELOPE.algorithm}::text,
-          ${req.label ?? null}::text,
-          ${req.expectedWorkingHash ?? null}::text
+          ${req.sourceHash}::text,
+          ${curGraph === null ? null : db.json(curGraph as never)}::jsonb,
+          ${curHash}::text,
+          ${curGraph === null ? null : analysisHashOf(curGraph)}::text,
+          ${req.expectedWorkingHash ?? null}::text,
+          'system'::text,
+          NULL::text,
+          ${`turn_${stableUuidFrom(req.mutationId)}`}::text,
+          ${req.label ?? null}::text
         ) AS receipt`;
       return { ok: true, receipt: rows[0].receipt as Record<string, unknown> };
     } catch (e) {
@@ -233,53 +282,81 @@ const pristineCarrier: RestoreCarrier = {
 // about how many statements the carrier used to get there.
 // ---------------------------------------------------------------------------
 
-const INJECT_SENTINEL = 'C4INJECTFAIL';
+/**
+ * ⚠ REWRITTEN when the suite was rebound to Codex's carrier, and the reason
+ * matters: the FIRST version of these injectors keyed on `v5_conversation_turns`,
+ * because the carrier it was written against wrote the working graph through
+ * `append_turn_atomic_v4`. Codex's `restore_model_version_atomic_v1` writes
+ * `scenarios` with a DIRECT `UPDATE` and inserts no turn row at all — so that
+ * injector would silently never fire, and every partial-state pin would have
+ * passed for the wrong reason. A fixture bound to HOW a carrier writes is not
+ * carrier-agnostic; it must bind to WHAT changes.
+ *
+ * These key on the logical step instead:
+ *   · restore version row  → BEFORE INSERT on model_versions, provenance='restore'
+ *   · working graph write  → BEFORE UPDATE on scenarios, graph actually changing
+ *
+ * Armed through a control TABLE rather than a session GUC because postgres.js
+ * pools connections: a `SET` would not reliably reach the connection the
+ * carrier runs on.
+ */
+const INJECT_NONE = 'none';
+const INJECT_RESTORE_ROW = 'restore_row';
+const INJECT_GRAPH_WRITE = 'graph_write';
 
 async function installInjectors(db: Sql): Promise<void> {
-  // (a) at the RESTORE VERSION ROW — i.e. AFTER any undo snapshot.
   await db.unsafe(`
+    CREATE TABLE IF NOT EXISTS public.c4acc_control (
+      id INT PRIMARY KEY DEFAULT 1, inject TEXT NOT NULL DEFAULT 'none');
+    INSERT INTO public.c4acc_control (id, inject) VALUES (1, 'none')
+      ON CONFLICT (id) DO UPDATE SET inject = 'none';
+
     CREATE OR REPLACE FUNCTION public.c4acc_fail_on_restore_row()
     RETURNS TRIGGER LANGUAGE plpgsql AS $fn$
     BEGIN
-      IF NEW.provenance = 'restore' AND NEW.label LIKE '%${INJECT_SENTINEL}_ROW%' THEN
+      IF (SELECT inject FROM public.c4acc_control WHERE id = 1) = '${INJECT_RESTORE_ROW}'
+         AND NEW.provenance = 'restore' THEN
         RAISE EXCEPTION 'c4acc injected failure at the restore version row'
           USING ERRCODE = 'C4INJ';
       END IF;
       RETURN NEW;
-    END $fn$;`);
-  await db.unsafe(`
+    END $fn$;
+
     DROP TRIGGER IF EXISTS c4acc_restore_row_injector ON public.model_versions;
     CREATE TRIGGER c4acc_restore_row_injector
       BEFORE INSERT ON public.model_versions
-      FOR EACH ROW EXECUTE FUNCTION public.c4acc_fail_on_restore_row();`);
+      FOR EACH ROW EXECUTE FUNCTION public.c4acc_fail_on_restore_row();
 
-  // (b) at the WORKING GRAPH WRITE — i.e. AFTER the version rows. The turn
-  //     row is inserted by append_turn_atomic_v4 immediately before it moves
-  //     scenarios.graph, so this is the graph-write step for any carrier that
-  //     uses the sanctioned writer.
-  await db.unsafe(`
     CREATE OR REPLACE FUNCTION public.c4acc_fail_on_graph_write()
     RETURNS TRIGGER LANGUAGE plpgsql AS $fn$
     BEGIN
-      IF NEW.turn_id LIKE '%${INJECT_SENTINEL}_GRAPH%' THEN
+      IF (SELECT inject FROM public.c4acc_control WHERE id = 1) = '${INJECT_GRAPH_WRITE}'
+         AND NEW.graph IS DISTINCT FROM OLD.graph THEN
         RAISE EXCEPTION 'c4acc injected failure at the working-graph write'
           USING ERRCODE = 'C4INJ';
       END IF;
       RETURN NEW;
-    END $fn$;`);
-  await db.unsafe(`
-    DROP TRIGGER IF EXISTS c4acc_graph_write_injector ON public.v5_conversation_turns;
+    END $fn$;
+
+    DROP TRIGGER IF EXISTS c4acc_graph_write_injector ON public.scenarios;
     CREATE TRIGGER c4acc_graph_write_injector
-      BEFORE INSERT ON public.v5_conversation_turns
+      BEFORE UPDATE ON public.scenarios
       FOR EACH ROW EXECUTE FUNCTION public.c4acc_fail_on_graph_write();`);
+}
+
+/** Arm/disarm. Always disarmed in a finally — a leaked arm would red the
+ *  whole rest of the file with an unrelated cause. */
+async function setInject(db: Sql, mode: string): Promise<void> {
+  await db`UPDATE public.c4acc_control SET inject = ${mode} WHERE id = 1`;
 }
 
 async function removeInjectors(db: Sql): Promise<void> {
   await db.unsafe(
     `DROP TRIGGER IF EXISTS c4acc_restore_row_injector ON public.model_versions;
-     DROP TRIGGER IF EXISTS c4acc_graph_write_injector ON public.v5_conversation_turns;
+     DROP TRIGGER IF EXISTS c4acc_graph_write_injector ON public.scenarios;
      DROP FUNCTION IF EXISTS public.c4acc_fail_on_restore_row();
-     DROP FUNCTION IF EXISTS public.c4acc_fail_on_graph_write();`,
+     DROP FUNCTION IF EXISTS public.c4acc_fail_on_graph_write();
+     DROP TABLE IF EXISTS public.c4acc_control;`,
   );
 }
 
@@ -460,13 +537,13 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
   describe('instrument liveness (a control that returns nothing proves nothing)', () => {
     it('the carrier under test is PRESENT in this database', async () => {
       const rows = await sql`
-        SELECT proname FROM pg_proc WHERE proname = 'restore_model_version_atomic'`;
+        SELECT proname FROM pg_proc WHERE proname = 'restore_model_version_atomic_v1'`;
       expect(
         rows.length,
-        'restore_model_version_atomic is ABSENT. This suite is BLOCKED ON THE ' +
-          'MIGRATION: apply supabase/migrations/20260824120000_v5_restore_model_' +
-          'version_atomic.sql to this database. Not a skip — an unapplied ' +
-          'migration must be loud.',
+        'restore_model_version_atomic_v1 is ABSENT. This suite is BLOCKED ON ' +
+          "THE MIGRATION: apply Codex's " +
+          'supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql ' +
+          'to this database. Not a skip — an unapplied migration must be loud.',
       ).toBe(1);
     });
 
@@ -486,22 +563,21 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
     it('the injectors really fire (positive control)', async () => {
       const { scenarioId } = await seed();
       let threw = false;
+      await setInject(sql, INJECT_GRAPH_WRITE);
       try {
-        await writeWorkingGraph(
-          sql,
-          scenarioId,
-          GRAPH_V1,
-          `${RUN_ID}-${INJECT_SENTINEL}_GRAPH-control`,
-        );
+        await writeWorkingGraph(sql, scenarioId, GRAPH_V1, `${RUN_ID}-inj-control`);
       } catch (e) {
         threw = true;
         expect(errState(e)).toBe('C4INJ');
+      } finally {
+        await setInject(sql, INJECT_NONE);
       }
       expect(threw, 'the graph-write injector did not fire — every partial-state pin below would pass vacuously').toBe(true);
     });
 
     it('the injectors do NOT fire without the sentinel (contrast control)', async () => {
       const { scenarioId } = await seed();
+      await setInject(sql, INJECT_NONE);
       await expect(
         writeWorkingGraph(sql, scenarioId, GRAPH_V1, `${RUN_ID}-clean-control`),
       ).resolves.toBeUndefined();
@@ -509,7 +585,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
   });
 
   // ── The invariant suite, run against BOTH carriers. ───────────────────────
-  for (const carrier of [pristineCarrier, atomicCarrier]) {
+  for (const carrier of [pristineCarrier, codexCarrier]) {
     const expectAtomic = carrier.claimsAtomic;
     // A pin's expectation is derived from the carrier's CLAIM, so the pristine
     // carrier documents the defect rather than being skipped. `expectAtomic`
@@ -529,15 +605,21 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
         const { scenarioId, v1Id, v1Hash } = await seedDrifted();
         const before = await readState(sql, scenarioId);
 
-        const res = await carrier.restore(sql, {
-          scenarioId,
-          versionId: v1Id,
-          mutationId: `${RUN_ID}-p1-${randomUUID()}`,
-          graph: GRAPH_V1,
-          sourceHash: v1Hash,
-          expectedWorkingHash: before.graphHash,
-          label: `${INJECT_SENTINEL}_ROW`,
-        });
+        await setInject(sql, INJECT_RESTORE_ROW);
+        let res: RestoreResult;
+        try {
+          res = await carrier.restore(sql, {
+            scenarioId,
+            versionId: v1Id,
+            mutationId: `${RUN_ID}-p1-${randomUUID()}`,
+            graph: GRAPH_V1,
+            sourceHash: v1Hash,
+            expectedWorkingHash: before.graphHash,
+            label: 'p1',
+          });
+        } finally {
+          await setInject(sql, INJECT_NONE);
+        }
         expect(res.ok, 'the injected failure did not refuse the operation').toBe(false);
 
         const after = await readState(sql, scenarioId);
@@ -564,15 +646,21 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
         const { scenarioId, v1Id, v1Hash } = await seed();
         const before = await readState(sql, scenarioId);
 
-        const res = await carrier.restore(sql, {
-          scenarioId,
-          versionId: v1Id,
-          mutationId: `${RUN_ID}-p2-${INJECT_SENTINEL}_GRAPH`,
-          graph: GRAPH_V1,
-          sourceHash: v1Hash,
-          expectedWorkingHash: before.graphHash,
-          label: 'p2',
-        });
+        await setInject(sql, INJECT_GRAPH_WRITE);
+        let res: RestoreResult;
+        try {
+          res = await carrier.restore(sql, {
+            scenarioId,
+            versionId: v1Id,
+            mutationId: `${RUN_ID}-p2-${randomUUID()}`,
+            graph: GRAPH_V1,
+            sourceHash: v1Hash,
+            expectedWorkingHash: before.graphHash,
+            label: 'p2',
+          });
+        } finally {
+          await setInject(sql, INJECT_NONE);
+        }
         expect(res.ok, 'the injected failure did not refuse the operation').toBe(false);
 
         const after = await readState(sql, scenarioId);
@@ -775,7 +863,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       const before = await readState(sql, scenarioId);
       const mutationId = `${RUN_ID}-replay`;
 
-      const first = await atomicCarrier.restore(sql, {
+      const first = await codexCarrier.restore(sql, {
         scenarioId,
         versionId: v1Id,
         mutationId,
@@ -790,7 +878,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
 
       // The replay carries the ORIGINAL expected hash, which is now stale.
       // A correct carrier answers from the idempotency key, NOT with a 409.
-      const second = await atomicCarrier.restore(sql, {
+      const second = await codexCarrier.restore(sql, {
         scenarioId,
         versionId: v1Id,
         mutationId,
@@ -820,7 +908,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       // Two DISTINCT mutation ids: this measures the CAS under real row
       // locking, not the idempotency key. Same base hash for both.
       const [a, b] = await Promise.all([
-        atomicCarrier.restore(sql, {
+        codexCarrier.restore(sql, {
           scenarioId,
           versionId: v1Id,
           mutationId: `${RUN_ID}-cc-a`,
@@ -829,7 +917,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
           expectedWorkingHash: before.graphHash,
           label: 'concurrent-a',
         }),
-        atomicCarrier.restore(sql, {
+        codexCarrier.restore(sql, {
           scenarioId,
           versionId: v1Id,
           mutationId: `${RUN_ID}-cc-b`,
@@ -995,6 +1083,241 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
     });
   });
 
+  /**
+   * ── append_turn_atomic_v5 vs v4: A DE-DUPLICATION THAT CHANGED BEHAVIOUR ──
+   *
+   * v5 is a copy of v4's fence/CAS/turn body with version creation added.
+   * Two full implementations of one piece of logic is a drift hazard; these
+   * pins measure the drift that ALREADY EXISTS rather than asserting it.
+   *
+   * Measured at the bytes on `codex/c8-a-integration` @ 8e6de866:
+   *   · `p_cas_enforce` occurs in v5 EXACTLY ONCE — in the signature. Its
+   *     body never reads it. v4 reads it in its CAS predicate.
+   *   · v5's CAS predicate is
+   *       current IS DISTINCT FROM expected AND incoming IS DISTINCT FROM current
+   *     v4's additionally requires `p_cas_enforce`, `expected IS NOT NULL` and
+   *     `current IS NOT NULL`. v5 dropped all three.
+   *
+   * Consequence: v5 refuses two cases v4 documents as ACCEPTED, and it does
+   * so unconditionally — there is no kill switch on the path that now carries
+   * every semantic commit.
+   *
+   * Each pin below carries a CONTRAST ARM that both versions accept, so a
+   * failure means "v5 diverges here", never "v5 refuses everything".
+   */
+  describe('append_turn_atomic_v4 → v5 drift (two copies of one predicate)', () => {
+    /** Fresh owned scenario; optionally give it a working graph first. */
+    async function freshScenario(withGraph: boolean): Promise<{ id: string; hash: string | null }> {
+      const id = randomUUID();
+      await sql`SELECT public.ensure_scenario_exists(${id}::uuid, ${randomUUID()}::uuid)`;
+      createdScenarios.push(id);
+      if (!withGraph) return { id, hash: null };
+      await writeWorkingGraph(sql, id, GRAPH_V1, `${RUN_ID}-drift-${randomUUID()}`);
+      return { id, hash: hashOf(GRAPH_V1) };
+    }
+
+    async function callV4(
+      scenarioId: string,
+      opts: { expected: string | null; incoming: string; enforce: boolean },
+    ): Promise<{ ok: boolean; sqlstate: string | null }> {
+      const turn = `v4-${randomUUID()}`;
+      try {
+        await sql`
+          SELECT public.append_turn_atomic_v4(
+            ${scenarioId}::uuid, ${turn}::text, 'direct_answer'::text, NULL::text,
+            ${turn}::text, FALSE, 0, 0, '[]'::jsonb,
+            ${sql.json(GRAPH_V2 as never)}::jsonb, NULL::text, '[]'::jsonb,
+            NULL::jsonb, NULL::text, NULL::text,
+            ${opts.expected}::text, ${opts.incoming}::text, ${opts.enforce},
+            NULL::bigint)`;
+        return { ok: true, sqlstate: null };
+      } catch (e) {
+        return { ok: false, sqlstate: errState(e) };
+      }
+    }
+
+    async function callV5(
+      scenarioId: string,
+      opts: { expected: string | null; incoming: string; enforce: boolean },
+    ): Promise<{ ok: boolean; sqlstate: string | null }> {
+      const turn = `v5-${randomUUID()}`;
+      try {
+        await sql`
+          SELECT public.append_turn_atomic_v5(
+            ${scenarioId}::uuid, ${turn}::text, 'direct_answer'::text, NULL::text,
+            ${turn}::text, FALSE, 0, 0, '[]'::jsonb,
+            ${sql.json(GRAPH_V2 as never)}::jsonb, NULL::text, '[]'::jsonb,
+            NULL::jsonb, NULL::text, NULL::text,
+            ${opts.expected}::text, ${opts.incoming}::text, ${opts.enforce},
+            NULL::bigint,
+            ${randomUUID()}::uuid,
+            ${analysisHashOf(GRAPH_V2)}::text,
+            ${ENVELOPE.algorithm}::text,
+            ${ENVELOPE.projection}::text,
+            ${ENVELOPE.normaliser}::text,
+            ${ENVELOPE.schema}::text,
+            'system'::text, NULL::text,
+            'committed_mutation'::text,
+            ${turn}::text)`;
+        return { ok: true, sqlstate: null };
+      } catch (e) {
+        return { ok: false, sqlstate: errState(e) };
+      }
+    }
+
+    it('N0 CONTRAST ARM: with expected === current, BOTH v4 and v5 accept', async () => {
+      const a = await freshScenario(true);
+      const b = await freshScenario(true);
+      const v4 = await callV4(a.id, { expected: a.hash, incoming: hashOf(GRAPH_V2), enforce: true });
+      const v5 = await callV5(b.id, { expected: b.hash, incoming: hashOf(GRAPH_V2), enforce: true });
+      expect(v4.ok, 'v4 refused the contrast arm — the probe is not discriminating').toBe(true);
+      expect(v5.ok, 'v5 refused the contrast arm — the probe is not discriminating').toBe(true);
+    });
+
+    it('N1a: expected = NULL against a SET current hash — v4 accepts, v5 REFUSES', async () => {
+      const a = await freshScenario(true);
+      const b = await freshScenario(true);
+      const v4 = await callV4(a.id, { expected: null, incoming: hashOf(GRAPH_V2), enforce: true });
+      const v5 = await callV5(b.id, { expected: null, incoming: hashOf(GRAPH_V2), enforce: true });
+      expect(v4.ok, "v4 must accept a NULL expectation — its documented 'no expectation' case").toBe(true);
+      expect(
+        v5.ok,
+        'v5 now ACCEPTS a NULL expectation. That is a behavioural change back ' +
+          "towards v4 — good, but this pin records the divergence, so update it " +
+          'deliberately rather than deleting it.',
+      ).toBe(false);
+      expect(v5.sqlstate).toBe('OLGC1');
+    });
+
+    it('N1b: NULL current hash (first graph write) — v4 accepts, v5 REFUSES', async () => {
+      const a = await freshScenario(false);
+      const b = await freshScenario(false);
+      const stale = hashOf({ some: 'other' });
+      const v4 = await callV4(a.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: true });
+      const v5 = await callV5(b.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: true });
+      expect(v4.ok, "v4 must accept a first graph write — it guards on current IS NOT NULL").toBe(true);
+      expect(v5.ok, 'v5 dropped the current-IS-NOT-NULL guard').toBe(false);
+      expect(v5.sqlstate).toBe('OLGC1');
+    });
+
+    /**
+     * ⚠ THE LAYOUT GAP, INHERITED — AND NOW ON THE COMMIT PATH.
+     *
+     * v5 gates version creation on
+     *   `v_current_hash IS DISTINCT FROM p_incoming_graph_identity_hash`
+     * i.e. purely on the identity hash. `TRANSIENT_UI_KEYS` strips selection,
+     * hover, viewport and ui state — so those are correctly free — but it does
+     * NOT strip `position`. So a pure node MOVE changes the identity hash,
+     * creates a version, and moves the hash the staleness machinery reads.
+     *
+     * On the old path that produced a stray version. On this path v5 carries
+     * EVERY semantic commit and always writes `scenarios.graph_identity_hash`,
+     * so the same gap now sits on the main line. That raises its severity; it
+     * does not change its cause.
+     *
+     * Pinned in BOTH directions: presentation-only must stay free, layout must
+     * be recorded as costing a version until someone decides otherwise.
+     */
+    it('N3: presentation-only creates NO version on the v5 path; LAYOUT still does (known gap)', async () => {
+      const { computeGraphIdentityHash } = await import(
+        '../../src/orchestrator-v5/context/graph-identity.js'
+      );
+      const realHash = (g: unknown) => computeGraphIdentityHash(g as never)!.value;
+      const BASE: any = {
+        nodes: [
+          { id: 'n1', label: 'A', position: { x: 0, y: 0 } },
+          { id: 'n2', label: 'B', position: { x: 10, y: 10 } },
+        ],
+        edges: [{ id: 'e1', source: 'n1', target: 'n2' }],
+      };
+      const clone = () => JSON.parse(JSON.stringify(BASE));
+
+      const scenarioId = randomUUID();
+      await sql`SELECT public.ensure_scenario_exists(${scenarioId}::uuid, ${randomUUID()}::uuid)`;
+      createdScenarios.push(scenarioId);
+
+      const commit = async (graph: unknown) => {
+        const turn = `n3-${randomUUID()}`;
+        // ⚠ The expected hash is READ BACK each time rather than passed as
+        // NULL. v5 dropped v4's `expected IS NOT NULL` guard (pin N1a), so it
+        // has no "no expectation" mode at all — a NULL expectation against a
+        // set current hash is refused OLGC1. This helper tripped exactly that
+        // on its first draft, which is the divergence reaching a caller.
+        const cur = await sql`
+          SELECT graph_identity_hash FROM public.scenarios
+           WHERE id = ${scenarioId}::uuid`;
+        const expected = (cur[0]?.graph_identity_hash as string | null) ?? null;
+        await sql`
+          SELECT public.append_turn_atomic_v5(
+            ${scenarioId}::uuid, ${turn}::text, 'direct_answer'::text, NULL::text,
+            ${turn}::text, FALSE, 0, 0, '[]'::jsonb,
+            ${sql.json(graph as never)}::jsonb, NULL::text, '[]'::jsonb,
+            NULL::jsonb, NULL::text, NULL::text,
+            ${expected}::text, ${realHash(graph)}::text, TRUE, NULL::bigint,
+            ${randomUUID()}::uuid, ${analysisHashOf(graph)}::text,
+            ${ENVELOPE.algorithm}::text, ${ENVELOPE.projection}::text,
+            ${ENVELOPE.normaliser}::text, ${ENVELOPE.schema}::text,
+            'system'::text, NULL::text, 'committed_mutation'::text, ${turn}::text)`;
+      };
+      const versions = async () =>
+        Number(
+          (
+            await sql`SELECT count(*)::int AS n FROM public.model_versions
+                       WHERE scenario_id = ${scenarioId}::uuid`
+          )[0].n,
+        );
+
+      await commit(BASE);
+      const afterBase = await versions();
+      expect(afterBase, 'the first commit must create exactly one version').toBe(1);
+
+      // Presentation-only — identity-neutral, so v5 must not create a version.
+      const pres = clone();
+      pres.nodes[0].selected = true;
+      pres.viewport = { x: 3, y: 3, zoom: 2 };
+      expect(
+        realHash(pres),
+        'fixture precondition: presentation-only must be identity-neutral',
+      ).toBe(realHash(BASE));
+      await commit(pres);
+      expect(
+        await versions(),
+        'a presentation-only commit created a version on the v5 path',
+      ).toBe(afterBase);
+
+      // Layout-only — the known gap.
+      const moved = clone();
+      moved.nodes[0].position = { x: 999, y: 999 };
+      expect(
+        realHash(moved),
+        'LAYOUT HAS BECOME IDENTITY-NEUTRAL. That is the fix this gap wants — ' +
+          'update N3 and the T2 known-gap pin together.',
+      ).not.toBe(realHash(BASE));
+      await commit(moved);
+      expect(
+        await versions(),
+        'layout no longer creates a version — the gap is closed; update this pin',
+      ).toBe(afterBase + 1);
+    });
+
+    it('N2: p_cas_enforce is INERT in v5 — there is no kill switch on this path', async () => {
+      const a = await freshScenario(true);
+      const b = await freshScenario(true);
+      const stale = hashOf({ some: 'other' });
+      // enforce = FALSE. In v4 this suppresses the CAS entirely.
+      const v4 = await callV4(a.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: false });
+      const v5 = await callV5(b.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: false });
+      expect(v4.ok, 'v4 with p_cas_enforce=false must accept a stale expectation').toBe(true);
+      expect(
+        v5.ok,
+        'v5 now HONOURS p_cas_enforce. If that was fixed deliberately, update ' +
+          'this pin; if the parameter was deleted instead, delete this pin and ' +
+          'the comments that claim the posture flag has an effect.',
+      ).toBe(false);
+      expect(v5.sqlstate).toBe('OLGC1');
+    });
+  });
+
   // ── THE DISCRIMINATING PAIR. ─────────────────────────────────────────────
   // Without this, every pin above could be passing for the wrong reason.
   describe('discrimination (the pins must bite)', () => {
@@ -1002,15 +1325,20 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       const { scenarioId, v1Id, v1Hash } = await seed();
       const before = await readState(sql, scenarioId);
 
-      await pristineCarrier.restore(sql, {
-        scenarioId,
-        versionId: v1Id,
-        mutationId: `${RUN_ID}-disc-${INJECT_SENTINEL}_GRAPH`,
-        graph: GRAPH_V1,
-        sourceHash: v1Hash,
-        expectedWorkingHash: before.graphHash,
-        label: 'discrimination',
-      });
+      await setInject(sql, INJECT_GRAPH_WRITE);
+      try {
+        await pristineCarrier.restore(sql, {
+          scenarioId,
+          versionId: v1Id,
+          mutationId: `${RUN_ID}-disc-${randomUUID()}`,
+          graph: GRAPH_V1,
+          sourceHash: v1Hash,
+          expectedWorkingHash: before.graphHash,
+          label: 'discrimination',
+        });
+      } finally {
+        await setInject(sql, INJECT_NONE);
+      }
       const afterPristine = await readState(sql, scenarioId);
 
       // The defect, in one line: the head names a version the working graph
@@ -1027,15 +1355,21 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       const { scenarioId, v1Id, v1Hash } = await seed();
       const before = await readState(sql, scenarioId);
 
-      const res = await atomicCarrier.restore(sql, {
-        scenarioId,
-        versionId: v1Id,
-        mutationId: `${RUN_ID}-disc2-${INJECT_SENTINEL}_GRAPH`,
-        graph: GRAPH_V1,
-        sourceHash: v1Hash,
-        expectedWorkingHash: before.graphHash,
-        label: 'discrimination',
-      });
+      await setInject(sql, INJECT_GRAPH_WRITE);
+      let res: RestoreResult;
+      try {
+        res = await codexCarrier.restore(sql, {
+          scenarioId,
+          versionId: v1Id,
+          mutationId: `${RUN_ID}-disc2-${randomUUID()}`,
+          graph: GRAPH_V1,
+          sourceHash: v1Hash,
+          expectedWorkingHash: before.graphHash,
+          label: 'discrimination',
+        });
+      } finally {
+        await setInject(sql, INJECT_NONE);
+      }
       expect(res.ok).toBe(false);
 
       const after = await readState(sql, scenarioId);

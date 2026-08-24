@@ -26,12 +26,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type {
-  AtomicRestoreOutcome,
-  ModelVersionRecord,
-  ModelVersionSummary,
-  VersionWriteOutcome,
-} from './types.js';
+import type { ModelVersionRecord, ModelVersionSummary, VersionWriteOutcome } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Typed errors (session-store idiom: adapter throws typed, service maps).
@@ -57,19 +52,6 @@ export class ModelVersionCasConflictError extends Error {
     super(message, options);
     this.name = 'ModelVersionCasConflictError';
     this.expectedHash = expectedHash;
-  }
-}
-
-/**
- * Component 4 (SQLSTATE MV412) — the working graph's identity was never
- * recorded, so the restore's base cannot be verified. A distinct type
- * because it is NOT a generic store fault: the database is healthy and the
- * answer is a deliberate, honest refusal.
- */
-export class ModelVersionBaseUnverifiableError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'ModelVersionBaseUnverifiableError';
   }
 }
 
@@ -104,45 +86,10 @@ export interface SaveVersionWrite {
   readonly event_id?: string;
 }
 
-/**
- * Component 4 — the input to the ONE-TRANSACTION restore.
- *
- * ⚠ THERE IS NO LONGER A `RestoreVersionWrite`. The pre-existing
- * `restoreVersion` port method wrote a version row and left the WORKING
- * GRAPH to a separate transaction issued by the route — the split that made
- * `RESTORE_INCOMPLETE` a representable outcome. It is deleted rather than
- * deprecated: leaving a second restore path available is exactly how a
- * later lane reintroduces the defect.
- *
- * The `graph`/`graph_identity_hash` here are the TARGET version's stored
- * bytes, re-validated and re-projected CEE-side. They are never a client's
- * bytes — the route reads the target itself and never reads a `graph` field
- * off the request.
- */
-export interface RestoreVersionAtomicWrite {
+export interface RestoreVersionWrite {
   readonly scenario_id: string;
   readonly version_id: string;
-  /** Idempotency key. REQUIRED — a replay returns the original receipt. */
-  readonly mutation_id: string;
-  readonly graph: unknown;
-  readonly graph_identity_hash: string;
-  readonly hash_algorithm: string;
-  readonly identity_projection_version: string;
-  readonly identity_normaliser_version: string;
-  readonly graph_schema_version: string;
-  /**
-   * The target version's stored identity hash as CEE read it. Asserted
-   * against the target row under the RPC's lock, so the receipt can never
-   * describe a version other than the one whose bytes were written.
-   */
-  readonly expected_source_identity_hash: string;
   readonly label?: string;
-  /**
-   * CAS against `scenarios.graph_identity_hash` — the WORKING graph the user
-   * was looking at. ⚠ NOT the head VERSION's hash: those are two different
-   * values with the same field name, and the pre-atomic route chained them
-   * as though they were one. See the migration header.
-   */
   readonly expected_graph_identity_hash?: string;
 }
 
@@ -152,7 +99,7 @@ export interface ModelVersionStorePort {
   saveVersion(write: SaveVersionWrite): Promise<VersionWriteOutcome>;
   listVersions(scenarioId: string, limit?: number): Promise<readonly ModelVersionSummary[]>;
   getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null>;
-  restoreVersionAtomic(write: RestoreVersionAtomicWrite): Promise<AtomicRestoreOutcome>;
+  restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
   getCurrentVersionId(scenarioId: string): Promise<string | null>;
 }
 
@@ -212,44 +159,18 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
     return parseWriteOutcome('create_model_version', data);
   }
 
-  /**
-   * Component 4 — the ONE-TRANSACTION restore.
-   *
-   * ⚠ THIS IS THE ONLY RESTORE PATH. It calls exactly one RPC, which is a
-   * single plpgsql invocation and therefore a single transaction: the
-   * snapshot, the restore row, the head move, the working-graph write and
-   * the journey event all commit together or none of them do. There is no
-   * partial-success branch to map here because the database cannot produce
-   * one.
-   *
-   * If the RPC is absent (migration not applied), PostgREST answers PGRST202
-   * and this throws a plain store error → the route answers 503. That is the
-   * intended behaviour: restore is UNAVAILABLE, never partial. There is
-   * deliberately no fallback to the old three-write sequence.
-   */
-  async restoreVersionAtomic(write: RestoreVersionAtomicWrite): Promise<AtomicRestoreOutcome> {
-    const { data, error } = await this.client.rpc('restore_model_version_atomic', {
+  async restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome> {
+    const { data, error } = await this.client.rpc('restore_model_version', {
       p_scenario_id: write.scenario_id,
       p_version_id: write.version_id,
-      p_mutation_id: write.mutation_id,
-      p_graph: write.graph,
-      p_graph_identity_hash: write.graph_identity_hash,
-      p_projection_version: write.identity_projection_version,
-      p_normaliser_version: write.identity_normaliser_version,
-      p_graph_schema_version: write.graph_schema_version,
-      p_expected_source_identity_hash: write.expected_source_identity_hash,
-      p_hash_algorithm: write.hash_algorithm,
       p_label: write.label ?? null,
+      p_event_id: null,
       p_expected_graph_identity_hash: write.expected_graph_identity_hash ?? null,
     });
     if (error) {
-      throw mapRpcError(
-        'restore_model_version_atomic',
-        error,
-        write.expected_graph_identity_hash ?? null,
-      );
+      throw mapRpcError('restore_model_version', error, write.expected_graph_identity_hash ?? null);
     }
-    return parseAtomicRestoreOutcome('restore_model_version_atomic', data);
+    return parseWriteOutcome('restore_model_version', data);
   }
 
   async listVersions(
@@ -389,54 +310,7 @@ function mapRpcError(rpc: string, error: unknown, expectedHash: string | null): 
       return new ModelVersionNotFoundError(message, { cause: error });
     case 'MV409':
       return new ModelVersionCasConflictError(message, expectedHash, { cause: error });
-    case 'MV412':
-      return new ModelVersionBaseUnverifiableError(message, { cause: error });
     default:
-      // Includes MV500 (the RPC's own post-write assertion) and PGRST202
-      // (function absent). Both are fail-closed store errors: the whole
-      // transaction rolled back, so nothing partial was committed.
       return new ModelVersionStoreError(message, { cause: error });
   }
-}
-
-/**
- * Parse the atomic restore receipt. Every field is checked: a receipt that
- * cannot be parsed is a hard store error, never a degraded success — this
- * is the canonical-state seam, and a receipt is the only thing the caller
- * has to reconcile against.
- */
-function parseAtomicRestoreOutcome(rpc: string, data: unknown): AtomicRestoreOutcome {
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-    throw new ModelVersionStoreError(`${rpc} returned non-object receipt: ${JSON.stringify(data)}`);
-  }
-  const row = data as Record<string, unknown>;
-  const versionId = row.version_id;
-  const versionNumber = row.version_number;
-  const hash = row.graph_identity_hash;
-  const restoredFrom = row.restored_from_version_id;
-  if (
-    typeof versionId !== 'string' ||
-    typeof versionNumber !== 'number' ||
-    typeof hash !== 'string' ||
-    typeof restoredFrom !== 'string'
-  ) {
-    throw new ModelVersionStoreError(`${rpc} returned malformed receipt: ${JSON.stringify(data)}`);
-  }
-  // `graph` must be PRESENT. A receipt without the restored bytes cannot be
-  // reconciled against, and silently returning `undefined` here would hand
-  // the route an empty graph to echo to the user as the restored model.
-  if (!('graph' in row) || row.graph === undefined) {
-    throw new ModelVersionStoreError(`${rpc} receipt carries no graph: ${JSON.stringify(data)}`);
-  }
-  const undoVersionId = row.undo_version_id;
-  return {
-    version_id: versionId,
-    version_number: versionNumber,
-    graph_identity_hash: hash,
-    restored_from_version_id: restoredFrom,
-    undo_version_id: typeof undoVersionId === 'string' ? undoVersionId : null,
-    graph: row.graph,
-    replayed: row.replayed === true,
-    event_id: typeof row.event_id === 'string' ? row.event_id : null,
-  };
 }

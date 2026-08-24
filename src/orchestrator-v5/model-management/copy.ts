@@ -72,9 +72,5 @@ export const MODEL_MANAGEMENT_ERROR_COPY: Record<ModelManagementErrorCode, CopyB
     headline: 'Nothing to save',
     body: 'There is no model content to version yet. Add to your model, then save a version.',
   },
-  base_unverifiable: {
-    headline: 'Nothing was changed',
-    body: "We could not confirm this model's current state, so the restore was not applied. Nothing was overwritten. Try again shortly.",
-  },
   store_error: MODEL_MANAGEMENT_COPY.errorGeneric,
 };

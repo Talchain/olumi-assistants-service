@@ -21,7 +21,6 @@ import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { compareVersionRecords } from './compare.js';
 import {
-  ModelVersionBaseUnverifiableError,
   ModelVersionCasConflictError,
   ModelVersionNotFoundError,
   ModelVersionSignInRequiredError,
@@ -30,7 +29,6 @@ import {
 import {
   CAS_CONFLICT_KIND,
   SIGN_IN_REQUIRED_MESSAGE,
-  type AtomicRestoreOutcome,
   type ModelManagementResult,
   type ModelVersionEvent,
   type ModelVersionRecord,
@@ -58,26 +56,10 @@ export interface SaveVersionRequest {
   readonly event_id?: string;
 }
 
-/**
- * Component 4 — the request for the ONE-TRANSACTION restore.
- *
- * ⚠ `RestoreVersionRequest` (the pre-atomic shape) is GONE. It described a
- * version-row write whose companion working-graph write lived in the route,
- * in a separate transaction — the split that made `RESTORE_INCOMPLETE`
- * representable. Deleting it rather than deprecating it is deliberate: a
- * second restore entry point is how the defect comes back.
- */
-export interface RestoreVersionAtomicRequest {
+export interface RestoreVersionRequest {
   readonly scenario_id: string;
   readonly version_id: string;
-  /** Idempotency key. REQUIRED — a replay returns the original receipt. */
-  readonly mutation_id: string;
-  /** The target version's stored graph, re-validated and re-projected. */
-  readonly graph: unknown;
-  /** The target version's stored identity hash, as the caller read it. */
-  readonly expected_source_identity_hash: string;
   readonly label?: string;
-  /** CAS against the WORKING graph's identity — not the head version's. */
   readonly expected_graph_identity_hash?: string;
 }
 
@@ -147,72 +129,20 @@ export class ModelManagementService {
     );
   }
 
-  /**
-   * Component 4 — the ONE-TRANSACTION restore. The whole operation (undo
-   * snapshot, restore row, head move, working graph, journey event) commits
-   * or it does not; there is no partial outcome to represent.
-   *
-   * Identity of the graph being restored is computed HERE, by the Group A
-   * module, exactly as `saveVersion` does — never SQL-side, never supplied
-   * by a client. The SAME hash is written to `scenarios.graph_identity_hash`
-   * and to the new head version, so the two cannot disagree afterwards.
-   */
-  async restoreVersionAtomic(
-    request: RestoreVersionAtomicRequest,
-  ): Promise<ModelManagementResult<AtomicRestoreOutcome>> {
+  async restoreVersion(
+    request: RestoreVersionRequest,
+  ): Promise<ModelManagementResult<VersionWriteOutcome>> {
     if (!this.isEnabled()) return { status: 'disabled' };
-
-    const identity = computeGraphIdentityHash(
-      request.graph as GraphStateIngress | null | undefined,
-    );
-    if (identity === null) {
-      return {
-        status: 'error',
-        error: {
-          code: 'empty_graph',
-          recoverable: true,
-          message: 'No graph content to restore (absent or identity-empty version graph).',
-        },
-      };
-    }
-
-    try {
-      const outcome = await this.store.restoreVersionAtomic({
+    return this.runWrite('model_version_restored', request.scenario_id, () =>
+      this.store.restoreVersion({
         scenario_id: request.scenario_id,
         version_id: request.version_id,
-        mutation_id: request.mutation_id,
-        graph: request.graph,
-        graph_identity_hash: identity.value,
-        hash_algorithm: identity.algorithm,
-        identity_projection_version: identity.projection_version,
-        identity_normaliser_version: identity.normaliser_version,
-        graph_schema_version: identity.graph_schema_version,
-        expected_source_identity_hash: request.expected_source_identity_hash,
         ...(request.label !== undefined ? { label: request.label } : {}),
         ...(request.expected_graph_identity_hash !== undefined
           ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
           : {}),
-      });
-      // A replay wrote nothing, so it produced no durable journey event and
-      // must not re-announce one — version history records changes, not
-      // confirmations (contract §7.3, the same rule `deduped` obeys).
-      if (!outcome.replayed && outcome.event_id !== null) {
-        await notifyVersionEventSink(this.eventSink, {
-          event_version: 'model_version_event.v1',
-          event_id: outcome.event_id,
-          event_type: 'model_version_restored',
-          scenario_id: request.scenario_id,
-          version_id: outcome.version_id,
-          version_number: outcome.version_number,
-          graph_identity_hash: outcome.graph_identity_hash,
-          restored_from_version_id: outcome.restored_from_version_id,
-          occurred_at_iso: new Date().toISOString(),
-        });
-      }
-      return { status: 'ok', value: outcome };
-    } catch (err) {
-      return mapThrownError(err);
-    }
+      }),
+    );
   }
 
   async listVersions(
@@ -407,18 +337,6 @@ function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
       status: 'error',
       error: {
         code: 'version_not_found',
-        recoverable: true,
-        message: err.message,
-      },
-    };
-  }
-  if (err instanceof ModelVersionBaseUnverifiableError) {
-    return {
-      status: 'error',
-      error: {
-        code: 'base_unverifiable',
-        // Recoverable: the operator can restore the identity posture; the
-        // caller cannot fix it by retrying, but nothing is broken or lost.
         recoverable: true,
         message: err.message,
       },
