@@ -69,7 +69,7 @@ import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
 } from './option-intervention-guard.js';
-import { hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
+import { EDIT_VERB_BASES, hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
 
 /**
  * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
@@ -77,8 +77,66 @@ import { hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
  * means one path treats "Set X to pretty likely" as an edit and the other
  * does not (CLAUDE.md trap 12 — the hand-maintained mirror).
  */
-export const EDIT_VERB_PATTERN =
-  /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
+/**
+ * DERIVED from `EDIT_VERB_BASES`, never re-listed. The veto in
+ * `mutation-warrant.ts` reads the same vocabulary, so a verb that can authorise
+ * a write here is always a verb that can forbid one there. They drifted apart
+ * once — overlapping on three of ten — and that gap was SENDABLE P0.
+ */
+/**
+ * The model's OWN ENTITY LABELS, handed to the no-change veto so a prohibition
+ * naming a factor is recognised as a prohibition about the model.
+ *
+ * ⭐ This closes the asymmetry that was SENDABLE P0 (24 Aug 2026): this file
+ * already resolves these very labels to AUTHORISE a write (see the
+ * `normMessage.includes(normLabel)` candidate scan below), while the veto could
+ * only see the four tokens {model, models, graph, graphs}. So
+ * "Whatever you do, don't set Rep Adoption Quality to 0.2" produced no veto
+ * candidate at all, the write went through, and the product replied
+ * "Updated Rep Adoption Quality from 0.7 to 0.2."
+ *
+ * The same graph, read the same way, for both directions.
+ */
+function modelEntityLabels(
+  graphLookup: GraphLookup | undefined,
+  factorNodeIds?: ReadonlySet<string>,
+): readonly string[] {
+  if (!graphLookup) return [];
+  try {
+    const out: string[] = [];
+    for (const entity of graphLookup.listEntitiesByKind('node')) {
+      // ⚠ NARROWED TOWARD THE POOL THE GRANT SIDE PREFERS. `listEntitiesByKind`
+      // buckets factor together with outcome/decision/risk/action, and the
+      // candidate scan below narrows to `factorNodeIds` before matching. Handing
+      // the veto the WIDER pool made naming a risk or outcome in a negative
+      // aside — "Don't increase Churn — set Growth to 0.9." — cancel an edit to
+      // an unrelated factor.
+      //
+      // ⚠ NOT "the same pool", and an earlier version of this comment said so
+      // wrongly. `set_factor_value` CAN reach a non-factor: there is a
+      // documented non-factor fallback below, and an unfiltered-pool fallback
+      // when the narrowed pool would empty. Measured: "Do not change Customer
+      // Churn Risk to 0.2." dispatches with a risk candidate, and the executor
+      // downgrades it to `refuse_non_factor_kind` downstream. So the veto's
+      // domain here is strictly NARROWER than the grant's — deliberately
+      // conservative, and the asymmetry is now in the safe direction.
+      const id = (entity as { id?: unknown }).id;
+      if (factorNodeIds && (typeof id !== 'string' || !factorNodeIds.has(id))) continue;
+      const label = (entity as { label?: unknown }).label;
+      if (typeof label === 'string' && label.trim().length > 0) out.push(label);
+    }
+    return out;
+  } catch {
+    // A lookup that cannot enumerate must not take the turn down; the veto
+    // simply falls back to its model-object vocabulary.
+    return [];
+  }
+}
+
+export const EDIT_VERB_PATTERN = new RegExp(
+  `\\b(${EDIT_VERB_BASES.join('|')})\\b`,
+  'i',
+);
 
 /**
  * P0 V5 golden-path repair (Wave 2, Path B) — deictic reference patterns.
@@ -533,7 +591,7 @@ export function tryDeterministicValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message)) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -970,7 +1028,7 @@ export function tryCompoundValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
-  if (hasExplicitNoModelChangeIntent(message)) {
+  if (hasExplicitNoModelChangeIntent(message, modelEntityLabels(graphLookup, factorNodeIds))) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
 
@@ -1213,6 +1271,11 @@ export function tryDeicticValueUpdate(
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
+  // ⚠ NO LABEL DOMAIN ON THE DEICTIC PATH, deliberately. This route resolves its
+  // target by POINTER ("that factor", "this one"), never by label, and it has no
+  // factor-kind information to narrow with — so handing it every node label
+  // would give the veto a domain strictly wider than anything this path can
+  // write, which is exactly the over-trigger the narrowing above exists to stop.
   if (hasExplicitNoModelChangeIntent(message)) {
     return { matched: false, skip_reason: 'explicit_no_model_change' };
   }
