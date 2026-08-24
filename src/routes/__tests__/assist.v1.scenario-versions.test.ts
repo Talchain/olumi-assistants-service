@@ -604,6 +604,35 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
     await app.close();
   });
 
+  it("fails closed when the internal comparison would violate the public diff contract", async () => {
+    const current = await compareVersions();
+    compareVersions.mockResolvedValue({
+      ...current,
+      value: {
+        ...current.value,
+        categories: {
+          ...current.value.categories,
+          structure: [
+            {
+              ...current.value.categories.structure[0],
+              path: "not-a-json-pointer",
+              entity_id: "",
+            },
+          ],
+        },
+      },
+    });
+    const app = await buildApp();
+    const res = await post(app, "/versions/compare", {
+      user_id: OWNER,
+      from_version_id: VERSION_A,
+      to_version_id: VERSION_B,
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().message).toBe("Those versions could not be compared right now.");
+    await app.close();
+  });
+
   it("rejects client graph or alleged hash truth", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {

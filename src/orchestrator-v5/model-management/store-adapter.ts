@@ -484,6 +484,26 @@ function parseAtomicRestoreOutcome(
   ) {
     throw new ModelVersionStoreError(`${rpc} returned malformed provenance: ${JSON.stringify(data)}`);
   }
+  if (
+    row.actor_kind !== 'known' &&
+    row.actor_kind !== 'system' &&
+    row.actor_kind !== 'unknown'
+  ) {
+    throw new ModelVersionStoreError(`${rpc} returned malformed actor_kind: ${JSON.stringify(data)}`);
+  }
+  if (
+    (row.actor_kind === 'known' &&
+      (typeof row.authored_by !== 'string' || row.authored_by.length === 0)) ||
+    (row.actor_kind !== 'known' && row.authored_by !== null)
+  ) {
+    throw new ModelVersionStoreError(`${rpc} returned contradictory actor attribution: ${JSON.stringify(data)}`);
+  }
+  if (
+    row.creation_kind !== 'restore' ||
+    row.source_version_id !== row.restored_from_version_id
+  ) {
+    throw new ModelVersionStoreError(`${rpc} returned contradictory restore provenance: ${JSON.stringify(data)}`);
+  }
   return {
     mutation_id: row.mutation_id as string,
     version_id: row.version_id as string,

@@ -99,6 +99,7 @@ import {
   ModelVersionsListV2LocalSchema,
   type ModelVersionSummaryV2Local,
 } from "../orchestrator-v5/model-management/history-v2.js";
+import { ModelVersionDiffV1LocalSchema } from "../orchestrator-v5/model-management/diff-v1.js";
 import type {
   ModelManagementResult,
   ModelVersionRecord,
@@ -624,12 +625,25 @@ export default async function route(app: FastifyInstance) {
       const wireComparison = comparison.relation === "different"
         ? (({ diff: _internalCounts, short_circuit: _internalShortCircuit, ...wire }) => wire)(comparison)
         : (({ short_circuit: _internalShortCircuit, ...wire }) => wire)(comparison);
-      return reply.code(200).send({
+      const wireOutcome = ModelVersionDiffV1LocalSchema.safeParse({
         schema: MODEL_VERSION_DIFF_SCHEMA,
         scenario_id: ctx.scenarioId,
         ...wireComparison,
         request_id: requestId,
       });
+      if (!wireOutcome.success) {
+        log.error(
+          {
+            event: "v5.scenario_versions.compare_public_egress_invalid",
+            request_id: requestId,
+            scenario_id: ctx.scenarioId,
+            issues: wireOutcome.error.issues.slice(0, 5),
+          },
+          "Scenario versions — comparison failed the public diff contract; failing closed",
+        );
+        return unavailable(reply, requestId, "Those versions could not be compared right now.");
+      }
+      return reply.code(200).send(wireOutcome.data);
     },
   );
 
