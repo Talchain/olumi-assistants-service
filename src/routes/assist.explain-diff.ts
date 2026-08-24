@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ExplainDiffInput, ExplainDiffOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
@@ -57,10 +57,7 @@ export const EXPLAIN_DIFF_PATHS = [
 ] as const;
 
 export default async function route(app: FastifyInstance) {
-  const handler = async (
-    req: Parameters<Parameters<FastifyInstance["post"]>[1]>[0],
-    reply: Parameters<Parameters<FastifyInstance["post"]>[1]>[1],
-  ) => {
+  const handler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
     const parsed = ExplainDiffInput.safeParse(req.body);
     
