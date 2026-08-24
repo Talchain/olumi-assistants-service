@@ -131,6 +131,18 @@ export type CeeTask =
   | "suggest_options"
   // Display-only compatibility name. The executable route is explain_diff.
   | "explainer"
+  // The EXECUTABLE explain-diff task — POST /assist/explain-diff calls
+  // getAdapter('explain_diff'). Promoted to a first-class CeeTask because it
+  // declares a provider constraint in ROUTER_TASK_PROVIDER_CAPABILITIES: with
+  // no checked-in default it fell through to the GLOBAL provider fallback,
+  // which on the deployed posture (LLM_PROVIDER absent → config default
+  // "openai") is gpt-4o-mini — a provider that does not implement the task, so
+  // every call died at resolution with MODEL_PROVIDER_MISMATCH. Same precedent
+  // and same reasoning as validate_graph (ROADMAP 2.146): a task whose provider
+  // must not be an accident of deployment env gets a checked-in default.
+  // The display-only `explainer` row above is a DIFFERENT string and stays
+  // display-only — they are deliberately not synonyms.
+  | "explain_diff"
   | "orchestrator"
   // Inert compatibility/PMS-readiness slot. LLMAdapter.repairGraph and every
   // executable caller were removed; do not report this as a live AI call.
@@ -222,6 +234,12 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   clarification: "gpt-4.1-2025-04-14",
   preflight: "gpt-4.1-2025-04-14",
   explainer: "gpt-4.1-2025-04-14",
+  // PROVIDER-CONSTRAINED (ROUTER_TASK_PROVIDER_CAPABILITIES): only the
+  // Anthropic and Fixtures adapters implement explainDiff. This is the
+  // EXECUTABLE task; the `explainer` row above is the display-only
+  // compatibility name and is deliberately left on its OpenAI model — the two
+  // are different strings and this change moves only this one.
+  explain_diff: "claude-sonnet-5",
   evidence_helper: "gpt-4.1-2025-04-14",
   sensitivity_coach: "gpt-4.1-2025-04-14",
   // Quality tier - reconciled to live staging CEE_MODEL_* (2026-08-08)
@@ -233,7 +251,18 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // Premium tier - advanced reasoning for complex tasks
   options: "gpt-5.2",
   suggest_options: "gpt-5.2",  // Alias for options task
-  critique_graph: "gpt-5.2",
+  // PROVIDER-CONSTRAINED (ROUTER_TASK_PROVIDER_CAPABILITIES): only the
+  // Anthropic and Fixtures adapters implement critiqueGraph. The previous
+  // default here was gpt-5.2 — an OpenAI model — so the checked-in default was
+  // GUARANTEED to fail at resolution with MODEL_PROVIDER_MISMATCH, and
+  // POST /assist/critique-graph could never serve on any deployment that did
+  // not set CEE_MODEL_CRITIQUE to an Anthropic model. Provider follows the
+  // winning model through MODEL_REGISTRY, so naming an Anthropic model here is
+  // what assigns the provider — no global LLM_PROVIDER flip is involved and no
+  // other task moves. Guarded by
+  // tests/unit/router-task-provider-capability.test.ts, which DERIVES the
+  // constrained set from ROUTER_TASK_PROVIDER_CAPABILITIES.
+  critique_graph: "claude-sonnet-5",
   decision_review: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_DECISION_REVIEW=gpt-4.1
   // Validation Pass 2 — CROSS-PROVIDER ON PURPOSE (ROADMAP 2.146). Pass 1 (the
   // drafter) is `draft_graph` above = claude-sonnet-5 (anthropic); this is
@@ -544,7 +573,8 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     promptTask: 'critique_graph',
     promptIdentity: 'runtime_source_version_hash',
     structuredContract: 'CritiqueGraphResult schema',
-    fallback: 'Anthropic serves PMS/default bytes; the checked-in OpenAI model lacks this adapter capability',
+    fallback:
+      'Anthropic serves PMS/default bytes; the checked-in task model is Anthropic so the capability constraint is satisfied without an env override',
     promotionGate: 'none_no_real_pack',
   },
   decision_review: {
@@ -593,13 +623,17 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
   },
   explain_diff: {
     hasExecutablePath: true,
-    modelAuthority: 'router_global_fallback',
-    checkedInModel: null,
+    // Was 'router_global_fallback' with checkedInModel: null. That is what made
+    // the task's provider an accident of deployment env: the global fallback
+    // resolves to OpenAI, which does not implement explainDiff.
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.explain_diff,
     promptAuthority: 'code_constant',
     promptTask: null,
     promptIdentity: 'code_hash',
     structuredContract: 'ExplainDiffResult rationales parser',
-    fallback: 'code-constant prompt; global model must resolve to Anthropic capability',
+    fallback:
+      'code-constant prompt; checked-in Anthropic task model satisfies the explain_diff provider constraint',
     promotionGate: 'none_no_real_pack',
   },
   extraction: {

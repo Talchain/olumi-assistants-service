@@ -37,6 +37,12 @@ import { isClaimableByClarificationResume } from '../routing/clarification-resum
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { findChipRawDecimalLeak } from './chip-safety.js';
 import {
+  UNITLESS_VALUE_SCALE_PHRASE,
+  exampleClause,
+  valueExampleForFamily,
+  valueExampleForUnit,
+} from './value-ask-guidance.js';
+import {
   buildConfigureOptionAdvisedFormat,
   buildOptionEffectReference,
 } from '../configure-option-chip-text.js';
@@ -390,9 +396,15 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
   if (readString(details.rejection_reason) === 'missing_value') {
     return {
       body: {
+        // ⭐ WITNESSED (staging UI `88cb7e37` / CEE `4e88390`): this branch
+        // closed with "for example £100,000" on a UNITLESS 0-1 quality factor.
+        // This path threads NO unit (see `preexecuteSetFactorValueStructural`
+        // — details carry parameter/rejection_reason/issue/handler_id/
+        // actual_value and nothing else), so ANY unit example here is
+        // fabricated. Point at the factor's own scale instead of inventing one.
         assistant_text:
-          `I couldn't tell what value to use. Please tell me the number ` +
-          `you want, for example £100,000.`,
+          `I couldn't tell what value to use. Tell me the number you want, ` +
+          `${UNITLESS_VALUE_SCALE_PHRASE}, and I'll apply it.`,
         suggested_actions: [
           {
             id: chipId('prompt', 'param-supply-value'),
@@ -517,11 +529,20 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
   }
 
   if (rejectionReason === 'bare_number_outside_cap') {
+    // The factor's cap does NOT imply a unit: `effectiveUnit` is
+    // `parsed.unit ?? obs?.unit`, and a capped UNITLESS factor leaves both
+    // undefined. Asking such a user for "the value with its unit" and showing
+    // them £100,000 is the witnessed defect.
+    const capExample = valueExampleForUnit(readString(details.unit));
+    const capAsk =
+      capExample === null
+        ? `Tell me the value ${UNITLESS_VALUE_SCALE_PHRASE} and I'll apply it.`
+        : `Tell me the value with its unit${exampleClause(capExample)} and I'll apply it.`;
     return {
       body: {
         assistant_text:
           `${sanitiseForUser(issue ?? error.message)} I haven't changed anything. ` +
-          `Tell me the value with its unit, for example £100,000, and I'll apply it.`,
+          `${capAsk}`,
         suggested_actions: [
           {
             id: chipId('prompt', 'param-supply-unit-value'),
@@ -561,12 +582,19 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
     const subject = factorLabel !== undefined
       ? safeLabel({ label: factorLabel, kind: undefined })
       : 'That factor';
+    // Same defect as `bare_number_outside_cap`: a factor with no recorded
+    // value very often has no recorded unit either, and this branch showed
+    // every one of them a currency.
+    const deltaExample = valueExampleForUnit(readString(details.unit));
+    const deltaAsk =
+      deltaExample === null
+        ? `Tell me what the value should be, ${UNITLESS_VALUE_SCALE_PHRASE}, and I'll set it.`
+        : `Tell me what the value should be${exampleClause(deltaExample)} and I'll set it.`;
     return {
       body: {
         assistant_text:
           `${subject} doesn't have a recorded value yet, so I can't adjust it ` +
-          `relative to a current value. Tell me what the value should be, for ` +
-          `example £100,000, and I'll set it.`,
+          `relative to a current value. ${deltaAsk}`,
         suggested_actions: [
           {
             id: chipId('prompt', 'param-absolute-set'),
@@ -600,12 +628,92 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
     typeof ctx.userMessage === 'string' &&
     !messageEvidencesUnit(ctx.userMessage, readString(details.unit))
   ) {
+    // ⭐⭐ THE WITNESSED DEFECT (staging UI `88cb7e37` / CEE `4e88390`), on the
+    // product's OWN recommended next step. The copy below used to read "so I
+    // need the value as a plain number ... Tell me the plain number you want".
+    // The user had ALREADY sent a plain number (0.7), and the same value
+    // succeeded when sent bare moments later. THE STATED REASON WAS NOT THE
+    // ACTUAL BLOCKER, so the user retyped numbers that could only keep failing.
+    //
+    // What this branch PROVABLY knows, and what the copy must therefore say:
+    //   • the factor is unitless — `unit_redeclares_scale` fires only on
+    //     `unit !== undefined && factorUnit === undefined`
+    //     (`evaluate-factor-value-proposal.ts` 2c);
+    //   • the unit did NOT come from the user — this branch's own guard is
+    //     `!messageEvidencesUnit(ctx.userMessage, details.unit)`;
+    //   • the magnitude was NEVER INSPECTED by the predicate.
+    // Therefore: name the UNIT as what cannot be applied, and hand back a
+    // sendable restatement. The refusal itself is untouched.
+    //
+    // ⚠⚠ F1, REVIEW OF #1080 — WHAT THIS COPY MUST *NOT* SAY, and why an
+    // earlier draft of this branch said it anyway. That draft closed with
+    // "the number isn't the problem: the unit is", reasoning that because the
+    // predicate never inspects magnitude, the magnitude cannot be at fault.
+    // THAT IS A NON-SEQUITUR: a predicate having no opinion on the number is
+    // not evidence the number is fine. `details.value` is `parsed.numeric`,
+    // and `normalise-factor-value.ts` declares the proposal's number lives in
+    // the UNIT's frame ("{ value: 5, unit: '%' } — percentage on 0-1 model
+    // scale") — while this branch fires precisely when that unit is one the
+    // user never stated. Reachable counter-example: a unitless uncapped factor
+    // sitting at 0.6, "set it to 12", router proposes `{value: 12, unit: '%'}`,
+    // guard 2c fires. "The number isn't the problem" plus `Say "Set X to 12"`
+    // would be false AND would steer the user into writing 12 onto a 0-1
+    // factor, which nothing downstream caps. The old copy claimed no such
+    // thing. So: assert nothing about the magnitude, and make the restatement
+    // CONDITIONAL ("if you meant N as a plain number") rather than an
+    // endorsement. This is trap 13d — an invariant written against the
+    // witnessed failure mode (0.7, where the two frames happened to coincide)
+    // instead of against the spec.
+    //
+    // ⚠ The unit is still never NAMED (ROADMAP 2.1261): saying "you applied %"
+    // about a % the routing model re-read from history is the defect that
+    // branch exists to close. "The edit I built for it carried one" attributes
+    // it where it belongs.
+    const renderedLabel = factorLabel !== undefined
+      ? safeLabel({ label: factorLabel, kind: undefined })
+      : undefined;
+    const unstatedSubject = renderedLabel ?? 'This factor';
+    // ⚠ F2, REVIEW OF #1080 — GATE ON THE RENDERED LABEL, NOT THE RAW ONE.
+    // The restatement tells the user to send a message VERBATIM, so it is only
+    // safe when the label we print is the label the router will match. An
+    // earlier draft gated on `factorLabel !== undefined` while interpolating
+    // `safeLabel(...)`, which has two reachable failure modes: an id-shaped
+    // label (`rep_adoption`) makes `safeLabel` return the bare deictic
+    // 'that item' — and `repair-value-binding.ts` documents a bare deictic as
+    // exactly what CANNOT anchor, so we would be prescribing a message the
+    // system has proven it cannot route; and a label over MAX_LABEL_LENGTH is
+    // truncated to `first 57 + '...'`, producing an unclosed quote around a
+    // label the user is told to send as-is. Byte equality with the raw label
+    // rules out substitution, truncation AND trimming in one check; the
+    // explicit deictic test covers a factor genuinely labelled "that item".
+    const labelIsFaithful =
+      renderedLabel !== undefined &&
+      renderedLabel === factorLabel &&
+      renderedLabel !== 'that item';
+    // Only a `set` may be restated as a target value: on increase/decrease/
+    // multiply `details.value` is the DELTA, and "Set X to <delta>" would
+    // invent the user's figure. Long floats are computed arithmetic
+    // ("1.2999999999999998") and are never echoed back to a user.
+    const unstatedValue = typeof details.value === 'number' && Number.isFinite(details.value)
+      ? details.value
+      : undefined;
+    const restatable =
+      readString(details.operator) === 'set' &&
+      unstatedValue !== undefined &&
+      String(unstatedValue).length <= 12 &&
+      labelIsFaithful;
+    const unstatedNext = restatable
+      ? `If you meant ${String(unstatedValue)} as a plain number on this ` +
+        `factor's own scale, say "Set ${unstatedSubject} to ` +
+        `${String(unstatedValue)}" and I'll apply it.`
+      : `Tell me the value again as a plain number on this factor's own scale ` +
+        `and I'll apply it.`;
     return {
       body: {
         assistant_text:
-          `This factor is recorded without a unit, so I need the value as a ` +
-          `plain number. I haven't changed anything. Tell me the plain number ` +
-          `you want and I'll apply it.`,
+          `${unstatedSubject} is recorded without a unit, so the unit in the ` +
+          `edit I built for it cannot be applied without changing what it ` +
+          `measures. I haven't changed anything. ${unstatedNext}`,
         suggested_actions: [
           {
             id: chipId('prompt', 'param-retry'),
@@ -963,12 +1071,26 @@ function composeValueUnitUnresolved(error: ValidationError): BranchResult {
   const subject = factorLabel
     ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor`
     : `that factor`;
+  // The example must come from THIS factor's family, not from a hardcoded
+  // currency. `factor_unit_family` is threaded by the turn-executor on every
+  // unresolved verdict; a `count` or `time` factor was previously shown
+  // £100,000. (This code cannot fire on a UNITLESS factor —
+  // `classifyValueUnitAgainstFactor` returns `resolved: true` when
+  // `factorFamily === null` — so this is the same defect class as the
+  // witnessed one rather than the witnessed one itself.)
+  const familyRaw = readString(details.factor_unit_family);
+  const unresolvedExample = valueExampleForFamily(
+    familyRaw === 'currency' || familyRaw === 'percent' || familyRaw === 'time' ||
+    familyRaw === 'metric' || familyRaw === 'count'
+      ? familyRaw
+      : null,
+  );
   return {
     body: {
       assistant_text:
         `I wasn't sure what value to use for ${subject}, so I haven't ` +
-        `changed anything. Please tell me the value with its unit, for ` +
-        `example £100,000, and I'll apply it.`,
+        `changed anything. Please tell me the value with its unit` +
+        `${exampleClause(unresolvedExample)} and I'll apply it.`,
       suggested_actions: [fallbackPrompt('Give the value with its unit')],
     },
     template_id: 'value_unit_unresolved',

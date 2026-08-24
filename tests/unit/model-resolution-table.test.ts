@@ -36,7 +36,7 @@ const RESOLUTION_TABLE: ReadonlyArray<{
   { site: "C4 decision_review", source: "TASK_MODEL_DEFAULTS.decision_review", expected: "gpt-4.1-2025-04-14" },
   { site: "C7/C8 repair_graph", source: "TASK_MODEL_DEFAULTS.repair_graph", expected: "gpt-4.1-2025-04-14" },
   // ── LIVE standalone /assist/* ───────────────────────────────────────────
-  { site: "C13 critique_graph", source: "TASK_MODEL_DEFAULTS.critique_graph", expected: "gpt-5.2" },
+  { site: "C13 critique_graph", source: "TASK_MODEL_DEFAULTS.critique_graph", expected: "claude-sonnet-5" },
   { site: "C15 suggest_options", source: "TASK_MODEL_DEFAULTS.suggest_options", expected: "gpt-5.2" },
   // ── DARK but registry-covered (governed by the drift guard) ─────────────
   { site: "C10 m2_graph_review (dark)", source: "TASK_MODEL_DEFAULTS.m2_graph_review", expected: "claude-opus-4-8" },
@@ -50,6 +50,9 @@ const RESOLUTION_TABLE: ReadonlyArray<{
   { site: "assist clarification", source: "TASK_MODEL_DEFAULTS.clarification", expected: "gpt-4.1-2025-04-14" },
   { site: "assist preflight", source: "TASK_MODEL_DEFAULTS.preflight", expected: "gpt-4.1-2025-04-14" },
   { site: "assist explainer", source: "TASK_MODEL_DEFAULTS.explainer", expected: "gpt-4.1-2025-04-14" },
+  // The EXECUTABLE explain-diff task, distinct from the display-only
+  // `explainer` row above. Provider-constrained to Anthropic/Fixtures.
+  { site: "assist explain-diff", source: "TASK_MODEL_DEFAULTS.explain_diff", expected: "claude-sonnet-5" },
   { site: "assist evidence_helper", source: "TASK_MODEL_DEFAULTS.evidence_helper", expected: "gpt-4.1-2025-04-14" },
   { site: "assist sensitivity_coach", source: "TASK_MODEL_DEFAULTS.sensitivity_coach", expected: "gpt-4.1-2025-04-14" },
   { site: "bias_check", source: "TASK_MODEL_DEFAULTS.bias_check", expected: "claude-sonnet-4-20250514" },

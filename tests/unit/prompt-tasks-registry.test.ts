@@ -62,8 +62,23 @@ const SCHEMA_TASKS_WITHOUT_DEFAULTS = ['evidence_helper', 'sensitivity_coach', '
  * vocabulary predates the prompt registry: `clarification` and `options` are
  * legacy aliases of `clarify_brief` and `suggest_options`. They are real
  * routing entries, not drift. Exact-set assertion, same rationale as above.
+ *
+ * `explain_diff` is a third, different case — not a legacy alias but a routing
+ * task that genuinely has NO prompt-store entry. Its Anthropic limb builds the
+ * prompt from a code constant (RUNTIME_AI_TASK_AUTHORITY.explain_diff records
+ * `promptAuthority: 'code_constant'`, `promptTask: null`), so there is nothing
+ * for the PMS registry to key. It was added to TASK_MODEL_DEFAULTS because it
+ * declares a provider constraint in ROUTER_TASK_PROVIDER_CAPABILITIES and had
+ * no checked-in default to satisfy it — without one it inherited the global
+ * provider fallback (OpenAI), which does not implement the task, so every
+ * POST /assist/explain-diff died at resolution with MODEL_PROVIDER_MISMATCH.
+ * The display-only `explainer` row remains the PMS-facing compatibility name.
  */
-const MODEL_ROUTING_NON_PROMPT_TASKS = ['clarification', 'options'] as const;
+const MODEL_ROUTING_NON_PROMPT_TASKS = [
+  'clarification',
+  'explain_diff',
+  'options',
+] as const;
 
 describe('prompt task registry', () => {
   describe('PROMPT_TASKS is derived from CeeTaskIdSchema', () => {

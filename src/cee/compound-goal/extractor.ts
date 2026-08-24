@@ -245,6 +245,277 @@ const LOWER_BOUND_PATTERNS = [
 ];
 
 /** "Between X and Y" pattern (generates two constraints) */
+/* ===========================================================================
+ * NOUN-FORM LIMITS — "a £50,000 cap", "budget of £120,000", "Our budget is
+ * £50,000", "Cost ceiling: £50,000".
+ *
+ * ⚠ WHY THIS IS A SEPARATE PATH AND NOT A WIDENING OF THE UPPER BOUNDS.
+ * Every pattern above states a limit with a VERB ("must not exceed", "capped
+ * at", "keep under"). The verb is what carries the speaker's commitment, and
+ * the #888 direction predicate is built on it. These patterns state a limit
+ * with a NOUN, where the commitment is carried by the surrounding clause
+ * instead — so they need a screen the verb forms do not, and the verb forms
+ * need a direction gate these do not. Two questions, two predicates
+ * (CLAUDE.md trap 21). NOTHING HERE CHANGES HOW DIRECTION IS DECIDED FOR ANY
+ * FORM ALREADY RECOGNISED: a noun-form limit has no floor/ceiling ambiguity to
+ * resolve — a budget, a cap, a ceiling and a max are ceilings by definition,
+ * which is precisely why they can be read without the direction machinery.
+ *
+ * ── THE MEASUREMENT THAT SCOPED THIS ──────────────────────────────────────
+ * The reviewer's 72-case corpus (`__tests__/fixtures/`) scored this extractor
+ * FP=5 FN=18 at 77e2e7d9. ELEVEN of those eighteen false negatives are noun
+ * forms; the other seven are verb/comparative/temporal forms deliberately left
+ * alone and pinned as a KNOWN set in the corpus spec.
+ *
+ * ── WHY THE LEXICON IS THIS SHORT, AND MUST STAY SHORT ────────────────────
+ * `maximum` and `minimum` are ABSENT ON PURPOSE. Four corpus cases state a
+ * "maximum of N" that the reviewer adjudicated SILENT ("Under GDPR the fines
+ * can reach a maximum of £17,500,000", "Suppose the board imposed a maximum of
+ * 12 hires", "Is a maximum of 12 people realistic?", "A maximum of 12 hires
+ * would be preferable") and NOT ONE adjudicated `fire`. Admitting them buys
+ * nothing and costs four. `max` is admitted and `\b`-closed, so it reads
+ * "£50k max" and never "maximum".
+ * ========================================================================= */
+
+/** Nouns that NAME a limit rather than describe a quantity. */
+const LIMIT_NOUN = String.raw`(?:budget|cap|ceiling|limit|max)`;
+
+/**
+ * Adjectives that may sit between the determiner and the limit noun. They are
+ * NOT the target name — "hard limit of £250,000" is a limit on cost, not on
+ * "hard".
+ */
+const LIMIT_ADJECTIVE = String.raw`(?:hard|firm|strict|absolute|total|overall|annual|fixed|upper|maximum|monthly|quarterly)`;
+
+/** The same alternation, anchored — hoisted because it is invariant. */
+const LIMIT_ADJECTIVE_ONLY_RE = new RegExp(`^${LIMIT_ADJECTIVE}$`, "i");
+
+/** A currency-bearing amount. Noun forms REQUIRE one — see NOUN_FORM_PATTERNS. */
+const AMT_CURRENCY = String.raw`[£$€]\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}`;
+
+/**
+ * ⚠ THE CURRENCY REQUIREMENT IS A RECOGNITION BOUNDARY. IT IS NOT A SCREEN,
+ * AND AN EARLIER VERSION OF THIS COMMENT CLAIMED IT DID A SCREEN'S JOB.
+ *
+ * That claim — "requiring the symbol drops both without needing a tense or
+ * aspect predicate" — was FALSE, and the twin that appeared to prove it passed
+ * for a reason unrelated to the property it tested (CLAUDE.md trap 13b). The two
+ * corpus cases behind it ("the current ceiling of 30 seats … has now lapsed",
+ * "we manage 12 capital projects") merely happened to carry no `£`. Add one —
+ * "The old cost ceiling: £50,000 was lifted in January" — and the entire
+ * descriptive class walks through untouched. There was no tense screen; there
+ * was a currency filter being credited with work it was not doing. The real one
+ * is {@link PAST_TENSE_DESCRIPTIVE_RE}, added once an 88-case corpus over this
+ * path's actual input space made the gap visible.
+ *
+ * What the requirement genuinely does is bound RECOGNITION: a bare-number noun
+ * form ("a hard limit of 12 hires", "a 4% cap on attrition", "a 200ms latency
+ * ceiling") is not extracted, and neither is word-denominated currency ("50,000
+ * GBP", "five hundred thousand pounds") — a real brief typed into the UI spells
+ * money that way. Those are deliberate, recorded gaps, pinned in
+ * `noun-form-wire-corpora.test.ts`: an unextracted limit is a gap and an
+ * invented one is a lie, and the boundary is blind in BOTH directions, which is
+ * the only reason it is safe to leave.
+ */
+const NOUN_FORM_PATTERNS: ReadonlyArray<{
+  re: RegExp;
+  /** 1-based group holding the amount. */
+  amount: number;
+  /** 1-based group holding the limit noun, when the pattern captures one. */
+  noun?: number;
+  /** 1-based group holding a substantive word qualifying the noun ("Cost ceiling"). */
+  qualifier?: number;
+}> = [
+  // N1  "a £50,000 cap" · "£50k max" · "on a £90,000 budget"
+  //     ⚠ `\b` AFTER THE NOUN IS THE WHOLE SUBSTRING SCREEN. Five corpus cases
+  //     turn on it: "£50,000 capital investment", "£2m capacity", "£40,000
+  //     budgeting", "£5m capital", "12 capital projects". Every one is a
+  //     PREFIX of a limit noun inside a longer, entirely descriptive word.
+  { re: new RegExp(String.raw`(${AMT_CURRENCY})\s+(${LIMIT_NOUN})\b`, "gi"), amount: 1, noun: 2 },
+
+  // N2  "a hard limit of £250,000" · "The budget of £120,000"
+  {
+    re: new RegExp(
+      String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})\s+of\s+(${AMT_CURRENCY})`,
+      "gi",
+    ),
+    amount: 2,
+    noun: 1,
+  },
+
+  // N3  "Cost ceiling: £50,000" · "Budget constraint: £400k annual"
+  {
+    re: new RegExp(
+      String.raw`(?:\b([A-Za-z][\w-]{2,})\s+)?\b(${LIMIT_NOUN})(?:\s+constraints?)?\s*:\s*(${AMT_CURRENCY})`,
+      "gi",
+    ),
+    amount: 3,
+    noun: 2,
+    qualifier: 1,
+  },
+
+  // N4  "Our budget is £50,000" · "The budget for this is £50,000, hard"
+  {
+    re: new RegExp(
+      String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})(?:\s+for\s+(?:this|it|the\s+[\w-]+))?\s+is\s+(${AMT_CURRENCY})`,
+      "gi",
+    ),
+    amount: 2,
+    noun: 1,
+  },
+];
+
+/* ===========================================================================
+ * THE COMMITMENT SCREENS — six of them, and EVERY ONE IS CLOSED-CLASS OR
+ * STRUCTURAL.
+ *
+ * ⚠⚠ READ THIS BEFORE ADDING A SEVENTH. A noun form states a limit only when
+ * the speaker is ASSERTING it of their own decision. The same six words state
+ * nothing at all when negated, asked, supposed, preferred, or attributed to
+ * somebody else — and the corpus contains TEN such cases against TWO genuine
+ * `<noun> of <amount>` assertions. Recognition alone would have shipped ten
+ * false positives, each of which COERCES THE USER INTO RECORDING A LIMIT THEY
+ * NEVER SET. That is a lie, not a gap, and it is the worse of the two.
+ *
+ * These screens are deliberately built from CLOSED word classes — negation
+ * proper, interrogative punctuation, subordinators, first-person pronouns,
+ * possessive determiners — rather than from an open-ended lexicon of
+ * third-party nouns ("competitor", "consultant", "regulator", …). CLAUDE.md
+ * trap 22: a corpus of three cases cannot bound a predicate over every
+ * third-party subject in English, and a list of nouns is exactly the
+ * hand-maintained mirror that goes stale in the gap direction. A closed class
+ * can be enumerated; an open one can only be guessed at.
+ * ========================================================================= */
+
+/**
+ * NEGATION PROPER — and DELIBERATELY NOT `NEGATION_OR_PREVENTION_LEAD`.
+ *
+ * ⚠ THE PREVENTION VERBS MUST NOT BE HERE, AND THE CORPUS PROVES IT.
+ * `NEGATION_OR_PREVENTION_LEAD` carries `avoid|prevent|protect|guard|stop`
+ * because it screens a `below|under` bound whose DIRECTION a prevention verb
+ * reverses. A noun form has no direction to reverse, so those verbs are
+ * irrelevant to it — and they are actively harmful: the real captured brief
+ * "the goal is to avoid downtime on a £90,000 budget" states a £90,000 budget,
+ * and `avoid` governs the downtime, not the budget. Screening on the wider
+ * list drops that row. Two predicates, two jobs — reusing the wrong one here
+ * would have re-created trap 21 inside the fix for it.
+ */
+const NEGATION_PROPER_RE =
+  /\b(?:must\s+not|will\s+not|should\s+not|shall\s+not|would\s+not|could\s+not|do\s+not|does\s+not|did\s+not|is\s+not|are\s+not|was\s+not|were\s+not|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|without|never|not|no(?=\s))/i;
+
+/**
+ * Subordinators that put the whole clause in an unasserted, hypothetical mood.
+ *
+ * ⚠ READ ON THE WHOLE SENTENCE, NOT ON THE TEXT BEFORE THE NOUN. The first cut
+ * read the pre-noun window, for no stated reason, while its S2 and S4 siblings
+ * read the sentence — so a conditional that happened to sit AFTER the noun was
+ * invisible and "A budget of £120,000 would be workable IF THE BOARD AGREED"
+ * minted a hard limit on a sum nobody had agreed to. A conditional anywhere in
+ * the sentence is a conditional; word order is not the concept.
+ */
+const CONDITIONAL_LEAD_RE =
+  /\b(?:if|unless|suppose|supposing|imagine|assuming|hypothetically|in\s+the\s+event\s+that|were\s+we\s+to|had\s+we)\b/i;
+
+/**
+ * PAST TENSE — a limit that WAS is not a limit that IS.
+ *
+ * ⚠⚠ THE COMMENT THIS REPLACES CLAIMED THE CURRENCY REQUIREMENT SUBSTITUTED FOR
+ * A DESCRIPTIVE SCREEN. IT DID NOT, AND THE TWIN THAT "PROVED" IT PASSED FOR A
+ * REASON UNRELATED TO THE PROPERTY IT TESTED (CLAUDE.md trap 13b).
+ * The two corpus cases behind that claim merely happened to lack a `£`. Add one
+ * — "The old cost ceiling: £50,000 was lifted in January" — and the whole class
+ * walks straight through. There was no descriptive screen at all; there was a
+ * currency filter being credited with work it was not doing.
+ *
+ * ⚠ SUBJECT-INDEPENDENT, AND THAT IS THE WHOLE POINT. `THIRD_PARTY_POSSESSION_RE`
+ * already matched `had`, then ADMITTED it whenever the subject was first-person —
+ * so "In 2024 we had a cap of £30,000" minted a live limit BECAUSE of the word
+ * `we`. Tense and ownership are two different questions (trap 21); the screen
+ * that answers one must not be asked the other. Three closed forms, no lexicon.
+ */
+const PAST_TENSE_DESCRIPTIVE_RE = /\b(?:had|was|were|used\s+to\s+be)\b/i;
+
+/**
+ * Preference and approximation markers. A limit the user would LIKE is not a
+ * limit the user HAS, and an approximated one is not a stated threshold.
+ */
+const SOFT_INTENT_RE =
+  /\b(?:prefer(?:red|s|able|ably)?|ideal(?:ly)?|nice\s+to\s+have|would\s+like|hop(?:ing|es?|efully)|aspir(?:e|ing)|wish|target(?:ing)?|aiming\s+for|indicative|provisional|notional|soft|thereabouts|ballpark|roughly|approximately|around|circa|or\s+so|somewhere\s+near)\b/i;
+
+/**
+ * A POSSESSION VERB WHOSE SUBJECT IS NOT THE USER — "our competitor HAS a
+ * budget of £2m", "the previous project HAD a cap of £30,000".
+ *
+ * ⚠ THE DISCRIMINATOR IS THE PRONOUN CLASS, NOT THE SUBJECT NOUN. "We have a
+ * hard limit of £250,000" and "Our main competitor has a budget of £2m" differ
+ * only in who owns the verb, and first-person pronouns are a CLOSED SET while
+ * third-party subjects are not. Anchored to the end of the left window so it
+ * reads the possessor immediately governing this noun and not some earlier one.
+ */
+const THIRD_PARTY_POSSESSION_RE =
+  /\b([\w-]+)\s+(?:has|have|had)\s+(?:a|an|the|its|their|his|her)?\s*$/i;
+const FIRST_PERSON_SUBJECT = new Set(["we", "i", "our", "ours", "us", "my", "mine"]);
+
+/**
+ * "…said THEIR budget of £2m…" — the limit is explicitly somebody else's.
+ *
+ * The second alternative is the GENITIVE CLITIC: "the vendor's cost ceiling",
+ * "our competitor's budget is £2m". Found while deriving the opposite-direction
+ * twins rather than from the corpus, which contains no genitive case — the twin
+ * obligation is what surfaced it, which is the argument for writing twins
+ * before believing a screen is complete.
+ *
+ * ⚠⚠ IT SUPPRESSES EVERY GENITIVE, INCLUDING FIRST-PERSON ONES, AND THAT IS A
+ * DELIBERATE RECORDED GAP RATHER THAN AN OVERSIGHT. "Our team's budget is
+ * £50,000" states a real limit and is dropped here.
+ *
+ * The carve-out was written and then REMOVED, because it oscillated exactly the
+ * way the #888 predicate did. Exempting a first-person determiner fixes "our
+ * team's budget" and immediately re-breaks "Our MAIN COMPETITOR'S budget is
+ * £2m" — where `our` modifies the competitor, not the budget — and every
+ * further rule traded one against the other. `our` genuinely cannot be resolved
+ * to a possessor without parsing the noun phrase, and this file's doctrine is
+ * that an unextracted limit is a gap while an invented one is a lie. So the
+ * gap is taken knowingly, in the safe direction, and written down here instead
+ * of being hidden inside a lookbehind that silently did nothing.
+ *
+ * The first version of this constant used a variable-length lookbehind to
+ * express the carve-out and was DEAD for the case it was written for: the
+ * assertion sat immediately before "team's" and read the space, never `our`.
+ * A screen that looks like it discriminates and does not is worse than one
+ * that plainly does not.
+ */
+const THIRD_PERSON_POSSESSIVE_RE = /(?:\b(?:their|theirs|his|her|hers|its)|[\w-]+'s)\s*$/i;
+
+/**
+ * The sentence containing `index`, for the screens that are properties of a
+ * whole sentence rather than of the text leading up to the match.
+ *
+ * ⚠ SENTENCE-SCOPED, NOT BRIEF-SCOPED, AND THAT IS LOAD-BEARING. Two real
+ * captured briefs open with a question and then state a limit in the NEXT
+ * sentence — "Should we expand into Germany this year? The goal is to grow
+ * revenue by 20% and the budget is £500,000." A brief-scoped interrogative
+ * screen reads the `?` and drops a limit the user plainly stated.
+ *
+ * Split on terminators FOLLOWED BY WHITESPACE only: a bare `[.!?]` splits
+ * "£1.5m" and "1,500,000" mid-number, which is how ROADMAP 2.714 died.
+ */
+function governingSentence(brief: string, index: number): string {
+  let start = 0;
+  const boundary = /[.!?](?=\s)/g;
+  let m: RegExpExecArray | null;
+  let end = brief.length;
+  while ((m = boundary.exec(brief)) !== null) {
+    const at = m.index + 1;
+    if (at <= index) start = at;
+    else {
+      end = at;
+      break;
+    }
+  }
+  return brief.slice(start, end);
+}
+
 /**
  * A magnitude suffix sitting at the END of an already-cleaned amount token,
  * with optional separating space ("5m", "5 million"). DERIVED from the shared
@@ -792,6 +1063,125 @@ function extractLowerBoundConstraints(
  * negative). ROADMAP 1.52 — see `REDUCTION_PATTERNS` doc comment above
  * and `utils/reduction-framing.ts` for the full sign-inversion doctrine.
  */
+/**
+ * Resolve what a noun-form limit is a limit ON.
+ *
+ * "budget" names its own metric. "cap", "ceiling", "limit" and "max" do not —
+ * they name the LIMITING, and the thing limited has to come from the qualifier
+ * ("Cost ceiling") or, failing that, from the currency symbol the pattern
+ * already required. A `£` bound with no other subject is a bound on cost.
+ *
+ * ⚠ THIS IS ALSO WHAT KEEPS THE ROW ALIVE DOWNSTREAM. `isJunkNodeId` rejects
+ * any stem under four characters, so a row targeting `fac_cap` or `fac_max` is
+ * dropped by `remapConstraintTargets` before it can reach `goal_constraints[]`
+ * — the extractor would mint it and the pipeline would silently bin it, which
+ * reads in every test as "the fix works" and on the wire as nothing at all.
+ */
+function resolveLimitTarget(noun: string, qualifier: string | undefined): string {
+  const n = noun.toLowerCase();
+  if (n === "budget") return "budget";
+  const q = qualifier?.toLowerCase();
+  if (q && !STOP_WORDS.has(q) && !LIMIT_ADJECTIVE_ONLY_RE.test(q)) {
+    return q;
+  }
+  return "cost";
+}
+
+/**
+ * Extract NOUN-FORM limits, screened for speaker commitment.
+ *
+ * Recognition is the easy half and it is not the half that matters. See the
+ * screens above for why each one exists and which corpus case it answers.
+ */
+function extractNounFormConstraints(
+  brief: string,
+  claimed: readonly Span[] = [],
+): ExtractedGoalConstraint[] {
+  const constraints: ExtractedGoalConstraint[] = [];
+
+  for (const spec of NOUN_FORM_PATTERNS) {
+    spec.re.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = spec.re.exec(brief)) !== null) {
+      const index = match.index ?? 0;
+      // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
+      if (overlapsClaimed(index, match[0].length, claimed)) continue;
+
+      // The text leading up to this noun, with parentheticals removed and
+      // earlier clauses cut — the SAME window the ceiling suppression uses, so
+      // the two paths cannot disagree about where a clause begins.
+      const head = suppressionWindow(brief, index, claimed);
+      const sentence = governingSentence(brief, index);
+
+      // S1 — negated.        "There is no hard limit of £50,000 on this."
+      if (NEGATION_PROPER_RE.test(head)) continue;
+      // S2 — asked, not told. "Would a budget of £250,000 be enough?"
+      if (/\?\s*$/.test(sentence.trim())) continue;
+      // S3 — supposed.        "If we had a cap of £50,000 we would…"
+      //                        SENTENCE-scoped, like S2 and S4: a conditional
+      //                        after the noun governs it just as much.
+      if (CONDITIONAL_LEAD_RE.test(sentence)) continue;
+      // S7 — past, not present. "In 2024 we had a cap of £30,000 on consultancy."
+      if (PAST_TENSE_DESCRIPTIVE_RE.test(sentence)) continue;
+      // S4 — preferred.       "Nice to have: a budget of £50,000 or thereabouts."
+      if (SOFT_INTENT_RE.test(sentence)) continue;
+      // S5 — somebody else's. "Our main competitor has a budget of £2m."
+      const possession = THIRD_PARTY_POSSESSION_RE.exec(head);
+      if (possession && !FIRST_PERSON_SUBJECT.has(possession[1].toLowerCase())) continue;
+      // S6 — explicitly theirs. "…said their budget of £2m was typical."
+      if (THIRD_PERSON_POSSESSIVE_RE.test(head)) continue;
+
+      const valueStr = match[spec.amount];
+      if (!valueStr) continue;
+      const noun = spec.noun ? match[spec.noun] : "budget";
+      const targetName = resolveLimitTarget(noun, spec.qualifier ? match[spec.qualifier] : undefined);
+
+      const { value, unit } = parseValue(valueStr);
+      constraints.push({
+        targetName,
+        targetNodeId: generateNodeId(targetName),
+        // A budget, a cap, a ceiling and a max are ceilings BY DEFINITION.
+        // There is no direction to infer here and none is inferred.
+        operator: "<=",
+        value,
+        unit,
+        label: buildBoundDisplayName(targetName, "<=", valueStr),
+        // ⚠ THE GOVERNING SENTENCE, NOT THE MATCHED SPAN — AND THE ASYMMETRY IS
+        // SPECIFIC TO THIS PATH. The four verb-path quotes above stay `match[0]`
+        // and are correct there: the verb IS the commitment, so the span carries
+        // it ("We must not exceed £250,000", "Spend is capped at £250,000").
+        //
+        // A noun carries no commitment — that is the premise this whole path is
+        // built on — so the span is exactly the wrong unit to quote. Measured on
+        // the residual leaks: "Deals in this segment typically run on a £90,000
+        // budget" produced the quote "£90,000 budget", and a GENUINE "We have a
+        // £250,000 budget for whichever route we pick" produced "£250,000
+        // budget". BYTE-IDENTICAL. The clause that disqualifies the first —
+        // `typically run on`, `The regulator sets` — is precisely what the span
+        // omits, so a fabricated row and a real one are indistinguishable in the
+        // one channel whose job is showing the user our evidence.
+        //
+        // That is what makes the seven KNOWN_WIRE_LEAKS acceptable to carry:
+        // "prefer visible failure over confident wrongness" licenses a wrong row
+        // only while the failure is LEGIBLE AS failure. Quoting the span made it
+        // read as the product faithfully honouring something the user said. This
+        // does not close the leaks and is not meant to — it makes them visible.
+        //
+        // `sentence` is already derived above for S2/S3/S4; no new derivation.
+        sourceQuote: sentence.trim().slice(0, 200),
+        // Below the 0.85 the verb forms carry: the noun states the limit but
+        // the commitment is read off the surrounding clause, which is a weaker
+        // reading than a verb that states it outright.
+        confidence: 0.75,
+        provenance: "explicit",
+        valueFrame: "level",
+      });
+    }
+  }
+
+  return constraints;
+}
+
 function extractReductionConstraints(brief: string): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1440,6 +1830,10 @@ export function extractCompoundGoals(
   const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
   const upperBound = extractUpperBoundConstraints(brief, claimed);
   const lowerBound = extractLowerBoundConstraints(brief, claimed);
+  // NOUN forms ("a £50,000 cap"). Runs AFTER the bound patterns and claims
+  // nothing: where a verb form already read the same words, `deduplicateConstraints`
+  // keeps the stricter row, and the verb form's higher confidence wins a tie.
+  const nounForm = extractNounFormConstraints(brief, claimed);
   const reduction = extractReductionConstraints(brief);
   const between = extractBetweenConstraints(brief);
   const temporal = extractTemporalConstraints(brief);
@@ -1449,6 +1843,7 @@ export function extractCompoundGoals(
     ...negatedFloors,
     ...upperBound,
     ...lowerBound,
+    ...nounForm,
     ...reduction,
     ...between,
     ...temporal,
@@ -1475,6 +1870,7 @@ export function extractCompoundGoals(
     constraint_types: {
       upper_bound: upperBound.length,
       lower_bound: lowerBound.length,
+      noun_form: nounForm.length,
       reduction: reduction.length,
       between: between.length / 2, // Each "between" generates 2 constraints
       temporal: temporal.length,
