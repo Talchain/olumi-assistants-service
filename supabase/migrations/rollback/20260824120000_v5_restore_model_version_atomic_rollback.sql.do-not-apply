@@ -1,0 +1,33 @@
+-- ============================================================================
+-- ROLLBACK for 20260824120000_v5_restore_model_version_atomic.sql
+-- DO NOT APPLY except as a deliberate, reviewed reversal.
+--
+-- ⚠ ROLLING THIS BACK REINSTATES A REPRESENTABLE PARTIAL STATE.
+-- Dropping restore_model_version_atomic leaves the service with no restore
+-- path at all (it has no fallback to the three-transaction sequence, by
+-- design — a fallback would reintroduce the very defect the migration
+-- abolishes). Restore then answers an honest 503 until CEE is rolled back
+-- to a build that predates the atomic path.
+--
+-- ORDER: roll the CEE deploy back FIRST, then apply this. The reverse order
+-- leaves restore unavailable for the length of the gap.
+--
+-- ⚠ THE COLUMN DROPS ARE DESTRUCTIVE AND ARE COMMENTED OUT ON PURPOSE.
+-- `mutation_id` is the idempotency key: dropping it makes every restore that
+-- ran under the atomic path replayable again, so a client retry that was
+-- previously deduped would write a second version row. `undo_version_id` is
+-- restore lineage — real history, and this estate does not delete history.
+-- Both columns are nullable and inert to every pre-existing reader; leaving
+-- them in place costs nothing and is the recommended rollback.
+-- ============================================================================
+
+DROP FUNCTION IF EXISTS public.restore_model_version_atomic(
+  uuid, uuid, text, jsonb, text, text, text, text, text, text, text, text
+);
+
+-- Deliberately NOT dropped — see the header. Uncomment only with an explicit
+-- decision recorded, and never while any row carries a non-NULL mutation_id.
+--
+-- DROP INDEX IF EXISTS public.model_versions_scenario_mutation_idx;
+-- ALTER TABLE public.model_versions DROP COLUMN IF EXISTS undo_version_id;
+-- ALTER TABLE public.model_versions DROP COLUMN IF EXISTS mutation_id;
