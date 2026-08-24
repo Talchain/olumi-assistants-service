@@ -14,6 +14,7 @@
  */
 import {
   computeGraphIdentityHash,
+  computeVersionAnalysisAffectingHashRecord,
   type GraphIdentityHash,
 } from '../../context/graph-identity.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -81,6 +82,8 @@ export function versionSummary(
   overrides: Partial<ModelVersionSummary> = {},
 ): ModelVersionSummary {
   const id = identityOf(graph);
+  const analysis = computeVersionAnalysisAffectingHashRecord(graph);
+  if (analysis === null) throw new Error('fixture graph produced no analysis identity');
   return {
     id: FIX_VERSION_ID,
     scenario_id: FIX_SCENARIO,
@@ -91,6 +94,15 @@ export function versionSummary(
     identity_projection_version: id.projection_version,
     identity_normaliser_version: id.normaliser_version,
     graph_schema_version: id.graph_schema_version,
+    analysis_affecting_hash: analysis.value,
+    mutation_id: null,
+    parent_version_id: null,
+    root_version_id: null,
+    actor_kind: null,
+    authored_by: null,
+    creation_kind: null,
+    source_version_id: null,
+    source_turn_id: null,
     label: null,
     provenance: null,
     restored_from_version_id: null,
