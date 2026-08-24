@@ -69,6 +69,9 @@ import type {
   ConstraintVerdictState,
   RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
+import type {
+  IntakeConstraintReconciliation,
+} from '../../orchestrator/context/intake-constraint-reconciliation.js';
 
 /**
  * How many constraint labels to name before collapsing to a count. Keeps the
@@ -155,6 +158,21 @@ const QUOTE_LEAD_IN = ' From your brief: ';
  *                       only when the producer itself disclosed that it
  *                       removed the constraint before computing
  *                       (`_meta.filtered_constraints`).
+ *   intake_unrecorded   "your brief states a limit that is not on your model"
+ *                       — a claim about the INTAKE, assertable only when the
+ *                       brief states an explicit hard limit AND the model
+ *                       records no constraint at all
+ *                       (`deriveIntakeConstraintReconciliation`).
+ *
+ * ⚠ THE FOURTH VOICE IS ABOUT A LIMIT THAT DOES NOT EXIST ON THE MODEL, which
+ * is why it could not reuse any of the three above. Every one of them speaks
+ * about a `goal_constraints[]` ROW — "one limit ON YOUR MODEL could not be
+ * checked", "the condition ON YOUR MODEL", "the conditions ON YOUR MODEL" —
+ * and on this state there is no row to speak about. Reusing the `unevaluated`
+ * voice here would tell the user a limit on their model went unchecked when
+ * the truth is that no limit was ever recorded, and would hand them the repair
+ * clause "this one stays on the model", which is false about a row that does
+ * not exist. Same conflation, one level out.
  *
  * Writing one and reusing it for another is exactly the conflation that made
  * both earlier revisions of this fix state something false — and it is what
@@ -169,7 +187,11 @@ const QUOTE_LEAD_IN = ' From your brief: ';
  * see {@link buildConstraintDisclosure} for the composition order and
  * {@link CONSTRAINT_GAP_DISCLOSURE_RE_SRC} for the grammar that admits it.
  */
-type DisclosureVoice = 'unevaluated' | 'identity_unresolved' | 'out_of_scope';
+type DisclosureVoice =
+  | 'unevaluated'
+  | 'identity_unresolved'
+  | 'out_of_scope'
+  | 'intake_unrecorded';
 
 /**
  * The STATE voices, in one place, so the grammar and the worst-case budget are
@@ -178,7 +200,7 @@ type DisclosureVoice = 'unevaluated' | 'identity_unresolved' | 'out_of_scope';
 const STATE_VOICES = ['unevaluated', 'identity_unresolved'] as const;
 
 /** Every voice, derived — the budget below must cover all of them. */
-const ALL_VOICES = [...STATE_VOICES, 'out_of_scope'] as const;
+const ALL_VOICES = [...STATE_VOICES, 'out_of_scope', 'intake_unrecorded'] as const;
 
 /**
  * The repair step for the UNEVALUATED voice. Deterministic and constant — it
@@ -295,6 +317,27 @@ const UNRESOLVED_LEAD_IN =
 const OUT_OF_SCOPE_LEAD_IN = 'This analysis does not test ';
 
 /**
+ * Constant lead-in for the INTAKE_UNRECORDED voice; escaped into the grammar
+ * below.
+ *
+ * ⚠ NOTE THE THREE CLAIMS IT DOES NOT MAKE, each of which was available and
+ * each of which would be false:
+ *   - NOT "you set a limit". `goal_constraints[]` rows are minted by the
+ *     drafter as well as by the user, and this voice speaks where there is no
+ *     row at all — but the SPAN is verbatim from the submitted text, so
+ *     "your brief states" is exactly as strong as the evidence, and no
+ *     stronger. It is the same distinction `cee/provenance/stated-amounts.ts`
+ *     is built on: *present in the submitted text* is observable, *asserted by
+ *     the user* is not.
+ *   - NOT "the limit was breached". Nothing here reads an option's value on any
+ *     axis, and no producer number of any kind is consulted.
+ *   - NOT "the limit holds". The whole point of the voice is that compliance is
+ *     UNRESOLVED, and a sentence that implied safety would be the more
+ *     dangerous of the two errors.
+ */
+const INTAKE_UNRECORDED_LEAD_IN = 'Your brief states ';
+
+/**
  * The sentence that states WHAT the disclosure is about, optionally naming the
  * conditions. Split out from the body so the published grammar and the
  * worst-case budget are both derived from the same shapes the builder can
@@ -328,6 +371,18 @@ function subjectSentence(
     return total === 1
       ? `One limit on your model could not be checked: ${joinLabels(named)}.`
       : `${total} limits on your model could not be checked, including ${joinLabels(named)}.`;
+  }
+  if (voice === 'intake_unrecorded') {
+    // The subject is what the brief SAYS, not what the model holds — there is
+    // nothing on the model to name. `named` carries VERBATIM SPANS from the
+    // submitted text ("£50,000 cap"), not drafter-minted labels, so quoting
+    // them back is quoting the user rather than attributing a name to them.
+    const what = total === 1 ? 'a limit' : `${total} limits`;
+    const tail = total === 1 ? 'that is not recorded on your model' : 'that are not recorded on your model';
+    if (named.length === 0) return `${INTAKE_UNRECORDED_LEAD_IN}${what} ${tail}.`;
+    return total === 1
+      ? `${INTAKE_UNRECORDED_LEAD_IN}${what} ${tail}: ${joinLabels(named)}.`
+      : `${INTAKE_UNRECORDED_LEAD_IN}${what} ${tail}, including ${joinLabels(named)}.`;
   }
   if (voice === 'out_of_scope') {
     // ⚠ ROADMAP 2.675 — "the conditions you set" WITHDRAWN here too, for the
@@ -387,6 +442,16 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     // unable to evaluate it.
     return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so no option can be put forward yet.`;
   }
+  if (voice === 'intake_unrecorded') {
+    // THE DOCTRINE'S THIRD CLAUSE IN ONE SENTENCE: compliance is UNRESOLVED,
+    // and the recommendation is withheld across the unknown rather than made
+    // over it. "Unresolved" is the precise word — not "failed" (we have read no
+    // option value) and not "unchecked against the engine" in the sense the
+    // `unevaluated` voice means it (there was no row to send).
+    return total === 1
+      ? ' It was not part of this analysis, so whether it holds is unresolved and no option can be put forward yet.'
+      : ' They were not part of this analysis, so whether they hold is unresolved and no option can be put forward yet.';
+  }
   if (voice === 'out_of_scope') {
     // NOT "so no option can be put forward" — that consequence is FALSE here.
     // The comparison ran on every dimension the model does carry; the only
@@ -402,9 +467,35 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     : ' So it cannot be confirmed whether they were checked, and no option can be put forward yet.';
 }
 
+/**
+ * The repair step for the INTAKE_UNRECORDED voice.
+ *
+ * ⚠ IT IS {@link UNEVALUATED_REPAIR_STEP} MINUS ONE CLAUSE, AND THE MISSING
+ * CLAUSE IS THE POINT. That constant ends "…and I will record it; THIS ONE
+ * STAYS ON THE MODEL. Then run the analysis again." — a disclosure of the
+ * residual that there is no conversational remove/replace operation
+ * (ROADMAP 2.659), so a correction appends beside the bad row. Here there IS
+ * no row, so that clause would be false, and it would tell a user to expect a
+ * duplicate they will never see. Everything else about the offer is identical
+ * and identically backed: `add_constraint` is a registered, witnessed V5
+ * handler, so "I will record it" is a live capability rather than a hope.
+ *
+ * ⚠ AND IT MUST NOT BE AN EMPTY DEAD END. A user told only "I cannot check your
+ * budget cap" has been given a refusal; a user told which limit is missing and
+ * offered a one-turn way to record it has been given a next move. Withholding
+ * without a repair step is the failure mode this voice exists to avoid, not a
+ * safer version of it.
+ */
+function intakeUnrecordedRepairStep(total: number): string {
+  return total === 1
+    ? ' Tell me the limit you meant in your own words and I will record it, then run the analysis again.'
+    : ' Tell me the limits you meant in your own words and I will record them, then run the analysis again.';
+}
+
 function repairStep(voice: DisclosureVoice, total: number): string {
   if (voice === 'unevaluated') return UNEVALUATED_REPAIR_STEP;
   if (voice === 'out_of_scope') return outOfScopeCloser(total);
+  if (voice === 'intake_unrecorded') return intakeUnrecordedRepairStep(total);
   return unresolvedRepairStep(total);
 }
 
@@ -515,6 +606,7 @@ function composeDisclosure(
 export function buildConstraintDisclosure(
   verdict: ConstraintVerdict,
   brief?: string | null,
+  intakeConstraints?: IntakeConstraintReconciliation | null,
 ): string {
   // STATE VOICE FIRST, OUT-OF-SCOPE SECOND, and both may be present.
   //
@@ -527,14 +619,79 @@ export function buildConstraintDisclosure(
   // locked template, which is the #703 failure this module exists to prevent.
   const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints, brief);
   const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints, brief);
-  if (stateVoice.length === 0 || outOfScope.length === 0) return `${stateVoice}${outOfScope}`;
-  // COMBINED survival probe. Each half already proved it survives ALONE
+  // THE INTAKE VOICE IS MUTUALLY EXCLUSIVE WITH BOTH OF THE ABOVE BY
+  // CONSTRUCTION, and that is a property worth stating because it is what keeps
+  // this composition simple. It speaks only when the model records NO ratified
+  // constraint; with none, `deriveConstraintVerdict` partitions an empty set,
+  // takes the `effective.length === 0` exit to `not_applicable` (state voice
+  // `''`) and has nothing to place on `outOfScopeConstraints` (`''`). The
+  // grammar and the composition below nevertheless admit the pairs rather than
+  // assuming the property — an argument about reachability should not be load-
+  // bearing for whether a user's disclosure survives the egress — and the
+  // exclusivity itself is pinned as a property in this module's spec.
+  const intake = buildIntakeConstraintVoice(intakeConstraints, brief);
+  const parts = [stateVoice, outOfScope, intake].filter((part) => part.length > 0);
+  if (parts.length <= 1) return parts.join('');
+  // COMBINED survival probe. Each part already proved it survives ALONE
   // (`buildVoice`), but the allowlist sees the CONCATENATION, and only a check
   // of the actual composed bytes can prove that shape passes. If it does not,
-  // keep the state voice — never let the additive 2.349 sentence cost the user
+  // fall back to the FIRST part — never let an additive sentence cost the user
   // the more serious disclosure.
-  const combined = `${stateVoice}${outOfScope}`;
-  return survivesEgress(combined) ? combined : stateVoice;
+  const combined = parts.join('');
+  return survivesEgress(combined) ? combined : (parts[0] as string);
+}
+
+/**
+ * The INTAKE_UNRECORDED voice — "your brief states a limit that is not recorded
+ * on your model".
+ *
+ * Its own builder rather than a call into {@link buildVoice}, because the items
+ * are {@link StatedLimit}s and not `RatifiedConstraint`s, and the difference is
+ * exactly the fact the voice exists to report: there is no row. Adapting a
+ * stated limit into a `RatifiedConstraint` to reuse the other builder would put
+ * a fabricated `constraint_id` on an object whose whole meaning is that no
+ * constraint exists — the conflation this module has already been rewritten
+ * twice to avoid.
+ *
+ * It reuses everything that is genuinely shared: `sanitiseLabel`, the label
+ * cap, `composeDisclosure`, and the same DEGRADE-TO-COUNT-ONLY ladder, so a
+ * span that would fail the egress costs specificity and never the whole
+ * disclosure.
+ *
+ * ⚠ THE NAMED SPANS ARE VERBATIM USER TEXT, not drafter labels. That is why
+ * this voice may quote them without a `locateEvidence` presence gate: the
+ * producer took them as a contiguous `slice` of the submitted brief, so
+ * presence is guaranteed by construction rather than asserted about a
+ * model-authored string (contrast {@link quoteSentence}, which gates precisely
+ * because `source_quote` is model-authored and the measured paraphrase mode
+ * strips negations).
+ */
+function buildIntakeConstraintVoice(
+  intake: IntakeConstraintReconciliation | null | undefined,
+  _brief?: string | null,
+): string {
+  if (intake === null || intake === undefined) return '';
+  if (intake.state !== 'limits_unrecorded') return '';
+  const limits = intake.unrecorded;
+  // Defensive, not decorative: the producer guarantees this is non-empty on
+  // this state, and a disclosure that announced a gap it could not name would
+  // be the generic hedge the doctrine's "identify the missing information"
+  // clause forbids. Silence beats a hedge.
+  if (limits.length === 0) return '';
+
+  const named = limits
+    .slice(0, MAX_NAMED_CONSTRAINTS)
+    .map((limit) => sanitiseLabel(limit.text, ''))
+    .filter(
+      (clean): clean is string =>
+        clean !== null && clean.length > 0 && clean.length <= CONSTRAINT_GAP_LABEL_MAX_CHARS,
+    );
+
+  const labelled = composeDisclosure('intake_unrecorded', limits.length, named);
+  if (named.length > 0 && !survivesEgress(labelled)) {
+    return composeDisclosure('intake_unrecorded', limits.length, []);
+  }
+  return labelled;
 }
 
 /**
@@ -734,9 +891,52 @@ const OUT_OF_SCOPE_RE_SRC =
  * IT STILL CANNOT MATCH THE EMPTY STRING — every branch requires at least one
  * voice — which the anchored template branch of the allowlist depends on.
  */
+/**
+ * Grammar branch for the INTAKE_UNRECORDED voice. Same construction as its
+ * three siblings — every fixed sentence escaped from the very constant the
+ * builder emits, the label slot interpolated from
+ * {@link CONSTRAINT_GAP_LABEL_MAX_CHARS} — so a copy edit here breaks the
+ * build-time probe and this module's tests loudly rather than silently
+ * reverting the user-facing message to the locked template.
+ *
+ * NO {@link QUOTE_SLOT}: this voice's named items ARE verbatim brief spans, so
+ * the separate quote rung has nothing to add and is never emitted.
+ */
+const INTAKE_UNRECORDED_RE_SRC =
+  ' ' +
+  escapeForRegex(INTAKE_UNRECORDED_LEAD_IN) +
+  '(?:' +
+  `a limit that is not recorded on your model(?:: ${JOINED_LABELS})?\\.` +
+  '|' +
+  `\\d{1,3} limits that are not recorded on your model(?:, including ${JOINED_LABELS})?\\.` +
+  ')' +
+  `(?:${escapeForRegex(consequenceSentence('intake_unrecorded', 1))}|${escapeForRegex(consequenceSentence('intake_unrecorded', 2))})` +
+  `(?:${escapeForRegex(intakeUnrecordedRepairStep(1))}|${escapeForRegex(intakeUnrecordedRepairStep(2))})`;
+
+/**
+ * ⚠ THREE TOP-LEVEL BRANCHES NOW. The intake voice is additive in the same way
+ * the 2.349 out-of-scope voice is — the allowlist gives this module exactly ONE
+ * optional slot in `TAIL_PATTERN`, so the slot itself has to admit every
+ * composition the builder can emit:
+ *
+ *     (?: STATE_VOICE (?: OUT_OF_SCOPE )? (?: INTAKE )? )
+ *     | (?: OUT_OF_SCOPE (?: INTAKE )? )
+ *     | (?: INTAKE )
+ *
+ * The pairs are admitted even though the intake voice is mutually exclusive
+ * with both others by construction (see {@link buildConstraintDisclosure}): a
+ * reachability argument must not be what stands between a user and their
+ * disclosure. Ordered longest-first, because JS alternation is leftmost-first
+ * and `validation-registry.ts`'s unanchored salvage match would otherwise
+ * capture only a trailing fragment.
+ *
+ * IT STILL CANNOT MATCH THE EMPTY STRING — every branch requires at least one
+ * voice — which the anchored template branch of the allowlist depends on.
+ */
 export const CONSTRAINT_GAP_DISCLOSURE_RE_SRC =
-  `(?:(?:(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC}))(?:${OUT_OF_SCOPE_RE_SRC})?)` +
-  `|(?:${OUT_OF_SCOPE_RE_SRC})`;
+  `(?:(?:(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC}))(?:${OUT_OF_SCOPE_RE_SRC})?(?:${INTAKE_UNRECORDED_RE_SRC})?)` +
+  `|(?:(?:${OUT_OF_SCOPE_RE_SRC})(?:${INTAKE_UNRECORDED_RE_SRC})?)` +
+  `|(?:${INTAKE_UNRECORDED_RE_SRC})`;
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
@@ -769,8 +969,17 @@ function worstCaseFor(voice: DisclosureVoice): number {
   ).length;
 }
 
+/**
+ * ⚠ THE INTAKE VOICE IS ADDED, NOT MAXED IN. The grammar admits it riding after
+ * a state voice and/or the out-of-scope voice, so the budget has to cover the
+ * longest shape the SLOT can carry, not the longest single voice. A budget that
+ * is one character short silently reverts the whole summary to the locked
+ * template with no error anywhere; a budget that is too generous costs nothing.
+ */
 export const CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS =
-  Math.max(...STATE_VOICES.map(worstCaseFor)) + worstCaseFor('out_of_scope');
+  Math.max(...STATE_VOICES.map(worstCaseFor)) +
+  worstCaseFor('out_of_scope') +
+  worstCaseFor('intake_unrecorded');
 
 /**
  * Derivation guard for the budget above (CLAUDE.md trap 12d, second face): the

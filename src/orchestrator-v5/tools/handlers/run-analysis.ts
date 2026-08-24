@@ -67,6 +67,10 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+import {
+  deriveIntakeConstraintReconciliation,
+  applyIntakeConstraintToLeaderPermission,
+} from '../../../orchestrator/context/intake-constraint-reconciliation.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
@@ -1501,6 +1505,37 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // enumeration, or a brief whose words reconcile with nothing on the graph
     // all yield `not_applicable`, which declares `mayNameLeadingOption: true`
     // and leaves both the headline and the persisted verdict byte-identical.
+    // THE INTAKE-CONSTRAINT AXIS — "did we RECORD the limit the user stated?",
+    // derived beside the constraint verdict and kept entirely separate from it
+    // (trap 21: three authorities, three questions, named apart rather than
+    // aligned). It closes the gap the 24 Aug fresh-guest journey measured: an
+    // explicit £50,000 cap in the brief, ZERO `goal_constraints[]` rows minted,
+    // and the £90,000 option — £40,000 over the cap — crowned "Leading option"
+    // at 71% with nothing said to the user. `deriveConstraintVerdict` cannot
+    // see that and is not wrong not to: with no ratified rows it correctly
+    // answers `not_applicable`, because it reasons about ratified constraints
+    // and there were none.
+    //
+    // Reads the SAME `ratifiedConstraints` derived above — the exact array this
+    // handler forwards to PLoT — so "we asked PLoT to enforce it" and "we never
+    // recorded it" are decided against the same bytes.
+    //
+    // ⚠ IT CONSUMES NO PRODUCER VALUE. Not a threshold, not a constraint
+    // probability, not a goal-fit. That is a safety property: PLoT's repair
+    // layer is currently observed to clamp a real-money cap (£50,000) to `<= 1`
+    // at `severity: info`, which on a 0–1 axis would certify an over-cap option
+    // as COMPLIANT. Nothing on this path can inherit that defect, and nothing
+    // on it may be extended to read a producer-supplied threshold.
+    //
+    // Fails toward TODAY'S BEHAVIOUR at every step: no brief, no explicit
+    // stated limit, or any recorded constraint at all all yield
+    // `not_applicable`, which declares `mayNameLeadingOption: true` and leaves
+    // both the headline and the persisted verdict byte-identical.
+    const intakeConstraintReconciliation = deriveIntakeConstraintReconciliation(
+      snapshot.briefText,
+      ratifiedConstraints,
+    );
+
     const snapshotOptionLabels = readGraphOptionLabels(snapshot.options);
     const intakeReconciliation = deriveIntakeOptionReconciliation(
       snapshot.briefText,
@@ -1560,6 +1595,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // standing rule is no new env-var gates, and a flag here would mean the
       // product keeps making the false claim by default.
       intake_options_missing: intakeReconciliation.state === 'options_missing',
+      // The brief stated an explicit hard limit and the model records no
+      // ratified constraint at all, so compliance with a condition the user
+      // wrote down is UNRESOLVED. Withhold the ranking claim rather than put an
+      // option forward across that unknown. UNGATED BY ANY FEATURE FLAG,
+      // deliberately: the estate's standing rule is no new env-var gates, and a
+      // flag here would mean the product keeps making the unsupported claim by
+      // default.
+      intake_constraints_unrecorded:
+        intakeConstraintReconciliation.state === 'limits_unrecorded',
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
@@ -1649,9 +1693,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // an unchecked quote could state the opposite of the limit beside it. Same
     // `snapshot.briefText` the intake reconciliation above reads; absent ⇒ the
     // quote stands down and the labelled disclosure ships unchanged.
+    // The intake-constraint reconciliation rides along so the disclosure can
+    // name the limit the brief states and the model never recorded. Its voice
+    // is mutually exclusive with the verdict's own by construction (it speaks
+    // only where there are no ratified rows, which is exactly where the state
+    // voices are silent), so this cannot displace a more serious disclosure.
     const constraintGapDisclosure = buildConstraintDisclosure(
       constraintVerdict,
       snapshot.briefText,
+      intakeConstraintReconciliation,
     );
     // ROADMAP 2.579 disclosure, LAST of the three. It names the option(s) the
     // brief listed and the graph does not carry, and gives BOTH repair paths
@@ -1769,9 +1819,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // nothing true to say about the constraint evidence — see
         // `applyIntakeToLeaderPermission` for the full statement of that
         // residual.
-        constraint_verdict: applyIntakeToLeaderPermission(
-          projectClaimSafety(constraintVerdict),
-          intakeReconciliation,
+        // Both intake axes fold into the SAME persisted permission, each a
+        // CONJUNCTION that can only ever REMOVE it. Order is irrelevant — a
+        // conjunction of monotone withholds commutes — and each leaves
+        // `constraint_verdict_state` untouched because neither has anything
+        // true to say about the constraint EVIDENCE (trap 21). See
+        // `applyIntakeConstraintToLeaderPermission` for the full statement of
+        // that residual.
+        constraint_verdict: applyIntakeConstraintToLeaderPermission(
+          applyIntakeToLeaderPermission(
+            projectClaimSafety(constraintVerdict),
+            intakeReconciliation,
+          ),
+          intakeConstraintReconciliation,
         ),
       },
     };

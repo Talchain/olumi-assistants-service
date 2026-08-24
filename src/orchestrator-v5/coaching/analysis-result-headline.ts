@@ -450,6 +450,40 @@ export interface AnalysisResultHeadlineInput {
    * Omitted / false ⇒ no change (byte-identical).
    */
   readonly intake_options_missing?: boolean;
+  /**
+   * True when the brief STATES an explicit hard limit and the model records NO
+   * ratified constraint at all — the `limits_unrecorded` state of
+   * `deriveIntakeConstraintReconciliation`
+   * (`orchestrator/context/intake-constraint-reconciliation.ts`).
+   *
+   * WHY THIS WITHHOLDS. The founder's ratified doctrine, clause three: "If
+   * compliance CANNOT be evaluated: do not silently recommend across the
+   * unknown — state that compliance is unresolved, identify the missing
+   * information, and withhold or qualify the recommendation." A leading-option
+   * claim made while a stated hard limit was never represented IS a
+   * recommendation across the unknown: the option being put forward may breach
+   * the very condition the user wrote down, and nothing in the run has any
+   * opinion either way. Measured 24 Aug on a fresh-guest journey — a brief with
+   * an explicit £50,000 cap produced zero `goal_constraints[]` rows, and the
+   * £90,000 option, £40,000 over the cap, was crowned "Leading option" at 71%
+   * with the two compliant options ranked 3rd and 4th.
+   *
+   * ⚠ IT IS NOT A BREACH FINDING AND MUST NEVER BE WORDED AS ONE. The producer
+   * reads no option value on any axis to reach this state. It says compliance
+   * is UNRESOLVED, never that a limit failed.
+   *
+   * DISTINCT FROM EVERY FLAG ABOVE, and deliberately its own input rather than
+   * folded into one of them (CLAUDE.md trap 21). The three constraint flags
+   * answer "was the hard condition the user RATIFIED honoured by this result?"
+   * — a question about the RUN, and all three presuppose a row exists.
+   * `intake_options_missing` answers "does the candidate set match what the
+   * user ENUMERATED?". This answers "did we RECORD the limit the user stated?"
+   * — a question about the INTAKE, where the answer is that there is no row at
+   * all. Own flag, own reason code, own copy.
+   *
+   * Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly intake_constraints_unrecorded?: boolean;
 }
 
 /**
@@ -518,6 +552,14 @@ export type HeadlineFallbackReason =
   // the INTAKE, not about the run's evidence, and conflating them on the
   // dashboard would hide a drafter defect inside a producer statistic.
   | 'intake_options_missing'
+  // The brief stated an explicit hard limit and the model records no ratified
+  // constraint at all, so compliance with a condition the user wrote down is
+  // UNRESOLVED and the confident-lead headline is withheld (see
+  // AnalysisResultHeadlineInput.intake_constraints_unrecorded). Its own reason
+  // code: this is a fact about the INTAKE — a limit that was never represented
+  // — and filing it under any constraint reason would report a drafting gap as
+  // an engine failure to evaluate a row that does not exist.
+  | 'intake_constraints_unrecorded'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -613,6 +655,38 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       descriptor: {
         case: null,
         reason: 'intake_options_missing',
+        has_leading_option: true,
+        has_clean_label: true,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // The brief stated an explicit hard limit that the model never recorded, so
+  // compliance with a condition the user wrote down is UNRESOLVED. WITHHOLD the
+  // confident "{X} currently leads" claim rather than put an option forward
+  // across that unknown — the option being named may breach the very limit the
+  // user stated, and this run has no evidence either way.
+  //
+  // PLACED AFTER the intake-options check and BEFORE every constraint reason,
+  // and the ordering is a claim rather than a convenience. The constraint
+  // reasons below all presuppose a ratified row EXISTS and say something about
+  // the evidence gathered on it; on this path there is no row, so they cannot
+  // be the honest answer. Options-missing still outranks it, because a
+  // candidate set that is not the user's set is the more fundamental defect.
+  // Nothing is lost to the ordering on the USER-FACING side: the run_analysis
+  // handler appends the intake-option disclosure and the constraint-gap
+  // disclosure independently, so a turn that is both intake-incomplete and
+  // missing a stated limit still tells the user both things. Only the single
+  // `reason` code has to choose.
+  if (input.intake_constraints_unrecorded === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'intake_constraints_unrecorded',
         has_leading_option: true,
         has_clean_label: true,
         has_driver: false,
