@@ -516,6 +516,15 @@ function labelRunEndAt(
     for (let offset = 0; offset < run.length; offset += 1) {
       if (tokens[cursor + offset] !== run[offset]) { hit = false; break; }
     }
+    // ⚠ A LABEL THAT SPANS THE MODEL OBJECT IS NOT AN ENTITY-SCOPED OBJECT.
+    // `MODEL_OBJECT_LEXEMES` only wins at the SAME cursor, so a factor literally
+    // named "The Model" starts one token earlier and swallows `model` — which
+    // would classify a genuine whole-model prohibition as entity-scoped, skip
+    // the conservative short-circuit, and let the affirmative edit through.
+    // Measured: with a factor named "The Model", "Do not change the model. Set
+    // Growth to 0.9." flipped from vetoed to WRITE. That is this PR's own
+    // flagship control, broken by a label.
+    if (hit && run.some((token) => MODEL_OBJECT_LEXEMES.has(token))) return null;
     // Return the LAST token of the label, so any scoped-tail scan that follows
     // starts after the whole object rather than inside it.
     if (hit) return cursor + run.length - 1;

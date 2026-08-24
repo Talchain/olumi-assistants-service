@@ -89,6 +89,11 @@ describe('no-change veto reaches the dispatch path', () => {
     ['Never touch Revenue. Set Growth to 0.9.', 'an outcome named in a prior sentence'],
     ['Do not change the Rep Adoption Quality. Set Growth to 0.9.', 'a FACTOR named in a prior sentence'],
     ['Set Growth to 0.9, and do not change Rep Adoption Quality.', 'the prohibition trailing the edit'],
+    // The SAME-ENTITY sub-class. Both were named by the first review and both
+    // were left unpinned by the first correction — verified restored by probe,
+    // but nothing stopped them regressing again.
+    ['I never update Rep Adoption Quality manually. Set Rep Adoption Quality to 0.6.', 'same entity, habitual negation'],
+    ['We never change Growth without approval, but go ahead: set Growth to 0.4.', 'same entity, explicit override'],
   ])('TWIN — forbidding one entity leaves an authorised edit to another intact: %s', (message) => {
     const d = dispatchFor(message);
     expect(
@@ -109,14 +114,50 @@ describe('no-change veto reaches the dispatch path', () => {
   it.each([
     ['Do not change Churn.', 'a risk'],
     ['Do not change Revenue.', 'an outcome'],
-  ])('CONTROL — a prohibition naming a NON-FACTOR entity is not this path\'s business: %s', (message) => {
-    // Pins the factor-kind narrowing in `modelEntityLabels`. `set_factor_value`
-    // can never target a risk or an outcome, so handing the veto those labels
-    // would give it a domain strictly wider than anything this path can write —
-    // the asymmetry, inverted. Without the narrowing this vetoes; with it, the
-    // turn is simply not the value-update path's to refuse.
+  ])('CONTROL — the veto does not fire on a NON-FACTOR label: %s', (message) => {
+    // Pins the factor-kind narrowing in `modelEntityLabels`.
+    //
+    // ⚠ THE ORACLE HERE WAS WRONG IN AN EARLIER VERSION and the correction is
+    // the point. It claimed `set_factor_value` "can never target" a risk or an
+    // outcome. It can: there is a documented non-factor fallback, and
+    // "Do not change Customer Churn Risk to 0.2." really does dispatch with a
+    // risk candidate (the executor downgrades it to `refuse_non_factor_kind`
+    // further downstream). A test that passes because of a false premise is a
+    // guard agreeing with itself.
+    //
+    // What is actually pinned, and all that is claimed: the narrowing keeps the
+    // VETO from firing on a non-factor label, which is what caused the
+    // "Don't increase Churn — set Growth to 0.9." regression. Nothing here
+    // asserts what the grant side can or cannot reach.
     const d = dispatchFor(message);
     expect(!d.matched ? d.skip_reason : 'matched').not.toBe('explicit_no_model_change');
+  });
+
+  it('CONTROL — a factor named after the model itself cannot disarm the whole-model veto', () => {
+    // Found by re-review. `MODEL_OBJECT_LEXEMES` only wins at the SAME cursor,
+    // so a label like "The Model" starts one token earlier and SWALLOWS `model`
+    // — classifying a genuine whole-model prohibition as entity-scoped, skipping
+    // the conservative short-circuit, and letting the affirmative edit through.
+    // Measured before the fix: this exact sentence flipped from vetoed to a
+    // WRITE of Growth = 0.9 — the flagship control above, broken by a label.
+    const nodes = [
+      { id: 'fac_themodel', kind: 'factor', label: 'The Model', observed_state: { value: 0.5 } },
+      { id: 'fac_growth', kind: 'factor', label: 'Growth', observed_state: { value: 0.5 } },
+    ];
+    const built = buildGraphLookup({ nodes, edges: [] } as unknown as Parameters<typeof buildGraphLookup>[0]);
+    if (built.kind !== 'ok') throw new Error(built.kind);
+    const d = tryDeterministicValueUpdate(
+      'Do not change the model. Set Growth to 0.9.',
+      extractQuantities('Do not change the model. Set Growth to 0.9.'),
+      built.lookup,
+      [],
+      new Set(nodes.map((n) => n.id)),
+      false,
+    );
+    expect(
+      !d.matched ? d.skip_reason : 'matched',
+      'a factor named after the model shadowed the model object and disarmed the whole-model veto',
+    ).toBe('explicit_no_model_change');
   });
 
   it.each([

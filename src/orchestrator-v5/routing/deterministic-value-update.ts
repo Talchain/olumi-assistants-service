@@ -105,13 +105,21 @@ function modelEntityLabels(
   try {
     const out: string[] = [];
     for (const entity of graphLookup.listEntitiesByKind('node')) {
-      // ⚠ NARROWED TO THE SAME POOL THE GRANT SIDE USES. `listEntitiesByKind`
+      // ⚠ NARROWED TOWARD THE POOL THE GRANT SIDE PREFERS. `listEntitiesByKind`
       // buckets factor together with outcome/decision/risk/action, and the
       // candidate scan below narrows to `factorNodeIds` before matching. Handing
-      // the veto the WIDER pool made its domain strictly larger than the grant's,
-      // so naming a risk or outcome in a negative aside — "Don't increase Churn
-      // — set Growth to 0.9." — cancelled an edit to an unrelated factor that
-      // `set_factor_value` could never have targeted anyway.
+      // the veto the WIDER pool made naming a risk or outcome in a negative
+      // aside — "Don't increase Churn — set Growth to 0.9." — cancel an edit to
+      // an unrelated factor.
+      //
+      // ⚠ NOT "the same pool", and an earlier version of this comment said so
+      // wrongly. `set_factor_value` CAN reach a non-factor: there is a
+      // documented non-factor fallback below, and an unfiltered-pool fallback
+      // when the narrowed pool would empty. Measured: "Do not change Customer
+      // Churn Risk to 0.2." dispatches with a risk candidate, and the executor
+      // downgrades it to `refuse_non_factor_kind` downstream. So the veto's
+      // domain here is strictly NARROWER than the grant's — deliberately
+      // conservative, and the asymmetry is now in the safe direction.
       const id = (entity as { id?: unknown }).id;
       if (factorNodeIds && (typeof id !== 'string' || !factorNodeIds.has(id))) continue;
       const label = (entity as { label?: unknown }).label;
