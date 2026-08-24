@@ -116,7 +116,17 @@ describe("B1-b — the scan is whole-brief, not subject-bound", () => {
     });
 
     it("DISCRIMINATOR: the decimal point of £1.5m does not end the clause and hide a negation", () => {
-      const iv = run("We spent £1.5m already and will not spend £20,000 more.", 20000);
+      // ⚠ THIS FIXTURE IS CHOSEN, NOT ILLUSTRATIVE. The obvious phrasing —
+      // "We spent £1.5m already and will not spend £20,000 more" — does NOT
+      // exercise the decimal guard at all: the " and " is a later boundary, so
+      // the window is "will not spend" either way and the test passes for a
+      // reason unrelated to its name. Mutation caught that (dropping the guard
+      // left it green), which is the same defect as R6 one file over. Here the
+      // decimal IS the last boundary before the amount, so the guard is the only
+      // thing keeping "not" inside the window: with it the window is
+      // "We will not approve a £1.5m budget for a "; without it the window
+      // collapses to "5m budget for a " and the negation is lost.
+      const iv = run("We will not approve a £1.5m budget for a £20,000 migration.", 20000);
       expect(iv?.source).toBe("cee_hypothesis");
     });
   });
