@@ -21,6 +21,7 @@ import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./num
 import { matchInterventionToFactor } from "./factor-matcher.js";
 import {
   classifyAmountAgainstBrief,
+  findStatedAmounts,
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import {
@@ -527,6 +528,89 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
+ * THE CARRIED RAW MAGNITUDE IS ALREADY IN MAGNITUDE SPACE — IT NEEDS NO DENOMINATOR.
+ *
+ * WHY THIS EXISTS (B1-b, derived at CEE `d1da670` against live wire captures).
+ * `classifyAmountAgainstBrief` is asked about the NORMALISED level, so it must
+ * de-normalise through the factor's `observed_state` to recover a magnitude.
+ * Measured on the deployed build across 12 fresh-guest draws of one frozen brief:
+ * the factors CEE mints carry `observed_state = {value: 0.5, source:
+ * "cee_inference"}` — no `cap`, no `raw_value` — so `resolveMagnitudeScale`
+ * returns `unknown`, the level cannot be de-normalised, and the verdict is
+ * `undecidable` for EVERY factor in the model. That makes the `statedInBrief`
+ * route to `brief_extraction` STRUCTURALLY DEAD for this class of brief, leaving
+ * the LLM-emitted `v4InterventionBindings` as the only surviving route — an
+ * unpinned per-factor model judgement. So whether the user's own stated figure is
+ * attributed to them is settled by a coin flip, while the figure itself sits in
+ * `carriedRaw`, unread, a few lines away.
+ *
+ * The asymmetry this estate already states is the whole justification: "a MATCH is
+ * decisive whatever the denominator — if the number appears in the text, the user
+ * wrote it". A RAW magnitude is the case where the denominator is not merely
+ * unknown but IRRELEVANT.
+ *
+ * ⚠ THIS FUNCTION INVENTS NOTHING. It answers one question — "did the user write
+ * THIS magnitude, and in which denomination?" — and answers it by asking the
+ * estate's EXISTING authority ({@link classifyAmountAgainstBrief}) once per
+ * candidate denomination rather than re-implementing magnitude comparison beside
+ * it (CLAUDE.md trap 21 / the two `generateGraphHash` twins). The
+ * `{kind: "identity"}` scale is not a claim about the factor's encoding; it is how
+ * this module spells "the number I am handing you IS the magnitude".
+ *
+ * FAIL-CLOSED IN THREE DIRECTIONS, each a refusal rather than a guess:
+ *   · no brief, or no stated amount of this magnitude ⇒ `null` — the user did not
+ *     write it, the model chose it, and the caller keeps saying so;
+ *   · a PLAIN or percent amount of the same magnitude also appears ("20,000
+ *     licences" beside "£20,000") ⇒ `null`. The kind is genuinely ambiguous and a
+ *     currency claim would be a fabrication about which quantity the user meant;
+ *   · two different currencies of the same magnitude ("£20,000" and "$20,000")
+ *     ⇒ `null`, for the same reason.
+ * Returning `null` always leaves the caller exactly where it already was.
+ */
+function resolveStatedDenominationForRawMagnitude(
+  rawMagnitude: number,
+  briefText: string | null | undefined,
+): { readonly unit: string; readonly matchedText: string } | null {
+  if (typeof rawMagnitude !== "number" || !Number.isFinite(rawMagnitude)) return null;
+
+  // The magnitude IS the magnitude — say so to the shared classifier.
+  const IDENTITY = { kind: "identity" } as const;
+
+  // A same-magnitude PLAIN (or percent) statement makes the KIND ambiguous.
+  // `readUnit(undefined)` reads as `plain`, which is exactly the question asked.
+  if (classifyAmountAgainstBrief(rawMagnitude, undefined, briefText, IDENTITY) === "stated") {
+    return null;
+  }
+
+  // Candidate denominations are only those the BRIEF ITSELF spells — never a
+  // default, and never one this module chose.
+  const denominations = new Map<string, string>();
+  for (const amount of findStatedAmounts(briefText)) {
+    if (amount.kind !== "currency" || amount.currencyCode === undefined) continue;
+    if (denominations.has(amount.currencyCode)) continue;
+    // The user's OWN spelling of the denomination, taken from the text they wrote.
+    const symbol = /^\s*([^\d\s.,-]+)/.exec(amount.matchedText)?.[1];
+    denominations.set(amount.currencyCode, symbol ?? amount.currencyCode);
+  }
+
+  const hits: { readonly unit: string; readonly matchedText: string }[] = [];
+  for (const [code, unit] of denominations) {
+    if (classifyAmountAgainstBrief(rawMagnitude, code, briefText, IDENTITY) !== "stated") continue;
+    const quoted = findStatedAmounts(briefText).find(
+      (a) =>
+        a.kind === "currency" &&
+        a.currencyCode === code &&
+        Math.abs(a.magnitude - rawMagnitude) <=
+          Math.max(Number.EPSILON, Math.abs(rawMagnitude) * 1e-9),
+    );
+    hits.push({ unit, matchedText: quoted?.matchedText.trim() ?? `${unit}${rawMagnitude}` });
+  }
+
+  // Exactly one denomination, or we cannot honestly name one.
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * Build interventions directly from V4 prompt data.
  *
  * V4 prompt instructs LLM to return option nodes with `data.interventions`
@@ -679,26 +763,46 @@ function buildInterventionsFromV4Data(
         reasoning: binding.reasoning,
       };
     } else {
+      // B1-b — THE STATED MAGNITUDE ROUTE.
+      //
+      // Reached only when there is no verified edge binding. `statedInBrief`
+      // above asks about the NORMALISED level and is therefore silent whenever
+      // the factor records no scale — which, measured on the deployed build, is
+      // every factor minted for a fresh brief. `carriedRaw` is the magnitude the
+      // model actually emitted for this factor and needs no denominator, so it
+      // can be checked directly. This ONLY EVER UPGRADES A DISOWNMENT INTO AN
+      // ATTRIBUTION, and only when the user demonstrably wrote that magnitude:
+      // it cannot invent a value (the value is unchanged either way), cannot
+      // fire without a brief, and refuses on any ambiguity of denomination.
+      const rawIsFinite = typeof carriedRaw === "number" && Number.isFinite(carriedRaw);
+      const statedDenomination =
+        binding === undefined && !statedInBrief && rawIsFinite
+          ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText)
+          : null;
+
+      const earnsBriefClaim =
+        binding === undefined && (statedInBrief || statedDenomination !== null);
+
       interventions[factorId] = {
         value,
-        ...(typeof carriedRaw === "number" && Number.isFinite(carriedRaw)
-          ? { raw_value: carriedRaw }
-          : {}),
-        unit: binding?.unit ?? unit,
-        source: binding === undefined && statedInBrief ? "brief_extraction" : "cee_hypothesis",
+        ...(rawIsFinite ? { raw_value: carriedRaw } : {}),
+        unit: binding?.unit ?? unit ?? statedDenomination?.unit,
+        source: earnsBriefClaim ? "brief_extraction" : "cee_hypothesis",
         target_match: {
           node_id: factorId,
           match_type: "exact_id", // LLM provided exact ID
           confidence: "high", // Direct from V4 prompt = high confidence
         },
-        value_confidence: binding === undefined && statedInBrief ? "high" : "low",
+        value_confidence: earnsBriefClaim ? "high" : "low",
         reasoning:
           binding?.reasoning ??
           (verdict === "stated"
             ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
-            : verdict === "not_stated"
-              ? "Model-chosen intervention level; this amount is not stated in the brief"
-              : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
+            : statedDenomination !== null
+              ? `Stated magnitude carried for this factor; the brief states ${statedDenomination.matchedText}`
+              : verdict === "not_stated"
+                ? "Model-chosen intervention level; this amount is not stated in the brief"
+                : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"),
       };
     }
   }
