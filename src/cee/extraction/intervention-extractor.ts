@@ -19,6 +19,7 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
+import { NEGATION_SCREEN_RE } from "../compound-goal/direction-gate.js";
 import {
   classifyAmountAgainstBrief,
   findStatedAmounts,
@@ -529,35 +530,190 @@ function formatRelativeDescription(value: ParsedValue): string {
 }
 
 /**
- * CLAUSE BOUNDARIES, for deciding what a negation GOVERNS.
+ * CLAUSE BOUNDARIES, for deciding what a denial GOVERNS.
  *
  * A sentence is too coarse. The frozen B1 brief settles it: "Staying on
  * Salesforce costs us nothing extra up front, and our annual Salesforce
  * licensing is £45,000." A sentence-scoped window puts "nothing" in front of
  * £45,000 and would refuse the one figure the product already gets RIGHT.
- * Coordinators are therefore boundaries too.
+ * Coordinators are therefore boundaries too — but only SOMETIMES, and the
+ * exception is the whole of {@link clauseWindow}.
  *
- * ⚠ `(?<!\d)\.(?!\d)` is load-bearing: an unguarded `.` treats the decimal point
- * of "£1.5m" as a sentence end, shrinking the window and so LOSING a negation
- * that really does govern — the unsafe direction. This is the same decimal-point
- * cut that truncated a magnitude guard's input in CLAUDE.md trap 22.
+ * ⚠ THE LOOKAHEAD `\.(?!\d)` IS LOAD-BEARING: an unguarded `.` treats the
+ * decimal point of "£1.5m" as a sentence end, shrinking the window and so
+ * LOSING a denial that really does govern — the unsafe direction. This is the
+ * same decimal-point cut that truncated a magnitude guard's input in CLAUDE.md
+ * trap 22.
+ *
+ * ⚠⚠ AND THE MATCHING LOOKBEHIND HAD TO GO, BECAUSE IT DELETED SENTENCE ENDS.
+ * This was spelled `(?<!\d)\.(?!\d)` — guarded on BOTH sides. The lookahead
+ * alone already excludes every decimal point (in "1.5" the `.` is followed by a
+ * digit); the lookbehind adds nothing to that and instead swallows the full
+ * stop of every sentence that ENDS in a number — which is most sentences that
+ * state money. Measured on this module's own frozen brief: in
+ * "…licensing is £45,000. We will not switch." the `.` after £45,000 was NOT a
+ * boundary, so with a forward window a denial in the NEXT sentence reached
+ * backwards into this one. Caught by an over-refusal control
+ * ("We cannot delay past Q3. The migration budget is £20,000."), not by
+ * inspection — the two guards look symmetrical and only one of them is doing a
+ * job.
  */
-const CLAUSE_BOUNDARY = /(?<!\d)\.(?!\d)|[!?;\n]|,\s*(?:and|or|but)\b|\s(?:and|or|but)\s/gi;
+const HARD_BOUNDARY_SRC = String.raw`\.(?!\d)|[!?;\n]`;
+const COORDINATOR_SRC = String.raw`,\s*(?:and|or|but)\b|\s(?:and|or|but)\s`;
+const CLAUSE_BOUNDARY = new RegExp(`${HARD_BOUNDARY_SRC}|${COORDINATOR_SRC}`, "gi");
+const IS_COORDINATOR = new RegExp(`^(?:${COORDINATOR_SRC})$`, "i");
 
 /**
- * Negation markers. DELIBERATELY INCOMPLETE — see the caller's note.
+ * THE DENIAL SCREEN — CONSUMED FROM THE ESTATE'S AUTHORITY, NOT MINTED HERE.
+ *
+ * ⚠ WHY THIS IS NOT A NEW LEXICON (CLAUDE.md trap 21 / the two
+ * `generateGraphHash` twins). `compound-goal/direction-gate.ts` already owns
+ * this estate's negation-and-prevention alphabet. It is the survivor of the
+ * FOUR-ROUND oscillation on exactly this shape of predicate, it carries the
+ * contraction forms three outside corpora in a row missed, it narrows `no` to
+ * `no(?=\s)` so `no-show` is not a negation, and it is guarded BOTH by a union
+ * assertion against the extractor's two lead lists AND by an external
+ * vocabulary sweep with its own KNOWN set. Re-typing any of that here would
+ * mint a twin that drifts. It is composed by SOURCE, so an alternative added
+ * there is live here the instant it lands, with nothing to sync.
+ *
+ * ⚠ THE LOCAL ADDITIONS ARE THE THREE THINGS THAT AUTHORITY DOES NOT COVER,
+ * and each is required by a case measured at the wire, not imagined:
+ *   · `nothing|neither|nor|exclud*` — `no(?=\s)` cannot match "nothing", and
+ *     the frozen brief's own "costs us nothing extra up front" is the
+ *     discriminator that stops this window being sentence-scoped;
+ *   · `declin*|instead of|rather than` — this module's original marker carried
+ *     them and they are load-bearing ("the budget was declined by finance");
+ *   · `\w+n['’]t` — the estate's list spells contractions with the STRAIGHT
+ *     apostrophe only, and real briefs are typed with the curly one.
+ *
+ * ⚠⚠ THE APOSTROPHE IS MANDATORY, AND ITS OPTIONALITY WAS A LIVE DEFECT.
+ * This module previously spelled that alternative `\b\w+n['’]?t\b`. With the
+ * apostrophe OPTIONAL it matches every English word ending in "nt" —
+ * *Procurement*, *amount*, *payment*, *current*, *percent*, *investment*,
+ * *commitment*, *segment*, *client*, *point*. Measured at the wire on
+ * `419a9684`: "Procurement authorised the £20,000 migration purchase" — a
+ * plain, unnegated assertion of the user's own figure — was REFUSED, because
+ * the word *Procurement* read as a contracted negation. It cost coverage
+ * silently and it would have cost far more once the window widened.
  */
-const NEGATION_MARKER =
-  /\b(?:not|no|never|without|avoid(?:ing)?|instead\s+of|rather\s+than|refus\w*|declin\w*|nothing|neither|nor|exclud\w*)\b|\b\w+n['\u2019]?t\b/i;
+const LOCAL_DENIAL_SRC = String.raw`\b(?:nothing|neither|nor|exclud\w*|declin\w*|instead\s+of|rather\s+than)\b|\b\w+n['’]t\b`;
+
+/** Any token that makes an amount's clause unsafe to read as the user's own assertion. */
+export const DENIAL_SCREEN_RE = new RegExp(
+  `${NEGATION_SCREEN_RE.source}|${LOCAL_DENIAL_SRC}`,
+  "i",
+);
 
 /**
- * Does a negation govern the clause this amount sits in?
+ * Does an amount END at `position` (ignoring trailing whitespace)?
+ * Used to recognise a COORDINAND — see {@link clauseWindow}.
+ */
+function amountEndsAt(
+  amounts: readonly { readonly index: number; readonly matchedText: string }[],
+  text: string,
+  position: number,
+): boolean {
+  let end = position;
+  while (end > 0 && /\s/.test(text.charAt(end - 1))) end--;
+  return amounts.some((a) => a.index + a.matchedText.length === end);
+}
+
+/** Does an amount BEGIN at `position` (ignoring leading whitespace)? */
+function amountStartsAt(
+  amounts: readonly { readonly index: number }[],
+  text: string,
+  position: number,
+): boolean {
+  let start = position;
+  while (start < text.length && /\s/.test(text.charAt(start))) start++;
+  return amounts.some((a) => a.index === start);
+}
+
+/**
+ * THE CLAUSE THIS AMOUNT SITS IN — SPANNING BOTH SIDES OF IT.
+ *
+ * ⚠ BOTH SIDES, BECAUSE ENGLISH DENIES IN BOTH DIRECTIONS. A backward-only
+ * window is blind to every postposed denial, and those are ordinary English,
+ * not edge cases: "The £20,000 migration budget was declined by finance", "The
+ * £20,000 migration was never approved", "A £20,000 migration is off the
+ * table". Measured at the wire on `419a9684`, all three were attributed to the
+ * user at `value_confidence: high`.
+ *
+ * ⚠⚠ A COORDINATOR MUST NOT CUT A GOVERNING DENIAL OFF A COORDINAND, AND THAT
+ * IS THE DECISIVE CASE. Measured at `419a9684`, these two sentences — the same
+ * words, the same governing negation, only the ORDER of two figures changed —
+ * produced OPPOSITE provenance for £20,000:
+ *
+ *     "We will not approve £20,000 or £45,000."   ->  cee_hypothesis   (right)
+ *     "We will not approve £45,000 or £20,000."   ->  brief_extraction (a lie)
+ *
+ * because `\s(?:and|or|but)\s` cut "not" off the second coordinand. An answer
+ * that changes when only the ORDER changes is an answer about the WINDOW, not
+ * about the sentence.
+ *
+ * ⚠⚠⚠ AND THE DISCRIMINATOR IS STRUCTURAL, NOT A LENGTH CLIFF. The estate
+ * ended its four-round oscillation on a natural-language predicate whose only
+ * discriminators were "two arbitrary length constants with hard cliffs on
+ * either side" (trap 22f), so a character budget is the one thing this must
+ * not be. The question a coordinator poses is grammatical and has a
+ * grammatical answer: IS THE THING IT JOINS A COORDINAND OF THIS AMOUNT, OR AN
+ * INDEPENDENT CLAUSE? A coordinand of an amount is an amount — so the test is
+ * simply whether an amount sits against the coordinator's far side, and it is
+ * answered by this module's OWN authority ({@link findStatedAmounts}), with no
+ * lexicon and nothing to keep in sync:
+ *
+ *     "not approve £45,000 | or | £20,000"          far side IS an amount  -> join
+ *     "nothing extra up front | , and | our ..."    far side is a CLAUSE   -> cut
+ *
+ * The second is the frozen brief's own £45,000 sentence, and cutting there is
+ * what keeps the one figure the product already gets right.
+ */
+function clauseWindow(
+  text: string,
+  amountIndex: number,
+  amountLength: number,
+): { readonly start: number; readonly end: number } {
+  const amounts = findStatedAmounts(text);
+
+  // ── BACKWARDS: the last boundary that is not joining a coordinand ────────
+  const before = text.slice(0, amountIndex);
+  const backward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  const hits: { index: number; text: string }[] = [];
+  for (let m = backward.exec(before); m !== null; m = backward.exec(before)) {
+    hits.push({ index: m.index, text: m[0] });
+  }
+  let start = 0;
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const hit = hits[i]!;
+    if (IS_COORDINATOR.test(hit.text) && amountEndsAt(amounts, text, hit.index)) continue;
+    start = hit.index + hit.text.length;
+    break;
+  }
+
+  // ── FORWARDS: the first boundary that is not joining a coordinand ────────
+  const afterFrom = amountIndex + amountLength;
+  const after = text.slice(afterFrom);
+  const forward = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
+  let end = text.length;
+  for (let m = forward.exec(after); m !== null; m = forward.exec(after)) {
+    const at = afterFrom + m.index;
+    if (IS_COORDINATOR.test(m[0]) && amountStartsAt(amounts, text, at + m[0].length)) continue;
+    end = at;
+    break;
+  }
+
+  return { start, end };
+}
+
+/**
+ * Does a denial govern the clause this amount sits in?
  *
  * ⚠ WHY THIS IS A REFUSAL AND NOT A PARSE (coordinator ruling, 2026-08-24).
  * Three residual classes reach this route, and they are NOT one class:
  *   · wrong-factor  ("Q4 bookings lost" takes the migration cost)   — accepted
  *   · third-party   ("a competitor paid £20,000")                   — accepted
- *   · NEGATED       ("we will NOT spend £20,000")                   — REFUSED here
+ *   · DENIED        ("we will NOT spend £20,000")                   — REFUSED here
  * The first two put a real number on the wrong object; the user's own figure
  * still reaches the model. The third MANUFACTURES USER EVIDENCE OUT OF THE
  * USER'S EXPLICIT DENIAL — it reads their refusal as their statement, which is
@@ -567,20 +723,35 @@ const NEGATION_MARKER =
  * FOUR consecutive rounds on exactly that shape, each round fixing one
  * direction and opening the other, and the ruling that ended it was: where
  * direction cannot be determined, make the ambiguity the product rather than
- * guess (CLAUDE.md trap 22f). So this detector is allowed to MISS, and is not
- * to be extended case-by-case when it does. It may only ever cause a REFUSAL:
- * refusing costs a disownment this product already tolerates on most draws,
- * while attributing costs a fabricated user statement. The asymmetry decides
- * the direction, so a miss degrades to today's behaviour and never to a lie.
+ * guess (CLAUDE.md trap 22f). So this detector is ALLOWED TO MISS. It is not
+ * extended verb-by-verb when it does: the residual misses are recorded instead,
+ * in the frozen KNOWN-DROPPED set in
+ * `__tests__/stated-magnitude-denial.test.ts`, whose pin is DERIVED by running
+ * the corpus and therefore REDs if that set grows OR shrinks. A gap recorded in
+ * the suite is honest; a gap invisible to it is how four rounds happened.
+ *
+ * ⚠⚠ THE ASYMMETRY, STATED THE RIGHT WAY ROUND. An earlier version of this
+ * comment said "a miss degrades to today's behaviour, never to a lie" and used
+ * that to license the direction. THAT IS INVERTED, and it is inverted about the
+ * one thing the comment exists to settle:
+ *   · a FALSE POSITIVE — refusing an amount the user did assert — degrades to
+ *     today's behaviour (`cee_hypothesis` / low), a disownment this product
+ *     already serves on most draws. That is the cheap direction.
+ *   · a FALSE NEGATIVE — MISSING a denial — is exactly the lie: it stamps
+ *     `brief_extraction` / high on a figure the user refused.
+ * So a MISS is the expensive failure, not the safe one, and the asymmetry
+ * argues for refusing WIDELY rather than for tolerating misses. The inverted
+ * sentence survived into the code and was being used to justify the unsafe
+ * direction — which is why it is corrected here at the source and not only in a
+ * PR description nobody inherits.
  */
-function negationGovernsAmount(briefText: string, amountIndex: number): boolean {
-  const before = briefText.slice(0, amountIndex);
-  const boundary = new RegExp(CLAUSE_BOUNDARY.source, CLAUSE_BOUNDARY.flags);
-  let start = 0;
-  for (let m = boundary.exec(before); m !== null; m = boundary.exec(before)) {
-    start = m.index + m[0].length;
-  }
-  return NEGATION_MARKER.test(before.slice(start));
+function denialGovernsAmount(
+  briefText: string,
+  amountIndex: number,
+  amountLength: number,
+): boolean {
+  const { start, end } = clauseWindow(briefText, amountIndex, amountLength);
+  return DENIAL_SCREEN_RE.test(briefText.slice(start, end));
 }
 
 /**
@@ -712,11 +883,11 @@ function resolveStatedDenominationForRawMagnitude(
           Math.max(Number.EPSILON, Math.abs(rawMagnitude) * 1e-9),
     );
     // FAIL-CLOSED ACROSS OCCURRENCES: if ANY statement of this magnitude is
-    // negated, the brief does not unambiguously assert it, so nothing here may
+    // denied, the brief does not unambiguously assert it, so nothing here may
     // claim the user did. One denial is enough to withdraw the claim.
     if (
       typeof briefText === "string" &&
-      occurrences.some((a) => negationGovernsAmount(briefText, a.index))
+      occurrences.some((a) => denialGovernsAmount(briefText, a.index, a.matchedText.length))
     ) {
       return null;
     }
