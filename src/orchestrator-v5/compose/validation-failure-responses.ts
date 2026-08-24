@@ -641,18 +641,55 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
     //     (`evaluate-factor-value-proposal.ts` 2c);
     //   • the unit did NOT come from the user — this branch's own guard is
     //     `!messageEvidencesUnit(ctx.userMessage, details.unit)`;
-    //   • the magnitude was never inspected by the predicate, so the NUMBER
-    //     cannot have been the blocker.
-    // Therefore: name the unit as the blocker, clear the number, and hand back
-    // a complete sendable restatement. The refusal itself is untouched.
+    //   • the magnitude was NEVER INSPECTED by the predicate.
+    // Therefore: name the UNIT as what cannot be applied, and hand back a
+    // sendable restatement. The refusal itself is untouched.
+    //
+    // ⚠⚠ F1, REVIEW OF #1080 — WHAT THIS COPY MUST *NOT* SAY, and why an
+    // earlier draft of this branch said it anyway. That draft closed with
+    // "the number isn't the problem: the unit is", reasoning that because the
+    // predicate never inspects magnitude, the magnitude cannot be at fault.
+    // THAT IS A NON-SEQUITUR: a predicate having no opinion on the number is
+    // not evidence the number is fine. `details.value` is `parsed.numeric`,
+    // and `normalise-factor-value.ts` declares the proposal's number lives in
+    // the UNIT's frame ("{ value: 5, unit: '%' } — percentage on 0-1 model
+    // scale") — while this branch fires precisely when that unit is one the
+    // user never stated. Reachable counter-example: a unitless uncapped factor
+    // sitting at 0.6, "set it to 12", router proposes `{value: 12, unit: '%'}`,
+    // guard 2c fires. "The number isn't the problem" plus `Say "Set X to 12"`
+    // would be false AND would steer the user into writing 12 onto a 0-1
+    // factor, which nothing downstream caps. The old copy claimed no such
+    // thing. So: assert nothing about the magnitude, and make the restatement
+    // CONDITIONAL ("if you meant N as a plain number") rather than an
+    // endorsement. This is trap 13d — an invariant written against the
+    // witnessed failure mode (0.7, where the two frames happened to coincide)
+    // instead of against the spec.
     //
     // ⚠ The unit is still never NAMED (ROADMAP 2.1261): saying "you applied %"
     // about a % the routing model re-read from history is the defect that
     // branch exists to close. "The edit I built for it carried one" attributes
     // it where it belongs.
-    const unstatedSubject = factorLabel !== undefined
+    const renderedLabel = factorLabel !== undefined
       ? safeLabel({ label: factorLabel, kind: undefined })
-      : 'This factor';
+      : undefined;
+    const unstatedSubject = renderedLabel ?? 'This factor';
+    // ⚠ F2, REVIEW OF #1080 — GATE ON THE RENDERED LABEL, NOT THE RAW ONE.
+    // The restatement tells the user to send a message VERBATIM, so it is only
+    // safe when the label we print is the label the router will match. An
+    // earlier draft gated on `factorLabel !== undefined` while interpolating
+    // `safeLabel(...)`, which has two reachable failure modes: an id-shaped
+    // label (`rep_adoption`) makes `safeLabel` return the bare deictic
+    // 'that item' — and `repair-value-binding.ts` documents a bare deictic as
+    // exactly what CANNOT anchor, so we would be prescribing a message the
+    // system has proven it cannot route; and a label over MAX_LABEL_LENGTH is
+    // truncated to `first 57 + '...'`, producing an unclosed quote around a
+    // label the user is told to send as-is. Byte equality with the raw label
+    // rules out substitution, truncation AND trimming in one check; the
+    // explicit deictic test covers a factor genuinely labelled "that item".
+    const labelIsFaithful =
+      renderedLabel !== undefined &&
+      renderedLabel === factorLabel &&
+      renderedLabel !== 'that item';
     // Only a `set` may be restated as a target value: on increase/decrease/
     // multiply `details.value` is the DELTA, and "Set X to <delta>" would
     // invent the user's figure. Long floats are computed arithmetic
@@ -664,17 +701,19 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
       readString(details.operator) === 'set' &&
       unstatedValue !== undefined &&
       String(unstatedValue).length <= 12 &&
-      factorLabel !== undefined;
+      labelIsFaithful;
     const unstatedNext = restatable
-      ? `Say "Set ${unstatedSubject} to ${String(unstatedValue)}" and I'll apply it as a plain number.`
-      : `Send it again as a plain number on its own and I'll apply it.`;
+      ? `If you meant ${String(unstatedValue)} as a plain number on this ` +
+        `factor's own scale, say "Set ${unstatedSubject} to ` +
+        `${String(unstatedValue)}" and I'll apply it.`
+      : `Tell me the value again as a plain number on this factor's own scale ` +
+        `and I'll apply it.`;
     return {
       body: {
         assistant_text:
-          `${unstatedSubject} is recorded without a unit, and the edit I built ` +
-          `for it carried one, which would change what it measures. I haven't ` +
-          `changed anything, and the number isn't the problem: the unit is. ` +
-          `${unstatedNext}`,
+          `${unstatedSubject} is recorded without a unit, so the unit in the ` +
+          `edit I built for it cannot be applied without changing what it ` +
+          `measures. I haven't changed anything. ${unstatedNext}`,
         suggested_actions: [
           {
             id: chipId('prompt', 'param-retry'),

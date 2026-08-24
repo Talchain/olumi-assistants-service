@@ -103,10 +103,96 @@ describe('D1 — the stated reason must be the actual blocker (unit_redeclares_s
     expect(response.assistant_text).not.toContain("Tell me the plain number you want and I'll apply it");
   });
 
-  it('names the UNIT as the blocker and clears the number', () => {
+  it('names the UNIT as what cannot be applied', () => {
     const { response } = compose(repAdoptionQualityRefusal(), ctx(WITNESSED_MESSAGE));
-    expect(response.assistant_text).toMatch(/the number isn't the problem/i);
-    expect(response.assistant_text).toMatch(/the unit is/i);
+    expect(response.assistant_text).toMatch(/the unit in the edit I built for it cannot be applied/i);
+  });
+
+  /**
+   * ⚠⚠ F1 (review of #1080) — A WITHDRAWN CLAIM, PINNED SO IT CANNOT RETURN.
+   *
+   * An earlier draft said "the number isn't the problem: the unit is",
+   * reasoning that a predicate which never inspects magnitude cannot be
+   * objecting to the magnitude. That is a NON-SEQUITUR — no opinion is not a
+   * clean bill of health. `details.value` is `parsed.numeric`, which
+   * `normalise-factor-value.ts` declares lives in the UNIT's frame
+   * ("{ value: 5, unit: '%' } — percentage on 0-1 model scale"), and this
+   * branch fires exactly when that unit is one the user never stated.
+   *
+   * The counter-example below is the reviewer's, reproduced verbatim: it is
+   * REACHABLE, and the withdrawn copy was both false on it and actively
+   * harmful, steering the user into writing 12 onto a 0-1 factor that nothing
+   * downstream caps. Trap 13d: the invariant had been written against the
+   * witnessed failure mode (0.7, where the two frames coincided) rather than
+   * against the spec.
+   */
+  it('F1: makes NO claim about the magnitude, on the reachable 12-on-a-0-1-factor case', () => {
+    const error = repAdoptionQualityRefusal();
+    (error.details as Record<string, unknown>).value = 12;
+    const { response } = compose(error, ctx('Set Rep Adoption Quality to 12.'));
+    expect(response.assistant_text).not.toMatch(/the number isn't the problem/i);
+    expect(response.assistant_text).not.toMatch(/number.{0,24}(is fine|not the problem|isn't the problem)/i);
+    // …and the restatement is CONDITIONAL, never an endorsement.
+    expect(response.assistant_text).toMatch(/if you meant 12 as a plain number/i);
+  });
+
+  it('F1: the witnessed turn also gets a conditional restatement, not an endorsement', () => {
+    const { response } = compose(repAdoptionQualityRefusal(), ctx(WITNESSED_MESSAGE));
+    expect(response.assistant_text).toMatch(/if you meant 0\.7 as a plain number/i);
+    expect(response.assistant_text).not.toMatch(/the number isn't the problem/i);
+  });
+
+  /**
+   * ⚠ F2 (review of #1080) — the restatement tells the user to send a message
+   * VERBATIM, so it may only be offered when the label printed IS the label
+   * the router will match. `safeLabel` substitutes 'that item' for an
+   * id-shaped label (and `repair-value-binding.ts` documents a bare deictic as
+   * precisely what cannot anchor) and truncates anything over 60 chars to
+   * `first 57 + '...'`, which would also leave the quote unclosed.
+   */
+  it('F2: an ID-SHAPED label gets no verbatim restatement (a deictic cannot anchor)', () => {
+    const error = repAdoptionQualityRefusal();
+    (error.details as Record<string, unknown>).factor_label = 'rep_adoption';
+    const { response } = compose(error, ctx(WITNESSED_MESSAGE));
+    expect(response.assistant_text).not.toContain('Say "Set');
+    expect(response.assistant_text).not.toContain('that item to');
+    // The honest half still ships.
+    expect(response.assistant_text).toMatch(/haven't changed anything/i);
+    expect(response.assistant_text).toMatch(/plain number on this factor's own scale/i);
+  });
+
+  it('F2: an OVER-LONG label gets no verbatim restatement (truncation would unclose the quote)', () => {
+    const error = repAdoptionQualityRefusal();
+    const longLabel = 'Rep Adoption Quality across every enterprise territory and segment worldwide';
+    expect(longLabel.length).toBeGreaterThan(60);
+    (error.details as Record<string, unknown>).factor_label = longLabel;
+    const { response } = compose(error, ctx(WITNESSED_MESSAGE));
+    // No verbatim instruction is offered…
+    expect(response.assistant_text).not.toContain('Say "Set');
+    // …and in particular the truncated form is never quoted back as one. The
+    // truncated label may still appear as the sentence SUBJECT (descriptive
+    // prose, exactly as every sibling branch renders it) — what must not
+    // happen is the user being told to SEND a truncated label.
+    expect(response.assistant_text).not.toMatch(/Set [^"]*\.\.\./);
+    expect(response.assistant_text).toMatch(/Tell me the value again as a plain number/i);
+  });
+
+  /**
+   * ⚠ F3 (review of #1080) — the copy and the ONLY clickable affordance beside
+   * it must not disagree (trap 21). The chip is pinned by the ROADMAP 2.1261
+   * spec and is deliberately unchanged; this asserts the pair is coherent —
+   * the copy makes no claim the chip contradicts.
+   */
+  it('F3: the copy does not contradict the unchanged "Try a different value" chip', () => {
+    const { response } = compose(repAdoptionQualityRefusal(), ctx(WITNESSED_MESSAGE));
+    expect(response.suggested_actions[0]).toMatchObject({
+      id: 'chip_prompt_param_retry',
+      label: 'Try a different value',
+      message: 'Use a different value for value.',
+    });
+    // The chip invites a different value; the copy must not assert the current
+    // one is already fine.
+    expect(response.assistant_text).not.toMatch(/the number isn't the problem/i);
   });
 
   it('hands back a COMPLETE, sendable restatement carrying the factor and the value in play', () => {
@@ -138,7 +224,7 @@ describe('D1 — the stated reason must be the actual blocker (unit_redeclares_s
     const { response } = compose(error, ctx('Increase Rep Adoption Quality by 0.7.'));
     expect(response.assistant_text).not.toContain('Set Rep Adoption Quality to 0.7');
     // The honest half still ships.
-    expect(response.assistant_text).toMatch(/the number isn't the problem/i);
+    expect(response.assistant_text).toMatch(/the unit in the edit I built for it cannot be applied/i);
   });
 
   it('a float carrying computed-arithmetic noise is never echoed back', () => {
