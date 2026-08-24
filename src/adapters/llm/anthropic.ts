@@ -3092,6 +3092,16 @@ export async function critiqueGraphWithAnthropic(
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
+  // Temperature policy (rejects-sampling gate → omit; thinking → 1; else the
+  // requested value) is single-sourced in anthropicTemperatureFor (FINAL-SWEEP
+  // F2). This site hardcoded `temperature: 0` and was never caught, because
+  // critique_graph's checked-in default was an OpenAI model — the router's
+  // capability gate rejected the task before any Anthropic request was built,
+  // so the missing gate here was unreachable. Now that the task resolves to a
+  // registered Anthropic model, a rejects-sampling-params model (claude-sonnet-5)
+  // would 400 on the sampling param without this.
+  const temperature = anthropicTemperatureFor(model, { thinking: false });
+
   log.info({ node_count: args.graph.nodes.length, edge_count: args.graph.edges.length, model, idempotency_key: idempotencyKey, prompt_id: critiquePromptMeta.taskId, prompt_hash: critiquePromptMeta.prompt_hash, prompt_source: critiquePromptMeta.source }, "calling Anthropic for critique");
 
   const abortController = new AbortController();
@@ -3105,7 +3115,7 @@ export async function critiqueGraphWithAnthropic(
           {
             model,
             max_tokens: maxTokens,
-            temperature: 0,
+            temperature,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
           },
@@ -3261,6 +3271,11 @@ Return ONLY valid JSON in this format:
   ]
 }`;
 
+  // Temperature policy single-sourced in anthropicTemperatureFor (FINAL-SWEEP
+  // F2) — same previously-unreachable hardcode as critiqueGraphWithAnthropic
+  // above; see the note there.
+  const temperature = anthropicTemperatureFor(model, { thinking: false });
+
   log.info({ change_count: (args.patch.adds?.nodes?.length || 0) + (args.patch.adds?.edges?.length || 0), model, idempotency_key: idempotencyKey }, "calling Anthropic for explain-diff");
 
   const abortController = new AbortController();
@@ -3274,7 +3289,7 @@ Return ONLY valid JSON in this format:
           {
             model,
             max_tokens: maxTokens,
-            temperature: 0,
+            temperature,
             messages: [{ role: "user", content: prompt }],
           },
           {

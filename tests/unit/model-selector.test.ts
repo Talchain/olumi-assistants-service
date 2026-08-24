@@ -146,10 +146,16 @@ describe("selectModel", () => {
       expect(result.source).toBe("default");
     });
 
-    it("returns premium tier for critique_graph task (reasoning model)", () => {
+    // Was "returns premium tier … gpt-5.2". That expectation encoded a default
+    // that could never serve: critique_graph is provider-constrained to
+    // Anthropic/Fixtures (ROUTER_TASK_PROVIDER_CAPABILITIES), so an OpenAI
+    // model made every POST /assist/critique-graph fail at resolution with
+    // MODEL_PROVIDER_MISMATCH. The test was green on a model the router
+    // rejected — it asserted the map, never that the map was serviceable.
+    it("returns the Anthropic quality-tier default for critique_graph (provider-constrained task)", () => {
       const result = selectModel({ task: "critique_graph" }, enabledConfig);
-      expect(result.modelId).toBe("gpt-5.2");
-      expect(result.tier).toBe("premium");
+      expect(result.modelId).toBe("claude-sonnet-5");
+      expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });
   });

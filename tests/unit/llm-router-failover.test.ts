@@ -11,7 +11,7 @@ import {
   getAdapterWithResolution,
   resetAdapterCache,
 } from "../../src/adapters/llm/router.js";
-import { ModelAssignmentError } from "../../src/config/model-assignment.js";
+import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router - Failover Configuration", () => {
@@ -147,14 +147,21 @@ describe("LLM Router - Failover Configuration", () => {
     vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic");
     vi.stubEnv("LLM_PROVIDER", "openai");
 
-    let caught: unknown;
-    try {
-      getAdapterWithResolution("critique_graph");
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(ModelAssignmentError);
-    if (!(caught instanceof ModelAssignmentError)) return;
-    expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
+    // Only ONE listed provider (anthropic) can serve critique_graph, so the
+    // chain must not activate. This used to be asserted indirectly, via the
+    // MODEL_PROVIDER_MISMATCH that the then-OpenAI checked-in default produced
+    // once resolution fell through. That default is now Anthropic, so the
+    // fall-through succeeds — and the non-activation is asserted DIRECTLY:
+    // a plain "anthropic" adapter from the task default, never a
+    // "*-failover" adapter and never resolution_source "llm_model_fallback".
+    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+
+    expect(adapter.name).toBe("anthropic");
+    expect(adapter.name).not.toContain("failover");
+    expect(resolution).toMatchObject({
+      provider: "anthropic",
+      resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+      resolution_source: "task_default",
+    });
   });
 });
