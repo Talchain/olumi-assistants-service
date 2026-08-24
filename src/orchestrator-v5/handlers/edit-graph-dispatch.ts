@@ -4559,14 +4559,17 @@ export async function dispatchEditGraph(
     // notice, F-HELD 2b; steer-don't-bind chip suppression, F-HELD 3a).
     // Adopt the committed response when the seam actually rewrote it. The
     // untouched fast path returns the SAME object (identity-equal), so this
-    // is a no-op there; a bare `{}` (test-double shape) has no
-    // assistant_text and is treated as "not rewritten".
+    // is a no-op there. A canonical model-version receipt is load-bearing even
+    // when assistant_text is empty; response_version keeps a bare `{}` legacy
+    // test double from being mistaken for a real response.
     const committedResponse = commitResult?.response;
+    const hasModelVersionReceipt =
+      committedResponse !== undefined &&
+      Object.prototype.hasOwnProperty.call(committedResponse, 'model_version_receipt');
     if (
       committedResponse !== undefined &&
       committedResponse !== response &&
-      typeof committedResponse.assistant_text === 'string' &&
-      committedResponse.assistant_text.length > 0
+      (hasModelVersionReceipt || committedResponse.response_version === 2)
     ) {
       response = committedResponse;
     }

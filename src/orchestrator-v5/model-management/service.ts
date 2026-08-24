@@ -17,18 +17,24 @@
  */
 
 import { config } from '../../config/index.js';
-import { computeGraphIdentityHash } from '../context/graph-identity.js';
+import {
+  computeGraphIdentityHash,
+  computeVersionAnalysisAffectingHashRecord,
+} from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { compareVersionRecords, ModelVersionDiffInputError } from './compare.js';
 import {
   ModelVersionCasConflictError,
+  ModelVersionMutationIdReusedError,
   ModelVersionNotFoundError,
   ModelVersionSignInRequiredError,
+  type AtomicRestoreVersionWrite,
   type ModelVersionStorePort,
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
   SIGN_IN_REQUIRED_MESSAGE,
+  type AtomicRestoreVersionOutcome,
   type ModelManagementResult,
   type ModelVersionEvent,
   type ModelVersionRecord,
@@ -61,6 +67,20 @@ export interface RestoreVersionRequest {
   readonly version_id: string;
   readonly label?: string;
   readonly expected_graph_identity_hash?: string;
+}
+
+export interface AtomicRestoreVersionRequest {
+  readonly scenario_id: string;
+  readonly version_id: string;
+  readonly mutation_id: string;
+  readonly graph: unknown;
+  readonly source_graph_identity_hash: string;
+  readonly current_graph: unknown;
+  readonly expected_graph_identity_hash: string | null;
+  readonly label?: string;
+  readonly actor_kind?: 'known' | 'system' | 'unknown';
+  readonly authored_by?: string | null;
+  readonly source_turn_id?: string | null;
 }
 
 export interface ModelManagementServiceOptions {
@@ -142,6 +162,79 @@ export class ModelManagementService {
           ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
           : {}),
       }),
+    );
+  }
+
+  async restoreVersionAtomic(
+    request: AtomicRestoreVersionRequest,
+  ): Promise<ModelManagementResult<AtomicRestoreVersionOutcome>> {
+    if (!this.isEnabled()) return { status: 'disabled' };
+
+    const restoredIdentity = computeGraphIdentityHash(
+      request.graph as GraphStateIngress | null | undefined,
+    );
+    if (restoredIdentity === null) {
+      return {
+        status: 'error',
+        error: {
+          code: 'empty_graph',
+          recoverable: true,
+          message: 'The restored graph is absent or identity-empty.',
+        },
+      };
+    }
+    const currentIdentity = computeGraphIdentityHash(
+      request.current_graph as GraphStateIngress | null | undefined,
+    );
+    const restoredAnalysis = computeVersionAnalysisAffectingHashRecord(
+      request.graph as GraphStateIngress | null | undefined,
+    );
+    const currentAnalysis = computeVersionAnalysisAffectingHashRecord(
+      request.current_graph as GraphStateIngress | null | undefined,
+    );
+    if (restoredAnalysis === null) {
+      return {
+        status: 'error',
+        error: {
+          code: 'empty_graph',
+          recoverable: true,
+          message: 'The restored graph has no durable analysis identity.',
+        },
+      };
+    }
+    if (this.store.restoreVersionAtomic === undefined) {
+      return {
+        status: 'error',
+        error: {
+          code: 'store_error',
+          recoverable: false,
+          message: 'Atomic model-version restore is not available in this store.',
+        },
+      };
+    }
+
+    return this.runWrite('model_version_restored', request.scenario_id, () =>
+      this.store.restoreVersionAtomic!({
+        scenario_id: request.scenario_id,
+        version_id: request.version_id,
+        mutation_id: request.mutation_id,
+        graph: request.graph,
+        graph_identity_hash: restoredIdentity.value,
+        analysis_affecting_hash: restoredAnalysis.value,
+        hash_algorithm: restoredIdentity.algorithm,
+        identity_projection_version: restoredIdentity.projection_version,
+        identity_normaliser_version: restoredIdentity.normaliser_version,
+        graph_schema_version: restoredIdentity.graph_schema_version,
+        source_graph_identity_hash: request.source_graph_identity_hash,
+        current_graph: request.current_graph,
+        current_graph_identity_hash: currentIdentity?.value ?? null,
+        current_analysis_affecting_hash: currentAnalysis?.value ?? null,
+        expected_graph_identity_hash: request.expected_graph_identity_hash,
+        actor_kind: request.actor_kind ?? 'unknown',
+        authored_by: request.authored_by ?? null,
+        source_turn_id: request.source_turn_id ?? null,
+        ...(request.label !== undefined ? { label: request.label } : {}),
+      } satisfies AtomicRestoreVersionWrite),
     );
   }
 
@@ -280,16 +373,20 @@ export class ModelManagementService {
   }
 
   /** Shared write path: typed-error mapping + post-commit event emission. */
-  private async runWrite(
+  private async runWrite<T extends VersionWriteOutcome>(
     eventType: ModelVersionEvent['event_type'],
     scenarioId: string,
-    write: () => Promise<VersionWriteOutcome>,
-  ): Promise<ModelManagementResult<VersionWriteOutcome>> {
+    write: () => Promise<T>,
+  ): Promise<ModelManagementResult<T>> {
     try {
       const outcome = await write();
       // Dedupe = no new version, no durable journey event ⇒ no sink event
       // (version history records changes, not confirmations — contract §7.3).
-      if (!outcome.deduped && outcome.event_id !== null) {
+      if (
+        !('replayed' in outcome && outcome.replayed === true) &&
+        !outcome.deduped &&
+        outcome.event_id !== null
+      ) {
         await notifyVersionEventSink(this.eventSink, {
           event_version: 'model_version_event.v1',
           event_id: outcome.event_id,
@@ -349,6 +446,16 @@ function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
         code: 'version_not_found',
         recoverable: true,
         message: err.message,
+      },
+    };
+  }
+  if (err instanceof ModelVersionMutationIdReusedError) {
+    return {
+      status: 'error',
+      error: {
+        code: 'mutation_id_reused',
+        recoverable: false,
+        message: 'That mutation id was already used for a different restore target.',
       },
     };
   }

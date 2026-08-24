@@ -115,6 +115,20 @@ export function computeDeterministicGraphHash(
 export function computeAnalysisAffectingGraphHash(
   graph: GraphStateIngress | null | undefined,
 ): string | null {
+  const full = computeAnalysisAffectingGraphHashSha256(graph);
+  return full === null ? null : full.slice(0, HASH_HEX_LENGTH);
+}
+
+/**
+ * Full SHA-256 content address of the SAME analysis-affecting projection.
+ *
+ * Freshness keeps its established 16-hex token above. Durable model-version
+ * identities use this collision-resistant 64-hex form. Both delegate to one
+ * projection implementation below, so there is no second normaliser.
+ */
+export function computeAnalysisAffectingGraphHashSha256(
+  graph: GraphStateIngress | null | undefined,
+): string | null {
   if (!graph) return null;
 
   const nodes = graph.nodes;
@@ -146,7 +160,7 @@ export function computeAnalysisAffectingGraphHash(
     goal_node_id: typeof goalNodeId === 'string' ? goalNodeId : null,
     goal_constraints: Array.isArray(goalConstraints) ? goalConstraints : [],
   });
-  return createHash('sha256').update(canonical).digest('hex').slice(0, HASH_HEX_LENGTH);
+  return createHash('sha256').update(canonical).digest('hex');
 }
 
 function pickDefined<T extends Record<string, unknown>>(

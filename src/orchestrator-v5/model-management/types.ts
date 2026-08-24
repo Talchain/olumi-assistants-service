@@ -65,6 +65,30 @@ export interface VersionWriteOutcome {
   readonly restored_from_version_id?: string;
 }
 
+/** Receipt from the single-transaction restore/adopt carrier. */
+export interface AtomicRestoreVersionOutcome extends VersionWriteOutcome {
+  readonly mutation_id: string;
+  readonly analysis_affecting_hash: string;
+  readonly hash_algorithm: string;
+  readonly identity_projection_version: string;
+  readonly identity_normaliser_version: string;
+  readonly graph_schema_version: string;
+  readonly restored_from_version_id: string;
+  readonly undo_version_id: string | null;
+  readonly parent_version_id: string | null;
+  readonly root_version_id: string | null;
+  readonly actor_kind: 'known' | 'system' | 'unknown';
+  readonly authored_by: string | null;
+  readonly creation_kind: 'restore';
+  readonly source_version_id: string;
+  readonly source_turn_id: string | null;
+  readonly graph: unknown;
+  readonly deduped: boolean;
+  readonly replayed: boolean;
+  readonly analysis_invalidated_at: string;
+  readonly event_id: string;
+}
+
 // ---------------------------------------------------------------------------
 // Typed errors / results — every entry point resolves to one of these;
 // the service layer never throws.
@@ -106,6 +130,8 @@ export type ModelManagementErrorCode =
   | 'version_graph_incompatible'
   /** The supplied graph is absent or identity-empty — nothing to version. */
   | 'empty_graph'
+  /** A mutation_id was replayed with a different restore target. */
+  | 'mutation_id_reused'
   /** Any other store/RPC failure (fail-closed catch-all). */
   | 'store_error';
 
