@@ -129,7 +129,6 @@ import { z } from "zod";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
-import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import {
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,

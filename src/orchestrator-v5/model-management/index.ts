@@ -52,10 +52,11 @@ export { ModelManagementService } from './service.js';
 export type {
   ModelManagementServiceOptions,
   SaveVersionRequest,
-  RestoreVersionRequest,
+  RestoreVersionAtomicRequest,
 } from './service.js';
 export {
   SupabaseModelVersionStore,
+  ModelVersionBaseUnverifiableError,
   ModelVersionSignInRequiredError,
   ModelVersionNotFoundError,
   ModelVersionCasConflictError,
@@ -65,7 +66,7 @@ export {
 export type {
   ModelVersionStorePort,
   SaveVersionWrite,
-  RestoreVersionWrite,
+  RestoreVersionAtomicWrite,
 } from './store-adapter.js';
 export { compareVersionRecords, summariseGraphDiff } from './compare.js';
 export { journeyRpcVersionEventSink, notifyVersionEventSink } from './version-event-sink.js';
@@ -74,6 +75,7 @@ export type {
   ModelVersionSummary,
   ModelVersionRecord,
   VersionWriteOutcome,
+  AtomicRestoreOutcome,
   ModelManagementResult,
   ModelManagementError,
   ModelManagementErrorCode,
