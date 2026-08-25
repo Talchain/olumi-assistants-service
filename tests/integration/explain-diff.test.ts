@@ -276,14 +276,26 @@ describe("POST /assist/explain-diff", () => {
      * lines in the fixtures adapter, mirroring the existing adds loops for
      * `updates`/`removes`.
      *
-     * ⚠ CONSEQUENCE FOR REACHABILITY, stated so it is not lost: the deployed
-     * behaviour of this capability depends on LLM_PROVIDER, and only ONE of the
-     * three providers can serve it —
-     *   anthropic → implemented (explainDiffWithAnthropic), handles any patch shape
-     *   fixtures  → 500 on every real UI payload (this test)
-     *   openai    → 400 "not_supported" (openai.ts explicitly does not implement it)
-     * Provider posture must be derived from the Render API or a live witness,
-     * never from YAML (render-staging.yaml has been wrong about this before).
+     * ⚠ CONSEQUENCE FOR REACHABILITY — SETTLED, no longer an open question.
+     *
+     * Which provider serves this task decides whether it works at all:
+     *   anthropic → implemented (explainDiffWithAnthropic), any patch shape
+     *   fixtures  → 0 rationales on an updates-only patch (this test)
+     *   openai    → does not implement explainDiff at all
+     *
+     * DERIVED, not assumed: LLM_PROVIDER is ABSENT from all 118 cee-staging env
+     * vars (Render API, fully paginated), so the schema default in
+     * src/config/index.ts governs — and it is "openai". The task therefore
+     * resolved to a provider that cannot execute it, on every request.
+     *
+     * FIXED by giving explain_diff a first-class checked-in task default
+     * (TASK_MODEL_DEFAULTS.explain_diff = claude-haiku-4-5), which outranks the
+     * global fallback and carries its provider through MODEL_REGISTRY. Pinned by
+     * tests/unit/explain-diff-provider-assignment.test.ts, which also REDs if the
+     * assignment is ever lost.
+     *
+     * The fixtures gap below is unrelated to that fix and remains real: it is a
+     * property of the test double, not of the deployed provider.
      */
     it("KNOWN GAP: fixtures adapter yields no rationales for an updates-only patch", async () => {
       const res = await app.inject({

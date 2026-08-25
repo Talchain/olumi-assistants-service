@@ -78,7 +78,13 @@ config.auth.supabaseUrl     // SUPABASE_URL (derives the default JWKS URL and th
 ### LLM Configuration
 
 ```typescript
-config.llm.provider           // LLM_PROVIDER (default: "anthropic")
+config.llm.provider           // LLM_PROVIDER (default: "openai" — src/config/index.ts:549,
+                              //   matching DEFAULT_PROVIDER in adapters/llm/router.ts.
+                              //   ⚠ This said "anthropic" and was false. It is load-bearing:
+                              //   critique_graph and explain_diff declare anthropic|fixtures
+                              //   in ROUTER_TASK_PROVIDER_CAPABILITIES, so a reader who
+                              //   believes the default is anthropic concludes both work.
+                              //   On cee-staging LLM_PROVIDER is UNSET, so this default governs.)
 config.llm.model              // LLM_MODEL
 config.llm.anthropicApiKey    // ANTHROPIC_API_KEY
 config.llm.openaiApiKey       // OPENAI_API_KEY

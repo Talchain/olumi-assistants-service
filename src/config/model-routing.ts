@@ -131,6 +131,27 @@ export type CeeTask =
   | "suggest_options"
   // Display-only compatibility name. The executable route is explain_diff.
   | "explainer"
+  // The EXECUTABLE explain-diff task (POST /assist/explain-diff and its
+  // browser-reachable twin /assist/v1/explain-diff both call
+  // getAdapter('explain_diff')).
+  //
+  // ⚠ WHY THIS IS A FIRST-CLASS TASK AND NOT LEFT TO THE GLOBAL FALLBACK.
+  // `explain_diff` was NOT a CeeTask, so `isValidCeeTask('explain_diff')` was
+  // false, so router.ts computed `taskDefault === undefined` and the task fell
+  // through precedence to step 6 — the global LLM_PROVIDER / LLM_MODEL.
+  //
+  // On cee-staging that is fatal, not merely untidy: LLM_PROVIDER is UNSET
+  // across all 118 service env vars, so the schema default in config/index.ts
+  // governs and resolves to "openai" — and the OpenAI adapter does not
+  // implement explainDiff, throwing `explain_diff_not_supported` on EVERY
+  // request. A complete, tested server capability could not answer once.
+  //
+  // This is the SAME failure `validate_graph` was rescued from below: an unset
+  // env var handing a task's identity to whatever the global model happens to
+  // be. The remedy is the same one the precedence contract prescribes — a
+  // checked-in default, which outranks the global fallback (step 4 > step 6)
+  // and carries its own provider through MODEL_REGISTRY.
+  | "explain_diff"
   | "orchestrator"
   // Inert compatibility/PMS-readiness slot. LLMAdapter.repairGraph and every
   // executable caller were removed; do not report this as a live AI call.
@@ -224,6 +245,19 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   explainer: "gpt-4.1-2025-04-14",
   evidence_helper: "gpt-4.1-2025-04-14",
   sensitivity_coach: "gpt-4.1-2025-04-14",
+  // CROSS-PROVIDER ON PURPOSE, and the only reason this row exists.
+  // claude-haiku-4-5 is registered in MODEL_REGISTRY as provider=anthropic,
+  // tier=fast, enabled=true, and ANTHROPIC_API_KEY is provisioned on
+  // cee-staging. Fast tier is the right fit on the merits too: the route caps
+  // each rationale at 280 chars with max_tokens 2048, and a user is waiting on
+  // a button press.
+  //
+  // Changing the GLOBAL LLM_PROVIDER would also make this task work, and must
+  // not be done: it moves orchestration, drafting, editing, decision review,
+  // repair and extraction at the same time, and drafting/editing are pinned to
+  // their providers deliberately for structured-output support. A per-task
+  // default moves exactly one task.
+  explain_diff: "claude-haiku-4-5",
   // Quality tier - reconciled to live staging CEE_MODEL_* (2026-08-08)
   draft_graph: "claude-sonnet-5",  // live CEE_MODEL_DRAFT_GRAPH (was claude-sonnet-4-6)
   edit_graph: "claude-sonnet-5",  // live CEE_MODEL_EDIT_GRAPH (was claude-sonnet-4-6)
