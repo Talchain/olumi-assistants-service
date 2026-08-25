@@ -10,10 +10,15 @@
  * with a dark call site is this estate's chronic failure #1.
  *
  * The sibling repair `compactedConstraints` — threaded three lines away, for
- * exactly the same reason (compactGraph drops the field) — has NO such pin:
- * deleting its call-site line drops every decision constraint from the prompt
- * and leaves the whole suite green. That is the shape this file exists to stop
- * happening to `goal_target`.
+ * exactly the same reason (compactGraph drops the field) — had NO such pin when
+ * this file was written: deleting its call-site line dropped every decision
+ * constraint from the prompt and left the whole suite green. That is the shape
+ * this file exists to stop happening to `goal_target`.
+ *
+ * ⚠ UPDATED 2026-08-25: that sibling is now pinned too, by
+ * `decision-constraints-wire.route-level.test.ts` in this directory. The
+ * paragraph above is kept because it records WHY this file exists, but it is no
+ * longer a live statement about `compactedConstraints`.
  *
  * So this asserts the fact through the REAL chain —
  *
