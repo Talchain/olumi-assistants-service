@@ -351,6 +351,7 @@ export class SupabaseSessionStore implements SessionStore {
       return await this.appendAtomicVersioned(
         write,
         baseRpcArgs,
+        rpcMode,
         fencePlan.path === 'atomic' ? fencePlan.generation : null,
       );
     }
@@ -1200,6 +1201,7 @@ export class SupabaseSessionStore implements SessionStore {
   private async appendAtomicVersioned(
     write: SessionTurnWrite,
     baseRpcArgs: Record<string, unknown>,
+    rpcMode: GraphCasRpcMode,
     generation: number | null,
   ): Promise<SessionAppendOutcome> {
     const version = write.modelVersion;
@@ -1209,37 +1211,42 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    let trustedExpectedHash = write.expectedGraphIdentityHash;
-    if (trustedExpectedHash === undefined) {
-      const { data: scenario, error: readError } = await this.client
-        .from('scenarios')
-        .select('graph_identity_hash')
-        .eq('id', write.scenario_id)
-        .maybeSingle();
-      if (readError) {
-        throw new StateCommitFailedError(
-          `append_turn_atomic_v5 could not read the trusted CAS base: ${errMsg(readError)}`,
-          { cause: readError, rpc_code: errCode(readError) },
-        );
-      }
-      const raw = (scenario as { graph_identity_hash?: unknown } | null)?.graph_identity_hash;
-      if (
-        raw !== null &&
-        raw !== undefined &&
-        (typeof raw !== 'string' || !/^[0-9a-f]{64}$/.test(raw))
-      ) {
-        throw new StateCommitFailedError(
-          'append_turn_atomic_v5 read a malformed trusted CAS base',
-        );
-      }
-      trustedExpectedHash = typeof raw === 'string' ? raw : null;
-    }
+    // ── THE CAS BASE IS THE CALLER'S TURN-START READ, NEVER A RE-READ ───────
+    // v5 delegates its CAS verbatim to v4 (migration 20260824200000, "exactly
+    // v4's semantics, not a second approximation in v5"), and v4 compares
+    // `v_current_hash` — read from `scenarios.graph_identity_hash` under its
+    // own FOR UPDATE (20260806120000:193) — against p_expected_graph_identity_hash
+    // (:311). Re-reading that SAME column here to supply the expected value
+    // would make the comparison FALSE BY CONSTRUCTION: the CAS would always
+    // "match" while reporting itself as enforcing. `store.ts:194-196` and
+    // `turn-executor.ts:1350-1353` both name and REFUSE exactly that
+    // ("a CAS that validates the write against itself always 'matches'";
+    // "hence FAIL CLOSED ... never adopt it").
+    //
+    // So the base is `write.expectedGraphIdentityHash`, threaded from the
+    // caller's turn-start server read, mapped exactly as the v3/v4 siblings
+    // map it (`:383`, `:1097`): undefined = this write path is NOT
+    // instrumented, null = a base read happened but was empty — BOTH send SQL
+    // NULL, and v4's `p_expected_graph_identity_hash IS NOT NULL` guard then
+    // compares nothing. That keeps the uninstrumented draft path honestly
+    // un-CAS'd (draft-graph-dispatch.ts:876-885 — "not a gap to 'fix' by
+    // trusting the request") instead of tautologically "passing" it.
+    const trustedExpectedHash = write.expectedGraphIdentityHash ?? null;
 
     const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
       ...baseRpcArgs,
       p_expected_graph_identity_hash: trustedExpectedHash,
+      // Always the version carrier's identity hash: v5 REQUIRES a 64-hex
+      // incoming hash in every mode (migration 20260824200000:545-549) because
+      // it stamps the version row, so this is NOT mode-derived. Only the
+      // expected base and the enforce switch are.
       p_incoming_graph_identity_hash: version.graph_identity_hash,
-      p_cas_enforce: true,
+      // B2: DERIVED, exactly as every sibling derives it (`:392`, `:1099`,
+      // `:1104`). The code default is 'shadow' (config/index.ts:677), whose
+      // contract is "no write is ever rejected"; promoting the versioned path
+      // to enforce unilaterally would make that false and is "a later
+      // explicit, Paul-gated step".
+      p_cas_enforce: rpcMode === 'enforce',
       p_fence_generation: generation,
       p_version_mutation_id: version.mutation_id,
       p_version_analysis_affecting_hash: version.analysis_affecting_hash,
@@ -1272,7 +1279,9 @@ export class SupabaseSessionStore implements SessionStore {
         this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
       }
       if (errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
-        this.emitRpcCasConflict(write, 'enforce', errCode(error));
+        // Report the mode that was actually in force, not a hardcoded label —
+        // otherwise the conflict telemetry misattributes every refusal.
+        this.emitRpcCasConflict(write, rpcMode, errCode(error));
         throw new GraphStaleWriteError(
           `append_turn_atomic_v5 rejected a stale graph write for scenario ${write.scenario_id}; ` +
             'the turn and version both rolled back.',
@@ -1281,6 +1290,24 @@ export class SupabaseSessionStore implements SessionStore {
             cause: error,
             expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
           },
+        );
+      }
+      // B3 — DEPLOY ORDER, MADE ACTIONABLE. There is deliberately NO legacy
+      // fallback here (see `append()`: "No legacy fallback is safe when the
+      // migration is absent") — a v2/v3/v4 fallback would commit the turn and
+      // graph while silently dropping the version, head and event that must
+      // share this transaction. So an un-migrated database FAILS CLOSED, and
+      // the only thing left to get right is telling the operator why, exactly
+      // as `append_turn_atomic_v4`'s PGRST202 does at :1114-1127.
+      if (errCode(error) === 'PGRST202') {
+        throw new StateCommitFailedError(
+          'append_turn_atomic_v5 is not present in this database (PGRST202). Model versioning ' +
+            '(CEE_MODEL_VERSIONS_ENABLED, default ON) requires it, and no legacy fallback is safe ' +
+            'because the turn, graph, version, head and event must share one transaction. ' +
+            'Execute migration 20260824200000_c8_atomic_model_version_restore BEFORE this build ' +
+            'serves traffic, or set CEE_MODEL_VERSIONS_ENABLED=false to disable versioning ' +
+            'without a deploy.',
+          { cause: error, rpc_code: errCode(error) },
         );
       }
       throw new StateCommitFailedError(
