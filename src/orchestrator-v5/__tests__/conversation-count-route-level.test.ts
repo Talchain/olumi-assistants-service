@@ -207,13 +207,15 @@ describe('conversation length — route-level: the prompt states the CONVERSATIO
     const conversation = conversationBlock(await routingPrompt());
     const notice = conversation.window?.notice ?? '';
     expect(conversation.window?.shown).toBe(READ_WINDOW);
-    expect(notice).toContain('the 20 most recent turns fetched for this prompt are shown above');
-    expect(notice).toContain('could not be read this turn');
-    expect(notice).toContain('earlier turns may exist outside the fetched window');
-    expect(notice).toContain('do not state a total number of turns or exchanges');
-    // The load-bearing assertion: 20 may truthfully describe the bounded read,
-    // but it must never be presented as the conversation's authoritative total.
-    expect(notice).not.toContain('20 turns are on record');
-    expect(notice).not.toContain('the true total is 20');
+    // Pin the whole deterministic disclosure. Substring bans are insufficient:
+    // a mutant could keep every safe clause and append a differently worded
+    // claim that 20 is the total. Exact bytes prove 20 has one licensed meaning
+    // here—the bounded fetched window—and no authoritative-total meaning.
+    expect(notice).toBe(
+      '[INCOMPLETE — the 20 most recent turns fetched for this prompt are shown above. ' +
+        'The true total could not be read this turn, so earlier turns may exist outside the ' +
+        'fetched window. Do not describe the turns above as the whole conversation, and do ' +
+        'not state a total number of turns or exchanges.]',
+    );
   });
 });
