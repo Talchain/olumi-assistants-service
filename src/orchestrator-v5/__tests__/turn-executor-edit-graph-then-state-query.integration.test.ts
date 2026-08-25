@@ -57,15 +57,20 @@ const mockState: {
   priorTurns: Array<Record<string, unknown>>;
   priorFacts: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
+  appendWrites: Array<Record<string, unknown>>;
 } = {
   priorTurns: [],
   priorFacts: [],
   persistedGraph: null,
+  appendWrites: [],
 };
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (write: Record<string, unknown>) => {
+      mockState.appendWrites.push(write);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -102,7 +107,7 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'opt_hire',
       to: 'fac_hiring_cost',
-      edge_type: 'causal',
+      edge_type: 'directed',
       strength: { mean: 0.5, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'positive',
@@ -110,7 +115,7 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'fac_hiring_cost',
       to: 'goal_q3',
-      edge_type: 'causal',
+      edge_type: 'directed',
       strength: { mean: 0.4, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'negative',
@@ -265,6 +270,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
     mockState.priorTurns = [];
     mockState.priorFacts = [];
     mockState.persistedGraph = null;
+    mockState.appendWrites = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 
@@ -370,6 +376,59 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt!.data.reason).toBe('graph_hash_diverged');
       expect(evt!.data.graph_hash_at_run).toBe(PRE_EDIT_HASH);
       expect(evt!.data.current_graph_hash).toBe(POST_EDIT_HASH);
+    });
+
+    it('routes the exact edit-effect question through supplied context and degrades an unsafe stale result claim', async () => {
+      const unsafeStaleClaim =
+        'Hire two senior engineers remains the leading option with a 72% result.';
+      const adapter = callingRoutingAdapter(unsafeStaleClaim);
+      const graphBefore = JSON.stringify(POST_EDIT_GRAPH);
+
+      const result = await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-edit-effect-continuity',
+        { routingAdapter: adapter, graphState: POST_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const prompt = adapter.chatWithTools.mock.calls[0]![0].messages[0]!.content as string;
+      expect(prompt).toContain('"graph": {');
+      expect(prompt).toMatch(
+        /"from": "opt_hire"[\s\S]{0,300}"to": "fac_hiring_cost"[\s\S]{0,300}"relationship": "strong positive link"/,
+      );
+      expect(prompt).not.toMatch(
+        /"from": "opt_hire"[\s\S]{0,300}"to": "fac_hiring_cost"[\s\S]{0,300}"relationship": "moderate positive link"/,
+      );
+      expect(prompt).toContain('"recent_changes": [');
+      expect(prompt).toContain('"freshness": "stale"');
+      expect(prompt).toContain('"rerun_required": true');
+      expect(prompt).toContain('"analysis_not_current_note"');
+      expect(prompt).toContain(SAFE_SUMMARY);
+
+      expect(result.response.assistant_text).not.toBe(unsafeStaleClaim);
+      expect(events).toContainEqual(expect.objectContaining({
+        event: 'v5.coaching.output_postcheck',
+        data: expect.objectContaining({
+          violation: 'confident_advice_under_unsafe_state',
+          freshness: 'stale',
+        }),
+      }));
+      expect(result.telemetry.turn_class).toBe('direct_answer');
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-edit-effect-continuity',
+      );
+      expect(committed).toBeDefined();
+      expect(committed).toMatchObject({
+        handler_id: null,
+        turn_class: 'direct_answer',
+      });
+      // The canonical append shape carries a `graph` key on every turn; a
+      // read-only turn proves absence of a graph write with value `undefined`.
+      expect(committed).toHaveProperty('graph', undefined);
+      expect(committed).not.toHaveProperty('graph_state');
+      expect(committed).not.toHaveProperty('applied_graph');
+      expect((result.response as { graph?: unknown }).graph).toBeUndefined();
+      expect(JSON.stringify(POST_EDIT_GRAPH)).toBe(graphBefore);
     });
   });
 

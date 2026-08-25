@@ -9,7 +9,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
-import { tryStateQueryGuard } from '../state-query-guard.js';
+import {
+  isStateQueryQuestionShape,
+  tryStateQueryGuard,
+} from '../state-query-guard.js';
+import { hasMutationWarrantSignal } from '../mutation-warrant.js';
 
 const ADD_CONSTRAINT_50K: RecentMutation = {
   action: 'constraint_added',
@@ -22,6 +26,74 @@ function ctxWith(recent: readonly RecentMutation[]): Pick<ContextPack, 'recent_c
 }
 
 describe('tryStateQueryGuard', () => {
+  describe('post-edit effect continuity', () => {
+    it('keeps an effect question mutation-protected but declines deterministic receipt copy', () => {
+      const message = 'What did that update do?';
+
+      // The route must not reinterpret the question's word "update" as a new
+      // mutation warrant.
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+
+      // The receipt guard must also not consume the turn: downstream reasoning
+      // already receives the ContextPack graph, canonical-derived freshness,
+      // and recent_changes.
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
+    it('leaves a factual readback on the deterministic receipt path', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      });
+
+      expect(outcome).toMatchObject({
+        matched: true,
+        dispatch: 'with_recent_change',
+        recent_change: ADD_CONSTRAINT_50K,
+      });
+    });
+
+    it('does not suppress a compound question followed by a real edit command', () => {
+      const message = 'What did that update do? Change it back.';
+
+      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+      expect(hasMutationWarrantSignal(message)).toBe(true);
+    });
+
+    it('does not mistake an interrogative reversal for a new command', () => {
+      const message = 'Did you change it back?';
+
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toMatchObject({ matched: true, dispatch: 'with_recent_change' });
+    });
+
+    it.each([
+      "What did that update do? Don't change it back.",
+      'What did that update do? Do not change it back.',
+      'What did that update do? I might change it back.',
+      "What did that update do? I won't change it back.",
+      'What did that update do? Should we change it back?',
+      'What did that update do? Did you actually change it back?',
+    ])('does not grant a reversal warrant to negated or deliberative text: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+    });
+  });
+
   describe('matches the named follow-up phrases', () => {
     const matchingMessages = [
       'What changed?',

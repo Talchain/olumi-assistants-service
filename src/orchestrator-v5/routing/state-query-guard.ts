@@ -8,7 +8,7 @@
  * named misroute class so it can never recur even if the LLM regresses.
  *
  * Behaviour:
- *   1. Match the user message against a tight allowlist of state-query
+ *   1. Match the user message against a tight allowlist of receipt state-query
  *      phrases — "what changed?", "what update did you make?",
  *      "I can't see it", "did you change it?", "what just changed?", etc.
  *   2. If matched AND `recent_changes` is non-empty, return a
@@ -21,7 +21,11 @@
  *      changes" dispatch that owns the state-query without falling to
  *      `edit_graph`. The user gets honest copy — "I haven't applied
  *      anything in this session." — instead of the legacy denial.
- *   4. If not matched, return `{ matched: false }` and the lifecycle
+ *   4. Questions about the effect of an edit ("what did that update do?")
+ *      are deliberately declined here so the existing read-only reasoning
+ *      path can answer from the ContextPack graph, canonical-derived freshness,
+ *      and receipts.
+ *   5. If not matched, return `{ matched: false }` and the lifecycle
  *      proceeds to the LLM.
  *
  * The guard never touches handlers, never mutates state, never calls an
@@ -135,10 +139,6 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // — change-word required. Generic "what did you do" deliberately excluded so
   // generic session questions ("What did you do?") fall through to the LLM.
   /\bwhat\s+did\s+you\s+(?:just\s+)?(?:change|update|add)\b/i,
-  // "what did that update do", "what did the change do", "what did that
-  // edit do" — asks the effect of a just-applied mutation. The trailing
-  // "do" disambiguates from a fresh imperative.
-  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
   // "did you change/update/apply/add" — change-word required.
   /\bdid\s+you\s+(?:change|update|apply|add)\b/i,
   // "I can't see it", "I cannot see this", "I can't see this constraint",
@@ -150,6 +150,19 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // "show me what you added/changed/updated" — change-word required.
   // Generic "show me what you did" deliberately excluded.
   /\bshow\s+me\s+what\s+you\s+(?:added|changed|updated)\b/i,
+];
+
+/**
+ * A consequence question about an accepted edit, not a receipt readback.
+ *
+ * These phrasings still need route-level mutation protection: "update" and
+ * "change" are edit words, but the user is asking what the prior edit means.
+ * The deterministic guard must not answer them with only the old receipt,
+ * though. It declines so the existing read-only reasoning path can use the
+ * ContextPack graph, canonical-derived freshness and `recent_changes`.
+ */
+const EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
 ];
 
 /**
@@ -226,7 +239,8 @@ const POST_MUTATION_COMPLAINT_PATTERNS: readonly RegExp[] = [
  * pre-routes can disambiguate the compound intent.
  *
  * The patterns below detect an unambiguous imperative edit signal:
- * `add/create <article> <noun>` or `change/update/set <noun> to <value>`.
+ * `add/create <article> <noun>`, `change/update/set <noun> to <value>`, or
+ * an explicit anaphoric reversal (`change/update it/that/this back`).
  * Pronouns ("add it", "update it") are intentionally not matched — those
  * appear in legitimate state-query phrases ("did you add it?", "did you
  * update it?") and the legacy patterns own them.
@@ -250,6 +264,11 @@ const FRESH_EDIT_BAIL_OUT_PATTERNS: readonly RegExp[] = [
   // legacy pattern (the "to <value>" tail is a value reference in
   // an interrogative, not a fresh-edit imperative).
   /(?<!did\s+you\s+)\b(?:change|update|set)\s+\S+(?:\s+\S+){0,2}\s+to\s+\S+/i,
+  // "change it back", "update that back" — only as an explicit imperative
+  // clause, at message start or after sentence punctuation, optionally polite.
+  // This excludes negated/declarative/deliberative uses such as "do not change
+  // it back", "I would not change it back", and "should we change it back?".
+  /(?:^|[.!?;:]\s+)(?:please(?:,\s*|\s+))?(?:change|update)\s+(?:it|that|this)\s+back\b(?=$|[\s.!?,;:])/i,
 ];
 
 /**
@@ -277,7 +296,8 @@ const EDIT_VERB_PATTERN =
 /**
  * Pure route-level predicate: does this message have the shape of a named
  * state-query follow-up ("what changed?", "what did you just change?",
- * "what was updated?", "what did that update do?")?
+ * "what was updated?") or a non-mutating edit-effect question ("what did
+ * that update do?")?
  *
  * Used by `route-v2` to SUPPRESS `edit_graph` routing for question phrases
  * that contain an edit verb (e.g. "what did you just change?" matches
@@ -287,10 +307,11 @@ const EDIT_VERB_PATTERN =
  * INDEPENDENT of `recent_changes`: at the route the ContextPack is not built
  * yet, and the route's only job is "do not hijack a question into an edit".
  *
- * It mirrors the legacy `STATE_QUERY_PATTERNS` arm of `tryStateQueryGuard`
- * exactly — the imperative-edit-verb negative gate first, the named-pattern
- * allowlist, then the compound fresh-edit bail-out — so the route never
- * suppresses a turn the in-executor guard would not itself claim. The
+ * The route protects two non-mutating question classes from edit routing:
+ * receipt readbacks, which `tryStateQueryGuard` claims deterministically, and
+ * edit-effect questions, which the guard deliberately declines to the existing
+ * read-only reasoning path. Both classes retain the compound fresh-edit
+ * bail-out. The
  * `POST_MUTATION_COMPLAINT_PATTERNS` arm is deliberately excluded here: those
  * require non-empty `recent_changes` and none of them contain an edit verb,
  * so they are never hijacked by edit routing and need no route suppression.
@@ -325,7 +346,9 @@ export function isStateQueryQuestionShape(message: string): boolean {
   const originQuestion = isStructureOriginQuestion(message);
   if (!briefAudit && !originQuestion) {
     if (EDIT_VERB_PATTERN.test(message)) return false;
-    if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
+    const isReceiptReadback = STATE_QUERY_PATTERNS.some((pat) => pat.test(message));
+    const isEditEffectQuestion = EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(message));
+    if (!isReceiptReadback && !isEditEffectQuestion) return false;
   }
   // The compound bail-out still applies to BOTH classes: "what did you leave
   // out? add a constraint" carries a real edit and belongs in normal routing.
@@ -512,6 +535,16 @@ export function tryStateQueryGuard(
     // *"that was my suggestion, not something you wrote"*, which is false about
     // why it is there. `recent_changes` is the RIGHT authority whenever it holds
     // a record for the subject, which is exactly what this deferral routes to.
+  }
+
+  // An effect question needs reasoning over the ContextPack graph and
+  // canonical-derived freshness, not a repetition of the prior mutation
+  // receipt. Route-level admission has
+  // already classified this shape as non-mutating via
+  // `isStateQueryQuestionShape`; declining here hands it to the existing
+  // read-only reasoning path with the full ContextPack.
+  if (EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
+    return { matched: false };
   }
 
   // Negative gate — cheapest of the session-edit arms. A message with an
