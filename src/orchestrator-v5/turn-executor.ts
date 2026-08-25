@@ -2689,6 +2689,28 @@ export async function runTurnExecutor(
         selection: context.selection,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
+        // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
+        // the same reason. `compactGraph` produces a `GraphV3Compact`
+        // (`{nodes, edges, _node_count, _edge_count}`) which has no constraints
+        // field and structurally cannot carry one, and the line above passes
+        // `graph: undefined` whenever a graph compacted — so on the compact
+        // path (which is UNCONDITIONAL: any non-null graph compacts) THIS is
+        // the sole carrier of the user's decision constraints into the prompt.
+        // Deleting it drops every constraint from every prompt.
+        //
+        // Neutering this line MUST turn
+        // context/__tests__/decision-constraints-wire.route-level.test.ts red.
+        // That suite pins the PRECONDITION as well as the verdict: it asserts
+        // from telemetry that the turn took the compact path before it asserts
+        // anything about the pack, because on the NON-compact path
+        // `projectGraph` reads `goal_constraints` off the raw graph and the
+        // constraints would arrive with this line cut.
+        //
+        // ⚠ Its authority order is REQUEST-FIRST and that is correct — the
+        // opposite of `goalTarget` below, deliberately. Constraints describe
+        // the graph being REASONED OVER; `goal_target` is a claim about what is
+        // SAVED. Do not "tidy" the two into agreement; the route-level suite
+        // above REDs if you do.
         compactedConstraints,
         // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
         // the same reason. The projection is defended by its own unit suite,
@@ -2710,9 +2732,14 @@ export async function runTurnExecutor(
         // instead of the transcript as the contaminating source. The compact
         // GRAPH beside it legitimately stays request-first; the RECORD cannot.
         //
-        // The sibling `compactedConstraints` above is NOT pinned this way —
-        // deleting it drops every decision constraint from the prompt with the
-        // whole suite green. Reported and rowed, deliberately not fixed here.
+        // ⚠ CORRECTED 2026-08-25. This comment previously read: "The sibling
+        // `compactedConstraints` above is NOT pinned this way — deleting it
+        // drops every decision constraint from the prompt with the whole suite
+        // green. Reported and rowed, deliberately not fixed here." That was
+        // true when written and is now FALSE: `compactedConstraints` has its
+        // own route-level pin (decision-constraints-wire.route-level.test.ts),
+        // and its call site carries the same ⚠ marker above. A stale sentence
+        // telling the next reader a line is unpinned is how a pin gets deleted.
         goalTarget: projectGoalTargetRecord(
           context.persistedGraph ?? options.graphState,
         ),
