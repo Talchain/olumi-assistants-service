@@ -161,6 +161,18 @@ function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
   }
   return {
     id: row.turn_row_id,
+    // Added by C8 commit 1bc0f23e. The required check was ALREADY RED on this
+    // line at c3a168cf (the boundary ratchet read 60 against a baseline of 59,
+    // reproduced at a pristine checkout), unseen because `codex/**` triggers
+    // neither the push nor the pull_request arm of ci.yml. Exempted rather than
+    // baselined: raising the baseline is what the gate exists to prevent, and
+    // this narrowing is genuinely checked — see the reason on the next line.
+    // Every field is validated field-by-field in the guard directly above
+    // (turn_row_id, version_id, mutation_id, both 64-hex hashes, version_number,
+    // graph presence, lineage ids, the creation_kind enum and the
+    // actor_kind/authored_by pairing), and a failure throws
+    // StateCommitFailedError — so this follows a full runtime check.
+    // forbidden-exempt: narrowing follows the exhaustive receipt validation directly above (throws StateCommitFailedError on any field mismatch)
     modelVersionReceipt: receipt as unknown as AtomicCommittedModelVersionReceipt,
   };
 }

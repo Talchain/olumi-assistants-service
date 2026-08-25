@@ -1,13 +1,39 @@
 /**
- * Model Management v1 — service layer (Layer 2, DARK).
+ * Model Management v1 — service layer (Layer 2). LIVE, not dark.
+ *
+ * ⚠ STALE-COMMENT FIX (C8-A integration, 2026-08-25). This header said
+ * "DARK", "default OFF" and "zero production call sites". All three were
+ * false, and all three under-reported liveness in the same direction — the
+ * dangerous direction, because an operator reading them would assume there is
+ * nothing live to disable before rolling the schema back. Derived at the bytes:
  *
  * Flag gate: EVERY entry point checks `CEE_MODEL_VERSIONS_ENABLED`
- * (config.cee.modelVersionsEnabled, default OFF) FIRST and fail-closed
- * no-ops to `{ status: 'disabled' }` — no store call, no hashing, no
- * side effects — when off.
+ * (config.cee.modelVersionsEnabled) FIRST and fail-closed no-ops to
+ * `{ status: 'disabled' }` — no store call, no hashing, no side effects — when
+ * off. The DEFAULT IS ON: `config/index.ts:1342` is
+ * `createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED")`, flipped by the
+ * 2026-08-17 wiring slice under the no-dark-launch rule. Production is the sole
+ * exception: `createEnvEnforcedBoolean` forces `false` when `env === "prod"`
+ * (`config/index.ts:158`).
  *
- * NOTHING here is wired into routes or the turn-executor this slice
- * (Track 3 isolation discipline): zero production call sites.
+ * This module IS wired into production call sites. `server.ts:1169` registers
+ * four routes unconditionally via `ceeScenarioVersionsRouteV1`:
+ *   POST /assist/v1/scenarios/:scenario_id/versions
+ *   POST /assist/v1/scenarios/:scenario_id/versions/compare
+ *   POST /assist/v1/scenarios/:scenario_id/versions/save
+ *   POST /assist/v1/scenarios/:scenario_id/versions/restore
+ * and the turn-commit seam auto-versions accepted graph mutations
+ * (`commit.ts:714`).
+ *
+ * OPERATIONAL — rollback order matters, and this is why the stale header was
+ * worth fixing rather than deleting. Setting `CEE_MODEL_VERSIONS_ENABLED=false`
+ * in the environment disables the feature WITHOUT a deploy (the routes then
+ * answer an honest VERSIONS_DISABLED 503). The C8 rollback script
+ * `supabase/migrations/rollback/20260824200000_c8_atomic_model_version_restore_rollback.sql.do-not-apply`
+ * DROPS `append_turn_atomic_v5`, which the turn path calls whenever a
+ * model-version carrier is built (`supabase-store.ts:338` → `:1226`). Dropping
+ * it while the flag is live breaks turn writes, so ANY ROLLBACK MUST DISABLE THE
+ * FLAG FIRST; with the flag off no carrier is built and the RPC is never reached.
  *
  * Identity: the Group A primitives are REUSED, never re-implemented —
  * `computeGraphIdentityHash` supplies the content identity envelope the
