@@ -39,6 +39,10 @@
       "skip": 1,
       "reason": "now against defunct behaviour. Kept as a change record only — unskip"
     },
+    "tests/integration/c4-canonical-state-restore.contract.test.ts": {
+      "runIf": 1,
+      "reason": "C4 canonical-state restore acceptance oracle (folded in from PR #1096). describe.runIf(RUN_C4_CANONICAL_STATE && DATABASE_URL) — it drives REAL plpgsql and installs failure-injection triggers, so it needs a LOCAL Postgres with the repo's migrations applied and must never touch staging. It cannot execute in CI today for a second, harder reason: it exercises migration 20260824200000, which is founder-gated and unapplied. Gated rather than deleted because its own first test asserts the carrier is PRESENT and FAILS LOUD (not skips) once a database is supplied — an unapplied migration must be loud. Un-gate when a migrated Postgres service exists in CI. See tests/integration/README-c4-local-db.md."
+    },
     "tests/integration/cee.draft-graph.empty-graph.test.ts": {
       "skip": 1,
       "reason": "Skipped: pipeline gap — unified pipeline does not catch empty-graph and return 400 CEE_GRAPH_INVALID. Deterministic (uses fixture mocks). Blocked on source fix "

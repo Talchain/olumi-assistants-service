@@ -650,9 +650,15 @@ describe("model-version skip telemetry — ordering (Codex defect 5)", () => {
     goal_node_id: "goal_x",
   };
 
+  // Annotated exactly as the sibling `versionEvents()` helper above is — an
+  // implicit `any` here passes `tsc -p tsconfig.build.json` (which excludes
+  // tests) and is caught only by the separate full-tsc "Typecheck Drift"
+  // ratchet, which is precisely why the named local gate is a proxy and not
+  // the authority.
   function skipEvents(spy: ReturnType<typeof vi.spyOn>) {
     return spy.mock.calls.filter(
-      (c) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
+      (c: readonly unknown[]) =>
+        c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
     );
   }
 
