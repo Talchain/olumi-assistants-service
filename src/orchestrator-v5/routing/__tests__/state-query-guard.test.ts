@@ -43,6 +43,21 @@ describe('tryStateQueryGuard', () => {
       })).toEqual({ matched: false });
     });
 
+    it.each([
+      'What did the hiring cost update do?',
+      'What did this pre-seed runway adjustment do?',
+      'What did your customer acquisition cost change do?',
+      'What did the update to hiring cost do?',
+      'What did this adjustment on pre-seed runway do?',
+    ])('protects an entity-qualified effect question without granting a mutation warrant: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+    });
+
     it('leaves a factual readback on the deterministic receipt path', () => {
       const outcome = tryStateQueryGuard({
         message: 'What changed?',
@@ -57,7 +72,18 @@ describe('tryStateQueryGuard', () => {
     });
 
     it('does not suppress a compound question followed by a real edit command', () => {
-      const message = 'What did that update do? Change it back.';
+      const message = 'What did the hiring cost update do? Change it back.';
+
+      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+      expect(hasMutationWarrantSignal(message)).toBe(true);
+    });
+
+    it('does not suppress an entity-qualified question followed by a bare edit imperative', () => {
+      const message = 'What did the hiring cost update do? Update budget.';
 
       expect(isStateQueryQuestionShape(message)).toBe(false);
       expect(tryStateQueryGuard({
@@ -79,6 +105,10 @@ describe('tryStateQueryGuard', () => {
 
     it.each([
       "What did that update do? Don't change it back.",
+      "What did the update to hiring cost do? Don't change it back.",
+      'What did the hiring cost update do? Update budget?',
+      'What did the hiring cost update do? Please update budget?',
+      'What did the hiring cost update do? Change it back?',
       'What did that update do? Do not change it back.',
       'What did that update do? I might change it back.',
       "What did that update do? I won't change it back.",

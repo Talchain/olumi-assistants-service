@@ -385,7 +385,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       const graphBefore = JSON.stringify(POST_EDIT_GRAPH);
 
       const result = await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        mkPayload('What did the hiring cost update do?'),
         'req-edit-effect-continuity',
         { routingAdapter: adapter, graphState: POST_EDIT_GRAPH as never },
       );

@@ -192,12 +192,15 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  * a judgement that the message is not an edit. Subtracting it here would strip
  * the warrant from the most unambiguous edit requests the product accepts.
  *
- * The result is a strict superset of `hasMutationSignal`; the union assertion
- * in the spec pins that, so the canonical list can never recognise an edit this
- * predicate refuses.
+ * The result is a strict superset of `hasMutationSignal` for mutation-shaped
+ * turns. An authoritative state-query question is the deliberate exception:
+ * no lower-level lexical signal may convert a question about an earlier edit
+ * into permission for a new one. Compound questions that also carry a fresh
+ * imperative have already bailed out of that question shape.
  */
 export function hasMutationWarrantSignal(message: string): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
+  if (isStateQueryQuestionShape(message)) return false;
   if (hasMutationSignal(message)) return true;
   if (hasConstraintMutationSignal(message)) return true;
   return isEditRequestShape(message);

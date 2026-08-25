@@ -162,7 +162,19 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
  * ContextPack graph, canonical-derived freshness and `recent_changes`.
  */
 const EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
-  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
+  // Pronoun and entity-qualified forms:
+  //   "what did that update do?"
+  //   "what did the hiring cost update do?"
+  // The bounded token bridge admits an ordinary display label without trying
+  // to resolve it here; grounding still belongs to the ContextPack graph and
+  // recent-change receipt downstream. Route-level classification only needs
+  // to stop an explicit read question being mistaken for mutation consent.
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:(?:[\p{L}\p{N}][\p{L}\p{N}'’&/-]*\s+){0,16})?(?:update|change|edit|adjustment)\s+do\b/iu,
+  // Post-nominal referents are equally read-only:
+  //   "what did the update to hiring cost do?"
+  // Keep this structural and bounded; entity resolution still happens only in
+  // the downstream grounded reasoning path.
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+(?:to|on)\s+(?:[\p{L}\p{N}][\p{L}\p{N}'’&/-]*\s+){1,16}do\b/iu,
 ];
 
 /**
@@ -268,7 +280,12 @@ const FRESH_EDIT_BAIL_OUT_PATTERNS: readonly RegExp[] = [
   // clause, at message start or after sentence punctuation, optionally polite.
   // This excludes negated/declarative/deliberative uses such as "do not change
   // it back", "I would not change it back", and "should we change it back?".
-  /(?:^|[.!?;:]\s+)(?:please(?:,\s*|\s+))?(?:change|update)\s+(?:it|that|this)\s+back\b(?=$|[\s.!?,;:])/i,
+  /(?:^|[.!?;:]\s+)(?:please(?:,\s*|\s+))?(?:change|update)\s+(?:it|that|this)\s+back\b(?=$|[\s.!,;:])/i,
+  // A separate explicit imperative after a read question is still a mutation
+  // request even when it omits a value: "What did … do? Update budget." The
+  // sentence boundary and optional polite prefix exclude embedded, negated and
+  // deliberative uses ("don't update", "should we update").
+  /(?:^|[.!?;:]\s+)(?:please(?:,\s*|\s+))?(?:change|update|edit|adjust)\s+(?:(?:the|this|that|my|our)\s+)?[\p{L}\p{N}][\p{L}\p{N}'’&/().%£$€:-]*(?:\s+[\p{L}\p{N}][\p{L}\p{N}'’&/().%£$€:-]*){0,15}\b(?=$|[.!,;:])/iu,
 ];
 
 /**
