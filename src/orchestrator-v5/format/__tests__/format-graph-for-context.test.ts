@@ -28,6 +28,9 @@
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+} from '../../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
 import {
   formatGraphForContext,
@@ -286,6 +289,106 @@ describe('formatGraphForContext — node transformation', () => {
     expect(out.nodes[0]!.unit).toBe('k');
     expect(out.nodes[1]!.unit).toBe('%');
     expect(out.nodes[2]!.unit).toBe('GBP');
+  });
+});
+
+describe('formatGraphForContext — producer uncertainty passthrough', () => {
+  it('preserves producer strings and order without local interpretation', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_platform',
+            kind: 'factor',
+            label: 'Platform capability',
+            observed_state: {
+              uncertainty_drivers: [
+                'Current platform capability not specified',
+                'Workflow fit unconfirmed',
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.uncertainty_drivers).toEqual([
+      'Current platform capability not specified',
+      'Workflow fit unconfirmed',
+    ]);
+    expect(out.nodes[0]).not.toHaveProperty('uncertainty_drivers_disclosure');
+  });
+
+  it('withholds conflicting top-level and observed-state values', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_platform',
+            kind: 'factor',
+            label: 'Platform capability',
+            uncertainty_drivers: ['Promoted value'],
+            observed_state: { uncertainty_drivers: ['Observed-state value'] },
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]).not.toHaveProperty('uncertainty_drivers');
+    expect(out.nodes[0]!.uncertainty_drivers_disclosure).toEqual({
+      status: 'conflicting_sources_withheld',
+    });
+  });
+
+  it('preserves truthful bounds disclosure and is idempotent on its own output', () => {
+    const overlong = 'x'.repeat(CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS + 1);
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_platform',
+            kind: 'factor',
+            label: 'Platform capability',
+            uncertainty_drivers: [overlong, 'Second exact entry', 'Count-bounded entry'],
+          },
+        ],
+        goals: [],
+      }),
+    );
+    expect(out.nodes[0]!.uncertainty_drivers).toEqual([
+      overlong.slice(0, CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS),
+      'Second exact entry',
+    ]);
+    expect(out.nodes[0]!.uncertainty_drivers_disclosure).toEqual({
+      status: 'truncated',
+      original_entries: 3,
+      retained_entries: 2,
+      entries_omitted_by_count: 1,
+      entries_truncated_by_chars: 1,
+      per_entry_char_limit: CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+    });
+    expect(formatGraphForContext(out as unknown as ContextPackGraph)).toEqual(out);
+  });
+
+  it('adds no uncertainty keys when the producer supplied none', () => {
+    const out = formatGraphForContext(rawGraph());
+    expect(JSON.stringify(out)).not.toContain('uncertainty_driver');
+  });
+
+  it('does not promote uncertainty-shaped metadata from non-factor nodes', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'goal_growth',
+            kind: 'goal',
+            label: 'Growth',
+            uncertainty_drivers: ['Out-of-scope goal metadata'],
+            observed_state: { uncertainty_drivers: ['Out-of-scope goal metadata'] },
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]).not.toHaveProperty('uncertainty_drivers');
+    expect(out.nodes[0]).not.toHaveProperty('uncertainty_drivers_disclosure');
   });
 });
 
