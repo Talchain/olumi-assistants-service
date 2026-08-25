@@ -16,9 +16,12 @@
  * DOM. The reason is structural, not a timing artefact — the draft's SSE stream
  * closes on a terminal COMPLETE frame, the auto-run turn is server-initiated and
  * has no client listening, and `routes/assist.v1.scenario-graph.ts` (the only
- * scenario read leg) returns no analysis at all. The two open PRs that would
- * change this are CEE #1010 (producer) and UI #752 (consumer); BOTH are
- * unmerged.
+ * scenario read leg) returns no analysis at all. ⚠ THAT MEASUREMENT IS NOW
+ * HISTORY, and is kept because it is the evidence #1058 rests on: CEE #1010
+ * (producer) shipped the read leg and UI #752 (consumer) renders it, so the
+ * auto-run's result DOES reach the user on the delivered path. See the delivery
+ * section below for what that changed, and for the paths on which it still
+ * does not.
  *
  * So any surface whose copy presupposes the user has already seen a result must
  * ask "was this run the USER's?", and that question needs an answer that cannot
@@ -150,53 +153,85 @@ export function isAutoInitiatedRunAnalysisFact(fact: HandlerFact): boolean {
  *                                         A fact about DELIVERY, which changes
  *                                         when the delivery channel goes live.
  *
- * ── WHY THIS IS A CONSTANT AND NOT A DERIVATION, STATED HONESTLY ────────────
- * CEE cannot derive delivery today. `readScenarioAnalysis` is a PURE READ — it
- * never mutates — so no trace of "this result was served" is persisted, and the
- * fact carries no delivery marker. The honest options were a constant or a
- * write-on-read, and a write-on-read would be WRONG at the intermediate deploy
- * state: it would stamp "delivered" the moment CEE serves the payload, while a
- * pre-#752 UI is still discarding it — re-opening #1058's defect in the window
- * between the two deploys. CLAUDE.md: *a guarantee that spans services is dark
- * until BOTH halves are live; check the copy is true at every intermediate
- * deploy state, not only the final one.*
+ * ── WHY THIS IS STILL A CONSTANT: THE DERIVED SUCCESSOR WAS ATTEMPTED AND LOST ─
+ * The successor #1010 recommended — have UI #752's read request carry a
+ * client-capability marker and have `routes/scenario-graph-analysis-read.ts`
+ * record delivery only when a capable client was served — was scoped at CEE's
+ * tip `33c97cf` and UI #752's head `fe1944af`. It fails on TWO independent
+ * grounds, and the second is fatal on its own:
  *
- * ⚠ A CONSTANT IS A HAND-MAINTAINED MIRROR (CLAUDE.md trap #12), so it is made
- * LOUD rather than left to be remembered: its value is asserted by test, and
- * BOTH postures of the predicate — and of the coaching signal above it — are
- * pinned by test NOW (`coaching-auto-run-delivered.test.ts`). Flipping it is a
- * one-line, reviewed change whose behaviour is already proven on both sides.
+ *   1. THERE IS NOWHERE TO WRITE THE RECORD. `v5_handler_facts` is append-only
+ *      in code: of the `SessionStore` methods, nine WRITE (`append`,
+ *      `claimTurnFence`, `markTurnStopped`, `invalidateScoped`, `invalidateAll`,
+ *      `storeDraftGraph`, `ensureScenarioExists`, `markGraphWriteFailed`,
+ *      `resolveScenarioDraftLoss`) and the three that name a fact
+ *      (`readFactsFor`, `readFactsWithTurnFor`, `readNewestAnalysisFactFor`) are
+ *      ALL reads. `supabase-store.ts` issues exactly two `.update(` calls, both
+ *      on `v5_turn_fence`, neither on the facts table. So a delivery stamp needs
+ *      a new column or table, a migration, a new store method and every mock
+ *      updated — a new persistence seam, not a wiring job.
  *
- * ⭐ THE FULLY-DERIVED SUCCESSOR, deliberately NOT built here (scope-expansion
- * rule — it requires a change to UI #752, another lane's PR): have #752's read
- * request carry a client-capability marker, and have the read leg record
- * delivery only when a capable client was actually served. That derives at every
- * deploy state with no constant to flip. Recommended as the follow-up.
+ *   2. ⭐ EVEN WITH THAT SEAM, THE READ LEG CANNOT KNOW. Delivery happens AFTER
+ *      the response is sent: `canvas/hydrate/applyScenarioAnalysisRead.ts`
+ *      decides client-side and returns `applied | alreadyHeld | notYet`, and the
+ *      hook around it returns `delivered | already_held | deadline | aborted |
+ *      unreadable`. A marker on the REQUEST proves only that a capable client
+ *      ASKED. Recording on it would stamp "delivered" for every `deadline` and
+ *      `aborted` outcome — which is recording capability, the one thing a
+ *      delivery record must not do.
+ *
+ * THE SMALLEST ENABLING CHANGE, therefore, is not on the read leg at all: the
+ * truth exists only in the client, so the client must report it. A DELIVERY
+ * RECEIPT on the NEXT TURN's request — the UI naming the run whose result it
+ * actually applied — needs no persistence (it rides the existing
+ * `V5RequestExtensionsSchema` slice, whose strip-list is derived from
+ * `Object.keys(...shape)` and drift-checked by
+ * `tests/contract/v5-extension-fields-derived.test.ts`) and derives correctly at
+ * every deploy state: an old UI sends no receipt and reads as not-delivered,
+ * which is exactly today's behaviour, so CEE can ship FIRST with no window at
+ * all. It was NOT built here because it is a new turn-wire field plus threading
+ * through both dispatch paths — a different design from the one briefed, and the
+ * scope-expansion rule says re-brief rather than expand.
+ *
+ * ⚠⚠ SO THIS CONSTANT NARROWS #1058 RATHER THAN CLOSING IT, and that must not be
+ * forgotten because the common case now looks right. `useProvisionalAnalysisDelivery`
+ * arms ONLY on a `running` verdict and gives up at 60 s, and UI #752 leaves
+ * `hydrate/serverGraphHydration.ts` UNTOUCHED — so the BOOT path never applies
+ * the analysis. A user who reloads or navigates away inside the ~20 s run sees
+ * nothing, and this constant still asserts they saw it: their next manual run is
+ * narrated "The result is unchanged", which is #1058's witnessed sentence. The
+ * `deadline` / `aborted` / `unreadable` paths are the residual, they are pinned
+ * by the counterfactual posture in `coaching-phantom-prior-run.test.ts`, and the
+ * receipt above is what closes them.
  */
 
 /**
  * Does a post-draft auto-run's RESULT reach the user?
  *
- * `false` at this tip. The delivery channel needs both halves and only one is
- * merged: CEE #1010 (this PR — the read leg that returns the analysis) and UI
- * #752 (`canvas/hydrate/applyScenarioAnalysisRead.ts` — the consumer that
- * renders it). Verified 2026-08-20: that file is ABSENT from `DecisionGuideAI`
- * `staging` and PRESENT on #752's head `fe1944af`, and #752 is OPEN.
+ * `true` at this tip. The delivery channel's both halves are live: CEE #1010
+ * (`routes/scenario-graph-analysis-read.ts` — the read leg that returns the
+ * analysis) and UI #752 (`canvas/hooks/useProvisionalAnalysisDelivery.ts` +
+ * `canvas/hydrate/applyScenarioAnalysisRead.ts` — the consumer that renders it
+ * without another turn).
  *
- * ⭐ FLIP THIS TO `true` IN THE SAME CHANGE THAT MERGES UI #752, and not before.
- * Flipping it early re-opens #1058 (a first-ever analysis narrated as a re-run);
- * leaving it late leaves the inversion this block documents (a genuine re-run
- * narrated as a first analysis). Both directions are already under test.
+ * ⭐ THE LAND ORDER IS LOAD-BEARING AND IT IS UI-FIRST. Flipping this BEFORE
+ * #752 is deployed re-opens #1058 for every user (a first-ever analysis narrated
+ * as a re-run — witnessed on staging 2026-08-19). Flipping it after leaves the
+ * inversion (a genuine re-run narrated as a first analysis), which under-claims
+ * rather than fabricating a comparison. So: deploy UI #752, then this.
  */
-export const AUTO_RUN_RESULT_REACHES_USER = false;
+export const AUTO_RUN_RESULT_REACHES_USER = true;
 
 /**
  * Has this `run_analysis` fact's result been put in front of the user?
  *
  * FALSE for every non-`run_analysis` fact. TRUE for a user-initiated run — the
  * turn that ran it is the turn that displayed it. For an auto-initiated run the
- * answer is {@link AUTO_RUN_RESULT_REACHES_USER}, because that class is visible
- * only once the delivery channel's both halves are live.
+ * answer is {@link AUTO_RUN_RESULT_REACHES_USER} — `true` since the delivery
+ * channel's both halves went live. ⚠ That constant is an ESTATE-WIDE claim about
+ * a channel, not a per-user observation: read its block for the `deadline` /
+ * `aborted` paths on which it still overclaims, and for the receipt that would
+ * make this a derivation.
  *
  * ⚠ SAYS NOTHING ABOUT WHETHER THE RUN PRODUCED ANYTHING. A `noop` fact did not
  * run, so nothing was displayed — but that is a different question again ("did
@@ -206,6 +241,9 @@ export const AUTO_RUN_RESULT_REACHES_USER = false;
  *
  * @param autoRunResultReachesUser injectable ONLY so both postures can be pinned
  *        by test without module mocking. Production always takes the default.
+ *        ⭐ It is also the ONLY discriminating handle either posture spec has now
+ *        that the constant equals the delivered posture — a control asserting the
+ *        constant's current value alone cannot fail (CLAUDE.md trap #12b).
  */
 export function hasUserSeenRunAnalysisResult(
   fact: HandlerFact,

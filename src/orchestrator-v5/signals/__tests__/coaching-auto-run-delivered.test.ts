@@ -14,11 +14,13 @@
  * first analysis: #1058's defect facing the other way (CLAUDE.md trap #21 — two
  * questions under one name, coincident until a change decouples them).
  *
- * The posture is switched by mocking ONLY `AUTO_RUN_RESULT_REACHES_USER` and the
- * predicate that reads it, `importOriginal`-spread so every other export stays
- * the real one (CLAUDE.md trap #12: a `vi.mock` factory REPLACES the module).
- * `vi.mock` is file-scoped and hoisted, which is exactly why the two postures
- * live in two files rather than two `describe`s.
+ * ⭐ THAT WORLD IS NOW PRODUCTION, so this file no longer mocks anything. It
+ * USED to inject the delivered posture over a production `false`; the constant
+ * was flipped alongside UI #752 and the injection became a no-op — see the note
+ * above the fixtures. The counterfactual moved to
+ * `coaching-phantom-prior-run.test.ts`, which now carries the injected
+ * PRE-DELIVERY posture. `vi.mock` is file-scoped and hoisted, which is why the
+ * two postures live in two files rather than two `describe`s.
  *
  * ── WHY BOTH DIRECTIONS ARE HERE, NOT JUST THE INVERSION (trap 22b) ─────────
  * One direction alone lets the other through. A fix that makes an auto-run count
@@ -28,15 +30,16 @@
  * has its opposite-direction twin, and the twins are asserted in the SAME
  * posture, so neither can be satisfied by the flag simply not applying.
  *
- * ── THE POSITIVE CONTROL (trap 13) ─────────────────────────────────────────
- * A mock that silently fails to apply leaves every assertion below passing for
- * the wrong reason — they would be re-testing the current posture under a
- * heading that claims otherwise. The first test therefore proves the injected
- * posture actually reaches the predicate the production code calls, and every
- * later assertion is meaningful only because that control fires.
+ * ── THE POSITIVE CONTROL (trap 13, and trap 12b) ───────────────────────────
+ * The first test proves production really ships the delivered posture, so every
+ * assertion below is about the shipped constant rather than an injected one.
+ * ⚠ It deliberately does NOT rest on that constant alone: a control asserting
+ * only the current value cannot fail once that value is the default — the way
+ * the prompt-drift gate's three controls hollowed out. Its discriminating half
+ * is the predicate's explicit parameter, which is real in both directions.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -44,21 +47,21 @@ import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 import { buildAutoRunProvenance, RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
 import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
-// ── the posture switch ──────────────────────────────────────────────────────
-
-vi.mock('../../context/run-initiator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../context/run-initiator.js')>();
-  return {
-    // `importOriginal` spread: the marker vocabulary, the provenance builder and
-    // `isAutoInitiatedRunAnalysisFact` all stay REAL. Only the delivery posture
-    // moves — which is the point, since the whole claim under test is that
-    // provenance and delivery are now separable.
-    ...actual,
-    AUTO_RUN_RESULT_REACHES_USER: true,
-    hasUserSeenRunAnalysisResult: (fact: HandlerFact): boolean =>
-      actual.hasUserSeenRunAnalysisResult(fact, true),
-  };
-});
+// ── no posture switch: THIS FILE IS PRODUCTION ──────────────────────────────
+//
+// ⭐ IT USED TO CARRY ONE. Until the constant was flipped alongside UI #752 this
+// file injected `AUTO_RUN_RESULT_REACHES_USER: true` over a production `false`.
+// Production now ships `true`, so that injection would set a value to itself:
+// a no-op mock whose "positive control" could no longer fail, i.e. a control
+// decayed into a tautology by its own success (CLAUDE.md trap #12b, the exact
+// shape that hollowed out the prompt-drift gate's three controls). It is
+// REMOVED rather than left looking load-bearing, and the discrimination this
+// file needs now comes from the predicate's explicit parameter, which is real
+// in both directions.
+//
+// The counterfactual moved with it: `coaching-phantom-prior-run.test.ts` now
+// carries the injected PRE-DELIVERY posture and its own positive control. The
+// two files have swapped roles; neither posture went unpinned.
 
 // ── fixtures (same carriers as the current-posture spec) ────────────────────
 
@@ -162,16 +165,24 @@ function editBranch(priorFacts: readonly HandlerFact[]) {
 // ── the control, then the two directions ────────────────────────────────────
 
 describe('once #1010 + UI #752 deliver the auto-run result, an auto-run IS a result the user saw', () => {
-  it('POSITIVE CONTROL: the delivered posture actually reaches the predicate production calls', async () => {
-    // Without this, every assertion below would pass by re-testing the CURRENT
-    // posture under a heading claiming the delivered one (CLAUDE.md trap #13:
-    // an instrument that cannot fail is not evidence).
+  it('POSITIVE CONTROL: production ships the delivered posture, and the predicate still discriminates', async () => {
+    // No mock stands between this file and production any more, so this is a
+    // claim about the SHIPPED constant. It is not ceremony: every assertion
+    // below is meaningful only if this reads `true`, and if the constant is
+    // ever flipped back they must all fail rather than quietly change meaning.
     const runInitiator = await import('../../context/run-initiator.js');
     expect(runInitiator.AUTO_RUN_RESULT_REACHES_USER).toBe(true);
-    // …and it discriminates: the auto-run fact reads SEEN, the identical fact
-    // is still correctly identified as auto-INITIATED. Provenance and delivery
-    // are separate answers about the same object.
     expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(true);
+
+    // ⭐ THE DISCRIMINATION, and it does NOT come from the constant. A control
+    // that only asserts the current value cannot fail once that value is the
+    // default (trap #12b). The explicit parameter is real in both directions,
+    // so this pair bites whichever way the constant is set.
+    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), false)).toBe(false);
+    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), true)).toBe(true);
+
+    // …and provenance is unmoved by either: the identical fact is still
+    // correctly identified as auto-INITIATED. Two questions, one object.
     expect(runInitiator.isAutoInitiatedRunAnalysisFact(AUTO_RUN_PRIOR())).toBe(true);
   });
 
