@@ -54,11 +54,21 @@ export const MAX_OPTION_EFFECT_ASK_CHIPS = 3;
  * sites: this file's template, and a bare string literal
  * `'chip_prompt_option_effect_bind_1'` in `turn-executor.ts`'s
  * `dispatch === 'clarify'` outstanding-ask redirect branch. A chip id is a
- * JOIN KEY — pending-action `chip_id`, the two-turn chip-suppression window
- * (`last_chip_ids_shown` / `chip_ids_clicked`), and the `proposal_ref`
- * identity bridge all match on the emitted string. Had this file's format ever
- * changed, the literal would have kept emitting the old id SILENTLY and one of
- * the two emit paths would have stopped matching, with no test going red.
+ * JOIN KEY — pending-action `chip_id` and the `proposal_ref` identity bridge
+ * match on the emitted string. Had this file's format ever changed, the literal
+ * would have kept emitting the old id SILENTLY and one of the two emit paths
+ * would have stopped matching, with no test going red.
+ *
+ * ⚠ CORRECTED 2026-08-25 — THIS NOTE NAMED A THIRD JOIN THAT DOES NOT EXIST.
+ * It cited "the two-turn chip-suppression window (`last_chip_ids_shown` /
+ * `chip_ids_clicked`)". That window is DEAD CODE at this tip:
+ * `suppressedChipIds`, `registerChipClick` and `updateLastChipIds` in
+ * `src/orchestrator/deterministic/session-state.ts` have ZERO callers outside
+ * their own file (derived with a contrast control — `mergeSessionState`, in the
+ * same file, reads 2). The false sentence cost a whole hypothesis: a lane
+ * investigating a phantom picker inherited it and spent budget on a suppressor
+ * that cannot suppress anything. A comment describing a dependency that is not
+ * there is a hand-maintained mirror (trap 12) pointing at nothing.
  *
  * ⚠ DO NOT ADD A PARALLEL CONSTANT OR A SECOND SPELLING. Import this.
  * `option-effect-bind-chip-id-single-owner.test.ts` REDs if any non-test module

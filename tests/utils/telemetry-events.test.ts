@@ -666,6 +666,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
           "v5.edit_graph.option_effect_write_resolved",
         V5OptionEffectAskEmitted:
           "v5.edit_graph.option_effect_ask_emitted",
+        V5OptionEffectLabelCollision:
+          "v5.edit_graph.option_effect_label_collision",
         V5ConfigureOptionOutcomeUnhonoured:
           "v5.edit_graph.configure_option_outcome_unhonoured",
         // Wave-1 Lane B (PR3, ROADMAP 3.16) — edit target not present in the
@@ -1527,6 +1529,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5RepairValueBindingResolved,
         TelemetryEvents.V5OptionEffectWriteResolved,
         TelemetryEvents.V5OptionEffectAskEmitted,
+        // ⭐ 2026-08-25 — two or more options share ONE normalised label, so the
+        // disambiguation ask is unanswerable and the rename exit replaced it.
+        TelemetryEvents.V5OptionEffectLabelCollision,
         // ⭐ ROADMAP 2.427 — the configure-option outcome did not honour the
         // turn's intent (no interventions write for the named option id).
         // Diagnostic-only, same posture as its false-success sibling
@@ -2414,6 +2419,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Deliberate frozen-registry additions per the registry discipline.
         "v5.edit_graph.option_effect_write_resolved",
         "v5.edit_graph.option_effect_ask_emitted",
+        "v5.edit_graph.option_effect_label_collision",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

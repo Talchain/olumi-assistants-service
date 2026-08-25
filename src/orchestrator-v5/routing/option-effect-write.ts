@@ -458,6 +458,59 @@ function matchLabels(
   return matched.filter((m) => !isNestedThroughout(m, matched));
 }
 
+/**
+ * ⭐ THE ONE SPELLING OF "the same option name", and the ONE normalisation
+ * `matchLabels` resolves identity by. Exported so the collision predicate below
+ * and the companion spec both read the SAME rule rather than re-spelling it
+ * (CLAUDE.md trap 12: the second spelling is the one that rots).
+ *
+ * ⚠ THE COLLISION CLASS IS NORMALISED, NOT BYTE-IDENTICAL. Measured at pristine
+ * `14aefde6`: a case-only difference and a whitespace-only difference BOTH
+ * reach the ambiguous ask, because this is the function that decides identity.
+ * A guard written against byte equality would have missed two thirds of the
+ * class it was written for.
+ */
+export function normaliseOptionLabel(label: string): string {
+  return label.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * ⭐⭐ THE COLLISION PREDICATE. Returns the shared label when two or more of
+ * `labels` normalise to one key, else `null`.
+ *
+ * ⚠ IT IS A STRUCTURAL TEST OVER EXACT KEYS, NOT A SIMILARITY PREDICATE, and
+ * that is the whole point. The estate oscillated four rounds on one
+ * natural-language predicate (trap 22f), each round fixing one direction and
+ * reopening the other. This asks only *do these two strings resolve to the same
+ * identity key?* — the same question `matchLabels` already answers to decide
+ * which node the user meant. It admits no fuzziness and therefore has no
+ * direction to oscillate in.
+ *
+ * ⚠ THE OPPOSITE-DIRECTION HARM IS THE WORSE ONE. Two options that are merely
+ * SIMILAR ("Subcontract inner-city runs to green courier" beside "subcontracting
+ * inner-city deliveries to a green courier" — both present in the captured
+ * draft) MUST keep resolving to their own distinct ids. Suppressing those would
+ * silently withhold a user's option, which is worse than the dead end this
+ * removes. Pinned by an opposite-direction twin in the companion spec.
+ *
+ * The FIRST key to reach two members wins, so the reported label is stable
+ * under input order for the single-collision case that every call site has.
+ */
+export function findCollidingOptionLabel(
+  labels: readonly string[],
+): { readonly label: string; readonly count: number } | null {
+  const byKey = new Map<string, string[]>();
+  for (const label of labels) {
+    const key = normaliseOptionLabel(label);
+    if (key.length === 0) continue;
+    byKey.set(key, [...(byKey.get(key) ?? []), label]);
+  }
+  for (const [, members] of byKey) {
+    if (members.length > 1) return { label: members[0]!, count: members.length };
+  }
+  return null;
+}
+
 /** The factors this option is wired to. Same reader as the recovery copy. */
 export function linkedFactorsOf(
   graph: GraphV3T,
@@ -573,10 +626,60 @@ export type OptionEffectWriteResolution =
       readonly candidates: readonly OptionEffectCandidate[];
       /** Option labels the message named, when the OPTION is what is ambiguous. */
       readonly optionLabels: readonly string[];
+    }
+  | {
+      /**
+       * ⭐⭐ TWO OR MORE OPTIONS CARRY ONE NORMALISED LABEL — so the ask above
+       * is UNANSWERABLE and must never be composed. It would quote one string
+       * twice and offer chips that are byte-identical in label AND message,
+       * every one of which re-enters this same state (measured at `14aefde6`).
+       *
+       * This is not a decline: declining drops the turn to the edit LLM, i.e.
+       * the wrong-entity-write path this module exists to close. It is the
+       * ratified exit for an unwinnable disambiguation — make the ambiguity the
+       * product and name the one action that resolves it (RENAME), which the
+       * user performs through an identity-carrying canvas selection.
+       */
+      readonly matched: true;
+      readonly kind: 'label_collision';
+      /** The shared label, in the spelling the user sees. Quoted ONCE in copy. */
+      readonly collidingLabel: string;
+      /** How many options carry it. Always >= 2. */
+      readonly collidingCount: number;
+      readonly value: number;
     };
 
 function decline(reason: OptionEffectWriteDeclineReason): OptionEffectWriteResolution {
   return { matched: false, reason };
+}
+
+/** The `ask` shape, derived from the union so it cannot drift from it. */
+type OptionEffectAskResolution = Extract<OptionEffectWriteResolution, { kind: 'ask' }>;
+
+/**
+ * ⭐⭐ THE ONE GATE EVERY ASK PASSES THROUGH. An ask whose `optionLabels`
+ * collide is downgraded to `label_collision`.
+ *
+ * ⚠ IT IS A WRAPPER RATHER THAN A CHECK AT EACH SITE, DELIBERATELY (trap 12).
+ * There are FOUR `kind: 'ask'` return sites across three resolution rules, and
+ * a per-site check is a hand-maintained mirror: the fifth site added later
+ * would silently keep composing the unanswerable ask, with no test going red.
+ * Routing every site through one function makes that structurally impossible.
+ *
+ * The `ambiguity: 'factor'` sites carry exactly ONE option label and therefore
+ * can never collide — they pass through byte-identically, which is asserted by
+ * an opposite-direction twin rather than assumed here.
+ */
+function askOrCollision(ask: OptionEffectAskResolution): OptionEffectWriteResolution {
+  const collision = findCollidingOptionLabel(ask.optionLabels);
+  if (collision === null) return ask;
+  return {
+    matched: true,
+    kind: 'label_collision',
+    collidingLabel: collision.label,
+    collidingCount: collision.count,
+    value: ask.value,
+  };
 }
 
 /**
@@ -654,7 +757,7 @@ function resolveFromOutstandingAsk(
   // `pairs` is already deduplicated by (option, factor), so two entries here
   // are two genuinely different OPTIONS waiting on this one factor.
   if (candidates.length > 1) {
-    return {
+    return askOrCollision({
       matched: true,
       kind: 'ask',
       ambiguity: 'option',
@@ -667,7 +770,7 @@ function resolveFromOutstandingAsk(
         factorLabel: pair.factorLabel,
       })),
       optionLabels: candidates.map((pair) => pair.optionLabel),
-    };
+    });
   }
 
   const pair = candidates[0]!;
@@ -821,7 +924,7 @@ function resolveFromAnsweredAsk(
       )
       .filter((pair): pair is MissingEffectPair => pair !== undefined);
     if (candidates.length < 2) return decline('answer_points_elsewhere');
-    return {
+    return askOrCollision({
       matched: true,
       kind: 'ask',
       ambiguity: 'option',
@@ -838,7 +941,7 @@ function resolveFromAnsweredAsk(
         factorLabel: pair.factorLabel,
       })),
       optionLabels: candidates.map((pair) => pair.optionLabel),
-    };
+    });
   }
 
   if (pointedOptionIds.length === 1 && pointedOptionIds[0] !== asked.optionId) {
@@ -934,7 +1037,7 @@ export function resolveOptionEffectWrite(params: {
         factorLabel: factor.label,
       });
     }
-    return {
+    return askOrCollision({
       matched: true,
       kind: 'ask',
       ambiguity: 'option',
@@ -942,7 +1045,7 @@ export function resolveOptionEffectWrite(params: {
       value,
       candidates,
       optionLabels: optionMatches.map((m) => m.label),
-    };
+    });
   }
 
   const option = optionMatches[0]!;
@@ -956,7 +1059,7 @@ export function resolveOptionEffectWrite(params: {
   }
 
   if (factorMatches.length > 1) {
-    return {
+    return askOrCollision({
       matched: true,
       kind: 'ask',
       ambiguity: 'factor',
@@ -969,7 +1072,7 @@ export function resolveOptionEffectWrite(params: {
         factorLabel: factor.label,
       })),
       optionLabels: [option.label],
-    };
+    });
   }
 
   const factor = factorMatches[0]!;

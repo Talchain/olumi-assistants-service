@@ -169,6 +169,14 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../compose/option-effect-ask-response.ts',
   ),
+  // ⭐ THE DUPLICATE-OPTION-LABEL EXIT (2026-08-25) — the rename-coaching
+  // composer that replaces an ask which could not be answered. Caught by
+  // `derivedComposeFileDomain()` on the commit that created the file (the
+  // mechanism working, seventh instance), registered on the same commit.
+  'compose/duplicate-option-label-response.ts': resolve(
+    HERE,
+    '../compose/duplicate-option-label-response.ts',
+  ),
 };
 
 /**
@@ -808,6 +816,36 @@ const OPTION_EFFECT_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/duplicate-option-label-response.ts` — the
+ * duplicate-option-label rename exit (2026-08-25), on the commit that created
+ * the file. The derived domain test caught it on its first run.
+ */
+const DUPLICATE_OPTION_LABEL_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
+      + 'shape as OPTION_EFFECT_ASK_SITES and REPAIR_VALUE_ASK_SITES). It is the NARROWEST '
+      + 'composer in this register: the template interpolates exactly TWO ingredients, and both '
+      + 'are structural facts about the graph rather than anything read from an analysis. '
+      + '(1) `collidingLabel` — a label carried by two or more OPTION nodes of the persisted '
+      + 'graph, selected because those nodes share a normalised label under '
+      + '`normaliseOptionLabel`, the same function `matchLabels` resolves identity by. It is '
+      + 'quoted VERBATIM and exactly ONCE. (2) `collidingCount` — how many options carry it, '
+      + 'rendered through `countWord`. '
+      + 'IT CANNOT ASSERT A LEADER, and the argument is stronger here than for its siblings: '
+      + 'this composer never receives an analysis result, a value, a candidate list or an option '
+      + 'ORDERING of any kind — the resolution variant it consumes carries only the shared label '
+      + 'and its count, so there is no per-option datum in scope to rank, compare or crown even '
+      + 'if the copy wanted one. The two options are by construction INDISTINGUISHABLE to this '
+      + 'code, which is the entire reason the composer exists. '
+      + 'It ships ZERO chips, asserted by its companion spec, so no label leaves this file '
+      + 'through the chip channel either. Zero LLM calls. The route threads '
+      + '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -819,6 +857,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
   'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
   'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
+  'compose/duplicate-option-label-response.ts': DUPLICATE_OPTION_LABEL_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -1264,10 +1303,18 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // failed `pnpm test:required` on the commit that created the site, and the
     // guard found the omission rather than a human remembering it. Sixth
     // instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(45);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(41);
+    // ⚠ DUPLICATE-OPTION-LABEL EXIT (2026-08-25): 45 -> 46 sites, 41 -> 42 keys,
+    // one ADDED file (compose/duplicate-option-label-response.ts), registered
+    // `structural` with its derivation (DUPLICATE_OPTION_LABEL_SITES). Recorded
+    // the same way as every entry above, and for the same reason: this ledger
+    // failed `pnpm test:required` on the commit that created the site, and the
+    // guard found the omission rather than a human remembering it. Seventh
+    // instance of the mechanism working.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(46);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(42);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
+      'compose/duplicate-option-label-response.ts',
       'compose/edit-clarify-response.ts',
       'compose/option-effect-ask-response.ts',
       'compose/repair-value-ask-response.ts',
