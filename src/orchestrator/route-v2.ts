@@ -3360,10 +3360,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // which is precisely the phantom-shaped state. Failure-marked rows are
     // excluded by the read so a scenario whose only draft LOST its commit
     // classifies fresh and a re-sent brief can redraft.
-    const isContinuationScenario = frameStageNoGraph
-      ? (await loadHasPriorTurns(ingress.scenario_id, requestId)) ||
-        (await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId))
+    // The two disjuncts are kept SEPARATE (they used to be inlined into one
+    // `||`) because the no-model unstranding term below must distinguish
+    // them: "this scenario has history" and "a draft is in flight right now"
+    // are different facts, and only the first one is safe to lift on. The
+    // short-circuit is preserved exactly — the fence is read ONLY when the
+    // committed-rows answer is false, which is the phantom-shaped state.
+    const hasPriorCommittedTurns = frameStageNoGraph
+      ? await loadHasPriorTurns(ingress.scenario_id, requestId)
       : false;
+    const admittedLiveTurnFromShortCircuit =
+      frameStageNoGraph && !hasPriorCommittedTurns
+        ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
+        : false;
+    const isContinuationScenario = hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit;
     // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
     // a draft loss stands (a failure-marked fence row + no committed graph),
     // the loss notice tells the user "send your decision brief again and
@@ -3376,6 +3386,74 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       frameStageNoGraph && isContinuationScenario
         ? await loadDraftLossStands(ingress.scenario_id, requestId)
         : false;
+    // ────────────────────────────────────────────────────────────────────
+    // THE NO-MODEL UNSTRANDING TERM — the guard protects a MODEL, and this
+    // scenario has none.
+    // ────────────────────────────────────────────────────────────────────
+    // The continuation guard above keys on the SCENARIO having history, never
+    // on whether a model exists. Its protection is entirely about an existing
+    // model: a refresh must not be misread as a fresh brief and "start over"
+    // on a live decision. Where no model exists there is nothing to start over
+    // from and nothing to clobber — the guard buys no protection there and
+    // costs the user the product's first step.
+    //
+    // Left un-narrowed it is a STANDING dead end, not a transient one:
+    // continuation + no persisted model + a decision brief suppresses the
+    // draft shortcut, and re-sending the brief is suppressed by the same term.
+    // Neither pre-existing escape hatch covers it — `draftOfferMarker` needs
+    // the last committed turn to have been a draft offer, and
+    // `draftLossRedraftUnstrand` needs a failure-marked fence row. A user who
+    // simply chatted first and then asked for a model matches neither.
+    //
+    // Same unstranding pattern, and the same rule, as 2.709 invariant 6: the
+    // `unsupported_action_system_dispatched` copy tells this exact user "Tell
+    // me the decision you're weighing … and I'll draft it", and a promise the
+    // classifier does not keep is a dead-end.
+    //
+    // ⚠ The wire flag `explicit_generate` / `generate_model` is documented
+    // below (C1) as bypassing this guard, and it does — but the DEPLOYED UI
+    // does not send it. Derived 25 Aug 2026 at the staging bundle
+    // (`index-B4U7PUoe.js`, `/version.json` commit e36d3631, 81 chunks
+    // crawled, controls green): the only builder that sets `generate_model`
+    // sits behind `VITE_ENABLE_V5_ORCHESTRATOR`, which is inlined `"true"`,
+    // so the V5 block returns before that code is reachable. The escape hatch
+    // exists in CEE and cannot be exercised by a real user — which is exactly
+    // why this term cannot be left to the flag.
+    //
+    // ⚠ THE FENCE READ IS LOAD-BEARING, NOT DEFENCE-IN-DEPTH. Invariant 3's
+    // S2 state shares this term's signature EXACTLY — a draft admitted
+    // seconds ago has zero committed rows and nothing persisted yet, so
+    // "no persisted model" is TRUE mid-draft. Lifting on persisted-model
+    // absence alone would re-open the phantom-model P0 the guard was
+    // extended to close. The fence is therefore consulted before any lift,
+    // including on the committed-turns path where the short-circuit above
+    // never read it.
+    //
+    // Fail-CLOSED on any read failure, deliberately, matching the
+    // explicit-generate path's stated doctrine: a model that MIGHT exist must
+    // never be drafted over during a store outage. Paid only on frame-stage
+    // no-request-graph continuation turns with no standing loss — the slice
+    // `draftLossRedraftUnstrand` already reads in.
+    let noModelDraftUnstrand = false;
+    if (frameStageNoGraph && isContinuationScenario && !draftLossRedraftUnstrand) {
+      try {
+        const draftInFlight = hasPriorCommittedTurns
+          ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
+          : admittedLiveTurnFromShortCircuit;
+        noModelDraftUnstrand =
+          !draftInFlight && (await loadPersistedGraphStrict(ingress.scenario_id)) == null;
+      } catch (err) {
+        noModelDraftUnstrand = false;
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'V5 no-model unstrand — persisted-state read failed; keeping the continuation guard',
+        );
+      }
+    }
     if (isContinuationScenario) {
       const wouldDraft = isDraftShapedText(ingress.message);
       emit(TelemetryEvents.V5ContinuationGuardApplied, {
@@ -3383,6 +3461,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         scenario_id: ingress.scenario_id,
         guard: wouldDraft ? 'draft_graph' : 'frame_no_brief',
         prior_turns_present: true,
+        // The guard is NOT applied to the draft limb when a term un-strands
+        // it. Reporting "guard_applied" on a turn that went on to draft would
+        // make this event lie about the outcome it is named for.
+        draft_limb_lifted_no_model: noModelDraftUnstrand,
       });
     }
     // ────────────────────────────────────────────────────────────────────
@@ -3877,7 +3959,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // redraft it", and a promise the classifier does not keep is a
       // dead-end. Self-limiting — the term is false again the moment a
       // graph commits.
-      (!isContinuationScenario || draftOfferMarker !== null || draftLossRedraftUnstrand) &&
+      // AND except when the scenario has NO MODEL AT ALL (fourth disjunct):
+      // the guard protects an existing model, and a user with none who sends
+      // a brief must be able to get one. Fenced against the in-flight-draft
+      // state and fail-closed on a read failure — see its derivation above.
+      (!isContinuationScenario ||
+        draftOfferMarker !== null ||
+        draftLossRedraftUnstrand ||
+        noModelDraftUnstrand) &&
       // META-DECISION-DIAGNOSIS-2026-07-20 — a chip_click carries EXPLICIT
       // product-intent metadata; the draft heuristic exists to classify
       // anonymous free text and must never capture product-authored canned

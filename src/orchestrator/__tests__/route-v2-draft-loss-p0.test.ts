@@ -423,9 +423,34 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
   });
 
-  it('CONTROL: with no standing loss, a continuation scenario still suppresses the draft shortcut', async () => {
+  /**
+   * ⚠ THIS CONTROL WAS RE-BASED BY THE NO-MODEL DEAD-END FIX (25 Aug 2026),
+   * for the same reason 2.715 re-based the one above.
+   *
+   * As written it held `persistedGraphForRead = null` (the beforeEach
+   * default) and asserted NO DRAFT — so it did not merely control for the
+   * loss term, it PINNED THE NO-MODEL DEAD END AS INTENDED BEHAVIOUR:
+   * continuation + no model + a complete brief must not draft. That is the
+   * standing hole the fix closes, so the assertion had to move.
+   *
+   * What replaces it is the case the continuation guard actually exists for —
+   * a scenario that HAS a model — which keeps a genuine suppression control
+   * here rather than deleting one. ⚠ NAMED LIMIT: this control and the test
+   * above it now differ in TWO variables (standing loss AND model presence),
+   * so the pair no longer isolates the loss term on its own. It is not
+   * repaired by holding the model present in both: `scenarioDraftLossStands`
+   * means "failure-marked fence row AND no committed graph", so
+   * loss-stands-with-a-model is a state the producer cannot emit, and a
+   * fixture outside the producer's domain proves nothing. The loss term's
+   * discrimination is instead preserved structurally — the no-model term is
+   * computed only when `draftLossRedraftUnstrand` is false, so the test above
+   * still drafts for the loss term's reason and REDs if that term is removed.
+   * The full no-model matrix lives in route-v2-no-model-dead-end.test.ts.
+   */
+  it('CONTROL (re-based): with no standing loss, a continuation scenario that HAS a model still suppresses the draft shortcut', async () => {
     draftLossStandsForRead = false;
     hasPriorTurnsForRead = true;
+    persistedGraphForRead = { nodes: [{ id: 'opt-a', kind: 'option', label: 'Option A' }], edges: [] };
 
     const res = await app.inject({
       method: 'POST',
