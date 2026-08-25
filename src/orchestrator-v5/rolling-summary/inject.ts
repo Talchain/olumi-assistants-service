@@ -229,7 +229,7 @@ const NO_INJECTION: SummaryInjectionOutcome = Object.freeze({
  * test/transport errors — remains single-attempt and fails into the existing
  * hot-window fallback.
  */
-function isTransientSummaryReadError(error: unknown): boolean {
+function isTransientSummaryReadError(error: unknown): error is RollingSummaryStoreError {
   if (!(error instanceof RollingSummaryStoreError)) return false;
   const code = error.code?.toUpperCase() ?? '';
   return (
