@@ -264,6 +264,9 @@ describe('POST /orchestrate/v2/turn — the no-model continuation dead end', () 
 
     expect(res.statusCode).toBe(200);
     expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    // Bound by IDENTITY, not by a value predicate another scenario could
+    // satisfy: the model-presence fact must be read for THIS scenario.
+    expect(loadGraphMock).toHaveBeenCalledWith(SCENARIO_ID);
   });
 
   // ═══ THE GUARD'S PROTECTION — preserved, not traded away ════════════════
