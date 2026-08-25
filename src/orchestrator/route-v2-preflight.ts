@@ -158,17 +158,10 @@ export async function resolveVerifiedIdentityOrRefuse(
 /**
  * STEP 3, EXTRACTED — effective identity + scenario ownership.
  *
- * The caller-supplied `user_id` extension is IGNORED — on EVERY request, not
- * only verified ones. A mismatch is telemetry-only.
- *
- * ⚠ THE "ONLY VERIFIED ONES" QUALIFIER IS WHAT MADE THIS EXPLOITABLE, and it
- *   read as safe because of where it sat: the spec said client identity is
- *   "dead input from any public path", and the fallback only applied when
- *   identity was NOT verified — which sounds like the internal case. It is not.
- *   Unverified is the DEFAULT for anyone who simply presents no token, and the
- *   `/bff/cee/*` edge injects the service key for any visitor, so the public
- *   internet reaches these handlers as `service_legacy`. The carve-out written
- *   for internal harnesses was in practice the front door.
+ * On a verified turn the JWT-derived user_id is authoritative and the
+ * caller-supplied `user_id` extension is IGNORED (spec: after the flip, client
+ * identity from any public path is dead input). A mismatch is telemetry-only —
+ * the verified value wins.
  *
  * The ownership decision itself stays `preflightEnsureScenario`'s, unchanged:
  * it fails CLOSED when the ownership oracle is unavailable, refuses an
@@ -183,6 +176,46 @@ export async function resolveVerifiedIdentityOrRefuse(
  *
  * Shared by `runPreFlight` and `recordExplicitTurnStop` (2.236).
  */
+/**
+ * What a route passes as `claimedUserId` when its SURFACE cannot admit
+ * caller-asserted identity at all.
+ *
+ * ── THE CARVE-OUT IS SOUND IN ONE PLACE AND UNSOUND IN ANOTHER ─────────────
+ * `service_legacy` exists so a key-authed internal caller can still act on a
+ * user's behalf, and `user-identity.ts` justifies it as *"reachable by
+ * key-authed service callers (internal harnesses) only, never browser paths"*.
+ *
+ * That sentence is TRUE for `/orchestrate/v2/turn{,/stop}` and FALSE for
+ * `/assist/v1/scenarios/*`, and the difference was MEASURED on deployed
+ * staging rather than reasoned about:
+ *
+ *   · The `/bff/cee/*` Netlify edge staples the assist key onto ANY visitor's
+ *     request, and all five `/assist/v1/scenarios/*` routes answer from their
+ *     live handlers through it — each a schema'd `error.v1` carrying a
+ *     `request_id`. So on those routes the handler CANNOT distinguish an
+ *     internal harness from an anonymous stranger, and a trust boundary that
+ *     cannot tell its two callers apart is not a boundary.
+ *   · `/bff/cee/orchestrate/v2/turn` and `/stop` answer `{"error":"Not found"}`
+ *     — BYTE-IDENTICAL to a fabricated-route control in the same run, while a
+ *     scenario route answered from a live handler in that same run. The edge
+ *     matches an ALLOWED_TARGETS allowlist against the rewritten `/assist/v1/*`
+ *     path, and the orchestrate paths are off-list. They are NOT anonymously
+ *     reachable that way.
+ *   · The browser proxy (`/proxy/v5/turn{,/stream,/stop}`) IS public and DOES
+ *     inject the key — but it STRIPS body `user_id` on all three rungs, so the
+ *     carve-out is not reachable with a forged identity there either.
+ *
+ * ⚠ SO THIS IS DELIBERATELY NOT A GLOBAL CHANGE. Removing the fallback inside
+ *   `authorizeScenarioOwnership` would also remove it for the turn routes,
+ *   where the premise holds and where a positive control in
+ *   `turn-stop-authorization.test.ts` pins the service seam ON PURPOSE. A
+ *   previous lane priced that exact change, named its blast radius as breaking
+ *   the documented service-caller carve-out, and left that control as a
+ *   tripwire. Scoping the fix to the surfaces whose premise is false leaves the
+ *   tripwire green because nothing it guards has moved.
+ */
+export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
+
 export async function authorizeScenarioOwnership(
   scenarioId: string,
   claimedUserId: string | null,
@@ -192,48 +225,24 @@ export async function authorizeScenarioOwnership(
   | { readonly ok: true; readonly effectiveUserId: string | null }
   | { readonly ok: false; readonly reason: string }
 > {
-  // ⚠⚠ CALLER-ASSERTED IDENTITY IS NOT AN OWNERSHIP AUTHORITY. Only a VERIFIED
-  //    token subject is. This line is the whole fix, and it is one line because
-  //    this function is the ONE place the question is asked — derived, not
-  //    assumed: every read of the parsed `user_id` extension across the service
-  //    (5 of them: the three scenario routes, turn admission, and Stop) is the
-  //    `claimedUserId` argument to this function. There is no downstream
-  //    consumer of the raw claimed value to strip it out of.
-  //
-  //    WHAT IT CLOSES, demonstrated end-to-end against deployed staging with
-  //    positive and negative controls rather than reasoned about:
-  //      · READ  — an anonymous caller (no token) POSTing a scenario UUID with
-  //        `user_id` set to the OWNER's id received that scenario's full graph,
-  //        brief and committed analysis (200). The same request with a
-  //        different id, no id, and a malformed id all refused (404).
-  //      · WRITE — the same channel let an anonymous caller CREATE a scenario
-  //        attributed to any user id they chose. 64 rows in staging are already
-  //        owned by 56 ids matching no auth user, written this way.
-  //
-  //    The previous shape fell back to `claimedUserId` whenever identity was
-  //    not `verified` — which is every request that presents no token, and the
-  //    edge injects the service key for ANY visitor, so "holds a valid assist
-  //    key" distinguishes nobody from anybody on these routes.
-  const effectiveUserId = identity.mode === 'verified' ? identity.userId : null;
-
-  // A claim we did NOT honour is worth seeing: it is either a client that has
-  // not yet moved to the token, or someone probing. Logged either way, never
-  // acted on. Prefix only — an id is not written to logs in full.
-  if (claimedUserId !== null && claimedUserId !== effectiveUserId) {
-    emit(TelemetryEvents.UserJwtIdentityMismatch, {
-      request_id: requestId,
-      claimed_user_id_prefix: claimedUserId.slice(0, 8),
-      verified_user_id_prefix: effectiveUserId?.slice(0, 8) ?? 'none',
-    });
-    log.warn(
-      {
+  let effectiveUserId = claimedUserId;
+  if (identity.mode === 'verified') {
+    if (claimedUserId !== null && claimedUserId !== identity.userId) {
+      emit(TelemetryEvents.UserJwtIdentityMismatch, {
         request_id: requestId,
         claimed_user_id_prefix: claimedUserId.slice(0, 8),
-        verified_user_id_prefix: effectiveUserId?.slice(0, 8) ?? 'none',
-        identity_mode: identity.mode,
-      },
-      'V5 pre-flight: caller-asserted user_id is not an ownership authority — ignored',
-    );
+        verified_user_id_prefix: identity.userId.slice(0, 8),
+      });
+      log.warn(
+        {
+          request_id: requestId,
+          claimed_user_id_prefix: claimedUserId.slice(0, 8),
+          verified_user_id_prefix: identity.userId.slice(0, 8),
+        },
+        'V5 pre-flight: caller-supplied user_id differs from verified JWT sub — using verified identity',
+      );
+    }
+    effectiveUserId = identity.userId;
   }
 
   const preflight = await preflightEnsureScenario(scenarioId, effectiveUserId, requestId);

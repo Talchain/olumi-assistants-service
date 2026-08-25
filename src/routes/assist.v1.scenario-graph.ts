@@ -151,6 +151,7 @@ import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-exte
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import {
   authorizeScenarioOwnership,
+  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
@@ -377,7 +378,14 @@ export default async function route(app: FastifyInstance) {
       try {
         owned = await authorizeScenarioOwnership(
           scenarioId,
-          extensions.value.userId,
+          // ⚠ CALLER-ASSERTED IDENTITY IS NOT ADMISSIBLE ON THIS SURFACE.
+          // This route is reached through the `/bff/cee/*` edge, which staples
+          // the assist key onto ANY visitor's request — so "holds a valid
+          // service key" distinguishes nobody from anybody here, and a body
+          // `user_id` is a stranger's say-so. Only a verified token subject
+          // identifies the caller. See the constant for the measurement that
+          // scopes this to these routes and NOT to the turn routes.
+          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
           resolved.identity,
           requestId,
         );
