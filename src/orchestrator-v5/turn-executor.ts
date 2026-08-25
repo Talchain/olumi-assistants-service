@@ -2517,6 +2517,13 @@ export async function runTurnExecutor(
       const compactedConstraints = compactedGraph
         ? (graphStateForTurn?.goal_constraints ?? null)
         : null;
+      // THE SUCCESS-TARGET RECORD — derived by the adapter above from the RAW
+      // graph through the single authority (`extractPersistedGoalTarget`).
+      // `undefined` when no graph was read this turn, so the pack key is
+      // ABSENT and UNKNOWN STAYS UNKNOWN rather than becoming a reassuring
+      // "unset".
+      const goalTarget =
+        compactOutcome.kind === 'compacted' ? compactOutcome.goalTarget : undefined;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
       // verdict (already computed this turn) + readiness into the hash-free,
@@ -2689,6 +2696,19 @@ export async function runTurnExecutor(
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
         compactedConstraints,
+        // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
+        // the same reason. The projection is defended by its own unit suite,
+        // but a defended pure function with a dark call site is this estate's
+        // chronic failure #1. Neutering this line MUST turn
+        // context/__tests__/record-vs-transcript-boundary.route-level.test.ts
+        // red: without it the model receives no success-target record at all
+        // and answers "is it set?" from the conversation transcript, which is
+        // the witnessed fabrication this field exists to close.
+        //
+        // The sibling `compactedConstraints` above is NOT pinned this way —
+        // deleting it drops every decision constraint from the prompt with the
+        // whole suite green. Reported, deliberately not fixed here.
+        goalTarget,
         analysis: analysisSummary,
         analysisStalenessReason,
         // Spine A backstop: option-controlled levers must not be surfaced as

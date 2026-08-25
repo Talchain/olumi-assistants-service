@@ -88,8 +88,32 @@ export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
  * registration marker `graphRegistersGoalTarget` checks. Returns null for
  * any non-graph shape or a graph that does not register a target (never
  * throws).
+ *
+ * ⭐ EXPORTED (2026-08-25) — THIS IS THE ONE "IS THE SUCCESS TARGET SET, AND
+ * TO WHAT?" AUTHORITY, AND A SECOND ONE MUST NEVER BE MINTED.
+ *
+ * The ContextPack's `goal_target` section (context/compact-graph-for-
+ * contextpack.ts) reads the record through THIS function, so the model is
+ * told exactly what this guard would police. Before that, the record's
+ * set-ness reached the model through nothing at all: `compactGraph` drops
+ * `goal_threshold` (orchestrator/context/graph-compact.ts:223) and the one
+ * readiness kind that could have named it (`goal_threshold_missing`) has no
+ * producer — so a user who MENTIONED a target in conversation but never
+ * recorded one had that sentence quoted back as persisted state, because the
+ * transcript was the only place in the prompt where an answer existed.
+ *
+ * ⚠ Note what this function is NOT, so the two are never aligned by mistake
+ * (they answer different questions and the estate's chronic defect is
+ * merging such pairs):
+ *   · `claimsGoalTargetRegistration(text)` asks "does this SENTENCE claim a
+ *     registration?" — a predicate over prose, deliberately narrow.
+ *   · `has_goal_target` (build-turn-context.ts:757) is derived from
+ *     `goal_translation.user_scale_target`, is TELEMETRY-ONLY, and by its own
+ *     comment never reaches the wire or the LLM prompt.
+ *   · `summariseReadiness` asks "what is still open for analysis?" and does
+ *     not answer threshold set-ness at all.
  */
-function extractPersistedGoalTarget(
+export function extractPersistedGoalTarget(
   graph: unknown,
 ): { readonly value: number; readonly unit?: string } | null {
   if (graph === null || graph === undefined || typeof graph !== 'object') {
@@ -340,22 +364,16 @@ export function claimsGoalTargetRegistration(
  * carries a finite numeric `goal_threshold_raw` — the exact field
  * `has_goal_target` / the UI goal chip / PLoT's explicit-threshold path key
  * on. Tolerant reader: any non-graph shape → false (never throws).
+ *
+ * ⚠ DELEGATES to {@link extractPersistedGoalTarget} rather than re-testing the
+ * marker itself. Until 2026-08-25 these two functions carried BYTE-DUPLICATED
+ * scan logic in this same file — two readers of one contract, free to drift
+ * apart on the next edit, which is this estate's named chronic defect (the two
+ * `generateGraphHash` twins). Behaviour is unchanged: the predicate is exactly
+ * "the extractor found one".
  */
 export function graphRegistersGoalTarget(graph: unknown): boolean {
-  if (graph === null || graph === undefined || typeof graph !== 'object') {
-    return false;
-  }
-  const nodes = (graph as Record<string, unknown>).nodes;
-  if (!Array.isArray(nodes)) return false;
-  return nodes.some((n) => {
-    if (n === null || typeof n !== 'object') return false;
-    const node = n as Record<string, unknown>;
-    return (
-      node.kind === 'goal' &&
-      typeof node.goal_threshold_raw === 'number' &&
-      Number.isFinite(node.goal_threshold_raw)
-    );
-  });
+  return extractPersistedGoalTarget(graph) !== null;
 }
 
 export interface GoalTargetReceiptDecision {

@@ -36,6 +36,7 @@ import type {
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
+import type { ContextPackGoalTarget } from './compact-graph-for-contextpack.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -465,6 +466,15 @@ export interface ContextPack {
    */
   readonly readiness?: ContextPackReadinessProjection;
   /**
+   * The success-target record — the model-facing answer to "is a success
+   * target set, and to what?". See {@link ContextPackGoalTarget}.
+   *
+   * ⚠ ABSENT (key missing, never `goal_target: null`) when no graph was read
+   * this turn: absence means UNKNOWN, never "unset". A consumer that reads
+   * absence as "no target is set" re-creates the defect this field closes.
+   */
+  readonly goal_target?: ContextPackGoalTarget;
+  /**
    * LLM-facing graph projection. Edges carry decision-language `relationship`
    * phrases ("moderate positive link") instead of raw `strength` floats; raw
    * `exists` probabilities and `plain_interpretation` strings are stripped;
@@ -687,6 +697,26 @@ export interface AssembleContextPackInput {
    * compact path. Passthrough only — assembler does not introspect.
    */
   readonly compactedConstraints?: readonly unknown[] | null;
+  /**
+   * THE SUCCESS-TARGET RECORD, built by `compactGraphForContextPack` from the
+   * RAW ingress graph through the single authority
+   * (`extractPersistedGoalTarget`, compose/goal-target-receipt-guard.ts).
+   *
+   * PRE-PROJECTED UPSTREAM ON PURPOSE — the same discipline as `readiness` and
+   * `coachingContext`. The "is a success target set?" question has exactly ONE
+   * owner and the assembler must never become a second one.
+   *
+   * Sibling repair to `compactedConstraints` above and for the same reason:
+   * `compactGraph` drops `goal_threshold` (graph-compact.ts:223) exactly as it
+   * drops `goal_constraints`, so the compact path loses it and the caller has
+   * to carry it. Without this the model received NO statement about the
+   * success target in either direction, and answered "is it set?" from the
+   * only place an answer existed — the conversation transcript.
+   *
+   * Omitted (undefined) when no graph was read this turn → the pack key is
+   * ABSENT → UNKNOWN REMAINS UNKNOWN, and byte-identity with pre-change packs.
+   */
+  readonly goalTarget?: ContextPackGoalTarget;
   /**
    * The compact analysis summary, optionally carrying the Lane 21 signal
    * extensions (tipping points / evidence-gap VOI / goal-fit provenance —
@@ -1490,6 +1520,18 @@ export function assembleContextPackWithSummary(
     // `open_items`) as "nothing is blocking" re-creates the exact defect this
     // field exists to close. Verbatim passthrough; no derivation here.
     ...(input.readiness !== undefined ? { readiness: input.readiness } : {}),
+    // SUCCESS TARGET — placed with the HARD STRUCTURED STATE, deliberately
+    // beside `readiness` and above `conversation`, so the model reads it as
+    // part of the record rather than as conversational colour.
+    //
+    // Conditional spread: the key is ABSENT when no graph was read this turn,
+    // never `goal_target: null` and never a reassuring `unset`. Absence means
+    // UNKNOWN. The two PRESENT states are both positive claims — `set` carries
+    // the value, `unset` says the graph was read and registers no target — and
+    // that is the whole point: before this field, "unset" was UNSAYABLE, so
+    // absence-of-evidence and evidence-of-absence were the same token and the
+    // model resolved the question from the transcript instead.
+    ...(input.goalTarget !== undefined ? { goal_target: input.goalTarget } : {}),
     // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
     // above `conversation`, so the model reads the user's focus as part of the
     // model rather than as conversational colour. ⚠ In the SERIALISED prompt
