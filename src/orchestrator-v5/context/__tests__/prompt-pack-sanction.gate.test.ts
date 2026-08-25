@@ -55,6 +55,7 @@ import {
   FOCUS_INSTRUCTION,
   READINESS_INSTRUCTION,
   GOAL_TARGET_INSTRUCTION,
+  BRIEF_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -128,6 +129,10 @@ const MODEL_FACING_CORPUS = [
   // served PMS prompt cannot sanction it (operator-managed, not editable from
   // this repo), which is exactly why the instruction is code-owned.
   GOAL_TARGET_INSTRUCTION,
+  // Saved opening framing. Emitted by the SAME condition that puts `brief` on
+  // the pack. It licences continuity while keeping historical framing below
+  // the current Living Model and explicit current-user corrections.
+  BRIEF_INSTRUCTION,
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -150,11 +155,6 @@ const KNOWN_UNSANCTIONED: ReadonlyArray<{
   readonly promptSha: string;
   readonly note: string;
 }> = [
-  {
-    field: 'brief',
-    promptSha: 'adcc5128d4e6e6bc',
-    note: "FOUND BY THIS GATE, STILL OPEN AT v120. The user's OWN persisted decision brief (Lane 28) is model-facing and prose-bearing; v120 contains ZERO occurrences of \"brief\" (case-insensitive) in 25,149 chars, exactly as v119 did. v120 fixed older_relevant_facts and did not touch this. Same defect class, same closed-world instructions.",
-  },
   {
     field: 'analysis.staleness_reason',
     promptSha: 'adcc5128d4e6e6bc',
@@ -580,7 +580,8 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
   it('WAIVER EXPIRY — EVERY waiver granted for v119 expires on a prompt change, on BOTH discriminators', () => {
     // The waiver path must be exercised by REAL waivers, not a synthetic one —
     // an untested waiver path is the same guarantee theatre this gate hunts.
-    // All three live divergences flow through it, across both discriminators.
+    // The remaining live divergence flows through it on the phantom-field
+    // discriminator. The brief sanction is now code-owned and needs no waiver.
     const otherSha = 'deadbeefdeadbeef';
     const sanction = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
     const phantom = findPhantomFields(SERVED_PROMPT, SERIALISED);
@@ -594,7 +595,7 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     expect(applyWaivers(phantom, LIVE_SHA)).toEqual([]);
 
     // AFTER A RE-PIN: every waiver expires and every divergence resurfaces.
-    expect(applyWaivers(sanction, otherSha).sort()).toEqual(['brief']);
+    expect(applyWaivers(sanction, otherSha)).toEqual([]);
     expect(applyWaivers(phantom, otherSha)).toEqual(['analysis.staleness_reason']);
 
     // No waiver is inert: each one is doing real suppression work today.
@@ -614,9 +615,9 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     ]) {
       expect(found, `${quiet} should not fire`).not.toContain(quiet);
     }
-    // One live sanction finding at v120: older_relevant_facts was FIXED by the
-    // prompt lane; `brief` was not touched and remains open.
-    expect(found.sort()).toEqual(['brief']);
+    // No live sanction finding remains at v120: older_relevant_facts is named
+    // by the served prompt and `brief` is conditionally sanctioned in code.
+    expect(found).toEqual([]);
   });
 
   it('FIXTURE-BLINDNESS CONTROL — an unpopulated field is CAUGHT, not silently skipped', () => {
