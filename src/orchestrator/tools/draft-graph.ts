@@ -17,7 +17,7 @@ import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, Orche
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
-import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
+import { buildCanonicalAnalysisReadyFromGraph, carryCanonicalRunAdmission } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { buildModelBuildingNotices } from "../../cee/draft/records/model-building-notices.js";
@@ -415,9 +415,23 @@ export async function handleDraftGraph(
   // from the pipeline body. If present but invalid, don't fallback — let the upstream
   // validation failure surface rather than masking it with graph-derived readiness.
   const pipelineHasAnalysisReady = 'analysis_ready' in body && body.analysis_ready != null;
-  const analysisReady = pipelineHasAnalysisReady
+  // ONE canonical build for this turn, feeding BOTH the fallback payload and the
+  // run-admission carry below. Never two calls: two assessments of one graph could
+  // disagree, which is exactly what `analysis-ready-core` exists to prevent.
+  const canonicalAnalysisReady = graphOutput
+    ? buildCanonicalAnalysisReadyFromGraph(graph)
+    : undefined;
+  const projectedAnalysisReady = pipelineHasAnalysisReady
     ? extractAnalysisReady(body)
-    : (graphOutput ? buildCanonicalAnalysisReadyFromGraph(graph) : undefined);
+    : canonicalAnalysisReady;
+  // ⭐ THE DRAFT TURN MUST REPORT THE SAME RUN ADMISSION AS EVERY OTHER TURN.
+  // `extractAnalysisReady` is a named-field re-projection, so it drops `may_run` —
+  // and the pipeline could not have supplied it anyway, because the admission rule
+  // belongs to the side holding the graph. Carry CEE's own verdict on; do not
+  // recompute it. See `carryCanonicalRunAdmission`.
+  const analysisReady = projectedAnalysisReady
+    ? carryCanonicalRunAdmission(projectedAnalysisReady, canonicalAnalysisReady)
+    : undefined;
   if (analysisReady) {
     patchData.analysis_ready = analysisReady;
   }
