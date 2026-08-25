@@ -52,6 +52,7 @@ import {
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
+import type { ZodError } from 'zod';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type {
   PendingAction,
@@ -71,7 +72,10 @@ import {
   computeGraphIdentityHash,
   computeVersionAnalysisAffectingHashRecord,
 } from './context/graph-identity.js';
-import { decideModelVersionCreation } from './model-management/version-creation-policy.js';
+import {
+  asGraphStateIngress,
+  decideModelVersionCreation,
+} from './model-management/version-creation-policy.js';
 import {
   attachModelVersionMutationReceipt,
   toModelVersionMutationReceiptV1,
@@ -694,8 +698,31 @@ function buildHeldLapseNotice(pa: PendingAction): string {
 
 const PersistedGraphV3 = GraphV3.passthrough();
 
+/**
+ * The carrier plan carries NO graph, deliberately.
+ *
+ * C8 originally returned `parsed.data` here and the commit persisted THAT in
+ * place of the projected form. `GraphV3.passthrough()` keeps every field, but a
+ * Zod object parse REBUILDS the object in schema-declaration order — so the
+ * bytes written to `scenarios.graph` came back with their keys reordered
+ * whenever the carrier succeeded. That silently broke the persist-site
+ * contract this file resolves `graphForStore` first to guarantee: "the appended
+ * graph IS the projected form (nothing mutates after the check)".
+ *
+ * Worse than reordering, and the reason this is a correctness fix rather than a
+ * cosmetic one: `.passthrough()` applies to the ROOT object ONLY. The nested
+ * `NodeV3` / `EdgeV3` schemas strip unknown keys as Zod does by default, so the
+ * substituted object came back with additive node fields DELETED — measured, a
+ * factor node's `value: 10` was dropped from the bytes written to
+ * `scenarios.graph`. The carrier hashed that lossy form too, so the hashes were
+ * self-consistent and the loss was invisible to every assertion.
+ *
+ * Both hashes are therefore now computed from the SAME object that is
+ * persisted, making "the carrier's hashes describe the persisted bytes" true by
+ * construction rather than by coincidence — this matters because
+ * `analysis_affecting_hash` is what CAS compares on.
+ */
 interface AtomicCommittedModelVersionPlan {
-  readonly graph: unknown;
   readonly write: AtomicCommittedModelVersionWrite;
 }
 
@@ -704,6 +731,127 @@ function deterministicMutationId(scenarioId: string, turnId: string): string {
     .update(`olumi:model-version:committed-mutation:${scenarioId}:${turnId}`)
     .digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Carrier outcomes, and where the boundary between them actually falls.
+ *
+ * THE RULE BEING IMPLEMENTED: a valid semantic commit on a VERSIONABLE graph
+ * must still produce the durable version/history consequence — versioning may
+ * only be skipped for state that genuinely cannot be versioned, and never
+ * silently. Silently dropping a version that WAS due would remove the durable
+ * history the Core journey depends on, which is worse than the dead-end this
+ * change fixes, because a silent skip is indistinguishable from success.
+ *
+ * WHERE "VERSIONABLE" IS DECIDED — the GraphV3 parse, and it is a genuine
+ * boundary rather than a convenience:
+ *
+ *   · A version row is GraphV3-shaped by contract, and its
+ *     `analysis_affecting_hash` is what the CAS compares on. Deriving those
+ *     identities from a graph that is NOT GraphV3 is the exact hazard
+ *     `assertGraphForIdentity` exists to prevent — it is how something like
+ *     `{nodes:[42,'x']}` would hash into the authoritative comparison value.
+ *     So a non-conformant graph has NO valid version that could be written.
+ *   · Therefore every parse failure is genuinely NON-VERSIONABLE. There is no
+ *     "could have been versioned but something went wrong" case hiding among
+ *     them — that case lives strictly AFTER a successful parse, and it throws.
+ *
+ * ⚠ WHY THE SKIP IS NOT NARROWED TO A "LEGACY-ONLY" PREDICATE, stated plainly
+ * because the instinct to narrow it is right and the evidence refutes it.
+ * An earlier revision skipped only when EVERY Zod issue was a missing required
+ * field (`invalid_type` + `received: 'undefined'`) and threw on anything else,
+ * to keep a corrupt graph from being laundered as legacy. Measured against the
+ * real failing corpus, that predicate FAILS 15 legitimate commits, because
+ * non-conformance in this estate is routinely not a missing field:
+ *
+ *     invalid_enum_value | causal | edges[].edge_type        (older vocabulary)
+ *     invalid_type       | number | edges[].strength         (legacy scalar strength)
+ *     too_small          |        | edges[].strength.std     (std: 0)
+ *
+ * The last one is decisive: `std: 0` is persisted VERBATIM and deliberately, by
+ * a current code path whose whole point is that the numeric floor is not
+ * applied at adopt so the identity hash stays stable. That is a CURRENT product
+ * graph, not an old one — so "GraphV3 rejects it" cannot be read as "it is
+ * corrupt", and a predicate that fails the turn on non-conformance would break
+ * behaviour the product intends.
+ *
+ * The discrimination that was wanted is therefore delivered where it is safe
+ * and useful — in the OBSERVABILITY, not the control flow. Every skip names
+ * which kind of non-conformance it was, so the two populations stay countable
+ * and a corruption spike is visible, without a fragile predicate deciding
+ * whether a user's turn survives. What must never happen — a versionable graph
+ * losing its version — is fully covered: a graph that parses ALWAYS gets a
+ * version, and any failure after the parse throws.
+ *
+ * The DESIGNED no-version outcomes (flag off, no graph, and the policy's
+ * `no_op` / `presentation_only`) stay silent: they are not faults, and an alarm
+ * that fires on them would be worthless. Only non-conformance logs at `warn`
+ * and emits `status: 'skipped'` with a closed-enum reason — the shape
+ * `recordDecisionRecordForCommit` already uses for a skipped secondary record,
+ * on the frozen registry member `v5.model_versions.version_created` whose only
+ * emitter C8 removed.
+ */
+type ModelVersionCarrierSkipReason =
+  | 'graph_missing_required_fields'
+  | 'graph_incompatible_with_graph_v3';
+
+/**
+ * Classify HOW the graph failed GraphV3. This selects a telemetry reason only —
+ * both outcomes skip — so that "an old row is missing a field" and "a field is
+ * present but unusable" remain separately countable.
+ */
+function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkipReason {
+  const everyIssueIsAMissingField =
+    error.issues.length > 0 &&
+    error.issues.every(
+      (issue) => issue.code === 'invalid_type' && issue.received === 'undefined',
+    );
+  return everyIssueIsAMissingField
+    ? 'graph_missing_required_fields'
+    : 'graph_incompatible_with_graph_v3';
+}
+
+/**
+ * Record a carrier skip and return `undefined` so the commit proceeds.
+ *
+ * The emit is guarded: this runs BEFORE the append, so an `emit()` fault on a
+ * pathological payload would convert a skip back into the turn failure this
+ * whole change exists to prevent.
+ */
+function skipAtomicCommittedModelVersion(
+  reason: ModelVersionCarrierSkipReason,
+  metadata: CommitMetadata,
+): undefined {
+  log.warn(
+    {
+      scenario_id: metadata.scenario_id,
+      turn_id: metadata.turn_id,
+      skip_reason: reason,
+    },
+    'ModelManagement — semantic model version SKIPPED for this commit (turn committed in full; no version row written)',
+  );
+  try {
+    emit(TelemetryEvents.V5ModelVersionCreated, {
+      scenario_id: metadata.scenario_id,
+      turn_id: metadata.turn_id,
+      status: 'skipped',
+      skip_reason: reason,
+      version_number: null,
+      graph_identity_hash_prefix: null,
+      error_code: null,
+      provenance: 'commit',
+    });
+  } catch (emitErr) {
+    log.debug(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        err: emitErr instanceof Error ? emitErr.message : String(emitErr),
+      },
+      'ModelManagement — version-skip telemetry emit failed (skip already logged; turn result unaffected)',
+    );
+  }
+  return undefined;
 }
 
 /** Build the carrier and the exact graph bytes it content-addresses. */
@@ -717,23 +865,31 @@ function buildAtomicCommittedModelVersion(
   const policy = decideModelVersionCreation(metadata.baseGraphForInvariants, graph);
   if (!policy.create) return undefined;
 
-  // Shared GraphV3 is root-passthrough. Preserve top-level options,
-  // goal_node_id and additive persisted fields in hash, DB and receipt.
+  // The parse is a VALIDITY GATE over the bytes about to be persisted — its
+  // output is deliberately not used (see the plan interface).
   const parsed = PersistedGraphV3.safeParse(graph);
   if (!parsed.success) {
-    throw new StateCommitFailedError(
-      'Model version carrier requires a valid persisted GraphV3; refusing a split semantic commit.',
+    // NOT VERSIONABLE — no valid version row exists for this graph. Skip, and
+    // make the skip observable with the kind of non-conformance it was.
+    return skipAtomicCommittedModelVersion(
+      classifyGraphV3NonConformance(parsed.error),
+      metadata,
     );
   }
-  const full = computeGraphIdentityHash(parsed.data);
-  const analysis = computeVersionAnalysisAffectingHashRecord(parsed.data);
+
+  // VERSIONABLE — a version MUST be created from here on. Hash the EXACT object
+  // being persisted, not the parse output (which strips additive nested
+  // fields). A failure below is a real failure on a graph that IS versionable,
+  // so it SURFACES rather than silently dropping durable history.
+  const persistedGraph = asGraphStateIngress(graph);
+  const full = computeGraphIdentityHash(persistedGraph);
+  const analysis = computeVersionAnalysisAffectingHashRecord(persistedGraph);
   if (full === null || analysis === null) {
     throw new StateCommitFailedError(
-      'Model version carrier could not derive both durable identities; refusing a split semantic commit.',
+      'Model version carrier could not derive both durable identities for a versionable graph; refusing a split semantic commit.',
     );
   }
   return {
-    graph: parsed.data,
     write: {
       mutation_id: deterministicMutationId(metadata.scenario_id, metadata.turn_id),
       graph_identity_hash: full.value,
@@ -837,7 +993,9 @@ export async function commitDirectAnswer(
     projectedGraphForStore,
     metadata,
   );
-  const graphForStore = atomicVersionPlan?.graph ?? projectedGraphForStore;
+  // The projected form is what gets persisted, ALWAYS — the carrier validates
+  // and hashes it, it never substitutes its own bytes (see the plan interface).
+  const graphForStore = projectedGraphForStore;
 
   // The authoritative hash for this turn: RECOMPUTED on the bytes above, never
   // the caller's advertised value. Callers compute their hash before the
