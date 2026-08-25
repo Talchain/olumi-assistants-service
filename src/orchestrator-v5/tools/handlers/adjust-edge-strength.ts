@@ -26,6 +26,7 @@ import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestra
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { USER_EDIT_EDGE_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -331,10 +332,18 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // the V3 transform usually maps source → display, but we set
         // both explicitly so downstream consumers don't need to wait
         // for the next round-trip through transformResponseToV3.
+        // ⚠ THE LITERAL IS SHARED, NOT SPELLED TWICE (2026-08-25). This used
+        // to hardcode `'user_specified'`. A second edge writer now exists —
+        // `stampUserEditEdgeProvenance`, which carries the same claim for the
+        // `edit_graph` path, where the shared node stamper is structurally
+        // scoped out of edges. Two writers of one wire literal, each spelling
+        // it by hand, is the hand-maintained twin this estate loses things to:
+        // the fix for one path would have minted the very defect class it was
+        // closing. Both now read `USER_EDIT_EDGE_SOURCE`.
         const existingProvenance = edge.provenance;
         edge.provenance = {
           ...(existingProvenance ?? {}),
-          source: 'user_specified',
+          source: USER_EDIT_EDGE_SOURCE,
         };
         edge.provenance_display = 'user_set';
 

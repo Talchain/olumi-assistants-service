@@ -34,6 +34,9 @@
  * would FAIL CEE's GraphV3 parse at every edit seam. Widened to the user-owned
  * literals the estate actually writes.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect, vi } from 'vitest';
 
 import {
@@ -470,5 +473,213 @@ describe('normal edit seam — a chat-set value earns the user stamp on the APPL
     });
     expect('elicited_from' in observed).toBe(false);
     expect(node.provenance).toBe('user_set');
+  });
+});
+
+// ===========================================================================
+// EDGE PROVENANCE — the same defect, one entity across.
+//
+// ── The measured defect (live probe, 2026-08-25) ───────────────────────────
+// A user explicitly instructs an edge-strength change. The write commits
+// correctly — and canonical state still records
+// `provenance: { source: "cee_hypothesis" }`. The product keeps calling the
+// user's decision its own guess.
+//
+// Sharper than a mislabel, and why this is a Core truthfulness defect rather
+// than cosmetics: the witnessed edge was already `status: "contested"`,
+// `sign_unstable: true`, `needs_user_input: true` — an edge the product had
+// EXPLICITLY ASKED THE USER TO SETTLE. It recorded them settling it and then
+// attributed the answer to itself. That erases the author, which is the one
+// direction Olumi's premise cannot bend.
+//
+// ── Mechanism, derived at the bytes ────────────────────────────────────────
+// `stampUserEditProvenance` is not misbehaving on edges; it is STRUCTURALLY
+// SCOPED OUT of them. Its own header says "Scope: ONLY `update_node` ops", and
+// its first statement is `if (op.op !== 'update_node') return op;`. An edge
+// write is `update_edge`, so it is returned BY REFERENCE, unstamped, by
+// construction. Edge ops DO reach the seam — `edit-graph.ts` handles
+// `update_edge` in the SAME operations stream it hands to the stamper — they
+// simply fall straight through it.
+//
+// The only thing that ever stamped an edge is `adjust-edge-strength.ts`, a
+// different (typed-handler) path, writing a DIFFERENT field with a DIFFERENT
+// vocabulary: `EdgeV3.provenance.source = 'user_specified'` versus the node's
+// `observed_state.source = 'user_override'`.
+//
+// ── Why a SIBLING stamper and not a widened one ────────────────────────────
+// Two entities, two fields, two vocabularies. Folding them into one function
+// would put two concepts under one name — the defect class this estate keeps
+// paying for. `stampUserEditEdgeProvenance` is composed at the SAME call site,
+// exactly as `stampUserEditProvenance` is.
+//
+// ── Deliberately NOT changed (two symptoms that are not this defect) ───────
+// `origin: "repair"` records how the edge was AUTHORED — a true historical
+// fact, and rewriting it would falsify the record. `validation.user_action`
+// belongs to the validation pipeline's own state machine
+// (`cee/validation-pipeline/comparison.ts`), a separate seam. Appearing in the
+// same screenshot does not make them the same defect.
+// ===========================================================================
+
+describe('stampUserEditEdgeProvenance — the user authored this relationship', () => {
+  const CONTESTED_GRAPH = {
+    nodes: [
+      { id: 'fac_price', kind: 'factor', label: 'Price' },
+      { id: 'goal_rev', kind: 'goal', label: 'Revenue' },
+    ],
+    edges: [
+      {
+        from: 'fac_price',
+        to: 'goal_rev',
+        strength: { mean: 0.3, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: 'positive' as const,
+        // The product's own guess, and its own request that the user settle it.
+        provenance: { source: 'cee_hypothesis', reasoning: 'inferred from brief' },
+        origin: 'repair',
+        status: 'contested',
+        sign_unstable: true,
+        needs_user_input: true,
+      },
+    ],
+  };
+
+  const strengthEdit: PatchOperation[] = [
+    {
+      op: 'update_edge',
+      path: 'fac_price::goal_rev',
+      value: { strength: { mean: -0.6, std: 0.1 }, effect_direction: 'negative' },
+    } as PatchOperation,
+  ];
+
+  it('THE ACCEPTANCE CASE: a contested edge the user settles is attributed to the USER', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const [stamped] = stampUserEditEdgeProvenance(strengthEdit, CONTESTED_GRAPH);
+    const provenance = (stamped!.value as Record<string, unknown>)
+      .provenance as Record<string, unknown>;
+    expect(
+      provenance?.source,
+      'the user was explicitly asked to settle this edge and did. Recording ' +
+        "their answer as the product's own hypothesis takes credit for the " +
+        "user's reasoning — the one direction 'humans remain the authors' " +
+        'cannot bend.',
+    ).toBe('user_specified');
+  });
+
+  it('MERGES rather than replaces — an existing reasoning is not destroyed by the stamp', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const [stamped] = stampUserEditEdgeProvenance(strengthEdit, CONTESTED_GRAPH);
+    const provenance = (stamped!.value as Record<string, unknown>)
+      .provenance as Record<string, unknown>;
+    expect(
+      provenance?.reasoning,
+      "`applyUpdateEdge` assigns non-required-nested fields WHOLESALE, so a " +
+        'stamp that replaced the provenance object would silently delete the ' +
+        'edge\'s recorded reasoning. EdgeProvenanceV3 is .passthrough(), so ' +
+        'additive members must survive too.',
+    ).toBe('inferred from brief');
+  });
+
+  it('leaves the contested markers and `origin` ALONE — they are not this defect', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const [stamped] = stampUserEditEdgeProvenance(strengthEdit, CONTESTED_GRAPH);
+    const value = stamped!.value as Record<string, unknown>;
+    // The stamp writes provenance and nothing else into the op.
+    expect(Object.keys(value).sort()).toEqual(
+      ['effect_direction', 'provenance', 'strength'].sort(),
+    );
+    expect(value.origin, '`origin` records how the edge was AUTHORED — a true historical fact').toBeUndefined();
+    expect(value.status).toBeUndefined();
+    expect(value.needs_user_input).toBeUndefined();
+  });
+
+  it('stamps an edge with NO prior provenance (the field is optional on EdgeV3)', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const bare = {
+      ...CONTESTED_GRAPH,
+      edges: [{ ...CONTESTED_GRAPH.edges[0], provenance: undefined }],
+    };
+    const [stamped] = stampUserEditEdgeProvenance(strengthEdit, bare);
+    const provenance = (stamped!.value as Record<string, unknown>)
+      .provenance as Record<string, unknown>;
+    expect(provenance?.source).toBe('user_specified');
+  });
+
+  it('SCOPE: a non-parameter edge write is returned BY REFERENCE, untouched', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    // Provenance is a claim about who authored the RELATIONSHIP'S PARAMETERS.
+    // A label/annotation edit is not that claim — the same narrowness the node
+    // stamper applies by binding to a `value` leaf rather than to any
+    // update_node.
+    const labelOnly: PatchOperation[] = [
+      { op: 'update_edge', path: 'fac_price::goal_rev', value: { label: 'renamed' } } as PatchOperation,
+    ];
+    const out = stampUserEditEdgeProvenance(labelOnly, CONTESTED_GRAPH);
+    expect(out[0], 'ops needing no stamp must be returned by reference').toBe(
+      labelOnly[0],
+    );
+  });
+
+  it('SCOPE: node ops are returned BY REFERENCE — this stamper owns edges only', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const nodeOp: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_price',
+        value: { observed_state: { value: 42 } },
+      } as PatchOperation,
+    ];
+    const out = stampUserEditEdgeProvenance(nodeOp, CONTESTED_GRAPH);
+    expect(
+      out[0],
+      'the two stampers must not both claim an entity — that is the ' +
+        'two-concepts-one-name defect this split exists to avoid',
+    ).toBe(nodeOp[0]);
+  });
+
+  it('an edge absent from the graph is left alone rather than invented', async () => {
+    const { stampUserEditEdgeProvenance } = await import(
+      '../canonicalise-value-ops.js'
+    );
+    const missing: PatchOperation[] = [
+      { op: 'update_edge', path: 'nope::alsonope', value: { strength: { mean: 0.1, std: 0.1 } } } as PatchOperation,
+    ];
+    const out = stampUserEditEdgeProvenance(missing, CONTESTED_GRAPH);
+    expect(out[0]).toBe(missing[0]);
+  });
+
+  it('ONE CONSTANT, TWO WRITERS: the typed handler and this stamper cannot drift', async () => {
+    const mod = await import('../canonicalise-value-ops.js');
+    const handler = readFileSync(
+      fileURLToPath(
+        new URL(
+          '../../orchestrator-v5/tools/handlers/adjust-edge-strength.ts',
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    );
+    expect(
+      (mod as Record<string, unknown>).USER_EDIT_EDGE_SOURCE,
+      'the edge literal must be exported as a shared constant',
+    ).toBe('user_specified');
+    expect(
+      handler.includes('USER_EDIT_EDGE_SOURCE'),
+      'adjust-edge-strength.ts must consume the SHARED constant. Two edge ' +
+        'writers spelling the same literal by hand is exactly the ' +
+        'hand-maintained twin this fix would otherwise mint while closing ' +
+        'the first one.',
+    ).toBe(true);
   });
 });

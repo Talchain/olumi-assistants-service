@@ -418,6 +418,116 @@ export function stampUserEditProvenance(
 }
 
 // ---------------------------------------------------------------------------
+// EDGE user provenance — the same claim, one entity across.
+//
+// ── The defect (live probe, 2026-08-25) ────────────────────────────────────
+// A user explicitly instructs an edge-strength change. It commits correctly,
+// and canonical state still records `provenance: { source: "cee_hypothesis" }`.
+// The witnessed edge was already `status: "contested"`, `sign_unstable: true`,
+// `needs_user_input: true` — an edge the product had EXPLICITLY ASKED the user
+// to settle. It recorded them settling it and kept calling it its own guess.
+//
+// ── Why this is a SIBLING and not a widened `stampUserEditProvenance` ──────
+// That function is not misbehaving on edges; it is structurally scoped out of
+// them ("Scope: ONLY `update_node` ops", and its first statement returns any
+// other op by reference). Widening it would put TWO ENTITIES, TWO FIELDS and
+// TWO VOCABULARIES under one name — node `observed_state.source` =
+// 'user_override' versus edge `provenance.source` = 'user_specified'. That is
+// the two-concepts-one-name defect this codebase keeps paying for, so the two
+// stampers stay separate and compose at the same call site.
+//
+// ── Scope, deliberately as narrow as the node stamper's ────────────────────
+// The node stamp binds to a `value` leaf rather than to any `update_node`.
+// This one binds to the edge's PARAMETERS — the fields that carry the causal
+// claim — rather than to any `update_edge`. A label or annotation edit is not
+// an authorship claim about the relationship.
+//
+// ── What this does NOT touch, and why ──────────────────────────────────────
+// `origin` records how the edge was AUTHORED ('repair' here); that is a true
+// historical fact and rewriting it would falsify the record.
+// `validation.user_action` belongs to the validation pipeline's own state
+// machine. Neither becomes this defect by appearing in the same payload.
+// `provenance_display` is RESPONSE-ONLY and recomputed deterministically from
+// `provenance.source` by `transformResponseToV3`, so stamping the source is
+// sufficient and stamping the display too would mint a second writer.
+// ---------------------------------------------------------------------------
+
+/** The `EdgeV3.provenance.source` literal CEE's user-edit writers stamp. */
+export const USER_EDIT_EDGE_SOURCE = 'user_specified' as const;
+
+/**
+ * Edge fields that carry the causal claim. Writing any of them is the user
+ * asserting authorship of the relationship's parameters.
+ *
+ * DERIVED from the schema rather than spelled twice: these are exactly
+ * `EdgeV3`'s non-identity, non-metadata parameter fields. Kept here beside the
+ * predicate that reads it so a reviewer sees the scope and the rule together.
+ */
+const EDGE_PARAMETER_KEYS: ReadonlySet<string> = new Set([
+  'strength',
+  'exists_probability',
+  'effect_direction',
+]);
+
+function operationWritesEdgeParameters(op: PatchOperation | undefined): boolean {
+  if (op?.op !== 'update_edge') return false;
+  const value = asRecord(op.value);
+  if (value === null) return false;
+  return Object.keys(value).some((key) => EDGE_PARAMETER_KEYS.has(key));
+}
+
+/**
+ * Stamp user authorship onto every parameter-writing `update_edge` op.
+ *
+ * Stamped INTO THE OP (pre-apply), exactly as the node stamper is, so the write
+ * rides applier → canonical parse → `batchFullyLanded` unchanged; stamping the
+ * canonical graph afterwards would trip `updateWritesSurvived`'s deepEqual.
+ *
+ * MERGES with the edge's existing provenance rather than replacing it.
+ * `applyUpdateEdge` assigns non-required-nested fields WHOLESALE, so a replacing
+ * stamp would silently delete a recorded `reasoning` — and `EdgeProvenanceV3` is
+ * `.passthrough()`, so additive members must survive too.
+ *
+ * Pure and total — never throws, never mutates its inputs; ops needing no stamp
+ * are returned by reference.
+ */
+export function stampUserEditEdgeProvenance(
+  operations: readonly PatchOperation[],
+  graph: unknown,
+): PatchOperation[] {
+  const edges = asRecord(graph)?.edges;
+  const edgeList: ReadonlyArray<Record<string, unknown>> = Array.isArray(edges)
+    ? (edges.filter((e) => asRecord(e) !== null) as Record<string, unknown>[])
+    : [];
+
+  return operations.map((op) => {
+    if (!operationWritesEdgeParameters(op)) return op;
+    const target = parseEdgeTargetPath(op.path);
+    if (target === null) return op;
+
+    // An edge the graph does not carry is not ours to attribute — inventing
+    // provenance for a relationship that does not exist would be a fabrication,
+    // and the applier will reject the op anyway (EDGE_NOT_FOUND).
+    const edge = edgeList.find(
+      (e) => e.from === target.from && e.to === target.to,
+    );
+    if (edge === undefined) return op;
+
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const existing = asRecord(edge.provenance) ?? {};
+
+    return {
+      ...op,
+      value: {
+        ...value,
+        provenance: { ...existing, source: USER_EDIT_EDGE_SOURCE },
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Observed value-pair authority (ROADMAP 2.1033 — the SERVER half of
 // "screen = commit", 2026-08-09).
 //
