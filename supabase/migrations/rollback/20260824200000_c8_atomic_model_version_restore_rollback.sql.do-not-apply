@@ -1,10 +1,18 @@
 -- DO NOT APPLY without explicit approval. Existing atomic-restore rows may
 -- depend on these columns; dropping them destroys receipt/lineage metadata.
 
+-- ⚠ THE SIGNATURE HERE IS LOAD-BEARING AND MUST TRACK THE FORWARD MIGRATION.
+-- `DROP FUNCTION IF EXISTS` matches on the ARGUMENT TYPE LIST. If this list is
+-- stale, the statement matches nothing, `IF EXISTS` swallows it, and the
+-- rollback reports success while leaving `append_turn_atomic_v5` in place —
+-- a rollback that silently rolls nothing back. The trailing BOOLEAN is
+-- `p_expected_base_known` (added with the known-base CAS guard); a static guard
+-- in supabase-store-v5-cas-static-guards.test.ts asserts the forward GRANT and
+-- REVOKE signatures carry it, and this file must move with them.
 DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(
   UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
   JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
-  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN
 );
 
 DROP FUNCTION IF EXISTS public.restore_model_version_atomic_v1(

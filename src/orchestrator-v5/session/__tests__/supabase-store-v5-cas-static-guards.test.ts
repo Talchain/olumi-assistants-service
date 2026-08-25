@@ -217,3 +217,75 @@ describe('C8-A defect 1 — known-base CAS (SQL oracle)', () => {
     }
   });
 });
+
+/**
+ * ROLLBACK-SIGNATURE DRIFT — a rollback that silently rolls nothing back.
+ *
+ * `DROP FUNCTION IF EXISTS f(<types>)` matches on the ARGUMENT TYPE LIST. Change
+ * the forward function's arity without changing the rollback's list and the
+ * DROP matches nothing, `IF EXISTS` swallows it, and the script exits 0 having
+ * left the function in place. The operator reads a successful rollback; the
+ * database still carries the thing they meant to remove.
+ *
+ * This is a hand-maintained mirror of the forward signature, so it is DERIVED
+ * here instead of restated: the guard reads the forward CREATE's parameter
+ * count and asserts the rollback's DROP list matches it.
+ */
+describe('C8-A rollback signature tracks the forward migration', () => {
+  const rollback = readFileSync(
+    fileURLToPath(
+      new URL(
+        '../../../../supabase/migrations/rollback/20260824200000_c8_atomic_model_version_restore_rollback.sql.do-not-apply',
+        import.meta.url,
+      ),
+    ),
+    'utf8',
+  );
+
+  function paramCountOfForwardV5(): number {
+    const start = v5Code.indexOf(
+      'CREATE OR REPLACE FUNCTION public.append_turn_atomic_v5(',
+    );
+    const open = v5Code.indexOf('(', start);
+    const close = v5Code.indexOf(')\nRETURNS', open);
+    return v5Code
+      .slice(open + 1, close)
+      .split(',')
+      .filter((p) => p.trim().length > 0).length;
+  }
+
+  function dropTypeCountOfRollbackV5(): number {
+    const start = rollback.indexOf(
+      'DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(',
+    );
+    const open = rollback.indexOf('(', start);
+    const close = rollback.indexOf(')', open);
+    return rollback
+      .slice(open + 1, close)
+      .split(',')
+      .filter((p) => p.trim().length > 0).length;
+  }
+
+  it('PROBE LIVENESS: both signatures were located and are non-trivial', () => {
+    expect(paramCountOfForwardV5()).toBeGreaterThan(20);
+    expect(dropTypeCountOfRollbackV5()).toBeGreaterThan(20);
+  });
+
+  it('the rollback DROP lists exactly as many argument types as v5 declares parameters', () => {
+    expect(
+      dropTypeCountOfRollbackV5(),
+      'the rollback DROP signature has drifted from the forward CREATE. ' +
+        'PostgreSQL will match no function, IF EXISTS will swallow it, and the ' +
+        'rollback will report success while append_turn_atomic_v5 survives.',
+    ).toBe(paramCountOfForwardV5());
+  });
+
+  it('the rollback still drops the function the flag must be turned off BEFORE removing', () => {
+    // Deploy-order coupling, pinned so the ordering note cannot rot silently:
+    // the turn path calls this RPC whenever a version carrier is built, so
+    // dropping it while CEE_MODEL_VERSIONS_ENABLED is live breaks turn writes.
+    expect(rollback).toContain(
+      'DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(',
+    );
+  });
+});
