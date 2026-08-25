@@ -163,6 +163,7 @@ import {
 import {
   DRAFT_GRAPH_MIN_BRIEF_LENGTH,
   isDraftShapedText,
+  isQuestionToAssistant,
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import { admitCurrentTurnFence, turnFencePreHandler } from './turn-fence-prehandler.js';
@@ -5653,9 +5654,82 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       draftOfferMarker !== null &&
       !SHORT_CONFIRM_PATTERN.test(ingress.message) &&
       !AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message);
+    // ────────────────────────────────────────────────────────────────────
+    // S6 / issue #1108 — INV-Q'S ANSWER BRANCH. A strategic question is
+    // valid Core input, not a malformed decision brief.
+    // ────────────────────────────────────────────────────────────────────
+    // THE DEFECT: "How can I accelerate securing pre-seed investment for my
+    // startup?" came back with the canned framing prompt, and so did the
+    // user's follow-up "What's wrong with what I entered?" — byte-identical.
+    // Founder ruling: Olumi is a strategic reasoning enhancement system, not
+    // a discrete-decision form.
+    //
+    // ⭐ `isQuestionToAssistant` (INV-Q) IS NOT WEAKENED HERE, AND MUST NOT
+    // BE. It exists to stop the product's own coaching prompts being modelled
+    // as decisions, and it genuinely discriminates. Its problem was that it
+    // DEFLECTED TO NOWHERE: a complete manifest over CEE `src/` (tests
+    // excluded) gives it exactly two lines — its definition in
+    // `schemas/assist.ts` and its single call site inside `isDraftShapedText`.
+    // There was no "question to the assistant" ANSWER branch at all, so a
+    // correctly-classified question had nowhere to land except this guard.
+    // The classification was right; the destination was missing.
+    //
+    // ⭐⭐ WHY THE DESTINATION IS THE REASONING LAYER AND NOT THE DRAFTER.
+    // Measured at `5f2e3fd0` against the real predicates, contrast controls in
+    // the same run: the strategic challenges this branch admits, the
+    // conversational-repair turn, the eleven coaching prompts INV-Q was built
+    // to protect, and the six A7 assistant-subject cases are BYTE-IDENTICAL on
+    // every predicate CEE computes (`invQ=true, draftShaped=false,
+    // procMeta=false, briefRegex=true`). They occupy ONE CELL. So no predicate
+    // over message text can admit the first while refusing the rest, and any
+    // branch that DRAFTED from this cell would draft from the repair turn and
+    // from the coaching corpus too — re-creating exactly the defect INV-Q
+    // exists to prevent. Routing to `runTurnExecutor` is correct for all four
+    // classes at once, because an ANSWER is the right response to a question
+    // whatever the question is about. The architecture is forced by that
+    // measurement, not chosen.
+    //
+    // SIDE EFFECT, AND A WELCOME ONE: at pristine this guard answered all 17
+    // protected questions AND seeded a one-tap "Build the model" offer from
+    // the question itself — the "poisoned brief one tap later" defect
+    // `process-meta-intake.ts` names, live in the corpus INV-Q protects.
+    // Routing the cell here removes that offer.
+    //
+    // SCOPE, STATED NARROWLY (trap 20): this term claims INTERROGATIVE text
+    // only. Non-interrogative frame-stage input that misses the decision-verb
+    // alternation — "Help me pressure-test our go-to-market strategy." — does
+    // NOT reach INV-Q and is UNCHANGED by this branch. That is a real,
+    // separate seam (the guard's L56 dead-end corpus is pinned to receive this
+    // copy in route-v2-no-persisted-graph-fallthrough.test.ts), and closing it
+    // is a product decision about the guard's cost rationale, not an
+    // implementation choice. Reported, not silently half-fixed.
+    const isStrategicQuestionForReasoning =
+      ingress.stage === 'frame' &&
+      extensions.graphState == null &&
+      // Product-authored canned text never becomes an LLM turn on this branch:
+      // the whole point of the chip_click exclusions elsewhere in this file.
+      ingress.source !== 'chip_click' &&
+      !isNonReadinessTypedChipClickForExecutor &&
+      // SHORT-END BOUND, forced by a measured failure rather than reasoned:
+      // without it this term captured `"can you?"` (8 chars) from the retired
+      // A1/A2 fixture pins — a contentless interrogative fragment, which is
+      // not a strategic challenge and for which the guard's deterministic
+      // answer is both better and cheaper. The floor is the product's
+      // EXISTING single-source brief-length constant, the same one
+      // `isDraftShapedText` and the guard's own draft-offer seed already
+      // apply — not a new threshold invented for this branch.
+      ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+      isQuestionToAssistant(ingress.message) &&
+      // The exact-mirror process-meta prompts keep their own deterministic
+      // answer branch above; this term must never steal them from it.
+      !isProcessMetaIntake(ingress.message);
+
     const isFrameNoBriefShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
+      // S6 #1108 — a question to the assistant is answered by the reasoning
+      // layer below, never by the canned framing prompt.
+      !isStrategicQuestionForReasoning &&
       // V5 Signature Loop — a continuation (prior committed turns) must NOT get
       // the "start over" framing prompt; let it reach TurnExecutor's memory.
       // C3 re-fire (above) is the one exception: the continuation consists of
