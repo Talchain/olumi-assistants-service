@@ -50,6 +50,7 @@ import {
   formatFactorValueUnchanged,
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
+import { frameEditedBaselineForAnalysis } from './d1-shared/frame-edited-baseline.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
@@ -406,9 +407,43 @@ export function createSetFactorValueHandler(): HandlerFn {
       inputHasUnit: parsed.inputHasUnit,
     });
 
+    // ── THE UNIT AND CAP THIS WRITE WILL PERSIST ─────────────────────────
+    // Hoisted above the framing decision because the frame derivation needs the
+    // SAME unit the write lands with (pass 3d frames on the factor's own unit),
+    // and because the cap decides whether this is a framed-capless factor at
+    // all. `after` below consumes these, so there is one resolution, not two.
+    const resolvedUnit = parsed.unit ?? before.unit;
+    const resolvedCap = parsed.cap ?? before.cap;
+
+    // ── ROW 2.1103: THE EDIT SEAM NO LONGER MANUFACTURES THE STATE THE
+    //    ANALYSIS GATE REFUSES ───────────────────────────────────────────────
+    // With no cap and no prior frame `normaliseFactorValue` returns
+    // `{raw_value: x, value: x}` — raw === value BY CONSTRUCTION — which fails
+    // `recoverScaleFrame`'s `raw > value` precondition BY CONSTRUCTION, so
+    // `findScaleIncoherentBaselineFactorIds` refuses the analysis of a value the
+    // product just accepted. A magnitude stated in the BRIEF is framed by
+    // records pass 3d and analyses; the identical magnitude typed HERE was not,
+    // and the user who took the product's own advice ("setting a real value
+    // would make this result more trustworthy") got a refusal for their trouble.
+    //
+    // The decision is delegated whole, and it declines by default: it frames
+    // ONLY a write the analysis gate would otherwise refuse (asked by CALLING
+    // that gate, never by restating its conditions) AND only a magnitude the
+    // producer's own doctrine says must be normalised. `undefined` — every
+    // guard's failure direction — is today's behaviour byte for byte.
+    const framedBaseline = frameEditedBaselineForAnalysis({
+      targetFactorId: targetId,
+      candidate: { value: normalised.value, raw_value: normalised.raw_value },
+      ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : { unit: undefined }),
+      ...(resolvedCap !== undefined ? { cap: resolvedCap } : { cap: undefined }),
+      nodes: graph.nodes,
+      interventionSources: [graph, rawGraph],
+    });
+    const effective = framedBaseline ?? normalised;
+
     const after: ObservedSnapshot = {
-      value: normalised.value,
-      raw_value: normalised.raw_value,
+      value: effective.value,
+      raw_value: effective.raw_value,
       // The SAME provenance the merged node is stamped with below, so the wire
       // patch and the persisted graph cannot disagree about who owns the number.
       //
@@ -423,16 +458,12 @@ export function createSetFactorValueHandler(): HandlerFn {
             elicited_from: appliedProvenance.elicited_from,
           }
         : {}),
-      ...(parsed.unit !== undefined
-        ? { unit: parsed.unit }
-        : before.unit !== undefined
-          ? { unit: before.unit }
-          : {}),
-      ...(parsed.cap !== undefined
-        ? { cap: parsed.cap }
-        : before.cap !== undefined
-          ? { cap: before.cap }
-          : {}),
+      // ONE resolution of each, shared with the framing decision above — the
+      // frame must be derived on the unit this write actually persists, so two
+      // independent resolutions would be two authorities on the same question.
+      // Semantics unchanged: `parsed` wins, else `before`, else absent.
+      ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
+      ...(resolvedCap !== undefined ? { cap: resolvedCap } : {}),
     };
 
     // 1.16 item A2 — consented cap change detection. An explicit proposal
@@ -459,8 +490,8 @@ export function createSetFactorValueHandler(): HandlerFn {
       }
       const merged = {
         ...(node.observed_state ?? {}),
-        value: normalised.value,
-        raw_value: normalised.raw_value,
+        value: effective.value,
+        raw_value: effective.raw_value,
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
         // 2.396(b) — the pill-earning stamp. The provenance stamp below is
@@ -526,8 +557,8 @@ export function createSetFactorValueHandler(): HandlerFn {
       // path; we normalise back to undefined-meaning-cleared rather
       // than persisting the prior value.
       const recomputedDisplay = synthesiseDisplayValue({
-        value: normalised.value,
-        raw_value: normalised.raw_value,
+        value: effective.value,
+        raw_value: effective.raw_value,
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
         ...(node.factor_type !== undefined ? { factor_type: node.factor_type } : {}),
         ...(after.cap !== undefined ? { cap: after.cap } : {}),

@@ -83,6 +83,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { deriveFactorScaleFrame } from "../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
@@ -991,47 +992,25 @@ function isOptionControlledFactor(
  */
 
 /**
- * Percent spellings: the banked corpus's ('%-prefixed, all 30 record sets),
- * plus the spelt-out forms the adversarial review supplied from OUTSIDE that
- * corpus ("per cent" — this is a British-English estate — and "pct"). Trap 22:
- * the corpus-only version silently read "3 per cent" as a derived-frame 0.6.
+ * ⭐ THE FRAME DERIVATION MOVED — ONE HOME, NOT A SECOND COPY (row 2.1103).
+ *
+ * `isPercentScaledUnit`, `isBasisPointsUnit`, `nextNiceNumberAbove` and
+ * `deriveFactorScaleFrame` now live in `d1-shared/scale-frame.ts`, beside
+ * `recoverScaleFrame` — the exact inverse operation. The edit seam
+ * (`set-factor-value.ts`) needs the SAME derivation this pass applies, and a
+ * second copy of it is this estate's most repeated defect (the two
+ * `generateGraphHash` twins, trap 12).
+ *
+ * They are RE-EXPORTED here, not reimplemented, so every existing importer and
+ * test binds to the same bytes pass 3d runs. The module they moved to is a pure
+ * leaf with no imports, so this dependency cannot cycle.
  */
-export function isPercentScaledUnit(unit: string | undefined): boolean {
-  if (typeof unit !== "string") return false;
-  const t = unit.trim().toLowerCase();
-  return t.startsWith("%") || t.startsWith("percent") || t.startsWith("per cent") || t.startsWith("pct");
-}
-
-/**
- * Basis points declare scale 10,000 — NOT 100. Lumping "bps" into the percent
- * set would be a 100× error in the opposite direction (30 bps = 0.003, never
- * 0.3). Narrow on purpose: "bps" and "basis point(s)"; a bare "bp" is left to
- * the derived frame rather than guessed.
- */
-export function isBasisPointsUnit(unit: string | undefined): boolean {
-  if (typeof unit !== "string") return false;
-  const t = unit.trim().toLowerCase();
-  return t.startsWith("bps") || t.startsWith("basis point");
-}
-
-/**
- * The smallest {1,2,5}·10^k STRICTLY greater than `x` (x > 0, finite).
- * Pure arithmetic, no floating log tricks at the boundaries: the exponent scan
- * starts safely below x and walks up, so exact powers (100 → 200) behave.
- */
-export function nextNiceNumberAbove(x: number): number {
-  let magnitude = 10 ** Math.floor(Math.log10(x));
-  // Math.log10 can land one bucket high or low at representation boundaries;
-  // step down until magnitude ≤ x so the candidate walk below is complete.
-  while (magnitude > x) magnitude /= 10;
-  for (;;) {
-    for (const m of [1, 2, 5]) {
-      const candidate = m * magnitude;
-      if (candidate > x) return candidate;
-    }
-    magnitude *= 10;
-  }
-}
+export {
+  isPercentScaledUnit,
+  isBasisPointsUnit,
+  nextNiceNumberAbove,
+  deriveFactorScaleFrame,
+} from "../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
 /**
  * ⭐ MAY A STATED `goal`'s NUMBER BE REGISTERED AS THE SUCCESS TARGET?
@@ -1153,23 +1132,6 @@ function applyStatedGoalTarget(
  * The per-factor frame, or `undefined` when none is needed (already unit
  * interval) or none truthfully exists (a negative magnitude).
  */
-export function deriveFactorScaleFrame(
-  magnitudes: readonly number[],
-  unit: string | undefined,
-): number | undefined {
-  if (magnitudes.length === 0) return undefined;
-  if (magnitudes.some((m) => m < 0)) return undefined;
-  const max = Math.max(...magnitudes);
-  if (max <= 1) return undefined;
-  if (isPercentScaledUnit(unit) && max <= 100) return 100;
-  if (isBasisPointsUnit(unit) && max <= 10000) return 10000;
-  const frame = nextNiceNumberAbove(max);
-  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
-  // infinite frame would ship a fabricated level 0 under a green guard
-  // (review breadth finding). Non-finite frame → unframed, the honest path.
-  if (!Number.isFinite(frame)) return undefined;
-  return frame;
-}
 
 // ── The projector ───────────────────────────────────────────────────────────
 
