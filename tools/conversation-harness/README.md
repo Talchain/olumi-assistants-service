@@ -770,6 +770,54 @@ MEMORY_RETENTION_REPORT_PATH=/tmp/retention.md pnpm harness:test   # + write the
 `tools/conversation-harness/**` and `src/orchestrator-v5/**` — so it executes on
 every PR that can move the memory path, it just does not block.
 
+## Canonical-state precedence and long-session continuity
+
+`__tests__/canonical-state-precedence.harness-test.ts` +
+`fixtures/canonical-precedence-case.json` +
+`fixtures/summary-retention-case.json` +
+`scorer/canonical-state-precedence.ts`.
+
+This evaluator answers a narrower question than the retention table: when
+current structured state and older conversation disagree, does the routing
+model use the current model without losing a durable summary-only dependency?
+It reuses the production ContextPack assembler and routing serialiser. It does
+not create another state, memory, prompt, or scientific authority.
+
+The deterministic gate carries two 20-turn journeys through the real assembly
+path. One puts a current target, constraints, evidence source, accepted change,
+open item, and stale AnalysisState beside deliberately obsolete transcript and
+summary claims. The other places a standing dependency only in the rolling
+summary, outside the eight-turn verbatim window, beside a resolved distraction.
+Preconditions prove every conflict really reaches the prompt and that the
+negative controls are non-vacuous. Exact payload canaries, channel-aware answer
+extraction, and wrong-answer mutants make the scorer fail closed.
+
+```bash
+pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts \
+  tools/conversation-harness/__tests__/canonical-state-precedence.harness-test.ts
+```
+
+An optional live routing-model witness is double-gated and bounded to 24
+provider HTTP attempts (two cases x three reruns x the route's cache-fallback
++ max-token-retry + repair ceiling of four). The evaluator process disables
+both repository and provider-SDK retries; production retry behaviour is
+byte-identical while that process-local evaluator scope is inactive. The runner refuses
+fallback/default prompt bytes and
+requires the loaded PMS routing prompt to match the repo-canonical version and
+hash before the first model call. Any miss fails the N=3 run; no majority or
+median can hide it.
+
+```bash
+ORCHESTRATOR_EVAL_LIVE_CANDIDATES=1 \
+  pnpm exec tsx tools/conversation-harness/canonical-precedence-cli.ts --live
+```
+
+The live report records only visible answer text, intent, actual responding
+model, resolution plan, usage, latency, stop reason, prompt identity, fixture
+hashes, and scores. It never serialises provider thinking/signature blocks.
+This is advisory `LIVE_MODEL_ROUTING` evidence, not summary-generation,
+persistence-reload, HTTP/UI, mounted, or reliability evidence.
+
 ## Residuals for v1
 
 - Full localization decision tree (v0 ships single-hop rules + honest gaps).
