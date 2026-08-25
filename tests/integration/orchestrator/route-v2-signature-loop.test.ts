@@ -40,6 +40,13 @@ vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => (
 let pendingActionsForRead: readonly PendingAction[] = [];
 let pendingReadShouldThrow = false;
 let hasPriorTurnsResult = false;
+/**
+ * Persisted server-side graph. Mutable because the refresh-continuation guard
+ * is now narrowed on MODEL PRESENCE (the no-model dead-end fix, 25 Aug 2026):
+ * a continuation with no model is no longer suppressed, so D1 must supply the
+ * model whose protection it is actually asserting.
+ */
+let persistedGraphForRead: unknown = null;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
@@ -52,8 +59,8 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraph: async () => persistedGraphForRead,
+    loadGraphAndBriefText: async () => ({ graph: persistedGraphForRead, briefText: null }),
     readMostRecentPendingActions: async () => {
       if (pendingReadShouldThrow) throw new Error('simulated pending read failure');
       return pendingActionsForRead;
@@ -214,6 +221,7 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
     pendingActionsForRead = [];
     pendingReadShouldThrow = false;
     hasPriorTurnsResult = false;
+    persistedGraphForRead = null;
   });
 
   // ── behaviour #1 + #2: confirmation beats edit routing ──────────────────
@@ -392,8 +400,22 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
   });
 
   // ── Fix D: refresh-continuation routing ─────────────────────────────────
-  it('D1: a brief at frame stage with prior turns is a CONTINUATION → no draft_graph', async () => {
+  /**
+   * ⚠ RE-BASED BY THE NO-MODEL DEAD-END FIX (25 Aug 2026). As written this
+   * left nothing persisted, so it asserted that a continuation with NO MODEL
+   * must not draft — pinning the standing dead end rather than the refresh
+   * protection it is named for. Fix D is about a REFRESH of an existing
+   * decision ("the assistant starts over instead of reading server-side
+   * memory"), which presupposes a model to start over from, so the model is
+   * now supplied explicitly. The no-model half is covered by
+   * src/orchestrator/__tests__/route-v2-no-model-dead-end.test.ts.
+   */
+  it('D1: a brief at frame stage with prior turns AND a persisted model is a CONTINUATION → no draft_graph', async () => {
     hasPriorTurnsResult = true;
+    persistedGraphForRead = {
+      nodes: [{ id: 'opt-a', kind: 'option', label: 'Option A' }],
+      edges: [],
+    };
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
