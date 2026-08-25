@@ -91,10 +91,19 @@ export type SummarySpeaker = (typeof SUMMARY_SPEAKERS)[number];
 /** 01 §2: target envelope. Below MIN is not rejected (a terse summary is
  *  valid); above HARD_CAP IS rejected (bloat — keep the prior summary). */
 export const SUMMARY_TARGET_MIN_CHARS = 800;
-export const SUMMARY_TARGET_MAX_CHARS = 1200;
+/**
+ * Evidence-led upper target. The previous 1,200-char instruction forced both
+ * oldest-first and newest-first compressors to discard 2/10 durable facts in
+ * the realistic 20-turn Northern Hub journey, even though the faithful
+ * summary was 1,371 chars and remained safely below the 1,600 hard cap.
+ * The production target is the measured peak rounded up to the next 100-char
+ * operating boundary (1,400), leaving small run-to-run wording headroom while
+ * the hard reject ceiling remains unchanged.
+ */
+export const SUMMARY_TARGET_MAX_CHARS = 1400;
 /** Hard reject ceiling — a summariser that ignores the length contract is
  *  treated as a schema violation (01 §2 "reject and keep the prior summary").
- *  Set with headroom over the 1,200 target + [tN] stamps + slot labels. */
+ *  Retains 200 chars of headroom over the target for [tN] stamps + slot labels. */
 export const SUMMARY_HARD_CAP_CHARS = 1600;
 
 /** Anti-compounding regeneration horizon (01 §2 / 07 R1): every N turns the
