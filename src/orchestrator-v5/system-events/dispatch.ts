@@ -38,7 +38,6 @@ import {
   GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
-  loadPriorFactsQuietly,
   loadPriorFactsWithReadState,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
@@ -1376,14 +1375,23 @@ async function dispatchFactorValueEdit(
     };
   }
 
-  const priorFacts = await loadPriorFactsQuietly(payload.scenario_id, requestId);
+  // ⚠ READ WITH THE STATE, NOT QUIETLY. This was `loadPriorFactsQuietly`, which
+  // discards WHETHER THE READ SUCCEEDED and hands back `[]` for both "no analysis
+  // has ever run" and "the fact store threw". That distinction is exactly what
+  // the freshness derivation below needs (CONTEXT/MEMORY V5 defect 4): reading a
+  // failed read as an empty one makes a store outage claim `none` — "this
+  // scenario has never been analysed" — a positive assertion we cannot support.
+  // The `.facts` handed to `applyFactorValueEdit` are byte-identical to before,
+  // so this widens what THIS function can see without changing what the editor
+  // receives. Both sibling mutating writers in this file already read this way.
+  const priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
 
   const result = await applyFactorValueEdit({
     payload,
     event,
     requestId,
     persistedGraph,
-    priorFacts,
+    priorFacts: priorFactsRead.facts,
   });
 
   // ── the refusal path ─────────────────────────────────────────────────────
@@ -1536,10 +1544,66 @@ async function dispatchFactorValueEdit(
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
 
+  // ⭐ THE DERIVATION THIS EXIT USED TO THROW AWAY.
+  //
+  // This turn WROTE THE GRAPH. Returning no derivation made `route-v2.ts`'s
+  // `system_event` exit spread nothing, and the finaliser then fell through
+  // `ctx.freshness ?? exitDerivationFor(ctx) ?? NO_ANALYSIS_CONTEXT_DERIVATION`
+  // to the last term — because `exitDerivationFor` correctly REFUSES the
+  // persisted-graph fallback whenever a graph is in scope (that derivation
+  // describes the graph as it was BEFORE the turn, and handing it to a turn that
+  // just mutated the graph would claim currency for a superseded analysis).
+  //
+  // The result was `unknown_degraded` / `no_graph_this_turn`, whose contract text
+  // is "no graph was in scope, so there was nothing to classify" — asserted on
+  // the one turn that had the graph and changed it. Measured on the wire: the
+  // assistant text said "This makes the last analysis stale. Re-run analysis"
+  // while the composed verdict in the SAME payload declined to say so and shipped
+  // `requires_rerun: false`.
+  //
+  // Same shape, same order and same reasoning as `dispatchEdgeStrengthEdit` and
+  // `dispatchStructuralDelete` above — this writer was the outlier, not the rule.
+  // Fact history is observational only: it never authorises or blocks the write.
+  // A healthy empty read means canonical `none` (→ `never_run`); a degraded read
+  // must not fabricate that conclusion and therefore emits honest `unknown`.
+  //
+  // ⚠ DERIVED, NEVER ASSERTED. It is `deriveAnalysisFreshness` that decides
+  // `stale`, not this call site — so re-applying a value that leaves the
+  // analysis-affecting hash unmoved still reports `fresh`, and a scenario with no
+  // prior analysis still reports `none`. Hardcoding "an edit means stale" here
+  // would trade the understatement for an overstatement, which is the worse
+  // defect. `persistedAnalysisGraphHash` is the hash of the bytes that LANDED
+  // (see the comment above it) — never a hash of our pre-projection copy.
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.factor_value_edit',
+    },
+    {
+      prior_fact_count: priorFactsRead.facts.length,
+      prior_fact_read_status: priorFactsRead.status,
+      current_turn_fact_count: result.handlerFacts.length,
+    },
+  );
+
   return {
     response,
     commitPerformed: true,
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
     // Still the full graph: the egress id-leak scrub resolves ids to labels
     // against it, independently of the hash above.
     graph: graphForReadiness,
