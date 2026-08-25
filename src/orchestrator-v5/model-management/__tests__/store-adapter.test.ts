@@ -399,6 +399,67 @@ describe('SupabaseModelVersionStore.listVersions', () => {
     const store = new SupabaseModelVersionStore(client);
     await expect(store.listVersions(SCENARIO)).rejects.toBeInstanceOf(ModelVersionStoreError);
   });
+
+  // The legacy-derivation path above hashes `row.graph`, which is `unknown` off
+  // the row. These pin the two measured ways that goes wrong, and they bind to
+  // the GUARD's own message, not merely to the error class — the pre-existing
+  // "analysis-affecting identity is unavailable" throw is also a
+  // ModelVersionStoreError, so `toBeInstanceOf` alone would not discriminate
+  // which check fired.
+  it.each([
+    // Not dereferenceable as an object at all.
+    ['a string', 'corrupt', /row field 'graph' must be an object/],
+    ['a number', 42, /row field 'graph' must be an object/],
+    ['an array', [1, 2, 3], /row field 'graph' must be an object/],
+    ['null', null, /row field 'graph' must be an object/],
+    // An object, but the projection dereferences `nodes.length` unconditionally,
+    // so a graph-shaped-but-nodeless row is the raw-TypeError case.
+    ['a non-graph object', { corrupted: true }, /row field 'graph\.nodes' must be an array of objects/],
+    ['a graph with no edges key', { nodes: [] }, /row field 'graph\.edges' must be an array of objects/],
+    // Measured at this tip: this shape hashes to a well-formed 64-hex that can
+    // never equal an identity computed on the write path. This is the case a
+    // bare `as` cast would have shipped — served as an authoritative
+    // analysis_affecting_hash, the field CAS and freshness compare on.
+    [
+      'a graph whose nodes hold non-objects',
+      { nodes: [42, 'x'], edges: [] },
+      /row field 'graph\.nodes' must be an array of objects/,
+    ],
+  ])(
+    'refuses to derive a legacy analysis hash when graph is %s (typed, never a raw TypeError or a silent hash)',
+    async (_label, graph, expectedMessage) => {
+      const { client } = makeClient({
+        selectResult: {
+          data: [summaryRow({ analysis_affecting_hash: null, graph })],
+          error: null,
+        },
+      });
+      const store = new SupabaseModelVersionStore(client);
+      const rejection = await store.listVersions(SCENARIO).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(rejection).toBeInstanceOf(ModelVersionStoreError);
+      expect((rejection as Error).message).toMatch(expectedMessage as RegExp);
+    },
+  );
+
+  it('CONTRAST: a legacy graph whose nodes lack kind/label still derives (persistence never required the wire fields)', async () => {
+    // This is the discriminating half. The repo's usual parser for this shape,
+    // GraphStateIngressSchema, REJECTS this row (it requires node.kind and
+    // node.label for the UI wire contract). Gating the derivation on it would
+    // turn the legacy backfill into a hard read failure. If this case ever
+    // starts throwing, the guard has been tightened to the wrong boundary.
+    const { client } = makeClient({
+      selectResult: {
+        data: [summaryRow({ analysis_affecting_hash: null, graph: { nodes: [{ id: 'n1' }], edges: [] } })],
+        error: null,
+      },
+    });
+    const store = new SupabaseModelVersionStore(client);
+    const [version] = await store.listVersions(SCENARIO);
+    expect(version!.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
 });
 
 describe('SupabaseModelVersionStore.getVersion', () => {

@@ -26,6 +26,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 
 import type {
@@ -346,6 +347,82 @@ function explicitNullableString(
   throw new ModelVersionStoreError(`${ctx}: row field '${key}' must be non-empty or null`);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isArrayOfObjects(value: unknown): boolean {
+  return Array.isArray(value) && value.every(isPlainObject);
+}
+
+/** Dereferenced UNCONDITIONALLY by the projection — see requireGraphForIdentity. */
+const IDENTITY_REQUIRED_COLLECTIONS = ['nodes', 'edges'] as const;
+
+/**
+ * Narrow the persisted `graph` column — SELECTed as `unknown`, and genuinely
+ * unknown — to the type the durable-identity hasher declares, after checking the
+ * structure that hasher ACTUALLY consumes.
+ *
+ * Deliberately NOT `GraphStateIngressSchema.safeParse`, the repo's usual parser
+ * for this shape. That schema is the UI WIRE contract: it requires `kind` and
+ * `label` on every node because the validator's GraphLookup needs them. Persistence
+ * never required them. Measured at this tip, a legacy row of the shape this very
+ * column set was added to serve — `{nodes:[{id:'n1'}],edges:[]}` — FAILS that parse
+ * and yet hashes deterministically (56ffb07f…). Gating on it would convert the
+ * legacy backfill into a hard read failure and redden the legacy-derivation case in
+ * store-adapter.test.ts. Right guard, wrong boundary.
+ *
+ * What the projection actually requires is DERIVED from its body
+ * (`computeAnalysisAffectingGraphHashSha256`, graph-hash.ts), not guessed:
+ * it reads `nodes.length` / `edges.length` and then `nodes.map(...)` /
+ * `edges.map(...)` UNCONDITIONALLY, while `options` and `goal_constraints` are
+ * `Array.isArray`-guarded. So `nodes` and `edges` are required and must be arrays;
+ * `options` is genuinely optional. Both failure modes below are measured, not
+ * theoretical:
+ *   · a row the hasher cannot dereference (`'corrupt'`, `42`, `[1,2,3]`, and
+ *     `{corrupted:true}` — an object, but with no `nodes`) does NOT degrade to
+ *     `null`. It throws a raw `TypeError` out of the projection: an UNTYPED error
+ *     escaping a section whose whole contract is that degraded rows throw
+ *     `ModelVersionStoreError`;
+ *   · `{nodes:[42,'x'],edges:[]}` hashes SILENTLY to a well-formed 64-hex
+ *     (8249e07f…) that can never equal an identity computed on the write path — and
+ *     that value is then served as the row's authoritative `analysis_affecting_hash`,
+ *     the field CAS and freshness compare on. This is the case a bare `as` cast
+ *     would have shipped.
+ *
+ * Written as an ASSERTION SIGNATURE, not as a function returning a cast value.
+ * The hasher's DECLARED parameter is stricter than its real contract, so no total
+ * function can produce a `GraphStateIngress` from a legacy row — the narrowing is
+ * irreducibly an assertion. Saying so with `asserts` keeps it honest AND keeps the
+ * double-cast population at its frozen baseline
+ * (scripts/check-forbidden-boundary-patterns.sh): the containment ratchet caught the
+ * first draft of this function, which reached for that construct. Every property the
+ * projection dereferences is checked below, so the assertion claims only what was
+ * measured, and the malformed shapes fail loud and typed before reaching it.
+ */
+function assertGraphForIdentity(
+  value: unknown,
+  ctx: string,
+): asserts value is GraphStateIngress {
+  if (!isPlainObject(value)) {
+    throw new ModelVersionStoreError(
+      `${ctx}: row field 'graph' must be an object to derive an analysis-affecting identity`,
+    );
+  }
+  for (const key of IDENTITY_REQUIRED_COLLECTIONS) {
+    if (!isArrayOfObjects(value[key])) {
+      throw new ModelVersionStoreError(
+        `${ctx}: row field 'graph.${key}' must be an array of objects to derive an analysis-affecting identity`,
+      );
+    }
+  }
+  if (value.options !== undefined && !isArrayOfObjects(value.options)) {
+    throw new ModelVersionStoreError(
+      `${ctx}: row field 'graph.options' must be an array of objects to derive an analysis-affecting identity`,
+    );
+  }
+}
+
 function parseSummaryRow(scenarioId: string, row: Record<string, unknown>): ModelVersionSummary {
   const ctx = `model_versions row (scenario ${scenarioId})`;
   const versionNumber = row.version_number;
@@ -353,11 +430,15 @@ function parseSummaryRow(scenarioId: string, row: Record<string, unknown>): Mode
     throw new ModelVersionStoreError(`${ctx}: version_number missing or invalid`);
   }
   const storedAnalysisHash = explicitNullableString(row, 'analysis_affecting_hash', ctx);
-  const computedAnalysisHash =
-    storedAnalysisHash === null
-      ? computeVersionAnalysisAffectingHashRecord(row.graph)
-      : null;
-  const analysisHash = storedAnalysisHash ?? computedAnalysisHash?.value ?? null;
+  let derivedAnalysisHash: string | null = null;
+  if (storedAnalysisHash === null) {
+    // Bound to a const so the assertion signature can narrow it; a property
+    // access off `row` is not a narrowable reference.
+    const graph = row.graph;
+    assertGraphForIdentity(graph, ctx);
+    derivedAnalysisHash = computeVersionAnalysisAffectingHashRecord(graph)?.value ?? null;
+  }
+  const analysisHash = storedAnalysisHash ?? derivedAnalysisHash;
   if (analysisHash === null || !/^[0-9a-f]{64}$/.test(analysisHash)) {
     throw new ModelVersionStoreError(`${ctx}: analysis-affecting identity is unavailable`);
   }
