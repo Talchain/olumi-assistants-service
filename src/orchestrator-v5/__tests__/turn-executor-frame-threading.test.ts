@@ -251,22 +251,20 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
     expect(frame.model.graphHash).toBe(result.freshness!.current_graph_hash);
   });
 
-  it('priorTurnCount reports the ASSEMBLED (capped) context, never the uncapped store total', async () => {
-    // cap+2 prior turns in the store; the ContextPack conversation projection
-    // caps at CONTEXT_PACK_RECENT_TURNS_CAP. The frame must report what the turn
-    // actually reasoned over — the uncapped store total would over-report context
-    // completeness to the harness (A2 fabricated-completeness hazard flagged in
-    // the slice-2 fail-open review). Derived from the constant so the cap binds
-    // whatever its value.
-    const storeTotal = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
-    mockState.priorTurns = Array.from({ length: storeTotal }, (_, i) => i + 1).map(mkPriorTurn);
+  it('priorTurnCount reports the ASSEMBLED degraded-summary hot window', async () => {
+    // The summary seam is absent in this fixture, so the ContextPack retains
+    // every row in the already-bounded fetched window instead of discarding
+    // turns after the normal healthy-summary cap. The frame must report what
+    // the turn actually reasoned over, not a policy constant.
+    const fetchedWindow = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
+    mockState.priorTurns = Array.from({ length: fetchedWindow }, (_, i) => i + 1).map(mkPriorTurn);
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-frame-cap', {
       routingAdapter: mockRoutingAdapter(async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…')),
       handlerRegistry: makeSuccessRegistry(GRAPH_HASH),
       graphState: GRAPH_WITH_OPTIONS,
     });
     expect(result.frame).toBeDefined();
-    expect(result.frame!.conversation.priorTurnCount).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(result.frame!.conversation.priorTurnCount).toBe(fetchedWindow);
   });
 
   it('read-only posture: the frame never alters the user-facing response', async () => {
