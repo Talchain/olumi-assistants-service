@@ -148,7 +148,7 @@ describe('duplicate option label — the rename exit', () => {
       const resp = composeDuplicateOptionLabelResponse({
         collidingLabel: LBL,
         collidingCount: 2,
-        stage: 'FRAME',
+        stage: 'frame',
       });
       const text = resp.assistant_text ?? '';
       expect(text.split(LBL)).toHaveLength(2); // one occurrence => two split parts
@@ -159,7 +159,7 @@ describe('duplicate option label — the rename exit', () => {
       const resp = composeDuplicateOptionLabelResponse({
         collidingLabel: LBL,
         collidingCount: 3,
-        stage: 'FRAME',
+        stage: 'frame',
       });
       expect((resp.assistant_text ?? '').split(LBL)).toHaveLength(2);
     });
@@ -168,7 +168,7 @@ describe('duplicate option label — the rename exit', () => {
       const resp = composeDuplicateOptionLabelResponse({
         collidingLabel: LBL,
         collidingCount: 2,
-        stage: 'FRAME',
+        stage: 'frame',
       });
       const text = resp.assistant_text ?? '';
       expect(text).not.toContain('Pick one below');
@@ -181,7 +181,7 @@ describe('duplicate option label — the rename exit', () => {
       const resp = composeDuplicateOptionLabelResponse({
         collidingLabel: LBL,
         collidingCount: 2,
-        stage: 'FRAME',
+        stage: 'frame',
       });
       expect(resp.suggested_actions ?? []).toHaveLength(0);
     });
@@ -198,7 +198,7 @@ describe('duplicate option label — the rename exit', () => {
       const resp = composeDuplicateOptionLabelResponse({
         collidingLabel: LBL,
         collidingCount: 2,
-        stage: 'FRAME',
+        stage: 'frame',
       });
 
       // (a) NO offered route can re-enter the collision, because none is offered.
