@@ -27,9 +27,22 @@
  *   MERGE the two options       → silently deletes a user's option. Over-
  *                                 suppression here is WORSE than the dead end.
  *   RENAME THEM FOR THE USER    → invents user-facing content (P5).
- *   PUT THE ID IN THE REPLAY    → collides head-on with this seam's copy
- *                                 contract: entities are named by their
- *                                 user-facing labels only, never `opt_*`.
+ *   PUT THE ID IN THE REPLAY    → the sibling composer states a copy contract
+ *                                 banning `opt_*` in user-facing text.
+ *                                 ⚠ THAT CONTRACT IS NOT ENFORCED, and an
+ *                                 earlier draft of this header asserted it as
+ *                                 fact. Measured: no detector in the repo
+ *                                 matches `opt_*`, the one that would is
+ *                                 excluded from the global list, and the
+ *                                 egress guard is scoped to `assistant_text`
+ *                                 only — while chip ids already ship
+ *                                 snake_case on the wire by design, and the
+ *                                 estate has ratified a chip whose replay
+ *                                 differs from its display. An id-bearing chip
+ *                                 was therefore a LIVE DESIGN OPTION, not a
+ *                                 prohibited one. It is declined on the
+ *                                 narrower ground below — this reply needs no
+ *                                 chip at all — NOT because a rule forbids it.
  *   DECLINE                     → drops the turn to the edit LLM, i.e. the
  *                                 wrong-entity-write path `option-effect-write`
  *                                 exists to close. A visible dead end traded
@@ -38,10 +51,62 @@
  * The fourth exit is the estate's ratified one for an unwinnable
  * disambiguation (CLAUDE.md trap 22f): MAKE THE AMBIGUITY THE PRODUCT. The
  * product genuinely cannot refer to these options by label, so it says exactly
- * that, and names the one action that resolves it without deleting anything,
- * without inventing anything and without an id — RENAME, which the user
- * performs through an identity-carrying canvas selection: the very surface
- * that made Delete work.
+ * that and names an action that resolves it — one the user performs through an
+ * IDENTITY-CARRYING canvas selection, the surface that has no label ambiguity.
+ *
+ * ⚠⚠ THE COPY NAMES **DELETE**, NOT RENAME, AND THAT WAS MEASURED RATHER THAN
+ * PREFERRED. Rename is the better remedy — it destroys nothing — and this
+ * composer shipped it in draft. IT IS DARK IN THE UI AT THE DEPLOYED TIP
+ * (`DecisionGuideAI` staging `39162243`), verified in that repo:
+ *
+ *   · `InspectorRouter.tsx` never passes `onLabelChange` to `InspectorShell`
+ *     (0 occurrences; contrast `onClose=` reads 3 in the same file), so
+ *     `EditableLabel.tsx:124-131` renders its READ-ONLY `<span>` branch —
+ *     whose own comment is "no rename affordance, because there is no rename".
+ *   · `requestNodeRename` has ZERO production callers (contrast: its sibling
+ *     `clearNodeRename` reads 1).
+ *   · `NODE_SETTER_AUTHORITY.setLabel` is hardcoded `'disabled'`, and the user
+ *     is SHOWN a read-only notice. It is not flag-gated: no flag flip makes
+ *     rename true, so this is not a dark-launch we can switch on.
+ *   · It is dark for EVERY node kind, so there is no factor-only fallback.
+ *
+ * A GUARANTEE THAT SPANS SERVICES IS DARK UNTIL BOTH HALVES ARE LIVE. Naming
+ * rename here would have replaced a dead end with a NEW dead end wearing better
+ * prose — the one outcome worse than shipping nothing, and precisely the defect
+ * class this composer exists to remove. Delete is verified reachable by two
+ * independent ungated entry points (keyboard `Delete`/`Backspace` on a
+ * selection, and right-click → Delete), and it is the route the witnessed user
+ * actually escaped by.
+ *
+ * ⚠ IT IS PHRASED AS AN INSTRUCTION, NOT A GUARANTEE. Delete fails closed when
+ * a canonical scenario has no current server hash, so "press Delete" is what to
+ * DO, not a promise about what will happen. Do not tighten it into a promise.
+ *
+ * ⭐ WHEN RENAME IS WIRED, THIS COPY SHOULD CHANGE — removing an option is
+ * lossier than renaming one, and the user should not have to destroy a distinct
+ * strategy to answer a naming question.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ WHY THIS IS NOT FIXED AT THE MINT, on measured grounds.
+ *
+ * The draft prompt ALREADY instructs distinctness — `src/prompts/defaults.ts:686`:
+ * "IMPORTANT: Each option must be distinct. Do not duplicate existing options
+ * or create near-duplicates." The 17 Aug capture was drafted under that
+ * instruction and carries THREE near-duplicate pairs anyway: six option nodes
+ * that are three actions each written twice, once lifted verbatim from the
+ * brief and once as a reworded synthesis of the same action. So mint-side
+ * prevention by instruction is demonstrably weak, and an EXACT collision is
+ * simply the tail of that same distribution — it occurs when the reworded label
+ * lands on the brief's own phrasing, differing only in case or whitespace.
+ *
+ * ⚠ AND THE RAW MATERIAL IS ABUNDANT EVEN THOUGH THE OBSERVED RATE IS ZERO. In
+ * a wire corpus (claude-sonnet-5, structured outputs off, n=15), 7 of 15
+ * responses emitted TWO JSON documents whose option label sets are IDENTICAL
+ * after normalisation. They reach a single node array only because
+ * `extractJsonFromResponse` SELECTS one document. No claim is made that a
+ * merging or appending path exists today — those paths were not traced — only
+ * that the colliding bytes are already on the wire at high frequency, so this
+ * exit is insurance against a masked condition rather than a rare-defect patch.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ IT SHIPS NO CHIP, DELIBERATELY. A chip's replay message is a SENTENCE, and
@@ -93,8 +158,8 @@ export function composeDuplicateOptionLabelResponse(
   const assistant_text =
     `${countWord(input.collidingCount)} of your options share the name ` +
     `"${input.collidingLabel}", so I cannot tell which one you mean. ` +
-    `I have not changed the model. Rename one of them on the canvas — select ` +
-    `it and edit its name — then tell me the value again and I will record it.`;
+    `I have not changed the model. Remove one of them on the canvas — select ` +
+    `it and press Delete — then tell me the value again and I will record it.`;
 
   return composeDirectAnswerResponse({
     answerKind: 'functional',

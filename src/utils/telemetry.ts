@@ -3385,6 +3385,13 @@ export function emit(event: string, data: Event) {
             );
           }
 
+          if (typeof eventData.option_label_collision_count === "number") {
+            datadogClient.histogram(
+              "cee.draft_graph.option_label_collision_count",
+              eventData.option_label_collision_count as number,
+            );
+          }
+
           if (typeof eventData.uncertain_node_count === "number") {
             datadogClient.histogram(
               "cee.draft_graph.uncertain_node_count",

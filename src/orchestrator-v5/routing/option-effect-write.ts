@@ -459,10 +459,20 @@ function matchLabels(
 }
 
 /**
- * ⭐ THE ONE SPELLING OF "the same option name", and the ONE normalisation
- * `matchLabels` resolves identity by. Exported so the collision predicate below
- * and the companion spec both read the SAME rule rather than re-spelling it
- * (CLAUDE.md trap 12: the second spelling is the one that rots).
+ * ⭐ THE normalisation `matchLabels` RESOLVES IDENTITY BY. Exported so the
+ * collision predicate below and the companion spec both read the SAME rule
+ * rather than re-spelling it (CLAUDE.md trap 12: the second spelling rots).
+ *
+ * ⚠ IT IS NOT THE ONLY SPELLING IN THE ESTATE, and an earlier draft of this
+ * comment claimed it was. Measured: THREE normalisations of an option label
+ * coexist — this one (lowercase + whitespace-collapse + trim),
+ * `whatif/resolve-target-option.ts:188` (lowercase only) and
+ * `options-identical-graceful-dedup.ts:123` (trim + lowercase). Nothing is
+ * corrupted by the divergence today, because the other two REFUSE on a
+ * collision rather than act on one — but their collision CLASSES differ from
+ * this one's, so a label differing only in internal whitespace is a collision
+ * here and not there. Unifying them is a separate change with its own blast
+ * radius; recorded rather than asserted away.
  *
  * ⚠ THE COLLISION CLASS IS NORMALISED, NOT BYTE-IDENTICAL. Measured at pristine
  * `14aefde6`: a case-only difference and a whitespace-only difference BOTH
@@ -509,6 +519,33 @@ export function findCollidingOptionLabel(
     if (members.length > 1) return { label: members[0]!, count: members.length };
   }
   return null;
+}
+
+/**
+ * ⭐⭐ THE FREQUENCY INSTRUMENT. How many DISTINCT option labels are shared by
+ * two or more options — 0 for a healthy draft.
+ *
+ * ⚠ WHY IT LIVES HERE AND IS NOT A SECOND COUNTER. It reuses
+ * `normaliseOptionLabel`, so the number reported to an operator is the number
+ * of collisions the RESOLVER would actually trip on. A separately-spelled
+ * counter would drift from the predicate it is meant to measure and start
+ * reporting a rate for a condition the product does not have (trap 12).
+ *
+ * ⚠ IT RETURNS A COUNT, NEVER A LABEL. Option labels are user-authored model
+ * content and must not enter telemetry. The count is what answers the open
+ * question — how often does the drafter mint a colliding name — and the string
+ * adds nothing operational.
+ */
+export function countCollidingOptionLabels(labels: readonly string[]): number {
+  const byKey = new Map<string, number>();
+  for (const label of labels) {
+    const key = normaliseOptionLabel(label);
+    if (key.length === 0) continue;
+    byKey.set(key, (byKey.get(key) ?? 0) + 1);
+  }
+  let collisions = 0;
+  for (const [, n] of byKey) if (n > 1) collisions += 1;
+  return collisions;
 }
 
 /** The factors this option is wired to. Same reader as the recovery copy. */
