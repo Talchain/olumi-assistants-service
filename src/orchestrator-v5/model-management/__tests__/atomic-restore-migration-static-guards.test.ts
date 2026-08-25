@@ -198,7 +198,7 @@ describe("C8-A atomic semantic append migration", () => {
     );
   });
 
-  it("contains no second fence, CAS, turn, graph, facts or brief authority", () => {
+  it("contains no second fence, turn, graph, facts or brief authority", () => {
     expect(appendBody.match(/public\.append_turn_atomic_v4\(/g)).toHaveLength(
       1
     );
@@ -210,9 +210,56 @@ describe("C8-A atomic semantic append migration", () => {
     expect(appendBody).not.toContain("SET brief_text = p_brief_text");
     expect(appendBody).not.toContain("public.v5_turn_fence");
     expect(appendBody).not.toMatch(/ERRCODE = 'OLTF[123]'/);
-    expect(appendBody).not.toMatch(/ERRCODE = 'OLGC1'/);
-    expect(appendBody.match(/p_expected_graph_identity_hash/g)).toHaveLength(2);
-    expect(appendBody.match(/p_cas_enforce/g)).toHaveLength(2);
+  });
+
+  /**
+   * ⚠⚠ NARROWED, NOT RELAXED (Codex C8-A review defect 1, 2026-08-25).
+   *
+   * The assertion above used to also carry
+   *     expect(appendBody).not.toMatch(/ERRCODE = 'OLGC1'/)
+   * plus exact counts of 2 for `p_expected_graph_identity_hash` and
+   * `p_cas_enforce` — i.e. it forbade v5 from raising a CAS conflict AT ALL.
+   *
+   * That is one claim too strong, and it forbade the fix. v5 must not
+   * REIMPLEMENT v4's CAS — a second approximation of the same question, which
+   * is what delegation removed. It must still be able to guard the one case
+   * v4 structurally cannot express, because v4's predicate is gated on
+   * `p_expected_graph_identity_hash IS NOT NULL AND v_current_hash IS NOT NULL`:
+   * a caller that READ the base and found it absent. Without that guard, two
+   * concurrent writers on an unstamped scenario both pass and silently
+   * overwrite one another.
+   *
+   * So the guard now pins the SHAPE rather than the absence: exactly one CAS
+   * raise, reachable only through `p_expected_base_known`, and the delegation
+   * to v4 still intact. A reimplementation — a second raise, or a raise not
+   * gated on the known-base flag — still REDs.
+   */
+  it("adds EXACTLY ONE CAS guard, reachable only via p_expected_base_known, and still delegates to v4", () => {
+    expect(
+      appendBody.match(/ERRCODE = 'OLGC1'/g),
+      "more than one CAS raise in v5 means it has regrown a CAS of its own " +
+        "rather than adding the single guard v4 cannot express"
+    ).toHaveLength(1);
+
+    const guardStart = appendBody.indexOf("AND p_expected_base_known");
+    expect(
+      guardStart,
+      "the CAS raise must sit inside the known-base guard; if this conjunct is " +
+        "absent the raise is unconditional and every uninstrumented caller breaks"
+    ).toBeGreaterThan(-1);
+    const raiseAt = appendBody.indexOf("ERRCODE = 'OLGC1'");
+    const guardEnd =
+      appendBody.indexOf("END IF;", guardStart) + "END IF;".length;
+    expect(
+      raiseAt > guardStart && raiseAt < guardEnd,
+      "the OLGC1 raise is outside the p_expected_base_known guard"
+    ).toBe(true);
+
+    // The delegated CAS parameters are still forwarded to v4 verbatim — the
+    // property the delegation exists to provide.
+    expect(appendBody.match(/p_cas_enforce/g)).toHaveLength(3);
+    expect(appendBody.match(/p_expected_base_known/g)).toHaveLength(2);
+    expect(appendBody.match(/p_expected_graph_identity_hash/g)).toHaveLength(5);
   });
 
   it("durably distinguishes guest/no-op null receipts from missing owned versions", () => {

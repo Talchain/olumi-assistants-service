@@ -149,20 +149,43 @@ describe("atomic semantic model-version commit", () => {
       lineage: { kind: "known", parent_version_id: null, root_version_id: ROOT_ID },
       undo_version_id: null,
     });
-    // The PUBLIC receipt is the GraphV3 PROJECTION of the persisted graph, not
-    // a byte copy of it. The receipt schema's `GraphV3.passthrough()` is
-    // ROOT-only, so additive NESTED node fields (here `fac_y.value`) are
-    // stripped on the way to the wire while remaining in `scenarios.graph`.
+    // ⚠⚠ THIS ASSERTION WAS INVERTED (Codex C8-A review defect 3, 2026-08-25).
     //
-    // This assertion used to read `toEqual(writes[0]!.graph)` and passed only
-    // because C8 ALSO persisted that same lossy parse output — the two agreed
-    // because both were stripped. Persisting the projected form (the B3
-    // "appended graph IS the projected form" invariant) makes the persisted
-    // bytes richer than the wire view, so the honest relationship is stated
-    // here rather than left as an equality that held by defect.
-    expect(wire.model_version_receipt!.graph).toEqual(
-      GraphV3.passthrough().parse(writes[0]!.graph)
-    );
+    // It previously read:
+    //     expect(wire.model_version_receipt!.graph).toEqual(
+    //       GraphV3.passthrough().parse(writes[0]!.graph));
+    // i.e. it PINNED the receipt's graph as the LOSSY projection, on the
+    // reasoning that `GraphV3.passthrough()` is root-only so additive nested
+    // node fields are "stripped on the way to the wire". The mechanism was
+    // described exactly right. The problem is the question it never asked:
+    // the receipt also ships `full_hash`, and that hash is computed over the
+    // RICH graph. So the pinned payload was internally inconsistent — a
+    // receipt whose own hash does not describe its own graph — and any client
+    // that verifies the receipt the way a receipt is meant to be verified gets
+    // a mismatch and concludes the server lied.
+    //
+    // The invariant is now written against the SPEC (`full_hash` is the
+    // identity of `graph`) rather than against the observed behaviour. That is
+    // the whole point of shipping a hash beside a payload; an equality between
+    // two things that were both stripped cannot express it.
+    expect(
+      computeGraphIdentityHash(wire.model_version_receipt!.graph as never)!.value,
+      "the receipt's full_hash must be the identity hash of the receipt's OWN " +
+        "graph — a client cannot verify a receipt whose hash describes a " +
+        "richer object than the one it was handed"
+    ).toBe(wire.model_version_receipt!.full_hash);
+    // …and the graph it carries is the persisted one, byte for byte, including
+    // the additive nested field the old projection deleted.
+    expect(wire.model_version_receipt!.graph).toEqual(writes[0]!.graph);
+    expect(
+      (
+        wire.model_version_receipt!.graph as {
+          nodes: Array<Record<string, unknown>>;
+        }
+      ).nodes.find((n) => n.id === "fac_y")!.value,
+      "the additive nested field must survive to the wire; stripping it is what " +
+        "forked the receipt from its own hash"
+    ).toBe(10);
     expect(
       (writes[0]!.graph as { nodes: Array<Record<string, unknown>> }).nodes.find(
         (n) => n.id === "fac_y"
@@ -424,7 +447,28 @@ describe("C8-A: versionable graphs version; non-versionable graphs skip observab
     });
   });
 
-  it("NON-VERSIONABLE (std:0, a present-but-unusable field): commits, and is classified apart from a missing field", async () => {
+  /**
+   * ⚠⚠ THIS TEST WAS INVERTED (Codex C8-A review defect 2 / blocker H1).
+   *
+   * It was titled "NON-VERSIONABLE (std:0 …)" and asserted
+   * `writes[0]!.modelVersion` is undefined — i.e. it PINNED the silent loss of
+   * version, head, event and receipt for a std:0 graph as correct behaviour,
+   * and pinned the skip telemetry that reported it.
+   *
+   * `std: 0` is not non-versionable. Both durable identities resolve on it (see
+   * the PREMISE test below), so a valid version row was always available; the
+   * only thing rejecting it was a `z.number().positive()` in the ADMISSIBILITY
+   * gate. And it is not rare: `validators/numeric-bounds.ts` records that the
+   * live UI writer floors outbound sigma with `Math.max(0, …)` and therefore
+   * "emits std=0 continuously". So this pin blessed the routine, silent
+   * destruction of durable history on the main commit line.
+   *
+   * The reason-classification the test was really protecting — that the two
+   * non-conformance populations stay separately countable — is unchanged and
+   * still covered by the missing-fields case above and the genuinely
+   * incompatible case below.
+   */
+  it("VERSIONABLE (std:0): the sigma class is admitted, and no skip event is emitted", async () => {
     const { store, writes } = capturingStore({ receipt: true });
 
     const result = await commitDirectAnswer(
@@ -433,11 +477,41 @@ describe("C8-A: versionable graphs version; non-versionable graphs skip observab
       store
     );
 
-    // The turn must survive: this graph is deliberately persisted verbatim.
+    expect(result.performed).toBe(true);
+    expect(
+      writes[0]!.modelVersion,
+      "a std:0 graph must still produce its version: the turn and graph were " +
+        "persisted, so dropping the version splits the semantic commit"
+    ).toBeDefined();
+    expect(
+      versionEvents(),
+      "there is no fault to report — emitting a skip here would keep the alarm " +
+        "firing on the product's most common edge shape"
+    ).toHaveLength(0);
+  });
+
+  it("NON-VERSIONABLE (a genuinely incompatible field): still commits, still skips, still classified apart", async () => {
+    // A non-sigma incompatibility, so the sigma floor cannot rescue it — this
+    // is what keeps `graph_incompatible_with_graph_v3` a live, reachable
+    // classification rather than a dead enum member after the fix above.
+    const INCOMPATIBLE_GRAPH = {
+      nodes: [{ id: "goal_x", kind: "goal", label: "Goal" }],
+      edges: [
+        { from: "goal_x", to: "goal_x", edge_type: "not_a_real_enum_member" },
+      ],
+      goal_node_id: "goal_x",
+    };
+    const { store, writes } = capturingStore({ receipt: true });
+
+    const result = await commitDirectAnswer(
+      composed(),
+      { ...META, graph: INCOMPATIBLE_GRAPH },
+      store
+    );
+
     expect(result.performed).toBe(true);
     expect(writes[0]!.modelVersion).toBeUndefined();
 
-    // Distinct reason — the two non-conformance populations stay countable.
     const events = versionEvents();
     expect(events).toHaveLength(1);
     expect(events[0]![1]).toMatchObject({
@@ -458,5 +532,172 @@ describe("C8-A: versionable graphs version; non-versionable graphs skip observab
 
     expect(writes[0]!.modelVersion).toBeUndefined();
     expect(versionEvents()).toHaveLength(0);
+  });
+});
+
+/**
+ * CODEX C8-A REVIEW — DEFECT 2 / BLOCKER H1: a single `strength.std = 0` edge
+ * made a whole scenario silently unversionable.
+ *
+ * `EdgeStrengthV3.std` is `z.number().positive()` (`schemas/cee-v3.ts:263`), so
+ * the carrier's `PersistedGraphV3.safeParse` gate rejected the graph with
+ * `too_small` and the commit skipped the version — while still persisting the
+ * turn and the graph. Turn and graph durable, version + head + event + receipt
+ * gone: the atomic-history rule the carrier's own header states.
+ *
+ * The justification recorded in that header — that a graph GraphV3 rejects
+ * "has NO valid version that could be written" — is FALSE for this class, and
+ * the first test proves it by construction: both durable identities resolve on
+ * exactly this graph, so a perfectly good version row was available throughout.
+ *
+ * H1 IS NOT A POLICY FORK. `validators/numeric-bounds.ts` already settles it
+ * ("Cut 3"): std <= 0 is invalid under the contract AND routinely produced by
+ * the live UI writer, which floors outbound sigma with `Math.max(0, …)`; the
+ * ratified treatment is to tolerate it on the identity/persist path and floor
+ * it only where it crosses into compute. The gate now reuses that same floor
+ * for the ADMISSIBILITY question, and nothing else — the hashes and the
+ * persisted bytes stay verbatim, which the second test pins.
+ */
+describe("model-version carrier — zero-sigma edges (Codex defect 2 / H1)", () => {
+  const STD_ZERO_GRAPH = {
+    nodes: [
+      { id: "goal_x", kind: "goal", label: "Goal" },
+      { id: "fac_y", kind: "factor", label: "Factor" },
+    ],
+    edges: [
+      {
+        from: "fac_y",
+        to: "goal_x",
+        // The exact value the UI writer emits continuously.
+        strength: { mean: 0.5, std: 0 },
+        exists_probability: 0.9,
+        effect_direction: "positive",
+      },
+    ],
+    goal_node_id: "goal_x",
+  };
+
+  it("PREMISE: a std:0 graph HAS a computable durable identity (so 'not versionable' was false)", () => {
+    expect(
+      computeGraphIdentityHash(STD_ZERO_GRAPH as never),
+      "if this is null the skip would have been justified; it is not null, " +
+        "so a valid version row existed the whole time",
+    ).not.toBeNull();
+    expect(GraphV3.safeParse(STD_ZERO_GRAPH).success).toBe(false);
+  });
+
+  it("commits a model version for a std:0 graph instead of silently skipping history", async () => {
+    const { store, writes } = capturingStore({ receipt: true });
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: STD_ZERO_GRAPH },
+      store,
+    );
+    expect(writes).toHaveLength(1);
+    expect(
+      writes[0]!.modelVersion,
+      "the turn and graph were persisted but no version carrier was built — " +
+        "that is the split semantic commit: history silently lost for a graph " +
+        "the product routinely produces",
+    ).toBeDefined();
+    expect(writes[0]!.modelVersion!.creation_kind).toBe("committed_mutation");
+  });
+
+  it("IDENTITY STAYS SACRED: the sigma floor is used for the gate ONLY, never for the hashes or the bytes", async () => {
+    const { store, writes } = capturingStore({ receipt: true });
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: STD_ZERO_GRAPH },
+      store,
+    );
+    const persisted = writes[0]!.graph as {
+      edges: Array<{ strength: { std: number } }>;
+    };
+    expect(
+      persisted.edges[0]!.strength.std,
+      "the floor must not reach the persisted bytes — rewriting strength.std " +
+        "forks the analysis-affecting hash (numeric-bounds.ts 'Cut 2', the " +
+        "abc7d29 false-stale regression)",
+    ).toBe(0);
+    expect(
+      writes[0]!.modelVersion!.graph_identity_hash,
+      "the version's identity must be the identity of the UNFLOORED bytes " +
+        "that were actually written",
+    ).toBe(computeGraphIdentityHash(writes[0]!.graph as never)!.value);
+  });
+});
+
+/**
+ * CODEX C8-A REVIEW — DEFECT 5: version telemetry was published BEFORE the
+ * transaction it describes.
+ *
+ * The skip emit sat inside `buildAtomicCommittedModelVersion` (commit.ts:992),
+ * 345 lines and one `await` ahead of `store.append()`. A turn whose append then
+ * threw — CAS conflict, PGRST202, fence refusal — had already published
+ * `v5.model_versions.version_created{status:'skipped'}`, an outcome for a
+ * transaction that never committed. Nothing rolls telemetry back.
+ *
+ * A DISCRIMINATING PAIR: the same skip-eligible graph down both arms, differing
+ * only in whether the append succeeds. Only the successful arm may emit. The
+ * success arm alone would pass against the old always-emit code.
+ */
+describe("model-version skip telemetry — ordering (Codex defect 5)", () => {
+  // Fails GraphV3 on a non-sigma class, so the sigma floor cannot rescue it and
+  // it remains a genuine carrier skip.
+  const NON_CONFORMANT_GRAPH = {
+    nodes: [{ id: "goal_x", kind: "goal", label: "Goal" }],
+    edges: [{ from: "goal_x", to: "goal_x", edge_type: "not_a_real_enum_member" }],
+    goal_node_id: "goal_x",
+  };
+
+  function skipEvents(spy: ReturnType<typeof vi.spyOn>) {
+    return spy.mock.calls.filter(
+      (c) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
+    );
+  }
+
+  it("emits the skip once the turn is durable", async () => {
+    const spy = vi.spyOn(telemetry, "emit").mockImplementation(() => undefined);
+    try {
+      const { store } = capturingStore();
+      await commitDirectAnswer(
+        composed(),
+        { ...META, graph: NON_CONFORMANT_GRAPH },
+        store,
+      );
+      const events = skipEvents(spy);
+      expect(events).toHaveLength(1);
+      expect(events[0]![1]).toMatchObject({
+        status: "skipped",
+        scenario_id: SCENARIO_ID,
+        turn_id: TURN_ID,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("emits NOTHING when the append fails — the skip described a transaction that never happened", async () => {
+    const spy = vi.spyOn(telemetry, "emit").mockImplementation(() => undefined);
+    try {
+      const { store } = capturingStore({
+        fail: new Error("append_turn_atomic_v5 rejected a stale graph write"),
+      });
+      await expect(
+        commitDirectAnswer(
+          composed(),
+          { ...META, graph: NON_CONFORMANT_GRAPH },
+          store,
+        ),
+      ).rejects.toThrow();
+      expect(
+        skipEvents(spy),
+        "a version-skip event was published for a turn that rolled back. The " +
+          "event asserts an outcome of a transaction that never committed, and " +
+          "telemetry does not roll back.",
+      ).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -2,6 +2,7 @@ import { OlumiResponseSchema, type OlumiResponse } from "@talchain/schemas/bound
 import { z } from "zod";
 
 import { GraphV3 } from "../../schemas/cee-v3.js";
+import { floorGraphSigmaForCompute } from "../../validators/numeric-bounds.js";
 
 const Uuid = z.string().uuid();
 const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
@@ -28,6 +29,56 @@ const Lineage = z.discriminatedUnion("kind", [
 ]);
 
 /**
+ * VALIDATE THE GRAPH WITHOUT REWRITING IT.
+ *
+ * ⚠ `GraphV3.passthrough()` HERE WAS A HASH/PAYLOAD FORK (Codex C8-A review,
+ * 2026-08-25). `.passthrough()` applies to the ROOT OBJECT ONLY — the nested
+ * `NodeV3`/`EdgeV3` schemas strip unknown keys, as Zod does by default. So a
+ * Zod parse REBUILT the receipt's graph with every additive nested field
+ * DELETED, while `full_hash` kept the hash computed over the RICH graph. The
+ * receipt then asserted an identity its own payload could not reproduce:
+ * measured, a node's `value: 10` and a custom additive field vanished from
+ * `receipt.graph` and `H(receipt.graph) !== receipt.full_hash`. Any client that
+ * verifies the receipt by recomputing the hash — which is the entire point of
+ * shipping a hash with it — concludes the server lied.
+ *
+ * `commit.ts` already fixed exactly this defect on the PERSIST path (it stopped
+ * substituting `parsed.data` for the graph it writes, "so the carrier's hashes
+ * describe the persisted bytes by construction rather than by coincidence").
+ * The receipt path was left on the old pattern. This closes it the same way.
+ *
+ * `z.unknown()` performs no transform, so the caller's object passes through by
+ * reference; the refinement still runs the full `GraphV3` shape check and
+ * surfaces its issues under the `graph` path. That is the same discipline
+ * `assertIngressGraphNumericBounds` uses — "never rewrites the graph; it
+ * returns the caller's object by reference or rejects it"
+ * (`validators/numeric-bounds.ts`) — and it is the only form that can keep
+ * `full_hash === H(graph)` true.
+ */
+const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
+  // The ADMISSIBILITY question must be the same one the version carrier asked,
+  // or a version it legitimately created cannot be receipted — and the commit
+  // would then throw AFTER the durable write, which is the split this whole
+  // slice exists to prevent. `commit.ts` gates on the sanctioned sigma
+  // projection (Codex defect 2 / H1), so this does too. Same floor, same
+  // reason, one policy: `strength.std <= 0` is invalid under the contract yet
+  // routinely emitted by the live UI writer, and the ratified treatment is to
+  // tolerate it on the identity path and floor it only where it crosses into
+  // compute (`validators/numeric-bounds.ts`, "Cut 3").
+  //
+  // The floor is used for the CHECK ONLY. `z.unknown()` performs no transform,
+  // so `value` still passes through by reference and `full_hash === H(graph)`
+  // is preserved.
+  const parsed = GraphV3.passthrough().safeParse(
+    floorGraphSigmaForCompute(value).graph,
+  );
+  if (parsed.success) return;
+  for (const issue of parsed.error.issues) {
+    ctx.addIssue(issue);
+  }
+});
+
+/**
  * Temporary exact mirror of schemas commit 91e610dc. Remove only after the
  * ordered schemas changes publish under an honest version newer than 0.48.0.
  */
@@ -38,7 +89,7 @@ export const ModelVersionMutationReceiptV1LocalSchema = z
     mutation_id: Uuid,
     version_id: Uuid,
     sequence: z.number().int().min(1),
-    graph: GraphV3.passthrough(),
+    graph: GraphVerbatim,
     full_hash: Sha256,
     hash_algorithm: z.string().min(1),
     identity_projection_version: z.string().min(1),

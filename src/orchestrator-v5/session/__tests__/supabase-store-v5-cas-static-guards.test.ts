@@ -116,3 +116,104 @@ describe('B3 — the deploy order is documented, not just the rollback order', (
     expect(deployClause.toLowerCase()).toContain('not persisted');
   });
 });
+
+/**
+ * CODEX C8-A REVIEW — DEFECT 1: the null-base CAS bypass.
+ *
+ * The behavioural proof lives in the C4 oracle (N1c), which needs a real
+ * Postgres and is excluded from the required gate. These guards are what the
+ * required gate CAN see: the SQL bytes that make N1c's outcome inevitable.
+ * They are derived from the producer, not from a reading of intent.
+ *
+ * The defect: v4's CAS is guarded by `p_expected_graph_identity_hash IS NOT
+ * NULL AND v_current_hash IS NOT NULL`. Those are correct for v4, whose
+ * parameter DEFAULTS to NULL and therefore genuinely means "no expectation
+ * supplied". They are wrong for a caller that READ the base and found it
+ * absent — on an unstamped scenario every concurrent writer sends NULL, both
+ * guards short-circuit, and no CAS runs for any of them.
+ */
+describe('C8-A defect 1 — known-base CAS (SQL oracle)', () => {
+  const v5Body = v5Code.slice(
+    v5Code.indexOf('CREATE OR REPLACE FUNCTION public.append_turn_atomic_v5'),
+  );
+  /**
+   * The GUARD, isolated. Anchored on `AND p_expected_base_known` — the
+   * conjunct — because a bare `p_expected_base_known` also matches the
+   * PARAMETER DECLARATION in the signature, and slicing from there silently
+   * spans the whole validation preamble instead of the predicate. A guard
+   * that measures the wrong region is exactly the instrument defect these
+   * files exist to catch.
+   */
+  const guardStart = v5Body.indexOf('AND p_expected_base_known');
+  const guard = v5Body.slice(
+    guardStart,
+    v5Body.indexOf('END IF;', guardStart) + 'END IF;'.length,
+  );
+
+  it('PROBE LIVENESS: the guard region was actually located and is non-empty', () => {
+    expect(guardStart, 'the guard conjunct was not found — every assertion below would be vacuous').toBeGreaterThan(-1);
+    expect(guard.length).toBeGreaterThan(80);
+    expect(guard).toContain('RAISE EXCEPTION');
+  });
+
+  it('v5 declares p_expected_base_known, defaulted FALSE so every existing caller keeps delegating', () => {
+    expect(
+      /p_expected_base_known\s+BOOLEAN\s+DEFAULT\s+FALSE/i.test(v5Body),
+      'the parameter must exist AND default FALSE. Without the default, adding ' +
+        'it silently changes every 30-argument caller — including the C4 ' +
+        "oracle's delegation pins — from delegation to enforcement.",
+    ).toBe(true);
+  });
+
+  it('v5 compares the base with IS DISTINCT FROM — null-safe, no IS NOT NULL bypass', () => {
+    expect(
+      /v_current_hash\s+IS\s+DISTINCT\s+FROM\s+p_expected_graph_identity_hash/i.test(
+        guard,
+      ),
+      'a null-safe comparison is the whole point: `=` returns NULL (falsy) ' +
+        'when either side is NULL, which is the bypass being closed.',
+    ).toBe(true);
+    expect(
+      /p_expected_graph_identity_hash\s+IS\s+NOT\s+NULL\s+AND\s+v_current_hash\s+IS\s+NOT\s+NULL/i.test(
+        guard,
+      ),
+      "v5's own guard must not reproduce v4's two-NULL bypass — that is the " +
+        'defect, not the fix.',
+    ).toBe(false);
+  });
+
+  it('v5 PRESERVES the first-write exemption, so an unstamped legacy row is not bricked', () => {
+    expect(
+      /NOT\s*\(\s*v_current_hash\s+IS\s+NULL\s+AND\s+p_expected_graph_identity_hash\s+IS\s+NOT\s+NULL\s*\)/i.test(
+        guard,
+      ),
+      'Without this exemption the guard refuses every scenario whose graph ' +
+        'exists but whose graph_identity_hash column was never stamped — a ' +
+        'far larger outage than the lost update it closes. The migration that ' +
+        'introduced v4\'s equivalent is literally named after this exemption.',
+    ).toBe(true);
+  });
+
+  it('the CAS conflict is raised on the canonical SQLSTATE the client already maps', () => {
+    expect(
+      guard.includes('OLGC1'),
+      'a bespoke SQLSTATE would surface as an opaque StateCommitFailedError ' +
+        'instead of the typed GraphStaleWriteError the caller handles.',
+    ).toBe(true);
+  });
+
+  it('the REVOKE/GRANT signatures track the new arity (a stale grant leaves v5 unexecutable)', () => {
+    const grants = v5Code.match(
+      /(?:REVOKE|GRANT)\s+EXECUTE\s+ON\s+FUNCTION\s+public\.append_turn_atomic_v5\s*\(([^)]*)\)/gi,
+    );
+    expect(grants, 'both a REVOKE and a GRANT must be present').toHaveLength(2);
+    for (const g of grants!) {
+      expect(
+        g.trim().endsWith('BOOLEAN\n)') || /,\s*BOOLEAN\s*\)$/.test(g.trim()),
+        'the grant signature must end with the new BOOLEAN parameter, or it ' +
+          'names a function signature that no longer exists and the GRANT ' +
+          'silently applies to nothing.',
+      ).toBe(true);
+    }
+  });
+});

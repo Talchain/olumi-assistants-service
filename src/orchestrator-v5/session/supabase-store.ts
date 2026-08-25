@@ -1233,9 +1233,32 @@ export class SupabaseSessionStore implements SessionStore {
     // trusting the request") instead of tautologically "passing" it.
     const trustedExpectedHash = write.expectedGraphIdentityHash ?? null;
 
+    // ── AND THE FACT SQL NULL CANNOT CARRY (Codex C8-A review defect 1) ──────
+    // The two cases above are NOT the same fact, and collapsing them is a lost
+    // update. `undefined` = this write path is not instrumented, so there is no
+    // expectation to enforce. `null` = a base read HAPPENED and found the base
+    // ABSENT — a real, known expectation that the base is still absent.
+    //
+    // v4's CAS cannot tell them apart: it is guarded by
+    // `p_expected_graph_identity_hash IS NOT NULL AND v_current_hash IS NOT NULL`,
+    // correct for v4 (whose parameter defaults to NULL and means "no
+    // expectation") and wrong for a caller that measured an empty base. On a
+    // legacy scenario with `scenarios.graph_identity_hash` NULL, every
+    // concurrent writer reads expected = NULL, sends NULL, and NO CAS RUNS FOR
+    // ANY OF THEM — they serialise on the row lock and silently overwrite each
+    // other with no conflict raised.
+    //
+    // So the knowledge travels as its own parameter. v5 enforces a null-safe
+    // `IS DISTINCT FROM` only when the base is KNOWN; when it is not, v5
+    // delegates to v4 exactly as before, which is what the C4 oracle's
+    // N1a/N1b/N2 pins assert. `in` rather than `!== undefined` so an explicitly
+    // absent property and a present-but-undefined one read alike.
+    const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
+
     const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
       ...baseRpcArgs,
       p_expected_graph_identity_hash: trustedExpectedHash,
+      p_expected_base_known: expectedBaseKnown,
       // Always the version carrier's identity hash: v5 REQUIRES a 64-hex
       // incoming hash in every mode (migration 20260824200000:545-549) because
       // it stamps the version row, so this is NOT mode-derived. Only the

@@ -508,7 +508,12 @@ CREATE OR REPLACE FUNCTION public.append_turn_atomic_v5(
   p_version_actor_kind           TEXT,
   p_version_authored_by          TEXT,
   p_version_creation_kind        TEXT,
-  p_version_source_turn_id       TEXT
+  p_version_source_turn_id       TEXT,
+  -- Does the caller actually KNOW the expected base, or is it simply not
+  -- instrumented on this path? SQL NULL cannot answer that, and conflating the
+  -- two is the defect below. DEFAULT FALSE so every existing caller — and the
+  -- C4 oracle's N1a/N1b/N2 pins — keep the pure-delegation behaviour they pin.
+  p_expected_base_known          BOOLEAN DEFAULT FALSE
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -576,6 +581,71 @@ BEGIN
   END IF;
   v_should_create := v_user_id IS NOT NULL
     AND v_current_hash IS DISTINCT FROM p_incoming_graph_identity_hash;
+
+  -- ── NULL-SAFE CAS FOR A *KNOWN* EXPECTED BASE ──────────────────────────────
+  -- v4 remains the canonical CAS and is not touched. This guard covers the one
+  -- case v4 structurally CANNOT express, because its predicate is guarded by
+  --     p_expected_graph_identity_hash IS NOT NULL AND v_current_hash IS NOT NULL
+  -- (20260806120000_v5_turn_fence_first_write_exemption.sql:308-312). Those two
+  -- guards are correct for v4, whose expected-hash parameter DEFAULTS to NULL
+  -- and therefore genuinely means "no expectation supplied". They are wrong for
+  -- a caller that READ the base and found it ABSENT: on a legacy scenario whose
+  -- scenarios.graph_identity_hash is NULL, every concurrent writer reads
+  -- expected = NULL at turn start, sends NULL, the first guard short-circuits,
+  -- and NO CAS RUNS FOR ANY OF THEM. They serialise on the row lock and
+  -- silently overwrite one another — a lost update with no conflict raised.
+  --
+  -- `p_expected_base_known` is the missing fact, not a second CAS: it says
+  -- whether NULL means "known-absent" (enforce) or "not instrumented" (defer to
+  -- v4, exactly as before). `IS DISTINCT FROM` is null-safe on both sides, so
+  -- known-absent → known-absent matches and known-absent → moved conflicts.
+  --
+  -- This is the SAME semantics restore_model_version_atomic_v1 already states in
+  -- this very migration ("NULL is a meaningful expected absence; IS DISTINCT
+  -- FROM handles both null and non-null cases without a bypass"). Restore had
+  -- it; append did not. One concept, two paths, opposite null handling.
+  --
+  -- The final conjunct preserves v4's idempotent-replay exemption: when the
+  -- incoming graph ALREADY equals the current one, re-sending it is a replay,
+  -- not a conflict. p_incoming_graph_identity_hash is required 64-hex above, so
+  -- it is never NULL here.
+  -- ⚠ THE FIRST-WRITE EXEMPTION IS PRESERVED, DELIBERATELY. v4's second guard
+  -- (`v_current_hash IS NOT NULL`) is not only a bypass — it is also the
+  -- exemption the migration NAMED AFTER IT exists to provide
+  -- (20260806120000_v5_turn_fence_FIRST_WRITE_EXEMPTION). A legacy row whose
+  -- graph EXISTS but whose graph_identity_hash column was never stamped reads
+  -- `current = NULL` while the caller legitimately supplies a recomputed
+  -- `expected = <hash>`. Refusing that is not conflict detection, it is
+  -- bricking every unstamped scenario on its next turn — the exact "Cut 1"
+  -- failure `validators/numeric-bounds.ts` records paying for once already.
+  --
+  -- So this guard adds EXACTLY ONE enforcement over v4 — `expected IS NULL AND
+  -- current IS NOT NULL` — which is precisely the lost update and nothing else:
+  --
+  --   expected NULL,  current NULL   -> match      (first writer proceeds)
+  --   expected NULL,  current SET    -> CONFLICT   <- the lost update, caught
+  --   expected SET,   current NULL   -> exempt     (unstamped legacy row)
+  --   expected h1,    current h2     -> CONFLICT   (v4 catches this too)
+  --   expected h,     current h      -> match
+  --
+  -- Two concurrent writers on an unstamped scenario both read expected = NULL.
+  -- They serialise on the FOR UPDATE above: the first sees current NULL and
+  -- commits, stamping the hash; the second then sees current SET against its
+  -- NULL expectation and is refused. That is the race closed.
+  IF p_cas_enforce
+     AND p_expected_base_known
+     AND v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
+     AND p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash
+     AND NOT (v_current_hash IS NULL AND p_expected_graph_identity_hash IS NOT NULL)
+  THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'OLGC1',
+      MESSAGE = format(
+        'append_turn_atomic_v5: stale graph write for scenario %s (expected %s, current %s)',
+        p_scenario_id,
+        COALESCE(p_expected_graph_identity_hash, '<absent>'),
+        COALESCE(v_current_hash, '<absent>'));
+  END IF;
 
   -- Remember whether this was already a durable turn before delegating. v4
   -- decides replay first and returns that row without any side effect; this
@@ -788,11 +858,11 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.append_turn_atomic_v5(
   UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
   JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
-  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.append_turn_atomic_v5(
   UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
   JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
-  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN
 ) TO service_role;

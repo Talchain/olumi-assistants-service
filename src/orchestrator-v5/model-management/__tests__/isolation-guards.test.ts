@@ -41,6 +41,16 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
     '../boundary/request-extensions.js', // GraphStateIngress (type-only)
     '../../orchestrator/context/stable-stringify.js', // Group A canonicaliser
+    // C8-A (Codex review defect 2 / H1, 2026-08-25): the SANCTIONED sigma
+    // projection. `mutation-receipt.ts` must ask the SAME admissibility
+    // question the commit carrier asks, or a version the carrier legitimately
+    // created cannot be receipted and the commit throws AFTER the durable
+    // write — the exact split this slice exists to prevent. Importing the one
+    // shared bounds module is what keeps that a single policy instead of a
+    // hand-maintained twin of the floor (the defect class this estate pays for
+    // most). Pure, synchronous, no I/O, no config read; `commit.ts` already
+    // depends on it for the same reason.
+    '../../validators/numeric-bounds.js',
     '../../utils/telemetry.js', // log (event-sink dispatch)
     // Lane 8 (3b cleanup): the A3 CAS vocabulary — CAS_CONFLICT_KIND is now
     // `satisfies GraphCasConflictCategory` against the landed #346 closed

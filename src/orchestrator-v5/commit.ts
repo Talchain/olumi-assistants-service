@@ -68,6 +68,7 @@ import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
+import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import {
   computeGraphIdentityHash,
   computeVersionAnalysisAffectingHashRecord,
@@ -721,10 +722,11 @@ const PersistedGraphV3 = GraphV3.passthrough();
  * persisted, making "the carrier's hashes describe the persisted bytes" true by
  * construction rather than by coincidence — this matters because
  * `analysis_affecting_hash` is what CAS compares on.
+ *
+ * (The carrier is now the `plan` arm of `AtomicCommittedModelVersionOutcome`,
+ * declared below with the skip/none arms it must be distinguished from. The
+ * no-graph rule above is unchanged and still load-bearing.)
  */
-interface AtomicCommittedModelVersionPlan {
-  readonly write: AtomicCommittedModelVersionWrite;
-}
 
 function deterministicMutationId(scenarioId: string, turnId: string): string {
   const hex = createHash('sha256')
@@ -812,16 +814,38 @@ function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkip
 }
 
 /**
- * Record a carrier skip and return `undefined` so the commit proceeds.
+ * The carrier's outcome. Deliberately THREE cases, not two.
  *
- * The emit is guarded: this runs BEFORE the append, so an `emit()` fault on a
- * pathological payload would convert a skip back into the turn failure this
- * whole change exists to prevent.
+ * ⚠ THE SKIP IS NO LONGER REPORTED FROM HERE (Codex C8-A review, 2026-08-25).
+ * It used to `emit()` inline, and this function runs at `commit.ts:992` — 345
+ * lines and one `await` BEFORE `store.append()` at `:1337`. So a turn whose
+ * append then threw (`GraphStaleWriteError` on a CAS conflict,
+ * `StateCommitFailedError` on PGRST202, a fence refusal) had ALREADY published
+ * `v5.model_versions.version_created{status:'skipped'}` — a claim about the
+ * outcome of a transaction that never committed. Nothing rolls telemetry back.
+ *
+ * This file already states the correct rule twenty lines below the fix, for a
+ * different event: *"Telemetry fires AFTER write succeeds — never log a
+ * 'created' event for a pending action that was rolled back by an RPC
+ * failure."* The version skip now obeys the same rule: the reason is RETURNED,
+ * and the commit emits it from the post-success block once the append is
+ * durable.
+ */
+type AtomicCommittedModelVersionOutcome =
+  | { readonly kind: 'plan'; readonly write: AtomicCommittedModelVersionWrite }
+  /** A DESIGNED no-version outcome (flag off, no graph, no_op, presentation_only). Silent. */
+  | { readonly kind: 'none' }
+  /** Non-conformance. Reportable — but only once the turn is durable. */
+  | { readonly kind: 'skip'; readonly reason: ModelVersionCarrierSkipReason };
+
+/**
+ * Log the skip immediately (a log line is not a claim about a committed
+ * transaction) and carry the reason to the post-success emit.
  */
 function skipAtomicCommittedModelVersion(
   reason: ModelVersionCarrierSkipReason,
   metadata: CommitMetadata,
-): undefined {
+): AtomicCommittedModelVersionOutcome {
   log.warn(
     {
       scenario_id: metadata.scenario_id,
@@ -830,44 +854,53 @@ function skipAtomicCommittedModelVersion(
     },
     'ModelManagement — semantic model version SKIPPED for this commit (turn committed in full; no version row written)',
   );
-  try {
-    emit(TelemetryEvents.V5ModelVersionCreated, {
-      scenario_id: metadata.scenario_id,
-      turn_id: metadata.turn_id,
-      status: 'skipped',
-      skip_reason: reason,
-      version_number: null,
-      graph_identity_hash_prefix: null,
-      error_code: null,
-      provenance: 'commit',
-    });
-  } catch (emitErr) {
-    log.debug(
-      {
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        err: emitErr instanceof Error ? emitErr.message : String(emitErr),
-      },
-      'ModelManagement — version-skip telemetry emit failed (skip already logged; turn result unaffected)',
-    );
-  }
-  return undefined;
+  return { kind: 'skip', reason };
 }
 
 /** Build the carrier and the exact graph bytes it content-addresses. */
 function buildAtomicCommittedModelVersion(
   graph: unknown,
   metadata: CommitMetadata,
-): AtomicCommittedModelVersionPlan | undefined {
+): AtomicCommittedModelVersionOutcome {
   if (config.cee.modelVersionsEnabled !== true || !graphWasProvided(graph)) {
-    return undefined;
+    return { kind: 'none' };
   }
   const policy = decideModelVersionCreation(metadata.baseGraphForInvariants, graph);
-  if (!policy.create) return undefined;
+  if (!policy.create) return { kind: 'none' };
 
   // The parse is a VALIDITY GATE over the bytes about to be persisted — its
   // output is deliberately not used (see the plan interface).
-  const parsed = PersistedGraphV3.safeParse(graph);
+  //
+  // ⚠ THE GATE IS EVALUATED AGAINST THE SANCTIONED SIGMA PROJECTION, NOT THE
+  // RAW BYTES (Codex C8-A review defect 2 / H1, 2026-08-25). `EdgeStrengthV3.std`
+  // is `z.number().positive()` (schemas/cee-v3.ts:263), so a single `std: 0`
+  // edge failed this parse with `too_small` and the WHOLE scenario silently
+  // stopped versioning — turn and graph persisted, version/head/event/receipt
+  // dropped. That is the atomic-history violation this carrier's own header
+  // forbids, and the header's justification for tolerating it — that a graph
+  // GraphV3 rejects "has NO valid version that could be written" — is FALSE for
+  // this class: measured, `computeGraphIdentityHash` and
+  // `computeVersionAnalysisAffectingHashRecord` BOTH resolve on a `std: 0`
+  // graph, so a perfectly good version row was available the entire time.
+  //
+  // `std <= 0` is not a corrupt graph and not a legacy one. It is a CURRENT,
+  // routinely-produced ingress reality with an already-ratified treatment
+  // (`validators/numeric-bounds.ts`, "Cut 3"): the UI's own writer floors
+  // outbound sigma with `Math.max(0, …)` — a floor of ZERO — so it "emits std=0
+  // continuously", and the compute path handles it by flooring at the
+  // persisted-load boundary, metered as `cee.compute.sigma_floor`, while
+  // leaving the hashed bytes untouched. Skipping the version here invented a
+  // FOURTH treatment for the same value, and the only one that destroys data.
+  //
+  // So the gate reuses the sanctioned floor rather than minting a third policy.
+  // The floored graph is used for the PARSE ONLY. Everything downstream — the
+  // identity hash, the analysis-affecting hash and the bytes actually persisted
+  // — is still derived from `graph` verbatim, because `strength.std` is inside
+  // the analysis-affecting projection and rewriting it would fork identity
+  // (numeric-bounds.ts "Cut 2", the abc7d29 false-stale regression). Identity
+  // stays sacred; only the admissibility question is asked of the projection.
+  const gateGraph = floorGraphSigmaForCompute(graph).graph;
+  const parsed = PersistedGraphV3.safeParse(gateGraph);
   if (!parsed.success) {
     // NOT VERSIONABLE — no valid version row exists for this graph. Skip, and
     // make the skip observable with the kind of non-conformance it was.
@@ -890,6 +923,7 @@ function buildAtomicCommittedModelVersion(
     );
   }
   return {
+    kind: 'plan',
     write: {
       mutation_id: deterministicMutationId(metadata.scenario_id, metadata.turn_id),
       graph_identity_hash: full.value,
@@ -1354,7 +1388,7 @@ export async function commitDirectAnswer(
     // expected-base hashes (undefined when the path is not instrumented).
     expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
     expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
-    ...(atomicVersionPlan !== undefined
+    ...(atomicVersionPlan.kind === 'plan'
       ? { modelVersion: atomicVersionPlan.write }
       : {}),
   });
@@ -1380,6 +1414,24 @@ export async function commitDirectAnswer(
   // whole block: a telemetry fault degrades to a log, never an error. (Datadog
   // transport is already independently guarded inside `emit()`.)
   try {
+    // ModelManagement — the version SKIP, reported only now that the turn is
+    // durable. Moved here from `buildAtomicCommittedModelVersion` (Codex C8-A
+    // review defect 5): emitted at decision time it published the outcome of a
+    // transaction that had not run, and stayed published when the append then
+    // threw. Same rule as the pending-action emit below.
+    if (atomicVersionPlan.kind === 'skip') {
+      emit(TelemetryEvents.V5ModelVersionCreated, {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        status: 'skipped',
+        skip_reason: atomicVersionPlan.reason,
+        version_number: null,
+        graph_identity_hash_prefix: null,
+        error_code: null,
+        provenance: 'commit',
+      });
+    }
+
     // V5 Coaching State Spine — Stage 2B-1b: post-success persistence telemetry.
     // Once per commit across the whole turn taxonomy. `coaching_state_present`
     // distinguishes turns that derived a snapshot (turn-executor / chip-click)
