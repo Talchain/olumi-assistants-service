@@ -164,6 +164,7 @@ import {
   DRAFT_GRAPH_MIN_BRIEF_LENGTH,
   isDraftShapedText,
 } from '../schemas/assist.js';
+import { understandOpenFrameIntake } from '../orchestrator-v5/routing/open-frame-intake.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import { admitCurrentTurnFence, turnFencePreHandler } from './turn-fence-prehandler.js';
 import { recordExplicitTurnStop } from '../routes/turn-stop.js';
@@ -3374,6 +3375,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
         : false;
     const isContinuationScenario = hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit;
+    // ROADMAP 2.308 / System B — ONE route-level strict graph read, shared by
+    // no-model unstranding, semantic empty-workspace intake, configure-option
+    // anchoring, and the edit-lane reload below. TurnExecutor may later perform
+    // its own combined context read; this memo governs only these route-level
+    // consumers. It caches failure as well as value so they see one canonical
+    // fact and cannot retry a failed read into a different answer.
+    let persistedGraphMemo:
+      | { readonly ok: true; readonly value: unknown }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (persistedGraphMemo === null) {
+        try {
+          persistedGraphMemo = {
+            ok: true,
+            value: await loadPersistedGraphStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedGraphMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
+      return persistedGraphMemo.value;
+    };
     // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
     // a draft loss stands (a failure-marked fence row + no committed graph),
     // the loss notice tells the user "send your decision brief again and
@@ -3441,7 +3466,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
           : admittedLiveTurnFromShortCircuit;
         noModelDraftUnstrand =
-          !draftInFlight && (await loadPersistedGraphStrict(ingress.scenario_id)) == null;
+          !draftInFlight && (await loadPersistedGraphOnce()) == null;
       } catch (err) {
         noModelDraftUnstrand = false;
         log.warn(
@@ -4065,7 +4090,90 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         clarifyV2DeferredDisclosure = cv2.deferredAsk?.disclosure ?? null;
       }
     }
-    if (isDraftGraphShape || explicitGenerateDraft || clarifyV2DraftBrief !== null) {
+
+    // CORE SYSTEM B — broad strategic intake runs only after the established
+    // deterministic clarify-v2 resume has declined the turn. The legacy text
+    // heuristic above remains the zero-extra-call fast path for explicit
+    // decisions; otherwise the frontier model makes one advisory routing
+    // judgement instead of another keyword classification.
+    //
+    // Authority boundaries:
+    //   - only start_model / continue_conversation can be returned;
+    //   - the user brief is never rewritten and no graph content is produced;
+    //   - a strict canonical read must prove persistence is empty before the
+    //     advisory call is licensed;
+    //   - present/invalid/unreadable persistence defers to the existing
+    //     canonical edit/TurnExecutor lanes below using the identical memo;
+    //   - semantic starts dispatch the draft producer directly and do not
+    //     inherit decision-only clarify-v2 questions.
+    const canStartModelOnThisFrame =
+      !isContinuationScenario ||
+      draftOfferMarker !== null ||
+      draftLossRedraftUnstrand ||
+      noModelDraftUnstrand;
+    const shouldConsiderOpenFrameIntake =
+      ingress.stage === 'frame' &&
+      !isPopulatedIngressGraph(extensions.graphState) &&
+      ingress.source === 'composer' &&
+      !draftShapedTurn &&
+      !explicitGenerateDraft &&
+      clarifyV2DraftBrief === null &&
+      canStartModelOnThisFrame &&
+      !isNonReadinessTypedChipClickForExecutor &&
+      !isProcessMetaIntake(ingress.message);
+    let shouldUnderstandOpenFrameIntake = false;
+    let openFrameIntakeDeferredToCanonicalLane = false;
+    if (shouldConsiderOpenFrameIntake) {
+      try {
+        const persisted = await loadPersistedGraphOnce();
+        if (persisted == null) shouldUnderstandOpenFrameIntake = true;
+        else openFrameIntakeDeferredToCanonicalLane = true;
+      } catch {
+        openFrameIntakeDeferredToCanonicalLane = true;
+      }
+    }
+    let openFrameIntakeStartsModel = false;
+    let openFrameIntakeContinuesConversation = false;
+    if (shouldUnderstandOpenFrameIntake) {
+      const recentTurns = isContinuationScenario
+        ? await loadRecentConversationTurns(ingress.scenario_id, requestId)
+        : [];
+      const intake = await understandOpenFrameIntake({
+        currentMessage: ingress.message,
+        recentTurns,
+        requestId,
+        scenarioId: ingress.scenario_id,
+      });
+      openFrameIntakeStartsModel = intake.route === 'start_model';
+      openFrameIntakeContinuesConversation = intake.route === 'continue_conversation';
+      log.info(
+        {
+          event: 'v5.open_frame_intake_routed',
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          route: intake.route,
+          source: intake.source,
+          ...(intake.source === 'model'
+            ? {
+                model: intake.model,
+                latency_ms: intake.latencyMs,
+                input_tokens: intake.inputTokens,
+                output_tokens: intake.outputTokens,
+              }
+            : { fallback_reason: intake.fallbackReason }),
+          recent_turns_considered: recentTurns.length,
+        },
+        'Open-frame strategic intake routed without rewriting the user brief',
+      );
+    }
+    const isSemanticOpenFrameDraft =
+      openFrameIntakeStartsModel && !isPopulatedIngressGraph(extensions.graphState);
+    if (
+      isDraftGraphShape ||
+      isSemanticOpenFrameDraft ||
+      explicitGenerateDraft ||
+      clarifyV2DraftBrief !== null
+    ) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -4514,43 +4622,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // proposal), and lets an edit-verb-bearing state-query fall through to the
     // recent-changes-grounded state-query guard.
     // ────────────────────────────────────────────────────────────────
-    // ────────────────────────────────────────────────────────────────
-    // ROADMAP 2.308 / S1 — ONE persisted-graph read per turn, shared.
-    //
-    // Two sites now need `scenarios.graph`: the configure-option label anchor
-    // (immediately below) and the edit-lane graphState reload (~340 lines
-    // down). Memoised here so the pair costs ONE Supabase round-trip, not two
-    // — the diagnosis's explicit instruction was "re-use the loaded value …
-    // one read per turn, not two".
-    //
-    // The memo caches the FAILURE as well as the value, deliberately: the
-    // label-anchor caller swallows errors (a labels read must never fail a
-    // turn that would otherwise succeed), while the edit-lane reload below
-    // re-throws the SAME error and produces the SAME typed recovery it
-    // produced before this change. Caching the rejection is what keeps those
-    // two policies from becoming two reads with two different outcomes.
-    // ────────────────────────────────────────────────────────────────
-    let persistedGraphMemo:
-      | { readonly ok: true; readonly value: unknown }
-      | { readonly ok: false; readonly error: unknown }
-      | null = null;
-    const loadPersistedGraphOnce = async (): Promise<unknown> => {
-      if (persistedGraphMemo === null) {
-        try {
-          persistedGraphMemo = {
-            ok: true,
-            // `loadPersistedGraphStrict` (vs the swallowing
-            // `loadPersistedGraph`) lets the edit-lane consumer distinguish
-            // `session_store_failed` from `no_persisted_graph`.
-            value: await loadPersistedGraphStrict(ingress.scenario_id),
-          };
-        } catch (err) {
-          persistedGraphMemo = { ok: false, error: err };
-        }
-      }
-      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
-      return persistedGraphMemo.value;
-    };
     const boundedNonMutationAnalytical =
       isBoundedNonMutationAnalyticalRequest(ingress.message);
     const analyticalQuestionDetected =
@@ -5664,6 +5735,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // forces draftShapedTurn=false → isDraftGraphShape=false → this guard
       // consumed it). With the exclusion, the chip_click region is total.
       !isNonReadinessTypedChipClickForExecutor &&
+      // A semantically-understood composer turn has already been routed. A
+      // start_model outcome dispatched above; a conversation/fallback outcome
+      // belongs to TurnExecutor. Neither may re-enter the canned rejection.
+      !openFrameIntakeContinuesConversation &&
+      // A present or unreadable canonical graph is not an empty-workspace
+      // brief failure. It belongs to the established canonical-state lane,
+      // which consumes the same strict-read memo above.
+      !openFrameIntakeDeferredToCanonicalLane &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(
