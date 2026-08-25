@@ -389,6 +389,11 @@ const COACH_CONVERSE: ContextPolicy = {
     // Readiness — status + the OPEN ITEMS behind it. `coaching_context` above
     // carries a readiness STATUS and a blocker COUNT; this section is the only
     // one carrying the blocker IDENTITY and the user's route out of it.
+    // Success target — the record's answer to "is one set, and to what". The
+    // ONLY section carrying that fact: `compactGraph` drops `goal_threshold`
+    // and no readiness kind names it, so before this the model had no
+    // statement in either direction and answered from the transcript.
+    { name: 'goal_target', source: 'graph', projection: 'projectGoalTargetRecord → extractPersistedGoalTarget (single authority, shared with the receipt guard; reads the PERSISTED graph, never the request-first graphStateForTurn; key ABSENT when no graph was read — absence means UNKNOWN, never "unset")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'readiness', source: 'readiness', projection: 'projectContextPackReadiness → summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },

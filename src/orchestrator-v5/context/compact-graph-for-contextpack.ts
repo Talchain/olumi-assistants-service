@@ -33,8 +33,27 @@ export interface CompactGraphForContextPackOptions {
   readonly requestId: string;
 }
 
+/**
+ * ⚠ THE SUCCESS-TARGET RECORD IS DELIBERATELY *NOT* DERIVED HERE.
+ *
+ * It lived on this outcome in the first draft of the fix and that was wrong.
+ * This adapter is handed `graphStateForTurn`, which is REQUEST-FIRST
+ * (`turn-executor.ts:2004`) — correct for the graph the model reasons over,
+ * and WRONG for a claim about what is SAVED: a stale or forged client
+ * `graph_state` carrying `goal_threshold_raw` would have been reported to the
+ * model as recorded state.
+ *
+ * The record now has its own module and its own authority order
+ * (`context/goal-target-record.ts`, persisted-first, matching the `:2732`
+ * precedent). Do not reintroduce it here — the two graphs are different on
+ * purpose, and colocating them is what hid the defect.
+ */
 export type CompactGraphOutcome =
-  | { readonly kind: 'compacted'; readonly compact: GraphV3Compact; readonly via: 'strict_parse' | 'structural_fallback' }
+  | {
+      readonly kind: 'compacted';
+      readonly compact: GraphV3Compact;
+      readonly via: 'strict_parse' | 'structural_fallback';
+    }
   | { readonly kind: 'absent' };
 
 /**

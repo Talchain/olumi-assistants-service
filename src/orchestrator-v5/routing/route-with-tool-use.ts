@@ -1243,6 +1243,17 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.readiness !== undefined) {
     parts.push('', READINESS_INSTRUCTION);
   }
+  // SUCCESS TARGET — CODE-OWNED, a sibling of the readiness block above,
+  // appended by the SAME condition that puts `goal_target` on the pack. Absent
+  // key → no section → no instruction → byte-identity with pre-change prompts.
+  //
+  // ⚠ THIS BLOCK IS HALF THE FIX AND THE PACK FIELD IS THE OTHER HALF. The
+  // field alone would leave the model free to prefer the transcript; the
+  // instruction alone would make it answer "unset" on every turn, because
+  // before `goal_target` the record carried no target in EITHER direction.
+  if (contextPack.goal_target !== undefined) {
+    parts.push('', GOAL_TARGET_INSTRUCTION);
+  }
   // Context v2 S4-INJECT [R2]: the facts-beat-summary precedence instruction
   // — CODE-OWNED (not PMS-served), a sibling of COACHING_CONTEXT_INSTRUCTION
   // appended the same way, gated by the same condition that put the section
@@ -1395,6 +1406,40 @@ export const READINESS_INSTRUCTION = [
   // so the resolution is to suppress the count and give this block precedence —
   // rather than reconcile two authorities that answer different questions.
   '- Do not state a number of blockers; name what is open. Where the coaching state reports a different blocker count, this block governs.',
+].join('\n');
+
+/**
+ * THE RECORD-VS-TRANSCRIPT BOUNDARY, stated to the model.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * Witnessed on deployed staging (CEE `cd3d6ae`), fresh state-class: a user
+ * named a success measure IN CONVERSATION, it was never persisted, and when
+ * asked to quote it back "or say it is unset" the assistant quoted it AS
+ * RECORDED STATE, with provenance — then explained why the non-existent target
+ * "wasn't scored". Six structural statements on the same page said no target
+ * was set.
+ *
+ * It was not stochastic hallucination. A field the user had NEVER mentioned
+ * was reported unset, correctly, on the same page — because the transcript was
+ * empty for that one. Same code path, one variable: what the conversation
+ * contained. The model was reading the only source of an answer it had been
+ * given.
+ *
+ * ── WHY THE WORDING IS SHAPED THIS WAY ─────────────────────────────────────
+ * The last bullet is not politeness. Doctrine: safety must not reduce Olumi to
+ * an empty dead end. Refusing to discuss a number the user just said would
+ * trade a fabrication for a different failure. The correct answer names both
+ * facts — you said 85%, the model does not carry it — and offers the repair,
+ * which is better product than either fabricating or going mute.
+ */
+export const GOAL_TARGET_INSTRUCTION = [
+  '## Success target (deterministic — authoritative)',
+  'The `goal_target` block above is the system’s verified answer to "is a success target recorded on this model, and what is it?". It is read from the saved model itself. Treat it as the source of truth over anything said in conversation.',
+  '- If `status` is "set", you may state that value (with its unit) as the recorded success target.',
+  '- If `status` is "unset", NO success target is recorded — say so plainly, even if a number was mentioned earlier in this conversation. A value someone mentioned in conversation has NOT been recorded on the model, and must never be quoted back as though it had been.',
+  '- Never say a target has been set, saved, updated, applied or confirmed unless this block says "set". Never attach a source or provenance to a target this block does not carry.',
+  '- If this block is absent you do not know — say what you can see and offer to check, rather than asserting either way.',
+  '- When `status` is "unset" and the user did mention a figure, do not simply refuse: name both facts and offer the fix — for example "you mentioned 85%, but it isn’t recorded on the model yet — shall I set it as the success target?".',
 ].join('\n');
 
 export const COACHING_CONTEXT_INSTRUCTION = [

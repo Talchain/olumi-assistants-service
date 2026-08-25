@@ -542,6 +542,38 @@ const ContextPackFocusSchema = z
   .strict();
 
 /**
+ * The success-target record projected onto the pack.
+ *
+ * Mirrors `ContextPackGoalTarget` (context/goal-target-record.ts), derived
+ * through the SINGLE authority `extractPersistedGoalTarget`
+ * (compose/goal-target-receipt-guard.ts) — the same predicate the receipt guard
+ * polices assistant claims against.
+ *
+ * ⚠ THE FIRST DRAFT OF THIS COMMENT CLAIMED THE TWO "CAN NEVER DISAGREE". THAT
+ * WAS FALSE AND IS THE CORRECTION WORTH KEEPING. Sharing a predicate is not
+ * sharing an input: the projector was reading the REQUEST-first graph while the
+ * guard read `context.persistedGraph`, so a stale or forged client
+ * `graph_state` could put `status: 'set'` in front of the model on a scenario
+ * the guard would have called unbacked. They agree now because both are given
+ * the persisted graph — an invariant maintained at the CALL SITE, not by the
+ * shared function, and pinned by the divergent-arm test in
+ * record-vs-transcript-boundary.route-level.test.ts.
+ *
+ * `.strict()` on both arms: a value plus its unit is the whole contract, and
+ * nothing else from the goal node belongs in the prompt.
+ */
+export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('set'),
+      value: z.number(),
+      unit: z.string().optional(),
+    })
+    .strict(),
+  z.object({ status: z.literal('unset') }).strict(),
+]);
+
+/**
  * One still-open readiness item. `kind` is the canonical low-cardinality
  * presentation tag from `summariseReadiness`; `description` is the recovery
  * authority's user-safe next step (the ROUTE, not just the fact of a
@@ -612,6 +644,21 @@ export const ContextPackSchema = z
      * turn that derived none). Absence means UNKNOWN, never "unblocked".
      */
     readiness: ContextPackReadinessSchema.optional(),
+    /**
+     * SUCCESS TARGET: is one recorded on the model, and to what value.
+     *
+     * A DISCRIMINATED UNION on purpose. `unset` is a POSITIVE claim — the
+     * graph was read and registers no target — and it is exactly the claim
+     * that was previously unsayable: with no field at all, "no target is
+     * recorded" and "the projection dropped it" were the same token, so a
+     * model asked "is it set?" answered from the conversation transcript,
+     * quoting a number the user had merely mentioned as persisted state.
+     *
+     * Present ONLY when a graph was read this turn (key absent otherwise).
+     * ABSENCE MEANS UNKNOWN, NEVER "unset". `.strict()` so a raw threshold
+     * cap or a fabricated provenance cannot ride along into the prompt.
+     */
+    goal_target: ContextPackGoalTargetSchema.optional(),
     /**
      * SELECTION-AWARE ANSWERING (hop 4): the user's canvas selection, resolved
      * against canonical state and projected display-safe by `projectFocus`.

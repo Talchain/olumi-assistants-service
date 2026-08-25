@@ -54,6 +54,7 @@ import {
   SUMMARY_PRECEDENCE_INSTRUCTION,
   FOCUS_INSTRUCTION,
   READINESS_INSTRUCTION,
+  GOAL_TARGET_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -122,6 +123,11 @@ const MODEL_FACING_CORPUS = [
   // sanction it (it is operator-managed and not editable from this repo), which
   // is precisely why the instruction is code-owned.
   READINESS_INSTRUCTION,
+  // Success target. Emitted by the SAME condition that puts `goal_target` on
+  // the pack — same reasoning as its four siblings above. Like `readiness`, the
+  // served PMS prompt cannot sanction it (operator-managed, not editable from
+  // this repo), which is exactly why the instruction is code-owned.
+  GOAL_TARGET_INSTRUCTION,
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -333,6 +339,12 @@ function assembleMaximalPack(
         },
       ],
     } as never,
+    // FIXTURE_COMPLETENESS: `goal_target` is a schema-declared key, so the
+    // maximal fixture must populate it. The `set` arm is the MAXIMAL one (it
+    // carries value AND unit); the `unset` arm is exercised by
+    // record-vs-transcript-boundary.test.ts, which is where the defect this
+    // field closes actually lives.
+    goalTarget: { status: 'set', value: 15, unit: '%' } as never,
     // A LARGE COMPACT graph — production supplies `compactedGraph`, and it is
     // the input the context-budget module actually trims, so this is what makes
     // the pack carry the `context_budget` disclosure key (FIXTURE_COMPLETENESS).
