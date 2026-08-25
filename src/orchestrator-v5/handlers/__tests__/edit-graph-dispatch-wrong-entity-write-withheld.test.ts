@@ -382,6 +382,96 @@ describe('2.1266 — the wrong-entity write is withheld (J4 t5 wire replay)', ()
   });
 });
 
+/**
+ * ⭐⭐ S7 — A `not_honoured` TURN MUST SHIP THE GESTURE, NOT ONLY THE SENTENCE.
+ *
+ * Wire-witnessed (UI `326970a7` · CEE `5f2e3fd`, guest): the chip labelled
+ * "Set effect on Cash runway consumed" returned `blocks: []` and opened
+ * nothing — `activeElement: BODY`, Model tab `aria-selected: "false"`.
+ *
+ * ⚠ THIS IS THE PIN THAT STOPS THE BUILDER BEING DEAD CODE. `ui-directive.ts`'s
+ * own unit spec proves `buildConfigureOptionRepairDirective` CONSTRUCTS a valid
+ * block; only this file proves the dispatch actually SHIPS one, through the real
+ * `dispatchEditGraph`. A builder with a green unit spec and no call site is the
+ * guarantee-theatre class this estate has paid for repeatedly.
+ *
+ * ⚠ WHY IT IS KEYED TO THE OUTCOME AND NOT TO THE CHIP (trap 21 — two questions
+ * under similar names). Two predicates changed in this PR and they answer
+ * DIFFERENT questions, deliberately:
+ *   - the GESTURE asks *"did an interventions write fail to land for the option
+ *     the user named?"* — true for every phrasing that reaches this branch, so
+ *     the directive fires on all of them. The option panel is where the value is
+ *     set however the user got here.
+ *   - the COPY asks *"has the user already named the slot?"* — true only for the
+ *     identification-complete shape, so only that shape stops being taught the
+ *     format (pinned in `repair-chip-identification-complete.test.ts`).
+ * Collapsing them into one predicate would either withhold the gesture from
+ * users who typed the sentence, or strip the format from users who named
+ * nothing. They are not the same question.
+ *
+ * The fixture below is the WIRE's, not mine (trap 16): `t4_chip_message` is a
+ * verbatim capture, and note it CARRIES A VALUE (`…to 0.12`) — it is the
+ * value-bearing sibling chip, not the repair chip. That is exactly why it is the
+ * right fixture here: it proves the gesture is bound to the OUTCOME, since this
+ * message never reaches the identification-complete copy branch at all.
+ */
+describe('S7 — a not_honoured turn hands the user to the surface that writes', () => {
+  const directivesOf = (blocks: readonly { type: string }[]) =>
+    blocks.filter((b) => b.type === 'ui_directive') as unknown as Array<{
+      verb: string;
+      source?: string;
+      targets: Array<{ id: string; kind: string; label: string }>;
+    }>;
+
+  it('PRECONDITION — the wire fixture carries a value, so it is NOT the copy branch', () => {
+    // Pins the premise the trap-21 note above rests on. Without this the
+    // gesture assertion could pass for the wrong reason and nobody would see it.
+    expect(WITNESS.wire.t4_chip_message).toMatch(/\d/);
+  });
+
+  it('ships exactly ONE ui_directive — open_inspector at the OPTION', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-gesture');
+
+    const directives = directivesOf(out.response.blocks);
+    // N=1: the compose ladder's invariant holds on this path too.
+    expect(directives).toHaveLength(1);
+    expect(directives[0]!.verb).toBe('open_inspector');
+    // IDENTITY, not "a target exists" (trap 19). A factor target would satisfy
+    // a kind-only or length-only assertion while pointing the user at a panel
+    // that cannot set this value.
+    expect(directives[0]!.targets[0]!.id).toBe(OPTION_ID);
+    expect(directives[0]!.targets[0]!.id).not.toBe(FACTOR_ID);
+    expect(directives[0]!.targets[0]!.kind).toBe('option');
+  });
+
+  it('stamps the gesture `gate` — no handler fact backs it', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-source');
+    expect(directivesOf(out.response.blocks)[0]!.source).toBe('gate');
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWIN (trap 22b). A gesture that fired when the
+   * write DID land would point at a panel to fix something already fixed — the
+   * "chip offered for a pair the user had already set" defect, re-minted as a
+   * navigation. It must stay silent on the honoured path.
+   */
+  it('DISCRIMINATING TWIN — an honoured write ships NO repair gesture', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      optionEffectAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t5_user_message, 'req-s7-honoured');
+    expect(
+      directivesOf(out.response.blocks).filter((d) => d.verb === 'open_inspector'),
+    ).toHaveLength(0);
+  });
+});
+
 describe('2.1266 opposite-direction twins — a withhold that eats a real edit is a NEW harm', () => {
   it('the effect value landing on the named option COMMITS', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
