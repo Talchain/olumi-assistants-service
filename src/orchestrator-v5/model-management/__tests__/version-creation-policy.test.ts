@@ -2,7 +2,28 @@ import { describe, expect, it } from "vitest";
 
 import { decideModelVersionCreation } from "../version-creation-policy.js";
 
-const BASE = {
+/**
+ * The fixture graph's shape, declared rather than inferred.
+ *
+ * Declared because the tests below MUTATE the clone, and an inferred type
+ * freezes each field at the exact shape the literal happens to spell — so
+ * adding `evidence_id` to a provenance object reads as an excess property
+ * against `{ source: string }`, even though the ingress node schema is
+ * `.passthrough()` and carries any such field through to the identity
+ * projection (which is precisely what the evidence/provenance case asserts).
+ */
+type TestNode = {
+  id: string;
+  kind: string;
+  label: string;
+  observed_state?: { value: number };
+  provenance?: { source: string; evidence_id?: string };
+  position?: { x: number; y: number };
+  description?: string;
+};
+type TestGraph = { nodes: TestNode[]; edges: { from: string; to: string }[] };
+
+const BASE: TestGraph = {
   nodes: [
     {
       id: "factor-price",
@@ -34,9 +55,7 @@ describe("model-version creation policy", () => {
   });
 
   it("label/description changes create a semantic version", () => {
-    const wording = structuredClone(BASE) as typeof BASE & {
-      nodes: Array<(typeof BASE.nodes)[number] & { description?: string }>;
-    };
+    const wording = structuredClone(BASE);
     wording.nodes[0]!.label = "Current list price";
     wording.nodes[0]!.description = "The price customers pay before discounts.";
     expect(decideModelVersionCreation(BASE, wording)).toEqual({
