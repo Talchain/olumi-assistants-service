@@ -44,6 +44,17 @@ function stripPresentation(value: unknown): unknown {
   return out;
 }
 
+/**
+ * Structural narrowing to the ingress shape: an object carrying `nodes` and
+ * `edges` arrays. Exported so the commit seam's version carrier can hash the
+ * EXACT bytes it persists without minting a second copy of this predicate — a
+ * hand-maintained twin of a narrowing rule is precisely how two same-named
+ * graph authorities drift apart.
+ */
+export function asGraphStateIngress(value: unknown): GraphStateIngress | null {
+  return asIngress(value);
+}
+
 function asIngress(value: unknown): GraphStateIngress | null {
   if (value === null || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
