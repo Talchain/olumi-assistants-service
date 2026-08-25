@@ -106,23 +106,28 @@ function makeGraph(goalExtra: Record<string, unknown> = {}): GraphStateIngress {
 }
 
 function priorTurnsMentioning(text: string | null): SessionTurnWithContent[] {
-  return [
-    {
-      id: 'row-1',
-      scenario_id: 'scen-abc',
-      user_id: 'user-1',
-      turn_id: 't-prev-1',
-      turn_class: 'frame',
-      handler_id: null,
-      request_hash: 'hash-1',
-      response_emitted: true,
-      llm_calls_used: 1,
-      duration_ms: 250,
-      created_at: '2026-08-24T21:00:00.000Z',
-      user_message: text,
-      assistant_message: 'Understood — tell me the options you are weighing.',
-    } as SessionTurnWithContent,
-  ];
+  // Typed, not cast: `SessionTurn.turn_class` is the SESSION vocabulary
+  // ('direct_answer', …), NOT the boundary payload's
+  // frame/clarify/propose/decide/review. A widening cast here would have hidden
+  // that — and a fixture that type-checks only because it was cast is exactly
+  // the kind that encodes the author's model of the producer instead of the
+  // producer.
+  const turn: SessionTurnWithContent = {
+    id: 'row-1',
+    scenario_id: 'scen-abc',
+    user_id: 'user-1',
+    turn_id: 't-prev-1',
+    turn_class: 'direct_answer',
+    handler_id: null,
+    request_hash: 'hash-1',
+    response_emitted: true,
+    llm_calls_used: 1,
+    duration_ms: 250,
+    created_at: '2026-08-24T21:00:00.000Z',
+    user_message: text,
+    assistant_message: 'Understood — tell me the options you are weighing.',
+  };
+  return [turn];
 }
 
 /**
