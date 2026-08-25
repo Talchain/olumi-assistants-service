@@ -46,6 +46,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeConfigureOptionClarifyResponse } from '../configure-option-clarify-response.js';
+import { findForbiddenPhraseHit } from '../forbidden-user-facing-phrases.js';
 import {
   buildRepairPairChip,
   buildRepairPairChipMessage,
@@ -113,6 +114,34 @@ describe('clicking the repair chip — identification is complete', () => {
     expect(text).toContain(OPTION);
     expect(text).toContain(FACTOR);
     expect(text).toMatch(/from 0 .*to 1/);
+  });
+
+  /**
+   * ⭐ THE MODULE'S COPY CONTRACT APPLIES TO THE NEW BRANCH TOO — and nothing
+   * else asserted it.
+   *
+   * `configure-option-clarify-response.ts`'s header requires every string it
+   * emits to survive the V5 egress guards, because `FORBIDDEN_USER_FACING_PHRASES`
+   * replaces the WHOLE response on a hit. The existing guard suite
+   * (`configure-option-clarify-terminates.test.ts`) drives only the bare-ask and
+   * answered fixtures, so **this branch's copy was outside its corpus** — a
+   * corpus that excludes a reachable class cannot certify the code over it
+   * (CLAUDE.md trap 13d). Derived via `findForbiddenPhraseHit` rather than by
+   * re-listing the patterns (trap 12).
+   */
+  it('survives the egress guard — the whole response would be replaced otherwise', () => {
+    // POSITIVE CONTROL FIRST (trap 13): an absence assertion is vacuous until
+    // the instrument is shown able to see a presence. A guard that matched
+    // nothing would let the assertion below pass while testing nothing.
+    //
+    // ⚠ THE CONTROL EARNED ITS KEEP IMMEDIATELY. It was first written with
+    // "I couldn't make that change." — taken from this composer's own header,
+    // which says the copy must carry *"no 'couldn't'"*. It returned NULL: that
+    // phrase is NOT in `FORBIDDEN_USER_FACING_PHRASES` at this tip. The header
+    // is a hand-maintained description of the list (trap 12) and is inaccurate
+    // on that word. The control below is a DERIVED member of the real list.
+    expect(findForbiddenPhraseHit('Sorry, no change was made.')).not.toBeNull();
+    expect(findForbiddenPhraseHit(compose(CHIP.message))).toBeNull();
   });
 
   it('names the locus where the value can be set by hand', () => {
