@@ -95,12 +95,27 @@ export const ObservedStateV3 = z.object({
    *  are members of the UI's 11-literal `SOURCE_CLASSES`, which the paragraph
    *  above names as "the acknowledged cross-repo source of this list" — and so
    *  were already capable of failing this parse. The widening closes latent
-   *  refusals; it does not open a new hole. Nothing in CEE BRANCHES on any
-   *  `source` value other than `brief_extraction` (complete non-test sweep at
-   *  this tip: `cee/decision-review/graph-normalizer.ts:122` and
+   *  refusals; it does not open a new hole.
+   *
+   *  ⚠ THE SENTENCE THAT USED TO FOLLOW IS NOW FALSE, AND ITS FALSENESS WAS THE
+   *  DEFECT. It read: "Nothing in CEE BRANCHES on any `source` value other than
+   *  `brief_extraction` (complete non-test sweep at this tip:
+   *  `cee/decision-review/graph-normalizer.ts:122` and
    *  `cee/provenance/money-invariant.ts`, both testing only for
    *  `brief_extraction`, whose behaviour is byte-unchanged), so a wider accept
-   *  set cannot redirect an existing decision.
+   *  set cannot redirect an existing decision." The sweep was accurate; the
+   *  INFERENCE was not. `graph-normalizer.ts` tested only for `brief_extraction`
+   *  because it held a private TWO-member mirror of this very vocabulary, and
+   *  its `else` arm sampled every user-authored literal — including a verified
+   *  `panel_elicited` answer — 50% WIDER than the model's own reading of the
+   *  brief. Testing for ONE literal out of twelve is not "not branching"; it is
+   *  branching with an inverted default.
+   *
+   *  Corrected at `cee/decision-review/value-source-extraction-type.ts`, which
+   *  maps the whole vocabulary under a `Record<KnownObservedStateSourceLiteral,
+   *  …>` so a thirteenth literal fails typecheck. `cee/provenance/
+   *  money-invariant.ts` still tests only for `brief_extraction`; that read was
+   *  NOT re-derived by this lane and is stated as unexamined, not as safe.
    *
    *  `panel_elicited` is the one genuinely NEW member, and CEE is its ONLY
    *  stamper — `set_factor_value`, and only after `verifyAppliedFrom` has
