@@ -805,6 +805,12 @@ export interface AssembleContextPackInput {
    * `conversation.window.summarised` ONLY when `conversationSummary` is
    * also supplied (a coverage number without its block would be a marker
    * that discloses nothing). Null/undefined → marker unchanged.
+   *
+   * Production passes `null` when the summary read found no section and `0`
+   * for a no-coverage floor/refusal. Those checked-degraded states retain the
+   * already-fetched hot window instead of discarding turns 9..N. Omission
+   * (`undefined`) preserves legacy/non-runtime assembler callers at eight.
+   * The whole-pack ceiling remains the only downstream budget authority.
    */
   readonly summarisedTurns?: number | null;
   /**
@@ -1457,10 +1463,18 @@ export function assembleContextPackWithSummary(
   // the block is a real four-slot summary, a floor, or a withheld refusal
   // — the latter two stamp an honest 0). No section ⇒ marker unchanged ⇒
   // byte-identity with pre-S4 packs.
+  const summaryHasCoverage =
+    input.conversationSummary !== undefined &&
+    typeof input.summarisedTurns === 'number' &&
+    input.summarisedTurns > 0;
+  const summaryCoverageWasChecked = input.summarisedTurns !== undefined;
   const projectedConversation = projectConversation(
     input.priorTurns,
     input.pendingConfirmation ?? false,
     input.priorTurnsTotal,
+    summaryCoverageWasChecked && !summaryHasCoverage
+      ? input.priorTurns.length
+      : CONTEXT_PACK_RECENT_TURNS_CAP,
   );
   const conversation =
     input.conversationSummary !== undefined &&
@@ -2269,6 +2283,13 @@ export function projectConversation(
    * `recent_turns`) is unchanged.
    */
   totalStored?: number | null,
+  /**
+   * Optional extension of the normal eight-turn verbatim window. The
+   * assembler uses the fetched hot-window length only when rolling-summary
+   * coverage is absent/zero. Values below the normal cap cannot shrink the
+   * healthy window; values above the available rows are clamped.
+   */
+  requestedTurnCap: number = CONTEXT_PACK_RECENT_TURNS_CAP,
 ): ContextPackConversation {
   // Context v2 (02 §Disclosure fix 2): window + per-turn `truncated`
   // disclosure is now UNCONDITIONAL — the pack always tells the LLM how much
@@ -2276,16 +2297,23 @@ export function projectConversation(
   // The pack is JSON.stringified into the routing prompt.
 
   // priorTurns arrives ordered by created_at DESC (most recent first) from
-  // SessionStore.readRecent. We cap at five. `last_tool_used` is the most
-  // recent handler invocation — scan the full prior_turns to find it even
-  // when it falls outside the five-turn window.
+  // SessionStore.readRecent. Healthy summary coverage uses the normal
+  // eight-turn cap; degraded summary coverage may retain the already-fetched
+  // hot window. `last_tool_used` scans all fetched rows regardless.
   //
   // V5 Conversation Context Reliability: project the per-turn conversation
   // content (user_message / assistant_message) so the LLM sees the actual
   // words of recent turns, not content-free stubs. This flows into the prompt
   // automatically via route-with-tool-use's `JSON.stringify(contextPack)` —
   // no prompt-template change needed. Null stays null.
-  const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => {
+  const finiteRequestedCap = Number.isSafeInteger(requestedTurnCap) && requestedTurnCap > 0
+    ? requestedTurnCap
+    : CONTEXT_PACK_RECENT_TURNS_CAP;
+  const effectiveTurnCap = Math.min(
+    priorTurns.length,
+    Math.max(CONTEXT_PACK_RECENT_TURNS_CAP, finiteRequestedCap),
+  );
+  const recent = priorTurns.slice(0, effectiveTurnCap).map((turn) => {
     const projected: ContextPackConversation['recent_turns'][number] = {
       turn_id: turn.turn_id,
       turn_class: turn.turn_class,
@@ -2320,7 +2348,7 @@ export function projectConversation(
   // the thing the LLM loses when a turn falls out of the window.
   // `disclosed` is now always true — the `{shown, available}` window
   // disclosure below renders unconditionally.
-  if (priorTurns.length > CONTEXT_PACK_RECENT_TURNS_CAP) {
+  if (priorTurns.length > effectiveTurnCap) {
     const contentChars = (turns: readonly SessionTurnWithContent[]): number =>
       turns.reduce(
         (sum, t) => sum + (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0),
@@ -2330,7 +2358,7 @@ export function projectConversation(
       site: 'context-pack-assembler.projectConversation',
       section: 'conversation',
       original_chars: contentChars(priorTurns),
-      kept_chars: contentChars(priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP)),
+      kept_chars: contentChars(priorTurns.slice(0, effectiveTurnCap)),
       strategy: 'window_slice',
       disclosed: true,
     });
@@ -2359,6 +2387,7 @@ export function projectConversation(
     total,
     totalKnown,
     windowCapped: priorTurns.length > recent.length,
+    fetchedWindowExpanded: effectiveTurnCap > CONTEXT_PACK_RECENT_TURNS_CAP,
   });
   return {
     recent_turns: recent,
@@ -2404,18 +2433,33 @@ function conversationWindowNotice(args: {
   readonly total: number;
   readonly totalKnown: boolean;
   readonly windowCapped: boolean;
+  /** The degraded-summary fallback exhausted the bounded fetched window. */
+  readonly fetchedWindowExpanded?: boolean;
 }): string | null {
-  const { shown, total, totalKnown, windowCapped } = args;
+  const { shown, total, totalKnown, windowCapped, fetchedWindowExpanded = false } = args;
   if (!totalKnown) {
     // The count read failed. We still know history was cut whenever the read
     // window itself over-ran the projected slice — say so WITHOUT a number
     // rather than passing off the window length as the total.
-    if (!windowCapped) return null;
-    return (
-      `[INCOMPLETE — the ${shown} most recent turns are shown above and earlier turns exist that ` +
-      `are not shown. The true total could not be read this turn. Do not describe the turns above ` +
-      `as the whole conversation, and do not state a total number of turns or exchanges.]`
-    );
+    if (windowCapped) {
+      return (
+        `[INCOMPLETE — the ${shown} most recent turns are shown above and earlier turns exist that ` +
+        `are not shown. The true total could not be read this turn. Do not describe the turns above ` +
+        `as the whole conversation, and do not state a total number of turns or exchanges.]`
+      );
+    }
+    // A degraded-summary fallback can show every row in the bounded hot read,
+    // but that does NOT turn the read-window length into a conversation total.
+    // The count failure means earlier rows are possible, not certain.
+    if (fetchedWindowExpanded) {
+      return (
+        `[INCOMPLETE — the ${shown} most recent turns fetched for this prompt are shown above. ` +
+        `The true total could not be read this turn, so earlier turns may exist outside the fetched ` +
+        `window. Do not describe the turns above as the whole conversation, and do not state a ` +
+        `total number of turns or exchanges.]`
+      );
+    }
+    return null;
   }
   if (total <= shown) return null;
   const notShown = total - shown;
