@@ -36,13 +36,13 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   invalidatePromptCache: vi.fn(),
 }));
 
-function makeResponse() {
+function makeResponse(model = 'claude-sonnet-4-6') {
   return {
     id: 'msg_test',
     type: 'message',
     role: 'assistant',
     content: [{ type: 'text', text: 'ok' }],
-    model: 'claude-sonnet-4-6',
+    model,
     stop_reason: 'end_turn',
     stop_sequence: null,
     usage: {
@@ -100,5 +100,19 @@ describe('chatWithToolsAnthropic — system_cache_blocks → SDK payload', () =>
 
     const [body] = mockCreate.mock.calls[0];
     expect(body.system).toBe('PLAIN_STRING_SYSTEM');
+  });
+
+  it('reports the provider-returned model rather than the requested alias', async () => {
+    mockCreate.mockResolvedValue(makeResponse('claude-provider-resolved-actual'));
+    const { chatWithToolsAnthropic } = await import('../../src/adapters/llm/anthropic.js');
+    const result = await chatWithToolsAnthropic({
+      system: 'system',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 't', description: 'd', input_schema: { type: 'object', properties: {} } }],
+      model: 'claude-requested-alias',
+    });
+
+    expect(mockCreate.mock.calls[0]![0].model).toBe('claude-requested-alias');
+    expect(result.model).toBe('claude-provider-resolved-actual');
   });
 });

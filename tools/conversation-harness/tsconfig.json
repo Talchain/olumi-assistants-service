@@ -30,6 +30,7 @@
     "types": ["node"]
   },
   "include": [
+    "canonical-precedence-cli.ts",
     "scorer/**/*.ts",
     "__tests__/**/*.ts",
     "vitest.config.ts",
