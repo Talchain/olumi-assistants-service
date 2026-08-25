@@ -167,6 +167,29 @@ describe('buildUserMessage — a turn with no selection is BYTE-IDENTICAL to pre
     ).toBeTypeOf('string');
     delete analysis?.analysis_not_current_note;
 
+    // SECOND SUBTRACTION, same doctrine as the first. `display_graph.goals` is
+    // now projected through `projectNode` instead of passing the raw
+    // `ContextPackGraph.goals` through by reference — it was a raw-value leak
+    // (`value` / `raw_value` / `cap` reached the model on the goals channel).
+    //
+    // On THIS fixture the delta is KEY ORDER ONLY, measured: `projectNode`
+    // emits `{id, label, kind}` where the raw compact node was `{id, kind,
+    // label}`. Same keys, same values — `goal_rev` carries no numerics, so
+    // nothing is stripped here. The precondition below pins exactly that: if a
+    // future edit gives this fixture a VALUED goal, the deep-equality check
+    // REDs rather than letting a real content change be silently subtracted.
+    //
+    // Restoring the raw array by reference reproduces the pre-change bytes
+    // exactly, by construction — no JSON text surgery (see the golden's
+    // docblock on why that route failed twice).
+    const displayGraph = pack.display_graph as unknown as { goals: readonly unknown[] };
+    expect(
+      displayGraph.goals,
+      'precondition: the goals projection must be content-neutral on this fixture — ' +
+        'a difference here is a REAL delta and must not be subtracted away',
+    ).toEqual(pack.graph.goals);
+    displayGraph.goals = pack.graph.goals;
+
     const msg = buildUserMessage(pack, USER_MESSAGE);
     expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
     expect(createHash('sha256').update(msg).digest('hex')).toBe(PRISTINE_GOLDEN_SHA256);

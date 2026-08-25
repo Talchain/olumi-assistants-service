@@ -63,6 +63,37 @@ function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+/**
+ * SUBTRACT THE GOALS-PROJECTION DELTA, so the base-commit golden above stays
+ * assertable — the same doctrine this file already applies to
+ * `analysis_not_current_note`, and for the same reason: re-capturing the hash
+ * would silently retire the only evidence that the budget wiring is
+ * byte-neutral.
+ *
+ * `display_graph.goals` used to be `ContextPackGraph.goals` passed through BY
+ * REFERENCE. That was a raw-value leak — this fixture's goal (`n0`) carries
+ * `value` / `raw_value` / `cap`, and all three reached the model on the goals
+ * channel while `display_graph.nodes` correctly showed `display_value: "0%"`.
+ * `goals` is now projected through the same `projectNode` as `nodes`.
+ *
+ * Restoring the raw array by reference reproduces the pre-change bytes EXACTLY
+ * by construction. The precondition asserts the projection genuinely changed
+ * something, so a revert of the fix cannot make this subtraction a silent
+ * no-op that still reports the golden as meaningful.
+ */
+function subtractGoalsProjectionDelta(pack: {
+  display_graph: unknown;
+  graph: { goals: readonly unknown[] };
+}): void {
+  const displayGraph = pack.display_graph as { goals: readonly unknown[] };
+  expect(
+    JSON.stringify(displayGraph.goals),
+    'precondition: goals must be PROJECTED, not passed through — if these are already ' +
+      'identical the subtraction is vacuous and this golden no longer proves byte-neutrality',
+  ).not.toBe(JSON.stringify(pack.graph.goals));
+  displayGraph.goals = pack.graph.goals;
+}
+
 function assembleUnderBudgetPack() {
   return assembleContextPack({
     payload: BASE_PAYLOAD,
@@ -226,6 +257,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
         'if it is absent the subtraction below is vacuous and proves nothing',
     ).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
+    subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
 
     expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
       UNDER_BUDGET_GOLDEN_SHA256,
@@ -318,6 +350,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     const displayAnalysis = pack.display_analysis as Record<string, unknown> | null;
     expect(displayAnalysis?.analysis_not_current_note).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
+    subtractGoalsProjectionDelta(pack);
     expect(sha256(JSON.stringify(pack))).toBe(UNDER_BUDGET_GOLDEN_SHA256);
 
     const ceilingCuts = emitSpy.mock.calls.filter(

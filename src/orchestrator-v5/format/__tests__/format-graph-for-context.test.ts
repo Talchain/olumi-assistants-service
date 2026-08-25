@@ -362,13 +362,62 @@ describe('formatGraphForContext — canonical & legacy edge shapes', () => {
 });
 
 describe('formatGraphForContext — passthrough fields', () => {
-  it('preserves options, goals, constraints, counts unchanged', () => {
+  it('preserves options, constraints, counts unchanged', () => {
     const raw = rawGraph();
     const out = formatGraphForContext(raw);
     expect(out.options).toBe(raw.options);
-    expect(out.goals).toBe(raw.goals);
     expect(out.constraints).toBe(raw.constraints);
     expect(out.counts).toBe(raw.counts);
+  });
+
+  /**
+   * `goals` USED TO BE ASSERTED HERE as `expect(out.goals).toBe(raw.goals)` —
+   * a referential-identity pin on a passthrough that was a raw-value LEAK.
+   * `goals` is a by-kind index of `nodes`, so every goal reached Sonnet twice:
+   * stripped via `nodes`, raw via `goals`, carrying `value`/`raw_value`/`cap`.
+   *
+   * ⚠ Worth recording WHY this suite could not see it. `rawGraph()`'s goal
+   * (`goal_growth`) carries NO numeric fields, so its projection is visually
+   * identical to its raw form — when the fix landed, this assertion failed with
+   * *"Compared values have no visual difference"*. And `assertNoNumbersInEdges`,
+   * the no-raw-floats guard in this file, is scoped to EDGES by name. A corpus
+   * that omits the value class the contract admits cannot certify the code over
+   * that class (trap 22). The valued-goal case below closes that gap.
+   */
+  it('projects goals through projectNode — stripping raw floats, keeping display_value', () => {
+    const raw = rawGraph({
+      nodes: [
+        { id: 'opt_a', kind: 'option', label: 'Option A' },
+        { id: 'goal_churn', kind: 'goal', label: 'Reduce Churn', value: 0.42, raw_value: 42, unit: '%', cap: 100, source: 'user', provenance: 'user' },
+      ],
+      goals: [
+        { id: 'goal_churn', kind: 'goal', label: 'Reduce Churn', value: 0.42, raw_value: 42, unit: '%', cap: 100, source: 'user', provenance: 'user' },
+      ],
+    });
+    const out = formatGraphForContext(raw);
+
+    expect(out.goals).toHaveLength(1);
+    const goal = out.goals[0]!;
+
+    // PRESENCE — an absence assertion alone would pass on an empty projection.
+    expect(goal.id).toBe('goal_churn');
+    expect(goal.label).toBe('Reduce Churn');
+    expect(goal.kind).toBe('goal');
+    expect(goal.unit).toBe('%');
+    expect(goal.display_value).toBe('42%');
+
+    // ABSENCE — the raw-value cage, now covering the goals channel too.
+    expect(goal).not.toHaveProperty('value');
+    expect(goal).not.toHaveProperty('raw_value');
+    expect(goal).not.toHaveProperty('cap');
+    expect(goal).not.toHaveProperty('provenance');
+    expect(goal).not.toHaveProperty('source');
+
+    // The invariant the fix rests on: `goals` is an index of `nodes`, so the
+    // two projections of one node must agree exactly.
+    const asNode = out.nodes.find((n) => n.id === 'goal_churn');
+    expect(asNode).toBeDefined();
+    expect(goal).toEqual(asNode);
   });
 });
 
