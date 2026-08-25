@@ -6,8 +6,8 @@
 import { stableStringify } from "../../orchestrator/context/stable-stringify.js";
 import type { GraphStateIngress } from "../boundary/request-extensions.js";
 import {
-  computeGraphIdentityHash,
-  normaliseGraphForIdentity,
+  isIdentityEmptyGraph,
+  orderGraphEntriesForComparison,
 } from "../context/graph-identity.js";
 
 export type VersionCreationDecision =
@@ -111,34 +111,71 @@ function asIngress(value: unknown): GraphStateIngress | null {
     : null;
 }
 
+/**
+ * The two shapes this policy compares, both taken from the graph ITSELF.
+ *
+ * ⚠⚠ THIS POLICY NO LONGER ASKS `computeGraphIdentityHash` WHETHER ANYTHING
+ * CHANGED (C8-A review lead finding, 2026-08-25). It used to, and that made a
+ * factor labelled "UI" silently destroy version history.
+ *
+ * `normaliseIdBase("UI")` → `"ui"`; `CANONICAL_ID_REGEX` requires no prefix, so
+ * an ordinary factor name becomes a bare id that is ALSO a member of
+ * `TRANSIENT_UI_KEYS`. Options key their interventions BY FACTOR ID
+ * (`tools/plot-intervention-scale.ts:444/:653`), so that id appears as an
+ * object KEY — and the identity projection's `stripTransientDeep` removes such
+ * keys at EVERY depth. Both sides of the comparison lost the entry, the hashes
+ * matched, the policy answered `no_op`, and `no_op` is a DESIGNED-SILENT arm:
+ * graph and turn persisted, version + head + event + receipt gone, with no
+ * telemetry to notice it. Measured for all sixteen members of that set;
+ * "UI", "Viewport", "Panel State" and "Selection" are ordinary names in a
+ * strategic model.
+ *
+ * The identity hash still collides. That is a CAS-authority defect with its own
+ * blast radius — closing it means an `IDENTITY_NORMALISER_VERSION` bump and a
+ * rehash of every persisted value — and it is ROWED, not absorbed here. What is
+ * fixed is this policy resting a history decision on a function that collides.
+ *
+ * Ordering comes from `orderGraphEntriesForComparison`, which is the identity
+ * normaliser's ordering WITHOUT its strip, reusing the same comparators so
+ * there is no second copy of the ordering rule.
+ *
+ * `full` retains everything, so it answers "did anything at all change?".
+ * `policy` additionally drops entry-level presentation fields, so it answers
+ * "did anything the user would call the MODEL change?".
+ */
+function comparableShapes(graph: GraphStateIngress): {
+  full: string;
+  policy: string;
+} {
+  const ordered = orderGraphEntriesForComparison(graph);
+  return {
+    full: stableStringify(ordered),
+    policy: stableStringify(stripPresentation(ordered)),
+  };
+}
+
 export function decideModelVersionCreation(
   priorGraph: unknown,
   projectedGraph: unknown
 ): VersionCreationDecision {
   const current = asIngress(projectedGraph);
   if (current === null) return { create: false, reason: "no_graph" };
-  const currentIdentity = computeGraphIdentityHash(current);
-  if (currentIdentity === null) return { create: false, reason: "no_graph" };
+  // Emptiness ONLY — deliberately not the identity hash. `isIdentityEmptyGraph`
+  // reads the raw graph's top-level entry arrays BEFORE any strip runs, so it
+  // cannot be perturbed by the key collision above. The check must stay: an
+  // identity-empty graph has no derivable version, and letting one through
+  // would make the commit seam throw after deciding to version it.
+  if (isIdentityEmptyGraph(current)) return { create: false, reason: "no_graph" };
 
   const prior = asIngress(priorGraph);
   if (prior === null) return { create: true, reason: "initial" };
-  const priorIdentity = computeGraphIdentityHash(prior);
-  if (priorIdentity?.value === currentIdentity.value) {
+
+  const priorShapes = comparableShapes(prior);
+  const currentShapes = comparableShapes(current);
+  if (priorShapes.full === currentShapes.full) {
     return { create: false, reason: "no_op" };
   }
-
-  const priorNormalised = normaliseGraphForIdentity(prior);
-  const currentNormalised = normaliseGraphForIdentity(current);
-  if (priorNormalised === null || currentNormalised === null) {
-    return { create: true, reason: "semantic_change" };
-  }
-  const priorPolicyShape = stableStringify(
-    stripPresentation(priorNormalised.graph)
-  );
-  const currentPolicyShape = stableStringify(
-    stripPresentation(currentNormalised.graph)
-  );
-  return priorPolicyShape === currentPolicyShape
+  return priorShapes.policy === currentShapes.policy
     ? { create: false, reason: "presentation_only" }
     : { create: true, reason: "semantic_change" };
 }

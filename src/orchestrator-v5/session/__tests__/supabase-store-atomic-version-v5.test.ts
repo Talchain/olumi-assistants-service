@@ -403,3 +403,80 @@ describe('B3 — an un-migrated database fails closed with an ACTIONABLE message
     expect((err as Error).message).not.toContain('20260824200000');
   });
 });
+
+/**
+ * ⭐⭐ `p_expected_base_known` — THE FACT SQL NULL CANNOT CARRY.
+ *
+ * The C8-A review measured that the known-base CAS guard was DARK in the
+ * running code: the mutant `const expectedBaseKnown = false` SURVIVED the whole
+ * suite (32,734 tests, exit 0). Presence of the fix is not coverage of it —
+ * nothing asserted the wire argument, so the guard could never have fired and
+ * no test could tell.
+ *
+ * These assertions are at the RPC-ARGUMENT level ON PURPOSE, and that makes
+ * them POSTURE-INDEPENDENT: they pin what CEE *tells* the database, never
+ * whether the database then refuses. Whether a refusal follows is
+ * `p_cas_enforce`'s job, i.e. `CEE_V5_GRAPH_CAS_RPC`. A test written against
+ * the refusal would pass under `enforce` and silently stop discriminating under
+ * `shadow` — the deployed value is config-derived and not process-witnessed, so
+ * a guard whose meaning depends on it is a guard that can go quiet without a
+ * code change or a review.
+ *
+ * The three cases are a DISCRIMINATING SET, not one assertion repeated:
+ * `undefined` (uninstrumented) must be FALSE, and BOTH `null` (base read, found
+ * absent) and a real hash must be TRUE. A mutant hardcoding either constant
+ * fails at least one.
+ */
+describe('p_expected_base_known — the caller states whether it KNOWS the base', () => {
+  it('a KNOWN-ABSENT base (explicit null) is announced as KNOWN', async () => {
+    const store = storeWith('enforce');
+    await store.append(write({ expectedGraphIdentityHash: null }));
+    expect(
+      v5Args().p_expected_base_known,
+      'the caller READ the base and found it absent. Reporting that as ' +
+        '"unknown" collapses it into the uninstrumented case, and v5 then ' +
+        'delegates to v4 — whose CAS is gated on `expected IS NOT NULL`, so no ' +
+        'CAS runs at all and two concurrent writers silently overwrite.',
+    ).toBe(true);
+    expect(v5Args().p_expected_graph_identity_hash).toBeNull();
+  });
+
+  it('an UNINSTRUMENTED path (undefined) is announced as UNKNOWN', async () => {
+    const store = storeWith('enforce');
+    await store.append(write({}));
+    expect(
+      v5Args().p_expected_base_known,
+      'no base was read on this path. Claiming to know it would enforce a CAS ' +
+        'against a value nobody measured — the draft path is deliberately ' +
+        'un-CAS\'d and must stay that way.',
+    ).toBe(false);
+  });
+
+  it('a real read base is announced as KNOWN, and travels verbatim', async () => {
+    const store = storeWith('enforce');
+    await store.append(
+      write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }),
+    );
+    expect(v5Args().p_expected_base_known).toBe(true);
+    expect(v5Args().p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
+  });
+
+  it('POSTURE-INDEPENDENT: the announced fact does not change with the CAS mode', async () => {
+    // The fact is a property of what the CALLER measured, never of how the
+    // database is configured to react. If these ever diverge, the flag has
+    // started editing history rather than gating enforcement.
+    for (const mode of ['off', 'shadow', 'enforce'] as const) {
+      vi.clearAllMocks();
+      selectCalls.length = 0;
+      rpc.mockResolvedValue({
+        data: { turn_row_id: 'turn-row', model_version_receipt: receipt },
+        error: null,
+      });
+      await storeWith(mode).append(write({ expectedGraphIdentityHash: null }));
+      expect(
+        v5Args().p_expected_base_known,
+        `mode=${mode}: the known-base FACT must not depend on the CAS posture`,
+      ).toBe(true);
+    }
+  });
+});

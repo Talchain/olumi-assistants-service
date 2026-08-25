@@ -242,43 +242,83 @@ describe('C8-A rollback signature tracks the forward migration', () => {
     'utf8',
   );
 
-  function paramCountOfForwardV5(): number {
-    const start = v5Code.indexOf(
-      'CREATE OR REPLACE FUNCTION public.append_turn_atomic_v5(',
-    );
+  /**
+   * ⚠⚠ THIS GUARD COMPARED COMMA COUNTS, AND A COUNT CANNOT SEE A TYPE
+   * (C8-A review, 2026-08-25). Proven by execution: mutating the rollback's
+   * `p_fence_generation` type from `BIGINT` to `INTEGER` left it 19/19 GREEN —
+   * while `DROP FUNCTION IF EXISTS` resolves on the ARGUMENT TYPE LIST, so that
+   * rollback would have matched NO function, `IF EXISTS` would have swallowed
+   * the miss, and the script would have exited 0 having dropped nothing.
+   *
+   * That is precisely the failure the guard exists to close, and the guard was
+   * structurally incapable of seeing it — arity is not identity. A rollback
+   * guard that cannot detect a broken rollback is worse than no guard, because
+   * it is trusted, and we are about to run this migration.
+   *
+   * It now compares the TYPE SEQUENCE, derived from the forward CREATE on both
+   * sides, and covers BOTH functions the rollback drops.
+   */
+
+  /** Parameter TYPES of a forward `CREATE OR REPLACE FUNCTION`, in order. */
+  function forwardParamTypes(fn: string): string[] {
+    const start = v5Code.indexOf(`CREATE OR REPLACE FUNCTION public.${fn}(`);
+    if (start === -1) return [];
     const open = v5Code.indexOf('(', start);
     const close = v5Code.indexOf(')\nRETURNS', open);
+    if (close === -1) return [];
     return v5Code
       .slice(open + 1, close)
       .split(',')
-      .filter((p) => p.trim().length > 0).length;
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((p) => {
+        // `p_name  TYPE [DEFAULT …]` → TYPE
+        const parts = p.split(/\s+/);
+        return (parts[1] ?? '').toUpperCase();
+      });
   }
 
-  function dropTypeCountOfRollbackV5(): number {
-    const start = rollback.indexOf(
-      'DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(',
-    );
+  /** Argument TYPES of the rollback's `DROP FUNCTION`, in order. */
+  function rollbackDropTypes(fn: string): string[] {
+    const start = rollback.indexOf(`DROP FUNCTION IF EXISTS public.${fn}(`);
+    if (start === -1) return [];
     const open = rollback.indexOf('(', start);
     const close = rollback.indexOf(')', open);
+    if (close === -1) return [];
     return rollback
       .slice(open + 1, close)
       .split(',')
-      .filter((p) => p.trim().length > 0).length;
+      .map((t) => t.trim().toUpperCase())
+      .filter((t) => t.length > 0);
   }
 
-  it('PROBE LIVENESS: both signatures were located and are non-trivial', () => {
-    expect(paramCountOfForwardV5()).toBeGreaterThan(20);
-    expect(dropTypeCountOfRollbackV5()).toBeGreaterThan(20);
-  });
+  const FUNCTIONS = ['append_turn_atomic_v5', 'restore_model_version_atomic_v1'];
 
-  it('the rollback DROP lists exactly as many argument types as v5 declares parameters', () => {
-    expect(
-      dropTypeCountOfRollbackV5(),
-      'the rollback DROP signature has drifted from the forward CREATE. ' +
-        'PostgreSQL will match no function, IF EXISTS will swallow it, and the ' +
-        'rollback will report success while append_turn_atomic_v5 survives.',
-    ).toBe(paramCountOfForwardV5());
-  });
+  it.each(FUNCTIONS)(
+    'PROBE LIVENESS: both signatures for %s were located and are non-trivial',
+    (fn) => {
+      // A guard that resolved two empty arrays would compare [] to [] and agree
+      // with itself forever — the exact vacuity this file exists to refuse.
+      expect(forwardParamTypes(fn).length).toBeGreaterThan(15);
+      expect(rollbackDropTypes(fn).length).toBeGreaterThan(15);
+      expect(forwardParamTypes(fn).every((t) => /^[A-Z]+$/.test(t))).toBe(true);
+    },
+  );
+
+  it.each(FUNCTIONS)(
+    "the rollback's DROP type SEQUENCE for %s matches the forward CREATE exactly",
+    (fn) => {
+      expect(
+        rollbackDropTypes(fn),
+        `the rollback DROP signature for ${fn} has drifted from the forward ` +
+          'CREATE. PostgreSQL resolves DROP FUNCTION on the argument TYPE list, ' +
+          'so it will match no function, IF EXISTS will swallow it, and the ' +
+          'rollback will report success while the function survives. Compare ' +
+          'the reported sequences element by element — a single differing type ' +
+          'is enough to orphan the statement.',
+      ).toEqual(forwardParamTypes(fn));
+    },
+  );
 
   it('the rollback still drops the function the flag must be turned off BEFORE removing', () => {
     // Deploy-order coupling, pinned so the ordering note cannot rot silently:
@@ -286,6 +326,9 @@ describe('C8-A rollback signature tracks the forward migration', () => {
     // dropping it while CEE_MODEL_VERSIONS_ENABLED is live breaks turn writes.
     expect(rollback).toContain(
       'DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(',
+    );
+    expect(rollback).toContain(
+      'DROP FUNCTION IF EXISTS public.restore_model_version_atomic_v1(',
     );
   });
 });

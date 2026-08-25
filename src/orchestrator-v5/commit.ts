@@ -81,6 +81,7 @@ import {
   attachModelVersionMutationReceipt,
   toModelVersionMutationReceiptV1,
 } from './model-management/mutation-receipt.js';
+import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
@@ -801,6 +802,23 @@ type ModelVersionCarrierSkipReason =
  * Classify HOW the graph failed GraphV3. This selects a telemetry reason only —
  * both outcomes skip — so that "an old row is missing a field" and "a field is
  * present but unusable" remain separately countable.
+ *
+ * ⚠⚠ THE HEADER ABOVE STATES A POLICY CHOICE AS AN IMPOSSIBILITY, AND THAT IS
+ * WRONG (C8-A review, 2026-08-25). It justifies skipping with "a non-conformant
+ * graph has NO valid version that could be written". That sentence is FALSE for
+ * at least two of the three classes it names: measured, `edge_type: 'causal'`
+ * (older vocabulary) and a legacy scalar `strength` BOTH yield a computable
+ * `graph_identity_hash` AND a computable `analysis_affecting_hash`, so a valid
+ * version row was available for them the whole time — the same refutation that
+ * closed the `std: 0` case.
+ *
+ * What is actually true is narrower and worth saying plainly: we CHOOSE not to
+ * version a graph that fails the canonical contract, because a version row is
+ * GraphV3-shaped by contract and admitting non-conformant bytes into the
+ * durable record would make the version store's own guarantee untrue. That is a
+ * defensible policy. It is not an impossibility, and stating it as one is how
+ * the next session inherits a wrong belief and reasons from it — which is
+ * exactly what happened with `std: 0`.
  */
 function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkipReason {
   const everyIssueIsAMissingField =
@@ -1393,17 +1411,62 @@ export async function commitDirectAnswer(
       : {}),
   });
   const persistedRowId = appendOutcome.id;
-  const publicModelVersionReceipt =
-    appendOutcome.modelVersionReceipt === undefined
-      ? null
-      : toModelVersionMutationReceiptV1(
-          metadata.scenario_id,
-          appendOutcome.modelVersionReceipt,
-        );
-  const responseWithModelVersionReceipt =
-    publicModelVersionReceipt === null
-      ? responseForCommit
-      : attachModelVersionMutationReceipt(responseForCommit, publicModelVersionReceipt);
+
+  // ⚠⚠ DEGRADE, NEVER THROW — THE WRITE IS ALREADY DURABLE HERE (C8-A review,
+  // 2026-08-25). Both calls below run AFTER `store.append` and, until this
+  // change, OUTSIDE the guarded block beneath them. Both can throw: the
+  // construction runs `ModelVersionMutationReceiptV1LocalSchema.parse`, and the
+  // attach runs a `.strict()` parse that rejects ANY unknown top-level key on
+  // the response. A throw at this point does not roll anything back — it tells
+  // a user their committed turn failed, which is the persisted-state invariant
+  // inverted, and it is the same class as the pre-transaction telemetry defect
+  // one step earlier in this function.
+  //
+  // Honest status: LATENT, not demonstrated. The review could not produce a
+  // live supplier of an unknown top-level key today. It is guarded anyway
+  // because the cost of being wrong is asymmetric — a missing receipt is a
+  // degraded response the client already handles (the field is optional), while
+  // a throw is a false failure report on durable state.
+  //
+  // The receipt is a REPORT about the write, never part of it, so omitting it
+  // cannot corrupt anything. The turn result is unaffected.
+  let publicModelVersionReceipt: ModelVersionMutationReceiptV1Local | null = null;
+  let responseWithModelVersionReceipt = responseForCommit;
+  try {
+    publicModelVersionReceipt =
+      appendOutcome.modelVersionReceipt === undefined
+        ? null
+        : toModelVersionMutationReceiptV1(
+            metadata.scenario_id,
+            appendOutcome.modelVersionReceipt,
+          );
+    responseWithModelVersionReceipt =
+      publicModelVersionReceipt === null
+        ? responseForCommit
+        : attachModelVersionMutationReceipt(
+            responseForCommit,
+            publicModelVersionReceipt,
+          );
+  } catch (receiptErr) {
+    // Reset BOTH, so a construction that succeeded and an attach that then
+    // failed cannot leave the commit returning a receipt the response does not
+    // carry — the two must agree or a consumer reading one and rendering the
+    // other diverges.
+    publicModelVersionReceipt = null;
+    responseWithModelVersionReceipt = responseForCommit;
+    log.warn(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_row_id: persistedRowId,
+        err:
+          receiptErr instanceof Error ? receiptErr.message : String(receiptErr),
+      },
+      'ModelManagement — model-version receipt could not be built or attached; ' +
+        'the turn is COMMITTED and is returned without a receipt (report only, ' +
+        'never part of the write)',
+    );
+  }
 
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist

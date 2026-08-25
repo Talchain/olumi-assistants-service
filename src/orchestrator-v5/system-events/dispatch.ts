@@ -768,12 +768,22 @@ async function dispatchEdgeStrengthEdit(
       pending_actions: [],
       priorPendingActions: priorPendingActions,
       contentGraph: result.mutatedGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -1160,12 +1170,22 @@ async function dispatchStructuralDelete(
       pending_actions: [],
       priorPendingActions,
       contentGraph: result.mutatedGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -1464,12 +1484,22 @@ async function dispatchFactorValueEdit(
       // symptom was a hash that never moved.
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;

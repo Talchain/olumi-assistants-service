@@ -707,3 +707,68 @@ describe("model-version skip telemetry — ordering (Codex defect 5)", () => {
     }
   });
 });
+
+/**
+ * ⭐ GATE 5 — A RECEIPT FAULT MUST NOT REPORT A COMMITTED TURN AS FAILED.
+ *
+ * `toModelVersionMutationReceiptV1` and `attachModelVersionMutationReceipt` run
+ * AFTER `store.append` — the write is already durable — and both can throw: the
+ * first runs a Zod `.parse`, the second a `.strict()` parse that rejects ANY
+ * unknown top-level key on the response. Until this fix they sat OUTSIDE the
+ * guarded block beneath them, so a throw there surfaced an irreversible commit
+ * to the caller as an error.
+ *
+ * Honest status: LATENT. No live supplier of an unknown top-level key was
+ * demonstrated. It is guarded because the costs are asymmetric — a missing
+ * receipt is a degraded response whose field is already optional, while a throw
+ * is a FALSE FAILURE REPORT about durable state, which is the same class as the
+ * pre-transaction telemetry defect fixed one step earlier in this function.
+ *
+ * The fault is injected at the RECEIPT CARRIER, not by stubbing the module, so
+ * this exercises the real construction path rather than a mock of it.
+ */
+describe("model-version receipt — degrade, never throw (gate 5)", () => {
+  it("a receipt that cannot be built still returns the COMMITTED turn", async () => {
+    const { store } = capturingStore();
+    const base = createNoopSessionStore();
+    const poisoned: SessionStore = {
+      ...base,
+      async append(write) {
+        return {
+          id: "row-1",
+          // A carrier whose `version_id` is not a UUID: the receipt schema
+          // rejects it, so construction throws on durable state.
+          modelVersionReceipt: {
+            ...receiptFor(write),
+            version_id: "not-a-uuid",
+          } as AtomicCommittedModelVersionReceipt,
+        };
+      },
+    };
+    void store;
+
+    const result = await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH },
+      poisoned,
+    );
+
+    expect(
+      result.performed,
+      "the append succeeded and the write is durable — a receipt fault must " +
+        "never convert that into a turn failure",
+    ).toBe(true);
+    expect(
+      (result.response as Record<string, unknown>).model_version_receipt,
+      "the PUBLIC wire receipt is a REPORT about the write, never part of it. " +
+        "When it cannot be built it is omitted — the field is optional on the " +
+        "response schema — and the committed turn is returned regardless.",
+    ).toBeUndefined();
+    // NOTE the deliberate asymmetry: `result.modelVersionReceipt` is the
+    // STORE'S RAW CARRIER, a different object with different (internal)
+    // consumers, and it is unaffected by a wire-receipt construction fault. Only
+    // the public receipt degrades. Asserting both were null would be asserting a
+    // relationship that does not exist.
+    expect(result.modelVersionReceipt).not.toBeNull();
+  });
+});

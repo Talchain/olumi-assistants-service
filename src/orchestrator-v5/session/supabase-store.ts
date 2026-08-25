@@ -1251,8 +1251,20 @@ export class SupabaseSessionStore implements SessionStore {
     // So the knowledge travels as its own parameter. v5 enforces a null-safe
     // `IS DISTINCT FROM` only when the base is KNOWN; when it is not, v5
     // delegates to v4 exactly as before, which is what the C4 oracle's
-    // N1a/N1b/N2 pins assert. `in` rather than `!== undefined` so an explicitly
-    // absent property and a present-but-undefined one read alike.
+    // N1a/N1b/N2 pins assert.
+    //
+    // ⚠ PROSE CORRECTED (C8-A review, 2026-08-25): this comment used to claim
+    // "`in` rather than `!== undefined`" while the code below is, and always
+    // was, `!== undefined`. The CODE is right and the sentence was backwards.
+    // `!== undefined` deliberately treats an omitted property and an explicit
+    // `undefined` ALIKE — both mean "this path did not read a base" — while
+    // keeping `null` distinct, because null is a base that WAS read and found
+    // absent. That is the whole distinction this parameter exists to carry, so
+    // a comment describing the opposite test is worse than none.
+    //
+    // Callers must therefore SPREAD their CAS object rather than conditionally
+    // omitting the key; `system-events/dispatch.ts` omitted it and made this
+    // fact permanently false on three live paths.
     const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
 
     const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
