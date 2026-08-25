@@ -2566,8 +2566,10 @@ export async function runTurnExecutor(
       // no-dark-launches ruling). The loader owns the whole activation
       // condition: below-window conversations return immediately (no store
       // construction, no RPC; byte-identity pinned by test); beyond the
-      // window it performs ONE read and degrades to "no block" on any
-      // failure (never a turn failure). Lag/staleness (01 §4) is computed
+      // window it performs one read, with one immediate retry only for an
+      // explicitly attested transient connection code, and degrades to "no
+      // block" after any final failure (never a turn failure). Lag/staleness
+      // (01 §4) is computed
       // against the same prior turns the pack's verbatim window projects
       // from — the FULL hot read (≤ SESSION_READ_WINDOW_TURNS, default 20),
       // NOT the 5-turn pack slice; that surplus is what lets the loader's

@@ -28,6 +28,7 @@ import {
   buildConversationSummarySection,
   loadConversationSummaryForInjection,
 } from '../inject.js';
+import { RollingSummaryStoreError } from '../store-adapter.js';
 import type { RollingSummary } from '../summary-types.js';
 import type { RollingSummaryStorePort } from '../store-adapter.js';
 
@@ -195,6 +196,124 @@ describe('loadConversationSummaryForInjection — below-window activation gate',
     });
     expect(outcome.section).toBeNull();
     expect(outcome.lagTurns).toBeNull();
+    expect(store.loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('one attested transient read failure retries once and recovers the stored summary', async () => {
+    const loadSummary = vi
+      .fn<RollingSummaryStorePort['loadSummary']>()
+      .mockRejectedValueOnce(
+        new RollingSummaryStoreError('opaque store failure', { code: '57P03' }),
+      )
+      .mockResolvedValueOnce(summaryFixture());
+    const store: RollingSummaryStorePort = {
+      loadSummary,
+      upsertSummary: vi.fn(),
+    };
+
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      requestId: 'req-transient-recovery',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(2);
+    expect(loadSummary).toHaveBeenNthCalledWith(1, 'scn-1');
+    expect(loadSummary).toHaveBeenNthCalledWith(2, 'scn-1');
+    expect(outcome.section?.text).toContain('Keep Maria on the team.');
+    expect(outcome.lagTurns).toBe(0);
+    expect(outcome.summarisedTurns).toBe(1);
+  });
+
+  it.each(['08001', '08006', '08P01', '53300', 'PGRST001', 'PGRST002', 'PGRST003'])(
+    'retries the explicit transient code %s exactly once',
+    async (code) => {
+      const loadSummary = vi.fn(async () => {
+        throw new RollingSummaryStoreError('transient read failed', { code });
+      });
+      const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+      const outcome = await loadConversationSummaryForInjection({
+        scenarioId: 'scn-1',
+        windowTurnsNewestFirst: [T2, T1],
+        windowDepth: 1,
+        summaryStore: store,
+      });
+
+      expect(loadSummary).toHaveBeenCalledTimes(2);
+      expect(outcome).toEqual({ section: null, lagTurns: null, summarisedTurns: null });
+    },
+  );
+
+  it('does not retry transient-looking prose without an attested code', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError(
+        'could not connect: database is starting and the pool timed out',
+      );
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a producer-attested non-transient schema/RPC error', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('function not found', { code: 'PGRST202' });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+    expect(outcome.section).toBeNull();
+  });
+
+  it('does not treat an arbitrary malformed 08-prefix token as SQLSTATE class 08', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('malformed code', { code: '08oops' });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry PGRST000 because it may attest a non-transient bad database URI', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('database connection is unavailable', {
+        code: 'PGRST000',
+      });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
   });
 });
 
