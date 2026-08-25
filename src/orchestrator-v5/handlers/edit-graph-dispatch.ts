@@ -3781,8 +3781,8 @@ export async function dispatchEditGraph(
     //
     // ⚠ WHY IT IS EMITTED HERE AND NOT BY THE LADDER, since that is the obvious
     // question and the obvious answer is wrong: this branch commits
-    // `handler_facts: []` (nothing applied ⇒ `editGraphFact` stays null a few
-    // hundred lines below), and `compose.ts`'s directive ladder is driven
+    // `handler_facts: []` (nothing applied ⇒ `editGraphFact` stays null at the
+    // commit site further down this function), and `compose.ts`'s ladder is driven
     // ENTIRELY by that fact list. A `case 'edit_graph'` in
     // `buildFocusInspectorDirective` would be live code no data can reach
     // (CLAUDE.md trap 16-inverse). This site is the one that HOLDS the option
