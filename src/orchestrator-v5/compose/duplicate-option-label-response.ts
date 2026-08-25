@@ -27,22 +27,43 @@
  *   MERGE the two options       → silently deletes a user's option. Over-
  *                                 suppression here is WORSE than the dead end.
  *   RENAME THEM FOR THE USER    → invents user-facing content (P5).
- *   PUT THE ID IN THE REPLAY    → the sibling composer states a copy contract
- *                                 banning `opt_*` in user-facing text.
- *                                 ⚠ THAT CONTRACT IS NOT ENFORCED, and an
- *                                 earlier draft of this header asserted it as
- *                                 fact. Measured: no detector in the repo
- *                                 matches `opt_*`, the one that would is
+ *   PUT THE ID IN THE REPLAY    → STRUCTURALLY BLOCKED by the contract, which
+ *                                 is a different and stronger reason than the
+ *                                 one an earlier draft of this header gave.
+ *
+ *                                 ⚠ WHAT THAT DRAFT GOT WRONG: it cited the
+ *                                 sibling composer's copy contract ("no
+ *                                 `opt_*` in user-facing text") as if it were
+ *                                 enforced. It is not — NO detector in the
+ *                                 repo matches `opt_*`, the one that would is
  *                                 excluded from the global list, and the
  *                                 egress guard is scoped to `assistant_text`
- *                                 only — while chip ids already ship
- *                                 snake_case on the wire by design, and the
- *                                 estate has ratified a chip whose replay
- *                                 differs from its display. An id-bearing chip
- *                                 was therefore a LIVE DESIGN OPTION, not a
- *                                 prohibited one. It is declined on the
- *                                 narrower ground below — this reply needs no
- *                                 chip at all — NOT because a rule forbids it.
+ *                                 alone. Do not re-assert it as a rule.
+ *
+ *                                 ⭐ THE REAL REASON, read at the RESOLVED
+ *                                 package this file imports from
+ *                                 (`@talchain/schemas/boundary` →
+ *                                 `dist/boundary/olumi-response.js:21-27`):
+ *                                 `ActionSchema` is `.strict()` and carries
+ *                                 exactly `id`, `label`, `message`,
+ *                                 `action_type?`, `detail?`. THERE IS NO
+ *                                 FREE-FORM PAYLOAD FIELD, so an ad-hoc
+ *                                 `target_id` cannot be attached at all.
+ *                                 An id could therefore ride ONLY in
+ *                                 `message` — which is REPLAYED AS USER TEXT
+ *                                 and so is user-visible — or in `id`, which
+ *                                 is the chip's own join key and never a
+ *                                 referent the resolver reads. There is no
+ *                                 third slot. So an id-bearing chip is not a
+ *                                 freely available design option: it requires
+ *                                 putting a node id into user-visible replay
+ *                                 text, which is precisely what the copy
+ *                                 convention exists to prevent.
+ *
+ *                                 Both halves are stated because the next
+ *                                 reader inherits whichever one is written:
+ *                                 the convention is real but unenforced; the
+ *                                 SCHEMA is what actually closes this door.
  *   DECLINE                     → drops the turn to the edit LLM, i.e. the
  *                                 wrong-entity-write path `option-effect-write`
  *                                 exists to close. A visible dead end traded
