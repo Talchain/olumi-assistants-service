@@ -83,8 +83,44 @@ function joinPhrases(phrases: readonly string[]): string {
   return `${phrases.slice(0, -1).join(', ')} or ${phrases[phrases.length - 1]!}`;
 }
 
+/**
+ * ⭐ THE `draft_graph` LIMB OF THE SAME HONESTY RULE (25 Aug 2026).
+ *
+ * Capabilities this deployment GENUINELY PROVIDES, but through a dispatch
+ * path that is not the validator's handler registry. `draft_graph` is
+ * dispatched by route-v2 BEFORE routing (`dispatchDraftGraph`, no flag), so
+ * it is deliberately absent from both `HANDLER_VALIDATION_REGISTRY` and the
+ * routing tool-schema enum. When the routing model proposes it anyway — an
+ * out-of-enum proposal, which is the ONLY way this composer is reachable —
+ * the validator returns HANDLER_NOT_FOUND and the generic template used to
+ * assert a version-level capability limit.
+ *
+ * WITNESSED on deployed staging, 25 Aug 2026 (1 of 14 fresh-guest runs;
+ * drafting succeeded in 12 of the other 13 on the same deploy):
+ *   "I can't do draft graph through chat in this version."
+ * Drafting from a brief is the product's PRIMARY capability. The sentence
+ * denied a capability the deployment has, and offered no route to a model.
+ *
+ * The values are the USER-FACING phrasing of the capability, so the honest
+ * copy is DERIVED from this table rather than written out beside it.
+ *
+ * ⚠ HAND-WRITTEN LIST — the part that can go short (CLAUDE.md trap 12d).
+ * Pinned BOTH WAYS in `__tests__/unsupported-action-draft-capability-honesty
+ * .test.ts`: every id here must be ABSENT from the validation registry AND
+ * from the tool-schema enum, so an id that becomes a real handler REDs
+ * instead of keeping a dead honesty branch.
+ */
+export const SYSTEM_DISPATCHED_CAPABILITY_PHRASES: Readonly<Record<string, string>> = {
+  draft_graph: 'build a model from your decision brief',
+};
+
 /** Coarse category used to pick copy. */
-type HandlerCategory = 'structural' | 'value_change' | 'analysis_dep' | 'generic';
+type HandlerCategory =
+  | 'structural'
+  | 'value_change'
+  | 'analysis_dep'
+  | 'system_dispatched'
+  | 'generic';
 
 const STRUCTURAL_HANDLERS = new Set([
   'add_option',
@@ -115,9 +151,15 @@ const ANALYSIS_DEP_HANDLERS = new Set([
 ]);
 
 function categorise(handlerId: string): HandlerCategory {
+  // Order is load-bearing and deliberately ADDITIVE: the three named buckets
+  // keep first claim, so no existing categorisation moves (the 2.663
+  // structural branch owns `edit_graph` and must keep it — pinned by the
+  // regression twin). `system_dispatched` intercepts ONLY what would
+  // otherwise have fallen through to the generic version-limit denial.
   if (STRUCTURAL_HANDLERS.has(handlerId)) return 'structural';
   if (VALUE_HANDLERS.has(handlerId)) return 'value_change';
   if (ANALYSIS_DEP_HANDLERS.has(handlerId)) return 'analysis_dep';
+  if (SYSTEM_DISPATCHED_CAPABILITY_PHRASES[handlerId] != null) return 'system_dispatched';
   return 'generic';
 }
 
@@ -153,6 +195,9 @@ export function composeUnsupportedActionResponse(
     safeHandlerId,
     hasAnalysis,
     supportedMutationPhrases(context.handlerRegistry),
+    // Looked up on the RAW handler id: the table is keyed by wire ids, and
+    // `sanitiseForUser` is a user-facing transform, not an identity.
+    SYSTEM_DISPATCHED_CAPABILITY_PHRASES[handlerId] ?? null,
   );
 
   return {
@@ -174,8 +219,31 @@ function buildText(
   safeHandlerId: string,
   hasAnalysis: boolean,
   supportedMutations: readonly string[],
+  systemDispatchedPhrase: string | null,
 ): string {
   switch (category) {
+    case 'system_dispatched': {
+      // The capability EXISTS; it simply is not reachable as a validator
+      // handler, which is an implementation fact and never a product limit.
+      //
+      // Three constraints this copy is written against, in order:
+      //  1. It must not claim a version-level capability limit.
+      //  2. It must offer a next action the user can actually take. That
+      //     action is TYPED TEXT, deliberately not a chip: route-v2's draft
+      //     heuristic excludes `source === 'chip_click'` outright, so a chip
+      //     can never reach the draft dispatch. Offering one would be a
+      //     second dead-end affordance dressed as a fix.
+      //  3. It must assert NOTHING about model or analysis state. This
+      //     composer has no view of the persisted graph, and the same path is
+      //     reachable on a continuation scenario that already holds a model —
+      //     so "nothing was built" would be false exactly where it mattered.
+      const phrase = systemDispatchedPhrase ?? 'do that';
+      return (
+        `I can ${phrase}. I couldn't read that message as a brief, though. ` +
+        "Tell me the decision you're weighing and the options you're choosing " +
+        "between, and I'll draft it."
+      );
+    }
     case 'structural': {
       const canvasFallback =
         `You can make this change (${safeHandlerId.replace(/_/g, ' ')}) directly on the canvas, ` +
