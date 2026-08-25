@@ -83,7 +83,23 @@ export interface DisplaySafeGraph {
   readonly nodes: readonly DisplaySafeNode[];
   readonly edges: readonly DisplaySafeEdge[];
   readonly options: readonly unknown[];
-  readonly goals: readonly unknown[];
+  /**
+   * Goal nodes, projected through the SAME `projectNode` as `nodes` — not the
+   * raw `ContextPackGraph.goals` passthrough this field used to carry.
+   *
+   * `ContextPackGraph.goals` is a by-kind INDEX of `ContextPackGraph.nodes`
+   * (both constructors — `projectCompactGraph` and `projectGraph` — derive it
+   * by filtering the same node array), so every entry here is also in `nodes`.
+   * Passing it through unprojected therefore did not add information: it
+   * duplicated each goal in raw form and defeated the raw-value strip that
+   * `DisplaySafeNode` exists to enforce. Measured on the production path, one
+   * goal reached Sonnet as BOTH `{unit, display_value: "42%"}` (via `nodes`)
+   * and `{value: 0.42, raw_value: 42, cap: 100}` (via `goals`).
+   *
+   * Typed as `DisplaySafeNode[]` rather than `unknown[]` so the guarantee is
+   * checked by the compiler, not just by the test suite.
+   */
+  readonly goals: readonly DisplaySafeNode[];
   readonly constraints: readonly unknown[];
   readonly counts: ContextPackGraph['counts'];
 }
@@ -469,7 +485,17 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     and legacy `strength_mean`. When no strength is present an
  *     existing `relationship` (idempotent re-projection) is preserved.
  *
- *   - `options`, `goals`, `constraints`, `counts`: pass through unchanged.
+ *   - `goals` is projected through the SAME `projectNode` as `nodes`. It used
+ *     to pass through unchanged, which was a raw-value LEAK: `goals` is a
+ *     by-kind index of `nodes` built by filtering the same array, so each goal
+ *     reached Sonnet twice — once stripped via `nodes`, once raw via `goals`,
+ *     carrying `value` / `raw_value` / `cap`. Projecting loses nothing the
+ *     model had (the stripped twin was always already present) and gains
+ *     `display_value`, which the raw compact node has no field for.
+ *
+ *   - `options`, `constraints`, `counts`: pass through unchanged. `options` is
+ *     already projected to `{id, label}` by the assembler and carries no
+ *     numerics; `constraints` is threaded from the caller.
  */
 export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
   const labelMap = new Map<string, string>();
@@ -491,11 +517,21 @@ export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
     if (projected !== null) edges.push(projected);
   }
 
+  // Goals go through the SAME projector as `nodes` — see the `goals` field
+  // note on `DisplaySafeGraph`. Because `raw.goals` is a by-kind index of
+  // `raw.nodes`, a goal that projects to `null` here is one that was already
+  // dropped from `nodes` above, so the two arrays stay consistent.
+  const goals: DisplaySafeNode[] = [];
+  for (const goal of raw.goals as readonly RawNodeShape[]) {
+    const projected = projectNode(goal);
+    if (projected !== null) goals.push(projected);
+  }
+
   return {
     nodes,
     edges,
     options: raw.options,
-    goals: raw.goals,
+    goals,
     constraints: raw.constraints,
     counts: raw.counts,
   };
