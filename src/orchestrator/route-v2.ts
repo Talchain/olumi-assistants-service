@@ -241,6 +241,7 @@ import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/config
 // half binds inside `dispatchEditGraph`, against the graph it applies to).
 import { resolveOptionEffectWrite } from '../orchestrator-v5/routing/option-effect-write.js';
 import { composeOptionEffectAskResponse } from '../orchestrator-v5/compose/option-effect-ask-response.js';
+import { composeDuplicateOptionLabelResponse } from '../orchestrator-v5/compose/duplicate-option-label-response.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
@@ -5263,6 +5264,46 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         message: ingress.message,
         graph: effectiveGraphState,
       });
+      // ⭐⭐ THE DUPLICATE-OPTION-LABEL EXIT — a journey-witnessed dead end.
+      //
+      // Two or more options carry ONE normalised label, so the ask below cannot
+      // be composed: it would quote one string twice and offer chips that are
+      // byte-identical in label AND message, every one of which re-enters this
+      // same state. Measured at pristine `14aefde6` on the captured graph.
+      //
+      // ⚠ THIS BRANCH MUST SIT BEFORE THE ASK AND MUST NOT FALL THROUGH. Left
+      // unhandled, `label_collision` would drop to the V4 edit dispatch — the
+      // wrong-entity-write path `option-effect-write` exists to close — trading
+      // a visible dead end for a possible silent corruption. Fixing this by
+      // deleting the branch is therefore strictly worse than the defect.
+      //
+      // Nothing is written, and readiness is derived from the UNCHANGED graph,
+      // exactly as the sibling ask does: the disambiguation turn must not be
+      // the turn the user's specific blocker disappears.
+      if (optionEffectAsk.matched && optionEffectAsk.kind === 'label_collision') {
+        emit(TelemetryEvents.V5OptionEffectLabelCollision, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          colliding_count: optionEffectAsk.collidingCount,
+        });
+        const collisionReadiness = buildCanonicalAnalysisReadyFromGraph(effectiveGraphState);
+        const collisionResponse = composeDuplicateOptionLabelResponse({
+          collidingLabel: optionEffectAsk.collidingLabel,
+          collidingCount: optionEffectAsk.collidingCount,
+          stage: ingress.stage,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', collisionResponse, {
+          ...(collisionReadiness !== undefined ? { analysisReady: collisionReadiness } : {}),
+          graph: null,
+          ...(await claimSafety.forExit()),
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
+
       if (optionEffectAsk.matched && optionEffectAsk.kind === 'ask') {
         emit(TelemetryEvents.V5OptionEffectAskEmitted, {
           request_id: requestId,

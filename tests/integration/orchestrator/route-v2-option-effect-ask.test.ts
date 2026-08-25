@@ -150,6 +150,35 @@ const GRAPH_STATE = {
   ],
 };
 
+/**
+ * ⭐⭐ THE COLLIDING GRAPH — two options carrying the SAME label, distinct ids.
+ *
+ * Same shape as `GRAPH_STATE`, and deliberately so: the ONLY difference is that
+ * `opt_leeds_dup` repeats `OPTION_A` verbatim. So a difference in outcome
+ * between the two fixtures is attributable to the collision and to nothing else.
+ */
+const COLLIDING_GRAPH_STATE = {
+  nodes: [
+    { id: 'dec_depot', kind: 'decision', label: 'Depot capacity' },
+    { id: 'opt_leeds', kind: 'option', label: OPTION_A, interventions: {} },
+    { id: 'opt_leeds_dup', kind: 'option', label: OPTION_A, interventions: {} },
+    {
+      id: 'fac_capex',
+      kind: 'factor',
+      label: FACTOR,
+      observed_state: { value: 0.5, source: 'cee_inference', extractionType: 'inferred' },
+    },
+    { id: 'goal_margin', kind: 'goal', label: 'Margin preservation' },
+  ],
+  edges: [
+    edge('dec_depot', 'opt_leeds'),
+    edge('dec_depot', 'opt_leeds_dup'),
+    edge('opt_leeds', 'fac_capex'),
+    edge('opt_leeds_dup', 'fac_capex'),
+    edge('fac_capex', 'goal_margin'),
+  ],
+};
+
 function makeEditGraphMockResult() {
   return {
     response: {
@@ -187,6 +216,10 @@ function makeTurnExecutorMockResult() {
       validation_error_code: null,
     },
   };
+}
+
+function collidingPayload(message: string): Record<string, unknown> {
+  return { ...payload(message), graph_state: COLLIDING_GRAPH_STATE };
 }
 
 function payload(message: string): Record<string, unknown> {
@@ -264,6 +297,85 @@ describe('POST /orchestrate/v2/turn — an ambiguous option-effect request asks'
     expect(res.statusCode).toBe(200);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
     expect((res.json() as { assistant_text: string }).assistant_text).toBe('edit lane engaged');
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ⭐⭐ THE DUPLICATE-OPTION-LABEL EXIT, AT THE ROUTE.
+  //
+  // ⚠ WHY THIS BLOCK EXISTS AS A ROUTE TEST AND NOT ONLY A RESOLVER TEST.
+  // The resolver spec proves `label_collision` is RETURNED. It cannot prove the
+  // route HANDLES it — and an unhandled `label_collision` does not fail loudly:
+  // it falls past this block to `dispatchEditGraph`, i.e. the wrong-entity-write
+  // path the whole seam exists to close. Measured: neutralising the route's
+  // collision branch left the full required gate byte-identical to pristine
+  // (1,868 files / 32,917 passed), so a tidy-up deleting it would have restored
+  // the defect AND made it silent, under a fully green suite. The positive
+  // control for that measurement is the sibling ask branch in this same block,
+  // whose equivalent mutation REDs the first test in this file.
+  //
+  // So the load-bearing assertion here is `dispatchEditGraphMock` NOT called.
+  // Everything else is corroboration.
+  describe('two options share one label — the escape exit', () => {
+    it('answers with the escape coaching and NEVER reaches the edit lane', async () => {
+      // PRECONDITION PINNED, not assumed: two DISTINCT option ids carrying ONE
+      // label. A fixture that silently collapsed them would make every
+      // assertion below pass for the wrong reason.
+      const options = COLLIDING_GRAPH_STATE.nodes.filter((n) => n.kind === 'option');
+      expect(options).toHaveLength(2);
+      expect(new Set(options.map((n) => n.id)).size).toBe(2);
+      expect(new Set(options.map((n) => n.label)).size).toBe(1);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: collidingPayload(
+          `Set the ${OPTION_A} option's effect on ${FACTOR} to 0.4.`,
+        ),
+      });
+
+      expect(res.statusCode).toBe(200);
+      // ⭐ THE ONE THAT MATTERS. An unhandled collision falls through to here.
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      expect(turnExecutorMock).not.toHaveBeenCalled();
+
+      const body = res.json() as {
+        assistant_text: string;
+        suggested_actions: Array<{ label: string; message?: string }>;
+      };
+      expect(body.assistant_text).toContain('share the name');
+      expect(body.assistant_text).toContain('not changed the model');
+      // The route the copy names, and the label quoted exactly ONCE — the old
+      // ask's whole failure was repeating one string as if that distinguished it.
+      // DELETE, not rename: rename is dark in the UI at the deployed tip, so
+      // naming it would swap this dead end for a new one.
+      expect(body.assistant_text.toLowerCase()).toContain('press delete');
+      expect(body.assistant_text.split(OPTION_A)).toHaveLength(2);
+      // ⚠ NO CHIP. Every label-spelled chip re-enters the collision; this is the
+      // difference from the sibling ask above, which ships chips deliberately.
+      expect(body.suggested_actions).toHaveLength(0);
+    });
+
+    it('OPPOSITE-DIRECTION TWIN — DISTINCT labels still reach the chip-bearing ask, not this exit', async () => {
+      // Without this twin the block above would pass on a route that answered
+      // every ambiguous option-effect turn with the rename copy, silently
+      // withdrawing the chips the distinct-label ask is supposed to offer.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload(
+          `Set the ${OPTION_A} option's effect and the ${OPTION_B} option's effect on ${FACTOR} to 0.4.`,
+        ),
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        assistant_text: string;
+        suggested_actions: Array<{ label: string }>;
+      };
+      expect(body.assistant_text).not.toContain('share the name');
+      expect(body.suggested_actions.length).toBeGreaterThan(0);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    });
   });
 
   it('OPPOSITE-DIRECTION TWIN — an ordinary edit is dispatched, not asked', async () => {

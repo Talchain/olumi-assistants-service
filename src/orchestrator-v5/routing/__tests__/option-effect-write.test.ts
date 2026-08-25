@@ -832,10 +832,19 @@ describe('F1 — a nested label is dropped only WHERE it is nested (position, no
     );
   });
 
-  it('TWIN — two options carrying the SAME label are an ambiguity, not a mutual nest', () => {
+  it('TWIN — two options carrying the SAME label are a COLLISION, not a mutual nest', () => {
     // The length ordering must be STRICT. Identical labels contain each other,
     // so a non-strict comparison drops BOTH and reports "no option named" —
     // turning a genuine ambiguity into a silent decline.
+    //
+    // ⚠ THE VERDICT MOVED, THE DISCRIMINATION DID NOT (2026-08-25). This case
+    // used to terminate in `ask`; it now terminates in `label_collision`,
+    // because an ask composed from two IDENTICAL labels quotes one string twice
+    // and offers chips that are byte-identical in label AND message — every one
+    // of which re-enters this state. What this twin exists to prove is
+    // unchanged and is still proven: under a non-strict `>=` BOTH matches are
+    // dropped, `optionMatches.length` falls to 0, and the resolution can no
+    // longer be `label_collision` — so the mutant still REDs here.
     const g = graph();
     g.nodes.push(optionNode(HIRE_ID, 'Hire'), optionNode('opt_hire_dup', 'Hire'));
     g.nodes.push({
@@ -852,10 +861,13 @@ describe('F1 — a nested label is dropped only WHERE it is nested (position, no
       message: "Set the Hire option's effect on Payroll cost to 0.5.",
       graph: g,
     });
-    if (!resolution.matched || resolution.kind !== 'ask') throw new Error('expected an ask');
-    expect(resolution.candidates.map((c) => c.optionId).sort()).toEqual(
-      [HIRE_ID, 'opt_hire_dup'].sort(),
-    );
+    if (!resolution.matched || resolution.kind !== 'label_collision') {
+      throw new Error('expected a label_collision');
+    }
+    // Bound BY IDENTITY: the shared label itself, and the number of options
+    // carrying it — not a value predicate another label could satisfy.
+    expect(resolution.collidingLabel).toBe('Hire');
+    expect(resolution.collidingCount).toBe(2);
   });
 
   it('TWIN (factor) — a genuinely nested FACTOR reference still resolves to the longer', () => {

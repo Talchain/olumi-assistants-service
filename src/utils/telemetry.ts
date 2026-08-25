@@ -2061,6 +2061,15 @@ export const TelemetryEvents = {
   // instead of guessing and writes nothing (trap 22f: the ambiguity is the
   // product). Payload: request_id, scenario_id, ambiguity ('option' |
   // 'factor'), candidate_count.
+  // ⭐⭐ Two or more options carry ONE normalised label, so the disambiguation
+  // ask is UNANSWERABLE and was replaced by the rename-coaching exit. Payload:
+  //   - request_id, scenario_id
+  //   - colliding_count: number — how many options share the name (>= 2)
+  // ⚠ THE LABEL ITSELF IS NOT EMITTED. It is user-authored model content.
+  // The count is what an on-call needs to know how often the drafter mints a
+  // colliding name; the string adds nothing operational and is the user's.
+  V5OptionEffectLabelCollision: "v5.edit_graph.option_effect_label_collision",
+
   V5OptionEffectAskEmitted: "v5.edit_graph.option_effect_ask_emitted",
 
   // ⭐⭐ ROADMAP 2.427 — the configure-option OUTCOME did not honour the turn's
@@ -3373,6 +3382,13 @@ export function emit(event: string, data: Event) {
             datadogClient.histogram(
               "cee.draft_graph.structural_warning_count",
               eventData.draft_warning_count as number,
+            );
+          }
+
+          if (typeof eventData.option_label_collision_count === "number") {
+            datadogClient.histogram(
+              "cee.draft_graph.option_label_collision_count",
+              eventData.option_label_collision_count as number,
             );
           }
 

@@ -8,6 +8,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { countCollidingOptionLabels } from "../orchestrator-v5/routing/option-effect-write.js";
 import { logCeeCall } from "../cee/logging.js";
 import { config, isProduction } from "../config/index.js";
 import { safeEqual } from "../utils/hash.js";
@@ -506,6 +507,27 @@ export default async function route(app: FastifyInstance) {
           cost_usd: typeof llmQuality?.cost_usd === "number" ? llmQuality.cost_usd : 0,
           engine_provider: typeof llmQuality?.provider === "string" ? llmQuality.provider : "unknown",
           engine_model: typeof llmQuality?.model === "string" ? llmQuality.model : "unknown",
+          // ⭐⭐ THE FREQUENCY INSTRUMENT for the duplicate-option-label dead end.
+          //
+          // Emitted at DRAFT-EMISSION time rather than only where the defect
+          // bites, and WITH ITS DENOMINATOR (`option_count`), because a bare
+          // numerator cannot produce a rate. The dead end was journey-witnessed
+          // and its mechanism proven, but its FREQUENCY was unmeasurable from
+          // the in-repo corpus: 0 collisions in 112 graphs bounds it at only
+          // ~2.7% at 95%, which cannot distinguish "1 in 200" from "never".
+          // These two fields answer that from production within a staging week.
+          //
+          // ⚠ NO LABEL IS EMITTED — option labels are user-authored content.
+          option_label_collision_count: Array.isArray(graphNodes)
+            ? countCollidingOptionLabels(
+                (graphNodes as Array<Record<string, unknown>>)
+                  .filter((n) => n?.kind === "option")
+                  .map((n) => (typeof n.label === "string" ? n.label : "")),
+              )
+            : 0,
+          option_count: Array.isArray(graphNodes)
+            ? (graphNodes as Array<Record<string, unknown>>).filter((n) => n?.kind === "option").length
+            : 0,
         });
       } else if (result.statusCode >= 400) {
         const body = result.body as Record<string, unknown>;
