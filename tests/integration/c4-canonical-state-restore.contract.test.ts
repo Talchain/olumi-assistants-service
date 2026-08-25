@@ -1174,7 +1174,30 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       expect(v5.ok, 'v5 refused the contrast arm — the probe is not discriminating').toBe(true);
     });
 
-    it('N1a: expected = NULL against a SET current hash — v4 accepts, v5 REFUSES', async () => {
+    /**
+     * ⚠ N1a / N1b / N2 UPDATED (C8-A integration, 2026-08-25) — the divergence
+     * these three recorded is GONE, deliberately, and they now pin its absence.
+     *
+     * `append_turn_atomic_v5` no longer reimplements the CAS. It delegates the
+     * whole turn write to `append_turn_atomic_v4` inside the same transaction
+     * (migration 20260824200000, "ONE turn authority"), passing `p_cas_enforce`
+     * straight through. The migration says so in its own words: *"p_cas_enforce
+     * and every nullable CAS case are therefore exactly v4's semantics, not a
+     * second approximation in v5."*
+     *
+     * So the three v5 expectations flip REFUSE → ACCEPT, and each pin now
+     * asserts AGREEMENT with v4 rather than divergence from it. They were NOT
+     * deleted: a deleted pin stops discriminating, while these still RED if v5
+     * ever grows a second CAS of its own — which is exactly the regression the
+     * delegation was built to make impossible. The v4 arm stays as the
+     * reference behaviour, so each case still fails loudly if v4 itself moves.
+     *
+     * ⚠ NOT EXECUTED by the C8-A pass: this oracle needs a real Postgres and
+     * migration 20260824200000 is founder-gated and unapplied. These are
+     * derived from the migration's bytes, and want a real run before they are
+     * treated as witnessed.
+     */
+    it('N1a: expected = NULL against a SET current hash — v4 and v5 BOTH accept (v5 delegates)', async () => {
       const a = await freshScenario(true);
       const b = await freshScenario(true);
       const v4 = await callV4(a.id, { expected: null, incoming: hashOf(GRAPH_V2), enforce: true });
@@ -1182,22 +1205,33 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       expect(v4.ok, "v4 must accept a NULL expectation — its documented 'no expectation' case").toBe(true);
       expect(
         v5.ok,
-        'v5 now ACCEPTS a NULL expectation. That is a behavioural change back ' +
-          "towards v4 — good, but this pin records the divergence, so update it " +
-          'deliberately rather than deleting it.',
-      ).toBe(false);
-      expect(v5.sqlstate).toBe('OLGC1');
+        'v5 REFUSED a NULL expectation. It is meant to delegate the CAS to v4, ' +
+          'so refusing here means v5 has regrown a CAS of its own — the exact ' +
+          'divergence the delegation removed. Do not relax this pin; fix v5.',
+      ).toBe(true);
+      expect(
+        v5.sqlstate,
+        'v5 raised a CAS SQLSTATE on the delegated path; it should raise none',
+      ).toBe(null);
     });
 
-    it('N1b: NULL current hash (first graph write) — v4 accepts, v5 REFUSES', async () => {
+    it('N1b: NULL current hash (first graph write) — v4 and v5 BOTH accept (v5 delegates)', async () => {
       const a = await freshScenario(false);
       const b = await freshScenario(false);
       const stale = hashOf({ some: 'other' });
       const v4 = await callV4(a.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: true });
       const v5 = await callV5(b.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: true });
       expect(v4.ok, "v4 must accept a first graph write — it guards on current IS NOT NULL").toBe(true);
-      expect(v5.ok, 'v5 dropped the current-IS-NOT-NULL guard').toBe(false);
-      expect(v5.sqlstate).toBe('OLGC1');
+      expect(
+        v5.ok,
+        "v5 REFUSED a first graph write. v4's current-IS-NOT-NULL guard is " +
+          'restored to v5 by delegation, so a refusal means v5 is evaluating the ' +
+          'CAS itself again.',
+      ).toBe(true);
+      expect(
+        v5.sqlstate,
+        'v5 raised a CAS SQLSTATE on a first graph write; the delegated path raises none',
+      ).toBe(null);
     });
 
     /**
@@ -1300,7 +1334,7 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       ).toBe(afterBase + 1);
     });
 
-    it('N2: p_cas_enforce is INERT in v5 — there is no kill switch on this path', async () => {
+    it('N2: p_cas_enforce is HONOURED in v5 — the kill switch works on this path', async () => {
       const a = await freshScenario(true);
       const b = await freshScenario(true);
       const stale = hashOf({ some: 'other' });
@@ -1308,13 +1342,20 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       const v4 = await callV4(a.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: false });
       const v5 = await callV5(b.id, { expected: stale, incoming: hashOf(GRAPH_V2), enforce: false });
       expect(v4.ok, 'v4 with p_cas_enforce=false must accept a stale expectation').toBe(true);
+      // Updated (C8-A, 2026-08-25): the parameter was NOT deleted — v5 forwards
+      // it verbatim to v4, so the posture flag genuinely has an effect and the
+      // comments claiming so are now true. The pin is kept, and inverted, so it
+      // REDs if the forwarding is ever dropped and the flag goes inert again.
       expect(
         v5.ok,
-        'v5 now HONOURS p_cas_enforce. If that was fixed deliberately, update ' +
-          'this pin; if the parameter was deleted instead, delete this pin and ' +
-          'the comments that claim the posture flag has an effect.',
-      ).toBe(false);
-      expect(v5.sqlstate).toBe('OLGC1');
+        'v5 REFUSED with p_cas_enforce=false. The flag is meant to be forwarded ' +
+          'verbatim to v4, so a refusal means v5 is ignoring the kill switch — ' +
+          'i.e. it has stopped delegating and there is no CAS override on this path.',
+      ).toBe(true);
+      expect(
+        v5.sqlstate,
+        'v5 raised a CAS SQLSTATE while the CAS was explicitly disabled',
+      ).toBe(null);
     });
   });
 
