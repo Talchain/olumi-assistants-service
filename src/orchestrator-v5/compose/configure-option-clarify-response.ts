@@ -41,6 +41,7 @@ import { composeDirectAnswerResponse } from '../compose.js';
 import {
   buildConfigureOptionAdvisedFormat,
   buildConfigureOptionDirectSetSentence,
+  messageNamesOptionEffectSlot,
 } from '../configure-option-chip-text.js';
 
 export interface ComposeConfigureOptionClarifyInput {
@@ -217,7 +218,43 @@ export function composeConfigureOptionClarifyResponse(
       ].join(' ')
     : null;
 
-  const assistant_text = qualitativeText !== null
+  // ⭐⭐ IDENTIFICATION COMPLETE, VALUE ABSENT — the state the product's OWN
+  // repair chip puts the user in, and the one state the bare-ask branch below
+  // must never see.
+  //
+  // WITNESSED (UI `326970a7` · CEE `5f2e3fd`, guest): the chip labelled "Set
+  // effect on Cash runway consumed" replayed its message, landed here with no
+  // digit, and got the teach-the-format branch — *"Tell me what it changes, like
+  // this: Set the rebuild our product on an AI-native architecture option's
+  // effect on Cash runway consumed to 0.6."* **A button that says "Set effect on
+  // X" handing back a sentence to retype, naming the option and factor the chip
+  // had already named.**
+  //
+  // The bare-ask branch is not wrong — it is answering a DIFFERENT question. It
+  // exists to teach the routable phrasing to a user who has named nothing, and
+  // it stays exactly as it was for them (pinned by the opposite-direction cases
+  // in `repair-chip-identification-complete.test.ts`). What was missing is that
+  // naming the slot and naming a number are two different acts, and the product
+  // treated the absence of the second as the absence of both.
+  //
+  // ⚠ IT STILL ASKS FOR THE NUMBER, and that is not a shortfall. The chip
+  // withholds the value deliberately (`buildRepairPairChip`'s header): choosing
+  // it would invent the user's figure, the fabrication class P5 exists to close.
+  // So the honest move is to ask for the ONE thing that is not derivable and
+  // hand the user to the surface that writes it — which the turn's
+  // `open_inspector` directive now actually opens, making this sentence's
+  // instruction true rather than homework.
+  const identificationComplete =
+    !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
+
+  const assistant_text = identificationComplete
+    ? [
+        `"${optionLabel}" has no effect value on ${primaryFactor} yet.`,
+        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+        buildConfigureOptionDirectSetSentence(optionLabel, primaryFactor),
+      ].join(' ')
+    : qualitativeText !== null
     ? qualitativeText
     : answered
     ? [

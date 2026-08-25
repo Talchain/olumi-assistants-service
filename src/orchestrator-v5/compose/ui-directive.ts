@@ -264,12 +264,20 @@ function emitDirective(factType: string, block: UiDirectiveBlock): UiDirectiveBl
 }
 
 /** Build + strict-validate a single-target directive, or null on schema failure. */
-function directiveFromRef(verb: UiDirectiveVerbLiteral, ref: GraphNodeRef): UiDirectiveBlock | null {
+function directiveFromRef(
+  verb: UiDirectiveVerbLiteral,
+  ref: GraphNodeRef,
+  // Defaulted to the ladder so every EXISTING call site keeps its exact bytes —
+  // the same additive shape `directiveFromUiTarget` already uses for the gate
+  // remedy. Only `buildConfigureOptionRepairDirective` overrides it, and its
+  // header carries the derivation for why.
+  source: typeof LADDER_SOURCE | typeof GATE_SOURCE = LADDER_SOURCE,
+): UiDirectiveBlock | null {
   const candidate: UiDirectiveBlock = {
     type: 'ui_directive',
     verb,
     targets: [{ id: ref.id, label: ref.label, kind: ref.kind }],
-    source: LADDER_SOURCE,
+    source,
   };
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
@@ -888,6 +896,15 @@ const ROW7_DISPATCHABLE_KINDS: ReadonlySet<string> = new Set(['factor', 'option'
  *  `focus @ <factor>` and the block bytes are identical. */
 const DISCUSSED_ENTITY_TAG = 'discussed_entity';
 
+/**
+ * The repair-chip gesture's telemetry tag. NOT a fact type — this path has no
+ * fact (`handler_facts: []`), which is the whole reason the gesture is stamped
+ * `gate`. A distinct tag keeps it countable apart from the fact-driven rows: an
+ * `open_inspector @ option` block is byte-identical to row 1's, so the tag is
+ * the only thing that can tell a repair gesture from a post-mutation one.
+ */
+const CONFIGURE_OPTION_REPAIR_TAG = 'configure_option_repair';
+
 /** A block's `target_refs`, read defensively. Blocks that do not carry the
  *  field (graph_patch, text, analysis_result, the directive itself) yield []. */
 function readTargetRefs(block: OlumiResponse['blocks'][number]): readonly GraphNodeRef[] {
@@ -997,6 +1014,84 @@ export function buildFocusInspectorDirective(
       // add_constraint (UI drops the patch — fail-open avoided), compare_options
       // (no V5 producer — unreachable), explain_result (deprecated literal,
       // historic rows only), edit_graph: no directive class.
+      //
+      // ⚠ `edit_graph` STAYS UNMAPPED HERE ON PURPOSE, and the reason is not the
+      // one it looks like. The configure-option repair chip exits on
+      // `exit_path: edit_graph` with NO directive, and the obvious repair is to
+      // give `edit_graph` a row in this switch. It would be DEAD CODE: that turn
+      // commits `handler_facts: []` (`edit-graph-dispatch.ts` builds a fact only
+      // when a mutation applied), so this switch never receives an `edit_graph`
+      // fact on the path that needs the gesture. The code would be live and the
+      // DATA could never reach it — CLAUDE.md trap 16-inverse. The gesture is
+      // emitted instead by `buildConfigureOptionRepairDirective` below, called
+      // directly from the composer that HOLDS the option identity.
       return null;
   }
+}
+
+/**
+ * ⭐⭐ THE GESTURE THE REPAIR CHIP PROMISED — `open_inspector` at the option
+ * whose effect value is missing.
+ *
+ * ## The defect this closes, wire-witnessed
+ *
+ * UI `326970a7` · CEE `5f2e3fd` · PLoT `3a3bee5` · ISL `28fe0c9`, guest session.
+ * Chat offered `chip_prompt_repair_effect_value`, labelled **"Set effect on Cash
+ * runway consumed"**. Clicking it opened nothing (`activeElement: BODY`, the
+ * Model tab left `aria-selected: "false"`), returned `blocks: []`, and replied
+ * with a sentence for the user to RETYPE — naming the very option and factor the
+ * chip had just named. *A button that says "Set effect on X" handed back
+ * homework.*
+ *
+ * ## Why the gesture belongs here and not in the ladder switch
+ *
+ * See the `default:` arm above. In one line: the ladder is fact-driven and this
+ * turn has no fact, so a `case 'edit_graph'` there could never fire.
+ *
+ * ## Why `open_inspector`, and why the OPTION
+ *
+ * The value lives at `data/interventions/<factorId>` **on the option node** —
+ * the field CEE writes and the only field the canvas edits, from the option
+ * panel. That derivation, with its UI-tip evidence, is already carried by
+ * `buildConfigureOptionDirectSetSentence`; this gesture simply makes that
+ * sentence TRUE by opening the panel it names, instead of asking the user to
+ * find it. `open_inspector` is the established verb for it —
+ * `buildMutationInspectorDirective` emits exactly this at a mutated node.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A WRITE. The chip withholds the value on purpose
+ * (`buildRepairPairChip`'s header: choosing the user's number is the fabrication
+ * class P5 exists to close). So this hands the user to the surface that writes
+ * rather than inventing a figure to write — the same posture the UI's Act
+ * affordance takes when it cannot itself mutate. **No second writer is created:
+ * the canvas intervention editor and CEE's `update_node` write the same field.**
+ *
+ * ## `gate`, not `ladder`
+ *
+ * This file's own doctrine draws the line: a LADDER directive rides a handler
+ * fact; a GATE directive rides something CEE answered deterministically WITHOUT
+ * one. This path commits `handler_facts: []` by construction, so `ladder` would
+ * tell every capture and telemetry query that a fact backed a gesture no fact
+ * backs. Second producer of `gate`, and the enum value already exists (0.39.0).
+ *
+ * Fail-closed on every missing input: an unresolvable option is no gesture at
+ * all, never a gesture pointing at nothing.
+ */
+export function buildConfigureOptionRepairDirective(
+  optionId: string,
+  optionLabel: string,
+): UiDirectiveBlock | null {
+  const id = typeof optionId === 'string' ? optionId.trim() : '';
+  const label = typeof optionLabel === 'string' ? optionLabel.trim() : '';
+  if (id.length === 0 || label.length === 0) {
+    return suppressDirective(CONFIGURE_OPTION_REPAIR_TAG, 'target_unresolved');
+  }
+  const block = directiveFromRef(
+    'open_inspector',
+    { id, label, kind: 'option' },
+    GATE_SOURCE,
+  );
+  if (block === null) {
+    return suppressDirective(CONFIGURE_OPTION_REPAIR_TAG, 'target_unresolved');
+  }
+  return emitDirective(CONFIGURE_OPTION_REPAIR_TAG, block);
 }

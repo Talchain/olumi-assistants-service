@@ -66,6 +66,7 @@ import {
   resolveOptionEffectWrite,
 } from '../routing/option-effect-write.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
+import { buildConfigureOptionRepairDirective } from '../compose/ui-directive.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import {
   decideGoalTargetReceipt,
@@ -3770,8 +3771,41 @@ export async function dispatchEditGraph(
     const admissionNow = resolveRunAdmission(
       optionInterventionWriteWithheld ? parsedGraph : (editResult.appliedGraph ?? parsedGraph),
     );
+    // ⭐⭐ THE GESTURE, NOT ONLY THE SENTENCE (S7).
+    //
+    // The reply below tells the user to open the option and add the factor to
+    // what it changes. Until now that was the END of it: the turn shipped
+    // `blocks: []` and the user was left to find the panel themselves — which,
+    // on the witnessed capture (UI `326970a7` · CEE `5f2e3fd`), is what turned
+    // a chip labelled "Set effect on Cash runway consumed" into homework.
+    //
+    // ⚠ WHY IT IS EMITTED HERE AND NOT BY THE LADDER, since that is the obvious
+    // question and the obvious answer is wrong: this branch commits
+    // `handler_facts: []` (nothing applied ⇒ `editGraphFact` stays null a few
+    // hundred lines below), and `compose.ts`'s directive ladder is driven
+    // ENTIRELY by that fact list. A `case 'edit_graph'` in
+    // `buildFocusInspectorDirective` would be live code no data can reach
+    // (CLAUDE.md trap 16-inverse). This site is the one that HOLDS the option
+    // identity at the moment the remedy is composed.
+    //
+    // Identity-bound (trap 19): `configureOutcome.optionId` is the option whose
+    // interventions write was checked and found absent — the same id the
+    // telemetry above reports — never "an option from this graph".
+    const repairDirective = buildConfigureOptionRepairDirective(
+      configureOutcome.optionId,
+      configureOutcome.optionLabel,
+    );
+    // Respect the N=1 directive invariant the compose ladder maintains. Today
+    // this branch always carries zero directives (no facts ⇒ no ladder run), so
+    // the guard is inert — it is here so that if a directive ever DOES arrive on
+    // this path, this one yields rather than shipping a second gesture the UI
+    // has no rule for.
+    const alreadyHasDirective = response.blocks.some((b) => b.type === 'ui_directive');
     response = {
       ...response,
+      ...(repairDirective !== null && !alreadyHasDirective
+        ? { blocks: [...response.blocks, repairDirective] }
+        : {}),
       assistant_text: composeConfigureOptionClarifyResponse({
         optionLabel: configureOutcome.optionLabel,
         factorLabels: configureOutcome.factorLabels,
