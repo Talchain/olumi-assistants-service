@@ -234,10 +234,31 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(committedGraph() as never));
 
     expect(body.analysis_ready).toBeDefined();
-    // Honest absence: no freshness derivation is threaded on this path, so the
-    // block must NOT assert a freshness verdict. Claiming `fresh` here would
-    // recreate the exact lie the change exists to remove.
-    expect(body.analysis_ready.freshness).toBeUndefined();
+    // ⚠ UPDATED, AND THE ORIGINAL REASONING IS KEPT RATHER THAN DELETED (trap 14),
+    // because its NORMATIVE half still holds and only its FACTUAL half changed.
+    //
+    // It read: *"Honest absence: no freshness derivation is threaded on this
+    // path, so the block must NOT assert a freshness verdict. Claiming `fresh`
+    // here would recreate the exact lie the change exists to remove."*
+    //
+    // The first clause was a DESCRIPTION of the producer at the time, not a
+    // decision that none should ever be threaded — and that description WAS the
+    // defect. `dispatchFactorValueEdit` threaded no derivation on the turn it
+    // wrote the graph, so `response-finaliser.ts` fell through to
+    // `NO_ANALYSIS_CONTEXT_DERIVATION` and shipped `unknown_degraded` /
+    // `no_graph_this_turn` — "no graph was in scope" — on the turn that had the
+    // graph and changed it. The derivation is now threaded.
+    //
+    // THE NORMATIVE HALF IS UNCHANGED AND IS ASSERTED HERE, HARDER THAN BEFORE:
+    // the block must never claim `fresh` on a turn that moved the graph. This
+    // fixture's store holds NO prior run_analysis fact (`readFactsFor` → []), so
+    // the earned verdict is `none` — the honest "nothing has ever run for this
+    // model", which is a fact read, not a fabricated currency claim.
+    expect(body.analysis_ready.freshness).toBe('none');
+    expect(body.analysis_ready.freshness_reason).toBe('no_successful_run_analysis_fact');
+    // The load-bearing prohibition, stated as its own assertion so it cannot be
+    // lost if the fixture's fact chain ever changes.
+    expect(body.analysis_ready.freshness).not.toBe('fresh');
 
     // The receipt is real prose, which is what makes the egress scrub matter.
     expect(body.assistant_text).toContain('Marketing budget');
