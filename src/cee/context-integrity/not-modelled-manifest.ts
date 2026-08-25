@@ -49,6 +49,8 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
+import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -527,6 +529,123 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
  */
 const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
 
+/**
+ * ⭐⭐ THE SECOND WAY A FIGURE CAN BE THE USER'S: THEY WROTE IT ON THE CANVAS.
+ *
+ * ── THE DEFECT THIS CLOSES (wire-witnessed 2026-08-25) ─────────────────────
+ * The evidence test above asks only *"does this number appear in the BRIEF?"*.
+ * A user who sets a value through the Model-tab Confirm chip has authored it
+ * just as surely, and it will never appear in their brief — so the ledger told
+ * a user *"Those are my estimates, not yours"* about a value they had set
+ * themselves minutes earlier (canonical state
+ * `{ value: 0.35, source: "user_override", raw_value: 0.35 }`).
+ *
+ * That is the worst thing this surface can do. Its entire job is to say who
+ * authored what, and Olumi's founding premise is that humans remain the
+ * authors — so erasing the user's authorship here is not a missing feature,
+ * it is the product being confidently wrong about the one thing it exists to
+ * be right about.
+ *
+ * ── WHY THIS DOES NOT RE-OPEN THE DEFECT ABOVE ─────────────────────────────
+ * The header above refuses to read `provenance` / `extractionType`, because the
+ * 2026-08-08 trace measured those labels FALSE exactly where they matter. That
+ * refusal is well-founded — and it simply does not extend to user-write
+ * receipts. That sentence is the whole of this fix.
+ *
+ * The trace's lying labels were all PRODUCER-WRITTEN: CEE's own extraction and
+ * inference writers stamping the model's opinion of itself. A user-write
+ * receipt is written by a different mechanism entirely, and three INDEPENDENT
+ * structural guarantees keep it honest:
+ *
+ *   1. `observed_state.source` is `field_class: 'provenance_owned'` — DENIED to
+ *      the AI edit lane (`orchestrator-v5/graph-management/field-safety.ts`,
+ *      whose depth-1 rule was restored SPECIFICALLY because a root relaxation
+ *      had sanctioned this sub-field).
+ *   2. The drafting model cannot emit `observed_state` AT ALL — the draft
+ *      schema is `additionalProperties: false`, "No exceptions"
+ *      (`cee/draft/anthropic-graph-schema.ts`), and declares no such property.
+ *   3. The one rule that ever forged `user_override` from the system's own
+ *      reading of prose (#853) was REVERTED, not narrowed, on 8 Aug 2026, and
+ *      is now pinned by both a measured corpus and a derived writer manifest
+ *      (`cee/transforms/__tests__/no-brief-derived-user-override.*`).
+ *
+ * Any one of those failing still leaves two.
+ *
+ * ── ⚠ THE ASYMMETRY, STATED BECAUSE IT DECIDES EVERY OPEN CASE ─────────────
+ * WRONGLY CLAIMING A USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY
+ * OMITTING ONE OF OUR OWN INVENTIONS FROM THE LIST. Where authorship cannot be
+ * determined, LEAVE IT OUT rather than guess — the composed answer already
+ * carries a true sentence covering that ("This is not a complete account of
+ * what was left out"), so an omission is disclosed and a false claim is not.
+ *
+ * ── ⚠ AND THE OPPOSITE HARM, WHICH IS WHY THIS IS NOT MERELY `user_stated` ──
+ * `brief_extraction` and `explicit` ALSO classify as `user_stated` on the
+ * authorship axis. Suppressing on authorship alone would drop them — and the
+ * set that removes is precisely *"the label says from-brief but the number is
+ * not in the brief"*, i.e. THE MEASURED LIE. That deletes TRUE entries from a
+ * disclosure whose entire value is that it is specific: a downgrade wearing a
+ * fix's clothes. Hence two conjuncts, never one.
+ */
+const USER_WRITE_RECEIPT: Readonly<
+  Record<KnownObservedStateSourceLiteral, boolean>
+> = {
+  // ── USER-WRITE RECEIPTS: stamped server-side by a deterministic user-write
+  // ── path. Contract provenance: `schemas/cee-v3.ts` names these the
+  // ── "USER-OWNED members".
+  user_override: true, // typed value — UI edit surfaces AND CEE set_factor_value
+  user_confirmed: true, // "confirm as is"
+  user: true, // Model-tab factor-value edits
+  user_edited: true, // OutputsDock transition bridge
+  user_calibration: true, // inspector calibration
+  // The user marked this as their own assumption. They still AUTHORED it, so
+  // telling them "you did not state this" would be the exact harm.
+  //
+  // ⚠ DELIBERATE DIVERGENCE, NAMED (trap 21). This follows
+  // `graph-readiness/obligation-provenance.ts` (`user_stated`) and DIVERGES
+  // from `decision-review/value-source-extraction-type.ts` (`inferred`) — the
+  // same literal, three questions, and only the authorship one is ours. Pinned
+  // both ways in `not-modelled-manifest.user-authorship.test.ts`.
+  user_assumption: true,
+  // Elicited from a named participant AND verified against CEE's own collab
+  // store before the stamp is written — CEE is its only stamper.
+  panel_elicited: true,
+
+  // ── PRODUCER-WRITTEN: the model's labels about itself. Measured lying by the
+  // ── 2026-08-08 trace. NEVER a receipt — see the two-conjunct note above.
+  brief_extraction: false,
+  explicit: false,
+  cee_inference: false,
+  inferred: false,
+  cee_repair: false,
+};
+
+/**
+ * Did the user WRITE this value, as opposed to the model having labelled it as
+ * theirs?
+ *
+ * ⚠ A DIFFERENT QUESTION FROM `classifyValueSource`, DELIBERATELY (trap 21).
+ * That one answers *"who authored this?"*; this answers *"is this stamp itself
+ * trustworthy evidence of user authorship?"*. Both conjuncts are required:
+ *
+ *   1. the upstream authority agrees the value is the user's — so authorship is
+ *      decided in ONE place and this module never holds a second opinion; and
+ *   2. the stamp is a user-write receipt rather than a producer label.
+ *
+ * Absence is NOT promoted, and that is the shared contract's own instruction:
+ * "a consumer MUST NOT read absence as any particular class; classify
+ * unknown/absent as neutral, never guess". An unstamped or unrecognised value
+ * simply falls through to the brief-evidence test, exactly as before — which
+ * also keeps the list SPECIFIC rather than quietly shrinking it.
+ */
+function isUserWriteReceipt(node: Record<string, unknown>): boolean {
+  const observed = node.observed_state;
+  if (observed === null || typeof observed !== "object") return false;
+  const stamp = (observed as Record<string, unknown>).source;
+  if (typeof stamp !== "string") return false;
+  if (classifyValueSource(stamp) !== "user_stated") return false;
+  return USER_WRITE_RECEIPT[stamp as KnownObservedStateSourceLiteral] === true;
+}
+
 /** The objects that may carry a (value…, unit) pair, in precedence order. */
 const CARRIER_KEYS = ["observed_state", "data"] as const;
 
@@ -803,9 +922,19 @@ function deriveInferredFactors(
 
     // Nothing to own.
     if (!carriesAFigure(node)) continue;
-    // The single provenance authority: anything the matcher certified as the
-    // user's figure is theirs, full stop. This is what makes the two sections
-    // structurally incapable of contradicting each other.
+    // ⭐ THE USER WROTE THIS ONE. Checked FIRST because it is the only DIRECT
+    // evidence of authorship available here — a receipt for a write the user
+    // actually performed, rather than an inference from what their brief says.
+    // The two tests below reason about the BRIEF; this one does not, which is
+    // exactly why it catches what they cannot (a value set on the canvas after
+    // the brief was written). See {@link isUserWriteReceipt}.
+    if (isUserWriteReceipt(node)) continue;
+    // The single authority over the BRIEF-MATCH relationship: anything the
+    // matcher certified as the user's figure is theirs, full stop. This is what
+    // makes the two sections structurally incapable of contradicting each
+    // other. (It is not the only authority on AUTHORSHIP — the canvas-write
+    // receipt above is the other, and the two cannot disagree because neither
+    // can claim a figure the other has released.)
     //
     // ⚠ NO MEASURED NOTATION MAKES THIS BITE — BUT SIGNED MONEY DOES, AND THE
     // CLAIM THAT IT "CANNOT" WAS CORPUS-BOUNDED, NOT STRUCTURAL.
