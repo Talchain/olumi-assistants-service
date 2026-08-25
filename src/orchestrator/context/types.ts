@@ -89,3 +89,28 @@ export interface TokenBudget {
   conversation: number;
   buffer: number;
 }
+
+// ============================================================================
+// Conversation Summary (shared prompt projection)
+// ============================================================================
+
+/**
+ * Read-only projection of the persisted rolling summary into an LLM prompt.
+ *
+ * This type lives in the shared context layer because both the V5 coaching
+ * ContextPack and the V4 edit/repair context consume the exact same projected
+ * bytes. Keeping one structural authority prevents the two prompt paths from
+ * drifting on watermark, lag, or stale-disclosure semantics.
+ */
+export interface ConversationSummaryContext {
+  /** Four-slot FRAME / CONSTRAINTS / RESOLVED / OPEN text, or empty on refusal. */
+  readonly text: string;
+  /** Newest committed turn absorbed by the stored summary. */
+  readonly current_to_turn_id: string;
+  /** Committed turns after the watermark. */
+  readonly lag_turns: number;
+  /** Whether the summary is stale or otherwise degraded. */
+  readonly stale: boolean;
+  /** In-band disclosure for stale, floor, or withheld summary states. */
+  readonly note?: string;
+}

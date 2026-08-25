@@ -88,4 +88,43 @@ describe('serialiseEditContextForLLM — conversation section', () => {
     expect(result).toContain("Let's focus on marketing spend as the main lever.");
     expect(result).toContain('Got it - marketing spend is now the focus factor.');
   });
+
+  it('renders the shared rolling summary with an explicit working-notes precedence rule', () => {
+    const result = serialiseEditContextForLLM(
+      makeContext({
+        messages: [{ role: 'user', content: 'The current model is the authority.' }],
+        conversation_summary: {
+          text: 'RESOLVED: Supplier assurance readiness changed from 0.3 to 0.8. [t:accepted]',
+          current_to_turn_id: 'accepted-turn',
+          lag_turns: 1,
+          stale: false,
+        },
+      }),
+    );
+
+    expect(result).toContain('## Conversation Summary — working notes');
+    expect(result).toContain('Supplier assurance readiness changed from 0.3 to 0.8.');
+    expect(result).toContain('Current Graph, Analysis Summary, FOCUS, and Recent Conversation override');
+    expect(result.indexOf('## Conversation Summary')).toBeGreaterThan(
+      result.indexOf('## Recent Conversation'),
+    );
+  });
+
+  it('renders an honest withheld-summary note without inventing summary text', () => {
+    const result = serialiseEditContextForLLM(
+      makeContext({
+        conversation_summary: {
+          text: '',
+          current_to_turn_id: 'old-watermark',
+          lag_turns: 12,
+          stale: true,
+          note: '(conversation summary withheld: coverage unverifiable)',
+        },
+      }),
+    );
+
+    expect(result).toContain('## Conversation Summary — working notes');
+    expect(result).toContain('(conversation summary withheld: coverage unverifiable)');
+    expect(result).not.toContain('RESOLVED:');
+  });
 });

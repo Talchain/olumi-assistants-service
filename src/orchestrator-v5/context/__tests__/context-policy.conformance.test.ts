@@ -475,6 +475,12 @@ describe('edit_graph anchor — realised serialiser sections are declared', () =
     ],
     scenario_id: 'scen-edit-anchor',
     brief: { text: 'Choose a hiring model for the new tier.', truncated: false, original_chars: 39 },
+    conversation_summary: {
+      text: 'RESOLVED: Offshore shortlist accepted. [t:prior]',
+      current_to_turn_id: 'prior-turn',
+      lag_turns: 1,
+      stale: false,
+    },
   };
 
   it('every realised sectionChars key is a declared edit_graph section', () => {
@@ -492,6 +498,20 @@ describe('edit_graph anchor — realised serialiser sections are declared', () =
   it('the brief renders FIRST as the ## Decision Brief section (S2)', () => {
     const { text } = serialiseEditContextForLLMWithMeta(editContext);
     expect(text.startsWith('## Decision Brief')).toBe(true);
+  });
+
+  it('declares the now-populated rolling summary as model-facing on edit and repair', () => {
+    for (const callSite of ['edit_graph', 'repair_edit_graph'] as const) {
+      const section = CONTEXT_POLICY[callSite].sections.find(
+        (candidate) => candidate.name === 'conversation_summary',
+      );
+      expect(section?.model_facing).toBe(true);
+      expect(section?.enforcement).not.toBe('unpopulated');
+      expect(CONTEXT_POLICY[callSite].memory_window?.rolling_summary).toBe(true);
+      expect(CONTEXT_POLICY[callSite].memory_window?.degraded_summary_fallback).toBe(
+        'fetched_hot_window',
+      );
+    }
   });
 });
 

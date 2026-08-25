@@ -405,7 +405,10 @@ export function serialiseEditContextForLLMWithMeta(
   // separately as the LLM's userMessage). Placed early, alongside the
   // graph, so facts the user already established are not pushed out by
   // later sections when the prompt is trimmed upstream.
-  if (context.messages && context.messages.length > 0) {
+  if (
+    (context.messages && context.messages.length > 0) ||
+    context.conversation_window_notice
+  ) {
     measure('conversation', () => {
       const rendered = renderRecentConversationForEditWithMeta(context.messages, maxConversationChars);
       if (rendered.dropped > 0) {
@@ -426,8 +429,13 @@ export function serialiseEditContextForLLMWithMeta(
           disclosed: true,
         });
       }
-      if (rendered.text.length > 0) {
+      if (rendered.text.length > 0 || context.conversation_window_notice) {
         sections.push('## Recent Conversation');
+        if (context.conversation_window_notice) {
+          sections.push(context.conversation_window_notice);
+        }
+      }
+      if (rendered.text.length > 0) {
         sections.push(rendered.text);
       }
     });
@@ -461,6 +469,29 @@ export function serialiseEditContextForLLMWithMeta(
       sections.push('## FOCUS');
       sections.push('The user has selected these elements. Prioritise changes to these:');
       sections.push(context.selected_elements!.map(el => `- ${el}`).join('\n'));
+    });
+  }
+
+  // Persisted rolling summary for edit/repair continuity. Kept LAST and
+  // explicitly subordinated to current structured state and recent turns: it
+  // is working memory, never canonical graph or analysis authority. An empty
+  // text with a note is a deliberate memory-hole/floor disclosure and must
+  // still render; omitting it would turn an honest known gap into silence.
+  if (
+    context.conversation_summary &&
+    (context.conversation_summary.text.length > 0 || context.conversation_summary.note)
+  ) {
+    measure('conversation_summary', () => {
+      sections.push('## Conversation Summary — working notes');
+      sections.push(
+        'Current Graph, Analysis Summary, FOCUS, and Recent Conversation override these notes when they conflict.',
+      );
+      if (context.conversation_summary.text.length > 0) {
+        sections.push(context.conversation_summary.text);
+      }
+      if (context.conversation_summary.note) {
+        sections.push(context.conversation_summary.note);
+      }
     });
   }
 

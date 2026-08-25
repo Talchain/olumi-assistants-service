@@ -109,7 +109,11 @@ import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
 } from './hold-thread-through.js';
-import { projectConversation } from '../context/context-pack-assembler.js';
+import {
+  CONTEXT_PACK_RECENT_TURNS_CAP,
+  projectConversation,
+} from '../context/context-pack-assembler.js';
+import { loadConversationSummaryForInjection } from '../rolling-summary/inject.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import { config } from '../../config/index.js';
@@ -1918,8 +1922,44 @@ export async function dispatchEditGraph(
   // Read failures degrade to an empty slice (see
   // `loadRecentConversationTurns`) — never fail the turn over a
   // conversation-history read.
+  const editBriefTextPromise = (async () => {
+    try {
+      return await loadScenarioBriefText(payload.scenario_id, requestId);
+    } catch {
+      return null;
+    }
+  })();
   const priorConversationTurns = await loadRecentConversationTurns(payload.scenario_id, requestId);
-  const { recent_turns: recentConversationSlice } = projectConversation(priorConversationTurns, false);
+  const [summaryInjection, editBriefText] = await Promise.all([
+    loadConversationSummaryForInjection({
+      scenarioId: payload.scenario_id,
+      windowTurnsNewestFirst: priorConversationTurns,
+      windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
+      requestId,
+    }),
+    editBriefTextPromise,
+  ]);
+  const useFetchedHotWindow =
+    priorConversationTurns.length > CONTEXT_PACK_RECENT_TURNS_CAP &&
+    (summaryInjection.section === null || summaryInjection.summarisedTurns === 0);
+  const editConversationSummary =
+    useFetchedHotWindow && summaryInjection.section?.text === ''
+      ? {
+          ...summaryInjection.section,
+          note:
+            `(conversation summary withheld: stored coverage is unverifiable; showing ` +
+            `${priorConversationTurns.length} fetched recent turns verbatim; the true ` +
+            'conversation total is unavailable and earlier turns may exist; do not assume knowledge of them)',
+        }
+      : summaryInjection.section;
+  const { recent_turns: recentConversationSlice } = projectConversation(
+    priorConversationTurns,
+    false,
+    null,
+    useFetchedHotWindow
+      ? priorConversationTurns.length
+      : CONTEXT_PACK_RECENT_TURNS_CAP,
+  );
   // Context v2 S2 (ROADMAP 1.199, was 1.73 02 §Seam 1): thread the persisted
   // decision brief into the edit context — edit/repair are the two turn-path
   // LLM sites that received NOTHING of the brief. Now UNCONDITIONAL: the S2
@@ -1932,18 +1972,22 @@ export async function dispatchEditGraph(
   // this is the sibling read. The brief reaches ONLY the edit-context
   // serialiser (serialiseEditContextForLLMWithMeta, called from edit-graph.ts
   // for edit + repair), so it cannot leak into any other lane.
-  let editBriefSlice: ConversationContext['brief'] = null;
-  try {
-    const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
-    editBriefSlice = projectBriefForEdit(briefText);
-  } catch {
-    editBriefSlice = null; // helper already degrades; belt for test doubles
-  }
+  const editBriefSlice: ConversationContext['brief'] = projectBriefForEdit(editBriefText);
   const context: ConversationContext = {
     graph: parsedGraph,
     analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
     framing: { stage: mapStageToDecisionStage(payload.stage) },
     messages: conversationSliceToMessages(recentConversationSlice),
+    ...(useFetchedHotWindow && summaryInjection.section === null
+      ? {
+          conversation_window_notice:
+            `(rolling summary unavailable: showing ${recentConversationSlice.length} fetched recent turns; ` +
+            'the true conversation total is unavailable and earlier turns may exist)',
+        }
+      : {}),
+    ...(editConversationSummary !== null
+      ? { conversation_summary: editConversationSummary }
+      : {}),
     scenario_id: payload.scenario_id,
     ...(editBriefSlice ? { brief: editBriefSlice } : {}),
   };

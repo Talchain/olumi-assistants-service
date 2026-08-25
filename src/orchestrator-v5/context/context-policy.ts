@@ -426,7 +426,7 @@ const EDIT_GRAPH_SECTIONS: readonly ContextSectionPolicy[] = [
   { name: 'framing', source: 'framing', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'analysis_summary', source: 'analysis_enrichment', projection: 'summariseAnalysisResponse', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'focus', source: 'focus', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-  { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_EDIT_CONVERSATION_SUMMARY, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
+  { name: 'conversation_summary', source: 'rolling_summary', projection: 'loadConversationSummaryForInjection → serialiseEditContextForLLMWithMeta (shared watermark/lag/refusal semantics; explicit working-notes precedence)', char_budget: T_EDIT_CONVERSATION_SUMMARY, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
 ];
 
 const EDIT_GRAPH: ContextPolicy = {
@@ -434,10 +434,14 @@ const EDIT_GRAPH: ContextPolicy = {
   turn_class: 'edit',
   llm: true,
   model_ref: 'edit.llm',
-  memory_window: { verbatim_turns: POLICY_VERBATIM_TURNS, rolling_summary: false },
+  memory_window: {
+    verbatim_turns: POLICY_VERBATIM_TURNS,
+    rolling_summary: true,
+    degraded_summary_fallback: 'fetched_hot_window',
+  },
   total_char_budget: T_EDIT_TOTAL,
   sections: EDIT_GRAPH_SECTIONS,
-  note: 'Edit threads the 5-turn conversation window (I-4 FIXED) + the persisted decision brief (S2, now unconditional). conversation_summary declared but not yet injected on this site (unpopulated).',
+  note: 'Edit threads the normal verbatim window + the persisted decision brief. Beyond it, the shared rolling summary is injected as subordinate working notes; absent/zero coverage expands the already-fetched hot window with an honest unknown-total disclosure.',
 };
 
 /**

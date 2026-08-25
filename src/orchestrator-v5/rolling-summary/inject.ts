@@ -48,6 +48,7 @@
  */
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import type { ConversationSummaryContext } from '../../orchestrator/context/types.js';
 
 import { HISTORY_CAP_DISCLOSURE } from './assemble.js';
 import { getRollingSummaryStore } from './index.js';
@@ -62,26 +63,7 @@ import type { RollingSummaryStorePort } from './store-adapter.js';
 // Schema in ../context/context-pack-schema.ts — strict there).
 // ---------------------------------------------------------------------------
 
-export interface ContextPackConversationSummary {
-  /** The four-slot block (FRAME / CONSTRAINTS / RESOLVED / OPEN) with
-   *  `[t:xxxxxxxx]` provenance stamps riding along. Doctrine P text (04
-   *  §3.3): the summariser is forbidden raw floats, so this block is too.
-   *  EMPTY on a memory-hole refusal (Codex r2 blocker 1) — the withheld
-   *  block is replaced by the disclosed-absence `note`. */
-  readonly text: string;
-  /** The watermark turn — the newest committed turn the summary absorbed. */
-  readonly current_to_turn_id: string;
-  /** Committed turns after the watermark (01 §4). */
-  readonly lag_turns: number;
-  /** True ⇔ the staleness invariant is violated (lag ≥ window depth) — AND
-   *  forced true for a generator:'floor' summary regardless of lag
-   *  (1.73-pre b): a floor absorbed NO conversation history, so lag-derived
-   *  freshness is vacuous for it and the section always discloses itself as
-   *  degraded. */
-  readonly stale: boolean;
-  /** In-band staleness disclosure — present IFF stale (never silently stale). */
-  readonly note?: string;
-}
+export type ContextPackConversationSummary = ConversationSummaryContext;
 
 // ---------------------------------------------------------------------------
 // Pure rendering

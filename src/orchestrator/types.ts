@@ -11,6 +11,7 @@
  */
 
 import type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T } from "../schemas/cee-v3.js";
+import type { ConversationSummaryContext } from './context/types.js';
 
 // ============================================================================
 // Decision Stage — RE-EXPORT, NOT A DECLARATION
@@ -928,7 +929,19 @@ export interface ConversationContext {
     options?: string[];
   } | null;
   messages: ConversationMessage[];
+  /**
+   * Honest disclosure when edit/repair expands the fetched hot window because
+   * no rolling-summary coverage is available. It is prompt metadata, never a
+   * fabricated user or assistant turn.
+   */
+  conversation_window_notice?: string;
   event_log_summary?: string;
+  /**
+   * Persisted rolling-summary projection for edit/repair continuity. This is
+   * working memory only: the current graph, analysis, and recent turns remain
+   * authoritative when they conflict with it.
+   */
+  conversation_summary?: ConversationSummaryContext;
   selected_elements?: string[];
   scenario_id: string;
   analysis_inputs?: AnalysisInputs | null;
