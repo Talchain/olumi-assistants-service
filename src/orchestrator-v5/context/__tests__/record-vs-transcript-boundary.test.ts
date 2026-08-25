@@ -65,6 +65,7 @@ import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { assembleContextPackWithSummary } from '../context-pack-assembler.js';
 import { compactGraphForContextPack } from '../compact-graph-for-contextpack.js';
+import { projectGoalTargetRecord } from '../goal-target-record.js';
 import { buildUserMessage } from '../../routing/route-with-tool-use.js';
 import { decideGoalTargetReceipt } from '../../compose/goal-target-receipt-guard.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
@@ -150,9 +151,12 @@ function renderTurn(args: {
     priorTurns: priorTurnsMentioning(args.priorTurnUserMessage),
     priorTurnsTotal: 1,
     compactedGraph,
-    ...(compactOutcome.kind === 'compacted' && 'goalTarget' in compactOutcome
-      ? { goalTarget: (compactOutcome as { goalTarget?: unknown }).goalTarget }
-      : {}),
+    // The RECORD is projected from the persisted graph, separately from the
+    // compaction — see goal-target-record.ts. These unit tests pass the same
+    // object as both, which is the ordinary case; the DIVERGENT arm (persisted
+    // and request graphs disagreeing) is exercised at route level, where the
+    // two are genuinely different inputs.
+    goalTarget: projectGoalTargetRecord(args.graph),
   } as Parameters<typeof assembleContextPackWithSummary>[0]);
 
   const userMessage = buildUserMessage(contextPack, args.question);

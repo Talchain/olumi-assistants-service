@@ -308,6 +308,7 @@ import {
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { projectGoalTargetRecord } from './context/goal-target-record.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
 import {
   getDecisionRecordStore,
@@ -2517,13 +2518,6 @@ export async function runTurnExecutor(
       const compactedConstraints = compactedGraph
         ? (graphStateForTurn?.goal_constraints ?? null)
         : null;
-      // THE SUCCESS-TARGET RECORD — derived by the adapter above from the RAW
-      // graph through the single authority (`extractPersistedGoalTarget`).
-      // `undefined` when no graph was read this turn, so the pack key is
-      // ABSENT and UNKNOWN STAYS UNKNOWN rather than becoming a reassuring
-      // "unset".
-      const goalTarget =
-        compactOutcome.kind === 'compacted' ? compactOutcome.goalTarget : undefined;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
       // verdict (already computed this turn) + readiness into the hash-free,
@@ -2705,10 +2699,23 @@ export async function runTurnExecutor(
         // and answers "is it set?" from the conversation transcript, which is
         // the witnessed fabrication this field exists to close.
         //
+        // ⚠⚠ AND THE ARGUMENT IS THE OTHER HALF OF THE FIX. This reads
+        // `context.persistedGraph ?? options.graphState` — the SAME
+        // persisted-FIRST order as `interventionControlledFactorIds` twenty
+        // lines below, and for the same reason its comment records (P0b-2).
+        // It must NEVER be `graphStateForTurn`: that is request-first
+        // (`:2004`), so a stale or forged client `graph_state` carrying
+        // `goal_threshold_raw` would be reported to the model as RECORDED
+        // state — the witnessed defect's own class, with the client payload
+        // instead of the transcript as the contaminating source. The compact
+        // GRAPH beside it legitimately stays request-first; the RECORD cannot.
+        //
         // The sibling `compactedConstraints` above is NOT pinned this way —
         // deleting it drops every decision constraint from the prompt with the
-        // whole suite green. Reported, deliberately not fixed here.
-        goalTarget,
+        // whole suite green. Reported and rowed, deliberately not fixed here.
+        goalTarget: projectGoalTargetRecord(
+          context.persistedGraph ?? options.graphState,
+        ),
         analysis: analysisSummary,
         analysisStalenessReason,
         // Spine A backstop: option-controlled levers must not be surfaced as

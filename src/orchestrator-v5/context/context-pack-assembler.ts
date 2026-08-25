@@ -36,7 +36,7 @@ import type {
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
-import type { ContextPackGoalTarget } from './compact-graph-for-contextpack.js';
+import type { ContextPackGoalTarget } from './goal-target-record.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -698,20 +698,27 @@ export interface AssembleContextPackInput {
    */
   readonly compactedConstraints?: readonly unknown[] | null;
   /**
-   * THE SUCCESS-TARGET RECORD, built by `compactGraphForContextPack` from the
-   * RAW ingress graph through the single authority
-   * (`extractPersistedGoalTarget`, compose/goal-target-receipt-guard.ts).
+   * THE SUCCESS-TARGET RECORD, built by `projectGoalTargetRecord`
+   * (context/goal-target-record.ts) from the PERSISTED graph through the single
+   * authority (`extractPersistedGoalTarget`,
+   * compose/goal-target-receipt-guard.ts).
    *
    * PRE-PROJECTED UPSTREAM ON PURPOSE — the same discipline as `readiness` and
    * `coachingContext`. The "is a success target set?" question has exactly ONE
    * owner and the assembler must never become a second one.
    *
-   * Sibling repair to `compactedConstraints` above and for the same reason:
-   * `compactGraph` drops `goal_threshold` (graph-compact.ts:223) exactly as it
-   * drops `goal_constraints`, so the compact path loses it and the caller has
-   * to carry it. Without this the model received NO statement about the
-   * success target in either direction, and answered "is it set?" from the
-   * only place an answer existed — the conversation transcript.
+   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. The
+   * caller must pass the record read from `context.persistedGraph ??
+   * options.graphState`, NOT `graphStateForTurn` (request-first,
+   * turn-executor.ts:2004). `compactedConstraints` beside it is request-first
+   * and correctly so — it describes the graph being reasoned over. This field
+   * is a claim about what is SAVED, and a stale or forged client graph would
+   * otherwise be reported to the model as recorded state.
+   *
+   * `compactGraph` drops `goal_threshold` (graph-compact.ts:223), so without
+   * this field the model received NO statement about the success target in
+   * either direction, and answered "is it set?" from the only place an answer
+   * existed — the conversation transcript.
    *
    * Omitted (undefined) when no graph was read this turn → the pack key is
    * ABSENT → UNKNOWN REMAINS UNKNOWN, and byte-identity with pre-change packs.

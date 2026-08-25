@@ -80,7 +80,7 @@ const PERSISTED_GRAPH: {
 
 /** The prior turn in which the user MENTIONED the figure and nothing saved it. */
 const PRIOR_TURN_ROW_ID = 'cccccccc-7a15-4ccc-8ccc-cccccccccccc';
-const PRIOR_TURN = {
+const PRIOR_TURN: Record<string, unknown> & { user_message: string | null; assistant_message: string } = {
   id: PRIOR_TURN_ROW_ID,
   scenario_id: SCENARIO_ID,
   user_id: null,
@@ -95,6 +95,12 @@ const PRIOR_TURN = {
   user_message: USER_SAID_IT,
   assistant_message: 'Understood — what options are you weighing?',
 };
+
+/** What the ASSISTANT said in the prior turn. Mutated by the assistant-voice
+ *  test and reset in `beforeEach` — `assistant_message` is on the pack
+ *  (assembler `projectConversation`) exactly as `user_message` is, so a fix
+ *  that only guarded the user's voice would leave the same hole open. */
+const DEFAULT_ASSISTANT_MESSAGE = 'Understood — what options are you weighing?';
 
 vi.mock('../../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
@@ -167,10 +173,18 @@ function textOnlyAdapter(): {
 }
 
 /** The exact user message the routing adapter received. */
-async function runTurn(message: string): Promise<string> {
+async function runTurn(
+  message: string,
+  clientGraphState?: unknown,
+): Promise<string> {
   const { adapter, calls } = textOnlyAdapter();
   await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
     routingAdapter: adapter,
+    // The CLIENT-supplied `graph_state` wire field. Distinct from the persisted
+    // graph the store returns, which is the whole point of the divergent arm.
+    ...(clientGraphState === undefined
+      ? {}
+      : { graphState: clientGraphState as never }),
   });
   expect(calls.length).toBeGreaterThan(0);
   const messages = calls[0]!.messages as Array<{ role: string; content: unknown }>;
@@ -190,6 +204,8 @@ beforeEach(() => {
   const n = goalNode();
   delete n.goal_threshold_raw;
   delete n.goal_threshold_unit;
+  PRIOR_TURN.assistant_message = DEFAULT_ASSISTANT_MESSAGE;
+  PRIOR_TURN.user_message = USER_SAID_IT;
   setTestSink(() => undefined);
 });
 afterEach(() => {
@@ -250,5 +266,116 @@ describe('route-level — the success-target record reaches the routing prompt',
     expect(unsetRecord).not.toEqual(setRecord);
     expect(unsetRecord).toEqual({ status: 'unset' });
     expect(setRecord).toEqual({ status: 'set', value: MENTIONED_VALUE, unit: '%' });
+  });
+});
+
+/**
+ * THE DIVERGENT ARM — the client payload as a contaminating source.
+ *
+ * Found in review. The first draft of this fix derived `goal_target` from
+ * `graphStateForTurn`, which is REQUEST-FIRST (`turn-executor.ts:2004`), so a
+ * stale or forged client `graph_state` carrying `goal_threshold_raw` produced
+ * `{status:'set'}` — under an instruction telling the model the block is "read
+ * from the saved model itself". That is the witnessed defect's OWN class, with
+ * the client payload standing in for the transcript.
+ *
+ * `graph_state` is a supported wire field (boundary/request-extensions.ts), so
+ * this is reachable input, not a contrived one.
+ */
+describe('route-level — the record is read from the PERSISTED graph, never the client payload', () => {
+  /** A client graph claiming a target the saved model does not carry. */
+  function forgedClientGraph(): Record<string, unknown> {
+    return {
+      nodes: [
+        {
+          id: GOAL_ID,
+          kind: 'goal',
+          label: 'Maintain customer satisfaction',
+          goal_threshold_raw: MENTIONED_VALUE,
+          goal_threshold_unit: '%',
+        },
+        { id: 'opt_four_day', kind: 'option', label: 'Four-day week' },
+      ],
+      edges: [],
+    };
+  }
+
+  it('a client graph claiming a target does NOT make the record say set', async () => {
+    // Persisted goal node is bare (beforeEach). Client says 85%.
+    const prompt = await runTurn(THE_QUESTION, forgedClientGraph());
+    const pack = observeSerialisedPack(prompt);
+
+    expect(
+      pack.goal_target,
+      'the record followed the CLIENT graph — a stale or forged graph_state is being reported to the model as saved state',
+    ).toEqual({ status: 'unset' });
+  });
+
+  it('POSITIVE CONTROL — the same client graph DOES reach the model as the graph it reasons over', async () => {
+    // Without this the test above would pass just as happily if `graphState`
+    // were being ignored entirely, proving nothing about authority ORDER.
+    const prompt = await runTurn(THE_QUESTION, forgedClientGraph());
+    const pack = observeSerialisedPack(prompt);
+    const graph = pack.graph as { nodes?: Array<{ id?: string }> } | undefined;
+
+    expect(graph?.nodes?.some((n) => n.id === GOAL_ID)).toBe(true);
+    // And the client graph is genuinely the one in play: it carries only two
+    // nodes, where the persisted fixture carries four.
+    expect(graph?.nodes?.length).toBe(2);
+  });
+
+  it('when the persisted graph DOES carry a target, the record says set (authority order, not blanket distrust)', async () => {
+    const n = goalNode();
+    n.goal_threshold_raw = 250000;
+
+    // Client graph claims something DIFFERENT — the persisted one must win.
+    const prompt = await runTurn(THE_QUESTION, forgedClientGraph());
+    const pack = observeSerialisedPack(prompt);
+
+    expect(pack.goal_target).toEqual({ status: 'set', value: 250000 });
+  });
+});
+
+/**
+ * THE TWO STATES WHERE RECORD AND TRANSCRIPT ACTIVELY DISAGREE.
+ *
+ * Both were correct by the instruction's wording and neither was tested — and
+ * these are the whole point of the change, so wording is not enough.
+ */
+describe('route-level — record and transcript disagree', () => {
+  it('SET BUT DIFFERENT: the record carries its own value, not the one mentioned', async () => {
+    const n = goalNode();
+    n.goal_threshold_raw = 92; // saved
+    n.goal_threshold_unit = '%';
+    // The transcript still says 85% (beforeEach).
+
+    const prompt = await runTurn(THE_QUESTION);
+    const pack = observeSerialisedPack(prompt);
+
+    // Bound by IDENTITY to the recorded value. A test asserting merely
+    // "status === set" would pass on the transcript's number too.
+    expect(pack.goal_target).toEqual({ status: 'set', value: 92, unit: '%' });
+    // The mentioned-but-not-recorded number is still visible to the model, so
+    // it can reconcile the two for the user rather than silently overwrite.
+    expect(prompt).toContain(USER_SAID_IT);
+  });
+
+  it('MENTIONED BY THE ASSISTANT: the record still says unset', async () => {
+    // The prior turn's ASSISTANT message names the figure and the USER never
+    // does. `assistant_message` is projected onto the pack exactly as
+    // `user_message` is, so a fix that guarded only the user's voice would
+    // leave this hole open — and an assistant quoting its own earlier
+    // fabrication is precisely how the witnessed defect compounded.
+    PRIOR_TURN.user_message = 'What should we do about the four-day week?';
+    PRIOR_TURN.assistant_message =
+      'Your success measure is 85% CSAT, so I will judge the options against that.';
+
+    const prompt = await runTurn(THE_QUESTION);
+    const pack = observeSerialisedPack(prompt);
+
+    expect(pack.goal_target).toEqual({ status: 'unset' });
+    // Positive control: the assistant's sentence really is in the prompt, so
+    // the assertion above is about authority, not about an absent input.
+    expect(prompt).toContain('Your success measure is 85% CSAT');
   });
 });

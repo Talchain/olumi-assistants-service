@@ -544,11 +544,20 @@ const ContextPackFocusSchema = z
 /**
  * The success-target record projected onto the pack.
  *
- * Mirrors `ContextPackGoalTarget` (context/compact-graph-for-contextpack.ts),
- * which is derived through the SINGLE authority `extractPersistedGoalTarget`
- * (compose/goal-target-receipt-guard.ts) — the same predicate the receipt
- * guard polices assistant claims against, so the pack and the guard can never
- * disagree about what the record says.
+ * Mirrors `ContextPackGoalTarget` (context/goal-target-record.ts), derived
+ * through the SINGLE authority `extractPersistedGoalTarget`
+ * (compose/goal-target-receipt-guard.ts) — the same predicate the receipt guard
+ * polices assistant claims against.
+ *
+ * ⚠ THE FIRST DRAFT OF THIS COMMENT CLAIMED THE TWO "CAN NEVER DISAGREE". THAT
+ * WAS FALSE AND IS THE CORRECTION WORTH KEEPING. Sharing a predicate is not
+ * sharing an input: the projector was reading the REQUEST-first graph while the
+ * guard read `context.persistedGraph`, so a stale or forged client
+ * `graph_state` could put `status: 'set'` in front of the model on a scenario
+ * the guard would have called unbacked. They agree now because both are given
+ * the persisted graph — an invariant maintained at the CALL SITE, not by the
+ * shared function, and pinned by the divergent-arm test in
+ * record-vs-transcript-boundary.route-level.test.ts.
  *
  * `.strict()` on both arms: a value plus its unit is the whole contract, and
  * nothing else from the goal node belongs in the prompt.
