@@ -9,7 +9,40 @@ import { deriveAnalysisFreshness } from "../../context/freshness.js";
 import { decideModelVersionCreation } from "../version-creation-policy.js";
 
 const SCENARIO_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const BASE = {
+
+/**
+ * The fixture graph's shape, declared rather than inferred.
+ *
+ * Declared because the tests below MUTATE the clone (`provenance`, `position`,
+ * `strength.mean`) and an inferred type freezes each field at the exact shape
+ * the literal happens to spell — so adding `evidence_id` to a provenance object
+ * reads as an excess property against `{ source: string }`, even though the
+ * ingress schema is `.passthrough()` at both the node and the edge level and
+ * carries any such field through. Kept as a `type` alias (not an interface) so
+ * it retains the implicit index signature that makes it assignable to the
+ * passthrough `GraphStateIngress` the hash modules take: the helpers below
+ * therefore pass the fixture at its real type instead of laundering it through
+ * `unknown`.
+ */
+type TestProvenance = { source: string; evidence_id?: string };
+type TestNode = {
+  id: string;
+  kind: string;
+  label: string;
+  observed_state?: { value: number; unit?: string };
+  provenance?: TestProvenance;
+  position?: { x: number; y: number };
+};
+type TestEdge = {
+  from: string;
+  to: string;
+  strength: { mean: number; std: number };
+  exists_probability: number;
+  effect_direction: string;
+};
+type TestGraph = { nodes: TestNode[]; edges: TestEdge[] };
+
+const BASE: TestGraph = {
   nodes: [
     {
       id: "factor-a",
@@ -32,12 +65,12 @@ const BASE = {
   ],
 };
 
-function fullHash(graph: unknown): string {
+function fullHash(graph: TestGraph): string {
   return computeGraphIdentityHash(graph)!.value;
 }
 
-function analysisHash(graph: unknown): string {
-  return computeAnalysisAffectingGraphHash(graph as never)!;
+function analysisHash(graph: TestGraph): string {
+  return computeAnalysisAffectingGraphHash(graph)!;
 }
 
 function fact(hash: string, computedAt = "2026-08-24T10:00:00.000Z"):

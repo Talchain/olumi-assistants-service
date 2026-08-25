@@ -24,6 +24,14 @@ import type { ModelVersionRecord } from '../types.js';
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
+// Distinct from the identity hashes above, deliberately: `compareVersionRecords`
+// RECOMPUTES both analysis-affecting hashes from `record.graph` and never reads
+// the stored `analysis_affecting_hash` column, so no assertion in this file can
+// be satisfied by this value. It is here because the column is non-nullable on
+// `ModelVersionRecord`, and it is a value the SUT provably ignores rather than a
+// hash forged to look consistent with any particular fixture graph (several of
+// which are deliberately malformed).
+const STORED_ANALYSIS_HASH = 'c'.repeat(64);
 
 function record(overrides: Partial<ModelVersionRecord> = {}): ModelVersionRecord {
   return {
@@ -37,6 +45,17 @@ function record(overrides: Partial<ModelVersionRecord> = {}): ModelVersionRecord
     identity_projection_version: IDENTITY_PROJECTION_VERSION,
     identity_normaliser_version: IDENTITY_NORMALISER_VERSION,
     graph_schema_version: GRAPH_SCHEMA_VERSION,
+    analysis_affecting_hash: STORED_ANALYSIS_HASH,
+    // Provenance columns are explicitly nullable on `ModelVersionSummary`, and
+    // null is the legacy-row reading: pre-C8 rows carry no mutation lineage.
+    mutation_id: null,
+    parent_version_id: null,
+    root_version_id: null,
+    actor_kind: null,
+    authored_by: null,
+    creation_kind: null,
+    source_version_id: null,
+    source_turn_id: null,
     label: null,
     provenance: null,
     restored_from_version_id: null,
