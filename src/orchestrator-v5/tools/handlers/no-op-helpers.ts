@@ -10,6 +10,14 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { HandlerInvocation } from '../registry.js';
+// The canonical user-facing currency sentences. Imported, never re-typed —
+// see the note on `buildAnalysisStaleTemplate`. `staleness-prefix.ts` imports
+// nothing, so this edge cannot form a cycle.
+import {
+  STALENESS_PREFIX,
+  UNCONFIRMED_PREFIX,
+  type StalenessCaveat,
+} from './staleness-prefix.js';
 import {
   isSuccessfulRunAnalysisFact,
   selectDegradedRunAnalysisFact,
@@ -281,6 +289,49 @@ export function decideExplanationPrecondition(
 }
 
 /**
+ * Which currency caveat, if any, does a precondition verdict carry?
+ *
+ * ⭐ THE CHANNEL'S LIVE INPUT. `applyStalenessPrefix` used to be driven by
+ * `analysisProjection.staleness_reason`, a field since removed from the
+ * projection — leaving the helper with zero live callers and the estate with no
+ * way to caveat an executed explanation (its only staleness enforcement was to
+ * REFUSE to answer). This maps the verdict the precondition already computes on
+ * every explanation turn, so the caveat can ACCOMPANY an answer rather than
+ * REPLACE it.
+ *
+ * ⚠ THE MAPPING LIVES HERE, NEXT TO THE VERDICT, ON PURPOSE. Putting it in
+ * `staleness-prefix.ts` would mean that module re-deciding what a verdict means
+ * — a second authority for one question, which is how the sentence it owns
+ * ended up with two copies in the first place. That module owns the WORDS; this
+ * one owns WHICH CLAIM IS LICENSED.
+ *
+ * Exhaustive with a `never` guard: a new verdict variant fails to typecheck
+ * here rather than silently inheriting "no caveat", which is the fail-OPEN
+ * direction and the wrong one for a trust claim.
+ */
+export function caveatForPreconditionVerdict(
+  verdict: ExplanationPreconditionVerdict,
+): StalenessCaveat | null {
+  switch (verdict) {
+    case 'stale':
+      return 'stale'
+    case 'unconfirmed':
+      return 'unconfirmed'
+    // No currency claim to make: `missing`/`degraded` have no result to
+    // caveat at all, and `execute` means the result IS current. Returning a
+    // caveat for any of these would invent a freshness claim.
+    case 'missing':
+    case 'degraded':
+    case 'execute':
+      return null
+    default: {
+      const _exhaustive: never = verdict
+      return _exhaustive
+    }
+  }
+}
+
+/**
  * Render the precondition-fail assistant_text for a non-execute verdict.
  * Pure function over the verdict + invocation context.
  */
@@ -333,9 +384,14 @@ export function buildPreconditionAssistantText(
  * scope by the same rule.
  */
 export function buildAnalysisStaleTemplate(): string {
+  // ⚠ COMPOSED, NOT RE-TYPED. This spelled the opening sentence out in full
+  // while `staleness-prefix.ts` held a character-identical copy under a
+  // docstring claiming to BE its single source of truth. One user-facing
+  // sentence, two hand-maintained copies (CLAUDE.md trap 12). Now one constant;
+  // `__tests__/staleness-prefix.test.ts` REDs if a copy reappears AND pins the
+  // assembled bytes, so this refactor cannot move user-facing copy.
   return (
-    `These results may be out of date because the model has changed ` +
-    `since the last analysis. Would you like to re-run analysis to see ` +
+    `${STALENESS_PREFIX} Would you like to re-run analysis to see ` +
     `how your changes affect the results?`
   );
 }
@@ -358,10 +414,8 @@ export function buildAnalysisStaleTemplate(): string {
  * internal terms (no graph hash, fact_type, analysis_status).
  */
 export function buildAnalysisUnconfirmedTemplate(): string {
-  return (
-    `The last analysis may be out of date because I can't confirm it ` +
-    `still matches the current model. Re-run analysis to see the current result.`
-  );
+  // Composed from the constant for the same reason as its stale twin above.
+  return `${UNCONFIRMED_PREFIX} Re-run analysis to see the current result.`;
 }
 
 /**
