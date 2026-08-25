@@ -88,7 +88,7 @@ import {
 import { applyPatchOperations } from '../../../../src/orchestrator/patch-applier.js';
 import { classifyValueSource } from '../../../../src/cee/graph-readiness/obligation-provenance.js';
 import type { GraphV3T } from '../../../../src/schemas/cee-v3.js';
-import type { PatchOperation } from '../../../../src/schemas/graph.js';
+import type { PatchOperation } from '../../../../src/orchestrator/types.js';
 
 /**
  * A factor exactly as the DRAFT pipeline leaves it: an LLM-estimated value
