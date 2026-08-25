@@ -259,6 +259,10 @@ import {
   isProcessMetaIntake,
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
+import {
+  FRAME_NO_BRIEF_ASSISTANT_TEXT,
+  composeFrameNoBriefResponse,
+} from '../orchestrator-v5/routing/frame-no-brief.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
 import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
@@ -5687,19 +5691,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // path; suggested_actions / analysis_ready intentionally empty
       // (no analysis to surface pre-graph). Round-2 review tightening:
       // shorter than the original draft.
-      const assistantText =
-        "I need a single decision question to start. " +
-        "For example: “Should we hire a tech lead or two developers?” or " +
-        "“Whether to launch in Q3 or hold for Q4?” " +
-        "Include the options you're comparing.";
-      const guardResponse: import('@talchain/schemas/boundary').OlumiResponse = {
-        response_version: 2,
-        assistant_text: assistantText,
-        blocks: [],
-        suggested_actions: [],
-        insights: [],
-        stage_indicator: 'frame',
-      } as import('@talchain/schemas/boundary').OlumiResponse;
+      //
+      // S6 Step 0 (2026-08-25): the literal and the envelope moved VERBATIM
+      // to `orchestrator-v5/routing/frame-no-brief.ts`, mirroring
+      // `composeProcessMetaIntakeResponse`. User-facing language no longer
+      // lives inside this file's routing control flow.
+      const assistantText = FRAME_NO_BRIEF_ASSISTANT_TEXT;
+      const guardResponse = composeFrameNoBriefResponse();
       // ────────────────────────────────────────────────────────────────
       // ROADMAP 2.63 C3 — seed the deterministic draft offer.
       // ────────────────────────────────────────────────────────────────
