@@ -1221,6 +1221,45 @@ export function buildCanonicalAnalysisReadyFromGraph(
   return { ...payload, may_run: admission.willProceed };
 }
 
+/**
+ * CARRY the canonical run-admission verdict onto a payload that was built by some
+ * OTHER projection of the same graph. A carry, never a second derivation.
+ *
+ * ⭐ WHY THIS EXISTS, AND WHY IT IS NOT A SECOND STAMPER.
+ *
+ * The draft path does not always build its payload here. When the unified pipeline
+ * supplies `analysis_ready`, `draft-graph.ts` uses `extractAnalysisReady`, which is
+ * by its own comment a NAMED-FIELD RE-PROJECTION: it rebuilds the payload key by key,
+ * so an additive field that is not named is silently dropped. `may_run` is not named
+ * there, and CANNOT be — the pipeline does not know the admission rule. The result
+ * was a draft turn with no verdict at all, on the one turn where a fresh user first
+ * meets the Analyse control (witnessed on the deployed build: absent 9 of 9).
+ *
+ * ⚠ THE VALUE IS READ, NOT COMPUTED. `canonical` must be the output of
+ * {@link buildCanonicalAnalysisReadyFromGraph} FOR THE SAME GRAPH, so the verdict
+ * published here is byte-for-byte the one that turn's canonical build already
+ * produced. Deriving it again — even from the same predicate — would put two
+ * computations of one fact in the tree, which is the hazard `analysis-ready-core`
+ * exists to remove. Pass the canonical payload; never re-assess.
+ *
+ * ⚠ IDENTITY WHEN THERE IS NOTHING TO CARRY. Returns the payload UNCHANGED (same
+ * reference) when the canonical build produced no verdict, or when the payload
+ * already carries that exact verdict. So the path that already builds canonically is
+ * provably not perturbed by this function, and a graph the canonical authority could
+ * not assess yields ABSENCE — the honest "unknown", which the consumer doctrine
+ * (`may_run !== false`) turns into its existing fallback. Absence is never
+ * synthesised into `false`: inventing a refusal out of an assessor failure is the
+ * false-BLOCK harm the field was published to end.
+ */
+export function carryCanonicalRunAdmission(
+  payload: NonNullable<GraphPatchBlockData['analysis_ready']>,
+  canonical: AnalysisReadyPayload | undefined,
+): NonNullable<GraphPatchBlockData['analysis_ready']> {
+  const mayRun = canonical?.may_run;
+  if (mayRun === undefined || payload.may_run === mayRun) return payload;
+  return { ...payload, may_run: mayRun };
+}
+
 // ============================================================================
 // Readiness Computation
 // ============================================================================
