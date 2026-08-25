@@ -102,6 +102,10 @@ const PRIOR_TURN: Record<string, unknown> & { user_message: string | null; assis
  *  that only guarded the user's voice would leave the same hole open. */
 const DEFAULT_ASSISTANT_MESSAGE = 'Understood — what options are you weighing?';
 
+/** Drives the REAL no-graph path: the store returns nothing for this scenario.
+ *  Reset in `beforeEach`. */
+let SUPPRESS_PERSISTED_GRAPH = false;
+
 vi.mock('../../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
     loadSummary: async () => null,
@@ -122,9 +126,9 @@ vi.mock('../../session/index.js', () => ({
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => PERSISTED_GRAPH,
+    loadGraph: async () => (SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH),
     loadGraphAndBriefText: async () => ({
-      graph: PERSISTED_GRAPH,
+      graph: SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH,
       briefText: 'Should we move to a four-day week?',
     }),
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -204,6 +208,7 @@ beforeEach(() => {
   const n = goalNode();
   delete n.goal_threshold_raw;
   delete n.goal_threshold_unit;
+  SUPPRESS_PERSISTED_GRAPH = false;
   PRIOR_TURN.assistant_message = DEFAULT_ASSISTANT_MESSAGE;
   PRIOR_TURN.user_message = USER_SAID_IT;
   setTestSink(() => undefined);
@@ -377,5 +382,21 @@ describe('route-level — record and transcript disagree', () => {
     // Positive control: the assistant's sentence really is in the prompt, so
     // the assertion above is about authority, not about an absent input.
     expect(prompt).toContain('Your success measure is 85% CSAT');
+  });
+
+  it('UNKNOWN STAYS UNKNOWN: no persisted graph and no client graph -> no claim at all', async () => {
+    // The REAL no-graph path, driven through the store. The unit-level version
+    // of this assertion passed for the wrong reason (it omitted the input
+    // rather than exercising the projector) and a mutant that downgraded
+    // UNKNOWN to "unset" survived it.
+    SUPPRESS_PERSISTED_GRAPH = true;
+
+    const prompt = await runTurn(THE_QUESTION);
+    const pack = observeSerialisedPack(prompt);
+
+    expect(pack).not.toHaveProperty('goal_target');
+    // Positive control: the turn really did run and the transcript really is
+    // present, so the absence above is a decision and not an empty prompt.
+    expect(prompt).toContain(USER_SAID_IT);
   });
 });

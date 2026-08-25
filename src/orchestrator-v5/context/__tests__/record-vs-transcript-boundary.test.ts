@@ -280,6 +280,30 @@ describe('record-vs-transcript boundary: the success target', () => {
       // unknown — the same discipline `readiness` already uses.
       expect(pack).not.toHaveProperty('goal_target');
     });
+
+    /**
+     * ⚠ THE TEST ABOVE PASSED FOR THE WRONG REASON AND A MUTANT CAUGHT IT.
+     *
+     * It omits `goalTarget` from the assembler input entirely, so the key is
+     * absent whatever `projectGoalTargetRecord` does — a mutant that downgraded
+     * UNKNOWN to `{status:'unset'}` at the projector left the whole suite GREEN
+     * (M4, survivor). The assertion was about the ASSEMBLER's conditional
+     * spread, not about the projector's null branch, while its name claimed the
+     * latter. A guard whose evidence comes from itself.
+     *
+     * These two close it at the projector, where the decision is actually made.
+     */
+    it('the projector itself returns UNDEFINED for a missing graph (not "unset")', () => {
+      expect(projectGoalTargetRecord(null)).toBeUndefined();
+      expect(projectGoalTargetRecord(undefined)).toBeUndefined();
+    });
+
+    it('DISCRIMINATION — a graph that IS present and bare returns unset, not undefined', () => {
+      // Without this pair the test above would pass on a projector that
+      // returned `undefined` for everything, which would be the J-F5 dead end
+      // wearing the honest answer's clothes.
+      expect(projectGoalTargetRecord(makeGraph())).toEqual({ status: 'unset' });
+    });
   });
 
   describe("WHY THE EXISTING RECEIPT GUARD DID NOT FIRE — its domain, pinned", () => {
