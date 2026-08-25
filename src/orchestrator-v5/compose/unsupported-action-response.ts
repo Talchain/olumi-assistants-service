@@ -292,32 +292,84 @@ function buildText(
   }
 }
 
+/**
+ * The text-prompt chip for a category, used wherever a handler chip would be
+ * wrong or unavailable. Free text, no `action_type`: it goes back through
+ * routing rather than firing a handler, so it is live on every scenario state.
+ */
+function textPromptChip(category: HandlerCategory, hasAnalysis: boolean): SuggestedAction {
+  if (category === 'system_dispatched') {
+    // Agrees with the sentence beside it, which asks the user to describe
+    // their decision. Deliberately a QUESTION ABOUT the brief, never a canned
+    // brief: a canned brief would arrive as `source: 'chip_click'` and be
+    // excluded from the draft heuristic, which is the dead end this branch
+    // exists to avoid.
+    return {
+      id: chipId('prompt', `unsupported_${category}`),
+      label: 'What should I include?',
+      message: 'What should I include when I describe my decision?',
+    };
+  }
+  if (category === 'analysis_dep' && !hasAnalysis) {
+    return {
+      id: chipId('prompt', `unsupported_${category}`),
+      label: 'Tell me what you want to know',
+      message: 'I want to run the analysis first.',
+    };
+  }
+  return {
+    id: chipId('prompt', `unsupported_${category}`),
+    label: 'Ask a different question',
+    message: "Let's try a different approach.",
+  };
+}
+
 function buildChips(
   context: ComposeContext,
   category: HandlerCategory,
   hasAnalysis: boolean,
 ): readonly SuggestedAction[] {
+  // ⭐ THE `system_dispatched` LIMB — A CHIP MUST NOT PROMISE WHAT THE CLICK
+  // CANNOT DELIVER (25 Aug 2026).
+  //
+  // Every other category's next step is `run_analysis`, and it is a real one:
+  // the user was editing or interrogating a model, so a model exists. This
+  // branch is the exception. It is reached when the routing model proposes
+  // `draft_graph` out of its own enum — i.e. the user asked for a MODEL TO BE
+  // BUILT — and the reachable population includes the user who has none.
+  // `curatedHandlerChips` can only ever return `run_analysis`
+  // (`USER_FACING_HANDLERS`), so this path was handing that user a button
+  // whose only possible outcome is a refusal: there is nothing to analyse.
+  //
+  // The chip is not merely re-pointed at drafting, because no chip can draft
+  // from here. Drafting is chip-reachable ONLY through the draft-offer
+  // pending-action resume (`resolveDraftOfferResume`, `copy_replay`), which
+  // needs a COMMITTED `draft_graph` pending carrying a brief seed. This
+  // composer commits nothing and — by construction — holds no usable seed:
+  // the message failed to read as a brief, which is why we are here. Absent
+  // that pending, a click falls through to the draft HEURISTIC, whose
+  // `draftShapedTurn` conjunction excludes `source === 'chip_click'` outright.
+  //
+  // Note what is deliberately NOT done: no model-state view is consulted. The
+  // composer has none (see `buildText` constraint 3), and it needs none — on
+  // this path the user asked to DRAFT, so `run_analysis` answers a question
+  // they did not ask in EITHER direction. The continuation that DOES hold a
+  // model gets the same live text prompt rather than a chip aimed elsewhere,
+  // and is pinned that way in
+  // `__tests__/unsupported-action-draft-chip-honesty.test.ts`.
+  if (category === 'system_dispatched') {
+    return [textPromptChip(category, hasAnalysis)];
+  }
+
   // Only surface chips for handlers actually in the registry. For every
-  // category the primary next step is run_analysis when it's registered —
-  // that's the only handler the UI can currently fire end-to-end.
+  // remaining category the primary next step is run_analysis when it's
+  // registered — that's the only handler the UI can currently fire end-to-end.
   const curated = curatedHandlerChips(context.handlerRegistry);
   if (curated.length === 0) {
     // Registry has nothing to offer — fall back to a text-prompt chip so the
     // user still has a visible next step. The compose layer's contract is
     // "every path produces at least one chip".
-    return [
-      {
-        id: chipId('prompt', `unsupported_${category}`),
-        label:
-          category === 'analysis_dep' && !hasAnalysis
-            ? 'Tell me what you want to know'
-            : 'Ask a different question',
-        message:
-          category === 'analysis_dep' && !hasAnalysis
-            ? 'I want to run the analysis first.'
-            : "Let's try a different approach.",
-      },
-    ];
+    return [textPromptChip(category, hasAnalysis)];
   }
   return curated.map(
     (h): SuggestedAction => ({
