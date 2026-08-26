@@ -8,8 +8,8 @@
  *   - band/sign mapping across boundaries (0.65 → moderate, 0.70 → strong)
  *   - near-zero suppression (|s| < 0.05 → "negligible link", sign dropped)
  *   - label resolution from node lookup (bare ID fallback when missing)
- *   - structural strip of strength / exists / plain_interpretation /
- *     model-internal node fields (raw_value, cap, source, _raw_provenance)
+ *   - structural strip of strength / std / exists / plain_interpretation,
+ *     while the compactor's closed coefficient-confidence band survives
  *   - A3.1 Task 6 strip of node-level `value` / `raw_value` / `cap`
  *     (compact-top-level AND canonical `observed_state.*`) — Sonnet
  *     never sees raw node numerics
@@ -48,7 +48,7 @@ function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
       { id: 'goal_growth', kind: 'goal', label: 'Quarterly Growth' },
     ],
     edges: [
-      { from: 'fac_marketing', to: 'fac_leads', strength: 0.65, exists: 0.9, plain_interpretation: 'Marketing has a strength of 0.65 on Leads', provenance: 'ai_inferred', _raw_provenance: 'inferred' },
+      { from: 'fac_marketing', to: 'fac_leads', strength: 0.65, exists: 0.9, plain_interpretation: 'Marketing has a strength of 0.65 on Leads', coefficient_confidence: 'moderate', provenance: 'ai_inferred', _raw_provenance: 'inferred' },
       { from: 'fac_leads', to: 'goal_growth', strength: -0.4, exists: 0.7 },
     ],
     options: [{ id: 'opt_a', label: 'Option A' }],
@@ -129,6 +129,7 @@ describe('formatGraphForContext — edge transformation', () => {
       from_label: 'Marketing Spend',
       to_label: 'New Leads',
       relationship: 'moderate positive link',
+      coefficient_confidence: 'moderate',
       provenance: 'ai_inferred',
     });
     expect(out.edges[1]).toEqual({
@@ -180,6 +181,25 @@ describe('formatGraphForContext — edge transformation', () => {
     assertNoNumbersInEdges(out.edges);
     // Belt-and-braces regex on serialised edges only (counts/nodes excluded).
     expect(JSON.stringify(out.edges)).not.toMatch(/\b-?0\.\d/);
+  });
+
+  it('carries only the compactor confidence vocabulary', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          { from: 'fac_marketing', to: 'fac_leads', strength: 0.5, coefficient_confidence: 'high' },
+          { from: 'fac_leads', to: 'goal_growth', strength: 0.5, coefficient_confidence: 'moderate' },
+          { from: 'fac_marketing', to: 'goal_growth', strength: 0.5, coefficient_confidence: 'uncertain' },
+          { from: 'goal_growth', to: 'fac_marketing', strength: 0.5, coefficient_confidence: 'very_high' },
+        ],
+      }),
+    );
+    expect(out.edges.map((edge) => edge.coefficient_confidence ?? null)).toEqual([
+      'high',
+      'moderate',
+      'uncertain',
+      null,
+    ]);
   });
 });
 

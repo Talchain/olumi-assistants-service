@@ -260,6 +260,7 @@ describe("compactGraph", () => {
     expect(result.edges[0].plain_interpretation).toBe(
       "Pro Plan Price Level strongly increases Monthly Churn Rate (high confidence)",
     );
+    expect(result.edges[0].coefficient_confidence).toBe("high");
   });
 
   it("causal edge produces correct plain_interpretation — negative weak uncertain", () => {
@@ -275,6 +276,7 @@ describe("compactGraph", () => {
     expect(result.edges[0].plain_interpretation).toBe(
       "Marketing Spend weakly decreases Customer Acquisition (uncertain)",
     );
+    expect(result.edges[0].coefficient_confidence).toBe("uncertain");
   });
 
   it("causal edge produces correct plain_interpretation — moderate with moderate confidence", () => {
@@ -290,6 +292,7 @@ describe("compactGraph", () => {
     expect(result.edges[0].plain_interpretation).toBe(
       "Factor A moderately increases Factor B (moderate confidence)",
     );
+    expect(result.edges[0].coefficient_confidence).toBe("moderate");
   });
 
   it("decision→option structural edges have no plain_interpretation (by node kind)", () => {
@@ -303,6 +306,7 @@ describe("compactGraph", () => {
     });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0]).not.toHaveProperty("plain_interpretation");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
   });
 
   it("option→factor structural edges have no plain_interpretation (by node kind)", () => {
@@ -316,6 +320,7 @@ describe("compactGraph", () => {
     });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0]).not.toHaveProperty("plain_interpretation");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
   });
 
   it("real causal factor→factor edge with mean=1.0 DOES get plain_interpretation", () => {
@@ -331,6 +336,7 @@ describe("compactGraph", () => {
     expect(result.edges[0].plain_interpretation).toBe(
       "Factor A strongly increases Factor B (high confidence)",
     );
+    expect(result.edges[0].coefficient_confidence).toBe("high");
   });
 
   it("bidirected edges have no plain_interpretation", () => {
@@ -345,6 +351,7 @@ describe("compactGraph", () => {
     });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0]).not.toHaveProperty("plain_interpretation");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
   });
 
   it("edge with zero mean has no plain_interpretation", () => {
@@ -357,6 +364,20 @@ describe("compactGraph", () => {
     });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0]).not.toHaveProperty("plain_interpretation");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
+  });
+
+  it("sub-threshold causal edges have no confidence band", () => {
+    const nodes = [
+      makeNode("a", { kind: "factor", label: "A" }),
+      makeNode("b", { kind: "factor", label: "B" }),
+    ];
+    const edge = makeEdge("a", "b", {
+      strength: { mean: 0.09, std: 0.25 },
+    });
+    const result = compactGraph(makeGraph(nodes, [edge]));
+    expect(result.edges[0]).not.toHaveProperty("plain_interpretation");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
   });
 
   it("edge direction derived from mean sign when effect_direction absent", () => {
@@ -416,6 +437,7 @@ describe("compactGraph", () => {
     const edge = makeEdge("a", "b", { strength: { mean: 0.5, std: 0.05 } });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0].plain_interpretation).toContain("(high confidence)");
+    expect(result.edges[0].coefficient_confidence).toBe("high");
   });
 
   it("std=0.0999 → high confidence (just below 0.10 boundary)", () => {
@@ -426,6 +448,7 @@ describe("compactGraph", () => {
     const edge = makeEdge("a", "b", { strength: { mean: 0.5, std: 0.0999 } });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0].plain_interpretation).toContain("(high confidence)");
+    expect(result.edges[0].coefficient_confidence).toBe("high");
   });
 
   it("std=0.10 → moderate confidence (boundary is exclusive for high)", () => {
@@ -436,6 +459,7 @@ describe("compactGraph", () => {
     const edge = makeEdge("a", "b", { strength: { mean: 0.5, std: 0.10 } });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0].plain_interpretation).toContain("(moderate confidence)");
+    expect(result.edges[0].coefficient_confidence).toBe("moderate");
   });
 
   it("std=0.1999 → moderate confidence (just below 0.20 boundary)", () => {
@@ -446,6 +470,7 @@ describe("compactGraph", () => {
     const edge = makeEdge("a", "b", { strength: { mean: 0.5, std: 0.1999 } });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0].plain_interpretation).toContain("(moderate confidence)");
+    expect(result.edges[0].coefficient_confidence).toBe("moderate");
   });
 
   it("std=0.20 → uncertain (inclusive lower bound)", () => {
@@ -456,6 +481,7 @@ describe("compactGraph", () => {
     const edge = makeEdge("a", "b", { strength: { mean: 0.5, std: 0.20 } });
     const result = compactGraph(makeGraph(nodes, [edge]));
     expect(result.edges[0].plain_interpretation).toContain("(uncertain)");
+    expect(result.edges[0].coefficient_confidence).toBe("uncertain");
   });
 
   it("std < 0.05 → no confidence qualifier", () => {
@@ -468,6 +494,7 @@ describe("compactGraph", () => {
     const interp = result.edges[0].plain_interpretation!;
     expect(interp).not.toContain("confidence");
     expect(interp).not.toContain("uncertain");
+    expect(result.edges[0]).not.toHaveProperty("coefficient_confidence");
   });
 
   // ==========================================================================

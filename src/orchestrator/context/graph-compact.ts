@@ -32,6 +32,14 @@ export type CompactNodeSource = 'user' | 'assumption' | 'system';
 export type CompactProvenance = 'from_brief' | 'ai_inferred' | 'user_set';
 
 /**
+ * Existing compactor-owned display bands for a producer-attested causal
+ * coefficient. These are the structured form of the phrases already emitted by
+ * `buildPlainInterpretation`; they do not expose `strength.std` or introduce a
+ * second threshold authority.
+ */
+export type CompactCoefficientConfidence = 'high' | 'moderate' | 'uncertain';
+
+/**
  * Hard prompt bounds for producer-supplied uncertainty text. The entry cap
  * matches the strict observed-state contract; the character cap matches the
  * existing producer-side proposal guard. Neither constant is a ranking rule:
@@ -99,6 +107,10 @@ export interface CompactEdge {
   exists: number;     // exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY if absent)
   /** Human-readable causal interpretation (causal edges only, omitted for structural/bidirected). */
   plain_interpretation?: string;
+  /** Closed form of the compactor's confidence phrase in `plain_interpretation`.
+   *  Omitted when the compactor emits no confidence phrase or the edge is not
+   *  interpreted as causal. */
+  coefficient_confidence?: CompactCoefficientConfidence;
   /** Display-safe provenance projection. Mapped from edge.provenance.source.
    *  Unknown / absent values map to `'ai_inferred'`. */
   provenance?: CompactProvenance;
@@ -326,11 +338,34 @@ function isStructuralEdge(
  *
  * Skips structural edges (by node kind), bidirected edges, and sub-threshold edges.
  */
+interface CompactPlainInterpretation {
+  readonly text: string;
+  readonly coefficientConfidence?: CompactCoefficientConfidence;
+}
+
+function classifyCoefficientConfidence(
+  std: number,
+): CompactCoefficientConfidence | undefined {
+  if (std >= 0.20) return 'uncertain';
+  if (std >= 0.10) return 'moderate';
+  if (std >= 0.05) return 'high';
+  return undefined;
+}
+
+function confidencePhrase(
+  confidence: CompactCoefficientConfidence | undefined,
+): string {
+  if (confidence === 'uncertain') return '(uncertain)';
+  if (confidence === 'moderate') return '(moderate confidence)';
+  if (confidence === 'high') return '(high confidence)';
+  return '';
+}
+
 function buildPlainInterpretation(
   edge: GraphV3T['edges'][number],
   labelMap: Map<string, string>,
   kindMap: Map<string, string>,
-): string | undefined {
+): CompactPlainInterpretation | undefined {
   // Skip bidirected edges
   const anyEdge = edge as Record<string, unknown>;
   if (anyEdge.edge_type === 'bidirected') return undefined;
@@ -365,22 +400,19 @@ function buildPlainInterpretation(
     magnitude = 'weakly';
   }
 
-  // Confidence from std: [0.05, 0.10) high, [0.10, 0.20) moderate, [0.20, ∞) uncertain
-  let confidence: string;
-  if (std >= 0.20) {
-    confidence = '(uncertain)';
-  } else if (std >= 0.10) {
-    confidence = '(moderate confidence)';
-  } else if (std >= 0.05) {
-    confidence = '(high confidence)';
-  } else {
-    confidence = '';
-  }
+  // One classification feeds both the existing prose and the structured
+  // prompt-safe carrier. Keeping the thresholds here prevents a formatter-
+  // side twin from drifting away from the producer's established wording.
+  const coefficientConfidence = classifyCoefficientConfidence(std);
+  const confidence = confidencePhrase(coefficientConfidence);
 
   const fromLabel = labelMap.get(edge.from) ?? edge.from;
   const toLabel = labelMap.get(edge.to) ?? edge.to;
 
-  return `${fromLabel} ${magnitude} ${verb} ${toLabel}${confidence ? ' ' + confidence : ''}`;
+  return {
+    text: `${fromLabel} ${magnitude} ${verb} ${toLabel}${confidence ? ' ' + confidence : ''}`,
+    ...(coefficientConfidence !== undefined ? { coefficientConfidence } : {}),
+  };
 }
 
 // ============================================================================
@@ -402,7 +434,7 @@ function buildPlainInterpretation(
  * observed_state.baseline, observed_state.extractionType (projected to source + provenance).
  *
  * Kept per edge: from, to, strength.mean, exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY),
- * plain_interpretation (causal edges only),
+ * plain_interpretation and its closed coefficient_confidence band (causal edges only),
  * provenance (display-safe CompactProvenance — derived from edge.provenance.source),
  * _raw_provenance (raw provenance.source string for diagnostics).
  * Dropped per edge: strength.std, effect_direction, label, edge.provenance.reasoning.
@@ -540,7 +572,10 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
 
       const interpretation = buildPlainInterpretation(edge, labelMap, kindMap);
       if (interpretation) {
-        e.plain_interpretation = interpretation;
+        e.plain_interpretation = interpretation.text;
+        if (interpretation.coefficientConfidence !== undefined) {
+          e.coefficient_confidence = interpretation.coefficientConfidence;
+        }
       }
 
       // Edge provenance projection. EdgeProvenanceV3.source ∈

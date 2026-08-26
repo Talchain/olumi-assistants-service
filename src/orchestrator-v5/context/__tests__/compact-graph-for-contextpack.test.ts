@@ -51,6 +51,18 @@ function makeStrictGraph(nodeCount: number, edgeCount: number): GraphStateIngres
   return { nodes, edges };
 }
 
+function makeCausalConfidenceGraph(std: number): GraphStateIngress {
+  const graph = makeStrictGraph(5, 0);
+  graph.edges = [{
+    from: 'n-3',
+    to: 'n-4',
+    strength: { mean: 0.5, std },
+    exists_probability: 0.9,
+    effect_direction: 'positive',
+  }];
+  return graph;
+}
+
 function firstFactor(graph: GraphStateIngress): Record<string, unknown> & {
   observed_state: Record<string, unknown>;
 } {
@@ -190,6 +202,39 @@ describe('compactGraphForContextPack', () => {
     }
   });
 
+  it('carries the existing causal confidence band into exact model-prompt bytes', async () => {
+    const highGraph = makeCausalConfidenceGraph(0.07);
+    const uncertainGraph = makeCausalConfidenceGraph(0.25);
+    const high = compactGraphForContextPack(highGraph, { requestId: 'req-confidence-high' });
+    const uncertain = compactGraphForContextPack(uncertainGraph, { requestId: 'req-confidence-uncertain' });
+    expect(high.kind).toBe('compacted');
+    expect(uncertain.kind).toBe('compacted');
+    if (high.kind !== 'compacted' || uncertain.kind !== 'compacted') {
+      throw new Error('expected compacted confidence pair');
+    }
+    expect(high.via).toBe('strict_parse');
+    expect(uncertain.via).toBe('strict_parse');
+    expect(high.compact.edges[0]!.coefficient_confidence).toBe('high');
+    expect(uncertain.compact.edges[0]!.coefficient_confidence).toBe('uncertain');
+
+    const [highPrompt, uncertainPrompt] = await Promise.all([
+      exactModelPromptFor(highGraph),
+      exactModelPromptFor(uncertainGraph),
+    ]);
+    const highFact = '"coefficient_confidence": "high"';
+    const uncertainFact = '"coefficient_confidence": "uncertain"';
+    expect(highPrompt).toContain(highFact);
+    expect(uncertainPrompt).toContain(uncertainFact);
+    expect(highPrompt.replace(highFact, '"coefficient_confidence": "<BAND>"')).toBe(
+      uncertainPrompt.replace(uncertainFact, '"coefficient_confidence": "<BAND>"'),
+    );
+    for (const prompt of [highPrompt, uncertainPrompt]) {
+      expect(prompt).not.toContain('"plain_interpretation"');
+      expect(prompt).not.toContain('"std"');
+      expect(prompt).not.toMatch(/\b0\.(?:07|25)\b/);
+    }
+  });
+
   it('compact JSON is substantially smaller than raw JSON for a 10-node graph', () => {
     const graph = makeStrictGraph(10, 12);
     const result = compactGraphForContextPack(graph, { requestId: 'req-1' });
@@ -198,7 +243,11 @@ describe('compactGraphForContextPack', () => {
     const rawBytes = JSON.stringify(graph).length;
     const compactBytes = JSON.stringify(result.compact).length;
 
-    expect(compactBytes).toBeLessThan(rawBytes * 0.5);
+    // The closed confidence token intentionally adds one small fact per
+    // interpreted causal edge. Keep the compact graph inside its documented
+    // ~800-1200-token target while still substantially reducing raw bytes.
+    expect(compactBytes).toBeLessThan(rawBytes * 0.55);
+    expect(compactBytes).toBeLessThan(4_000);
   });
 
   it('falls back to structural_fallback when ingress fails strict parse but is structurally compactable', () => {
@@ -217,6 +266,8 @@ describe('compactGraphForContextPack', () => {
     // Either strict_parse (if GraphV3 is permissive on kind) or structural_fallback.
     // Both are acceptable — the key invariant is the function never throws.
     expect(result.kind).toBe('compacted');
+    if (result.kind !== 'compacted') throw new Error('expected compacted fallback');
+    expect(result.compact.edges[0]).not.toHaveProperty('coefficient_confidence');
   });
 
   it('structural fallback never throws on empty-edge payloads', () => {
