@@ -319,9 +319,29 @@ describe('the loader refusal carries the identity the admission assessor already
     expect(buildAnalysisRefusalReadiness('NO_GRAPH', err.structuralReadiness).goal_node_id).toBe('');
   });
 
-  it('TWIN-2: a SCHEMA_INVALID refusal carries NO identity — the semantic projector has none to give', async () => {
+  it('TWIN-2: a SCHEMA_INVALID refusal on a NON-OBJECT graph carries NO identity — the semantic projector has none to give', async () => {
     const err = await loaderThrow('this is not a graph');
     expect(err.verdict.reasonCodes).toEqual(['SCHEMA_INVALID']);
+    expect(err.structuralReadiness).toBeUndefined();
+  });
+
+  it('TWIN-2b: the NUMERIC-RANGE refusal is a SECOND SCHEMA_INVALID branch, and it carries no identity either', async () => {
+    // ⚠ TWIN-2 above reaches the `typeof persistedGraph !== "object"` throw.
+    // A structured graph with an out-of-range `exists_probability` takes a
+    // DIFFERENT throw, with a hand-built verdict — and a twin that never
+    // reaches a branch cannot pin it. Found by a mutant that added a carrier to
+    // exactly this throw and left the whole suite green.
+    const err = await loaderThrow({
+      version: '1',
+      nodes: CONFIGURED_GRAPH.nodes,
+      edges: CONFIGURED_GRAPH.edges.map((e) =>
+        (e as { from?: string }).from === 'fac_licence'
+          ? { ...(e as object), exists_probability: 1.4 }
+          : e,
+      ),
+    });
+    expect(err.verdict.reasonCodes).toEqual(['SCHEMA_INVALID']);
+    expect(err.verdict.reasonCategory).toBe('numeric_integrity');
     expect(err.structuralReadiness).toBeUndefined();
   });
 
