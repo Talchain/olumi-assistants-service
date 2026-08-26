@@ -622,15 +622,43 @@ function resolveRunAdmissionTerms(
       // been unconditional since 2026-07-20, O-7 wave 2).
       scaleNetEnabled: true,
     });
-    // ⭐ REPAIR MONOTONICITY (founder ruling, 2026-08-25): "adding valid
-    // information cannot make the model less analysable."
+    // ⭐ REPAIR MONOTONICITY (founder ruling, 2026-08-25), SCOPED — and the
+    // scope is a measured boundary, not a hedge:
     //
-    // Options carrying AT LEAST ONE real value. PLoT's `EMPTY_INTERVENTIONS`
-    // predicate is exactly this emptiness test and nothing else
-    // (`preflight-v2.ts:184-187`), so an option in this set is one PLoT will
-    // accept — which is what makes its remaining missing values the compute's
-    // business rather than a reason to refuse. See
-    // {@link isWaivableByComputeDiscard}.
+    //   "USER INFORMATION THAT KEEPS THE OPTION SET DISTINGUISHABLE cannot make
+    //    the model less analysable."
+    //
+    // ⚠ THE UNQUALIFIED FORM IS VERY SLIGHTLY TOO STRONG, and the exception is
+    // REAL rather than a defect to be fixed later. Two options whose
+    // intervention maps become IDENTICAL are, for analysis purposes, ONE option
+    // — so user information that collapses two options into one genuinely DOES
+    // reduce analysability, and refusing is the honest answer. The distinct-map
+    // floor below therefore adds EXACTLY ONE monotonicity violation
+    // (`collision_2opt`, pinned in `run-admission-monotonicity.test.ts`).
+    // Stating the invariant unqualified with a known exception is the shape that
+    // goes stale and then licenses a weakened test; a scoped claim with the
+    // boundary named survives (CLAUDE.md trap 22f).
+    //
+    // Options carrying AT LEAST ONE real value.
+    //
+    // ⚠⚠ PREMISE CORRECTED IN PLACE, 2026-08-26 (PR #1129 review, Gate 2) —
+    // OLD SENTENCE RETAINED SO THE NARROWER ORIGINAL PREMISE STAYS VISIBLE:
+    //   ~~"PLoT's `EMPTY_INTERVENTIONS` predicate is exactly this emptiness test
+    //     AND NOTHING ELSE (`preflight-v2.ts:184-187`), so an option in this set
+    //     is one PLoT will accept."~~
+    // **That is FALSE at PLoT's bytes.** PLoT preflight carries **18 distinct
+    // blocker codes, all live on the v2 run path** (14 via
+    // `runPreflightValidation`, 4 via `validateGoalConstraints`), and a NON-EMPTY
+    // option can trip FOUR of them — so "non-empty ⇒ PLoT will accept" does not
+    // hold. `constraint` is also NOT in `NON_CAUSAL_NODE_KINDS`. The old claim
+    // was inherited from a narrower reading that PLoT has already flagged against
+    // itself.
+    //
+    // WHAT THE WAIVER ACTUALLY COVERS, stated as what it is: *of PLoT's 18
+    // preflight blockers, the one this waiver's population can newly trip is
+    // `IDENTICAL_OPTIONS` — and that one is closed by the distinct-map floor
+    // below.* The waiver is not a claim that PLoT accepts everything non-empty.
+    // See {@link isWaivableByComputeDiscard}.
     const valued = new Set<string>(
       wireOptions
         .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
@@ -642,7 +670,35 @@ function resolveRunAdmissionTerms(
     // It is LOAD-BEARING here for the same reason it is inside
     // `computeScaffoldPlan`: admitting a run PLoT will refuse is the F4 drift in
     // the other direction.
-    const comparisonSurvives = valued.size >= PLOT_MIN_COMPARISON_OPTIONS;
+    // ⭐ PLoT does not need two VALUED options — it needs two DISTINCT ones.
+    // `identical-options.ts:102-119` fingerprints an option as its sorted
+    // `nodeId:value` pairs (snapped to 1e-9) and DEDUPLICATES; when fewer than
+    // two unique remain, `preflight-v2.ts:443-449` raises the
+    // `IDENTICAL_OPTIONS` BLOCKER and the run 422s. Counting valued options
+    // rather than distinct ones admits precisely the partly-specified states
+    // where two maps most likely coincide — measured: two options each carrying
+    // only `{fac_a: 0.5}` are refused at base and ADMITTED without this.
+    //
+    // ⛔ DIRECTION IS WHY THIS IS THE HONEST SIDE: a false admission here dies as
+    // an opaque HTTP 422 a network hop away, at the wrong layer, on the
+    // two-option minimum. A local refusal is immediate and explicable.
+    const interventionFingerprint = (o: { interventions?: Record<string, unknown> }): string =>
+      Object.entries(o.interventions ?? {})
+        .map(([key, raw]) => {
+          const v =
+            raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
+              ? (raw as { value: unknown }).value
+              : raw;
+          return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
+        })
+        .sort()
+        .join('|');
+    const distinctValuedMaps = new Set<string>(
+      wireOptions
+        .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
+        .map((o) => interventionFingerprint(o as { interventions?: Record<string, unknown> })),
+    );
+    const comparisonSurvives = distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
     const blockers = assessment.blockingIssues;
     const touched = new Set<string>(plan.scaffolded_option_ids);
 
