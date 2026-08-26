@@ -297,6 +297,8 @@ export interface ContextPolicy {
   readonly memory_window: {
     readonly verbatim_turns: number; // DERIVED from CONTEXT_PACK_RECENT_TURNS_CAP
     readonly rolling_summary: boolean; // does this site inject the rolling summary?
+    /** Summary absent/zero coverage: retain the already-fetched hot window. */
+    readonly degraded_summary_fallback?: 'fetched_hot_window';
   } | null;
   /**
    * F10 (2026-07-24): a call site whose OWN dispatch is deterministic (`llm:false`)
@@ -338,7 +340,11 @@ const COACH_CONVERSE: ContextPolicy = {
   turn_class: 'coach-converse (coach-explain · analytical pill · run_analysis-by-message)',
   llm: true,
   model_ref: 'routing.sonnet',
-  memory_window: { verbatim_turns: POLICY_VERBATIM_TURNS, rolling_summary: true },
+  memory_window: {
+    verbatim_turns: POLICY_VERBATIM_TURNS,
+    rolling_summary: true,
+    degraded_summary_fallback: 'fetched_hot_window',
+  },
   total_char_budget: T_ROUTING_TOTAL,
   sections: [
     { name: 'version', source: 'identity', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
@@ -360,7 +366,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // driven by `total_char_budget`, NOT by the 34,000 below — hence
     // `enforced_by_total` rather than a false `enforced`. `cut_rank` is derived
     // from CONTEXT_PACK_CEILING_CUT_ORDER, the array the pass iterates.
-    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation; whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
+    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation (8 turns with summary coverage; fetched hot window when summary absent/zero); whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended

@@ -11,9 +11,12 @@
  *
  * ── WHAT IS A FLOOR AND WHAT IS A MEASUREMENT ───────────────────────────────
  *
- * Retention of a mid-conversation constraint is GRADED, and gating on a graded
- * number would either be arbitrary or would freeze today's behaviour as correct.
- * So the deliverable is a TABLE, and only two things RED:
+ * Retention of a live-model paraphrase remains GRADED because the lexical
+ * detector cannot judge semantic equivalence. The deterministic production-
+ * budget arms are different: they carry the user's words verbatim and exercise
+ * the real rolling-summary chain, so every seeded durable fact is now a floor.
+ * The old 1,200-char behaviour remains as an explicit mutant proving the new
+ * floor would have failed before this change.
  *
  *   MEM-FLOOR 1  the DECISION GOAL or a USER CORRECTION is absent from the
  *                injected summary — the two losses a tester experiences
@@ -31,11 +34,9 @@
  *                memory's — WITH a positive control proving that channel can
  *                report a presence.
  *   MEM-FLOOR 5  pack integrity / non-vacuity: the fixture is big enough, the
- *                summary actually injected, no pass was rejected or floored, and
- *                the faithful arm's output sits between the real
- *                SUMMARY_TARGET_MAX_CHARS and SUMMARY_HARD_CAP_CHARS — so the
- *                budget pressure the eval reports is produced by the production
- *                constants, not by a tuned fixture.
+ *                summary actually injected, no pass was rejected or floored,
+ *                and the faithful output sits above the explicit legacy mutant
+ *                while fitting the production target and hard cap.
  *
  * NOT REQUIRED, and honestly so. `staging`'s only required check is
  * `Lint, TypeCheck, Unit Tests` (derived from the branch-protection API, 30
@@ -95,9 +96,18 @@ const MEASURE_TURNS = kase.measure_at_turns;
 /** An in-window control turn: early enough that turn-5's fact is still verbatim. */
 const IN_WINDOW_CONTROL_TURN = 12;
 
+/**
+ * Historical mutant only — NOT a runtime authority. Keeping the superseded
+ * value here proves the all-facts floor turns red under the exact old policy,
+ * rather than merely asserting that 1,400 is better.
+ */
+const LEGACY_SILENT_LOSS_TARGET_CHARS = 1200;
+
 let faithful: RetentionRunResult;
-let budgetOldest: RetentionRunResult;
-let budgetNewest: RetentionRunResult;
+let productionOldest: RetentionRunResult;
+let productionNewest: RetentionRunResult;
+let legacyOldest: RetentionRunResult;
+let legacyNewest: RetentionRunResult;
 let erasing: RetentionRunResult;
 /** The assembled report string, so the extracted artefact itself is assertable. */
 let reportText = '';
@@ -114,17 +124,31 @@ beforeAll(async () => {
     model: makeCompressorArm({ budgetChars: null, dropOrder: 'oldest-first' }),
     measureAtTurns: [IN_WINDOW_CONTROL_TURN, ...MEASURE_TURNS],
   });
-  budgetOldest = await runRetentionEval({
+  productionOldest = await runRetentionEval({
     kase,
     model: makeCompressorArm({
       budgetChars: SUMMARY_TARGET_MAX_CHARS,
       dropOrder: 'oldest-first',
     }),
   });
-  budgetNewest = await runRetentionEval({
+  productionNewest = await runRetentionEval({
     kase,
     model: makeCompressorArm({
       budgetChars: SUMMARY_TARGET_MAX_CHARS,
+      dropOrder: 'newest-first',
+    }),
+  });
+  legacyOldest = await runRetentionEval({
+    kase,
+    model: makeCompressorArm({
+      budgetChars: LEGACY_SILENT_LOSS_TARGET_CHARS,
+      dropOrder: 'oldest-first',
+    }),
+  });
+  legacyNewest = await runRetentionEval({
+    kase,
+    model: makeCompressorArm({
+      budgetChars: LEGACY_SILENT_LOSS_TARGET_CHARS,
       dropOrder: 'newest-first',
     }),
   });
@@ -162,20 +186,31 @@ beforeAll(async () => {
     renderRetentionTable('ARM A — faithful compressor (no budget pressure)', faithful),
     '',
     renderRetentionTable(
-      `ARM B1 — budget ${SUMMARY_TARGET_MAX_CHARS} chars, oldest-first drop`,
-      budgetOldest,
+      `ARM B1 — production budget ${SUMMARY_TARGET_MAX_CHARS} chars, oldest-first`,
+      productionOldest,
     ),
     '',
     renderRetentionTable(
-      `ARM B2 — budget ${SUMMARY_TARGET_MAX_CHARS} chars, newest-first drop`,
-      budgetNewest,
+      `ARM B2 — production budget ${SUMMARY_TARGET_MAX_CHARS} chars, newest-first`,
+      productionNewest,
+    ),
+    '',
+    renderRetentionTable(
+      `MUTANT M1 — legacy budget ${LEGACY_SILENT_LOSS_TARGET_CHARS} chars, oldest-first`,
+      legacyOldest,
+    ),
+    '',
+    renderRetentionTable(
+      `MUTANT M2 — legacy budget ${LEGACY_SILENT_LOSS_TARGET_CHARS} chars, newest-first`,
+      legacyNewest,
     ),
     '',
     // Explicit [label, run] pairs: the previous form paired them POSITIONALLY via
     // flatMap+idx, so reordering the labels would have mislabelled the data.
     ...([
       ['ARM A (faithful)', faithful],
-      ['ARM B1 (oldest-first)', budgetOldest],
+      ['ARM B1 (production oldest-first)', productionOldest],
+      ['MUTANT M1 (legacy oldest-first)', legacyOldest],
     ] as const).flatMap(([label, run]) => {
       const passes = run.arm_passes ?? [];
       return [
@@ -278,23 +313,34 @@ describe('MEM-FLOOR 5 — pack integrity and non-vacuity', () => {
     }
   });
 
-  it('BUDGET PRESSURE IS PRODUCED BY THE PRODUCTION CONSTANTS, not by a padded fixture', () => {
+  it('the measured journey discriminates the old target from the production target', () => {
     const emitted = (faithful.arm_passes ?? []).map((p) => p.emitted_chars);
     const peak = Math.max(...emitted);
-    // Above the target the prompt tells the model to respect...
+    // The exact same realistic content exceeded the former instruction...
     expect(
       peak,
-      `ten ordinary stated constraints compress to ${peak} chars verbatim; if this drops below ` +
-        `SUMMARY_TARGET_MAX_CHARS (${SUMMARY_TARGET_MAX_CHARS}) the budget arm has nothing to ` +
-        'drop and ARM B measures nothing. Lengthen or add a durable statement.',
-    ).toBeGreaterThan(SUMMARY_TARGET_MAX_CHARS);
-    // ...and below the cap that would reject the pass outright.
+      `ten ordinary stated constraints compress to ${peak} chars verbatim; if this drops to ` +
+        `${LEGACY_SILENT_LOSS_TARGET_CHARS} or below, the legacy mutant no longer proves the ` +
+        'former policy loses facts.',
+    ).toBeGreaterThan(LEGACY_SILENT_LOSS_TARGET_CHARS);
+    // ...but fits the new licensed envelope without approaching the hard reject.
+    expect(
+      peak,
+      `the faithful peak ${peak} must fit the production target ` +
+        `${SUMMARY_TARGET_MAX_CHARS}; otherwise the new policy still instructs a drop`,
+    ).toBeLessThanOrEqual(SUMMARY_TARGET_MAX_CHARS);
+    expect(
+      SUMMARY_TARGET_MAX_CHARS,
+      'the production target must remain the measured faithful peak rounded up to the next ' +
+        '100-character operating boundary, rather than becoming an unmeasured allowance',
+    ).toBe(Math.ceil(peak / 100) * 100);
     expect(
       peak,
       `if this reaches SUMMARY_HARD_CAP_CHARS (${SUMMARY_HARD_CAP_CHARS}) the faithful arm is ` +
         'rejected as over_cap, the prior summary is kept, and ARM A measures a frozen summary ' +
         'rather than retention. Shorten the fixture.',
     ).toBeLessThan(SUMMARY_HARD_CAP_CHARS);
+    expect(SUMMARY_TARGET_MAX_CHARS).toBeLessThan(SUMMARY_HARD_CAP_CHARS);
   });
 
   it('the EXTRACTED report carries the stand-in caveat beside the numbers', () => {
@@ -517,7 +563,7 @@ describe('MEM-FLOOR 3 — detector controls (both directions, or the table is th
   it('evaluateFloors refuses a measurement paired with the wrong run', () => {
     // The guard is only honest if the (run, measurement) pair is coherent —
     // otherwise a caller could launder an unsound arm through a sound run's verdict.
-    expect(() => evaluateFloors(kase, budgetOldest, at(faithful, MEASURE_TURNS[0]!))).toThrow(
+    expect(() => evaluateFloors(kase, productionOldest, at(faithful, MEASURE_TURNS[0]!))).toThrow(
       /does not belong to the run/,
     );
   });
@@ -620,69 +666,85 @@ describe('MEM-FLOOR 1 — ARM C (erasure): the floor bites on the carry-forward 
 });
 
 // ---------------------------------------------------------------------------
-// THE MEASUREMENT — reported, deliberately NOT floored
+// CORE-PoC RETENTION FLOOR — the licensed production envelope
 // ---------------------------------------------------------------------------
 
-describe('MEASUREMENT — ARM B: what budget pressure costs, and what notices', () => {
-  it('the arm is non-vacuous: it actually dropped stated facts', () => {
-    const dropped = (budgetOldest.arm_passes ?? []).flatMap((p) => p.dropped_statements);
-    expect(
-      dropped.length,
-      'the budget arm dropped nothing — either the fixture shrank below the target ' +
-        '(see MEM-FLOOR 5) or the drop rule stopped firing',
-    ).toBeGreaterThan(0);
-    // ...and the drop reached the MEASUREMENT, not just the arm's own bookkeeping.
-    expect(lostFactIds(budgetOldest, MEASURE_TURNS[0]!).length).toBeGreaterThan(0);
-  });
-
-  it('a budget drop is SILENT: nothing rejects, counts, or discloses it', () => {
-    // The finding, converted into an assertion about the SYSTEM (the drop itself
-    // is supplied by the fixture). GATE 1 fires only on a slot emptied
-    // ENTIRELY, so a slot that loses some-but-not-all statements is invisible:
-    // status stays `applied`, carried_forward_slots stays 0, the summary is not
-    // stale and carries no note.
-    for (const e of budgetOldest.summary_events) {
-      expect(e.status).toBe('applied');
-      expect(e.carried_forward_slots).toBe(0);
-      expect(e.reject_reason).toBeNull();
-    }
+describe('CORE-PoC RETENTION FLOOR — production budget preserves the reasoning spine', () => {
+  it.each([
+    ['oldest-first', () => productionOldest],
+    ['newest-first', () => productionNewest],
+  ] as const)('%s: all durable facts survive at both context-limit turns', (_order, getRun) => {
+    const run = getRun();
     for (const turn of MEASURE_TURNS) {
-      const m = at(budgetOldest, turn);
-      expect(m.stale).toBe(false);
-      expect(m.note).toBeNull();
-      expect(m.history_capped).toBe(false);
+      const m = at(run, turn);
+      const lost = lostFactIds(run, turn);
+      expect(
+        lost,
+        `production target ${SUMMARY_TARGET_MAX_CHARS} lost durable facts at turn ${turn}`,
+      ).toEqual([]);
+      for (const fact of m.facts) {
+        if (fact.stated_at_turn === null) {
+          expect(fact.retained_in_summary, 'never-stated Aberdeen must stay absent').toBe(false);
+          expect(fact.present_in_prompt, 'irrelevant control must not enter the prompt').toBe(false);
+          continue;
+        }
+        expect(fact.retained_in_summary, `${fact.id} was lost from durable memory`).toBe(true);
+        expect(fact.present_in_prompt, `${fact.id} did not reach the active routing prompt`).toBe(true);
+        expect(
+          fact.present_in_verbatim_window,
+          `${fact.id} was rescued by the recent window rather than the rolling summary`,
+        ).toBe(false);
+      }
     }
-    // WHEN THE ESTATE GAINS A DROP DISCLOSURE, this expectation flips and this
-    // block becomes a floor. It is written as the measurement it is today, not
-    // as an approval of the behaviour.
-    expect(
-      lostFactIds(budgetOldest, MEASURE_TURNS[0]!).length,
-      'the whole point: facts were lost and the system said nothing',
-    ).toBeGreaterThan(0);
   });
 
-  it('WHICH fact a user loses is decided by the drop ORDER, which nothing constrains', () => {
-    const oldest = lostFactIds(budgetOldest, MEASURE_TURNS[0]!);
-    const newest = lostFactIds(budgetNewest, MEASURE_TURNS[0]!);
-    expect(oldest.length).toBeGreaterThan(0);
-    expect(newest.length).toBeGreaterThan(0);
-    expect(
-      oldest,
-      'if these coincide the eval has stopped discriminating between drop policies',
-    ).not.toEqual(newest);
-  });
-
-  it('a REGEN from full history does not repair a budget drop', () => {
-    // shouldRegenerate() rebuilds from FULL persisted history every
-    // SUMMARY_REGEN_INTERVAL turns — the estate's anti-compounding guard. It
-    // bounds DRIFT. It cannot bound a loss whose cause is the budget, because
-    // the regen re-derives the same over-budget input and drops again.
+  it('the full-history regeneration and the incremental chain agree', () => {
     const regenTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL === 0)!;
     const incrementalTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL !== 0)!;
-    expect(at(budgetOldest, regenTurn).stored_generator).toBe('regen');
-    expect(lostFactIds(budgetOldest, regenTurn).length).toBeGreaterThan(0);
-    expect(lostFactIds(budgetOldest, regenTurn)).toEqual(
-      lostFactIds(budgetOldest, incrementalTurn),
+    for (const run of [productionOldest, productionNewest]) {
+      expect(at(run, regenTurn).stored_generator).toBe('regen');
+      expect(lostFactIds(run, regenTurn)).toEqual([]);
+      expect(lostFactIds(run, incrementalTurn)).toEqual([]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LEGACY MUTANT — proves the floor would have caught the old 1,200 policy
+// ---------------------------------------------------------------------------
+
+describe('LEGACY MUTANT — the former 1,200-char policy fails the new floor', () => {
+  it('both drop orders lose durable reasoning under the exact old target', () => {
+    expect(SUMMARY_TARGET_MAX_CHARS).toBeGreaterThan(LEGACY_SILENT_LOSS_TARGET_CHARS);
+    const oldest = lostFactIds(legacyOldest, MEASURE_TURNS[0]!);
+    const newest = lostFactIds(legacyNewest, MEASURE_TURNS[0]!);
+    expect(oldest).toEqual(['budget_ceiling', 'earliest_start']);
+    expect(newest).toEqual(['scope_lock', 'transition_constraint']);
+    expect(oldest).not.toEqual(newest);
+  });
+
+  it('the loss is outside the verbatim window and reaches the real prompt boundary', () => {
+    for (const run of [legacyOldest, legacyNewest]) {
+      for (const turn of MEASURE_TURNS) {
+        const m = at(run, turn);
+        const lost = m.facts.filter(
+          (fact) => fact.stated_at_turn !== null && !fact.retained_in_summary,
+        );
+        expect(lost.length).toBeGreaterThan(0);
+        expect(lost.every((fact) => !fact.present_in_verbatim_window)).toBe(true);
+        expect(lost.every((fact) => !fact.present_in_prompt)).toBe(true);
+        expect(m.stale).toBe(false);
+        expect(m.note).toBeNull();
+      }
+    }
+  });
+
+  it('a full regeneration repeats rather than repairs the old budget loss', () => {
+    const regenTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL === 0)!;
+    const incrementalTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL !== 0)!;
+    expect(at(legacyOldest, regenTurn).stored_generator).toBe('regen');
+    expect(lostFactIds(legacyOldest, regenTurn)).toEqual(
+      lostFactIds(legacyOldest, incrementalTurn),
     );
   });
 });
