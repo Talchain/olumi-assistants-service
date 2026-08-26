@@ -1,33 +1,19 @@
 /**
- * The scenario routes do not accept caller-asserted identity.
+ * Ownership on the scenario routes is derived from the verified token subject.
  *
- * ── THE LEAK, DEMONSTRATED BEFORE IT WAS FIXED ──────────────────────────────
- * Against DEPLOYED staging, positive and negative controls in one run:
- * an anonymous caller (no token) posting a scenario UUID with `user_id` set to
- * the OWNER's id received that scenario's full graph, brief and committed
- * analysis (200, canary present). The same request with a DIFFERENT id, with NO
- * id, and with a MALFORMED id all refused (404). The claimed identity string
- * was the only variable. The register route let the same caller CREATE a
- * scenario attributed to an arbitrary id.
+ * ── WHAT THESE PIN ─────────────────────────────────────────────────────────
+ * On these surfaces the effective user is the verified token subject or
+ * nothing: an identifier carried in the request body is not an input to the
+ * ownership decision, in either direction. It can neither grant access nor
+ * withdraw it.
  *
- * ── WHY THE FIX IS SCOPED TO THESE ROUTES AND NOT TO THE SHARED FUNCTION ────
- * `service_legacy` lets a key-authed internal caller act on a user's behalf,
- * justified as *"reachable by key-authed service callers only, never browser
- * paths"*. MEASURED: that is FALSE here and TRUE for the turn routes.
- *
- *   · The `/bff/cee/*` edge staples the assist key onto ANY visitor's request,
- *     and all five `/assist/v1/scenarios/*` routes answer from their live
- *     handlers through it. The handler cannot tell an internal harness from an
- *     anonymous stranger, so the premise fails.
- *   · `/bff/cee/orchestrate/v2/turn` and `/stop` answer `{"error":"Not found"}`
- *     — byte-identical to a fabricated-route control in the same run, while a
- *     scenario route answered from its live handler in that same run. Not
- *     anonymously reachable that way.
- *
- * So the shared `authorizeScenarioOwnership` is UNCHANGED and the turn routes
- * keep the carve-out. A positive control in `turn-stop-authorization.test.ts`
- * pins that service seam deliberately; scoping the fix here leaves it green
- * because nothing it guards has moved.
+ * ── WHY THE CHANGE IS AT THE CALL SITES, NOT IN THE SHARED FUNCTION ────────
+ * `authorizeScenarioOwnership` is shared with the turn and Stop routes, where
+ * a key-authed service caller acting on a user's behalf is the documented and
+ * intended behaviour, and where a positive control in
+ * `turn-stop-authorization.test.ts` pins that seam deliberately. Changing the
+ * shared function would move behaviour there too; scoping it here leaves that
+ * control green because nothing it guards has moved.
  *
  * ── THE PAIRS ARE THE POINT ────────────────────────────────────────────────
  * A refusal test alone would pass on a route that refuses everything, and an
@@ -101,14 +87,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   scenarioExists.mockResolvedValue(true);
   loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: "Should I take the job?" });
-  // The scenario is OWNED. That is what makes the claim worth forging.
+  // The scenario has a stored owner. That is what makes the pairs below
+  // discriminating: an unowned scenario would admit everyone.
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
   getScenarioOwner.mockResolvedValue(OWNER);
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
   it("REFUSES an unverified caller who claims to be the owner", async () => {
-    // The exact request that returned a full graph on deployed staging.
     resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
 
     const app = await buildApp();
@@ -134,9 +120,8 @@ describe("an OWNED scenario is not readable on a caller's say-so", () => {
     await app.close();
   });
 
-  it("ignores a forged claim entirely — a VERIFIED owner reads even while claiming to be someone else", async () => {
-    // Proves the body is not consulted in EITHER direction: it can neither
-    // grant access nor withdraw it.
+  it("the body is not consulted in either direction — a VERIFIED owner reads even while the body names someone else", async () => {
+    // The body can neither grant access nor withdraw it.
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
 
     const app = await buildApp();
@@ -165,7 +150,7 @@ describe("every unverified mode behaves identically — no mode is a side door",
   ];
 
   for (const { label, identity } of modes) {
-    it(`${label}: claiming the owner's id is refused`, async () => {
+    it(`${label}: a request-supplied owner identifier is not honoured`, async () => {
       resolveUserIdentity.mockResolvedValue(identity);
 
       const app = await buildApp();

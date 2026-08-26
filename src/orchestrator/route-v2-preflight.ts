@@ -177,42 +177,26 @@ export async function resolveVerifiedIdentityOrRefuse(
  * Shared by `runPreFlight` and `recordExplicitTurnStop` (2.236).
  */
 /**
- * What a route passes as `claimedUserId` when its SURFACE cannot admit
- * caller-asserted identity at all.
+ * What a route passes as `claimedUserId` when its surface derives ownership
+ * from the verified token subject alone.
  *
- * ── THE CARVE-OUT IS SOUND IN ONE PLACE AND UNSOUND IN ANOTHER ─────────────
- * `service_legacy` exists so a key-authed internal caller can still act on a
- * user's behalf, and `user-identity.ts` justifies it as *"reachable by
- * key-authed service callers (internal harnesses) only, never browser paths"*.
+ * ── WHY A NAMED SENTINEL RATHER THAN A BARE `null` ─────────────────────────
+ * A bare `null` at a call site reads as "no identity was available", which is
+ * a statement about the REQUEST. This is a statement about the SURFACE: on
+ * these routes a request-supplied identifier is not an input to the ownership
+ * decision at all. Naming it keeps that intent legible at the call site and
+ * makes a future re-introduction a visible edit rather than a silent one.
  *
- * That sentence is TRUE for `/orchestrate/v2/turn{,/stop}` and FALSE for
- * `/assist/v1/scenarios/*`, and the difference was MEASURED on deployed
- * staging rather than reasoned about:
+ * ── WHY THIS IS SCOPED TO THE CALL SITES, NOT TO THE SHARED FUNCTION ───────
+ * `authorizeScenarioOwnership` is shared with `/orchestrate/v2/turn{,/stop}`,
+ * where a key-authed service caller acting on a user's behalf is the
+ * documented and intended behaviour (`user-identity.ts`), and where a positive
+ * control in `turn-stop-authorization.test.ts` pins that seam deliberately.
+ * Changing the shared function would move behaviour on those routes too.
  *
- *   · The `/bff/cee/*` Netlify edge staples the assist key onto ANY visitor's
- *     request, and all five `/assist/v1/scenarios/*` routes answer from their
- *     live handlers through it — each a schema'd `error.v1` carrying a
- *     `request_id`. So on those routes the handler CANNOT distinguish an
- *     internal harness from an anonymous stranger, and a trust boundary that
- *     cannot tell its two callers apart is not a boundary.
- *   · `/bff/cee/orchestrate/v2/turn` and `/stop` answer `{"error":"Not found"}`
- *     — BYTE-IDENTICAL to a fabricated-route control in the same run, while a
- *     scenario route answered from a live handler in that same run. The edge
- *     matches an ALLOWED_TARGETS allowlist against the rewritten `/assist/v1/*`
- *     path, and the orchestrate paths are off-list. They are NOT anonymously
- *     reachable that way.
- *   · The browser proxy (`/proxy/v5/turn{,/stream,/stop}`) IS public and DOES
- *     inject the key — but it STRIPS body `user_id` on all three rungs, so the
- *     carve-out is not reachable with a forged identity there either.
- *
- * ⚠ SO THIS IS DELIBERATELY NOT A GLOBAL CHANGE. Removing the fallback inside
- *   `authorizeScenarioOwnership` would also remove it for the turn routes,
- *   where the premise holds and where a positive control in
- *   `turn-stop-authorization.test.ts` pins the service seam ON PURPOSE. A
- *   previous lane priced that exact change, named its blast radius as breaking
- *   the documented service-caller carve-out, and left that control as a
- *   tripwire. Scoping the fix to the surfaces whose premise is false leaves the
- *   tripwire green because nothing it guards has moved.
+ * Scoping the change to the scenario call sites leaves that control green,
+ * because nothing it guards has moved: the two surfaces have different
+ * requirements, and this expresses the difference where the difference lives.
  */
 export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
 

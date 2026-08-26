@@ -378,13 +378,11 @@ export default async function route(app: FastifyInstance) {
       try {
         owned = await authorizeScenarioOwnership(
           scenarioId,
-          // ⚠ CALLER-ASSERTED IDENTITY IS NOT ADMISSIBLE ON THIS SURFACE.
-          // This route is reached through the `/bff/cee/*` edge, which staples
-          // the assist key onto ANY visitor's request — so "holds a valid
-          // service key" distinguishes nobody from anybody here, and a body
-          // `user_id` is a stranger's say-so. Only a verified token subject
-          // identifies the caller. See the constant for the measurement that
-          // scopes this to these routes and NOT to the turn routes.
+          // Ownership on this surface is derived from the verified token
+          // subject. A request-supplied identifier is not an input to that
+          // decision, so the sentinel is passed rather than the parsed
+          // extension. See the constant for why this is expressed here and not
+          // in the shared function.
           CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
           resolved.identity,
           requestId,
