@@ -13,8 +13,9 @@
  *   - Graph: field-trim ladder (edge `plain_interpretation` → low-value
  *     node metadata → `type`/`category`/`intervention_summary` → external
  *     prior ranges → `source` → edge `exists`). Nodes and edges are NEVER
- *     deleted; `label` is preserved throughout, so graph structure and
- *     counts are stable under trimming.
+ *     deleted; `label` and the closed `coefficient_confidence` fact are
+ *     preserved throughout, so graph structure and counts are stable under
+ *     trimming.
  *   - Analysis: `top_drivers` reduced to 3, `constraint_tensions` dropped.
  *   - Under budget: inputs are returned by REFERENCE, so an under-budget
  *     pack is byte-identical to an unbudgeted one (positive control).

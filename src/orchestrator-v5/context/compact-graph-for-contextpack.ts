@@ -13,8 +13,10 @@
  * `graphStateToGraphV3` in handlers/edit-graph-dispatch.ts. Required GraphV3
  * fields the ingress doesn't carry (edge.strength object, effect_direction,
  * exists_probability) are stamped with inert defaults so `compactGraph` can
- * still run; those defaults never mislead Sonnet because the compactor drops
- * std / uncertainty and maps zero-mean edges to `undefined` plain_interpretation.
+ * still run; those defaults never mislead Sonnet because zero-mean fallback
+ * edges receive neither a plain interpretation nor a coefficient-confidence
+ * band. Strict causal edges retain only the compactor's closed band; raw std
+ * remains absent from model-facing context.
  *
  * The full graph remains available to the validator via `graphLookupForValidate`
  * in turn-executor.ts — only the Sonnet-facing ContextPack is compacted.

@@ -11,10 +11,10 @@
  * formatted field `display_value` ("5%", "£50k", "18 months") so
  * Sonnet can answer "what is the current churn rate?" without
  * seeing the underlying floats — the raw `value` / `raw_value` /
- * `cap` remain stripped. Sonnet now sees label, kind, category,
- * unit (label only), and `display_value` (formatted string only) —
- * no raw node numerics, no edge `strength` floats, no `exists`
- * probabilities.
+ * `cap` remain stripped. Sonnet now sees label, kind, category, unit
+ * (label only), `display_value` (formatted string only), relationship
+ * language, and the compactor's closed coefficient-confidence band — no raw
+ * node numerics, no edge `strength` / `std` floats, no `exists` probabilities.
  *
  * Design principle: raw model values stay in structured state for
  * handlers, telemetry, freshness hashing, and edit_graph dispatch;
@@ -36,6 +36,7 @@
 import { synthesiseDisplayValue } from '../../cee/factor-extraction/display-value.js';
 import {
   projectUncertaintyDriversForContext,
+  type CompactCoefficientConfidence,
   type CompactProvenance,
   type CompactUncertaintyDriversDisclosure,
 } from '../../orchestrator/context/graph-compact.js';
@@ -84,6 +85,8 @@ export interface DisplaySafeEdge {
   /** Decision-language phrase: "moderate positive link", "strong negative link",
    *  "very strong positive link", or "negligible link" for |strength| < 0.05. */
   readonly relationship: string;
+  /** Compactor-classified coefficient confidence; no raw std reaches the prompt. */
+  readonly coefficient_confidence?: CompactCoefficientConfidence;
   readonly provenance?: CompactProvenance;
 }
 
@@ -174,6 +177,8 @@ interface RawEdgeShape {
    *  numeric magnitudes are non-negative). Ignored when the compact
    *  numeric `strength` is already signed. */
   readonly effect_direction?: unknown;
+  /** Closed compactor band emitted by compactGraph; raw std remains stripped. */
+  readonly coefficient_confidence?: unknown;
   readonly provenance?: unknown;
   /** Idempotency: a second pass through the formatter sees no `strength`
    *  but should preserve an existing allowlisted relationship phrase. */
@@ -186,6 +191,14 @@ function asString(value: unknown): string | undefined {
 
 function asProvenance(value: unknown): CompactProvenance | undefined {
   return value === 'from_brief' || value === 'ai_inferred' || value === 'user_set'
+    ? value
+    : undefined;
+}
+
+function asCoefficientConfidence(
+  value: unknown,
+): CompactCoefficientConfidence | undefined {
+  return value === 'high' || value === 'moderate' || value === 'uncertain'
     ? value
     : undefined;
 }
@@ -452,6 +465,7 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
     from_label: string;
     to_label: string;
     relationship: string;
+    coefficient_confidence?: CompactCoefficientConfidence;
     provenance?: CompactProvenance;
   } = {
     from,
@@ -460,6 +474,10 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
     to_label: labelMap.get(to) ?? to,
     relationship,
   };
+  const coefficientConfidence = asCoefficientConfidence(raw.coefficient_confidence);
+  if (coefficientConfidence !== undefined) {
+    edge.coefficient_confidence = coefficientConfidence;
+  }
   const provenance = asProvenance(raw.provenance);
   if (provenance !== undefined) edge.provenance = provenance;
   return edge;
@@ -470,7 +488,9 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *
  *   - Edges: `strength` and `exists` are stripped; `plain_interpretation` is
  *     stripped (may contain raw edge language like "strength of 0.55"; the
- *     raw graph retains it). A `relationship` phrase replaces them. Bare IDs
+ *     raw graph retains it). A `relationship` phrase replaces them, while the
+ *     compactor's closed `coefficient_confidence` band survives without raw
+ *     std. Bare IDs
  *     are kept on `from`/`to`; human labels are surfaced as `from_label` /
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *

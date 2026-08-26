@@ -211,7 +211,8 @@ describe("enforceContextBudget (pathological-input safety valve — graph/analys
       ],
       edges: [
         { from: "n0", to: "n1", strength: 0.5, exists: 0.9,
-          plain_interpretation: "F0 moderately increases F1 (high confidence)" },
+          plain_interpretation: "F0 moderately increases F1 (high confidence)",
+          coefficient_confidence: "high" },
       ],
       _node_count: 2,
       _edge_count: 1,
@@ -230,6 +231,8 @@ describe("enforceContextBudget (pathological-input safety valve — graph/analys
 
     // plain_interpretation must be stripped
     expect(result.graph_compact?.edges[0]).not.toHaveProperty("plain_interpretation");
+    // The compact fact survives when its expendable prose rendering is cut.
+    expect(result.graph_compact?.edges[0].coefficient_confidence).toBe("high");
     // Node fields (type, category, intervention_summary) must survive Pass 1
     expect(result.graph_compact?.nodes[0].type).toBe("t");
     expect(result.graph_compact?.nodes[0].category).toBe("c");

@@ -486,8 +486,9 @@ export interface ContextPack {
   readonly factor_values?: ContextPackFactorValues;
   /**
    * LLM-facing graph projection. Edges carry decision-language `relationship`
-   * phrases ("moderate positive link") instead of raw `strength` floats; raw
-   * `exists` probabilities and `plain_interpretation` strings are stripped;
+   * phrases ("moderate positive link") plus the compactor's closed coefficient
+   * confidence band instead of raw `strength` / `std` floats; raw `exists`
+   * probabilities and `plain_interpretation` strings are stripped;
    * nodes carry only display-safe fields (id/label/kind plus optional
    * category/unit/intervention_summary). Substituted in for `graph` by
    * `buildUserMessage` (route-with-tool-use.ts) when serialising the
@@ -1556,9 +1557,10 @@ export function assembleContextPackWithSummary(
     // forbidden-boundary gate rightly flags, while changing nothing.
     display_analysis: displayAnalysis,
     // Display-safe graph projection — what Sonnet actually sees in
-    // place of the raw graph. Edge `strength` floats become decision-
-    // language `relationship` phrases; `exists` and `plain_interpretation`
-    // are dropped; node numeric fields stripped. Raw `graph` above is
+    // place of the raw graph. Edge `strength` / `std` floats become decision-
+    // language `relationship` phrases plus the compactor's closed coefficient
+    // confidence band; `exists` and `plain_interpretation` are dropped; node
+    // numeric fields stripped. Raw `graph` above is
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
     // READINESS — placed with the HARD STRUCTURED STATE. Conditional spread:

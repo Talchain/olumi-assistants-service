@@ -154,7 +154,9 @@ function getMaxTokens(): number {
  *   Pass 3: source provenance
  * Edge trim (separate pass after all node passes):
  *   Pass 4: drop exists field from edges (preserve graph structure — never delete edges)
- * Preserved throughout: label, value, unit
+ * Preserved throughout: label, value, unit, coefficient_confidence. The closed
+ * confidence band is the compact fact; `plain_interpretation` is its expendable
+ * prose rendering.
  */
 
 /**
@@ -232,7 +234,7 @@ function trimCompactEdgeExists(edge: GraphV3Compact['edges'][number]): GraphV3Co
  * - Pass 2b: drop raw_value, cap from external-factor nodes (prior ranges)
  * - Pass 3: drop source provenance from nodes
  * - Pass 4: drop exists field from edges (preserves graph structure — no edges deleted)
- * - Preserve throughout: label, value, unit
+ * - Preserve throughout: label, value, unit, coefficient_confidence
  *
  * Analysis trimming:
  * - Drop constraint_tensions, reduce top_drivers to 3
