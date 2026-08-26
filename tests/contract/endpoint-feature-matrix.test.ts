@@ -339,10 +339,10 @@ import { buildFailureResponse } from "../../src/orchestrator-v5/failure-response
 import { sanitiseOlumiResponseForEgress } from "../../src/orchestrator-v5/compose/output-safety.js";
 
 describe("/orchestrate/v2/turn — substitute composition primitives", () => {
-  it("[stale-prefix] applyStalenessPrefix prepends canonical caveat when staleness_reason is non-null", () => {
+  it("[stale-prefix] applyStalenessPrefix prepends canonical caveat on a stale verdict", () => {
     const result = applyStalenessPrefix(
       "The London hire option leads in roughly 62% of simulations.",
-      "loaded_from_prior_run",
+      "stale",
     );
     expect(result.prefixed).toBe(true);
     expect(result.text.startsWith(STALENESS_PREFIX)).toBe(true);
@@ -350,7 +350,7 @@ describe("/orchestrate/v2/turn — substitute composition primitives", () => {
 
   it("[stale-prefix] applyStalenessPrefix is idempotent on already-prefixed text", () => {
     const text = `${STALENESS_PREFIX} Some figures.`;
-    const result = applyStalenessPrefix(text, "loaded_from_prior_run");
+    const result = applyStalenessPrefix(text, "stale");
     expect(result.prefixed).toBe(false);
     expect(result.text).toBe(text);
   });
