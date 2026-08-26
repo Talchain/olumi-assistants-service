@@ -199,6 +199,35 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     );
   });
 
+  /**
+   * ⭐ THE DISCRIMINATING FIXTURE, and it is not optional.
+   *
+   * On the graph above, the declared route and the blocker-derived route happen
+   * to produce the SAME eight descriptions (canonical `readiness_issues` are
+   * themselves minted through `blockerIssue`). So the canonical test above
+   * cannot tell which route ran — it would stay green even if the fix wrongly
+   * PREFERRED the derived record everywhere, which is exactly the over-wide
+   * failure this file is supposed to catch.
+   *
+   * Emptying `blockers` while keeping `readiness_issues` makes the two routes
+   * disagree: the declared route still names all four, the derived route can
+   * name nothing. That is the only fixture here that binds the canonical path
+   * to its own field.
+   */
+  it("reads the DECLARED record on the canonical shape — proven by starving the derived one", () => {
+    const graph = graphWithFourValuelessFactors(false);
+    const canonical: any = buildCanonicalAnalysisReadyFromGraph(graph);
+
+    // Precondition: the two routes really would disagree on this payload.
+    expect((canonical.readiness_issues ?? []).length).toBeGreaterThanOrEqual(2);
+    expect((canonical.blockers ?? []).length).toBeGreaterThanOrEqual(2);
+
+    const starved = { ...canonical, blockers: [] };
+    expect(factorsNamed(projectContextPackReadiness(starved)?.open_items ?? []).sort()).toEqual(
+      [...VALUELESS].sort(),
+    );
+  });
+
   it("invents NOTHING on a payload the canonical authority calls ready", () => {
     const graph = graphWithFourValuelessFactors(true);
     const payload: any = buildCanonicalAnalysisReadyFromGraph(graph);
