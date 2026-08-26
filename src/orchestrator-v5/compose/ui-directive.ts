@@ -812,6 +812,16 @@ function buildFlipFocusDirective(
   // applies to BOTH explanation handlers, so this row flips identically; gating
   // only its twin would point the user at a factor derived from an analysis the
   // answer above just called possibly-wrong.
+  //
+  // ⚠ ORDERING, RECORDED RATHER THAN CHANGED: this gate sits BEFORE the
+  // `no_flip_proposal` check, so a caveated turn that ALSO had no proposal now
+  // reports `staleness_caveated` rather than `no_flip_proposal`. Both are true
+  // of such a turn and the emitted directive is identical (none) either way, so
+  // this is a telemetry-attribution nuance, not a behaviour difference. It is
+  // noted because it is the kind of silent re-attribution that later reads as a
+  // capability going quiet in a dashboard (cf. the retired `no_flip_factor`
+  // tag). Currency is checked first deliberately: it is a claim about whether
+  // the turn may point at ANYTHING, which outranks which thing it would point at.
   if (fact.result.staleness_prefixed === true) {
     return suppressDirective('what_would_flip', 'staleness_caveated');
   }

@@ -261,12 +261,29 @@ export function applyStalenessPrefix(
  * ⚠⚠ EXHAUSTIVE WITH A `never` GUARD, MATCHING ITS SIBLING. This was a ternary,
  * and the old note here read *"total over `StalenessCaveat` by construction: the
  * type has exactly two members and both are named, so there is no default to
- * fall through."* True today, and it FAILS SILENT tomorrow: a ternary's `else`
- * absorbs any third member, so a new caveat would return the UNCONFIRMED copy —
- * the WEAKER claim in a state that may license a stronger one, which is the
- * fail-OPEN direction and the wrong one for a trust surface. The switch makes a
- * new member a TYPE ERROR here instead of a quiet mis-wording in front of a
- * user.
+ * fall through."* True today. A ternary's `else` absorbs any third member, so a
+ * new caveat would return the UNCONFIRMED copy — the WEAKER claim in a state
+ * that may license a stronger one, which is the fail-OPEN direction and the
+ * wrong one for a trust surface.
+ *
+ * ⚠ AND THE HONEST SIZE OF WHAT THIS CLOSES, BECAUSE THE FIRST VERSION OF THIS
+ * NOTE OVERSTATED IT. Measured by adding a third member (`'provisional'`) and
+ * typechecking both forms:
+ *
+ *   3rd member + this switch   → errors at `:151` AND at the `never` guard here
+ *   3rd member + the ternary   → errors at `:151` ONLY — ONE error, not zero
+ *
+ * So a third member does NOT slip through silently today: `APPROVED_OPENINGS`
+ * above is a `Record<StalenessCaveat, …>` and already fails the build. Claiming
+ * the ternary "catches nothing" would be the same overstatement this module is
+ * currently correcting one door down — a justification that inflates the risk it
+ * closes is the same defect class as a docstring that inflates a guarantee.
+ *
+ * What the switch actually buys, stated at its real size: it fails AT THIS
+ * FUNCTION rather than at a neighbouring table, so the error names the code that
+ * would emit the wrong words; and it does not depend on `APPROVED_OPENINGS`
+ * staying `Record`-typed — loosen that table to a partial or index signature and
+ * the ternary's silent fallthrough returns with no error anywhere.
  *
  * `caveatForPreconditionVerdict` (`no-op-helpers.ts`) already states this
  * reasoning for the same union's producer side and is written this way; the two

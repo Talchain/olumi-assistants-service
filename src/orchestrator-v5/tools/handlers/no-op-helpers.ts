@@ -314,6 +314,14 @@ export function decideExplanationPrecondition(
  * `explain_results` and `what_would_flip`, and the follow-up it defers to is the
  * change this comment now sits inside.
  *
+ * ⭐ THE METHOD IN THE OLD NOTE STANDS AND IS KEPT VERBATIM, because it is what
+ * stops the next reader repeating the error rather than merely inheriting its
+ * conclusion: *"Saying 'the channel is revived' would generalise a true
+ * statement about the verdict into a false one about the path (trap 20 — the
+ * overclaim happens in the RECORDING, not in the measurement)."* That reasoning
+ * is exactly why the rung claim above is now stated at the CALL SITE (`:463`,
+ * named and checkable) instead of as a standing adjective.
+ *
  * ⚠ CORRECTED HERE BECAUSE THE TWIN WAS CORRECTED AND THIS ONE WAS NOT.
  * `staleness-prefix.ts` carries the same rung note and had it updated in this
  * PR, with the reason stated: *"a rung claim is a dated measurement, not a
