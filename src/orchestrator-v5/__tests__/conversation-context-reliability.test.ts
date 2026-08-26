@@ -32,6 +32,8 @@ import { parseConversationContent, type SessionTurnWithContent } from '../sessio
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 import { makeMessagePayload } from './fixtures.js';
 import { setTestSink } from '../../utils/telemetry.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -271,6 +273,44 @@ describe('write side — stored assistant text equals the durable public (egress
     expect(last()?.assistantMessage).toContain('Revenue');
     expect(last()?.assistantMessage).not.toContain('goal_revenue');
     expect(last()?.assistantMessage).not.toContain('fac_delivery_cost');
+  });
+
+  it('keeps stored == wire for an ingress-valid structural-fallback graph', async () => {
+    const structuralFallbackGraph = {
+      nodes: [
+        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        { id: 'factor_growth', kind: 'factor', label: 'Growth rate' },
+      ],
+      // Valid at the request/context ingress, but intentionally not GraphV3:
+      // the legacy-shaped edge lacks GraphV3 strength/provenance members.
+      edges: [{ from: 'factor_growth', to: 'goal_revenue', edge_type: 'causal' }],
+    };
+    expect(GraphStateIngressSchema.safeParse(structuralFallbackGraph).success).toBe(true);
+    expect(GraphV3.safeParse(structuralFallbackGraph).success).toBe(false);
+
+    const { store, last } = makeCapturingStore();
+    const text = 'goal_revenue is most sensitive.';
+    await commitDirectAnswer(
+      makeResponse(text),
+      {
+        ...META,
+        userMessage: 'What is most sensitive?',
+        contentGraph: structuralFallbackGraph,
+      },
+      store,
+    );
+    const wireResponse = sanitiseOlumiResponseForEgress(
+      makeResponse(applyEgressForbiddenPhraseGuard(text).text),
+      {
+        graph: GraphStateIngressSchema.parse(structuralFallbackGraph),
+        requestId: 'test-structural-fallback',
+        exitPath: 'turn_executor',
+        userMessage: null,
+        mayNameLeadingOption: true,
+      },
+    );
+    expect(last()?.assistantMessage).toBe(wireResponse.assistant_text);
+    expect(last()?.assistantMessage).toBe('Revenue is most sensitive.');
   });
 });
 

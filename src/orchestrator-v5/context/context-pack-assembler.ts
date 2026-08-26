@@ -56,6 +56,7 @@ import { partitionInterventionControlledDrivers } from './intervention-controlle
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
+import type { ContextPackGraphContext } from './context-graph-snapshot.js';
 // Selection-aware answering (hop 4). TYPE-ONLY on purpose: the resolved
 // selection is produced by `buildTurnContext` and this module only PLACES it,
 // so there is no runtime edge from the assembler back to the context builder.
@@ -423,6 +424,15 @@ export interface ContextPack {
    * tolerant reading of hand-built packs.
    */
   readonly brief?: ContextPackBrief | null;
+  /**
+   * Authority of every graph-derived reasoning slice in this pack.
+   *
+   * Optional only so legacy hand-built `ContextPack` values remain assignable.
+   * The production assembler always emits it, and omission is interpreted as
+   * `unavailable` by both this assembler and the prompt builder. No error code
+   * or graph-read detail is model-facing.
+   */
+  readonly graph_context?: ContextPackGraphContext;
   readonly graph: ContextPackGraph;
   /**
    * Raw, handler-facing analysis projection. Carries float probabilities
@@ -688,6 +698,12 @@ export interface AssembleContextPackInput {
    * assembler omits it — a null is never serialised into the prompt).
    */
   readonly brief?: string | null;
+  /**
+   * Pre-selected graph authority. The turn executor selects one coherent
+   * canonical/provisional snapshot before assembly. Optional for direct legacy
+   * callers only; omission fails weak to `unavailable`, never to canonical.
+   */
+  readonly graphContext?: ContextPackGraphContext;
   readonly graph?: GraphWithOptions | null;
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
@@ -718,11 +734,10 @@ export interface AssembleContextPackInput {
    * PRE-PROJECTED UPSTREAM ON PURPOSE — the same discipline as `goalTarget`,
    * `readiness` and `coachingContext`.
    *
-   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. Pass the
-   * record read from `context.persistedGraph ?? options.graphState`, NOT
-   * `graphStateForTurn` (request-first, turn-executor.ts:2004). This is a claim
-   * about what is SAVED; a stale or forged client graph would otherwise report
-   * a factor as valued when the saved model has nothing.
+   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. Emit
+   * this record only when the single ContextPack graph selector returned
+   * `canonical`. This is a claim about what is SAVED; provisional, absent or
+   * unavailable state must leave the field absent.
    */
   readonly factorValues?: ContextPackFactorValues;
   /**
@@ -735,13 +750,10 @@ export interface AssembleContextPackInput {
    * `coachingContext`. The "is a success target set?" question has exactly ONE
    * owner and the assembler must never become a second one.
    *
-   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. The
-   * caller must pass the record read from `context.persistedGraph ??
-   * options.graphState`, NOT `graphStateForTurn` (request-first,
-   * turn-executor.ts:2004). `compactedConstraints` beside it is request-first
-   * and correctly so — it describes the graph being reasoned over. This field
-   * is a claim about what is SAVED, and a stale or forged client graph would
-   * otherwise be reported to the model as recorded state.
+   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. Emit
+   * this record only when the single ContextPack graph selector returned
+   * `canonical`. This field is a claim about what is SAVED; provisional,
+   * absent or unavailable state must leave it absent.
    *
    * `compactGraph` drops `goal_threshold` (graph-compact.ts:223), so without
    * this field the model received NO statement about the success target in
@@ -1538,11 +1550,19 @@ export function assembleContextPackWithSummary(
     input.coachingContext?.usable_for_chips === true,
   );
 
+  // Absence never means permission. Production always supplies this field,
+  // but direct/legacy assembler callers fail weak to `unavailable` rather than
+  // silently granting their graph canonical authority.
+  const graphContext: ContextPackGraphContext = input.graphContext ?? {
+    status: 'unavailable',
+  };
+
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
     ...(projectedBrief !== null ? { brief: projectedBrief } : {}),
+    graph_context: graphContext,
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
@@ -1581,7 +1601,9 @@ export function assembleContextPackWithSummary(
     // that is the whole point: before this field, "unset" was UNSAYABLE, so
     // absence-of-evidence and evidence-of-absence were the same token and the
     // model resolved the question from the transcript instead.
-    ...(input.goalTarget !== undefined ? { goal_target: input.goalTarget } : {}),
+    ...(graphContext.status === 'canonical' && input.goalTarget !== undefined
+      ? { goal_target: input.goalTarget }
+      : {}),
     // FACTOR VALUE STATE — placed with the hard structured state for the same
     // reason as `goal_target`: it is a claim about the saved model, not
     // conversational colour.
@@ -1592,7 +1614,9 @@ export function assembleContextPackWithSummary(
     // says the graph was read and every factor carries a value. Encoding that
     // as absence is exactly the collapse that let the model tell a user it
     // could not see which factors were unset while the Model tab named them.
-    ...(input.factorValues !== undefined ? { factor_values: input.factorValues } : {}),
+    ...(graphContext.status === 'canonical' && input.factorValues !== undefined
+      ? { factor_values: input.factorValues }
+      : {}),
     // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
     // above `conversation`, so the model reads the user's focus as part of the
     // model rather than as conversational colour. ⚠ In the SERIALISED prompt
@@ -1605,7 +1629,9 @@ export function assembleContextPackWithSummary(
     // The analysis join reads the SAME display-safe projection the model
     // receives, so `focus` can never show a number that disagrees with the
     // `analysis` section beside it.
-    ...(projectedFocus !== null ? { focus: projectedFocus } : {}),
+    ...(graphContext.status === 'canonical' && projectedFocus !== null
+      ? { focus: projectedFocus }
+      : {}),
     conversation,
     // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
     // Conditional spread — when the caller supplies nothing the key is

@@ -48,7 +48,10 @@ import { randomUUID } from 'node:crypto';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
-import { READINESS_INSTRUCTION } from '../routing/route-with-tool-use.js';
+import {
+  GRAPH_CONTEXT_INSTRUCTION,
+  READINESS_INSTRUCTION,
+} from '../routing/route-with-tool-use.js';
 
 const SCENARIO_ID = randomUUID();
 
@@ -219,12 +222,20 @@ interface ReadinessSection {
   open_items: Array<{ kind: string; description: string; option_label?: string }>;
 }
 
+interface SerialisedContextPack {
+  readonly graph_context?: { readonly status?: string };
+  readonly graph?: {
+    readonly nodes?: ReadonlyArray<{ readonly id?: string }>;
+  };
+  readonly readiness?: ReadinessSection;
+}
+
 /**
  * The `readiness` section AS SERIALISED into the routing prompt. Brace-matched
  * rather than sliced to a marker, because `buildUserMessage` appends
  * instruction blocks AFTER the JSON — a naive slice swallows them and throws.
  */
-function readinessSection(prompt: string): ReadinessSection | undefined {
+function serialisedContextPack(prompt: string): SerialisedContextPack {
   const marker = '## ContextPack\n';
   const at = prompt.indexOf(marker);
   expect(at).toBeGreaterThanOrEqual(0);
@@ -243,16 +254,21 @@ function readinessSection(prompt: string): ReadinessSection | undefined {
     if (c === '"') inString = true;
     else if (c === '{') depth++;
     else if (c === '}' && --depth === 0) {
-      return (JSON.parse(rest.slice(0, i + 1)) as { readiness?: ReadinessSection }).readiness;
+      return JSON.parse(rest.slice(0, i + 1)) as SerialisedContextPack;
     }
   }
-  throw new Error('readinessSection: unterminated ContextPack JSON');
+  throw new Error('serialisedContextPack: unterminated ContextPack JSON');
 }
 
-async function runTurn(message: string): Promise<string> {
+function readinessSection(prompt: string): ReadinessSection | undefined {
+  return serialisedContextPack(prompt).readiness;
+}
+
+async function runTurn(message: string, requestGraph?: unknown): Promise<string> {
   const { adapter, calls } = textOnlyAdapter();
   await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
     routingAdapter: adapter,
+    ...(requestGraph === undefined ? {} : { graphState: requestGraph as never }),
   });
   return routingUserMessage(calls);
 }
@@ -313,6 +329,42 @@ describe('ContextPack readiness — the wire', () => {
     // permission would be right here by luck and wrong on an auto-repairable
     // payload, which is exactly the defect one level down.
     expect(readyPrompt).toContain(READINESS_INSTRUCTION);
+  });
+
+  it('client lag cannot split prompt graph authority from prompt readiness', async () => {
+    // Arm A: a ready request cannot reopen readiness or replace the graph when
+    // the saved Living Model is blocked.
+    CURRENT_GRAPH = BLOCKED_GRAPH;
+    const blockedPrompt = await runTurn(
+      'Is there anything stopping this from running?',
+      READY_GRAPH,
+    );
+    const blockedPack = serialisedContextPack(blockedPrompt);
+    expect(blockedPack.graph_context).toEqual({ status: 'canonical' });
+    expect(blockedPack.readiness?.status).toBe('blocked');
+    expect(blockedPack.graph?.nodes).toHaveLength(3);
+    expect(blockedPack.graph?.nodes?.map((node) => node.id)).toEqual(
+      expect.arrayContaining(['goal_rev', 'opt_local', 'factor_salary']),
+    );
+    expect(blockedPack.graph?.nodes?.some((node) => node.id === 'opt_off')).toBe(false);
+
+    // Arm B is the polarity inversion: a blocked request cannot close a saved
+    // ready model. The persisted-only second option must reach the same prompt
+    // that carries `ready`, proving a common source rather than two matching
+    // status strings by coincidence.
+    CURRENT_GRAPH = READY_GRAPH;
+    const readyPrompt = await runTurn(
+      'Is there anything stopping this from running?',
+      BLOCKED_GRAPH,
+    );
+    const readyPack = serialisedContextPack(readyPrompt);
+    expect(readyPack.graph_context).toEqual({ status: 'canonical' });
+    expect(readyPack.readiness?.status).toBe('ready');
+    expect(readyPack.graph?.nodes?.some((node) => node.id === 'opt_off')).toBe(true);
+    expect(readyPack.graph?.nodes?.some((node) => node.id === 'dec')).toBe(true);
+
+    expect(blockedPrompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
+    expect(readyPrompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
   });
 
   it('open items are DEDUPED — byte-identical copies never reach the prompt', async () => {

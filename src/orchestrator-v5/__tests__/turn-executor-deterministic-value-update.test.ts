@@ -40,6 +40,9 @@ vi.mock('../session/index.js', () => ({
     // the ingress-shaped mutated graph commits as-is (this suite's
     // pre-merge-back expectations).
     loadGraph: async () => null,
+    // The request graph is the validated first-touch carrier in this suite.
+    // A missing canonical-read method means unavailable, not absent.
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
   }),
   resetSessionStoreForTests: () => {},
 }));

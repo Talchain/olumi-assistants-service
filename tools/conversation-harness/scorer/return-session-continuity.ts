@@ -808,6 +808,10 @@ export async function runFreshFacadeReturnSession(
     priorFacts: facts,
     priorFactsReadOk: context.prior_facts_read_ok,
     brief,
+    // The strict parse above consumed the graph loaded through the fresh
+    // persisted-session facade. State that authority explicitly; omission is
+    // intentionally `unavailable` and would invalidate this harness's claim.
+    graphContext: { status: 'canonical' },
     graph: compactedGraph ? undefined : authoritativeGraph,
     compactedGraph,
     compactedConstraints,

@@ -305,45 +305,38 @@ describe('repository scan (the gate)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Rule 2 — the current-model hash derivation anchors to the saved model.
+// 3. Rule 2 — graph-derived reasoning consumes one selector snapshot.
 // ---------------------------------------------------------------------------
 
-describe('hash-anchor rule (currentAnalysisGraphHashForTurn)', () => {
+describe('single-snapshot authority rule', () => {
   const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
 
-  it('anchors to context.persistedGraph; the request graph appears only in the cold-start branch', () => {
-    // Structural view: comments AND string contents blanked (newline- and
-    // length-preserving), so neither prose mentions nor braces inside strings
-    // can perturb the block capture.
+  it('binds the selector once and derives freshness/readiness from its graph', () => {
     const { structural } = tokenise(source);
+    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
+    expect(selectorIdx, 'selector binding not found').toBeGreaterThan(-1);
+    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
+    expect(selectorCall, 'selector call did not balance').not.toBeNull();
+    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
+    expect(selectorText).toContain('canonicalRead: context.persistedGraphRead');
+    expect(selectorText).toContain('requestGraph: options.graphState');
 
-    const assignIdx = structural.indexOf('currentAnalysisGraphHashForTurn = ((');
-    expect(assignIdx, 'hash derivation assignment not found — re-anchor this rule').toBeGreaterThan(-1);
-    const derivation = captureBalanced(structural, assignIdx, '{', '}');
-    expect(derivation, 'derivation block did not balance').not.toBeNull();
-    const derivationText = structural.slice(derivation!.start, derivation!.end + 1);
+    const binding = 'const contextGraphForReasoning = contextGraphSelection.graph';
+    expect(structural).toContain(binding);
 
-    // The persisted anchor exists.
-    expect(derivationText).toContain('context.persistedGraph');
+    const hashIdx = structural.indexOf('currentAnalysisGraphHashForTurn =', selectorCall!.end);
+    expect(hashIdx, 'hash derivation after selector not found').toBeGreaterThan(selectorCall!.end);
+    const hashEnd = structural.indexOf(';', hashIdx);
+    const hashText = structural.slice(hashIdx, hashEnd + 1);
+    expect(hashText).toContain('canonicalReadinessGraphForRun');
+    expect(hashText).not.toContain('graphStateForTurn');
+    expect(hashText).not.toContain('options.graphState');
 
-    // The ONLY permitted request-graph use is the documented cold-start branch
-    // (no saved model yet). Capture that branch and require every structural
-    // occurrence of `graphStateForTurn` in the derivation to sit inside it.
-    const guardIdx = derivationText.indexOf('persistedGraph === undefined || persistedGraph === null');
-    expect(guardIdx, 'cold-start guard not found — re-anchor this rule').toBeGreaterThan(-1);
-    const coldStart = captureBalanced(derivationText, guardIdx, '{', '}');
-    expect(coldStart, 'cold-start block did not balance').not.toBeNull();
-
-    const occurrences = [...derivationText.matchAll(/graphStateForTurn/g)].map((m) => m.index!);
-    expect(occurrences.length, 'expected the cold-start fallback to reference the request graph').toBeGreaterThan(0);
-    for (const idx of occurrences) {
-      expect(
-        idx >= coldStart!.start && idx <= coldStart!.end,
-        `graphStateForTurn used OUTSIDE the cold-start branch of the hash derivation (offset ${idx}) — ` +
-          `the current-model hash must never fall back to the request graph when a saved model exists ` +
-          `(false-fresh risk under client lag)`,
-      ).toBe(true);
-    }
+    const contextProjection = extractAuthorityCallSites(
+      source,
+      'orchestrator-v5/turn-executor.ts',
+    ).find((site) => site.argText === 'contextGraphForReasoning');
+    expect(contextProjection, 'ContextPack suppression must use the selected snapshot').toBeDefined();
   });
 
   it('normaliseArg is stable for the allowlisted forms (self-check)', () => {

@@ -25,10 +25,10 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 
-// A minimal analysable graph sent on the wire. Because no canonical graph is
-// persisted (the store mock has no loadGraphAndBriefText), TurnExecutor hashes
-// THIS ingress graph for the freshness verdict. Seeding the prior run_analysis
-// fact's `graph_hash_at_run` to the SAME hash makes freshness 'fresh', so the
+// A minimal analysable graph present both canonically and on the wire. The
+// persisted snapshot is the reasoning/freshness authority; the matching caller
+// copy is only request input. Seeding the prior run_analysis fact's
+// `graph_hash_at_run` to the SAME hash makes freshness 'fresh', so the
 // deterministic stale-rerun / no-analysis guards pass the turn through to the
 // coach — the F2 path under test.
 const GRAPH_STATE = {
@@ -191,6 +191,8 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // early-return empty (prior_facts is gated on prior_turns being non-empty).
     readRecent: async () => [PRIOR_TURN_ROW],
     readFactsFor: async () => [PRIOR_RUN_ANALYSIS_FACT],
+    loadGraph: async () => GRAPH_STATE,
+    loadGraphAndBriefText: async () => ({ graph: GRAPH_STATE, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),

@@ -56,6 +56,7 @@ import {
   READINESS_INSTRUCTION,
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
+  GRAPH_CONTEXT_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -120,6 +121,7 @@ function shortSha256(s: string): string {
  * also having to prove the prompt actually carries it.
  */
 const CODE_OWNED_INSTRUCTIONS = [
+  ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
   ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
   ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
   // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
@@ -290,6 +292,7 @@ function assembleMaximalPack(
     } as never,
     olderRelevantFacts:
       'Prior decisions recorded on this scenario (most recent first):\n- [2026-07-25] Chose "Hybrid Deployment": contract signed off by Thistlewood-Okafor.',
+    graphContext: { status: 'canonical' },
     // `systemEvent` is DELIBERATELY not supplied. A complete producer sweep of
     // the repo (`grep -rn 'systemEvent\s*:' src`) finds ZERO production callers:
     // system-event turns are handled in a deterministic pre-TurnExecutor branch
@@ -561,6 +564,31 @@ describe('prompt ↔ pack sanction gate', () => {
         `sees the licence, so any waiver removed on its authority is a false claim), or the ` +
         `instruction is no longer code-owned and must leave MODEL_FACING_CORPUS.`,
     ).toEqual([]);
+  });
+
+  it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
+    'GRAPH AUTHORITY — serialises %s exactly and emits its interpretation block once',
+    (status) => {
+      const rendered = buildUserMessage(
+        { ...PACK, graph_context: { status } },
+        USER_MESSAGE,
+      );
+      const serialised = observeSerialisedPack(rendered);
+
+      expect(serialised.graph_context).toEqual({ status });
+      expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    },
+  );
+
+  it('GRAPH AUTHORITY — legacy graph_context omission resolves exactly to unavailable', () => {
+    const rendered = buildUserMessage(
+      { ...PACK, graph_context: undefined },
+      USER_MESSAGE,
+    );
+    const serialised = observeSerialisedPack(rendered);
+
+    expect(serialised.graph_context).toEqual({ status: 'unavailable' });
+    expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
   });
 
   it('THE GATE — every prose-bearing model-facing field is NAMED in the text the model receives', () => {

@@ -29,6 +29,7 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { finaliseV5Response } from '../response-finaliser.js';
+import { GRAPH_CONTEXT_INSTRUCTION } from '../routing/route-with-tool-use.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -95,6 +96,52 @@ function mockRoutingAdapter(impl: ChatWithToolsMock) {
   };
 }
 
+interface SerialisedContextPack {
+  readonly graph_context?: { readonly status?: string };
+  readonly graph?: {
+    readonly nodes?: ReadonlyArray<{ readonly id?: string; readonly label?: string }>;
+    readonly edges?: ReadonlyArray<{
+      readonly from?: string;
+      readonly to?: string;
+      readonly relationship?: string;
+    }>;
+  };
+}
+
+function routingPrompt(adapter: ReturnType<typeof mockRoutingAdapter>): string {
+  const args = adapter.chatWithTools.mock.calls[0]?.[0];
+  expect(args, 'the routing adapter was never called').toBeDefined();
+  const messages = args!.messages as Array<{ role: string; content: unknown }>;
+  const user = messages.find((message) => message.role === 'user');
+  expect(user, 'no user message reached the routing adapter').toBeDefined();
+  return typeof user!.content === 'string' ? user!.content : JSON.stringify(user!.content);
+}
+
+function serialisedContextPack(prompt: string): SerialisedContextPack {
+  const marker = '## ContextPack\n';
+  const at = prompt.indexOf(marker);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const rest = prompt.slice(at + marker.length);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < rest.length; i++) {
+    const char = rest[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}' && --depth === 0) {
+      return JSON.parse(rest.slice(0, i + 1)) as SerialisedContextPack;
+    }
+  }
+  throw new Error('serialisedContextPack: unterminated ContextPack JSON');
+}
+
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const PRIOR_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const PRIOR_TURN_ID_CLIENT = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -140,6 +187,9 @@ const PRE_EDIT_GRAPH = {
 
 const POST_EDIT_GRAPH = {
   ...PRE_EDIT_GRAPH,
+  nodes: PRE_EDIT_GRAPH.nodes.map((node) =>
+    node.id === 'opt_a' ? { ...node, label: 'Option A after saved edit' } : node,
+  ),
   edges: [
     {
       ...PRE_EDIT_GRAPH.edges[0]!,
@@ -176,6 +226,10 @@ function findPreHandlerFreshnessEvent(): Event | undefined {
       e.event === 'v5.analysis_freshness.derived' &&
       (e.data.dispatch_path as string | undefined) === 'turn_executor_pre_handler',
   );
+}
+
+function findContextPackEvent(): Event | undefined {
+  return events.find((event) => event.event === 'v5.context_pack.assembled');
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +323,8 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     // not the request graph. Without the fix this is PRE_EDIT_HASH and
     // freshness is 'fresh'.
     expect(evt!.data.current_graph_hash).toBe(POST_EDIT_HASH);
+    expect(findContextPackEvent()?.data.graph_context_status).toBe('canonical');
+    expect(findContextPackEvent()?.data.graph_context_reason).toBe('persisted_valid');
   });
 
   it('remains FRESH when persisted graph matches the prior run_analysis fact (no edit)', async () => {
@@ -280,12 +336,15 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       mkTextResult('explanation'),
     );
 
-    await runTurnExecutor(
+    const run = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'why does it lead?' },
       'req-fresh-h3',
       {
         routingAdapter,
-        graphState: PRE_EDIT_GRAPH as never,
+        // Deliberately divergent client bytes: if freshness or the prompt fell
+        // back to request-first authority, this arm would be stale and the
+        // client-only renamed label would reach the model.
+        graphState: POST_EDIT_GRAPH as never,
       },
     );
 
@@ -294,6 +353,24 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.freshness).toBe('fresh');
     expect(evt!.data.reason).toBe('graph_hash_match');
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
+
+    const prompt = routingPrompt(routingAdapter);
+    const pack = serialisedContextPack(prompt);
+    const option = pack.graph?.nodes?.find((node) => node.id === 'opt_a');
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(option?.label).toBe('Option A');
+    expect(option?.label).not.toBe('Option A after saved edit');
+    expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
+
+    // Non-mutating response egress must describe the same canonical snapshot
+    // the prompt used, not the divergent request carrier. route-v2 passes this
+    // graph to both the entity-label scrub and graph-hash stamper.
+    expect(run.effectiveGraph?.nodes.find((node) => node.id === 'opt_a')?.label).toBe(
+      'Option A',
+    );
+    expect(computeAnalysisAffectingGraphHash(run.effectiveGraph as never)).toBe(
+      PRE_EDIT_HASH,
+    );
   });
 
   it('fresh fallback (no request analysis_state, graph_hash_match) emits NO stale/unknown user-facing copy', async () => {
@@ -362,7 +439,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       mkTextResult('explanation after parse failure'),
     );
 
-    await runTurnExecutor(
+    const run = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'why did that lead?' },
       'req-malformed-persisted-h3',
       {
@@ -376,6 +453,19 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.freshness).toBe('unknown');
     expect(evt!.data.reason).toBe('current_graph_hash_unavailable');
     expect(evt!.data.current_graph_hash).toBeNull();
+
+    // A malformed canonical record fails weak for the ContextPack too. This
+    // path exits deterministically before routing, so the assembly event is the
+    // observable source-authority seam rather than an adapter prompt.
+    expect(findContextPackEvent()?.data.graph_context_status).toBe('unavailable');
+    expect(findContextPackEvent()?.data.graph_context_reason).toBe(
+      'persisted_invalid_shape',
+    );
+    // The unavailable graph and request graph are both null at the readiness
+    // projection seam. Identity equality must not accidentally resurrect the
+    // request-derived readiness that was computed before authority selection.
+    expect(run.analysisReady).toBeUndefined();
+    expect(run.effectiveGraph).toBeNull();
   });
 
   it('legacy/unparseable persisted graph reload ships analysis_ready.freshness=unknown on the wire (Mission 3)', async () => {
@@ -457,9 +547,10 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     OlumiResponseSchema.parse(finalised);
   });
 
-  it('falls back to request graphState when persisted graph is absent (first-draft turn)', async () => {
-    // No persisted graph: this is a first-draft turn or the persisted
-    // read degraded. Request graphState is the only signal available.
+  it('uses a valid request graph provisionally only after an explicit absent persisted read', async () => {
+    // An explicit successful absent read is the only first-touch state that may
+    // promote a valid request graph. A degraded read is covered above and must
+    // remain unavailable.
     installPriorRunAnalysisFact(PRE_EDIT_HASH);
     (global as Record<string, unknown>).__test_persisted_graph = null;
     const routingAdapter = mockRoutingAdapter(async () =>
@@ -481,5 +572,17 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     // and that matches the prior fact's hash so freshness is 'fresh'.
     expect(evt!.data.freshness).toBe('fresh');
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
+    expect(findContextPackEvent()?.data.graph_context_status).toBe('provisional');
+    expect(findContextPackEvent()?.data.graph_context_reason).toBe(
+      'persisted_absent_request_valid',
+    );
+
+    const prompt = routingPrompt(routingAdapter);
+    const pack = serialisedContextPack(prompt);
+    expect(pack.graph_context).toEqual({ status: 'provisional' });
+    expect(pack.graph?.nodes?.map((node) => node.id)).toEqual(
+      expect.arrayContaining(['opt_a', 'fac_cost', 'goal_outcome']),
+    );
+    expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
   });
 });

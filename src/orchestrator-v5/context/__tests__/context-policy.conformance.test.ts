@@ -571,6 +571,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
       conversation_summary: 800,
       brief: 1_500, // enforced 2000 — under
       display_analysis: 3_200, // enforced 4000 — under
+      graph_context: 22,
       display_graph: 6_000, // telemetry_only — not checked
     };
     expect(findContextPolicyDivergences('routing', clean)).toEqual({
@@ -646,6 +647,20 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
   });
 
   it('POSITIVE CONTROL (egress-F3) — an always_expected section that went dark (under-emit) is SEEN', () => {
+    expect(
+      findContextPolicyDivergences('routing', {
+        brief: 500,
+        graph_context: 22,
+        display_graph: 1_200,
+      }).missing_sections,
+    ).toEqual([]);
+    expect(
+      findContextPolicyDivergences('routing', {
+        brief: 500,
+        display_graph: 1_200,
+      }).missing_sections,
+    ).toEqual(['graph_context']);
+
     // edit_graph declares graph_json always_expected (a graph is always present
     // on an edit turn). Present → clean.
     expect(
@@ -675,7 +690,14 @@ describe('runtime tripwire — emitContextPolicyDivergence (observe-only)', () =
 
   it('stays SILENT for a clean composition', () => {
     const { calls, logger } = fakeLogger();
-    emitContextPolicyDivergence('routing', { brief: 100, display_analysis: 2_000 }, 5_000, 'req-1', 'scn-1', logger);
+    emitContextPolicyDivergence(
+      'routing',
+      { brief: 100, display_analysis: 2_000, graph_context: 22 },
+      5_000,
+      'req-1',
+      'scn-1',
+      logger,
+    );
     expect(calls).toHaveLength(0);
   });
 

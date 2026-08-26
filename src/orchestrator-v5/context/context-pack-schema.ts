@@ -44,6 +44,7 @@
 import { z } from 'zod';
 
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
+import { GRAPH_CONTEXT_STATUSES } from './context-graph-snapshot.js';
 
 /**
  * The single allowed value for `version`. Bumping this is a cross-team
@@ -666,6 +667,17 @@ export const ContextPackSchema = z
      * the draft turn.
      */
     brief: ContextPackBriefSchema.nullable().optional(),
+    /**
+     * Authority of the graph-derived reasoning snapshot. Optional only for
+     * legacy hand-built packs; assembler/prompt omission resolves to the
+     * weakest safe state (`unavailable`).
+     */
+    graph_context: z
+      .object({
+        status: z.enum(GRAPH_CONTEXT_STATUSES),
+      })
+      .strict()
+      .optional(),
     graph: ContextPackGraphSchema,
     analysis: ContextPackAnalysisSchema.nullable(),
     display_analysis: DisplaySafeAnalysisSchema,

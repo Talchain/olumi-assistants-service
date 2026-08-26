@@ -431,9 +431,92 @@ describe('assembleContextPack', () => {
 describe('ContextPackSchema (canonical contract)', () => {
   it('accepts a freshly-assembled minimal pack', () => {
     const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    expect(pack.graph_context).toEqual({ status: 'unavailable' });
     const result = ContextPackSchema.safeParse(pack);
     expect(result.success).toBe(true);
   });
+
+  it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
+    'accepts graph_context status %s',
+    (status) => {
+      const pack = assembleContextPack({
+        payload: BASE_PAYLOAD,
+        priorTurns: [],
+        graphContext: { status },
+      });
+
+      expect(pack.graph_context).toEqual({ status });
+      expect(ContextPackSchema.safeParse(pack).success).toBe(true);
+    },
+  );
+
+  it('rejects a graph_context status outside the four-state contract', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const drifted = { ...pack, graph_context: { status: 'unknown' } };
+
+    const result = ContextPackSchema.safeParse(drifted);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join('.'))).toContain(
+        'graph_context.status',
+      );
+    }
+  });
+
+  it.each(['provisional', 'absent', 'unavailable'] as const)(
+    'does not emit saved-record slices when graph authority is %s',
+    (status) => {
+      const pack = assembleContextPack({
+        payload: BASE_PAYLOAD,
+        priorTurns: [],
+        graphContext: { status },
+        goalTarget: { status: 'set', value: 15, unit: '%' },
+        factorValues: {
+          factors: [{ label: 'Churn', has_value: true, provenance: 'user_stated' }],
+          without_value_count: 0,
+        },
+      });
+
+      expect(pack).not.toHaveProperty('goal_target');
+      expect(pack).not.toHaveProperty('factor_values');
+    },
+  );
+
+  it('emits saved-record slices only with explicit canonical authority', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      graphContext: { status: 'canonical' },
+      goalTarget: { status: 'set', value: 15, unit: '%' },
+      factorValues: {
+        factors: [{ label: 'Churn', has_value: true, provenance: 'user_stated' }],
+        without_value_count: 0,
+      },
+    });
+
+    expect(pack.goal_target).toEqual({ status: 'set', value: 15, unit: '%' });
+    expect(pack.factor_values?.without_value_count).toBe(0);
+  });
+
+  it.each(['provisional', 'absent', 'unavailable'] as const)(
+    'does not emit persisted focus facts when graph authority is %s',
+    (status) => {
+      const pack = assembleContextPack({
+        payload: BASE_PAYLOAD,
+        priorTurns: [],
+        graphContext: { status },
+        selection: {
+          requested_ids: ['factor-cost'],
+          elements: [{ id: 'factor-cost', kind: 'factor', label: 'Saved cost' }],
+          unresolved_ids: [],
+          unreadable_ref_ids: [],
+          graph_read: 'ok_present',
+        },
+      });
+
+      expect(pack).not.toHaveProperty('focus');
+    },
+  );
 
   it('accepts a fully-populated pack with analysis, graph, and prior turns', () => {
     const graph: GraphWithOptions = {

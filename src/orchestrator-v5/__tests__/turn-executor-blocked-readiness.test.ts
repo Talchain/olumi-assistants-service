@@ -37,6 +37,7 @@ import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 let appendShouldThrow: Error | null = null;
 const appendCalls: Array<unknown> = [];
+let persistedGraphForTest: GraphStateIngress | null = null;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -47,6 +48,7 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
+    loadGraphAndBriefText: async () => ({ graph: persistedGraphForTest, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
@@ -234,6 +236,7 @@ let errorSpy: ReturnType<typeof vi.spyOn> | null = null;
 beforeEach(() => {
   appendCalls.length = 0;
   appendShouldThrow = null;
+  persistedGraphForTest = READY_GRAPH;
   nonAnalyseHandlerInvoked = false;
   setTestSink(() => {});
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
@@ -536,6 +539,7 @@ describe('the P0 — a refused analyse turn must not erase a model the same turn
   });
 
   it('RED: the refusal KEEPS goal_node_id and the option identities when the model is not ready', async () => {
+    persistedGraphForTest = NOT_READY_GRAPH;
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
     );
@@ -560,6 +564,7 @@ describe('the P0 — a refused analyse turn must not erase a model the same turn
   });
 
   it('the verdict is STILL withdrawn — identity is kept, the refusal is not softened', async () => {
+    persistedGraphForTest = NOT_READY_GRAPH;
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
     );
