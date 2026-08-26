@@ -60,6 +60,9 @@ import {
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyStructuralDelete } from './structural-delete.js';
+// TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
+// grammar at typecheck time without adding a runtime edge into the tools layer.
+import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
 
 export type SystemEventCommitSkipReason = 'client_only_event';
 
@@ -426,18 +429,80 @@ const READER_ONLY_REFUSAL_COPY: Partial<
   // 0.50.0 direct-edit vocabulary — wire members CEE can READ but has no writer
   // for. Named individually because "I can't apply this change" would leave the
   // user guessing which gesture was dropped.
+  //
+  // ⚠⚠ THE DENIAL IS SCOPED TO THE CANVAS, AND THAT SCOPE IS LOAD-BEARING — it
+  // is the whole correction. The first version of this copy said "I can't add a
+  // factor to the model in this version", which denies the CAPABILITY. CEE has
+  // that capability: chat reaches it through `edit-graph-dispatch.ts` →
+  // `propose-structural-edit.ts`, whose advertised grammar carries `add_node`,
+  // `add_edge` and `update_node` (see READER_ONLY_CHAT_ROUTE_OPS below).
+  // What this deployment lacks is a writer for the gesture performed ON THE
+  // CANVAS — an implementation fact, never a product limit the user is told.
+  //
+  // ⭐ AND IT CLOSED A LOOP. `compose/unsupported-action-response.ts:247-267`
+  // appends, unconditionally, "You can make this change (add factor) directly
+  // on the canvas". So chat sent the user to the canvas and the canvas told
+  // them the version could not — an affordance terminating in refusal, with no
+  // exit. Each sentence below therefore names the route that WORKS, per the
+  // standing D-seam rule: hand the user to a direct-manipulation surface where
+  // one exists and works, and to chat where one does not. Pointing a CANVAS
+  // refusal at CHAT is non-circular by construction; the inverse pointer in
+  // unsupported-action-response fires only for handler ids with no chat route.
+  //
+  // Pinned BOTH WAYS in `__tests__/reader-only-refusal-capability-honesty.test.ts`.
   structural_add: {
-    text: "I can't add a factor to the model in this version, so I haven't changed the model.",
+    text:
+      "I can't apply a factor added on the canvas in this version, so I haven't " +
+      "changed the model. Tell me in chat what you want to add and I'll add it for you.",
     reason: 'structural_add_reader_only',
   },
   structural_add_edge: {
-    text: "I can't add a link between factors in this version, so I haven't changed the model.",
+    text:
+      "I can't apply a link added on the canvas in this version, so I haven't " +
+      "changed the model. Tell me in chat which factors to connect and I'll add " +
+      'the link for you.',
     reason: 'structural_add_edge_reader_only',
   },
   structural_rename: {
-    text: "I can't rename a factor in this version, so I haven't changed the model.",
+    text:
+      "I can't apply a rename made on the canvas in this version, so I haven't " +
+      "changed the model. Tell me in chat what to rename and I'll update the model " +
+      'for you.',
     reason: 'structural_rename_reader_only',
   },
+};
+
+/**
+ * The CHAT route that realises each canvas gesture this deployment cannot apply.
+ *
+ * This is what makes the refusal copy above CHECKABLE rather than merely
+ * better-worded. Each value is the canonical structural-edit op that delivers
+ * the same outcome through chat, so the honesty pin can ask the real question —
+ * *does a route exist?* — instead of pattern-matching the sentence.
+ *
+ * ⚠ HAND-WRITTEN, therefore the part that can go short (CLAUDE.md trap 12d).
+ * `StructuralEditOp` is imported as a TYPE, so a typo or a retired op fails
+ * TYPECHECK here; the test then pins the pair BOTH WAYS at runtime:
+ *   · every op named here is really in `STRUCTURAL_EDIT_OPS` — if chat LOSES
+ *     `add_node`, this stops being a route and the copy must go back to a flat
+ *     denial, so the guard REDs rather than leaving a false promise;
+ *   · every kind named here is really declared `reader_only_refusal` — if CEE
+ *     gains a server-side writer the kind becomes 'mutating', the refusal is
+ *     dead copy, and the guard REDs rather than keeping an unreachable branch.
+ *
+ * A type-only import keeps this binding free of a runtime edge into the tools
+ * layer; the test imports the value and does the derivation.
+ *
+ * ⭐ RE-SURFACE TRIGGER for this whole block: **the UI re-vendors to schemas
+ * ≥0.50.0**. That is the single event that gives these three kinds a live
+ * producer and turns any dishonesty here into a user-visible one.
+ */
+export const READER_ONLY_CHAT_ROUTE_OPS: Readonly<
+  Partial<Record<SystemEventKindLiteral, StructuralEditOp>>
+> = {
+  structural_add: 'add_node',
+  structural_add_edge: 'add_edge',
+  structural_rename: 'update_node',
 };
 
 /**
@@ -456,7 +521,7 @@ const READER_ONLY_REFUSAL_COPY: Partial<
  * refusal that names the wrong gesture is worse than a generic one, because it
  * tells the user something false about their own action.
  */
-function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiResponse {
+export function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiResponse {
   const copy = READER_ONLY_REFUSAL_COPY[payload.event.kind] ?? {
     text: "I can't apply this change in this version, so I haven't changed the model.",
     reason: `${payload.event.kind}_reader_only`,
