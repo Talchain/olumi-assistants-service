@@ -1005,10 +1005,18 @@ export function buildFocusInspectorDirective(
       // commits `handler_facts: []` (`edit-graph-dispatch.ts` builds a fact only
       // when a mutation applied), so this switch never receives an `edit_graph`
       // fact on the path that needs the gesture. The code would be live and the
-      // DATA could never reach it — CLAUDE.md trap 16-inverse. The gesture is
-      // emitted instead by `buildGateRemedySectionDirective`, called directly
-      // from `edit-graph-dispatch.ts`'s `not_honoured` branch — the shipped
-      // remedy surface for that blocker, reused rather than re-spelled.
+      // DATA could never reach it — CLAUDE.md trap 16-inverse.
+      //
+      // ⭐ AND NO GESTURE IS EMITTED ELSEWHERE FOR IT EITHER — the seam ships
+      // NONE, by decision. Two destinations were built and both were refuted by
+      // live drives: the canvas option inspector is read-only by policy (its
+      // controls sit in a `<fieldset disabled>`; a forced write produced zero
+      // wire calls), and the Model tab's `options` section has no value control
+      // on option rows at all (that row's `-value` testid resolves to an empty
+      // zero-height `<span>` where a FACTOR row gets a real `<button>`). With no
+      // surface that can accept the value, the honest answer is to ask for it in
+      // chat — where the user already is when the chip is clicked, and where a
+      // bare figure binds via `routing/repair-value-binding.ts`.
       return null;
   }
 }

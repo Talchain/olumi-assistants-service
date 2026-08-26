@@ -383,37 +383,50 @@ describe('2.1266 — the wrong-entity write is withheld (J4 t5 wire replay)', ()
 });
 
 /**
- * ⭐⭐ S7 — A `not_honoured` TURN MUST SHIP THE GESTURE, NOT ONLY THE SENTENCE.
+ * ⭐⭐ S7 — A `not_honoured` TURN SHIPS NO GESTURE, AND THAT IS THE ASSERTION.
+ *
+ * ⚠⚠ THIS HEADER PREVIOUSLY ARGUED THE OPPOSITE — "A not_honoured TURN MUST SHIP
+ * THE GESTURE" — and it survived two destination changes sitting directly above
+ * tests that assert the reverse. It is corrected rather than deleted, because
+ * the correction IS the record (trap 14): a comment that outlives the change it
+ * describes is this estate's dominant defect, and this PR met it three times.
  *
  * Wire-witnessed (UI `326970a7` · CEE `5f2e3fd`, guest): the chip labelled
  * "Set effect on Cash runway consumed" returned `blocks: []` and opened
- * nothing — `activeElement: BODY`, Model tab `aria-selected: "false"`.
+ * nothing — `activeElement: BODY`, Model tab `aria-selected: "false"`. The
+ * obvious repair is a `ui_directive`. TWO were built; live drives refuted BOTH:
  *
- * ⚠ THIS IS THE PIN THAT STOPS THE BUILDER BEING DEAD CODE. `ui-directive.ts`'s
- * own unit spec proves `buildGateRemedySectionDirective` CONSTRUCTS a valid
- * block; only this file proves the dispatch actually SHIPS one, through the real
- * `dispatchEditGraph`. A builder with a green unit spec and no call site is the
- * guarantee-theatre class this estate has paid for repeatedly.
+ *   1. `open_inspector` @ the OPTION — the canvas panel renders the intervention
+ *      row and `+ Add a change` (each reporting `disabled: false` ON ITSELF)
+ *      inside a `<fieldset disabled>` six ancestors up. A forced native write
+ *      produced ZERO wire calls. Read-only BY POLICY.
+ *   2. `open_section` @ {model_section,'options'} — matched pair in one session:
+ *      the OPTION row's `-value` testid resolves to an EMPTY zero-height
+ *      `<span>`, no role/tabindex/onclick, real click REFUSED; the FACTOR row's
+ *      control in the same table is a 37×42 `<button>` whose click SUCCEEDS.
+ *      Not policy (`anyDisabledFieldsetOnPage: 0`) — no control exists.
  *
- * ⚠ WHY IT IS KEYED TO THE OUTCOME AND NOT TO THE CHIP (trap 21 — two questions
- * under similar names). Two predicates changed in this PR and they answer
- * DIFFERENT questions, deliberately:
- *   - the GESTURE asks *"did an interventions write fail to land for the option
- *     the user named?"* — true for every phrasing that reaches this branch, so
- *     the directive fires on all of them. The option panel is where the value is
- *     set however the user got here.
- *   - the COPY asks *"has the user already named the slot?"* — true only for the
- *     identification-complete shape, so only that shape stops being taught the
- *     format (pinned in `repair-chip-identification-complete.test.ts`).
- * Collapsing them into one predicate would either withhold the gesture from
- * users who typed the sentence, or strip the format from users who named
- * nothing. They are not the same question.
+ * So there is no working direct-manipulation surface for this entity, the user
+ * is already in chat when they click, and the loop closes there: the reply asks
+ * for the number and a bare `0.6` binds via `deriveOnScreenEffectAsk` →
+ * `resolveRepairValueBinding` — a READINESS-STATE derivation no wording can
+ * break. **The tests below therefore pin an ABSENCE, and the positive control is
+ * what stops that absence being vacuous.**
  *
- * The fixture below is the WIRE's, not mine (trap 16): `t4_chip_message` is a
- * verbatim capture, and note it CARRIES A VALUE (`…to 0.12`) — it is the
- * value-bearing sibling chip, not the repair chip. That is exactly why it is the
- * right fixture here: it proves the gesture is bound to the OUTCOME, since this
- * message never reaches the identification-complete copy branch at all.
+ * ⚠ WHAT THIS FILE COVERS, EXACTLY — and it is narrower than it looks. An
+ * independent review established that `shouldInterceptBeforeEditLane` declines
+ * only on `carriesConfigureOptionValuePayload`, so the valueless REPAIR CHIP is
+ * claimed by the intercept and never reaches `dispatchEditGraph` at all. These
+ * tests therefore exercise the `not_honoured` branch as reached by the
+ * VALUE-BEARING sibling message — a real path, but NOT the capture's path. The
+ * user-facing fix for the capture is the copy branch, pinned in
+ * `repair-chip-identification-complete.test.ts`. This file's job is to stop a
+ * refuted gesture being (re-)introduced here, nothing wider.
+ *
+ * The fixture is the WIRE's, not mine (trap 16): `t4_chip_message` is a verbatim
+ * capture, and note it CARRIES A VALUE (`…to 0.12`) — which is precisely why it
+ * reaches this branch and never the identification-complete copy branch, so
+ * gesture and copy are observed independently (trap 21).
  */
 describe('S7 — a not_honoured turn ships no gesture, because none can help', () => {
   const directivesOf = (blocks: readonly { type: string }[]) =>
