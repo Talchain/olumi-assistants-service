@@ -49,6 +49,7 @@ import {
   buildAnalysisRefusalReadiness,
   buildCanonicalAnalysisReadyFromGraph,
 } from '../analysis-ready-helper.js';
+import { mapWireBlockers } from '../../../orchestrator-v5/compose/analysis-state-v1.js';
 
 const v3Edge = (id: string, from: string, to: string) => ({
   id, from, to,
@@ -197,6 +198,31 @@ describe('the analyse refusal carries the repair route its producer already wrot
     expect(carrier.goal_node_id).toBe('');
     expect(carrier.options).toEqual([]);
     expect('blockers' in carrier).toBe(false);
+  });
+
+  it('DOWNSTREAM: `analysis_state.run_state.blockers` stops being empty — the same single defect', () => {
+    // `chip-click-dispatch.ts:709-714` records the empty `run_state.blockers`
+    // and the missing identity as ONE defect: `analysis-state-v1.ts:493` calls
+    // `mapWireBlockers(input.readiness?.blockers)`, and `mapWireBlockers(
+    // undefined)` returns `[]`. This asserts the other half actually closed.
+    const carrier = buildAnalysisRefusalReadiness(
+      'MISSING_OPTION_VALUE',
+      buildCanonicalAnalysisReadyFromGraph(FRESH_DRAFT),
+    ) as { blockers?: unknown[] };
+
+    // Positive control on the OLD behaviour, so this is a discrimination and
+    // not a tautology: the empty carrier still maps to nothing.
+    expect(mapWireBlockers(undefined, 'blocked')).toEqual([]);
+
+    const mapped = mapWireBlockers(carrier.blockers, 'blocked');
+    expect(mapped.length).toBeGreaterThan(0);
+    // Bound by identity to the graph's pairs, and every issue names its option
+    // AND its factor — the count-to-route change this whole PR is for.
+    expect(mapped.map((i) => `${i.option_id}::${i.factor_id}`).sort()).toEqual(EXPECTED_PAIRS);
+    for (const issue of mapped) {
+      expect(issue.code).toBe('MISSING_OPTION_VALUE');
+      expect(issue.message.length).toBeGreaterThan(0);
+    }
   });
 
   it('TWIN-3: the one-argument call is byte-identical to the previous behaviour', () => {
