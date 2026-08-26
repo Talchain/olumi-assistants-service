@@ -229,6 +229,69 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     expect(result.changed).toBe(true);
   });
 
+  /**
+   * ⭐ GRAPH PRIMACY, PINNED BY CONTENTION — the ORDER of the ternary, not just
+   * its members.
+   *
+   * Caught by a surviving mutant, not by inspection: preferring the readiness
+   * roster whenever it is non-empty left BOTH suites fully green (13/13 here,
+   * 59/59 in the sibling), while the cruder "readiness ONLY, graph reader
+   * ignored" mutant REDs the armed control. The suite could see the graph
+   * reader DELETED and not see it DEMOTED — and demotion is the realistic
+   * drift: a reorder, or a later edit preferring the richer-looking payload.
+   *
+   * The cause was that NO case passed both sources. Every graph-bearing case
+   * omitted `analysisReady`; every readiness case passed `graph: null`. A
+   * ternary whose branches are never both live cannot have its order tested,
+   * and the two existing fixtures carry IDENTICAL labels, so merely populating
+   * both would still not discriminate.
+   *
+   * This case makes them CONTEND with DISJOINT rosters. Graph primacy is the
+   * entire safety argument for the six already-armed exits being byte-unchanged
+   * by this fix: if readiness ever won, an exit that has a real graph would
+   * start deciding "which options exist" from a different source — the two
+   * authorities on one question that the module docstring exists to prevent.
+   */
+  it('GRAPH PRIMACY: when BOTH sources are populated and disjoint, the GRAPH roster decides', () => {
+    /** Deliberately shares NO label with `GRAPH_WITH_ROSTER`. */
+    const DISJOINT_READY = {
+      status: 'needs_user_input',
+      goal_node_id: 'goal_1',
+      options: [
+        { option_id: 'opt_z', label: 'open a Bologna depot', status: 'ready', interventions: {} },
+      ],
+    };
+
+    // PIN THE PRECONDITION IN-TEST. Without this the assertion below could pass
+    // on a payload where the two sources never actually contended — which is
+    // precisely how the gap this test closes came to exist.
+    const graphRoster = optionRosterFromGraph(GRAPH_WITH_ROSTER);
+    const readinessRoster = optionRosterFromAnalysisReady(DISJOINT_READY);
+    expect(graphRoster.length).toBeGreaterThan(0);
+    expect(readinessRoster.length).toBeGreaterThan(0);
+    expect(graphRoster.some((label) => readinessRoster.includes(label))).toBe(false);
+    // …and the prose names a GRAPH option and NO readiness option, so the two
+    // sources give OPPOSITE answers to "does this text name a rostered option".
+    expect(textNamesAnOption(LEADER_PROSE, graphRoster)).toBe(true);
+    expect(textNamesAnOption(LEADER_PROSE, readinessRoster)).toBe(false);
+
+    const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
+      requestId: 'r-both-sources-disjoint',
+      exitPath: 'turn_executor',
+      mayNameLeadingOption: false,
+      graph: GRAPH_WITH_ROSTER,
+      analysisReady: DISJOINT_READY,
+    } as any);
+
+    // Graph primary ⇒ roster is the graph's ⇒ the prose names one ⇒ removed.
+    // Readiness preferred ⇒ roster is ['open a Bologna depot'] ⇒ the prose names
+    // nothing on it ⇒ the gate stands down and the lie ships. That is the
+    // inversion this test exists to RED.
+    expect(result.changed).toBe(true);
+    expect(result.editedFields).toContain('assistant_text');
+    expect(textAssertsLeadingOption(String(result.response.assistant_text))).toBe(false);
+  });
+
   // ── THE OPPOSITE TWIN. A gate that withholds everything is not a fix, it is a
   //    different defect — and it is the failure mode that has bitten repeatedly.
   it('OPPOSITE TWIN: a PERMITTED claim keeps its leader, roster or no roster', () => {
