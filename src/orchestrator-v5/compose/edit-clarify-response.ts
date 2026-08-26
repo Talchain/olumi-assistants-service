@@ -8,11 +8,26 @@
  * Output contract (matches the existing wire — no new fields, no new
  * action_type, no new turn-class):
  *   - `assistant_text`: deterministic copy. Lead sentence:
- *     "The model is unchanged so far." (`LEAD_TEXT`) If a fresh prior
- *     `run_analysis` fact exists, append: "Your last analysis is still
- *     current." (`FRESHNESS_SUFFIX`) Closing sentence asks the user for
- *     a specific factor / edge / option / value to change
+ *     "I haven't changed anything from that." (`LEAD_TEXT`) If a fresh
+ *     prior `run_analysis` fact exists, append: "Your last analysis is
+ *     still current." (`FRESHNESS_SUFFIX`) Closing sentence asks the user
+ *     for a specific factor / edge / option / value to change
  *     (`CLOSING_TEXT`).
+ *
+ *     ⚠⚠ THE LEAD IS TURN-SCOPED ON PURPOSE — "from that" means "from
+ *     the message you just sent", and it must stay that way. It read
+ *     "The model is unchanged so far." until 26 Aug 2026. That is a
+ *     SESSION-scoped claim, and NOTHING on this path knows the session:
+ *     `buildEditClarifyFallbackParts` is handed graph NODES ONLY, and
+ *     the V4 no-op branch that calls it (`tools/edit-graph.ts`) consults
+ *     no prior-mutation state at all. So the sentence was true about the
+ *     turn and false about the session, and it shipped that way twice:
+ *     once on a journey witness where two edits were already committed
+ *     and the product's own Model tab said `User edited` / `1 change`,
+ *     and once in the incident recorded at
+ *     `__tests__/calibration-consent-boundary.test.ts` where it followed
+ *     a mutation the system had just written. Say only what the turn
+ *     knows. Do not restore a session-scoped qualifier.
  *
  *     ⚠ DO NOT reach for the natural phrasings here. "No change was
  *     made to the model" / "no changes were made" / "nothing changed"
@@ -20,8 +35,10 @@
  *     (`compose/forbidden-user-facing-phrases.ts`), as is "previous
  *     analysis" / "prior analysis". They read perfectly and they are
  *     landmines: the V5 egress guard replaces the ENTIRE response with
- *     the neutral fallback when one fires. Use the positive framings
- *     above ("unchanged so far", "last analysis").
+ *     the neutral fallback when one fires. The shipped lead is checked
+ *     against that guard by execution in
+ *     `tests/unit/orchestrator-v5/compose/edit-clarify-turn-scoped-lead.test.ts`
+ *     — not by inspection.
  *
  *     This header previously quoted the two BANNED variants as though
  *     they were the shipped copy (the constants had moved on; the
@@ -89,13 +106,20 @@ export interface ComposeEditClarifyInput {
 // Copy contract — every string here MUST pass the V5 egress
 // `FORBIDDEN_USER_FACING_PHRASES` guard. Specifically:
 //   - "no change was made" / "no changes were made" → REWRITTEN.
-//     Use "unchanged so far" framing instead.
+//     Scope the statement to THIS TURN instead ("from that").
 //   - "previous analysis" / "prior analysis" → REWRITTEN.
 //     Use "last analysis" (the brief's canonical phrasing — see
 //     forbidden-user-facing-phrases.ts:91–92).
 // The composer's own unit test pins this contract via
 // `findForbiddenPhraseHit`.
-const LEAD_TEXT = 'The model is unchanged so far.';
+//
+// ⚠ LEAD_TEXT IS TURN-SCOPED. "from that" = "from the message you just
+// sent". This module is given no session or prior-mutation state, so it
+// may not make a claim that reaches beyond the turn — a session-scoped
+// qualifier here ("so far", "yet", "in this session") is how this
+// sentence twice contradicted the product's own UI. Pinned by
+// `tests/unit/orchestrator-v5/compose/edit-clarify-turn-scoped-lead.test.ts`.
+const LEAD_TEXT = "I haven't changed anything from that.";
 const FRESHNESS_SUFFIX = 'Your last analysis is still current.';
 const CLOSING_TEXT =
   "Tell me the specific factor, edge, option, or value to change, and I'll apply it directly.";
