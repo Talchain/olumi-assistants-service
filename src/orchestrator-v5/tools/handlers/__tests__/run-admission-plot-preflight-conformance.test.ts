@@ -143,6 +143,75 @@ function submittedOptionIds(graph: unknown): string[] {
     .filter((id): id is string => typeof id === 'string' && !waived.has(id));
 }
 
+/**
+ * The DECLARED parameter list of a function, parsed from its own source.
+ *
+ * ⚠ DELIBERATELY NOT `Function.length`, which stops counting at the first
+ * defaulted or rest parameter and therefore reports `1` for BOTH
+ * `(snapshot, computeMode = 'quick')` AND `(snapshot, ...rest)`. See the
+ * mode-invariance test below for the measured table.
+ *
+ * Splits on TOP-LEVEL commas only, tracking bracket depth and string literals,
+ * so a default value containing a comma (`opts = { x: 1, y: 2 }`) is one
+ * parameter rather than two. Throws rather than returning a plausible-but-empty
+ * answer, because a parser that fails quietly would restore the vacuity this
+ * replaced.
+ */
+function declaredParams(fn: { toString(): string }): string[] {
+  const src = fn.toString();
+  const open = src.indexOf('(');
+  if (open === -1) throw new Error('declaredParams: no parameter list in function source');
+
+  const params: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quote: string | null = null;
+  let closed = false;
+
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i] as string;
+
+    if (quote !== null) {
+      // Inside a string literal: copy verbatim, honouring escapes.
+      current += ch;
+      if (ch === '\\') {
+        i += 1;
+        if (i < src.length) current += src[i] as string;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth += 1;
+      if (depth === 1) continue; // the opening paren of the parameter list itself
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        closed = true;
+        break;
+      }
+    } else if (ch === ',' && depth === 1) {
+      params.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (!closed) throw new Error('declaredParams: unbalanced parameter list');
+  if (current.trim().length > 0) params.push(current.trim());
+  return params;
+}
+
 describe('may_run=true ⟹ PLoT preflight accepts the submitted snapshot', () => {
   it('REFUSES two strictly-ready options carrying the SAME intervention map (PLoT: IDENTICAL_OPTIONS)', () => {
     const graph = graphWithMaps([{ fac_velocity: 0.5 }, { fac_velocity: 0.5 }]);
@@ -209,18 +278,78 @@ describe('may_run=true ⟹ PLoT preflight accepts the submitted snapshot', () =>
    * cross-repo schema change is required. `@talchain/schemas` is untouched.
    *
    * ⚠ A SAMPLED PROOF WOULD DECAY THE DAY A MODE IS ADDED. This asserts the
-   * ARITY instead: admission is a pure function of ONE argument, the snapshot. If
-   * someone gives it a second parameter, this REDs — and that is precisely the
-   * moment the invariant would stop holding for free.
+   * DECLARED PARAMETER LIST instead: admission is a pure function of ONE
+   * argument, the snapshot.
+   *
+   * ⛔⛔ THE STATED GUARANTEE HERE WAS FALSE AS FIRST SHIPPED — CORRECTED
+   * 2026-08-26 (PR #1143 review). OLD SENTENCE RETAINED so the overclaim stays
+   * visible rather than being quietly tidied away:
+   *   ~~"This asserts the ARITY instead ... If someone gives it a second
+   *     parameter, this REDs — and that is precisely the moment the invariant
+   *     would stop holding for free."~~
+   * It asserted `resolveRunAdmission.length`, and **`Function.length` stops
+   * counting at the first defaulted or rest parameter**. Measured, mutated in:
+   *
+   *   | added parameter                    | `.length` guard | this guard |
+   *   |------------------------------------|-----------------|------------|
+   *   | `computeMode: string = 'quick'`    | **GREEN 6/6** ❌ | RED ✅     |
+   *   | `...rest: unknown[]`               | **GREEN 6/6** ❌ | RED ✅     |
+   *   | `computeMode?: string`             | RED ✅           | RED ✅     |
+   *
+   * The GREEN row is the one that matters: a defaulted parameter is THE NATURAL
+   * WAY TO ADD A MODE WITHOUT BREAKING EXISTING CALLERS, so the guard was
+   * decoration for the likeliest mutation while its own docstring promised the
+   * opposite. A guard whose stated reach exceeds its actual reach is worse than
+   * no guard — it is the false-label defect, and it was sitting inside the spec
+   * written to protect a contract invariant.
+   *
+   * This now parses the parameter list out of `fn.toString()`, which sees all
+   * three shapes. `declaredParams` pins its OWN precondition below, because a
+   * parser that silently returned one clean identifier would reproduce exactly
+   * the vacuity it replaced.
    */
   it('admission is a pure function of the snapshot alone — no mode parameter', () => {
-    expect(resolveRunAdmission.length).toBe(1);
+    const params = declaredParams(resolveRunAdmission);
+    expect(params).toHaveLength(1);
+    // PRECONDITION: the parse produced a real identifier, not '' or a stray
+    // fragment. This is what stops the assertion above passing vacuously, and it
+    // independently rejects both `=` and `...` since neither is identifier-legal.
+    expect(params[0]).toMatch(/^[A-Za-z_$][\w$]*$/);
+    // Named explicitly so the failure says WHICH shape was introduced.
+    expect(params[0]).not.toContain('='); // a defaulted mode parameter
+    expect(params[0]).not.toContain('...'); // a rest parameter
     // And the returned admission exposes no compute-mode field to gate on.
     const admission = resolveRunAdmission(
       graphWithMaps([{ fac_velocity: 0.3 }, { fac_velocity: 0.7 }]),
     );
     expect(Object.keys(admission)).not.toContain('compute_mode');
     expect(Object.keys(admission)).not.toContain('computeMode');
+  });
+
+  /**
+   * POSITIVE CONTROL for the guard directly above — trap 13, applied to our own
+   * instrument. The assertion above proves an ABSENCE (no second parameter), so
+   * it is worthless unless the parser can be shown to SEE a PRESENCE. Without
+   * this, a `declaredParams` broken to always return `['rawGraph']` would keep
+   * that test GREEN for ever, which is the precise failure mode being repaired.
+   */
+  it('PRECONDITION — declaredParams detects all three shapes it claims to catch', () => {
+    expect(declaredParams((rawGraph: unknown) => rawGraph)).toEqual(['rawGraph']);
+
+    const defaulted = declaredParams((a: unknown, computeMode = 'quick') => [a, computeMode]);
+    expect(defaulted).toHaveLength(2);
+    expect(defaulted[1]).toContain('=');
+
+    const optional = declaredParams((a: unknown, computeMode?: string) => [a, computeMode]);
+    expect(optional).toHaveLength(2);
+
+    const rested = declaredParams((a: unknown, ...rest: unknown[]) => [a, rest]);
+    expect(rested).toHaveLength(2);
+    expect(rested[1]).toContain('...');
+
+    // A default carrying a comma must not be miscounted as two parameters.
+    const commaDefault = declaredParams((a: unknown, opts = { x: 1, y: 2 }) => [a, opts]);
+    expect(commaDefault).toHaveLength(2);
   });
 
   it('multi-factor maps differing in ONE factor are distinct (order-independent)', () => {

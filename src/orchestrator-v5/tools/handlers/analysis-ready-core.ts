@@ -752,11 +752,28 @@ function resolveRunAdmissionTerms(
     //
     // ⭐ AND THE SHARPER FACT, which the counts alone hide: CEE's ENTIRE blocking
     // vocabulary is THREE kinds (`canonicalise_option_interventions`,
-    // `missing_value`, `model_structure`), and **14 of PLoT's 24 codes have ZERO
-    // references anywhere in CEE `src/`** (measured with a same-sweep contrast:
-    // `IDENTICAL_OPTIONS` = 40 hits, so the sweep was not blind). The gap is not
-    // "a few violations" — it is a refusal vocabulary CEE has largely never heard
-    // of, and a floor can only be written for a code someone has read.
+    // `missing_value`, `model_structure`), and **13 of PLoT's 24 codes have ZERO
+    // references anywhere in CEE `src/`, measured at CEE `02058e1e` — this PR's
+    // reviewed head, and re-measured unchanged at the commit that corrected this
+    // paragraph — against PLoT `3a3bee58`** (same-sweep contrast:
+    // `IDENTICAL_OPTIONS` = 50 lines / 18
+    // files, so the sweep was not blind; zero + non-zero = 24, so it was not
+    // short either). The gap is not "a few violations" — it is a refusal
+    // vocabulary CEE has largely never heard of, and a floor can only be written
+    // for a code someone has read.
+    //
+    // ⚠⚠ THIS FIGURE IS TIP-RELATIVE AND SELF-REFERENTIAL — WHICH IS WHY IT NOW
+    // CARRIES A COMMIT. Corrected 2026-08-26 (PR #1143 review): the number
+    // shipped here as **14**, and 14 is wrong at every tip — it measures **15**
+    // at base `d80e8133` and **13** at head, because THIS PR's own prose adds the
+    // first CEE references to two previously-unmentioned codes. A zero-reference
+    // count is moved BY THE ACT OF NAMING A CODE IN THIS COMMENT, so anyone
+    // citing a blocker code here must re-derive the count in the same commit.
+    // The contrast figure was sound (40 lines at base, matching exactly), so the
+    // original sweep was real and only its headline was mis-transcribed — a bare
+    // count is a hand-maintained mirror the moment the tree moves, which is
+    // precisely the defect this whole block was written to abolish. Re-derive:
+    // for each code in PLoT's `BLOCKER_CODES`, `git grep -a -F <code> <rev> -- src`.
     //
     // WHAT THE WAIVER ACTUALLY COVERS, stated as what it is: *the one blocker
     // this waiver's population can newly trip is `IDENTICAL_OPTIONS` — and that
