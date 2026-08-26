@@ -92,13 +92,30 @@ const EXPECTED_PAIRS = [
 ];
 
 /** Every option valued: the run ADMITS (#1126 class B). */
+/**
+ * ⚠ THE OPTIONS MUST DIFFER FROM ONE ANOTHER, NOT MERELY BE VALUED.
+ *
+ * This fixture used to clone ONE map (`{ fac_licence: 0.3, fac_ramp: 0.5 }`)
+ * onto every option node. Every option was then valued — but they were all
+ * IDENTICAL, and PLoT's `IDENTICAL_OPTIONS` blocker refuses that snapshot
+ * (`plot-lite-service` `src/validation/preflight-v2.ts:443-449`, staging
+ * `3a3bee58`). So the payload this test calls "admitting" was one the compute
+ * path would have 422'd, and `may_run: true` on it was the defect closed by
+ * `comparisonSurvivesDedup` (`orchestrator-v5/.../analysis-ready-core.ts`).
+ *
+ * Cloning one map across options is the most natural way to write a "configured"
+ * fixture, which is exactly why it encodes the author's model of configured
+ * ("every option has values") rather than PLoT's ("the options differ"). A
+ * fixture you wrote yourself is not evidence about the wire.
+ */
+let configuredOptionIndex = 0;
 const CONFIGURED = {
   ...FRESH_DRAFT,
-  nodes: FRESH_DRAFT.nodes.map((n) =>
-    (n as { kind?: string }).kind === 'option'
-      ? { ...n, interventions: { fac_licence: 0.3, fac_ramp: 0.5 } }
-      : n,
-  ),
+  nodes: FRESH_DRAFT.nodes.map((n) => {
+    if ((n as { kind?: string }).kind !== 'option') return n;
+    const i = configuredOptionIndex++;
+    return { ...n, interventions: { fac_licence: 0.3 + i * 0.2, fac_ramp: 0.5 + i * 0.1 } };
+  }),
 };
 
 type Blocker = {
