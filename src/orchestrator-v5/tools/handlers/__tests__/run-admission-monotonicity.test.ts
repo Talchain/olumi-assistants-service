@@ -366,6 +366,37 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
  * over the lattice). It does NOT reach structure the USER authored, and this
  * suite says so out loud rather than leaving the gap invisible.
  *
+ * ## ⭐⭐ BOTH HALVES, because either alone misleads
+ *
+ * **What the fix DOES.** On the `offered` classes — `unattributed` and
+ * `ai_drafted` — repair is now monotone: 0 violations over 505 states here, and
+ * on persisted real-capture fixtures base→head moves **6 violations → 0**. That
+ * is a real defect closed on the classes it covers.
+ *
+ * **How common the class it does NOT cover is.** This header used to call it
+ * "structure the USER authored", which reads like an edge case. It is not — it
+ * is closer to the DEFAULT posture, and the reason is one line in CEE's own
+ * transform:
+ *
+ *   `cee/transforms/schema-v3.ts:355-357` —
+ *   `extractionType === 'inferred' ? 'cee_inference' : 'brief_extraction'`
+ *
+ * A **two-way** stamp whose fallback arm is `brief_extraction`, which
+ * `obligation-provenance.ts` maps to `user_stated`. So a factor is user-stated
+ * unless the drafter positively marked it `inferred`. The option end is the
+ * same story: `encode-option-interventions.ts:169` and
+ * `normalise-option-interventions.ts:191` both write `'user_specified'`.
+ *
+ * Evidence from OUTSIDE this lane's head, which is the only kind that can price
+ * a class (CLAUDE.md trap 22): banked cold reads show option-intervention
+ * `source` is `brief_extraction` in **5 of 6** graphs (15/20/12/12/6 entries);
+ * and on two persisted graphs, flipping factors to the other branch of that
+ * two-way stamp reproduces the `T F F T` V-shape on **6 of 8** option rows.
+ *
+ * ⚠ So the honest summary is: this PR closes the defect for drafted structure
+ * and leaves it open for what is, in practice, the common posture. The pin below
+ * is what keeps that visible instead of letting a green suite imply otherwise.
+ *
  * ## Measured, not assumed (CEE `e6c620bc`, 505 lattice states per axis)
  *
  *   | axis            | admitted | blocked | monotonicity violations |
@@ -528,10 +559,20 @@ const buildAiDrafted = (specs: readonly OptionSpec[]) => buildStamped(specs, 'ce
  * two-thirds of the corpus that validated the `offered` fix. Union of the two
  * lists: EIGHT shapes / 505 states.
  *
- * ⚠ The baseline flag turns out to change NOTHING about the violation pattern —
- * the defect is baseline-invariant — which is exactly why the narrower pin
- * looked complete while covering less ground. Recorded rather than dropped: a
- * shape that adds no new class is still a shape the sibling axis runs.
+ * ⚠ THE BASELINE SHAPES ARE DUPLICATES OF THEIR TWINS TODAY, AND THE MECHANISM
+ * MATTERS MORE THAN THE OBSERVATION. Each reproduces its non-baseline twin's
+ * violations exactly (measured: `B:3+3+3@0` and `B:3+3+3@2` = 3 each, same as
+ * `3+3+3`; `B:1+3+2+3@1` = 12, same as `1+3+2+3`). That is not because the
+ * defect is indifferent to a status-quo arm — it is because **`is_baseline`
+ * never reaches the gate at all**: `analysis-ready-core.ts:611-617` says so in
+ * its own comment, *"Absent on the wire shape ⇒ undefined"*, so
+ * `isBaselineOption`'s strict `=== true` never fires and the HELD-baseline
+ * branch is unreachable from here.
+ *
+ * They are kept anyway, for two reasons: parity with the corpus that validated
+ * the sibling axis, and because these shapes become DISCRIMINATING the moment
+ * `is_baseline` does reach the wire — at which point a silent behaviour change
+ * would land on a corpus that already covers it rather than one that does not.
  */
 const STAMPED_SHAPES: ReadonlyArray<{ name: string; demands: number[]; baselineIndex?: number }> = [
   { name: '3+3', demands: [3, 3] },
@@ -741,6 +782,52 @@ describe('the ai_drafted axis — a drafted model must stay analysable', () => {
  * topologies where options intervene on disjoint factor sets. Nor is any of it
  * a wire or journey witness — every number in this file is in-process against
  * `resolveRunAdmission`.
+ *
+ * ## ⭐⭐ THE TWO-ARM FLOOR IS A ONE-SIDED GUARD — pinned tight, unpinned loose
+ *
+ * Recorded because it is the more useful finding, and NOT fixed here.
+ *
+ * Mutating `valued.size >= PLOT_MIN_COMPARISON_OPTIONS` to `>` (TIGHTENING)
+ * REDs — `the two-option minimum is INCLUSIVE` catches it. Mutating it to a
+ * constant `true` (LOOSENING) **survives**, and so does dropping the
+ * `valuedOptionIds.has(...)` conjunct. Neither could be shown to move a single
+ * verdict: identical 505-state vectors on all three axes here, and an
+ * independent review could not demonstrate non-equivalence across 41,040 states
+ * plus eight hand-built discriminators.
+ *
+ * ⚠ THEY ARE THEREFORE **UNDEMONSTRATED, NOT EQUIVALENT** — and the distinction
+ * is the point. An equivalent mutant must be DEMONSTRATED, never asserted, and a
+ * corpus that fails to separate two implementations has not proven they are the
+ * same (CLAUDE.md trap 13c). This note previously read "demonstrated
+ * equivalent"; that overstated a scoped measurement into a claim about all
+ * inputs.
+ *
+ * Root cause of the collapse: `is_baseline` is absent on the wire shape
+ * (`analysis-ready-core.ts:611-617`), so the HELD-baseline branch is
+ * unreachable and `valued.size >= 2` collapses onto `submitted >= 2` — which
+ * `computeScaffoldPlan` already enforces (`analysable-option-gate.ts:194-195`).
+ * The two conjuncts are redundant with each other, so removing EITHER changes
+ * nothing; removing BOTH admits 57 unsafe states on the drafted axis and 22 on
+ * the user-stated one, and all three companions below RED. The floor is
+ * defended in depth, and that depth is exactly what hides the single-conjunct
+ * mutants.
+ *
+ * ⛔ Do not "fix" this by relaxing a floor to make a mutant bite. PLoT's
+ * `options.minItems: 2` is real, verified at PLoT's own bytes.
+ *
+ * ## ⚠ ONE NAMED OVER-ADMISSION, RECORDED AND NOT BUILT
+ *
+ * `validateNotIdenticalOptions` blocks a run with fewer than two **distinct**
+ * option intervention maps — a different predicate from "two options carrying
+ * ANY value", which is what these companions and the floor both check. The
+ * waiver admits precisely the partly-specified states in which two maps are
+ * most likely to COINCIDE, so the gap between "two valued" and "two distinct"
+ * is widened here. Pre-existing at base for fully-valued graphs; widened, not
+ * introduced, by this PR.
+ *
+ * Remedy sketch for whoever picks it up: require ≥2 DISTINCT maps among
+ * `valued`, not merely `valued.size >= 2`. Not done here because it is a change
+ * to what admission REFUSES, and this PR is test-only.
  */
 describe('nothing is admitted that PLoT would refuse', () => {
   /**
