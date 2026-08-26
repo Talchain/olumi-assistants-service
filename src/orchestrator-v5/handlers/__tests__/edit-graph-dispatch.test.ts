@@ -85,7 +85,6 @@ import type {
   GraphPatchBlockData,
 } from '../../../orchestrator/types.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import { ModelVersionMutationReceiptV1LocalSchema } from '../../model-management/mutation-receipt.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,31 +129,6 @@ const POST_EDIT_GRAPH = {
   ],
 };
 
-const MODEL_VERSION_RECEIPT = ModelVersionMutationReceiptV1LocalSchema.parse({
-  schema: 'model_version_mutation_receipt.v1',
-  scenario_id: SCENARIO_ID,
-  mutation_id: '11111111-1111-4111-8111-111111111111',
-  version_id: '22222222-2222-4222-8222-222222222222',
-  sequence: 2,
-  graph: POST_EDIT_GRAPH,
-  full_hash: 'a'.repeat(64),
-  hash_algorithm: 'sha256',
-  identity_projection_version: 'identity.v1',
-  identity_normaliser_version: '1',
-  graph_schema_version: 'graph_v3',
-  analysis_affecting_hash: 'b'.repeat(64),
-  actor: { kind: 'unknown' },
-  creation: { kind: 'committed_mutation' },
-  source_turn_id: TURN_ID,
-  lineage: {
-    kind: 'known',
-    parent_version_id: '33333333-3333-4333-8333-333333333333',
-    root_version_id: '44444444-4444-4444-8444-444444444444',
-  },
-  undo_version_id: '33333333-3333-4333-8333-333333333333',
-  event_id: 'model_version_created_mutation_11111111-1111-4111-8111-111111111111',
-});
-
 function makeAppliedEditResult(overrides: Partial<EditGraphResult> = {}): EditGraphResult {
   // V5 H5 (Codex round-1 P1): a real "applied mutation" returns
   // wasRejected=false + appliedGraph + non-empty operations. The
@@ -185,12 +159,9 @@ function makeRejectedEditResult(): EditGraphResult {
   };
 }
 
-function makeCommitResult(
-  graphPersisted: boolean,
-  response: Record<string, unknown> = {},
-) {
+function makeCommitResult(graphPersisted: boolean) {
   return {
-    response,
+    response: {},
     performed: true as const,
     persisted_row_id: 'row-edit-1',
     graphPersisted,
@@ -252,32 +223,6 @@ describe('dispatchEditGraph', () => {
       // contract: a true successful applied mutation persists
       // graph state via metadata.graph.
       expect(metadata.handler_facts.length).toBe(1);
-    });
-
-    it('preserves the exact atomic receipt when the committed edit response has empty text', async () => {
-      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
-        .mockResolvedValue(makeAppliedEditResult());
-      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-        .mockResolvedValue(makeCommitResult(true, {
-          response_version: 2,
-          assistant_text: '',
-          blocks: [],
-          suggested_actions: [],
-          insights: [],
-          stage_indicator: 'analyse',
-          model_version_receipt: MODEL_VERSION_RECEIPT,
-        }) as Awaited<ReturnType<typeof commitDirectAnswer>>);
-
-      const result = await dispatchEditGraph({
-        payload: makePayload(),
-        requestId: 'req-edit-version-receipt',
-        request: STUB_REQUEST,
-        graphState: INGRESS_GRAPH,
-        analysisState: null,
-      });
-
-      expect((result.response as Record<string, unknown>).model_version_receipt)
-        .toEqual(MODEL_VERSION_RECEIPT);
     });
   });
 

@@ -29,24 +29,7 @@ const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const VERSION = '11111111-1111-4111-8111-111111111111';
 const OWNER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const HASH = 'a'.repeat(64);
-const HASH_B = 'b'.repeat(64);
 const GRAPH = { nodes: [{ id: 'n1', kind: 'factor', label: 'Price' }], edges: [] };
-
-const emptyCategories = () => ({
-  structure: [],
-  relationships: [],
-  values_uncertainty: [],
-  evidence_provenance: [],
-  goals_constraints_options: [],
-  assumptions_claims: [],
-  presentation: [],
-  other_model_fields: [],
-});
-
-const coverage = {
-  known_undetectable: ['conversation_or_discussion_not_committed_to_the_shared_graph'],
-  known_uninterpreted_paths: [],
-};
 
 const summary = () => ({
   id: VERSION,
@@ -58,15 +41,6 @@ const summary = () => ({
   identity_projection_version: 'gip.v1',
   identity_normaliser_version: 'gin.v1',
   graph_schema_version: 'gsv.v1',
-  analysis_affecting_hash: HASH,
-  mutation_id: null,
-  parent_version_id: null,
-  root_version_id: null,
-  actor_kind: null,
-  authored_by: null,
-  creation_kind: null,
-  source_version_id: null,
-  source_turn_id: null,
   label: null,
   provenance: null,
   restored_from_version_id: null,
@@ -201,27 +175,12 @@ describe('contracts RESPONSE — egress shapes mirror types.ts and reject drift'
   });
 
   it('comparison: identical + different variants parse; a bad relation is rejected', () => {
-    const base = {
-      from_version_id: VERSION,
-      to_version_id: '22222222-2222-4222-8222-222222222222',
-      from_full_hash: HASH,
-      categories: emptyCategories(),
-      coverage,
-    };
-    expect(VersionComparisonResponseSchema.safeParse({
-      ...base,
-      relation: 'identical',
-      short_circuit: true,
-      to_full_hash: HASH,
-      analysis_equivalent: true,
-    }).success).toBe(true);
+    expect(VersionComparisonResponseSchema.safeParse({ relation: 'identical', short_circuit: true }).success).toBe(true);
     expect(
       VersionComparisonResponseSchema.safeParse({
-        ...base,
         relation: 'different',
         short_circuit: false,
-        to_full_hash: HASH_B,
-        analysis_equivalent: false,
+        analysis_equivalent: null,
         diff: { nodes_added: 1, nodes_removed: 0, nodes_changed: 2, edges_added: 0, edges_removed: 1, edges_changed: 0 },
       }).success,
     ).toBe(true);

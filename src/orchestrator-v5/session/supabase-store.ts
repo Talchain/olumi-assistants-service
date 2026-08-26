@@ -39,10 +39,8 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
-  type AtomicCommittedModelVersionReceipt,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
-  type SessionAppendOutcome,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
@@ -94,88 +92,6 @@ import {
 } from '../coaching/coaching-state-snapshot.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
-
-function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-    throw new StateCommitFailedError(
-      `append_turn_atomic_v5 returned non-object receipt: ${JSON.stringify(data)}`,
-    );
-  }
-  const row = data as Record<string, unknown>;
-  const receiptRaw = row.model_version_receipt;
-  if (typeof row.turn_row_id !== 'string') {
-    throw new StateCommitFailedError(
-      `append_turn_atomic_v5 returned malformed receipt: ${JSON.stringify(data)}`,
-    );
-  }
-  if (receiptRaw === null) return { id: row.turn_row_id };
-  if (typeof receiptRaw !== 'object' || Array.isArray(receiptRaw)) {
-    throw new StateCommitFailedError(
-      `append_turn_atomic_v5 returned malformed receipt: ${JSON.stringify(data)}`,
-    );
-  }
-  const receipt = receiptRaw as Record<string, unknown>;
-  for (const key of [
-    'mutation_id',
-    'version_id',
-    'graph_identity_hash',
-    'analysis_affecting_hash',
-    'hash_algorithm',
-    'identity_projection_version',
-    'identity_normaliser_version',
-    'graph_schema_version',
-    'creation_kind',
-    'source_turn_id',
-    'event_id',
-  ] as const) {
-    if (typeof receipt[key] !== 'string' || receipt[key].length === 0) {
-      throw new StateCommitFailedError(
-        `append_turn_atomic_v5 returned malformed ${key}: ${JSON.stringify(data)}`,
-      );
-    }
-  }
-  if (
-    !/^[0-9a-f]{64}$/.test(receipt.graph_identity_hash as string) ||
-    !/^[0-9a-f]{64}$/.test(receipt.analysis_affecting_hash as string) ||
-    typeof receipt.version_number !== 'number' ||
-    !Number.isInteger(receipt.version_number) ||
-    receipt.version_number < 1 ||
-    !Object.prototype.hasOwnProperty.call(receipt, 'graph') ||
-    (receipt.parent_version_id !== null && typeof receipt.parent_version_id !== 'string') ||
-    (receipt.root_version_id !== null && typeof receipt.root_version_id !== 'string') ||
-    (receipt.undo_version_id !== null && typeof receipt.undo_version_id !== 'string') ||
-    receipt.source_version_id !== null ||
-    (receipt.creation_kind !== 'initial' && receipt.creation_kind !== 'committed_mutation') ||
-    (receipt.actor_kind !== 'known' &&
-      receipt.actor_kind !== 'system' &&
-      receipt.actor_kind !== 'unknown') ||
-    !(
-      (receipt.actor_kind === 'known' && typeof receipt.authored_by === 'string') ||
-      ((receipt.actor_kind === 'system' || receipt.actor_kind === 'unknown') &&
-        receipt.authored_by === null)
-    )
-  ) {
-    throw new StateCommitFailedError(
-      `append_turn_atomic_v5 returned malformed model-version receipt: ${JSON.stringify(data)}`,
-    );
-  }
-  return {
-    id: row.turn_row_id,
-    // Added by C8 commit 1bc0f23e. The required check was ALREADY RED on this
-    // line at c3a168cf (the boundary ratchet read 60 against a baseline of 59,
-    // reproduced at a pristine checkout), unseen because `codex/**` triggers
-    // neither the push nor the pull_request arm of ci.yml. Exempted rather than
-    // baselined: raising the baseline is what the gate exists to prevent, and
-    // this narrowing is genuinely checked — see the reason on the next line.
-    // Every field is validated field-by-field in the guard directly above
-    // (turn_row_id, version_id, mutation_id, both 64-hex hashes, version_number,
-    // graph presence, lineage ids, the creation_kind enum and the
-    // actor_kind/authored_by pairing), and a failure throws
-    // StateCommitFailedError — so this follows a full runtime check.
-    // forbidden-exempt: narrowing follows the exhaustive receipt validation directly above (throws StateCommitFailedError on any field mismatch)
-    modelVersionReceipt: receipt as unknown as AtomicCommittedModelVersionReceipt,
-  };
-}
 
 // V5 Conversation Context Reliability: user_message / assistant_message added
 // by migration 20260609120000. They are SELECTed here but parsed OUTSIDE the
@@ -245,7 +161,7 @@ export class SupabaseSessionStore implements SessionStore {
     private readonly options: SupabaseSessionStoreOptions,
   ) {}
 
-  async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+  async append(write: SessionTurnWrite): Promise<{ id: string }> {
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
     // SELECTs and the RPC call below is byte-identical to today. In observe
@@ -343,18 +259,6 @@ export class SupabaseSessionStore implements SessionStore {
     // that path. Everything else (unfenced / unclaimed / v4-missing
     // fallback) keeps the pre-v4 evaluate-then-append behaviour exactly.
     const fencePlan = await this.enforceTurnFence(write);
-
-    // A semantic version carrier is load-bearing: turn + graph +
-    // version/head/event must share v5's transaction. No legacy fallback is
-    // safe when the migration is absent.
-    if (write.modelVersion !== undefined) {
-      return await this.appendAtomicVersioned(
-        write,
-        baseRpcArgs,
-        rpcMode,
-        fencePlan.path === 'atomic' ? fencePlan.generation : null,
-      );
-    }
 
     if (fencePlan.path === 'atomic') {
       return await this.appendAtomicFenced(write, baseRpcArgs, rpcMode, fencePlan.generation);
@@ -1197,169 +1101,6 @@ export class SupabaseSessionStore implements SessionStore {
     return { id: data };
   }
 
-  /** Version-bearing canonical append. No legacy fallback is safe. */
-  private async appendAtomicVersioned(
-    write: SessionTurnWrite,
-    baseRpcArgs: Record<string, unknown>,
-    rpcMode: GraphCasRpcMode,
-    generation: number | null,
-  ): Promise<SessionAppendOutcome> {
-    const version = write.modelVersion;
-    if (version === undefined || write.graph == null) {
-      throw new StateCommitFailedError(
-        'append_turn_atomic_v5 requires both graph and model-version carrier',
-      );
-    }
-
-    // ── THE CAS BASE IS THE CALLER'S TURN-START READ, NEVER A RE-READ ───────
-    // v5 delegates its CAS verbatim to v4 (migration 20260824200000, "exactly
-    // v4's semantics, not a second approximation in v5"), and v4 compares
-    // `v_current_hash` — read from `scenarios.graph_identity_hash` under its
-    // own FOR UPDATE (20260806120000:193) — against p_expected_graph_identity_hash
-    // (:311). Re-reading that SAME column here to supply the expected value
-    // would make the comparison FALSE BY CONSTRUCTION: the CAS would always
-    // "match" while reporting itself as enforcing. `store.ts:194-196` and
-    // `turn-executor.ts:1350-1353` both name and REFUSE exactly that
-    // ("a CAS that validates the write against itself always 'matches'";
-    // "hence FAIL CLOSED ... never adopt it").
-    //
-    // So the base is `write.expectedGraphIdentityHash`, threaded from the
-    // caller's turn-start server read, mapped exactly as the v3/v4 siblings
-    // map it (`:383`, `:1097`): undefined = this write path is NOT
-    // instrumented, null = a base read happened but was empty — BOTH send SQL
-    // NULL, and v4's `p_expected_graph_identity_hash IS NOT NULL` guard then
-    // compares nothing. That keeps the uninstrumented draft path honestly
-    // un-CAS'd (draft-graph-dispatch.ts:876-885 — "not a gap to 'fix' by
-    // trusting the request") instead of tautologically "passing" it.
-    const trustedExpectedHash = write.expectedGraphIdentityHash ?? null;
-
-    // ── AND THE FACT SQL NULL CANNOT CARRY (Codex C8-A review defect 1) ──────
-    // The two cases above are NOT the same fact, and collapsing them is a lost
-    // update. `undefined` = this write path is not instrumented, so there is no
-    // expectation to enforce. `null` = a base read HAPPENED and found the base
-    // ABSENT — a real, known expectation that the base is still absent.
-    //
-    // v4's CAS cannot tell them apart: it is guarded by
-    // `p_expected_graph_identity_hash IS NOT NULL AND v_current_hash IS NOT NULL`,
-    // correct for v4 (whose parameter defaults to NULL and means "no
-    // expectation") and wrong for a caller that measured an empty base. On a
-    // legacy scenario with `scenarios.graph_identity_hash` NULL, every
-    // concurrent writer reads expected = NULL, sends NULL, and NO CAS RUNS FOR
-    // ANY OF THEM — they serialise on the row lock and silently overwrite each
-    // other with no conflict raised.
-    //
-    // So the knowledge travels as its own parameter. v5 enforces a null-safe
-    // `IS DISTINCT FROM` only when the base is KNOWN; when it is not, v5
-    // delegates to v4 exactly as before, which is what the C4 oracle's
-    // N1a/N1b/N2 pins assert.
-    //
-    // ⚠ PROSE CORRECTED (C8-A review, 2026-08-25): this comment used to claim
-    // "`in` rather than `!== undefined`" while the code below is, and always
-    // was, `!== undefined`. The CODE is right and the sentence was backwards.
-    // `!== undefined` deliberately treats an omitted property and an explicit
-    // `undefined` ALIKE — both mean "this path did not read a base" — while
-    // keeping `null` distinct, because null is a base that WAS read and found
-    // absent. That is the whole distinction this parameter exists to carry, so
-    // a comment describing the opposite test is worse than none.
-    //
-    // Callers must therefore SPREAD their CAS object rather than conditionally
-    // omitting the key; `system-events/dispatch.ts` omitted it and made this
-    // fact permanently false on three live paths.
-    const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
-
-    const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
-      ...baseRpcArgs,
-      p_expected_graph_identity_hash: trustedExpectedHash,
-      p_expected_base_known: expectedBaseKnown,
-      // Always the version carrier's identity hash: v5 REQUIRES a 64-hex
-      // incoming hash in every mode (migration 20260824200000:545-549) because
-      // it stamps the version row, so this is NOT mode-derived. Only the
-      // expected base and the enforce switch are.
-      p_incoming_graph_identity_hash: version.graph_identity_hash,
-      // B2: DERIVED, exactly as every sibling derives it (`:392`, `:1099`,
-      // `:1104`). The code default is 'shadow' (config/index.ts:677), whose
-      // contract is "no write is ever rejected"; promoting the versioned path
-      // to enforce unilaterally would make that false and is "a later
-      // explicit, Paul-gated step".
-      p_cas_enforce: rpcMode === 'enforce',
-      p_fence_generation: generation,
-      p_version_mutation_id: version.mutation_id,
-      p_version_analysis_affecting_hash: version.analysis_affecting_hash,
-      p_version_hash_algorithm: version.hash_algorithm,
-      p_version_projection_version: version.identity_projection_version,
-      p_version_normaliser_version: version.identity_normaliser_version,
-      p_version_graph_schema_version: version.graph_schema_version,
-      p_version_actor_kind: version.actor_kind,
-      p_version_authored_by: version.authored_by,
-      p_version_creation_kind: version.creation_kind,
-      p_version_source_turn_id: version.source_turn_id,
-    });
-
-    if (error) {
-      const fenceEvaluation = classifyAtomicFenceError(error);
-      if (fenceEvaluation !== null) {
-        this.emitFenceEvaluated(
-          write,
-          fenceEvaluation.verdict,
-          fenceEvaluation.generation,
-          fenceEvaluation.maxGeneration,
-          'atomic_append',
-        );
-        await this.markGraphWriteFailed(
-          write.scenario_id,
-          currentTurnFenceSlot()?.turnId ?? write.turn_id,
-          fenceEvaluation.verdict,
-          'draft_loss',
-        );
-        this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
-      }
-      if (errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
-        // Report the mode that was actually in force, not a hardcoded label —
-        // otherwise the conflict telemetry misattributes every refusal.
-        this.emitRpcCasConflict(write, rpcMode, errCode(error));
-        throw new GraphStaleWriteError(
-          `append_turn_atomic_v5 rejected a stale graph write for scenario ${write.scenario_id}; ` +
-            'the turn and version both rolled back.',
-          {
-            conflict_category: 'rpc_cas_conflict',
-            cause: error,
-            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
-          },
-        );
-      }
-      // B3 — DEPLOY ORDER, MADE ACTIONABLE. There is deliberately NO legacy
-      // fallback here (see `append()`: "No legacy fallback is safe when the
-      // migration is absent") — a v2/v3/v4 fallback would commit the turn and
-      // graph while silently dropping the version, head and event that must
-      // share this transaction. So an un-migrated database FAILS CLOSED, and
-      // the only thing left to get right is telling the operator why, exactly
-      // as `append_turn_atomic_v4`'s PGRST202 does at :1114-1127.
-      if (errCode(error) === 'PGRST202') {
-        throw new StateCommitFailedError(
-          'append_turn_atomic_v5 is not present in this database (PGRST202). Model versioning ' +
-            '(CEE_MODEL_VERSIONS_ENABLED, default ON) requires it, and no legacy fallback is safe ' +
-            'because the turn, graph, version, head and event must share one transaction. ' +
-            'Execute migration 20260824200000_c8_atomic_model_version_restore BEFORE this build ' +
-            'serves traffic, or set CEE_MODEL_VERSIONS_ENABLED=false to disable versioning ' +
-            'without a deploy.',
-          { cause: error, rpc_code: errCode(error) },
-        );
-      }
-      throw new StateCommitFailedError(
-        `append_turn_atomic_v5 RPC failed: ${errMsg(error)}`,
-        { cause: error, rpc_code: errCode(error) },
-      );
-    }
-
-    const parsed = parseAtomicVersionedAppend(data);
-    if (generation !== null) {
-      this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
-    }
-    this.cache.invalidateAll(write.scenario_id);
-    await this.resolveDraftLossAfterGraphCommit(write);
-    return parsed;
-  }
-
   /**
    * ROADMAP 2.709, REWRITTEN BY 2.736 — the OLTF2 replay passthrough.
    *
@@ -1992,29 +1733,6 @@ export class SupabaseSessionStore implements SessionStore {
     if (data == null) return null;
     const userId = (data as { user_id?: unknown }).user_id;
     return typeof userId === 'string' && userId.length > 0 ? userId : null;
-  }
-
-  async readAnalysisInvalidatedAt(scenarioId: string): Promise<string | null> {
-    const { data, error } = await this.client
-      .from('scenarios')
-      .select('analysis_invalidated_at')
-      .eq('id', scenarioId)
-      .maybeSingle();
-    if (error) {
-      throw new SessionReadError(
-        `readAnalysisInvalidatedAt failed for scenario ${scenarioId}: ${errMsg(error)}`,
-        { cause: error, code: errCode(error) },
-      );
-    }
-    if (data === null) return null;
-    const raw = (data as { analysis_invalidated_at?: unknown }).analysis_invalidated_at;
-    if (raw === null) return null;
-    if (typeof raw !== 'string' || !Number.isFinite(Date.parse(raw))) {
-      throw new SessionReadError(
-        `readAnalysisInvalidatedAt returned malformed timestamp for scenario ${scenarioId}`,
-      );
-    }
-    return raw;
   }
 
   async readMostRecentPendingActions(

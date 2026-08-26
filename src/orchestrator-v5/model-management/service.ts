@@ -1,39 +1,13 @@
 /**
- * Model Management v1 — service layer (Layer 2). LIVE, not dark.
- *
- * ⚠ STALE-COMMENT FIX (C8-A integration, 2026-08-25). This header said
- * "DARK", "default OFF" and "zero production call sites". All three were
- * false, and all three under-reported liveness in the same direction — the
- * dangerous direction, because an operator reading them would assume there is
- * nothing live to disable before rolling the schema back. Derived at the bytes:
+ * Model Management v1 — service layer (Layer 2, DARK).
  *
  * Flag gate: EVERY entry point checks `CEE_MODEL_VERSIONS_ENABLED`
- * (config.cee.modelVersionsEnabled) FIRST and fail-closed no-ops to
- * `{ status: 'disabled' }` — no store call, no hashing, no side effects — when
- * off. The DEFAULT IS ON: `config/index.ts:1342` is
- * `createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED")`, flipped by the
- * 2026-08-17 wiring slice under the no-dark-launch rule. Production is the sole
- * exception: `createEnvEnforcedBoolean` forces `false` when `env === "prod"`
- * (`config/index.ts:158`).
+ * (config.cee.modelVersionsEnabled, default OFF) FIRST and fail-closed
+ * no-ops to `{ status: 'disabled' }` — no store call, no hashing, no
+ * side effects — when off.
  *
- * This module IS wired into production call sites. `server.ts:1169` registers
- * four routes unconditionally via `ceeScenarioVersionsRouteV1`:
- *   POST /assist/v1/scenarios/:scenario_id/versions
- *   POST /assist/v1/scenarios/:scenario_id/versions/compare
- *   POST /assist/v1/scenarios/:scenario_id/versions/save
- *   POST /assist/v1/scenarios/:scenario_id/versions/restore
- * and the turn-commit seam auto-versions accepted graph mutations
- * (`commit.ts:714`).
- *
- * OPERATIONAL — rollback order matters, and this is why the stale header was
- * worth fixing rather than deleting. Setting `CEE_MODEL_VERSIONS_ENABLED=false`
- * in the environment disables the feature WITHOUT a deploy (the routes then
- * answer an honest VERSIONS_DISABLED 503). The C8 rollback script
- * `supabase/migrations/rollback/20260824200000_c8_atomic_model_version_restore_rollback.sql.do-not-apply`
- * DROPS `append_turn_atomic_v5`, which the turn path calls whenever a
- * model-version carrier is built (`supabase-store.ts:338` → `:1226`). Dropping
- * it while the flag is live breaks turn writes, so ANY ROLLBACK MUST DISABLE THE
- * FLAG FIRST; with the flag off no carrier is built and the RPC is never reached.
+ * NOTHING here is wired into routes or the turn-executor this slice
+ * (Track 3 isolation discipline): zero production call sites.
  *
  * Identity: the Group A primitives are REUSED, never re-implemented —
  * `computeGraphIdentityHash` supplies the content identity envelope the
@@ -43,24 +17,18 @@
  */
 
 import { config } from '../../config/index.js';
-import {
-  computeGraphIdentityHash,
-  computeVersionAnalysisAffectingHashRecord,
-} from '../context/graph-identity.js';
+import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { compareVersionRecords, ModelVersionDiffInputError } from './compare.js';
+import { compareVersionRecords } from './compare.js';
 import {
   ModelVersionCasConflictError,
-  ModelVersionMutationIdReusedError,
   ModelVersionNotFoundError,
   ModelVersionSignInRequiredError,
-  type AtomicRestoreVersionWrite,
   type ModelVersionStorePort,
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
   SIGN_IN_REQUIRED_MESSAGE,
-  type AtomicRestoreVersionOutcome,
   type ModelManagementResult,
   type ModelVersionEvent,
   type ModelVersionRecord,
@@ -93,20 +61,6 @@ export interface RestoreVersionRequest {
   readonly version_id: string;
   readonly label?: string;
   readonly expected_graph_identity_hash?: string;
-}
-
-export interface AtomicRestoreVersionRequest {
-  readonly scenario_id: string;
-  readonly version_id: string;
-  readonly mutation_id: string;
-  readonly graph: unknown;
-  readonly source_graph_identity_hash: string;
-  readonly current_graph: unknown;
-  readonly expected_graph_identity_hash: string | null;
-  readonly label?: string;
-  readonly actor_kind?: 'known' | 'system' | 'unknown';
-  readonly authored_by?: string | null;
-  readonly source_turn_id?: string | null;
 }
 
 export interface ModelManagementServiceOptions {
@@ -191,90 +145,16 @@ export class ModelManagementService {
     );
   }
 
-  async restoreVersionAtomic(
-    request: AtomicRestoreVersionRequest,
-  ): Promise<ModelManagementResult<AtomicRestoreVersionOutcome>> {
-    if (!this.isEnabled()) return { status: 'disabled' };
-
-    const restoredIdentity = computeGraphIdentityHash(
-      request.graph as GraphStateIngress | null | undefined,
-    );
-    if (restoredIdentity === null) {
-      return {
-        status: 'error',
-        error: {
-          code: 'empty_graph',
-          recoverable: true,
-          message: 'The restored graph is absent or identity-empty.',
-        },
-      };
-    }
-    const currentIdentity = computeGraphIdentityHash(
-      request.current_graph as GraphStateIngress | null | undefined,
-    );
-    const restoredAnalysis = computeVersionAnalysisAffectingHashRecord(
-      request.graph as GraphStateIngress | null | undefined,
-    );
-    const currentAnalysis = computeVersionAnalysisAffectingHashRecord(
-      request.current_graph as GraphStateIngress | null | undefined,
-    );
-    if (restoredAnalysis === null) {
-      return {
-        status: 'error',
-        error: {
-          code: 'empty_graph',
-          recoverable: true,
-          message: 'The restored graph has no durable analysis identity.',
-        },
-      };
-    }
-    if (this.store.restoreVersionAtomic === undefined) {
-      return {
-        status: 'error',
-        error: {
-          code: 'store_error',
-          recoverable: false,
-          message: 'Atomic model-version restore is not available in this store.',
-        },
-      };
-    }
-
-    return this.runWrite('model_version_restored', request.scenario_id, () =>
-      this.store.restoreVersionAtomic!({
-        scenario_id: request.scenario_id,
-        version_id: request.version_id,
-        mutation_id: request.mutation_id,
-        graph: request.graph,
-        graph_identity_hash: restoredIdentity.value,
-        analysis_affecting_hash: restoredAnalysis.value,
-        hash_algorithm: restoredIdentity.algorithm,
-        identity_projection_version: restoredIdentity.projection_version,
-        identity_normaliser_version: restoredIdentity.normaliser_version,
-        graph_schema_version: restoredIdentity.graph_schema_version,
-        source_graph_identity_hash: request.source_graph_identity_hash,
-        current_graph: request.current_graph,
-        current_graph_identity_hash: currentIdentity?.value ?? null,
-        current_analysis_affecting_hash: currentAnalysis?.value ?? null,
-        expected_graph_identity_hash: request.expected_graph_identity_hash,
-        actor_kind: request.actor_kind ?? 'unknown',
-        authored_by: request.authored_by ?? null,
-        source_turn_id: request.source_turn_id ?? null,
-        ...(request.label !== undefined ? { label: request.label } : {}),
-      } satisfies AtomicRestoreVersionWrite),
-    );
-  }
-
   async listVersions(
     scenarioId: string,
     limit?: number,
-    beforeSequence?: number,
   ): Promise<ModelManagementResult<readonly ModelVersionSummary[]>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
       const versions =
-        limit === undefined && beforeSequence === undefined
+        limit === undefined
           ? await this.store.listVersions(scenarioId)
-          : await this.store.listVersions(scenarioId, limit, beforeSequence);
+          : await this.store.listVersions(scenarioId, limit);
       return { status: 'ok', value: versions };
     } catch (err) {
       return mapThrownError(err);
@@ -368,8 +248,8 @@ export class ModelManagementService {
 
   /**
    * Compare two persisted versions (direction: `from` → `to`), CEE-side:
-   * identity-hash short-circuit, else analysis-affecting equivalence plus a
-   * deterministic semantic diff and explicit coverage ledgers (compare.ts).
+   * identity-hash short-circuit, else analysis-affecting equivalence + a
+   * compact structural diff summary (compare.ts).
    */
   async compareVersions(
     scenarioId: string,
@@ -400,20 +280,16 @@ export class ModelManagementService {
   }
 
   /** Shared write path: typed-error mapping + post-commit event emission. */
-  private async runWrite<T extends VersionWriteOutcome>(
+  private async runWrite(
     eventType: ModelVersionEvent['event_type'],
     scenarioId: string,
-    write: () => Promise<T>,
-  ): Promise<ModelManagementResult<T>> {
+    write: () => Promise<VersionWriteOutcome>,
+  ): Promise<ModelManagementResult<VersionWriteOutcome>> {
     try {
       const outcome = await write();
       // Dedupe = no new version, no durable journey event ⇒ no sink event
       // (version history records changes, not confirmations — contract §7.3).
-      if (
-        !('replayed' in outcome && outcome.replayed === true) &&
-        !outcome.deduped &&
-        outcome.event_id !== null
-      ) {
+      if (!outcome.deduped && outcome.event_id !== null) {
         await notifyVersionEventSink(this.eventSink, {
           event_version: 'model_version_event.v1',
           event_id: outcome.event_id,
@@ -435,16 +311,6 @@ export class ModelManagementService {
 
 /** Fail-closed typed mapping — the service never rethrows. */
 function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
-  if (err instanceof ModelVersionDiffInputError) {
-    return {
-      status: 'error',
-      error: {
-        code: 'version_graph_incompatible',
-        recoverable: false,
-        message: err.message,
-      },
-    };
-  }
   if (err instanceof ModelVersionSignInRequiredError) {
     return {
       status: 'error',
@@ -473,16 +339,6 @@ function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
         code: 'version_not_found',
         recoverable: true,
         message: err.message,
-      },
-    };
-  }
-  if (err instanceof ModelVersionMutationIdReusedError) {
-    return {
-      status: 'error',
-      error: {
-        code: 'mutation_id_reused',
-        recoverable: false,
-        message: 'That mutation id was already used for a different restore target.',
       },
     };
   }

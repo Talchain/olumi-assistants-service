@@ -59,7 +59,6 @@ export type AnalysisFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 export type FreshnessReason =
   | 'graph_hash_match'
   | 'graph_hash_diverged'
-  | 'model_restored_after_analysis'
   | 'legacy_fact_missing_hash'
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
@@ -109,12 +108,6 @@ export interface DeriveAnalysisFreshnessOptions {
    * means no analysis has been run. Absent ⇒ pre-fix behaviour.
    */
   readonly priorFactsReadOk?: boolean;
-  /**
-   * DB-stamped restore chronology marker. A selected analysis computed at or
-   * before this instant is stale even when its graph hash matches again; a
-   * later rerun naturally supersedes the marker by timestamp.
-   */
-  readonly analysisInvalidatedAt?: string | null;
 }
 
 /**
@@ -574,14 +567,16 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: identical-hash ⇒ fresh unless a later restore explicitly
-  // invalidated that fact. Hash equality proves matching bytes, not chronology:
-  // A -> analyse -> B -> restore A must remain stale until a newer rerun.
+  // Invariant 2 (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
+  // construction. If both hashes are present AND equal, the verdict MUST be
+  // 'fresh' — a run's own response can never be stale versus the hash it just
+  // analysed. Checked BEFORE invariant 3 so an identical-hash 'unknown' also
+  // lands on 'fresh' (the hashes prove freshness; 'unknown' would discard
+  // that proof). Coerce to 'fresh', never 'unknown'/'stale'.
   if (
     derivation.graph_hash_at_run !== null &&
     derivation.current_graph_hash !== null &&
     derivation.graph_hash_at_run === derivation.current_graph_hash &&
-    derivation.reason !== 'model_restored_after_analysis' &&
     derivation.freshness !== 'fresh'
   ) {
     return { coerce_to: 'fresh' };
@@ -688,29 +683,6 @@ export function deriveAnalysisFreshness(
       computed_at: null,
     };
     return enforceInvariants(noFact);
-  }
-
-  const invalidatedAtMs =
-    opts?.analysisInvalidatedAt == null
-      ? null
-      : Date.parse(opts.analysisInvalidatedAt);
-  const selectedAtMs =
-    selected.computed_at === null ? null : Date.parse(selected.computed_at);
-  if (
-    invalidatedAtMs !== null &&
-    Number.isFinite(invalidatedAtMs) &&
-    (selectedAtMs === null ||
-      !Number.isFinite(selectedAtMs) ||
-      selectedAtMs <= invalidatedAtMs)
-  ) {
-    return enforceInvariants({
-      freshness: 'stale',
-      reason: 'model_restored_after_analysis',
-      selected_fact_index: selected.index,
-      graph_hash_at_run: selected.graph_hash_at_run,
-      current_graph_hash: currentGraphHash,
-      computed_at: selected.computed_at,
-    });
   }
 
   // Base verdict from the graph-hash comparison (unchanged logic).

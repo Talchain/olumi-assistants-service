@@ -50,49 +50,6 @@ export interface PendingActionReadOptions {
   readonly validation?: 'tolerant' | 'strict';
 }
 
-export type VersionAuthoredBy = 'owner' | 'assistant' | string;
-
-export interface AtomicCommittedModelVersionWrite {
-  readonly mutation_id: string;
-  readonly graph_identity_hash: string;
-  readonly analysis_affecting_hash: string;
-  readonly hash_algorithm: string;
-  readonly identity_projection_version: string;
-  readonly identity_normaliser_version: string;
-  readonly graph_schema_version: string;
-  readonly actor_kind: 'known' | 'system' | 'unknown';
-  readonly authored_by: VersionAuthoredBy | null;
-  readonly creation_kind: 'committed_mutation';
-  readonly source_turn_id: string;
-}
-
-export interface AtomicCommittedModelVersionReceipt {
-  readonly mutation_id: string;
-  readonly version_id: string;
-  readonly version_number: number;
-  readonly graph_identity_hash: string;
-  readonly analysis_affecting_hash: string;
-  readonly hash_algorithm: string;
-  readonly identity_projection_version: string;
-  readonly identity_normaliser_version: string;
-  readonly graph_schema_version: string;
-  readonly actor_kind: 'known' | 'system' | 'unknown';
-  readonly authored_by: VersionAuthoredBy | null;
-  readonly creation_kind: 'initial' | 'committed_mutation';
-  readonly source_version_id: null;
-  readonly source_turn_id: string;
-  readonly parent_version_id: string | null;
-  readonly root_version_id: string | null;
-  readonly undo_version_id: string | null;
-  readonly graph: unknown;
-  readonly event_id: string;
-}
-
-export interface SessionAppendOutcome {
-  readonly id: string;
-  readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
-}
-
 export interface SessionTurnWrite {
   readonly scenario_id: string;
   readonly turn_id: string;
@@ -209,12 +166,10 @@ export interface SessionTurnWrite {
    * Same undefined/null convention as `expectedGraphIdentityHash`.
    */
   readonly expectedGraphAnalysisHash?: string | null;
-  /** Present only for an accepted persisted semantic graph mutation. */
-  readonly modelVersion?: AtomicCommittedModelVersionWrite;
 }
 
 export interface SessionStore {
-  append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  append(write: SessionTurnWrite): Promise<{ id: string }>;
   // V5 Conversation Context Reliability: returns the content-bearing superset
   // (user_message / assistant_message re-attached after the vendored strict
   // parse). SessionTurnWithContent ⊇ SessionTurn, so existing consumers that
@@ -453,8 +408,6 @@ export interface SessionStore {
     readonly graph: unknown | null;
     readonly briefText: string | null;
   }>;
-  /** DB-stamped restore chronology marker; null means no restore invalidation. */
-  readAnalysisInvalidatedAt?(scenarioId: string): Promise<string | null>;
   /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null
@@ -494,18 +447,23 @@ export interface SessionStore {
    * MM P1 (ROADMAP 1.25 hygiene batch, item 2 completion — Brief H guest
    * pre-check): plain read-only lookup of `scenarios.user_id`, WITHOUT the
    * upsert/ownership-comparison side effects of `ensureScenarioExists`.
-   * Atomic model-version creation now makes its guest decision under the
-   * scenario lock inside `append_turn_atomic_v5`; this lookup remains for
-   * decision-record capture and legacy readers.
+   * Used by the commit-seam Model Management version hook
+   * (`commit.ts::recordModelVersionForCommit`) to skip the `saveVersion`
+   * RPC entirely for a guest (unowned) scenario — that RPC always fails
+   * `sign_in_required` (MV001) for `user_id IS NULL`, so calling it is a
+   * wasted round trip on every guest commit.
    *
    * Returns the scenario's `user_id` (null for guest / unowned rows, or
    * when the scenario row does not exist — both read as "cannot version,
    * skip the write"). Optional on the interface (added after the original
    * ship) so pre-existing test doubles that don't implement it keep
-   * compiling.
+   * compiling; callers MUST treat a missing implementation the same as a
+   * read failure — fail-open to the pre-fix behaviour (attempt the RPC,
+   * let it answer MV001 authoritatively) rather than block the write.
    *
    * Read failures throw `SessionReadError`, mirroring the other plain
-   * reads on this interface.
+   * reads on this interface; the commit-seam caller catches and fails
+   * open (same non-blocking contract as every other step in that hook).
    */
   getScenarioOwner?(scenarioId: string): Promise<string | null>;
   /**

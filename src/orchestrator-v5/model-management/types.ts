@@ -1,8 +1,8 @@
 /**
- * Model Management v1 — typed vocabulary.
+ * Model Management v1 — typed vocabulary (Layer 2, DARK).
  *
- * The service is consumed by scenario-version routes and the commit seam.
- * Every service entry point is gated by
+ * Isolated module: NOTHING here is wired into routes or the turn-executor
+ * (Track 3 isolation discipline). Every service entry point is gated by
  * `CEE_MODEL_VERSIONS_ENABLED` (default OFF) and fail-closed no-ops to a
  * typed `disabled` result when the flag is off.
  *
@@ -39,23 +39,6 @@ export interface ModelVersionSummary {
   readonly identity_projection_version: string;
   readonly identity_normaliser_version: string;
   readonly graph_schema_version: string;
-  /** Derived for legacy rows; later provenance fields remain explicitly nullable. */
-  readonly analysis_affecting_hash: string;
-  readonly mutation_id: string | null;
-  readonly parent_version_id: string | null;
-  readonly root_version_id: string | null;
-  readonly actor_kind: 'known' | 'system' | 'unknown' | null;
-  readonly authored_by: string | null;
-  readonly creation_kind:
-    | 'initial'
-    | 'committed_mutation'
-    | 'restore'
-    | 'variant_creation'
-    | 'variant_promotion'
-    | 'unknown'
-    | null;
-  readonly source_version_id: string | null;
-  readonly source_turn_id: string | null;
   readonly label: string | null;
   readonly provenance: string | null;
   /** Restore lineage: the version whose graph this row copied, or null. */
@@ -80,30 +63,6 @@ export interface VersionWriteOutcome {
   readonly event_id: string | null;
   /** Set on restore outcomes only. */
   readonly restored_from_version_id?: string;
-}
-
-/** Receipt from the single-transaction restore/adopt carrier. */
-export interface AtomicRestoreVersionOutcome extends VersionWriteOutcome {
-  readonly mutation_id: string;
-  readonly analysis_affecting_hash: string;
-  readonly hash_algorithm: string;
-  readonly identity_projection_version: string;
-  readonly identity_normaliser_version: string;
-  readonly graph_schema_version: string;
-  readonly restored_from_version_id: string;
-  readonly undo_version_id: string | null;
-  readonly parent_version_id: string | null;
-  readonly root_version_id: string | null;
-  readonly actor_kind: 'known' | 'system' | 'unknown';
-  readonly authored_by: string | null;
-  readonly creation_kind: 'restore';
-  readonly source_version_id: string;
-  readonly source_turn_id: string | null;
-  readonly graph: unknown;
-  readonly deduped: boolean;
-  readonly replayed: boolean;
-  readonly analysis_invalidated_at: string;
-  readonly event_id: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +101,8 @@ export type ModelManagementErrorCode =
   | 'sign_in_required'
   /** Restore/read target absent for this scenario (SQLSTATE MV404). */
   | 'version_not_found'
-  /** A stored version cannot be compared safely under the GraphV3 identity
-   *  rules (malformed shape or duplicate stable identity). */
-  | 'version_graph_incompatible'
   /** The supplied graph is absent or identity-empty — nothing to version. */
   | 'empty_graph'
-  /** A mutation_id was replayed with a different restore target. */
-  | 'mutation_id_reused'
   /** Any other store/RPC failure (fail-closed catch-all). */
   | 'store_error';
 
@@ -177,53 +131,7 @@ export type ModelManagementResult<T> =
 // Compare.
 // ---------------------------------------------------------------------------
 
-export const MODEL_VERSION_DIFF_CATEGORIES = [
-  'structure',
-  'relationships',
-  'values_uncertainty',
-  'evidence_provenance',
-  'goals_constraints_options',
-  'assumptions_claims',
-  'presentation',
-  'other_model_fields',
-] as const;
-
-export type ModelVersionDiffCategory = (typeof MODEL_VERSION_DIFF_CATEGORIES)[number];
-export type ModelVersionDiffChangeKind = 'added' | 'removed' | 'changed';
-export type ModelVersionDiffEntityKind = 'model' | 'node' | 'edge' | 'option' | 'constraint';
-
-/**
- * One deterministic, leaf-level difference between two stored GraphV3
- * versions. Display values are bounded strings rather than arbitrary JSON so
- * the comparison response cannot become an unbounded second graph transport.
- */
-export interface ModelVersionDiffItem {
-  readonly path: string;
-  readonly change_kind: ModelVersionDiffChangeKind;
-  readonly entity_kind: ModelVersionDiffEntityKind;
-  readonly entity_id: string | null;
-  readonly label: string | null;
-  readonly before_display: string | null;
-  readonly after_display: string | null;
-  readonly summary: string;
-  readonly why_it_matters: string;
-}
-
-export type ModelVersionDiffCategories = Readonly<
-  Record<ModelVersionDiffCategory, readonly ModelVersionDiffItem[]>
->;
-
-export interface ModelVersionDiffCoverage {
-  /** Shared-reasoning facts that are not part of the persisted GraphV3
-   * version contract and therefore cannot appear in a version comparison. */
-  readonly known_undetectable: readonly string[];
-  /** Persisted paths detected by the generic leaf diff but not yet assigned a
-   * product-semantic interpretation. */
-  readonly known_uninterpreted_paths: readonly string[];
-}
-
-/** Compatibility counts retained for internal callers while the public v1
- * diff uses the richer category arrays. */
+/** Compact structural diff — counts only, no prose. */
 export interface VersionDiffSummary {
   readonly nodes_added: number;
   readonly nodes_removed: number;
@@ -236,27 +144,13 @@ export interface VersionDiffSummary {
 export type VersionComparison =
   /** Identity hashes equal under matching projection/normaliser versions —
    *  graphs are identical by content-address; no diff computed. */
-  | {
-      readonly relation: 'identical';
-      readonly short_circuit: true;
-      readonly from_version_id: string;
-      readonly to_version_id: string;
-      readonly from_full_hash: string;
-      readonly to_full_hash: string;
-      readonly analysis_equivalent: true;
-      readonly categories: ModelVersionDiffCategories;
-      readonly coverage: ModelVersionDiffCoverage;
-    }
+  | { readonly relation: 'identical'; readonly short_circuit: true }
   | {
       readonly relation: 'different';
       readonly short_circuit: false;
-      readonly from_version_id: string;
-      readonly to_version_id: string;
-      readonly from_full_hash: string;
-      readonly to_full_hash: string;
-      readonly analysis_equivalent: boolean;
-      readonly categories: ModelVersionDiffCategories;
-      readonly coverage: ModelVersionDiffCoverage;
+      /** True/false when both analysis-affecting hashes are computable;
+       *  null when either graph has no analysis-affecting hash. */
+      readonly analysis_equivalent: boolean | null;
       readonly diff: VersionDiffSummary;
     };
 

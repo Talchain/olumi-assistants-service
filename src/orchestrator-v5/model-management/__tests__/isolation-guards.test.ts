@@ -1,8 +1,9 @@
 /**
  * Model Management v1 — isolation / import-boundary guards (AST-driven, TS compiler API).
  *
- * The reviewed-boundary invariant this module lives by is:
- *   1. Only explicit sanctioned production call sites import it (INBOUND).
+ * The dark invariant this module lives by (Layer 2, Track-3 discipline) is:
+ *   1. ZERO PRODUCTION CALL SITES — nothing outside `model-management/` imports it, so
+ *      the module is dead code until a separately-reviewed wiring slice lands (INBOUND).
  *   2. The module's own production files import ONLY local files, a small allowlist of
  *      sanctioned cross-boundary seams, and allowlisted externals (OUTBOUND).
  *   3. No dynamic import()/require() anywhere (a dynamic specifier would slip the AST net).
@@ -41,33 +42,18 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
     '../boundary/request-extensions.js', // GraphStateIngress (type-only)
     '../../orchestrator/context/stable-stringify.js', // Group A canonicaliser
-    // C8-A (Codex review defect 2 / H1, 2026-08-25): the SANCTIONED sigma
-    // projection. `mutation-receipt.ts` must ask the SAME admissibility
-    // question the commit carrier asks, or a version the carrier legitimately
-    // created cannot be receipted and the commit throws AFTER the durable
-    // write — the exact split this slice exists to prevent. Importing the one
-    // shared bounds module is what keeps that a single policy instead of a
-    // hand-maintained twin of the floor (the defect class this estate pays for
-    // most). Pure, synchronous, no I/O, no config read; `commit.ts` already
-    // depends on it for the same reason.
-    '../../validators/numeric-bounds.js',
     '../../utils/telemetry.js', // log (event-sink dispatch)
     // Lane 8 (3b cleanup): the A3 CAS vocabulary — CAS_CONFLICT_KIND is now
     // `satisfies GraphCasConflictCategory` against the landed #346 closed
     // enum instead of a free-floating local literal. Type-only import.
     '../context/graph-cas-conflict.js',
-    '../../schemas/cee-v3.js', // strict local receipt mirror uses root-passthrough GraphV3
   ].map((s) => resolve(moduleDir, s)),
 );
 
 /** External bare specifiers permitted in production (pure libs / the sanctioned
  *  service-role client — no live-path coupling). `zod` was added with the strict
  *  boundary-contract module (contracts.ts) — a pure schema lib, no coupling. */
-const EXTERNAL_ALLOWED = new Set([
-  '@supabase/supabase-js',
-  '@talchain/schemas/boundary', // local overlay extends the currently-published response
-  'zod',
-]);
+const EXTERNAL_ALLOWED = new Set(['@supabase/supabase-js', 'zod']);
 
 /** Belt-and-braces: specific live surfaces that must NEVER appear in a production
  *  import (the allowlist already excludes them; this states the intent readably and
@@ -193,8 +179,13 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
   });
 });
 
-// Production consumers are explicit and reviewed. A new consumer must extend
-// this list deliberately in its own slice.
+// Lane 8 (2026-07-07): the separately-reviewed wiring slice LANDED — the
+// commit-seam version hook in commit.ts is the module's first (and only)
+// sanctioned production call site (flag-gated on CEE_MODEL_VERSIONS_ENABLED;
+// fire-and-forget; commit-model-version-hook.test.ts pins flag-off
+// byte-identity + the non-blocking contract). The dark invariant narrows:
+// ZERO call sites → EXACTLY the allowlisted set below. A new consumer must
+// extend this list deliberately, in its own reviewed slice.
 // COLLAB U-S0 (2026-08-09, ROADMAP 2.910): the SECOND sanctioned call site,
 // added deliberately in its own reviewed slice exactly as the note above
 // requires. `src/collab/store.ts` calls `getModelManagementService().saveVersion`
@@ -220,13 +211,12 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
 const SANCTIONED_INBOUND_CALL_SITES = new Set(
   [
     '../commit.ts',
-    '../handlers/draft-graph-dispatch.ts',
     '../../collab/store.ts',
     '../../routes/assist.v1.scenario-versions.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
-describe('model-management isolation guards — INBOUND (only sanctioned call sites)', () => {
+describe('model-management isolation guards — INBOUND (only the sanctioned commit-seam call site)', () => {
   it('no production file OUTSIDE the sanctioned set imports, re-exports, or dynamically imports the module', () => {
     for (const file of productionFilesMentioningModule) {
       if (SANCTIONED_INBOUND_CALL_SITES.has(resolve(file))) continue;
@@ -234,20 +224,21 @@ describe('model-management isolation guards — INBOUND (only sanctioned call si
       for (const spec of scanImports(file).specifiers) {
         expect(
           resolvesIntoModule(fileDir, spec),
-          `${file} imports Model Management ('${spec}') outside the reviewed call-site set`,
+          `${file} imports Model Management ('${spec}') — the ONLY sanctioned production call site is the ` +
+            'flag-gated commit-seam hook (commit.ts); add a new consumer only in its own reviewed slice',
         ).toBe(false);
       }
     }
   });
 
-  it('the atomic commit seam exists and imports the receipt adapter (the allowlist is not vacuous)', () => {
+  it('the sanctioned commit-seam call site EXISTS and actually imports the module (the allowlist is not vacuous)', () => {
     const commitFile = resolve(moduleDir, '../commit.ts');
     const importsModule = scanImports(commitFile).specifiers.some((s) =>
       resolvesIntoModule(dirname(commitFile), s),
     );
     expect(
       importsModule,
-      'commit.ts no longer imports the atomic model-version receipt adapter',
+      'commit.ts no longer imports model-management — the lane-8 version hook regressed; shrink the allowlist deliberately',
     ).toBe(true);
   });
 
@@ -272,9 +263,7 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../../orchestrator/context/stable-stringify.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../utils/telemetry.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/graph-cas-conflict.js')).toBe(true);
-    expect(importAllowed(moduleDir, '../../schemas/cee-v3.js')).toBe(true);
     expect(importAllowed(moduleDir, '@supabase/supabase-js')).toBe(true);
-    expect(importAllowed(moduleDir, '@talchain/schemas/boundary')).toBe(true);
     // zod is now allowlisted (added with the strict boundary-contract module):
     expect(importAllowed(moduleDir, 'zod')).toBe(true);
     // Off-list / forbidden:

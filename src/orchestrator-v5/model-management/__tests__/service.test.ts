@@ -11,7 +11,6 @@ import { describe, it, expect, vi } from 'vitest';
 
 import {
   computeGraphIdentityHash,
-  computeVersionAnalysisAffectingHashRecord,
   GRAPH_SCHEMA_VERSION,
   IDENTITY_NORMALISER_VERSION,
   IDENTITY_PROJECTION_VERSION,
@@ -47,16 +46,6 @@ const GRAPH = {
   edges: [{ from: 'n1', to: 'n2' }],
 };
 
-// Derived from GRAPH by the sanctioned module rather than hand-forged, matching
-// the __tests__/fixtures.ts convention: the stored analysis-affecting hash on a
-// record must describe that record's own graph. `record()` below is only ever
-// called with the default graph, so this stays true for every use in this file.
-const GRAPH_ANALYSIS_HASH = (() => {
-  const analysis = computeVersionAnalysisAffectingHashRecord(GRAPH);
-  if (analysis === null) throw new Error('fixture GRAPH produced no analysis identity');
-  return analysis.value;
-})();
-
 function outcome(overrides: Partial<VersionWriteOutcome> = {}): VersionWriteOutcome {
   return {
     version_id: NEW_ID,
@@ -80,17 +69,6 @@ function record(overrides: Partial<ModelVersionRecord> = {}): ModelVersionRecord
     identity_projection_version: IDENTITY_PROJECTION_VERSION,
     identity_normaliser_version: IDENTITY_NORMALISER_VERSION,
     graph_schema_version: GRAPH_SCHEMA_VERSION,
-    analysis_affecting_hash: GRAPH_ANALYSIS_HASH,
-    // Provenance columns are explicitly nullable on `ModelVersionSummary`, and
-    // null is the legacy-row reading: pre-C8 rows carry no mutation lineage.
-    mutation_id: null,
-    parent_version_id: null,
-    root_version_id: null,
-    actor_kind: null,
-    authored_by: null,
-    creation_kind: null,
-    source_version_id: null,
-    source_turn_id: null,
     label: null,
     provenance: null,
     restored_from_version_id: null,
@@ -350,20 +328,10 @@ describe('compareVersions wiring', () => {
     });
     const service = makeService(store);
     const result = await service.compareVersions(SCENARIO, TARGET_ID, NEW_ID);
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: 'ok',
-      value: {
-        relation: 'identical',
-        short_circuit: true,
-        from_version_id: TARGET_ID,
-        to_version_id: NEW_ID,
-        from_full_hash: 'a'.repeat(64),
-        to_full_hash: 'a'.repeat(64),
-        analysis_equivalent: true,
-      },
+      value: { relation: 'identical', short_circuit: true },
     });
-    if (result.status !== 'ok') throw new Error('expected comparison');
-    expect(Object.values(result.value.categories).flat()).toEqual([]);
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, TARGET_ID);
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, NEW_ID);
   });

@@ -1,10 +1,13 @@
 /**
  * Model Management v1 — module entry (Layer 2).
  *
- * Automatic versions are carried by the canonical atomic turn append in
- * `commit.ts`; the service remains the route/collaboration façade for explicit
- * model-version operations. `isolation-guards.test.ts` enforces the reviewed
- * import boundary.
+ * ONE sanctioned production call site (lane 8, 2026-07-07): the flag-gated
+ * commit-seam version hook in src/orchestrator-v5/commit.ts consumes
+ * `getModelManagementService()` after a durable graph-bearing append when
+ * CEE_MODEL_VERSIONS_ENABLED is true (fire-and-forget; failures never affect
+ * the turn). Everything else (routes, turn-executor, restore/compare
+ * surfaces) remains unwired; isolation-guards.test.ts enforces the exact
+ * call-site set.
  *
  * Env-read pattern — call-time, not module-load (mirrors
  * session/index.ts and its documented rationale): tests can stub env
@@ -50,14 +53,12 @@ export type {
   ModelManagementServiceOptions,
   SaveVersionRequest,
   RestoreVersionRequest,
-  AtomicRestoreVersionRequest,
 } from './service.js';
 export {
   SupabaseModelVersionStore,
   ModelVersionSignInRequiredError,
   ModelVersionNotFoundError,
   ModelVersionCasConflictError,
-  ModelVersionMutationIdReusedError,
   ModelVersionStoreError,
   MODEL_VERSION_LIST_DEFAULT_LIMIT,
 } from './store-adapter.js';
@@ -65,32 +66,19 @@ export type {
   ModelVersionStorePort,
   SaveVersionWrite,
   RestoreVersionWrite,
-  AtomicRestoreVersionWrite,
 } from './store-adapter.js';
-export {
-  compareVersionRecords,
-  summariseGraphDiff,
-  KNOWN_UNDETECTABLE_MODEL_VERSION_CHANGES,
-  ModelVersionDiffInputError,
-} from './compare.js';
+export { compareVersionRecords, summariseGraphDiff } from './compare.js';
 export { journeyRpcVersionEventSink, notifyVersionEventSink } from './version-event-sink.js';
 export { CAS_CONFLICT_KIND, SIGN_IN_REQUIRED_MESSAGE } from './types.js';
 export type {
   ModelVersionSummary,
   ModelVersionRecord,
   VersionWriteOutcome,
-  AtomicRestoreVersionOutcome,
   ModelManagementResult,
   ModelManagementError,
   ModelManagementErrorCode,
   VersionCasConflict,
   VersionComparison,
-  ModelVersionDiffCategory,
-  ModelVersionDiffChangeKind,
-  ModelVersionDiffEntityKind,
-  ModelVersionDiffItem,
-  ModelVersionDiffCategories,
-  ModelVersionDiffCoverage,
   VersionDiffSummary,
   ModelVersionEvent,
   VersionEventSink,
@@ -101,13 +89,11 @@ export type {
 export {
   CreateVersionRequestSchema,
   RestoreVersionRequestSchema,
-  AtomicRestoreRouteRequestSchema,
   ListVersionsRequestSchema,
   GetCurrentVersionRequestSchema,
   ModelVersionSummaryResponseSchema,
   ModelVersionRecordResponseSchema,
   VersionWriteOutcomeResponseSchema,
-  AtomicRestoreVersionOutcomeResponseSchema,
   VersionComparisonResponseSchema,
   ListVersionsResponseSchema,
   CurrentVersionResponseSchema,
@@ -117,13 +103,11 @@ export {
 export type {
   CreateVersionRequest,
   RestoreVersionRequestContract,
-  AtomicRestoreRouteRequest,
   ListVersionsRequest,
   GetCurrentVersionRequest,
   ModelVersionSummaryResponse,
   ModelVersionRecordResponse,
   VersionWriteOutcomeResponse,
-  AtomicRestoreVersionOutcomeResponse,
   VersionComparisonResponse,
   ListVersionsResponse,
   CurrentVersionResponse,

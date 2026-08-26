@@ -36,13 +36,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import { getSessionStore } from './session/index.js';
-import type {
-  AtomicCommittedModelVersionReceipt,
-  AtomicCommittedModelVersionWrite,
-  SessionStore,
-  VersionAuthoredBy,
-} from './session/store.js';
-import { StateCommitFailedError } from './session/store.js';
+import type { SessionStore } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import {
   checkPersistedGraphInvariants,
@@ -52,7 +46,6 @@ import {
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
-import type { ZodError } from 'zod';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type {
   PendingAction,
@@ -68,20 +61,8 @@ import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
-import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
-import {
-  computeGraphIdentityHash,
-  computeVersionAnalysisAffectingHashRecord,
-} from './context/graph-identity.js';
-import {
-  asGraphStateIngress,
-  decideModelVersionCreation,
-} from './model-management/version-creation-policy.js';
-import {
-  attachModelVersionMutationReceipt,
-  toModelVersionMutationReceiptV1,
-} from './model-management/mutation-receipt.js';
-import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
+import { getModelManagementService } from './model-management/index.js';
+import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
@@ -237,10 +218,6 @@ export interface CommitMetadata {
    * undefined/null convention.
    */
   readonly expectedGraphAnalysisHash?: string | null;
-  /** Explicit producer-attested actor; absence persists Unknown. */
-  readonly versionActor?:
-    | { readonly kind: 'known'; readonly authored_by: VersionAuthoredBy }
-    | { readonly kind: 'system' };
 }
 
 /**
@@ -353,7 +330,6 @@ export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
-  readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
    * True when CommitMetadata.graph was provided and the atomic commit
    * succeeded (both graph and turn row written). False when graph was absent.
@@ -698,271 +674,6 @@ function buildHeldLapseNotice(pa: PendingAction): string {
     : 'A held change has lapsed, say the word if you still want it.';
 }
 
-const PersistedGraphV3 = GraphV3.passthrough();
-
-/**
- * The carrier plan carries NO graph, deliberately.
- *
- * C8 originally returned `parsed.data` here and the commit persisted THAT in
- * place of the projected form. `GraphV3.passthrough()` keeps every field, but a
- * Zod object parse REBUILDS the object in schema-declaration order — so the
- * bytes written to `scenarios.graph` came back with their keys reordered
- * whenever the carrier succeeded. That silently broke the persist-site
- * contract this file resolves `graphForStore` first to guarantee: "the appended
- * graph IS the projected form (nothing mutates after the check)".
- *
- * Worse than reordering, and the reason this is a correctness fix rather than a
- * cosmetic one: `.passthrough()` applies to the ROOT object ONLY. The nested
- * `NodeV3` / `EdgeV3` schemas strip unknown keys as Zod does by default, so the
- * substituted object came back with additive node fields DELETED — measured, a
- * factor node's `value: 10` was dropped from the bytes written to
- * `scenarios.graph`. The carrier hashed that lossy form too, so the hashes were
- * self-consistent and the loss was invisible to every assertion.
- *
- * Both hashes are therefore now computed from the SAME object that is
- * persisted, making "the carrier's hashes describe the persisted bytes" true by
- * construction rather than by coincidence — this matters because
- * `analysis_affecting_hash` is what CAS compares on.
- *
- * (The carrier is now the `plan` arm of `AtomicCommittedModelVersionOutcome`,
- * declared below with the skip/none arms it must be distinguished from. The
- * no-graph rule above is unchanged and still load-bearing.)
- */
-
-function deterministicMutationId(scenarioId: string, turnId: string): string {
-  const hex = createHash('sha256')
-    .update(`olumi:model-version:committed-mutation:${scenarioId}:${turnId}`)
-    .digest('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
-
-/**
- * Carrier outcomes, and where the boundary between them actually falls.
- *
- * THE RULE BEING IMPLEMENTED: a valid semantic commit on a VERSIONABLE graph
- * must still produce the durable version/history consequence — versioning may
- * only be skipped for state that genuinely cannot be versioned, and never
- * silently. Silently dropping a version that WAS due would remove the durable
- * history the Core journey depends on, which is worse than the dead-end this
- * change fixes, because a silent skip is indistinguishable from success.
- *
- * WHERE "VERSIONABLE" IS DECIDED — the GraphV3 parse, and it is a genuine
- * boundary rather than a convenience:
- *
- *   · A version row is GraphV3-shaped by contract, and its
- *     `analysis_affecting_hash` is what the CAS compares on. Deriving those
- *     identities from a graph that is NOT GraphV3 is the exact hazard
- *     `assertGraphForIdentity` exists to prevent — it is how something like
- *     `{nodes:[42,'x']}` would hash into the authoritative comparison value.
- *     So a non-conformant graph has NO valid version that could be written.
- *   · Therefore every parse failure is genuinely NON-VERSIONABLE. There is no
- *     "could have been versioned but something went wrong" case hiding among
- *     them — that case lives strictly AFTER a successful parse, and it throws.
- *
- * ⚠ WHY THE SKIP IS NOT NARROWED TO A "LEGACY-ONLY" PREDICATE, stated plainly
- * because the instinct to narrow it is right and the evidence refutes it.
- * An earlier revision skipped only when EVERY Zod issue was a missing required
- * field (`invalid_type` + `received: 'undefined'`) and threw on anything else,
- * to keep a corrupt graph from being laundered as legacy. Measured against the
- * real failing corpus, that predicate FAILS 15 legitimate commits, because
- * non-conformance in this estate is routinely not a missing field:
- *
- *     invalid_enum_value | causal | edges[].edge_type        (older vocabulary)
- *     invalid_type       | number | edges[].strength         (legacy scalar strength)
- *     too_small          |        | edges[].strength.std     (std: 0)
- *
- * The last one is decisive: `std: 0` is persisted VERBATIM and deliberately, by
- * a current code path whose whole point is that the numeric floor is not
- * applied at adopt so the identity hash stays stable. That is a CURRENT product
- * graph, not an old one — so "GraphV3 rejects it" cannot be read as "it is
- * corrupt", and a predicate that fails the turn on non-conformance would break
- * behaviour the product intends.
- *
- * The discrimination that was wanted is therefore delivered where it is safe
- * and useful — in the OBSERVABILITY, not the control flow. Every skip names
- * which kind of non-conformance it was, so the two populations stay countable
- * and a corruption spike is visible, without a fragile predicate deciding
- * whether a user's turn survives. What must never happen — a versionable graph
- * losing its version — is fully covered: a graph that parses ALWAYS gets a
- * version, and any failure after the parse throws.
- *
- * The DESIGNED no-version outcomes (flag off, no graph, and the policy's
- * `no_op` / `presentation_only`) stay silent: they are not faults, and an alarm
- * that fires on them would be worthless. Only non-conformance logs at `warn`
- * and emits `status: 'skipped'` with a closed-enum reason — the shape
- * `recordDecisionRecordForCommit` already uses for a skipped secondary record,
- * on the frozen registry member `v5.model_versions.version_created` whose only
- * emitter C8 removed.
- */
-type ModelVersionCarrierSkipReason =
-  | 'graph_missing_required_fields'
-  | 'graph_incompatible_with_graph_v3';
-
-/**
- * Classify HOW the graph failed GraphV3. This selects a telemetry reason only —
- * both outcomes skip — so that "an old row is missing a field" and "a field is
- * present but unusable" remain separately countable.
- *
- * ⚠⚠ THE HEADER ABOVE STATES A POLICY CHOICE AS AN IMPOSSIBILITY, AND THAT IS
- * WRONG (C8-A review, 2026-08-25). It justifies skipping with "a non-conformant
- * graph has NO valid version that could be written". That sentence is FALSE for
- * at least two of the three classes it names: measured, `edge_type: 'causal'`
- * (older vocabulary) and a legacy scalar `strength` BOTH yield a computable
- * `graph_identity_hash` AND a computable `analysis_affecting_hash`, so a valid
- * version row was available for them the whole time — the same refutation that
- * closed the `std: 0` case.
- *
- * What is actually true is narrower and worth saying plainly: we CHOOSE not to
- * version a graph that fails the canonical contract, because a version row is
- * GraphV3-shaped by contract and admitting non-conformant bytes into the
- * durable record would make the version store's own guarantee untrue. That is a
- * defensible policy. It is not an impossibility, and stating it as one is how
- * the next session inherits a wrong belief and reasons from it — which is
- * exactly what happened with `std: 0`.
- */
-function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkipReason {
-  const everyIssueIsAMissingField =
-    error.issues.length > 0 &&
-    error.issues.every(
-      (issue) => issue.code === 'invalid_type' && issue.received === 'undefined',
-    );
-  return everyIssueIsAMissingField
-    ? 'graph_missing_required_fields'
-    : 'graph_incompatible_with_graph_v3';
-}
-
-/**
- * The carrier's outcome. Deliberately THREE cases, not two.
- *
- * ⚠ THE SKIP IS NO LONGER REPORTED FROM HERE (Codex C8-A review, 2026-08-25).
- * It used to `emit()` inline, and this function runs at `commit.ts:992` — 345
- * lines and one `await` BEFORE `store.append()` at `:1337`. So a turn whose
- * append then threw (`GraphStaleWriteError` on a CAS conflict,
- * `StateCommitFailedError` on PGRST202, a fence refusal) had ALREADY published
- * `v5.model_versions.version_created{status:'skipped'}` — a claim about the
- * outcome of a transaction that never committed. Nothing rolls telemetry back.
- *
- * This file already states the correct rule twenty lines below the fix, for a
- * different event: *"Telemetry fires AFTER write succeeds — never log a
- * 'created' event for a pending action that was rolled back by an RPC
- * failure."* The version skip now obeys the same rule: the reason is RETURNED,
- * and the commit emits it from the post-success block once the append is
- * durable.
- */
-type AtomicCommittedModelVersionOutcome =
-  | { readonly kind: 'plan'; readonly write: AtomicCommittedModelVersionWrite }
-  /** A DESIGNED no-version outcome (flag off, no graph, no_op, presentation_only). Silent. */
-  | { readonly kind: 'none' }
-  /** Non-conformance. Reportable — but only once the turn is durable. */
-  | { readonly kind: 'skip'; readonly reason: ModelVersionCarrierSkipReason };
-
-/**
- * Log the skip immediately (a log line is not a claim about a committed
- * transaction) and carry the reason to the post-success emit.
- */
-function skipAtomicCommittedModelVersion(
-  reason: ModelVersionCarrierSkipReason,
-  metadata: CommitMetadata,
-): AtomicCommittedModelVersionOutcome {
-  log.warn(
-    {
-      scenario_id: metadata.scenario_id,
-      turn_id: metadata.turn_id,
-      skip_reason: reason,
-    },
-    'ModelManagement — semantic model version SKIPPED for this commit (turn committed in full; no version row written)',
-  );
-  return { kind: 'skip', reason };
-}
-
-/** Build the carrier and the exact graph bytes it content-addresses. */
-function buildAtomicCommittedModelVersion(
-  graph: unknown,
-  metadata: CommitMetadata,
-): AtomicCommittedModelVersionOutcome {
-  if (config.cee.modelVersionsEnabled !== true || !graphWasProvided(graph)) {
-    return { kind: 'none' };
-  }
-  const policy = decideModelVersionCreation(metadata.baseGraphForInvariants, graph);
-  if (!policy.create) return { kind: 'none' };
-
-  // The parse is a VALIDITY GATE over the bytes about to be persisted — its
-  // output is deliberately not used (see the plan interface).
-  //
-  // ⚠ THE GATE IS EVALUATED AGAINST THE SANCTIONED SIGMA PROJECTION, NOT THE
-  // RAW BYTES (Codex C8-A review defect 2 / H1, 2026-08-25). `EdgeStrengthV3.std`
-  // is `z.number().positive()` (schemas/cee-v3.ts:263), so a single `std: 0`
-  // edge failed this parse with `too_small` and the WHOLE scenario silently
-  // stopped versioning — turn and graph persisted, version/head/event/receipt
-  // dropped. That is the atomic-history violation this carrier's own header
-  // forbids, and the header's justification for tolerating it — that a graph
-  // GraphV3 rejects "has NO valid version that could be written" — is FALSE for
-  // this class: measured, `computeGraphIdentityHash` and
-  // `computeVersionAnalysisAffectingHashRecord` BOTH resolve on a `std: 0`
-  // graph, so a perfectly good version row was available the entire time.
-  //
-  // `std <= 0` is not a corrupt graph and not a legacy one. It is a CURRENT,
-  // routinely-produced ingress reality with an already-ratified treatment
-  // (`validators/numeric-bounds.ts`, "Cut 3"): the UI's own writer floors
-  // outbound sigma with `Math.max(0, …)` — a floor of ZERO — so it "emits std=0
-  // continuously", and the compute path handles it by flooring at the
-  // persisted-load boundary, metered as `cee.compute.sigma_floor`, while
-  // leaving the hashed bytes untouched. Skipping the version here invented a
-  // FOURTH treatment for the same value, and the only one that destroys data.
-  //
-  // So the gate reuses the sanctioned floor rather than minting a third policy.
-  // The floored graph is used for the PARSE ONLY. Everything downstream — the
-  // identity hash, the analysis-affecting hash and the bytes actually persisted
-  // — is still derived from `graph` verbatim, because `strength.std` is inside
-  // the analysis-affecting projection and rewriting it would fork identity
-  // (numeric-bounds.ts "Cut 2", the abc7d29 false-stale regression). Identity
-  // stays sacred; only the admissibility question is asked of the projection.
-  const gateGraph = floorGraphSigmaForCompute(graph).graph;
-  const parsed = PersistedGraphV3.safeParse(gateGraph);
-  if (!parsed.success) {
-    // NOT VERSIONABLE — no valid version row exists for this graph. Skip, and
-    // make the skip observable with the kind of non-conformance it was.
-    return skipAtomicCommittedModelVersion(
-      classifyGraphV3NonConformance(parsed.error),
-      metadata,
-    );
-  }
-
-  // VERSIONABLE — a version MUST be created from here on. Hash the EXACT object
-  // being persisted, not the parse output (which strips additive nested
-  // fields). A failure below is a real failure on a graph that IS versionable,
-  // so it SURFACES rather than silently dropping durable history.
-  const persistedGraph = asGraphStateIngress(graph);
-  const full = computeGraphIdentityHash(persistedGraph);
-  const analysis = computeVersionAnalysisAffectingHashRecord(persistedGraph);
-  if (full === null || analysis === null) {
-    throw new StateCommitFailedError(
-      'Model version carrier could not derive both durable identities for a versionable graph; refusing a split semantic commit.',
-    );
-  }
-  return {
-    kind: 'plan',
-    write: {
-      mutation_id: deterministicMutationId(metadata.scenario_id, metadata.turn_id),
-      graph_identity_hash: full.value,
-      analysis_affecting_hash: analysis.value,
-      hash_algorithm: full.algorithm,
-      identity_projection_version: full.projection_version,
-      identity_normaliser_version: full.normaliser_version,
-      graph_schema_version: full.graph_schema_version,
-      // CEE ingress is service-authenticated, not end-user authenticated:
-      // payload user ids and event kinds cannot attest the author of reasoning.
-      // Producers may supply `versionActor` only when they hold that explicit
-      // fact (the restore route does); every ordinary carrier stays Unknown.
-      actor_kind: metadata.versionActor?.kind ?? 'unknown',
-      authored_by:
-        metadata.versionActor?.kind === 'known' ? metadata.versionActor.authored_by : null,
-      creation_kind: 'committed_mutation',
-      source_turn_id: metadata.turn_id,
-    },
-  };
-}
-
 /**
  * True when `metadata.graph` counts as "a graph was provided for this
  * commit" — MM hygiene batch fix (ROADMAP 1.25 MM P1 set, item 1).
@@ -1035,19 +746,12 @@ export async function commitDirectAnswer(
   // fired, freshness, the pending's re-pin and the held thread were all decided
   // against a graph we did not store. Ordering is the whole fix: project first,
   // then derive every hash-dependent decision from the projected bytes.
-  const projectedGraphForStore = projectGraphForPersistence(metadata.graph, {
+  const graphForStore = projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   });
-  const atomicVersionPlan = buildAtomicCommittedModelVersion(
-    projectedGraphForStore,
-    metadata,
-  );
-  // The projected form is what gets persisted, ALWAYS — the carrier validates
-  // and hashes it, it never substitutes its own bytes (see the plan interface).
-  const graphForStore = projectedGraphForStore;
 
   // The authoritative hash for this turn: RECOMPUTED on the bytes above, never
   // the caller's advertised value. Callers compute their hash before the
@@ -1386,7 +1090,7 @@ export async function commitDirectAnswer(
     );
   }
 
-  const appendOutcome = await store.append({
+  const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
     turn_class: metadata.turn_class,
@@ -1406,67 +1110,7 @@ export async function commitDirectAnswer(
     // expected-base hashes (undefined when the path is not instrumented).
     expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
     expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
-    ...(atomicVersionPlan.kind === 'plan'
-      ? { modelVersion: atomicVersionPlan.write }
-      : {}),
   });
-  const persistedRowId = appendOutcome.id;
-
-  // ⚠⚠ DEGRADE, NEVER THROW — THE WRITE IS ALREADY DURABLE HERE (C8-A review,
-  // 2026-08-25). Both calls below run AFTER `store.append` and, until this
-  // change, OUTSIDE the guarded block beneath them. Both can throw: the
-  // construction runs `ModelVersionMutationReceiptV1LocalSchema.parse`, and the
-  // attach runs a `.strict()` parse that rejects ANY unknown top-level key on
-  // the response. A throw at this point does not roll anything back — it tells
-  // a user their committed turn failed, which is the persisted-state invariant
-  // inverted, and it is the same class as the pre-transaction telemetry defect
-  // one step earlier in this function.
-  //
-  // Honest status: LATENT, not demonstrated. The review could not produce a
-  // live supplier of an unknown top-level key today. It is guarded anyway
-  // because the cost of being wrong is asymmetric — a missing receipt is a
-  // degraded response the client already handles (the field is optional), while
-  // a throw is a false failure report on durable state.
-  //
-  // The receipt is a REPORT about the write, never part of it, so omitting it
-  // cannot corrupt anything. The turn result is unaffected.
-  let publicModelVersionReceipt: ModelVersionMutationReceiptV1Local | null = null;
-  let responseWithModelVersionReceipt = responseForCommit;
-  try {
-    publicModelVersionReceipt =
-      appendOutcome.modelVersionReceipt === undefined
-        ? null
-        : toModelVersionMutationReceiptV1(
-            metadata.scenario_id,
-            appendOutcome.modelVersionReceipt,
-          );
-    responseWithModelVersionReceipt =
-      publicModelVersionReceipt === null
-        ? responseForCommit
-        : attachModelVersionMutationReceipt(
-            responseForCommit,
-            publicModelVersionReceipt,
-          );
-  } catch (receiptErr) {
-    // Reset BOTH, so a construction that succeeded and an attach that then
-    // failed cannot leave the commit returning a receipt the response does not
-    // carry — the two must agree or a consumer reading one and rendering the
-    // other diverges.
-    publicModelVersionReceipt = null;
-    responseWithModelVersionReceipt = responseForCommit;
-    log.warn(
-      {
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        turn_row_id: persistedRowId,
-        err:
-          receiptErr instanceof Error ? receiptErr.message : String(receiptErr),
-      },
-      'ModelManagement — model-version receipt could not be built or attached; ' +
-        'the turn is COMMITTED and is returned without a receipt (report only, ' +
-        'never part of the write)',
-    );
-  }
 
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist
@@ -1477,24 +1121,6 @@ export async function commitDirectAnswer(
   // whole block: a telemetry fault degrades to a log, never an error. (Datadog
   // transport is already independently guarded inside `emit()`.)
   try {
-    // ModelManagement — the version SKIP, reported only now that the turn is
-    // durable. Moved here from `buildAtomicCommittedModelVersion` (Codex C8-A
-    // review defect 5): emitted at decision time it published the outcome of a
-    // transaction that had not run, and stayed published when the append then
-    // threw. Same rule as the pending-action emit below.
-    if (atomicVersionPlan.kind === 'skip') {
-      emit(TelemetryEvents.V5ModelVersionCreated, {
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        status: 'skipped',
-        skip_reason: atomicVersionPlan.reason,
-        version_number: null,
-        graph_identity_hash_prefix: null,
-        error_code: null,
-        provenance: 'commit',
-      });
-    }
-
     // V5 Coaching State Spine — Stage 2B-1b: post-success persistence telemetry.
     // Once per commit across the whole turn taxonomy. `coaching_state_present`
     // distinguishes turns that derived a snapshot (turn-executor / chip-click)
@@ -1569,6 +1195,34 @@ export async function commitDirectAnswer(
     );
   }
 
+  // Lane 8 — Model Management version hook (CEE_MODEL_VERSIONS_ENABLED).
+  // Fires ONLY after the durable append succeeded AND a graph was persisted
+  // this commit. Fire-and-forget under the version-event-sink non-blocking
+  // contract: any MM failure logs and NEVER affects the turn result. Flag
+  // off ⇒ byte-identical commit path (no service construction, no env reads
+  // — pinned by commit-model-version-hook.test.ts). The graph handed to MM
+  // is `graphForStore` — the EXACT object the store just persisted — so the
+  // Group A identity envelope MM computes (computeGraphIdentityHash inside
+  // ModelManagementService.saveVersion) matches the store's own identity
+  // read of scenarios.graph.
+  if (config.cee.modelVersionsEnabled === true && graphWasProvided(metadata.graph)) {
+    void recordModelVersionForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      turnClass: metadata.turn_class,
+      handlerId: metadata.handler_id,
+      graph: graphForStore,
+      persistedRowId,
+      // MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): thread the SAME
+      // server-read expected-base hash the A3 graph-CAS observe hook uses,
+      // verbatim (null/undefined both collapse to "no expectation" —
+      // service.saveVersion only accepts a string). See
+      // recordModelVersionForCommit's doc comment for the bootstrap caveat.
+      expectedGraphIdentityHash: metadata.expectedGraphIdentityHash ?? undefined,
+      sessionStore: store,
+    });
+  }
+
   // ROADMAP 3.1 (CEE half) — decision-record capture hook
   // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
   // the durable append succeeded AND this commit carries a successful
@@ -1632,14 +1286,13 @@ export async function commitDirectAnswer(
   return {
     persistedAnalysisGraphHash,
     persistedGraph: writesGraph ? graphForStore : null,
-    modelVersionReceipt: appendOutcome.modelVersionReceipt ?? null,
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume
     // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
     // caller that threads `priorPendingActions`) surface it on the wire, so
     // wire copy == durable copy.
-    response: responseWithModelVersionReceipt,
+    response: responseForCommit,
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,
@@ -1647,6 +1300,161 @@ export async function commitDirectAnswer(
   };
 }
 
+/**
+ * MM P1 (ROADMAP 1.25 hygiene batch, item 2): true when a `saveVersion`
+ * result is the EXPECTED "guest scenario, no version history" outcome
+ * (SQLSTATE MV001 / error code `sign_in_required`) rather than a genuine MM
+ * fault.
+ *
+ * `sign_in_required` fires on EVERY commit for an unowned (guest) scenario
+ * — `scenarios.user_id IS NULL` (D3 Branch A, "guests refused" — see
+ * `supabase/migrations/20260705120000_v5_model_versions.sql`). That is the
+ * DESIGNED, EXPECTED outcome for guest traffic, not a fault: logging it at
+ * `warn` meant every guest commit logged a warning for behaviour working
+ * exactly as specified, drowning out genuine MM faults (`store_error`, real
+ * CAS conflicts). `recordModelVersionForCommit` uses this to demote that
+ * one case to `debug` — every other error/conflict status stays `warn`
+ * (still actionable).
+ */
+export function isExpectedGuestVersionRefusal(
+  result: ModelManagementResult<VersionWriteOutcome>,
+): boolean {
+  return result.status === 'error' && result.error.code === 'sign_in_required';
+}
+
+/**
+ * Lane 8 — commit-seam Model Management version hook (flag-gated caller).
+ *
+ * Non-blocking contract (mirrors version-event-sink.ts): every failure —
+ * service construction (missing SUPABASE_* env), RPC error, telemetry fault
+ * — is caught and logged at warn (except the expected guest-refusal case,
+ * see `isExpectedGuestVersionRefusal`); nothing propagates to the turn
+ * result. Idempotency: `event_id` is DETERMINISTIC on the turn id, so a
+ * retried turn (same scenario_id + turn_id) re-drives the same journey
+ * event, which the RPC dedupes by event_id; an identical graph additionally
+ * no-op-dedupes against the current head inside the RPC.
+ *
+ * MM P1 (ROADMAP 1.25, item 2 completion — Brief H guest pre-check): before
+ * spending the `saveVersion` RPC, do a plain read of `scenarios.user_id`
+ * (`SessionStore.getScenarioOwner`, when the store implements it) and skip
+ * the RPC entirely when the scenario is unowned (guest). `saveVersion`
+ * ALWAYS fails `sign_in_required` (MV001) for a guest scenario — this was
+ * previously a wasted RPC round trip on every guest commit. The pre-check
+ * is best-effort: a missing implementation, a read failure, or a scenario
+ * row that no longer exists all fail OPEN to the pre-fix behaviour (attempt
+ * the write; let the RPC answer MV001 authoritatively) rather than silently
+ * skip a version write that might actually be owned.
+ *
+ * MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): when the caller
+ * threaded an `expectedGraphIdentityHash` (the SAME server-read pre-turn
+ * base the A3 graph-CAS observe hook uses), pass it through to
+ * `saveVersion`'s optional write-time CAS. The RPC then rejects the write
+ * with a `cas_conflict` (MV409) if the scenario's current MM version head
+ * no longer matches that base — catching two concurrent commits racing the
+ * `current_model_version_id` pointer forward from the same starting point.
+ * KNOWN BOOTSTRAP CAVEAT (documented, not fixed here — a DB-migration-class
+ * change, out of scope for this hygiene batch): the RPC's CAS compares
+ * against the scenario's MM version HEAD, not `scenarios.graph` itself; for
+ * a scenario with pre-existing graph history whose FIRST MM-tracked commit
+ * carries a non-empty expected hash, the RPC sees no head yet (`v_head IS
+ * NULL`) and raises the same MV409 — a false conflict, not a real race.
+ * This degrades exactly like any other non-ok status here: logged at warn,
+ * turn result unaffected, no version row written for that turn. Filed as a
+ * residual for a future MM-hardening lane (mirrors ROADMAP 2.17).
+ */
+async function recordModelVersionForCommit(args: {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly turnClass: ConversationTurnClass;
+  readonly handlerId: V5ActionType | null;
+  readonly graph: unknown;
+  readonly persistedRowId: string;
+  readonly expectedGraphIdentityHash?: string;
+  readonly sessionStore: SessionStore;
+}): Promise<void> {
+  try {
+    if (typeof args.sessionStore.getScenarioOwner === 'function') {
+      try {
+        const owner = await args.sessionStore.getScenarioOwner(args.scenarioId);
+        if (owner === null) {
+          log.debug(
+            { scenario_id: args.scenarioId, turn_id: args.turnId },
+            'ModelManagement — commit-seam saveVersion skipped pre-emptively (guest scenario, sign-in required; expected, not a fault)',
+          );
+          return;
+        }
+      } catch (precheckErr) {
+        // Fail OPEN: an unreadable owner is not evidence of guest status —
+        // fall through to the real RPC, which answers authoritatively.
+        log.debug(
+          {
+            scenario_id: args.scenarioId,
+            turn_id: args.turnId,
+            err: precheckErr instanceof Error ? precheckErr.message : String(precheckErr),
+          },
+          'ModelManagement — guest pre-check read failed; proceeding to saveVersion (fail-open)',
+        );
+      }
+    }
+    const service = getModelManagementService();
+    const result = await service.saveVersion({
+      scenario_id: args.scenarioId,
+      graph: args.graph,
+      // Content-free label from turn context (handler id / turn class only).
+      label: `commit:${args.handlerId ?? args.turnClass}`,
+      provenance: 'commit',
+      event_id: `model_version_created_turn_${args.turnId}`,
+      ...(args.expectedGraphIdentityHash !== undefined
+        ? { expected_graph_identity_hash: args.expectedGraphIdentityHash }
+        : {}),
+    });
+    emit(TelemetryEvents.V5ModelVersionCreated, {
+      scenario_id: args.scenarioId,
+      turn_id: args.turnId,
+      turn_row_id: args.persistedRowId,
+      status:
+        result.status === 'ok'
+          ? result.value.deduped
+            ? 'deduped'
+            : 'ok'
+          : result.status,
+      version_number: result.status === 'ok' ? result.value.version_number : null,
+      graph_identity_hash_prefix:
+        result.status === 'ok' ? result.value.graph_identity_hash.slice(0, 16) : null,
+      error_code: result.status === 'error' ? result.error.code : null,
+      provenance: 'commit',
+    });
+    if (result.status === 'error' || result.status === 'conflict') {
+      const isExpectedGuestRefusal = isExpectedGuestVersionRefusal(result);
+      const logPayload = {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        status: result.status,
+        error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
+      };
+      if (isExpectedGuestRefusal) {
+        log.debug(
+          logPayload,
+          'ModelManagement — commit-seam saveVersion skipped (guest scenario, sign-in required; expected, not a fault)',
+        );
+      } else {
+        log.warn(
+          logPayload,
+          'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
+        );
+      }
+    }
+  } catch (err) {
+    log.warn(
+      {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'ModelManagement — version event sink emit failed (commit-seam version hook threw; turn result unaffected)',
+    );
+  }
+}
 
 /**
  * Compute a stable per-request hash for the `request_hash` column. The

@@ -98,7 +98,6 @@ import { mayNameLeadingOptionForFact } from '../orchestrator-v5/compose/withheld
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
-import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { GraphStateIngress } from '../orchestrator-v5/boundary/request-extensions.js';
 import { log } from '../utils/telemetry.js';
 
@@ -128,8 +127,6 @@ export interface ReadScenarioAnalysisParams {
   /** The graph this read just returned, or `null` when the scenario has none. */
   readonly graph: unknown;
   readonly requestId: string;
-  /** Atomic restore may supply the DB-returned marker and avoid a second read. */
-  readonly analysisInvalidatedAt?: string | null;
 }
 
 /**
@@ -150,13 +147,7 @@ export async function readScenarioAnalysis(
       params.graph as GraphStateIngress,
     );
 
-    const store = getSessionStore();
-    const [read, analysisInvalidatedAt] = await Promise.all([
-      loadPriorFactsWithReadState(params.scenarioId, params.requestId),
-      params.analysisInvalidatedAt !== undefined
-        ? Promise.resolve(params.analysisInvalidatedAt)
-        : store.readAnalysisInvalidatedAt?.(params.scenarioId) ?? Promise.resolve(null),
-    ]);
+    const read = await loadPriorFactsWithReadState(params.scenarioId, params.requestId);
     // ⚠ THE READ STATUS IS THREADED, and it is load-bearing. An empty fact list
     // is ambiguous: it means "never analysed" OR "the store read failed".
     // `deriveAnalysisFreshness` only distinguishes them when told, and reading a
@@ -165,7 +156,6 @@ export async function readScenarioAnalysis(
     // would terminate the client's wait with the wrong answer.
     const derivation = deriveAnalysisFreshness(read.facts, currentGraphHash, undefined, {
       priorFactsReadOk: read.status === 'ok',
-      analysisInvalidatedAt,
     });
 
     // The result block first, so the verdict's `leader_claim` can be composed

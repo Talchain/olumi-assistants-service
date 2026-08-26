@@ -84,10 +84,6 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
-import {
-  attachModelVersionMutationReceipt,
-  modelVersionMutationReceiptFromResponse,
-} from '../model-management/mutation-receipt.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
@@ -908,12 +904,6 @@ export async function dispatchDraftGraph(
     const persistenceMs = Date.now() - commitStartedAt;
 
     let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId, effectiveBrief);
-    const committedVersionReceipt = modelVersionMutationReceiptFromResponse(
-      commitResult.response,
-    );
-    if (committedVersionReceipt !== null) {
-      response = attachModelVersionMutationReceipt(response, committedVersionReceipt);
-    }
     // HOLD-WIPE fix — the committed provisional response carried the lapse
     // notice (and the commit seam may have appended its own turn-TTL lapse
     // notice, F-HELD 2b). The REAL wire response is built above, so

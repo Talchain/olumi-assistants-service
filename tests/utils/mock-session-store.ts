@@ -102,14 +102,6 @@ export function createMockSessionStore(
     storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
-    // C8-A (atomic model-version restore) — the drift alarm fired again here,
-    // as designed: `readAnalysisInvalidatedAt` was added to `SessionStore` and
-    // this helper was not updated. Benign default = the DB-stamped restore
-    // chronology marker is ABSENT, which the interface documents as "no restore
-    // invalidation" — i.e. analysis freshness is decided purely by graph hash,
-    // the pre-C8 behaviour every existing suite was written against. A suite
-    // exercising the post-restore staleness path overrides it with a timestamp.
-    readAnalysisInvalidatedAt: async () => null,
     ensureScenarioExists: async (_scenarioId, userId) => ({ user_id: userId }),
     getScenarioOwner: async () => null,
     readMostRecentPendingActions: async () => [],

@@ -1,8 +1,10 @@
 /**
- * Model Management v1 — strict boundary contracts.
+ * Model Management v1 — strict boundary contracts (Layer 2, DARK; prep-only).
  *
- * Zod request/response schemas for the model-management entry points. The
- * scenario-version routes parse ingress and validate egress with these shapes.
+ * Zod request/response schemas for the model-management entry points. NOTHING
+ * here is wired to a route or exported as a public API this slice — these are
+ * the strict shapes a later, separately-reviewed wiring slice will parse
+ * ingress / validate egress with (the request-extensions.ts safeParse idiom).
  *
  * LOAD-BEARING SECURITY PROPERTY — the server owns graph + hash truth:
  *   - The identity envelope of a saved version (graph_identity_hash + its
@@ -17,9 +19,10 @@
  *   - Restore accepts NO client graph: it copies the target version's graph
  *     server-side. The restore schema is `.strict()` with no `graph` field.
  *
- * Compare ingress is route-local because authenticated identity shares the
- * POST body. Its egress is validated here and accepts only server-loaded
- * stored-version facts; client graph/hash truth is rejected at the route.
+ * Compare has NO request contract here on purpose: the product-facing
+ * compare/timeline surface waits for #341 merged to staging (the internal
+ * compare helper stays dark). Only create/list/current/restore + the response
+ * and safe-error shapes are contracted this slice.
  */
 import { z } from 'zod';
 
@@ -73,17 +76,6 @@ export const RestoreVersionRequestSchema = z
   })
   .strict();
 
-/** Public restore intent: target, idempotency identity and exact working CAS. */
-export const AtomicRestoreRouteRequestSchema = z
-  .object({
-    scenario_id: ScenarioId,
-    version_id: VersionId,
-    mutation_id: z.string().uuid(),
-    label: Label.optional(),
-    expected_graph_identity_hash: Sha256Hex.nullable(),
-  })
-  .strict();
-
 export const ListVersionsRequestSchema = z
   .object({
     scenario_id: ScenarioId,
@@ -119,24 +111,6 @@ export const ModelVersionSummaryResponseSchema = z
     owner_user_id: z.string().uuid(),
     version_number: z.number().int().positive(),
     ...identityEnvelopeShape,
-    analysis_affecting_hash: Sha256Hex,
-    mutation_id: z.string().uuid().nullable(),
-    parent_version_id: z.string().uuid().nullable(),
-    root_version_id: z.string().uuid().nullable(),
-    actor_kind: z.enum(['known', 'system', 'unknown']).nullable(),
-    authored_by: z.string().min(1).nullable(),
-    creation_kind: z
-      .enum([
-        'initial',
-        'committed_mutation',
-        'restore',
-        'variant_creation',
-        'variant_promotion',
-        'unknown',
-      ])
-      .nullable(),
-    source_version_id: z.string().uuid().nullable(),
-    source_turn_id: z.string().min(1).nullable(),
     label: z.string().nullable(),
     provenance: z.string().nullable(),
     restored_from_version_id: z.string().uuid().nullable(),
@@ -161,32 +135,6 @@ export const VersionWriteOutcomeResponseSchema = z
   })
   .strict();
 
-export const AtomicRestoreVersionOutcomeResponseSchema = z
-  .object({
-    mutation_id: z.string().uuid(),
-    version_id: z.string().uuid(),
-    version_number: z.number().int().positive(),
-    graph_identity_hash: Sha256Hex,
-    analysis_affecting_hash: Sha256Hex,
-    hash_algorithm: z.string().min(1),
-    identity_projection_version: z.string().min(1),
-    identity_normaliser_version: z.string().min(1),
-    graph_schema_version: z.string().min(1),
-    restored_from_version_id: z.string().uuid(),
-    undo_version_id: z.string().uuid().nullable(),
-    parent_version_id: z.string().uuid().nullable(),
-    root_version_id: z.string().uuid().nullable(),
-    actor_kind: z.enum(['known', 'system', 'unknown']),
-    authored_by: z.string().nullable(),
-    creation_kind: z.literal('restore'),
-    source_version_id: z.string().uuid(),
-    source_turn_id: z.string().min(1).nullable(),
-    graph: GraphStateIngressSchema,
-    analysis_invalidated_at: z.string().datetime(),
-    event_id: z.string().min(1),
-  })
-  .strict();
-
 const VersionDiffSummaryResponseSchema = z
   .object({
     nodes_added: z.number().int().nonnegative(),
@@ -198,65 +146,13 @@ const VersionDiffSummaryResponseSchema = z
   })
   .strict();
 
-const ModelVersionDiffItemResponseSchema = z
-  .object({
-    path: z.string().min(1),
-    change_kind: z.enum(['added', 'removed', 'changed']),
-    entity_kind: z.enum(['model', 'node', 'edge', 'option', 'constraint']),
-    entity_id: z.string().nullable(),
-    label: z.string().nullable(),
-    before_display: z.string().nullable(),
-    after_display: z.string().nullable(),
-    summary: z.string().min(1),
-    why_it_matters: z.string().min(1),
-  })
-  .strict();
-
-const ModelVersionDiffCategoriesResponseSchema = z
-  .object({
-    structure: z.array(ModelVersionDiffItemResponseSchema),
-    relationships: z.array(ModelVersionDiffItemResponseSchema),
-    values_uncertainty: z.array(ModelVersionDiffItemResponseSchema),
-    evidence_provenance: z.array(ModelVersionDiffItemResponseSchema),
-    goals_constraints_options: z.array(ModelVersionDiffItemResponseSchema),
-    assumptions_claims: z.array(ModelVersionDiffItemResponseSchema),
-    presentation: z.array(ModelVersionDiffItemResponseSchema),
-    other_model_fields: z.array(ModelVersionDiffItemResponseSchema),
-  })
-  .strict();
-
-const ModelVersionDiffCoverageResponseSchema = z
-  .object({
-    known_undetectable: z.array(z.string().min(1)),
-    known_uninterpreted_paths: z.array(z.string().min(1)),
-  })
-  .strict();
-
 export const VersionComparisonResponseSchema = z.discriminatedUnion('relation', [
-  z
-    .object({
-      relation: z.literal('identical'),
-      short_circuit: z.literal(true),
-      from_version_id: z.string().uuid(),
-      to_version_id: z.string().uuid(),
-      from_full_hash: Sha256Hex,
-      to_full_hash: Sha256Hex,
-      analysis_equivalent: z.literal(true),
-      categories: ModelVersionDiffCategoriesResponseSchema,
-      coverage: ModelVersionDiffCoverageResponseSchema,
-    })
-    .strict(),
+  z.object({ relation: z.literal('identical'), short_circuit: z.literal(true) }).strict(),
   z
     .object({
       relation: z.literal('different'),
       short_circuit: z.literal(false),
-      from_version_id: z.string().uuid(),
-      to_version_id: z.string().uuid(),
-      from_full_hash: Sha256Hex,
-      to_full_hash: Sha256Hex,
-      analysis_equivalent: z.boolean(),
-      categories: ModelVersionDiffCategoriesResponseSchema,
-      coverage: ModelVersionDiffCoverageResponseSchema,
+      analysis_equivalent: z.boolean().nullable(),
       diff: VersionDiffSummaryResponseSchema,
     })
     .strict(),
@@ -279,14 +175,7 @@ export const CurrentVersionResponseSchema = z
 
 export const ModelManagementErrorResponseSchema = z
   .object({
-    code: z.enum([
-      'sign_in_required',
-      'version_not_found',
-      'version_graph_incompatible',
-      'empty_graph',
-      'mutation_id_reused',
-      'store_error',
-    ]),
+    code: z.enum(['sign_in_required', 'version_not_found', 'empty_graph', 'store_error']),
     recoverable: z.boolean(),
     message: z.string().min(1),
   })
@@ -306,15 +195,11 @@ export const VersionCasConflictResponseSchema = z
 
 export type CreateVersionRequest = z.infer<typeof CreateVersionRequestSchema>;
 export type RestoreVersionRequestContract = z.infer<typeof RestoreVersionRequestSchema>;
-export type AtomicRestoreRouteRequest = z.infer<typeof AtomicRestoreRouteRequestSchema>;
 export type ListVersionsRequest = z.infer<typeof ListVersionsRequestSchema>;
 export type GetCurrentVersionRequest = z.infer<typeof GetCurrentVersionRequestSchema>;
 export type ModelVersionSummaryResponse = z.infer<typeof ModelVersionSummaryResponseSchema>;
 export type ModelVersionRecordResponse = z.infer<typeof ModelVersionRecordResponseSchema>;
 export type VersionWriteOutcomeResponse = z.infer<typeof VersionWriteOutcomeResponseSchema>;
-export type AtomicRestoreVersionOutcomeResponse = z.infer<
-  typeof AtomicRestoreVersionOutcomeResponseSchema
->;
 export type VersionComparisonResponse = z.infer<typeof VersionComparisonResponseSchema>;
 export type ListVersionsResponse = z.infer<typeof ListVersionsResponseSchema>;
 export type CurrentVersionResponse = z.infer<typeof CurrentVersionResponseSchema>;
