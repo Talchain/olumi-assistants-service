@@ -741,12 +741,37 @@ export function reconcileObservedValuePair(
       }
     }
 
+    // ⭐ THE PERCENT DIVISOR IS THE FACTOR'S FRAME, NOT A CONSTANT.
+    // This is the one caller that HOLDS the frame — the node's persisted
+    // `scale_frame` plus its before-pair — and it used to throw that knowledge
+    // away here, leaving `resolveExistingRawValue` to assume 100. For the
+    // percent factors the ladder frames above 100 (NRR at 200, ROI at 500)
+    // that assumption is a silent 2–5× error in `raw_value`, and #1127's
+    // coherence check now REFUSES the pair it produces — the detector firing
+    // on a corruption written right here.
+    //
+    // Resolved through the shared owner, so this seam holds no private opinion
+    // about the frame (trap 12). Three consequences worth naming:
+    //   · an INCOHERENT stored frame resolves to `undefined` (#1127) and the
+    //     divisor degrades to 100 — today's behaviour, fail-safe;
+    //   · a frame of exactly 100 is arithmetically identical to today, which
+    //     is every ordinary 0–100 percentage;
+    //   · non-percent factors never read it — `resolveExistingRawValue` gates
+    //     the parameter behind `unit === '%'`, and capless framed non-% ops
+    //     returned from the frame branch above long before reaching here.
+    const percentDivisorFrame = resolveScaleFrame({
+      storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
+      value: nodeObserved.value,
+      raw_value: nodeObserved.raw_value,
+    });
+
     // `raw_value` deliberately OMITTED: we are asking what the NEW value
     // denotes, not echoing the old answer back (which is the defect).
     const derived = resolveExistingRawValue({
       value: newValue,
       ...(unit !== undefined ? { unit } : {}),
       ...(cap !== undefined ? { cap } : {}),
+      ...(percentDivisorFrame !== undefined ? { scaleFrame: percentDivisorFrame } : {}),
     });
 
     const nextObserved: Record<string, unknown> = { ...observed };
