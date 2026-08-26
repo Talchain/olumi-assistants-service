@@ -149,7 +149,50 @@ const CORPUS: readonly WarrantCase[] = [
   // taken from #1107's own spec
   { label: "NON_EDIT", message: "What did that update do? Should we change it back?", baseWarrant: false },
   // taken from #1107's own spec
-  { label: "NON_EDIT", message: "What did the hiring cost update do? Update budget?", baseWarrant: true },];
+  { label: "NON_EDIT", message: "What did the hiring cost update do? Update budget?", baseWarrant: true },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ⭐⭐ THE EDIT + SCOPE-FENCE CLASS. ADDED BECAUSE ITS ABSENCE WAS THE ROOT
+  // CAUSE OF THIS ROUND, NOT AS AN AFTERTHOUGHT TO THE CODE FIX.
+  //
+  // Every one of the 23 EDIT rows above is free of prohibition wording, so this
+  // corpus was STRUCTURALLY INCAPABLE of observing what an explicit-veto term
+  // does to a fenced edit. The first arrangement of Term 0 stripped the warrant
+  // from 81 of 81 rows in a 9-core x 9-fence matrix, and every assertion in this
+  // file stayed green (CLAUDE.md trap 22).
+  //
+  // These are ordinary business English: an instruction, plus a fence telling
+  // the assistant to stay inside it. They MUST warrant. Measured at c8eb71ec:
+  // all true. Each rides a canonical or constraint signal, which is what the
+  // conjuncts in Term 0 consult.
+  { label: "EDIT", message: "Set Churn to 0.5 and do not change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Increase hiring cost to 0.9 but do not change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Add an edge from pricing to churn. Do not change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Lower the discount rate to 0.05 and never change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Raise the price ceiling to 120, and do not change the current causal model.", baseWarrant: true },
+  { label: "EDIT", message: "Update churn to 0.03 and don't change the graph.", baseWarrant: true },
+
+  // ⭐ THE CONSTRAINT-ONLY HALF, AND IT IS HERE BECAUSE A MUTANT SURVIVED WITHOUT IT.
+  // Term 0 negates TWO signals. With only the rows above, deleting the
+  // `!hasConstraintMutationSignal` conjunct changed nothing any assertion could
+  // see — every fenced row that rode the constraint list ALSO rode the canonical
+  // one, so the second conjunct was never independently load-bearing in the
+  // corpus. These two ride the constraint list ALONE (hasMutationSignal = false),
+  // which is what makes that conjunct's mutant bite.
+  { label: "EDIT", message: "Keep churn below 3% and do not change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Cap the hiring cost at 0.9 and do not change the model.", baseWarrant: true },
+
+  // The same class, but the edit rides `isEditRequestShape` ALONE — no canonical
+  // and no constraint signal. Term 0's conjuncts cannot see it, so these STILL
+  // lose their warrant. Genuine edits, genuinely broken, pinned as
+  // KNOWN_OPEN_GAPS rather than left invisible.
+  { label: "EDIT", message: "Edit hiring cost to 0.9 and do not change the model.", baseWarrant: true },
+  { label: "EDIT", message: "Reduce churn to 0.02 and do not change the model.", baseWarrant: true },
+
+  // ⛔ THE RETRACTION. The user asked for an edit and then took it back in the
+  // same breath. The correct answer is NO WARRANT; this file records that we
+  // grant one. See KNOWN_OPEN_LIES for why it is not being "fixed".
+  { label: "NON_EDIT", message: "Set Churn to 0.5 - actually no, do not change the model.", baseWarrant: true },];
 
 /**
  * The two messages this change fixes. Both are explicit vetoes — the user said
@@ -193,6 +236,49 @@ const KNOWN_UNFIXED_LIES: readonly string[] = [
   "What did the update to hiring cost do? Don't change it back.",
   "What did the hiring cost update do? Update budget?",];
 
+/**
+ * ⛔ KNOWN-OPEN **GAP** — genuine edits that do NOT get a warrant. Pinned, not fixed.
+ *
+ * These ride `isEditRequestShape` ALONE: `hasMutationSignal` and
+ * `hasConstraintMutationSignal` are both FALSE for them. Term 0 refuses when the
+ * user fenced the turn AND both canonical lists are silent, so exactly this
+ * shape falls through the conjuncts. Closing it needs the veto predicate to
+ * consult its own affirmative-edit check on the unbounded path — a change to
+ * `hasExplicitNoModelChangeIntent` itself, not to the warrant — which is a
+ * larger, separately-reviewable piece of work.
+ *
+ * Asserted EXACTLY, so this REDs if it GROWS (more edits silently dropped) or
+ * SHRINKS (someone fixed one — move it out of here and say so).
+ */
+const KNOWN_OPEN_GAPS: readonly string[] = [
+  "Edit hiring cost to 0.9 and do not change the model.",
+  "Reduce churn to 0.02 and do not change the model.",];
+
+/**
+ * ⛔⛔ KNOWN-OPEN **LIE** — a retraction that still gets a warrant. THE PRICE OF
+ * THE FENCE FIX, PAID KNOWINGLY AND WRITTEN DOWN.
+ *
+ * Unguarded Term 0 refused this row, correctly. Adding the conjuncts that
+ * rescued 72 of 81 fenced edits also rescued this one, and it should not have
+ * been. That is a real, disclosed regression against the previous arrangement —
+ * accepted because "edit + scope fence" is ordinary business English and a
+ * mid-sentence retraction is a narrower, rarer construction.
+ *
+ * ⛔ DO NOT WRITE A PREDICATE TO SEPARATE THIS FROM A SCOPE FENCE.
+ * "…and do not change anything else" must warrant; "…actually no, do not change
+ * the model" must not. That is a natural-language discrimination over trailing
+ * clauses, and this estate has already burned FOUR consecutive rounds on exactly
+ * that shape on exactly this module — each round closing one direction and
+ * reopening the other under a fully green suite — before closing PR #1107 after
+ * five variants across two independent corpora. The standing ruling is that no
+ * further punctuation-only or lexical rule will settle it. If you find yourself
+ * writing that predicate, STOP and report.
+ *
+ * Asserted EXACTLY, in both directions, for the same reason as the set above.
+ */
+const KNOWN_OPEN_LIES: readonly string[] = [
+  "Set Churn to 0.5 - actually no, do not change the model.",];
+
 const EDITS = CORPUS.filter((c) => c.label === 'EDIT');
 const NON_EDITS = CORPUS.filter((c) => c.label === 'NON_EDIT');
 
@@ -200,10 +286,23 @@ describe('mutation warrant consults the explicit veto', () => {
   it('CORPUS_INTEGRITY — both directions present, no duplicates', () => {
     // A corpus that silently lost its EDIT half would let every GAP assertion
     // pass while proving nothing about the direction it exists to guard.
-    expect(CORPUS.length).toBe(48);
-    expect(EDITS.length).toBe(23);
-    expect(NON_EDITS.length).toBe(25);
+    expect(CORPUS.length).toBe(59);
+    expect(EDITS.length).toBe(33);
+    expect(NON_EDITS.length).toBe(26);
     expect(new Set(CORPUS.map((c) => c.message)).size).toBe(CORPUS.length);
+
+    // ⭐ THE BLIND SPOT THAT CAUSED THIS ROUND, NOW PINNED AS A PROPERTY OF THE
+    // CORPUS ITSELF. The original 23 EDIT rows contained ZERO prohibition
+    // wording, so no assertion in this file could observe what an explicit-veto
+    // term does to a fenced edit. Closing the code without closing the corpus
+    // would leave the next author exactly where this one started.
+    const fencedEdits = EDITS.filter((c) => /\b(?:do not|don't|never)\b/i.test(c.message));
+    expect(fencedEdits.length, 'the fenced-edit class vanished from the corpus').toBe(10);
+    // Every known-open row must actually be IN the corpus, or these sets pin nothing.
+    const messages = new Set(CORPUS.map((c) => c.message));
+    for (const m of [...KNOWN_OPEN_GAPS, ...KNOWN_OPEN_LIES]) {
+      expect(messages.has(m), `known-open row missing from CORPUS: ${m}`).toBe(true);
+    }
   });
 
   /**
@@ -241,9 +340,28 @@ describe('mutation warrant consults the explicit veto', () => {
     expect(hasMutationWarrantSignal(message)).toBe(true);
   });
 
-  it('the veto predicate fires on NO genuine edit in the corpus', () => {
-    const overfired = EDITS.filter((c) => hasExplicitNoModelChangeIntent(c.message));
+  /**
+   * ⚠ THIS TEST USED TO ASSERT THE VETO PREDICATE FIRES ON **NO** GENUINE EDIT,
+   * AND THAT WAS ONLY TRUE BECAUSE THE CORPUS HAD NO FENCED EDITS IN IT.
+   *
+   * It fires on all 8 of them — that is the whole point of the class, and it is
+   * precisely why consulting the predicate ALONE was unsafe. The honest form is
+   * to assert it over-fires on no edit that carries no fence, and to state the
+   * fenced count separately so a change to either number is visible.
+   */
+  it('the veto predicate fires on no UNFENCED edit, and on every fenced one', () => {
+    const fenced = EDITS.filter((c) => /\b(?:do not|don't|never)\b/i.test(c.message));
+    const unfenced = EDITS.filter((c) => !/\b(?:do not|don't|never)\b/i.test(c.message));
+    expect(unfenced.length, 'the unfenced edit half drifted').toBe(23);
+    expect(fenced.length, 'the fenced edit half drifted').toBe(10);
+
+    const overfired = unfenced.filter((c) => hasExplicitNoModelChangeIntent(c.message));
     expect(overfired.map((c) => c.message)).toEqual([]);
+
+    // The contrast half: without this, the assertion above would pass just as
+    // well if the veto predicate had stopped firing on anything at all.
+    const underfired = fenced.filter((c) => !hasExplicitNoModelChangeIntent(c.message));
+    expect(underfired.map((c) => c.message)).toEqual([]);
   });
 
   /**
@@ -251,42 +369,109 @@ describe('mutation warrant consults the explicit veto', () => {
    * authority is that it moves the two rows it was built to answer and nothing
    * else. If a third row moves, that claim is void and this REDs by naming it.
    */
-  it('DELTA — exactly the two veto rows change against base', () => {
+  it('DELTA — exactly the two veto rows and the two known-open gaps change against base', () => {
     const moved = CORPUS.filter(
       (c) => hasMutationWarrantSignal(c.message) !== c.baseWarrant,
     ).map((c) => c.message);
-    expect([...moved].sort()).toEqual([...EXPLICIT_VETOES].sort());
+    // The vetoes moved because this change fixes them. The known-open gaps moved
+    // because it breaks them, which is why they are named here rather than
+    // absorbed into a looser assertion. Anything else moving voids the claim
+    // that this change touches only what it says it touches.
+    expect([...moved].sort()).toEqual([...EXPLICIT_VETOES, ...KNOWN_OPEN_GAPS].sort());
   });
 
-  it('GAPS — no genuine edit loses its warrant', () => {
+  it('GAPS — the only edits without a warrant are the base gaps plus the recorded known-open set', () => {
     const gaps = EDITS.filter((c) => !hasMutationWarrantSignal(c.message)).map((c) => c.message);
     const baseGaps = EDITS.filter((c) => !c.baseWarrant).map((c) => c.message);
-    expect(gaps).toEqual(baseGaps);
-    expect(gaps.length).toBe(2);
-  });
-
-  it('LIES — 15 -> 13, and the remainder is EXACTLY the recorded set', () => {
-    const lies = NON_EDITS.filter((c) => hasMutationWarrantSignal(c.message)).map((c) => c.message);
-    const baseLies = NON_EDITS.filter((c) => c.baseWarrant).map((c) => c.message);
-    expect(baseLies.length).toBe(15);
-    expect([...lies].sort()).toEqual([...KNOWN_UNFIXED_LIES].sort());
-    expect(lies.length).toBe(13);
+    expect(baseGaps.length, 'base gap count drifted').toBe(2);
+    expect([...gaps].sort()).toEqual([...baseGaps, ...KNOWN_OPEN_GAPS].sort());
+    expect(gaps.length).toBe(4);
   });
 
   /**
-   * The superset relation and its ONE sanctioned exception, asserted here too
-   * because this corpus — unlike the one beside the invariant — actually
-   * contains the class that forks it.
+   * ⭐⭐ THE ROWS THIS CHANGE EXISTS TO RESCUE, ASSERTED POSITIVELY AND BY NAME.
+   *
+   * Kept as its OWN test rather than folded into GAPS above, and that is a
+   * deliberate binding decision. GAPS is legitimately sensitive to Term 3 — break
+   * `isEditRequestShape` and rows unrelated to this change become gaps, so GAPS
+   * REDs for reasons that have nothing to do with the conjuncts. It therefore
+   * cannot discriminate "these rows are rescued BY TERM 0's conjuncts" from
+   * "something else in the function moved". Measured: with GAPS as the target, a
+   * Term 3 mutant RED — which would have been read as this class biting when it
+   * was not.
+   *
+   * This test binds to the conjuncts alone. Every row below is a canonical or
+   * constraint hit, so it returns before Term 3 is ever reached, and the
+   * discriminating mutant pair is:
+   *   remove either conjunct  -> this REDs
+   *   break Term 3            -> this stays GREEN
    */
-  it('SUPERSET — holds for every canonical hit that is not an explicit veto', () => {
+  it('RESCUED — a scope fence does not strip a canonical or constraint edit', () => {
+    const rescued = EDITS
+      .filter((c) => /\b(?:do not|don't|never)\b/i.test(c.message))
+      .filter((c) => !KNOWN_OPEN_GAPS.includes(c.message));
+    expect(rescued.length, 'the rescued fenced-edit rows vanished').toBe(8);
+
+    // Both conjuncts must be independently load-bearing in this set, or one of
+    // their mutants survives with nothing to say. Pinned so it stays that way.
+    const canonicalRidden = rescued.filter((c) => hasMutationSignal(c.message));
+    const constraintOnly = rescued.filter((c) => !hasMutationSignal(c.message));
+    expect(canonicalRidden.length, 'no canonical-ridden fenced edit').toBe(6);
+    expect(constraintOnly.length, 'no constraint-ONLY fenced edit — the second conjunct is unpinned').toBe(2);
+
+    for (const c of rescued) {
+      // Precondition pinned in-test: this really IS a fenced edit, i.e. the veto
+      // predicate fires on it. Otherwise the warrant below could be true simply
+      // because Term 0 never engaged, and the row would prove nothing.
+      expect(hasExplicitNoModelChangeIntent(c.message), `not a fenced edit: ${c.message}`).toBe(true);
+      expect(hasMutationWarrantSignal(c.message), `fenced edit lost its warrant: ${c.message}`).toBe(true);
+    }
+  });
+
+  it('LIES — 16 -> 14, and the remainder is EXACTLY the two recorded sets', () => {
+    const lies = NON_EDITS.filter((c) => hasMutationWarrantSignal(c.message)).map((c) => c.message);
+    const baseLies = NON_EDITS.filter((c) => c.baseWarrant).map((c) => c.message);
+    expect(baseLies.length).toBe(16);
+    expect([...lies].sort()).toEqual([...KNOWN_UNFIXED_LIES, ...KNOWN_OPEN_LIES].sort());
+    expect(lies.length).toBe(14);
+  });
+
+  /**
+   * ⭐ THE SUPERSET RELATION, UNCONDITIONAL — AND THIS IS THE FILE WHERE IT
+   * ACTUALLY EXECUTES.
+   *
+   * ⚠ THE EARLIER FORM OF THIS TEST CARRIED A "NOT AN EXPLICIT VETO" EXCEPTION,
+   * AND THAT BRANCH WAS DEAD HERE TOO. Measured: of the corpus rows that satisfy
+   * `hasMutationSignal`, the number that are ALSO an explicit veto was ZERO, so
+   * the computed expectation was TRUE for every row and the exception never ran.
+   * It is gone rather than carved out, because the fork it admitted does not
+   * exist: Term 0 refuses only when `hasMutationSignal` is FALSE. Measured over
+   * 1,093,500 generated canonical-hit messages: 0 forks, against 850,500 with an
+   * unguarded Term 0.
+   *
+   * ⭐ The fenced-edit rows added above are what make this file's copy of the
+   * invariant load-bearing rather than decorative: they are canonical hits that
+   * ARE explicit vetoes, so they are exactly the rows an unguarded Term 0 forks.
+   */
+  it('SUPERSET — every canonical hit gets a warrant, no exceptions', () => {
     const canonical = CORPUS.filter((c) => hasMutationSignal(c.message));
-    expect(canonical.length).toBeGreaterThan(0); // pin the precondition
+    // Pin the precondition AND its size: a corpus that quietly stopped containing
+    // canonical hits would leave this loop asserting nothing, which is exactly
+    // how the copy of this invariant in mutation-warrant.test.ts read as coverage
+    // for 43 rows while executing zero times.
+    expect(canonical.length, 'canonical-hit rows drifted').toBe(22);
+
+    // The rows that make this test discriminating — canonical hits that are also
+    // explicit vetoes. If this ever reads 0, the invariant above is vacuous
+    // against the only class that can fork it, and this REDs to say so.
+    const forkable = canonical.filter((c) => hasExplicitNoModelChangeIntent(c.message));
+    expect(forkable.length, 'no canonical hit is an explicit veto — invariant is vacuous').toBe(7);
+
     for (const testCase of canonical) {
-      const expected = !hasExplicitNoModelChangeIntent(testCase.message);
       expect(
         hasMutationWarrantSignal(testCase.message),
-        `${testCase.message} — superset forked for a reason other than an explicit veto`,
-      ).toBe(expected);
+        `${testCase.message} — superset forked`,
+      ).toBe(true);
     }
   });
 });
