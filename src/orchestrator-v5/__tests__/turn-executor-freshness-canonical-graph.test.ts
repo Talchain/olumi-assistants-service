@@ -99,7 +99,11 @@ function mockRoutingAdapter(impl: ChatWithToolsMock) {
 interface SerialisedContextPack {
   readonly graph_context?: { readonly status?: string };
   readonly graph?: {
-    readonly nodes?: ReadonlyArray<{ readonly id?: string; readonly label?: string }>;
+    readonly nodes?: ReadonlyArray<{
+      readonly id?: string;
+      readonly label?: string;
+      readonly is_baseline?: true;
+    }>;
     readonly edges?: ReadonlyArray<{
       readonly from?: string;
       readonly to?: string;
@@ -205,6 +209,34 @@ const PRE_EDIT_HASH = computeAnalysisAffectingGraphHash(
 const POST_EDIT_HASH = computeAnalysisAffectingGraphHash(
   POST_EDIT_GRAPH as never,
 )!;
+
+const CANONICAL_BASELINE_GRAPH = {
+  nodes: [
+    {
+      id: 'opt_current',
+      kind: 'option',
+      label: 'Saved current approach',
+      is_baseline: true,
+    },
+    { id: 'opt_change', kind: 'option', label: 'Saved alternative' },
+    { id: 'goal_outcome', kind: 'goal', label: 'Outcome' },
+  ],
+  edges: [],
+};
+
+const CONFLICTING_REQUEST_BASELINE_GRAPH = {
+  nodes: [
+    { id: 'opt_current', kind: 'option', label: 'REQUEST ONLY current' },
+    {
+      id: 'opt_change',
+      kind: 'option',
+      label: 'REQUEST ONLY alternative',
+      is_baseline: true,
+    },
+    { id: 'goal_outcome', kind: 'goal', label: 'REQUEST ONLY outcome' },
+  ],
+  edges: [],
+};
 
 // ---------------------------------------------------------------------------
 // Telemetry sink
@@ -362,6 +394,42 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(option?.label).not.toBe('Option A after saved edit');
     expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
 
+  });
+
+  it('keeps the canonical baseline marker when request bytes mark a different option', async () => {
+    const canonicalHash = computeAnalysisAffectingGraphHash(
+      CANONICAL_BASELINE_GRAPH as never,
+    );
+    expect(canonicalHash, 'canonical fixture must produce a freshness hash').not.toBeNull();
+    installPriorRunAnalysisFact(canonicalHash!);
+    (global as Record<string, unknown>).__test_persisted_graph = CANONICAL_BASELINE_GRAPH;
+    const routingAdapter = mockRoutingAdapter(async () => mkTextResult('comparison'));
+
+    await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'compare the current approach with the alternative' },
+      'req-canonical-baseline-context',
+      {
+        routingAdapter,
+        graphState: CONFLICTING_REQUEST_BASELINE_GRAPH as never,
+      },
+    );
+
+    const prompt = routingPrompt(routingAdapter);
+    const pack = serialisedContextPack(prompt);
+    const current = pack.graph?.nodes?.find((node) => node.id === 'opt_current');
+    const alternative = pack.graph?.nodes?.find((node) => node.id === 'opt_change');
+
+    expect(findContextPackEvent()?.data.graph_compact_via).toBe('strict_parse');
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(current).toEqual(
+      expect.objectContaining({
+        label: 'Saved current approach',
+        is_baseline: true,
+      }),
+    );
+    expect(alternative?.label).toBe('Saved alternative');
+    expect(alternative).not.toHaveProperty('is_baseline');
+    expect(prompt).not.toContain('REQUEST ONLY');
   });
 
   it('fresh fallback (no request analysis_state, graph_hash_match) emits NO stale/unknown user-facing copy', async () => {

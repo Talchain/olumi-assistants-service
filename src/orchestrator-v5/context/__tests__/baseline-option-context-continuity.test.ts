@@ -7,20 +7,22 @@ import { compactGraphForContextPack } from '../compact-graph-for-contextpack.js'
 import { assembleContextPack } from '../context-pack-assembler.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
-function promptForBaseline(baselineId: 'opt_current' | 'opt_change' | null): string {
+type OptionId = 'opt_current' | 'opt_change';
+
+function promptForBaselines(baselineIds: readonly OptionId[]): string {
   const graph: GraphV3T = {
     nodes: [
       {
         id: 'opt_current',
         kind: 'option',
         label: 'Continue the current approach',
-        is_baseline: baselineId === 'opt_current',
+        is_baseline: baselineIds.includes('opt_current'),
       },
       {
         id: 'opt_change',
         kind: 'option',
         label: 'Adopt the alternative',
-        is_baseline: baselineId === 'opt_change',
+        is_baseline: baselineIds.includes('opt_change'),
       },
       { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
     ],
@@ -38,10 +40,15 @@ function promptForBaseline(baselineId: 'opt_current' | 'opt_change' | null): str
     }),
     priorTurns: [],
     priorFacts: [],
+    graphContext: { status: 'canonical' },
     graph,
     compactedGraph: outcome.compact,
   });
   return buildUserMessage(pack, 'Compare the current approach with the alternative.');
+}
+
+function promptForBaseline(baselineId: OptionId | null): string {
+  return promptForBaselines(baselineId === null ? [] : [baselineId]);
 }
 
 function observedOptionNodes(prompt: string): Array<Record<string, unknown>> {
@@ -73,11 +80,21 @@ describe('canonical baseline-option continuity', () => {
     ]);
     expect(beforePrompt).not.toContain('"is_baseline": false');
     expect(afterPrompt).not.toContain('"is_baseline": false');
+    expect(observeSerialisedPack(beforePrompt).graph_context).toEqual({ status: 'canonical' });
+    expect(observeSerialisedPack(afterPrompt).graph_context).toEqual({ status: 'canonical' });
   });
 
   it('does not infer a baseline from current-approach language', () => {
     expect(
       observedOptionNodes(promptForBaseline(null)).filter((node) => node.is_baseline === true),
     ).toEqual([]);
+  });
+
+  it('transports multiple literal producer facts without becoming a baseline adjudicator', () => {
+    expect(
+      observedOptionNodes(promptForBaselines(['opt_current', 'opt_change']))
+        .filter((node) => node.is_baseline === true)
+        .map((node) => node.id),
+    ).toEqual(['opt_change', 'opt_current']);
   });
 });
