@@ -292,9 +292,16 @@ describe('POST /orchestrate/v2/turn — semantic open-frame intake', () => {
     ) });
 
     expect(res.statusCode).toBe(200);
-    expect(mocks.understandOpenFrameIntake).toHaveBeenCalledWith(
-      expect.objectContaining({ currentMessage: message }),
-    );
+    // ⚠ MECHANISM ASSERTION REMOVED DELIBERATELY (2026-08-26), NOT A
+    // BEHAVIOURAL CHANGE. This message names the assistant ("Can you help me
+    // with this?") and is interrogative without a decision verb, so the
+    // ROADMAP 2.715 deterministic floor now answers it WITHOUT consulting the
+    // classifier. The user-visible outcome is identical and is still fully
+    // asserted below — TurnExecutor answers, no draft is dispatched, no canned
+    // rejection — it simply costs one fewer LLM call. Verified by instrumented
+    // probe rather than inferred from a stopped run: with only the
+    // `understandOpenFrameIntake` call assertion neutralised, this case passes
+    // unchanged on every remaining dimension.
     expect(mocks.runTurnExecutor).toHaveBeenCalledTimes(1);
     expect(mocks.dispatchDraftGraph).not.toHaveBeenCalled();
     expect(JSON.parse(res.body).assistant_text).not.toContain(CANNED_REJECTION);

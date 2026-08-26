@@ -163,6 +163,8 @@ import {
 import {
   DRAFT_GRAPH_MIN_BRIEF_LENGTH,
   isDraftShapedText,
+  isQuestionToAssistant,
+  mentionsAssistantSubject,
 } from '../schemas/assist.js';
 import { understandOpenFrameIntake } from '../orchestrator-v5/routing/open-frame-intake.js';
 import { runPreFlight } from './route-v2-preflight.js';
@@ -4121,9 +4123,72 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       canStartModelOnThisFrame &&
       !isNonReadinessTypedChipClickForExecutor &&
       !isProcessMetaIntake(ingress.message);
+    // ────────────────────────────────────────────────────────────────
+    // ROADMAP 2.715 — THE DETERMINISTIC PROTECTED-CLASS FLOOR.
+    //
+    // WHY THIS EXISTS. The intake above kept the deterministic YES path
+    // (`isDraftGraphShape` short-circuits before the classifier is consulted,
+    // so an explicit decision brief costs zero extra calls) and removed the
+    // deterministic NO path. Without a floor, 2.715's protected class — the
+    // product's own coaching prompts and questions ABOUT Olumi, which must
+    // never be modelled as decisions — becomes contingent on an advisory
+    // model verdict. Measured at `c907b518` with the classifier armed:
+    // `invalid` → 0/17 draft (the fail-safe), `continue_conversation` → 0/17,
+    // `start_model` → 17/17 DRAFT + auto-run. The landed corpus cannot see
+    // that third arm at all: its mock emits text + `end_turn`, which
+    // `parseOpenFrameIntakeResult` rejects, so every case there measures the
+    // fallback rather than the model's judgement.
+    //
+    // WHAT IT IS NOT. This is not a second keyword classifier and not a copy
+    // of the protected class. Both conjuncts are EXISTING single-source
+    // authorities from `schemas/assist.ts`: `isQuestionToAssistant` (the 2.715
+    // predicate that already gates `isDraftShapedText`) and
+    // `mentionsAssistantSubject` (derived from the same
+    // `ASSISTANT_SUBJECT_ALTERNATION_SOURCE` the subject-positional rule uses).
+    // No new vocabulary is introduced here. A hand-copied list would be the
+    // hand-maintained-mirror defect (CLAUDE.md trap 12).
+    //
+    // ⚠⚠ WHY BOTH CONJUNCTS, AND WHY THIS FLOOR IS DELIBERATELY PARTIAL.
+    // `isQuestionToAssistant` ALONE is not the protected class — it is
+    // "interrogative without a decision verb", which is ALSO true of the broad
+    // strategic challenges this PR exists to accept. Measured 2026-08-26:
+    //
+    //   isQuestionToAssistant       protected 17/17 · #1110 starts 4/6 · briefs 0/7
+    //   + mentionsAssistantSubject  protected 12/17 · #1110 starts 0/6 · briefs 0/7
+    //
+    // Flooring on the first alone would have refused "Why are enterprise
+    // customers not converting?" and "How can I accelerate securing pre-seed
+    // investment for my startup?" — this PR's own acceptance prompts (+9
+    // regressions, 8 in its own suite). So the floor covers TWELVE of the
+    // seventeen. The remaining FIVE name workspace artefacts rather than
+    // Olumi, stay classifier-contingent, and are ENUMERATED as KNOWN-UNFLOORED
+    // in `route-v2-inv-q-protected-class-armed.test.ts` with a test that REDs
+    // if that set grows OR shrinks. A gap recorded in the suite is honest; a
+    // gap invisible to it is how this class was lost in the first place. The
+    // durable home for the five is a widened `isProcessMetaIntake` (which
+    // already owns "question about the product/process") — rowed, not done in
+    // passing, because it needs its own outside corpus.
+    //
+    // WHAT IT BLOCKS, PRECISELY: DRAFTING, never ANSWERING. The floor is a
+    // term of `isFrameNoBriefShape` below as well, so a floored turn does NOT
+    // fall back to the legacy canned rejection this PR removed — it goes to
+    // TurnExecutor and gets a real conversational answer. That improvement is
+    // this PR's whole value and it survives intact.
+    //
+    // SCOPE. Deliberately conjoined with `shouldConsiderOpenFrameIntake`
+    // rather than evaluated globally: it may only affect turns that would
+    // otherwise have reached the classifier. Widening it to every question on
+    // every turn would change routing on populated-graph, non-composer and
+    // chip-click turns that this PR never touched (CLAUDE.md trap 22b — the
+    // defect lives in the BREADTH of the predicate, not the invariant).
+    // ────────────────────────────────────────────────────────────────
+    const openFrameIntakeProtectedFloor =
+      shouldConsiderOpenFrameIntake &&
+      isQuestionToAssistant(ingress.message) &&
+      mentionsAssistantSubject(ingress.message);
     let shouldUnderstandOpenFrameIntake = false;
     let openFrameIntakeDeferredToCanonicalLane = false;
-    if (shouldConsiderOpenFrameIntake) {
+    if (shouldConsiderOpenFrameIntake && !openFrameIntakeProtectedFloor) {
       try {
         const persisted = await loadPersistedGraphOnce();
         if (persisted == null) shouldUnderstandOpenFrameIntake = true;
@@ -4131,6 +4196,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       } catch {
         openFrameIntakeDeferredToCanonicalLane = true;
       }
+    }
+    if (openFrameIntakeProtectedFloor) {
+      log.info(
+        {
+          event: 'v5.open_frame_intake_protected_floor',
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+        },
+        'ROADMAP 2.715: a question to the assistant is answered, never modelled as a decision',
+      );
     }
     let openFrameIntakeStartsModel = false;
     let openFrameIntakeContinuesConversation = false;
@@ -5743,6 +5818,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // brief failure. It belongs to the established canonical-state lane,
       // which consumes the same strict-read memo above.
       !openFrameIntakeDeferredToCanonicalLane &&
+      // ROADMAP 2.715 — a floored question to the assistant must NOT inherit
+      // the canned rejection this PR removed. The floor blocks DRAFTING; the
+      // answer is TurnExecutor's, exactly as for `continue_conversation`.
+      // Without this term the floor would silently restore the deflection for
+      // all seventeen and undo the improvement it is meant to protect.
+      !openFrameIntakeProtectedFloor &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(
