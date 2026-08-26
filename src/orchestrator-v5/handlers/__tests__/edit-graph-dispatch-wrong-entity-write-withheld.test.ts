@@ -390,7 +390,7 @@ describe('2.1266 — the wrong-entity write is withheld (J4 t5 wire replay)', ()
  * nothing — `activeElement: BODY`, Model tab `aria-selected: "false"`.
  *
  * ⚠ THIS IS THE PIN THAT STOPS THE BUILDER BEING DEAD CODE. `ui-directive.ts`'s
- * own unit spec proves `buildConfigureOptionRepairDirective` CONSTRUCTS a valid
+ * own unit spec proves `buildGateRemedySectionDirective` CONSTRUCTS a valid
  * block; only this file proves the dispatch actually SHIPS one, through the real
  * `dispatchEditGraph`. A builder with a green unit spec and no call site is the
  * guarantee-theatre class this estate has paid for repeatedly.
@@ -420,6 +420,7 @@ describe('S7 — a not_honoured turn hands the user to the surface that writes',
     blocks.filter((b) => b.type === 'ui_directive') as unknown as Array<{
       verb: string;
       source?: string;
+      ui_target?: { kind: string; id: string };
       targets: Array<{ id: string; kind: string; label: string }>;
     }>;
 
@@ -429,7 +430,7 @@ describe('S7 — a not_honoured turn hands the user to the surface that writes',
     expect(WITNESS.wire.t4_chip_message).toMatch(/\d/);
   });
 
-  it('ships exactly ONE ui_directive — open_inspector at the OPTION', async () => {
+  it('ships exactly ONE ui_directive — open_section at the Model tab’s options', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       factorBaselineAppliedResult(),
     );
@@ -438,13 +439,29 @@ describe('S7 — a not_honoured turn hands the user to the surface that writes',
     const directives = directivesOf(out.response.blocks);
     // N=1: the compose ladder's invariant holds on this path too.
     expect(directives).toHaveLength(1);
-    expect(directives[0]!.verb).toBe('open_inspector');
-    // IDENTITY, not "a target exists" (trap 19). A factor target would satisfy
-    // a kind-only or length-only assertion while pointing the user at a panel
-    // that cannot set this value.
-    expect(directives[0]!.targets[0]!.id).toBe(OPTION_ID);
-    expect(directives[0]!.targets[0]!.id).not.toBe(FACTOR_ID);
-    expect(directives[0]!.targets[0]!.kind).toBe('option');
+    expect(directives[0]!.verb).toBe('open_section');
+    expect(directives[0]!.ui_target).toEqual({ kind: 'model_section', id: 'options' });
+  });
+
+  /**
+   * ⛔ THE REFUTED DESTINATION MUST NOT COME BACK.
+   *
+   * The first cut of this row shipped `open_inspector` at the option node. A
+   * live drive proved that panel read-only BY POLICY — it renders the
+   * intervention row inside a `<fieldset disabled>` and a forced write produced
+   * zero wire calls. This is a REGRESSION PIN, not a restatement of the test
+   * above: it fails if anyone re-points at the canvas, however that is spelled.
+   */
+  it('does NOT point at the canvas option panel, which cannot save', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-not-canvas');
+
+    const directives = directivesOf(out.response.blocks);
+    expect(directives.map((d) => d.verb)).not.toContain('open_inspector');
+    // And no entity target of any kind — a panel verb's target is the section.
+    expect(directives.flatMap((d) => d.targets)).toEqual([]);
   });
 
   it('stamps the gesture `gate` — no handler fact backs it', async () => {

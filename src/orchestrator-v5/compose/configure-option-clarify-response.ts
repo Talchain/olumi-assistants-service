@@ -240,10 +240,27 @@ export function composeConfigureOptionClarifyResponse(
   // ⚠ IT STILL ASKS FOR THE NUMBER, and that is not a shortfall. The chip
   // withholds the value deliberately (`buildRepairPairChip`'s header): choosing
   // it would invent the user's figure, the fabrication class P5 exists to close.
-  // So the honest move is to ask for the ONE thing that is not derivable and
-  // hand the user to the surface that writes it — which the turn's
-  // `open_inspector` directive now actually opens, making this sentence's
-  // instruction true rather than homework.
+  // So the honest move is to ask for the ONE thing that is not derivable — and
+  // the answer is written by simply typing it here, which is a PROVEN path
+  // (`interventions: {…, source: "user_specified"}`, verified after reload).
+  //
+  // ⚠⚠ AND IT DELIBERATELY DOES **NOT** APPEND
+  // `buildConfigureOptionDirectSetSentence`. That sentence — "open <option> on
+  // the canvas and add <factor> to what it changes" — was REFUTED BY A LIVE
+  // DRIVE on 2026-08-25: the canvas option panel renders the intervention row
+  // inside a `<fieldset disabled>` and writes NOTHING (a forced native write
+  // produced zero wire calls), and the panel's own notice says it is read-only
+  // because the change "cannot yet be saved to the shared model".
+  //
+  // ⛔ THE SENTENCE IS THEREFORE FALSE WHEREVER IT IS EMITTED, INCLUDING THE
+  // `answered` BRANCH BELOW, WHICH THIS CHANGE DELIBERATELY DOES NOT TOUCH.
+  // That is a pre-existing defect on a different branch with its own pins, and
+  // silently rewriting it here would put one lane's fix inside another's
+  // evidence. It is REPORTED, not absorbed (CLAUDE.md scope-expansion rule).
+  // Note the shape: this sentence was itself introduced to FIX a dead-end
+  // locus, was correct about which field the write targets, and went false when
+  // the surface was disabled underneath it — a cross-service hand-maintained
+  // mirror going stale exactly as its own header warned (trap 12).
   const identificationComplete =
     !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
 
@@ -252,7 +269,6 @@ export function composeConfigureOptionClarifyResponse(
         `"${optionLabel}" has no effect value on ${primaryFactor} yet.`,
         `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
-        buildConfigureOptionDirectSetSentence(optionLabel, primaryFactor),
       ].join(' ')
     : qualitativeText !== null
     ? qualitativeText

@@ -66,7 +66,7 @@ import {
   resolveOptionEffectWrite,
 } from '../routing/option-effect-write.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
-import { buildConfigureOptionRepairDirective } from '../compose/ui-directive.js';
+import { buildGateRemedySectionDirective } from '../compose/ui-directive.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import {
   decideGoalTargetReceipt,
@@ -3773,11 +3773,10 @@ export async function dispatchEditGraph(
     );
     // ⭐⭐ THE GESTURE, NOT ONLY THE SENTENCE (S7).
     //
-    // The reply below tells the user to open the option and add the factor to
-    // what it changes. Until now that was the END of it: the turn shipped
-    // `blocks: []` and the user was left to find the panel themselves — which,
-    // on the witnessed capture (UI `326970a7` · CEE `5f2e3fd`), is what turned
-    // a chip labelled "Set effect on Cash runway consumed" into homework.
+    // Until now this branch shipped `blocks: []` and the user was left to find
+    // the surface themselves — which, on the witnessed capture (UI `326970a7` ·
+    // CEE `5f2e3fd`), is what turned a chip labelled "Set effect on Cash runway
+    // consumed" into homework.
     //
     // ⚠ WHY IT IS EMITTED HERE AND NOT BY THE LADDER, since that is the obvious
     // question and the obvious answer is wrong: this branch commits
@@ -3785,16 +3784,44 @@ export async function dispatchEditGraph(
     // commit site further down this function), and `compose.ts`'s ladder is driven
     // ENTIRELY by that fact list. A `case 'edit_graph'` in
     // `buildFocusInspectorDirective` would be live code no data can reach
-    // (CLAUDE.md trap 16-inverse). This site is the one that HOLDS the option
-    // identity at the moment the remedy is composed.
+    // (CLAUDE.md trap 16-inverse).
     //
-    // Identity-bound (trap 19): `configureOutcome.optionId` is the option whose
-    // interventions write was checked and found absent — the same id the
-    // telemetry above reports — never "an option from this graph".
-    const repairDirective = buildConfigureOptionRepairDirective(
-      configureOutcome.optionId,
-      configureOutcome.optionLabel,
-    );
+    // ⭐⭐ WHY THE SHIPPED GATE-REMEDY BUILDER AND NOT A BESPOKE ONE — and this is
+    // the second destination this row has had, so the reasoning is recorded
+    // rather than the first attempt quietly deleted (trap 14).
+    //
+    // The first cut emitted `open_inspector` at the OPTION node, on the strength
+    // of `buildConfigureOptionDirectSetSentence`'s derivation that the canvas
+    // option panel edits `data/interventions/<factorId>` and its source comment
+    // "intervention inputs MUST remain editable". **A live drive on 2026-08-25
+    // refuted that**: the panel RENDERS the intervention row and `+ Add a change`
+    // (both reporting `disabled: false` per element) but both sit inside a
+    // `<fieldset disabled>` six ancestors up; a forced native write moved the
+    // input visually and produced ZERO wire calls, with the panel's own notice
+    // reading *"This inspector is read-only because these changes cannot yet be
+    // saved to the shared model. Use the Model tab …"*. It is read-only BY
+    // POLICY, so that directive would have been an honest panel telling the user
+    // it cannot help — a detour, not a destination.
+    //
+    // ⚠ NOTE THE INSTRUMENT LESSON, because it is why the first cut looked safe:
+    // A PER-ELEMENT `disabled` CHECK IS NOT AN ENABLED CHECK. Only an
+    // actionability check sees an ancestor `<fieldset disabled>`.
+    //
+    // The Model tab's `options` section is where this value is actually typed,
+    // and the product ALREADY says so: `REMEDY_SECTION_BY_OPEN_ITEM_KIND` maps
+    // `option_needs_encoding → 'options'` and `turn-executor.ts` already emits
+    // that gesture for this very blocker on the advice-gate path. So this row
+    // CONVERGES on the live builder instead of minting a second spelling of the
+    // same destination (trap 12). `option_needs_encoding` is not a guess about
+    // this turn — it is the readiness kind whose own definition is "connected to
+    // factors but has no numeric values set", which is exactly the state
+    // `evaluateConfigureOptionOutcome` just returned `not_honoured` for.
+    //
+    // ⚠ RUNG: the section is the shipped remedy surface for this blocker; that
+    // its rows WRITE is not witnessed by this lane. If a drive finds
+    // `OptionsSection` read-only too, this gesture and the advice-gate one are
+    // the same defect and re-point together — one change, not two.
+    const repairDirective = buildGateRemedySectionDirective('option_needs_encoding');
     // Respect the N=1 directive invariant the compose ladder maintains. Today
     // this branch always carries zero directives (no facts ⇒ no ladder run), so
     // the guard is inert — it is here so that if a directive ever DOES arrive on

@@ -144,10 +144,21 @@ describe('clicking the repair chip — identification is complete', () => {
     expect(findForbiddenPhraseHit(compose(CHIP.message))).toBeNull();
   });
 
-  it('names the locus where the value can be set by hand', () => {
-    // Derived from the single owner of that sentence — never re-spelled here
-    // (trap 12: the second spelling is the one that rots).
-    expect(compose(CHIP.message)).toContain(
+  /**
+   * ⛔ THE CANVAS-LOCUS SENTENCE MUST NOT APPEAR — it is now FALSE.
+   *
+   * A live drive on 2026-08-25 found the canvas option panel renders the
+   * intervention row inside a `<fieldset disabled>`; a forced native write
+   * produced ZERO wire calls, and the panel states it is read-only because the
+   * change "cannot yet be saved to the shared model". Sending a user there is a
+   * detour to a surface that tells them it cannot help.
+   *
+   * ⚠ This asserts only about THIS branch. The `answered` branch still emits the
+   * sentence; that is a reported pre-existing defect with its own pins, not
+   * something this lane silently rewrites.
+   */
+  it('does NOT send the user to the canvas panel, which cannot save', () => {
+    expect(compose(CHIP.message)).not.toContain(
       buildConfigureOptionDirectSetSentence(OPTION, FACTOR),
     );
   });
