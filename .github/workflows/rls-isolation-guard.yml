@@ -17,6 +17,14 @@ on:
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
+  # Self-scoped: runs on a PR only when the guard itself changes, so a change to
+  # the guard is demonstrated in the runner BEFORE it is merged. It deliberately
+  # does NOT run on unrelated PRs — it asserts against the deployed environment,
+  # so it is a drift detector, not a PR gate.
+  pull_request:
+    paths:
+      - 'scripts/ci/rls-isolation-guard.mjs'
+      - '.github/workflows/rls-isolation-guard.yml'
   push:
     branches: [staging]
     paths:
