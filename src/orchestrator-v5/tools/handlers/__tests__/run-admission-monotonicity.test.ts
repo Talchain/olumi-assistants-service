@@ -165,7 +165,30 @@ function specsFor(
 }
 
 describe('repair monotonicity — adding a valid value never reduces analysability', () => {
-  it('INVARIANT over the repair lattice: analysable(G) ⇒ analysable(G + one valid value)', () => {
+  /**
+   * ⭐ PRECONDITION FOR THE WHOLE CORPUS, PINNED IN-TEST. The waiver consults the
+   * `obligation` stamp from `classifyIssueObligation`, so a corpus whose issues
+   * were all `required` would exercise none of it and the lattice would pass by
+   * testing nothing (CLAUDE.md trap 13b). Assert the fixtures really do produce
+   * `offered` obligations — these graphs carry no user-authored provenance, which
+   * is what a fresh Olumi draft looks like.
+   */
+  it('PRECONDITION: the corpus produces `offered` obligations, so the waiver is exercised', () => {
+    const admission = resolveRunAdmission(
+      buildGraph([
+        { demand: 3, valued: 3 },
+        { demand: 3, valued: 3 },
+        { demand: 3, valued: 1 },
+      ]),
+    );
+    const valueIssues = (admission.assessment.blockingIssues ?? []).filter(
+      (i) => i.code === 'MISSING_OPTION_VALUE',
+    );
+    expect(valueIssues.length).toBeGreaterThan(0);
+    expect(valueIssues.every((i) => i.obligation === 'offered')).toBe(true);
+  });
+
+  it('INVARIANT over the repair lattice: analysable(G) ⇒ analysable(G + one valid value)', { timeout: 120_000 }, () => {
     const violations: string[] = [];
     let admitted = 0;
     let blocked = 0;
@@ -288,6 +311,29 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
       expect(codes.some((c) => c !== 'MISSING_OPTION_VALUE')).toBe(true);
       expect(admission.willProceed).toBe(false);
     });
+
+    /**
+     * ⚠⚠ KNOWN GAP, RECORDED RATHER THAN PAPERED OVER — the waiver's
+     * `obligation === 'offered'` conjunct is PRESENT BUT NOT COVERED HERE.
+     *
+     * Every fixture in this file produces `offered` obligations (pinned by the
+     * PRECONDITION spec above), so a mutant that deletes that conjunct does NOT
+     * bite this corpus. Covering it needs an option→factor effect whose BOTH
+     * ends are `user_stated`, and the shapes tried for that — an
+     * `observed_state.source` on the factor, and rich
+     * `{ value, source }` intervention entries on the option — both make the
+     * graph parse as **`SCHEMA_INVALID`**. That refusal is a different
+     * mechanism, so a twin built on those shapes would have gone green while
+     * testing nothing; it was the in-test precondition that caught it, not
+     * inspection.
+     *
+     * The gap is therefore in the FIXTURE VOCABULARY, not in the rule: building
+     * it needs the real `@talchain/schemas` V3 shape for user-stated
+     * provenance. Until that exists here, the conjunct's coverage rests on
+     * `obligation-provenance.ts`'s own suite, not on this one. Stated so the
+     * suite is green for the RIGHT reason and this does not read as coverage it
+     * does not provide.
+     */
 
     it('no option specified at all stays blocked', () => {
       expect(

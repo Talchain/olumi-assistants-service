@@ -420,9 +420,11 @@ function isWaivableByExclusion(
  *   `isWaivableByExclusion`     — *"is the run about to DROP the option this
  *                                 blocker names?"* If so nothing is analysed
  *                                 for it, so the missing value cannot matter.
- *   `isWaivableByComputeDiscard` — *"does the scientific compute CONSUME this
- *                                 missing input at all?"* If it does not, the
- *                                 blocker is an obligation CEE invented.
+ *   `isWaivableByComputeDiscard` — *"may this gap be DEMANDED of the user at
+ *                                 all, and does the compute consume it?"* It
+ *                                 answers the first half by CONSULTING the
+ *                                 existing `obligation` stamp rather than
+ *                                 minting a rival predicate beside it.
  *
  * ## Why a missing option×factor value on a VALUED option is not consumed
  *
@@ -469,7 +471,37 @@ function isWaivableByComputeDiscard(
   issue: CanonicalReadinessIssue,
   valuedOptionIds: ReadonlySet<string>,
 ): boolean {
+  // (1) THE PER-(OPTION,FACTOR) AXIS ONLY. The over-demand that has been
+  //     measured is confined to this axis; every other blocker code keeps its
+  //     refusal until compute's discard is proven for it SEPARATELY.
   if (issue.code !== 'MISSING_OPTION_VALUE') return false;
+
+  // (2) ⭐ THE EXISTING AUTHORITY — CONSULTED, NOT RE-DERIVED.
+  //     `classifyIssueObligation` (`cee/graph-readiness/obligation-provenance.ts`)
+  //     already stamps every issue with `obligation`, and its rule is one line in
+  //     one place by design: *"`user_stated` and only `user_stated` earns a
+  //     demand"* (`obligationFor`). An option→factor effect is `user_stated` only
+  //     when BOTH ends are the user's — the weakest end wins — so a gap over
+  //     structure the DRAFTER authored is `offered`, i.e. it may be put to the
+  //     user as an offer and never as a demand.
+  //
+  //     That is exactly the defect this fix exists to remove: readiness was
+  //     minting a MANDATORY per-(option,factor) obligation from an edge no user
+  //     drew. Reading the stamped field rather than writing a second predicate is
+  //     deliberate — a rival authority beside this one is the defect class this
+  //     estate pays for most often, and `obligation-provenance.ts` says so itself.
+  //
+  //     `undefined` is treated as NOT waivable: an unstamped issue means the
+  //     classifier did not run, and a missing verdict must not read as consent.
+  if (issue.obligation !== 'offered') return false;
+
+  // (3) PLoT'S REAL REFUSAL, WHICH IS NOT WAIVED. `EMPTY_INTERVENTIONS` fires on
+  //     `Object.keys(option.interventions ?? {}).length === 0` and nothing else
+  //     (`plot-lite-service` `src/validation/preflight-v2.ts:184-187`, staging
+  //     `3a3bee58`), and a blocker fails the whole preflight. So the option must
+  //     carry at least ONE real value. Without this conjunct an empty option's
+  //     blocker would be waived here and the run would be admitted straight into
+  //     a preflight refusal — F4 drift in the false-admission direction.
   return typeof issue.option_id === 'string' && valuedOptionIds.has(issue.option_id);
 }
 
