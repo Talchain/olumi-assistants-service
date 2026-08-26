@@ -57,6 +57,10 @@ function makeClient(cfg: MockConfig = {}): {
           filters[`order:${col}`] = opts;
           return chain;
         },
+        lt: (col: string, val: unknown) => {
+          filters[`lt:${col}`] = val;
+          return chain;
+        },
         limit: (n: number) => {
           filters.limit = n;
           return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
@@ -91,9 +95,19 @@ function summaryRow(overrides: Record<string, unknown> = {}) {
     identity_projection_version: 'identity.v1',
     identity_normaliser_version: '1',
     graph_schema_version: 'graph_v3',
+    analysis_affecting_hash: HASH_B,
+    mutation_id: null,
+    parent_version_id: null,
+    root_version_id: null,
+    actor_kind: null,
+    authored_by: null,
+    creation_kind: null,
+    source_version_id: null,
+    source_turn_id: null,
     label: null,
     provenance: 'user_save',
     restored_from_version_id: null,
+    graph: { nodes: [{ id: 'n1', kind: 'factor', label: 'Price' }], edges: [] },
     created_at: '2026-07-05T10:00:00.000+00:00',
     ...overrides,
   };
@@ -107,6 +121,56 @@ const SAVE_WRITE = {
   identity_projection_version: 'identity.v1',
   identity_normaliser_version: '1',
   graph_schema_version: 'graph_v3',
+};
+
+function atomicRestoreOutcome(overrides: Record<string, unknown> = {}) {
+  return {
+    mutation_id: '22222222-2222-4222-8222-222222222222',
+    version_id: '33333333-3333-4333-8333-333333333333',
+    version_number: 4,
+    graph_identity_hash: HASH_B,
+    analysis_affecting_hash: HASH_A,
+    hash_algorithm: 'sha256',
+    identity_projection_version: 'identity.v1',
+    identity_normaliser_version: '1',
+    graph_schema_version: 'graph_v3',
+    restored_from_version_id: VERSION_ID,
+    undo_version_id: null,
+    parent_version_id: VERSION_ID,
+    root_version_id: VERSION_ID,
+    actor_kind: 'known',
+    authored_by: 'owner',
+    creation_kind: 'restore',
+    source_version_id: VERSION_ID,
+    source_turn_id: null,
+    graph: SAVE_WRITE.graph,
+    deduped: false,
+    replayed: false,
+    analysis_invalidated_at: '2026-08-24T20:00:00.000Z',
+    event_id: 'model_version_restored_33333333-3333-4333-8333-333333333333',
+    ...overrides,
+  };
+}
+
+const ATOMIC_RESTORE_WRITE = {
+  scenario_id: SCENARIO,
+  version_id: VERSION_ID,
+  mutation_id: '22222222-2222-4222-8222-222222222222',
+  graph: SAVE_WRITE.graph,
+  graph_identity_hash: HASH_B,
+  analysis_affecting_hash: HASH_A,
+  hash_algorithm: 'sha256',
+  identity_projection_version: 'identity.v1',
+  identity_normaliser_version: '1',
+  graph_schema_version: 'graph_v3',
+  source_graph_identity_hash: HASH_A,
+  current_graph: SAVE_WRITE.graph,
+  current_graph_identity_hash: HASH_A,
+  current_analysis_affecting_hash: HASH_A,
+  expected_graph_identity_hash: HASH_A,
+  actor_kind: 'known' as const,
+  authored_by: 'owner',
+  source_turn_id: null,
 };
 
 describe('SupabaseModelVersionStore.saveVersion', () => {
@@ -250,8 +314,50 @@ describe('SupabaseModelVersionStore.restoreVersion', () => {
   });
 });
 
+describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
+  it('accepts an attested known actor from the guarded restore RPC', async () => {
+    const { client } = makeClient({
+      rpcResult: { data: atomicRestoreOutcome(), error: null },
+    });
+    const store = new SupabaseModelVersionStore(client);
+    const result = await store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    expect(result.actor_kind).toBe('known');
+    expect(result.authored_by).toBe('owner');
+  });
+
+  it.each(['system', 'unknown'] as const)(
+    'rejects contradictory %s attribution before receipt projection',
+    async (actorKind) => {
+      const { client } = makeClient({
+        rpcResult: {
+          data: atomicRestoreOutcome({ actor_kind: actorKind, authored_by: 'owner' }),
+          error: null,
+        },
+      });
+      const store = new SupabaseModelVersionStore(client);
+      await expect(store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE)).rejects.toBeInstanceOf(
+        ModelVersionStoreError,
+      );
+    },
+  );
+
+  it('rejects a known actor without authored_by and contradictory restore provenance', async () => {
+    for (const outcome of [
+      atomicRestoreOutcome({ authored_by: null }),
+      atomicRestoreOutcome({ creation_kind: 'committed_mutation' }),
+      atomicRestoreOutcome({ source_version_id: '44444444-4444-4444-8444-444444444444' }),
+    ]) {
+      const { client } = makeClient({ rpcResult: { data: outcome, error: null } });
+      const store = new SupabaseModelVersionStore(client);
+      await expect(store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE)).rejects.toBeInstanceOf(
+        ModelVersionStoreError,
+      );
+    }
+  });
+});
+
 describe('SupabaseModelVersionStore.listVersions', () => {
-  it('reads summaries newest-first by version_number (NOT created_at), graph column excluded', async () => {
+  it('reads newest-first and discards the internal legacy-hash graph from summaries', async () => {
     const rows = [summaryRow({ version_number: 2 }), summaryRow({ id: '44444444-4444-4444-8444-444444444444', version_number: 1 })];
     const { client, selectCalls } = makeClient({ selectResult: { data: rows, error: null } });
     const store = new SupabaseModelVersionStore(client);
@@ -259,12 +365,25 @@ describe('SupabaseModelVersionStore.listVersions', () => {
     const versions = await store.listVersions(SCENARIO, 10);
 
     expect(selectCalls[0]!.table).toBe('model_versions');
-    expect(selectCalls[0]!.cols).not.toContain('graph,');
-    expect(selectCalls[0]!.cols).not.toMatch(/,\s*graph\b/);
+    expect(selectCalls[0]!.cols).toMatch(/,\s*graph\b/);
     expect(selectCalls[0]!.filters['eq:scenario_id']).toBe(SCENARIO);
     expect(selectCalls[0]!.filters['order:version_number']).toEqual({ ascending: false });
     expect(selectCalls[0]!.filters.limit).toBe(10);
     expect(versions.map((v) => v.version_number)).toEqual([2, 1]);
+    expect(versions.every((version) => !Object.hasOwn(version, 'graph'))).toBe(true);
+  });
+
+  it('applies an exclusive sequence cursor and derives a missing legacy analysis hash', async () => {
+    const legacy = summaryRow({ analysis_affecting_hash: null });
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [legacy], error: null },
+    });
+    const store = new SupabaseModelVersionStore(client);
+
+    const [version] = await store.listVersions(SCENARIO, 6, 10);
+
+    expect(selectCalls[0]!.filters['lt:version_number']).toBe(10);
+    expect(version!.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('throws ModelVersionStoreError on read failure', async () => {
@@ -279,6 +398,67 @@ describe('SupabaseModelVersionStore.listVersions', () => {
     });
     const store = new SupabaseModelVersionStore(client);
     await expect(store.listVersions(SCENARIO)).rejects.toBeInstanceOf(ModelVersionStoreError);
+  });
+
+  // The legacy-derivation path above hashes `row.graph`, which is `unknown` off
+  // the row. These pin the two measured ways that goes wrong, and they bind to
+  // the GUARD's own message, not merely to the error class — the pre-existing
+  // "analysis-affecting identity is unavailable" throw is also a
+  // ModelVersionStoreError, so `toBeInstanceOf` alone would not discriminate
+  // which check fired.
+  it.each([
+    // Not dereferenceable as an object at all.
+    ['a string', 'corrupt', /row field 'graph' must be an object/],
+    ['a number', 42, /row field 'graph' must be an object/],
+    ['an array', [1, 2, 3], /row field 'graph' must be an object/],
+    ['null', null, /row field 'graph' must be an object/],
+    // An object, but the projection dereferences `nodes.length` unconditionally,
+    // so a graph-shaped-but-nodeless row is the raw-TypeError case.
+    ['a non-graph object', { corrupted: true }, /row field 'graph\.nodes' must be an array of objects/],
+    ['a graph with no edges key', { nodes: [] }, /row field 'graph\.edges' must be an array of objects/],
+    // Measured at this tip: this shape hashes to a well-formed 64-hex that can
+    // never equal an identity computed on the write path. This is the case a
+    // bare `as` cast would have shipped — served as an authoritative
+    // analysis_affecting_hash, the field CAS and freshness compare on.
+    [
+      'a graph whose nodes hold non-objects',
+      { nodes: [42, 'x'], edges: [] },
+      /row field 'graph\.nodes' must be an array of objects/,
+    ],
+  ])(
+    'refuses to derive a legacy analysis hash when graph is %s (typed, never a raw TypeError or a silent hash)',
+    async (_label, graph, expectedMessage) => {
+      const { client } = makeClient({
+        selectResult: {
+          data: [summaryRow({ analysis_affecting_hash: null, graph })],
+          error: null,
+        },
+      });
+      const store = new SupabaseModelVersionStore(client);
+      const rejection = await store.listVersions(SCENARIO).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(rejection).toBeInstanceOf(ModelVersionStoreError);
+      expect((rejection as Error).message).toMatch(expectedMessage as RegExp);
+    },
+  );
+
+  it('CONTRAST: a legacy graph whose nodes lack kind/label still derives (persistence never required the wire fields)', async () => {
+    // This is the discriminating half. The repo's usual parser for this shape,
+    // GraphStateIngressSchema, REJECTS this row (it requires node.kind and
+    // node.label for the UI wire contract). Gating the derivation on it would
+    // turn the legacy backfill into a hard read failure. If this case ever
+    // starts throwing, the guard has been tightened to the wrong boundary.
+    const { client } = makeClient({
+      selectResult: {
+        data: [summaryRow({ analysis_affecting_hash: null, graph: { nodes: [{ id: 'n1' }], edges: [] } })],
+        error: null,
+      },
+    });
+    const store = new SupabaseModelVersionStore(client);
+    const [version] = await store.listVersions(SCENARIO);
+    expect(version!.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 

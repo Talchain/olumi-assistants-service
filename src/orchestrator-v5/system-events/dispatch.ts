@@ -541,7 +541,7 @@ export async function dispatchSystemEvent(
   }
 
   try {
-    await commitDirectAnswer(response, {
+    const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
@@ -573,7 +573,7 @@ export async function dispatchSystemEvent(
         ? 'V5 system event refused by compatibility reader — no graph/fact write or new pending action'
         : 'V5 system event committed',
     );
-    return { response, commitPerformed: true, graph: null };
+    return { response: commitResult.response, commitPerformed: true, graph: null };
   } catch (err) {
     log.error(
       {
@@ -768,12 +768,22 @@ async function dispatchEdgeStrengthEdit(
       pending_actions: [],
       priorPendingActions: priorPendingActions,
       contentGraph: result.mutatedGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -1160,12 +1170,22 @@ async function dispatchStructuralDelete(
       pending_actions: [],
       priorPendingActions,
       contentGraph: result.mutatedGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -1442,6 +1462,7 @@ async function dispatchFactorValueEdit(
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -1463,16 +1484,27 @@ async function dispatchFactorValueEdit(
       // symptom was a hash that never moved.
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
-      ...(cas.expectedGraphIdentityHash !== null
-        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
-        : {}),
-      ...(cas.expectedGraphAnalysisHash !== null
-        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
-        : {}),
+      // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
+      // 2026-08-25). This was
+      //     ...(cas.expectedGraphIdentityHash !== null ? { … } : {})
+      // which turned a KNOWN-ABSENT base into an ABSENT PROPERTY — and those
+      // are different facts. `supabase-store.ts` derives `p_expected_base_known`
+      // as `write.expectedGraphIdentityHash !== undefined`, so omitting the key
+      // made it FALSE on every one of these paths and the whole known-base CAS
+      // guard was DARK in the running code: the fix shipped, and nothing on
+      // this seam could ever reach it.
+      //
+      // `computeExpectedGraphCasHashes` already returns BOTH keys, using null
+      // for "server base read, but no hashable graph existed" — exactly the
+      // fact that must travel. `turn-executor.ts` spreads the object for the
+      // same reason. Both metadata fields are typed `string | null | undefined`,
+      // so null is carried, not coerced away.
+      ...cas,
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    committedResponse = commitResult.response;
   } catch (err) {
     log.error(
       {
@@ -1520,8 +1552,8 @@ async function dispatchFactorValueEdit(
   // of the graph the store received disagreed until this was threaded.
   const response: OlumiResponse =
     persistedAnalysisGraphHash !== null
-      ? { ...result.response, graph_hash: persistedAnalysisGraphHash }
-      : result.response;
+      ? { ...committedResponse, graph_hash: persistedAnalysisGraphHash }
+      : committedResponse;
 
   // Readiness from the bytes that LANDED, not from our pre-projection copy.
   //
