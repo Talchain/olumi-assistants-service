@@ -36,10 +36,30 @@
  * the only evidence available and it is not optional.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ⚠⚠ THE HONEST FRAME: THIS CLASS IS ALREADY LEAKY, AND THIS FILE RECORDS
- * THAT RATHER THAN IMPLYING SAFETY.
+ * ⚠⚠ UPDATED 2026-08-26 — THE FRAME BELOW DESCRIBED THE PRE-INTAKE TIP AND IS
+ * NO LONGER CURRENT. WHAT CHANGED, AND WHAT THIS FILE NOW PINS:
  *
- * Measured at this tip: all seventeen reach `frame_no_brief_guard` and build
+ *   - the seventeen no longer reach `frame_no_brief_guard`; they reach
+ *     `turn_executor` and get a real conversational ANSWER instead of the
+ *     canned "I need a single decision question" deflection;
+ *   - the seed leak described below is CLOSED for all seventeen (the chip that
+ *     carried it is gone), and the block that pinned it now asserts its
+ *     ABSENCE;
+ *   - "no LLM call" no longer holds for every case: the empty-workspace intake
+ *     classifier is consulted for the five prompts the deterministic floor
+ *     does not reach.
+ *
+ * ⚠ THIS SUITE CANNOT SEE THE CASE THAT MATTERS MOST. Its adapter mock returns
+ * text + `end_turn`, which the intake producer rejects as `invalid_output`, so
+ * every case here measures the FAIL-SAFE rather than the classifier's
+ * judgement. The armed corpus —
+ * `route-v2-inv-q-protected-class-armed.test.ts` — drives all three verdicts
+ * and carries the KNOWN-UNFLOORED pin. Read the two together; neither is
+ * sufficient alone.
+ *
+ * The superseded frame, kept because it records what was true when written:
+ *
+ * Measured at that tip: all seventeen reach `frame_no_brief_guard` and build
  * NOTHING on the turn — no draft dispatch, no auto-run, no LLM call. But the
  * guard also seeds a one-tap "Build the model" chip whose PERSISTED
  * `brief_seed` is THE PROTECTED QUESTION ITSELF. One tap therefore models the
@@ -293,8 +313,15 @@ describe('ROADMAP 2.715 at the routing layer — a question to the assistant is 
       const { status, body } = await turn(app, message);
 
       expect(status).toBe(200);
-      // The verdict itself — NOT `draft_graph`.
-      expect(exitPath(body)).toBe('frame_no_brief_guard');
+      // ⚠ UPDATED DELIBERATELY (2026-08-26) — this asserted
+      // `frame_no_brief_guard` when written. That guard was the CANNED
+      // REJECTION ("I need a single decision question"), and removing it for
+      // this class is the whole value of the open-frame intake work: the
+      // seventeen now get a real conversational answer instead of a deflection.
+      // The protection that matters — nothing is BUILT on the turn — is
+      // unchanged and asserted below. This file's own header invited exactly
+      // this update rather than absorbing it silently.
+      expect(exitPath(body)).toBe('turn_executor');
       // No model was built for the meta-question.
       expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
       // No analysis was started off the back of one.
@@ -305,33 +332,45 @@ describe('ROADMAP 2.715 at the routing layer — a question to the assistant is 
   });
 
   /**
-   * ⚠ CURRENT BEHAVIOUR, RECORDED HONESTLY — NOT AN ENDORSEMENT.
+   * ⭐ THE LEAK IS CLOSED — UPDATED DELIBERATELY (2026-08-26), AND THE
+   * ASSERTIONS ARE INVERTED RATHER THAN DELETED.
    *
-   * The guard hands every protected prompt a one-tap "Build the model" chip
-   * whose persisted `brief_seed` is the question itself, via
-   * `deriveDraftOfferSeed` (route-v2.ts:585), which — unlike its twin
-   * `deriveBriefTextSeed` (derive-brief-seed.ts:118) — has no trailing-`?`
-   * refusal. So the class is protected on the TURN and one click from the
-   * defect. Pinned so that closing the leak is a deliberate, visible change:
-   * if this case goes red, someone fixed it, and the fix should be recorded
-   * rather than absorbed.
+   * When this block was written it pinned a real defect as CURRENT BEHAVIOUR:
+   * the guard handed every protected prompt a one-tap "Build the model" chip
+   * whose persisted `brief_seed` was the question itself (`deriveDraftOfferSeed`,
+   * route-v2.ts:585, which — unlike its twin `deriveBriefTextSeed`,
+   * derive-brief-seed.ts:118 — has no trailing-`?` refusal). The class was
+   * protected on the TURN and one click from the defect.
+   *
+   * Removing the canned guard for this class removed the chip that carried the
+   * seed, so the leak is closed UNCONDITIONALLY — for all seventeen, including
+   * the five the deterministic floor does not reach. That closure is now the
+   * thing under test: these cases assert the ABSENCE of the chip and of any
+   * pending seeded with the protected question, so a future change that
+   * re-introduces either goes RED here. The block's original instruction was
+   * that closing the leak should be "recorded rather than absorbed" — this is
+   * that record.
    */
-  describe('RESIDUAL LEAK (pinned as current behaviour): the one-tap chip is seeded with the protected question', () => {
+  describe('LEAK CLOSED: no one-tap chip carries the protected question as a brief seed', () => {
     it.each(INV_Q_PROTECTED_CLASS)(
-      'still offers a "Build the model" chip seeded with the question: %s',
+      'offers no "Build the model" chip and persists no seed: %s',
       async (message) => {
         const { body } = await turn(app, message);
 
         const chips = (body.suggested_actions ?? []) as Array<Record<string, any>>;
-        const offer = chips.find((c) => c.label === DRAFT_OFFER_CHIP_LABEL);
-        expect(offer, 'the draft-offer chip is present on every protected prompt today').toBeDefined();
-        expect(offer!.message).toBe(DRAFT_OFFER_CHIP_MESSAGE);
+        expect(
+          chips.find((c) => c.label === DRAFT_OFFER_CHIP_LABEL),
+          'the draft-offer chip was the carrier of the 2.715 seed leak',
+        ).toBeUndefined();
+        expect(chips.some((c) => c.message === DRAFT_OFFER_CHIP_MESSAGE)).toBe(false);
 
-        // The seed is the load-bearing half: the chip's own copy is generic,
-        // but what a tap RESUMES with is the protected question verbatim.
+        // The seed was the load-bearing half: the chip's copy is generic, but
+        // what a tap RESUMED with was the protected question verbatim.
         const pending = committedDraftOfferPending();
-        expect(pending, 'the guard commits a draft_graph pending alongside the chip').toBeDefined();
-        expect(pending!.action.brief_seed).toBe(message);
+        expect(
+          pending?.action?.brief_seed,
+          'no persisted draft_graph pending may carry the protected question',
+        ).not.toBe(message);
       },
     );
   });

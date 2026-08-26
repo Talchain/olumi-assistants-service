@@ -163,7 +163,10 @@ import {
 import {
   DRAFT_GRAPH_MIN_BRIEF_LENGTH,
   isDraftShapedText,
+  isQuestionToAssistant,
+  mentionsAssistantSubject,
 } from '../schemas/assist.js';
+import { understandOpenFrameIntake } from '../orchestrator-v5/routing/open-frame-intake.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import { admitCurrentTurnFence, turnFencePreHandler } from './turn-fence-prehandler.js';
 import { recordExplicitTurnStop } from '../routes/turn-stop.js';
@@ -3374,6 +3377,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
         : false;
     const isContinuationScenario = hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit;
+    // ROADMAP 2.308 / System B — ONE route-level strict graph read, shared by
+    // no-model unstranding, semantic empty-workspace intake, configure-option
+    // anchoring, and the edit-lane reload below. TurnExecutor may later perform
+    // its own combined context read; this memo governs only these route-level
+    // consumers. It caches failure as well as value so they see one canonical
+    // fact and cannot retry a failed read into a different answer.
+    let persistedGraphMemo:
+      | { readonly ok: true; readonly value: unknown }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (persistedGraphMemo === null) {
+        try {
+          persistedGraphMemo = {
+            ok: true,
+            value: await loadPersistedGraphStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedGraphMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
+      return persistedGraphMemo.value;
+    };
     // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
     // a draft loss stands (a failure-marked fence row + no committed graph),
     // the loss notice tells the user "send your decision brief again and
@@ -3441,7 +3468,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
           : admittedLiveTurnFromShortCircuit;
         noModelDraftUnstrand =
-          !draftInFlight && (await loadPersistedGraphStrict(ingress.scenario_id)) == null;
+          !draftInFlight && (await loadPersistedGraphOnce()) == null;
       } catch (err) {
         noModelDraftUnstrand = false;
         log.warn(
@@ -4065,7 +4092,163 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         clarifyV2DeferredDisclosure = cv2.deferredAsk?.disclosure ?? null;
       }
     }
-    if (isDraftGraphShape || explicitGenerateDraft || clarifyV2DraftBrief !== null) {
+
+    // CORE SYSTEM B — broad strategic intake runs only after the established
+    // deterministic clarify-v2 resume has declined the turn. The legacy text
+    // heuristic above remains the zero-extra-call fast path for explicit
+    // decisions; otherwise the frontier model makes one advisory routing
+    // judgement instead of another keyword classification.
+    //
+    // Authority boundaries:
+    //   - only start_model / continue_conversation can be returned;
+    //   - the user brief is never rewritten and no graph content is produced;
+    //   - a strict canonical read must prove persistence is empty before the
+    //     advisory call is licensed;
+    //   - present/invalid/unreadable persistence defers to the existing
+    //     canonical edit/TurnExecutor lanes below using the identical memo;
+    //   - semantic starts dispatch the draft producer directly and do not
+    //     inherit decision-only clarify-v2 questions.
+    const canStartModelOnThisFrame =
+      !isContinuationScenario ||
+      draftOfferMarker !== null ||
+      draftLossRedraftUnstrand ||
+      noModelDraftUnstrand;
+    const shouldConsiderOpenFrameIntake =
+      ingress.stage === 'frame' &&
+      !isPopulatedIngressGraph(extensions.graphState) &&
+      ingress.source === 'composer' &&
+      !draftShapedTurn &&
+      !explicitGenerateDraft &&
+      clarifyV2DraftBrief === null &&
+      canStartModelOnThisFrame &&
+      !isNonReadinessTypedChipClickForExecutor &&
+      !isProcessMetaIntake(ingress.message);
+    // ────────────────────────────────────────────────────────────────
+    // ROADMAP 2.715 — THE DETERMINISTIC PROTECTED-CLASS FLOOR.
+    //
+    // WHY THIS EXISTS. The intake above kept the deterministic YES path
+    // (`isDraftGraphShape` short-circuits before the classifier is consulted,
+    // so an explicit decision brief costs zero extra calls) and removed the
+    // deterministic NO path. Without a floor, 2.715's protected class — the
+    // product's own coaching prompts and questions ABOUT Olumi, which must
+    // never be modelled as decisions — becomes contingent on an advisory
+    // model verdict. Measured at `c907b518` with the classifier armed:
+    // `invalid` → 0/17 draft (the fail-safe), `continue_conversation` → 0/17,
+    // `start_model` → 17/17 DRAFT + auto-run. The landed corpus cannot see
+    // that third arm at all: its mock emits text + `end_turn`, which
+    // `parseOpenFrameIntakeResult` rejects, so every case there measures the
+    // fallback rather than the model's judgement.
+    //
+    // WHAT IT IS NOT. This is not a second keyword classifier and not a copy
+    // of the protected class. Both conjuncts are EXISTING single-source
+    // authorities from `schemas/assist.ts`: `isQuestionToAssistant` (the 2.715
+    // predicate that already gates `isDraftShapedText`) and
+    // `mentionsAssistantSubject` (derived from the same
+    // `ASSISTANT_SUBJECT_ALTERNATION_SOURCE` the subject-positional rule uses).
+    // No new vocabulary is introduced here. A hand-copied list would be the
+    // hand-maintained-mirror defect (CLAUDE.md trap 12).
+    //
+    // ⚠⚠ WHY BOTH CONJUNCTS, AND WHY THIS FLOOR IS DELIBERATELY PARTIAL.
+    // `isQuestionToAssistant` ALONE is not the protected class — it is
+    // "interrogative without a decision verb", which is ALSO true of the broad
+    // strategic challenges this PR exists to accept. Measured 2026-08-26:
+    //
+    //   isQuestionToAssistant       protected 17/17 · #1110 starts 4/6 · briefs 0/7
+    //   + mentionsAssistantSubject  protected 12/17 · #1110 starts 0/6 · briefs 0/7
+    //
+    // Flooring on the first alone would have refused "Why are enterprise
+    // customers not converting?" and "How can I accelerate securing pre-seed
+    // investment for my startup?" — this PR's own acceptance prompts (+9
+    // regressions, 8 in its own suite). So the floor covers TWELVE of the
+    // seventeen. The remaining FIVE name workspace artefacts rather than
+    // Olumi, stay classifier-contingent, and are ENUMERATED as KNOWN-UNFLOORED
+    // in `route-v2-inv-q-protected-class-armed.test.ts` with a test that REDs
+    // if that set grows OR shrinks. A gap recorded in the suite is honest; a
+    // gap invisible to it is how this class was lost in the first place. The
+    // durable home for the five is a widened `isProcessMetaIntake` (which
+    // already owns "question about the product/process") — rowed, not done in
+    // passing, because it needs its own outside corpus.
+    //
+    // WHAT IT BLOCKS, PRECISELY: DRAFTING, never ANSWERING. The floor is a
+    // term of `isFrameNoBriefShape` below as well, so a floored turn does NOT
+    // fall back to the legacy canned rejection this PR removed — it goes to
+    // TurnExecutor and gets a real conversational answer. That improvement is
+    // this PR's whole value and it survives intact.
+    //
+    // SCOPE. Deliberately conjoined with `shouldConsiderOpenFrameIntake`
+    // rather than evaluated globally: it may only affect turns that would
+    // otherwise have reached the classifier. Widening it to every question on
+    // every turn would change routing on populated-graph, non-composer and
+    // chip-click turns that this PR never touched (CLAUDE.md trap 22b — the
+    // defect lives in the BREADTH of the predicate, not the invariant).
+    // ────────────────────────────────────────────────────────────────
+    const openFrameIntakeProtectedFloor =
+      shouldConsiderOpenFrameIntake &&
+      isQuestionToAssistant(ingress.message) &&
+      mentionsAssistantSubject(ingress.message);
+    let shouldUnderstandOpenFrameIntake = false;
+    let openFrameIntakeDeferredToCanonicalLane = false;
+    if (shouldConsiderOpenFrameIntake && !openFrameIntakeProtectedFloor) {
+      try {
+        const persisted = await loadPersistedGraphOnce();
+        if (persisted == null) shouldUnderstandOpenFrameIntake = true;
+        else openFrameIntakeDeferredToCanonicalLane = true;
+      } catch {
+        openFrameIntakeDeferredToCanonicalLane = true;
+      }
+    }
+    if (openFrameIntakeProtectedFloor) {
+      log.info(
+        {
+          event: 'v5.open_frame_intake_protected_floor',
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+        },
+        'ROADMAP 2.715: a question to the assistant is answered, never modelled as a decision',
+      );
+    }
+    let openFrameIntakeStartsModel = false;
+    let openFrameIntakeContinuesConversation = false;
+    if (shouldUnderstandOpenFrameIntake) {
+      const recentTurns = isContinuationScenario
+        ? await loadRecentConversationTurns(ingress.scenario_id, requestId)
+        : [];
+      const intake = await understandOpenFrameIntake({
+        currentMessage: ingress.message,
+        recentTurns,
+        requestId,
+        scenarioId: ingress.scenario_id,
+      });
+      openFrameIntakeStartsModel = intake.route === 'start_model';
+      openFrameIntakeContinuesConversation = intake.route === 'continue_conversation';
+      log.info(
+        {
+          event: 'v5.open_frame_intake_routed',
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          route: intake.route,
+          source: intake.source,
+          ...(intake.source === 'model'
+            ? {
+                model: intake.model,
+                latency_ms: intake.latencyMs,
+                input_tokens: intake.inputTokens,
+                output_tokens: intake.outputTokens,
+              }
+            : { fallback_reason: intake.fallbackReason }),
+          recent_turns_considered: recentTurns.length,
+        },
+        'Open-frame strategic intake routed without rewriting the user brief',
+      );
+    }
+    const isSemanticOpenFrameDraft =
+      openFrameIntakeStartsModel && !isPopulatedIngressGraph(extensions.graphState);
+    if (
+      isDraftGraphShape ||
+      isSemanticOpenFrameDraft ||
+      explicitGenerateDraft ||
+      clarifyV2DraftBrief !== null
+    ) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -4514,43 +4697,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // proposal), and lets an edit-verb-bearing state-query fall through to the
     // recent-changes-grounded state-query guard.
     // ────────────────────────────────────────────────────────────────
-    // ────────────────────────────────────────────────────────────────
-    // ROADMAP 2.308 / S1 — ONE persisted-graph read per turn, shared.
-    //
-    // Two sites now need `scenarios.graph`: the configure-option label anchor
-    // (immediately below) and the edit-lane graphState reload (~340 lines
-    // down). Memoised here so the pair costs ONE Supabase round-trip, not two
-    // — the diagnosis's explicit instruction was "re-use the loaded value …
-    // one read per turn, not two".
-    //
-    // The memo caches the FAILURE as well as the value, deliberately: the
-    // label-anchor caller swallows errors (a labels read must never fail a
-    // turn that would otherwise succeed), while the edit-lane reload below
-    // re-throws the SAME error and produces the SAME typed recovery it
-    // produced before this change. Caching the rejection is what keeps those
-    // two policies from becoming two reads with two different outcomes.
-    // ────────────────────────────────────────────────────────────────
-    let persistedGraphMemo:
-      | { readonly ok: true; readonly value: unknown }
-      | { readonly ok: false; readonly error: unknown }
-      | null = null;
-    const loadPersistedGraphOnce = async (): Promise<unknown> => {
-      if (persistedGraphMemo === null) {
-        try {
-          persistedGraphMemo = {
-            ok: true,
-            // `loadPersistedGraphStrict` (vs the swallowing
-            // `loadPersistedGraph`) lets the edit-lane consumer distinguish
-            // `session_store_failed` from `no_persisted_graph`.
-            value: await loadPersistedGraphStrict(ingress.scenario_id),
-          };
-        } catch (err) {
-          persistedGraphMemo = { ok: false, error: err };
-        }
-      }
-      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
-      return persistedGraphMemo.value;
-    };
     const boundedNonMutationAnalytical =
       isBoundedNonMutationAnalyticalRequest(ingress.message);
     const analyticalQuestionDetected =
@@ -5664,6 +5810,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // forces draftShapedTurn=false → isDraftGraphShape=false → this guard
       // consumed it). With the exclusion, the chip_click region is total.
       !isNonReadinessTypedChipClickForExecutor &&
+      // A semantically-understood composer turn has already been routed. A
+      // start_model outcome dispatched above; a conversation/fallback outcome
+      // belongs to TurnExecutor. Neither may re-enter the canned rejection.
+      !openFrameIntakeContinuesConversation &&
+      // A present or unreadable canonical graph is not an empty-workspace
+      // brief failure. It belongs to the established canonical-state lane,
+      // which consumes the same strict-read memo above.
+      !openFrameIntakeDeferredToCanonicalLane &&
+      // ROADMAP 2.715 — a floored question to the assistant must NOT inherit
+      // the canned rejection this PR removed. The floor blocks DRAFTING; the
+      // answer is TurnExecutor's, exactly as for `continue_conversation`.
+      // Without this term the floor would silently restore the deflection for
+      // all seventeen and undo the improvement it is meant to protect.
+      !openFrameIntakeProtectedFloor &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(

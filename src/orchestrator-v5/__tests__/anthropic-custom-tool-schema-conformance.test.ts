@@ -54,6 +54,7 @@ import {
   buildOlumiActionTool,
   buildForcedPillTool,
 } from '../routing/tool-schema.js';
+import { OPEN_FRAME_INTAKE_TOOL } from '../routing/open-frame-intake.js';
 import {
   buildProposeStructuralEditTool,
   buildStructuralEditGrounding,
@@ -96,6 +97,10 @@ const SERVED_TOOL_SCHEMAS: readonly {
     label: 'propose_structural_edit',
     schema: buildProposeStructuralEditTool(GROUNDING).input_schema,
   },
+  {
+    label: 'olumi_route_open_frame_intake',
+    schema: OPEN_FRAME_INTAKE_TOOL.input_schema,
+  },
 ];
 
 /**
@@ -112,6 +117,7 @@ const SERVED_TOOL_SCHEMAS: readonly {
  */
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'adapters/llm/anthropic.ts',
+  'orchestrator-v5/routing/open-frame-intake.ts',
   'orchestrator-v5/routing/tool-schema.ts',
   'orchestrator-v5/tools/propose-structural-edit.ts',
 ];
