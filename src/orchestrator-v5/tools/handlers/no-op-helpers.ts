@@ -291,13 +291,24 @@ export function decideExplanationPrecondition(
 /**
  * Which currency caveat, if any, does a precondition verdict carry?
  *
- * ⭐ THE CHANNEL'S LIVE INPUT. `applyStalenessPrefix` used to be driven by
- * `analysisProjection.staleness_reason`, a field since removed from the
+ * ⭐ THE CHANNEL'S INTENDED INPUT — and note the tense, because the honest fact
+ * here is narrower than it first reads. `applyStalenessPrefix` used to be driven
+ * by `analysisProjection.staleness_reason`, a field since removed from the
  * projection — leaving the helper with zero live callers and the estate with no
  * way to caveat an executed explanation (its only staleness enforcement was to
  * REFUSE to answer). This maps the verdict the precondition already computes on
- * every explanation turn, so the caveat can ACCOMPANY an answer rather than
+ * every explanation turn, so the caveat CAN ACCOMPANY an answer rather than
  * REPLACE it.
+ *
+ * ⚠⚠ "CAN", NOT "DOES" — RUNG: CODE EXISTS. The VERDICT is genuinely live on
+ * every explanation turn; that half is true and is what makes this mapping worth
+ * having. But re-derived at `d7499dc9` over non-comment `src/` excluding tests,
+ * THIS FUNCTION HAS ZERO CALLERS and so does `applyStalenessPrefix`. The channel
+ * is TYPE-CONNECTED, NOT WIRED: nothing yet carries a caveat onto an executed
+ * answer. Saying "the channel is revived" would generalise a true statement
+ * about the verdict into a false one about the path (trap 20 — the overclaim
+ * happens in the RECORDING, not in the measurement). The wiring is the
+ * follow-up's job.
  *
  * ⚠ THE MAPPING LIVES HERE, NEXT TO THE VERDICT, ON PURPOSE. Putting it in
  * `staleness-prefix.ts` would mean that module re-deciding what a verdict means
@@ -387,9 +398,15 @@ export function buildAnalysisStaleTemplate(): string {
   // ⚠ COMPOSED, NOT RE-TYPED. This spelled the opening sentence out in full
   // while `staleness-prefix.ts` held a character-identical copy under a
   // docstring claiming to BE its single source of truth. One user-facing
-  // sentence, two hand-maintained copies (CLAUDE.md trap 12). Now one constant;
-  // `__tests__/staleness-prefix.test.ts` REDs if a copy reappears AND pins the
-  // assembled bytes, so this refactor cannot move user-facing copy.
+  // sentence, two hand-maintained copies (CLAUDE.md trap 12). Now one constant.
+  //
+  // Two DIFFERENT tests in `__tests__/staleness-prefix.test.ts` hold this, and
+  // the distinction matters: SINGLE_COPY scans the SOURCE BYTES of `src/` and
+  // REDs if this sentence is re-inlined here — drifted OR character-identical —
+  // while BYTE-PRESERVATION pins the ASSEMBLED bytes so the refactor cannot
+  // move user-facing copy. Only the first can see an identical re-type; a
+  // runtime value check never can, and the label here previously claimed
+  // otherwise.
   return (
     `${STALENESS_PREFIX} Would you like to re-run analysis to see ` +
     `how your changes affect the results?`

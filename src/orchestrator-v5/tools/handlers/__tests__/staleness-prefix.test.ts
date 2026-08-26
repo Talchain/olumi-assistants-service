@@ -142,7 +142,16 @@ describe('applyStalenessPrefix', () => {
 });
 
 /**
- * S8 — REVIVE THE CAVEAT CHANNEL (approved half (b)).
+ * S8 — RE-CONNECT THE CAVEAT CHANNEL'S INPUT (approved half (b)).
+ *
+ * ⚠⚠ RUNG: CODE EXISTS. NOT "REVIVED" — TYPE-CONNECTED, NOT WIRED. This block
+ * was headed "REVIVE THE CAVEAT CHANNEL", which generalises a true statement
+ * about the VERDICT into a false one about the PATH. Re-derived at `d7499dc9`
+ * over non-comment `src/` excluding tests: `applyStalenessPrefix` STILL HAS ZERO
+ * CALLERS, and so does `caveatForPreconditionVerdict`. The only importers of
+ * `staleness-prefix.ts` are this test, the contract test, and `no-op-helpers.ts`
+ * — which imports the two CONSTANTS and the type, not the function. Nothing yet
+ * carries a caveat onto an executed answer; a follow-up does the wiring.
  *
  * Two defects are closed here, both derived at `5f2e3fd0`:
  *
@@ -150,19 +159,35 @@ describe('applyStalenessPrefix', () => {
  *     projection ("the only consumer was applyStalenessPrefix" —
  *     `context/projection-summaries.ts:62`). It therefore had ZERO live callers
  *     in `src/`, so the estate had no working mechanism to caveat an executed
- *     explanation. It now takes the LIVE precondition verdict.
+ *     explanation. Its parameter now names the LIVE precondition verdict — the
+ *     INPUT is real; the CALL is still absent.
  *
  *  2. `STALENESS_PREFIX`'s own docstring claims it is the "Single source of
  *     truth ... Used by: buildAnalysisStaleTemplate" — but `no-op-helpers.ts`
  *     RE-TYPED the sentence rather than importing it. One user-facing sentence,
  *     two hand-maintained copies, and a docstring asserting otherwise
  *     (CLAUDE.md trap 12 + trap 14). The templates now compose from the
- *     constants, and the guards below fail loud if a copy reappears.
+ *     constants, and SINGLE_COPY at the foot of this file REDs if a copy
+ *     reappears — DRIFTED OR CHARACTER-IDENTICAL.
+ *
+ *     ⚠ That last clause is load-bearing and was wrong here before: this said
+ *     "the guards below fail loud if a copy reappears" while the only guard was
+ *     a RUNTIME value comparison, which a character-identical re-type passes.
+ *     Replacing a false "single source of truth" label with a false "REDs if a
+ *     copy reappears" label — in the file fixing the first — is trap 14
+ *     reproduced inside the fix for trap 14.
  *
  * ⚠ THIS CHANGE MUST NOT MOVE A SINGLE USER-VISIBLE BYTE. It is an authority
  * refactor, not a copy change: the byte-preservation test below is the one that
  * matters most, and `compose/__tests__/forbidden-user-facing-phrases.test.ts`
  * pins the same two strings independently.
+ *
+ * ⚠⚠ AND THE SAFETY ARGUMENT HAS AN EXPIRY DATE. "No user-visible bytes move"
+ * is currently underwritten by the fact that the changed function is
+ * UNREACHABLE. Correct today; it STOPS BEING A SAFETY ARGUMENT the moment the
+ * follow-up wires it, at which point the KNOWN GAP pinned below (a
+ * model-authored caveat is not recognised, so the prefix doubles) becomes
+ * user-visible and must be re-priced rather than inherited.
  */
 describe('S8 — the caveat channel is driven by a LIVE verdict, with ONE authority for the wording', () => {
   it('UNCONFIRMED_PREFIX is the non-asserting lead clause and is distinct from STALENESS_PREFIX', () => {

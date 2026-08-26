@@ -35,8 +35,24 @@
 // over `no-op-helpers.ts` returned zero hits for this symbol.
 //
 // It is TRUE NOW — `no-op-helpers.ts` composes both templates from these two
-// constants, and `__tests__/staleness-prefix.test.ts` fails loud if a copy
-// reappears. Do not re-inline the sentence.
+// constants. Do not re-inline the sentence.
+//
+// ⚠ AND THE GUARD THAT ENFORCES IT WAS ITSELF MIS-LABELLED ONCE, so state its
+// power precisely rather than inheriting a slogan. TWO tests in
+// `__tests__/staleness-prefix.test.ts` cover this, and they are NOT
+// interchangeable:
+//   • SINGLE_COPY (the derived one) counts occurrences of this constant in the
+//     SOURCE BYTES of `src/`, excluding tests, and REDs on a second occurrence
+//     — DRIFTED OR CHARACTER-IDENTICAL. This is the one that enforces "one
+//     copy". Proven by mutation: a character-identical re-inline REDs it.
+//   • BYTES compares RUNTIME VALUES, so it pins the assembled sentence but is
+//     STRUCTURALLY INCAPABLE of seeing a character-identical re-typed copy —
+//     both spellings produce the same string. It caught a 1-char drift and
+//     passed the identical copy in the same measured pair.
+// The earlier label here said the test suite "fails loud if a copy reappears",
+// which was true only of a copy that ALSO DRIFTED. A false label about a guard
+// is what teaches the next lane to stop looking (trap 14), which is exactly how
+// the "single source of truth" claim above survived being false.
 //
 // Aligns with the brief's required wording verbatim. Contains no
 // FORBIDDEN_USER_FACING_PHRASES entry (no "previous analysis",
@@ -149,14 +165,30 @@ export interface StalenessPrefixResult {
  * `analysisProjection.staleness_reason`, which was REMOVED from the projection
  * ("the only consumer was applyStalenessPrefix" —
  * `context/projection-summaries.ts:62`). Measured at `5f2e3fd0`: this function
- * had ZERO live callers anywhere in `src/`, against 4 live call sites for
- * `buildAnalysisStaleTemplate` in the same sweep — so the zero is a
+ * had ZERO live callers anywhere in `src/`, against a contrast control of
+ * `buildAnalysisStaleTemplate` in the same sweep reading 4 non-comment
+ * references (1 import, 1 definition and 2 CALL SITES) — so the zero is a
  * measurement, not a blind probe. The estate therefore had NO working mechanism
  * to caveat an executed explanation; the only staleness enforcement left was to
  * REFUSE to answer.
  *
  * It now takes the verdict the precondition already computes, which is live on
  * every explanation turn.
+ *
+ * ⚠⚠ RUNG: CODE EXISTS. THE CHANNEL IS TYPE-CONNECTED, NOT YET WIRED. Re-derived
+ * at `d7499dc9` over non-comment `src/` excluding tests: this function still has
+ * ZERO LIVE CALLERS, and so does `caveatForPreconditionVerdict`. The only
+ * importers of this module are its unit test, the contract test, and
+ * `no-op-helpers.ts` — which imports the two CONSTANTS and the type, not this
+ * function. What changed here is that the parameter now names a verdict the
+ * product actually computes; the accompany-don't-replace behaviour arrives when
+ * a follow-up calls it.
+ *
+ * ⚠ AND THE CONSEQUENCE FOR THE SAFETY ARGUMENT, because it expires: "no
+ * user-visible bytes move" is currently underwritten by the fact that this
+ * function is UNREACHABLE. That is correct today and STOPS BEING A SAFETY
+ * ARGUMENT the moment the follow-up wires it — at which point the doubling gap
+ * pinned in the tests becomes user-visible and must be re-priced, not inherited.
  */
 export function applyStalenessPrefix(
   text: string,
