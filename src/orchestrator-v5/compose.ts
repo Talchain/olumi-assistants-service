@@ -74,6 +74,21 @@ import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
+ * Endpoint labels are durable internal context on adjust-edge facts, not part
+ * of the strict public graph_patch contract. Keep wire bytes stable while the
+ * fact remains identity-bearing for later Runtime turns.
+ */
+function stripEdgeContinuityLabels<T>(snapshot: T): T {
+  if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return snapshot;
+  }
+  const projected = { ...(snapshot as Record<string, unknown>) };
+  delete projected.from_label;
+  delete projected.to_label;
+  return projected as T;
+}
+
+/**
  * ROADMAP 1.132 (F1) — the SUBSTANTIVE-vs-FUNCTIONAL answer discriminator.
  *
  * Every composed OlumiResponse is one of two kinds:
@@ -571,8 +586,14 @@ function buildBlocksFromFacts(
         status,
         operation: fact.fact_type,
         target_id,
-        before,
-        after,
+        before:
+          fact.fact_type === 'adjust_edge_strength'
+            ? stripEdgeContinuityLabels(before)
+            : before,
+        after:
+          fact.fact_type === 'adjust_edge_strength'
+            ? stripEdgeContinuityLabels(after)
+            : after,
       });
 
       // Wave-4 δ2 (ROADMAP 1.202) row 1 — point the UI at the node the user just

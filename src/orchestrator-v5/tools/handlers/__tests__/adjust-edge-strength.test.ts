@@ -10,6 +10,19 @@ import {
 import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
 import type { ProposalAction } from '../../../routing/types.js';
 import type { GraphV3T } from '../../../../schemas/cee-v3.js';
+import { projectRecentChanges } from '../../../context/recent-changes.js';
+import { tryStateQueryGuard } from '../../../routing/state-query-guard.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+type AdjustEdgeFact = Extract<HandlerFact, { fact_type: 'adjust_edge_strength' }>;
+
+function requireAdjustEdgeFact(facts: readonly HandlerFact[]): AdjustEdgeFact {
+  const fact = facts[0];
+  if (fact?.fact_type !== 'adjust_edge_strength') {
+    throw new Error(`expected adjust_edge_strength fact, got ${fact?.fact_type ?? 'none'}`);
+  }
+  return fact;
+}
 
 function buildInvocation(
   graph: GraphV3T,
@@ -121,6 +134,127 @@ describe('adjust_edge_strength handler', () => {
     const edge = mutated.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');
     expect(edge?.strength.mean).toBe(0.7);
     expect(edge?.effect_direction).toBe('positive');
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: {
+        before: {
+          from_label: 'Marketing budget',
+          to_label: 'Revenue',
+        },
+        after: {
+          from_label: 'Marketing budget',
+          to_label: 'Revenue',
+        },
+      },
+    });
+  });
+
+  it('carries a durable edge identity through fact projection and the next-turn state query', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
+      ),
+    );
+
+    const recentChanges = projectRecentChanges(outcome.handler_facts);
+    const followUp = tryStateQueryGuard({
+      message: 'What changed?',
+      contextPack: { recent_changes: recentChanges },
+    });
+    if (!followUp.matched || followUp.dispatch !== 'with_recent_change') {
+      throw new Error(`expected with_recent_change, got ${JSON.stringify(followUp)}`);
+    }
+    expect(followUp.assistant_text).toContain(
+      'Earlier in this conversation: Adjusted the link from Marketing budget to Revenue.',
+    );
+    expect(followUp.assistant_text).not.toContain('f-budget');
+    expect(followUp.assistant_text).not.toContain('g-revenue');
+  });
+
+  it('omits unsafe endpoint labels from the fact so later readers stay generic', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    graph.nodes.find((node) => node.id === 'f-budget')!.label = 'f-budget';
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
+      ),
+    );
+
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
+    expect(fact.result.before).not.toHaveProperty('from_label');
+    expect(fact.result.after).not.toHaveProperty('from_label');
+    expect(projectRecentChanges(outcome.handler_facts)[0]!.summary).toBe(
+      'Adjusted a link in the decision model.',
+    );
+  });
+
+  it('never rewrites an ID-shaped endpoint label into another node identity', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'fac_quality',
+      kind: 'factor',
+      label: 'Product quality',
+    });
+    graph.nodes.find((node) => node.id === 'f-budget')!.label = 'fac_quality';
+
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
+      ),
+    );
+
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
+    expect(fact.result.before).not.toHaveProperty('from_label');
+    expect(fact.result.after).not.toHaveProperty('from_label');
+    expect(JSON.stringify(outcome.handler_facts[0])).not.toContain('Product quality');
+    expect(projectRecentChanges(outcome.handler_facts)[0]!.summary).toBe(
+      'Adjusted a link in the decision model.',
+    );
+  });
+
+  it('omits canonical endpoint ID families that the central entity scanner does not recognise', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    graph.nodes.find((node) => node.id === 'f-budget')!.label = 'f-quality';
+
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
+      ),
+    );
+
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
+    expect(fact.result.before).not.toHaveProperty('from_label');
+    expect(fact.result.after).not.toHaveProperty('from_label');
+    expect(projectRecentChanges(outcome.handler_facts)[0]!.summary).toBe(
+      'Adjusted a link in the decision model.',
+    );
+  });
+
+  it('does not persist a misleading X-to-X identity when endpoints share a label', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    graph.nodes.find((node) => node.id === 'g-revenue')!.label = 'Marketing budget';
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
+      ),
+    );
+
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
+    expect(fact.result.before).not.toHaveProperty('from_label');
+    expect(fact.result.after).not.toHaveProperty('to_label');
+    expect(projectRecentChanges(outcome.handler_facts)[0]!.summary).toBe(
+      'Adjusted a link in the decision model.',
+    );
   });
 
   it('also accepts ASCII -> in the entity id', async () => {
@@ -411,7 +545,7 @@ describe('adjust_edge_strength handler', () => {
         makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.4, operator: 'set' }),
       ),
     );
-    const fact = outcome.handler_facts[0];
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
     expect(fact.noop).toBe(true);
     expect(fact.result.status).toBe('noop');
     expect(outcome.llm_calls_used).toBe(0);
@@ -432,7 +566,7 @@ describe('adjust_edge_strength handler', () => {
         makeProposal({ entityId: 'f-budget→g-revenue', strength: 0, operator: 'increase' }),
       ),
     );
-    const fact = outcome.handler_facts[0];
+    const fact = requireAdjustEdgeFact(outcome.handler_facts);
     expect(fact.noop).toBe(true);
     expect(fact.result.status).toBe('noop');
   });

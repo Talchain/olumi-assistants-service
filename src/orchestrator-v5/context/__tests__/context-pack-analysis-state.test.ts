@@ -159,9 +159,19 @@ describe('ContextPack — behaviour 9: AI-facing context populated together', ()
       user_message: 'what changed?',
       assistant_message: 'I adjusted a link in the model.',
     };
-    // adjust_edge_strength is the simplest mutation fact that projects to a
-    // recent_changes entry (no result fields required).
-    const mutationFact = { fact_type: 'adjust_edge_strength', fact_version: 1, noop: false, result: {} };
+    // A schema-valid applied edge fact projects to a generic recent-change
+    // entry when its historical snapshots do not carry licensed labels.
+    const mutationFact = {
+      fact_type: 'adjust_edge_strength',
+      fact_version: 1,
+      noop: false,
+      result: {
+        target_id: 'factor_a→factor_b',
+        status: 'applied',
+        before: { from: 'factor_a', to: 'factor_b' },
+        after: { from: 'factor_a', to: 'factor_b' },
+      },
+    };
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [priorTurn as never],

@@ -57,7 +57,12 @@ const RECEIPT_FIXTURES: Record<string, Record<string, unknown>> = {
     before: { raw_value: 1, label: 'Customer churn' },
     after: { raw_value: 2, label: 'Customer churn' },
   },
-  adjust_edge_strength: {},
+  adjust_edge_strength: {
+    target_id: 'factor_a→factor_b',
+    status: 'applied',
+    before: { from: 'factor_a', to: 'factor_b' },
+    after: { from: 'factor_a', to: 'factor_b' },
+  },
   edit_graph: {
     status: 'applied',
     safe_summary: 'Renamed a factor in the decision model.',
