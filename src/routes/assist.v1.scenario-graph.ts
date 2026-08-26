@@ -10,7 +10,9 @@
  * Supabase with the service role, and the browser never touches Supabase.
  *
  * ── WHY POST FOR A READ (the convention DEMANDS it; this is not a preference) ─
- * Two independent reasons, both derived at the tip:
+ * Two independent reasons, both derived at the tip WHEN WRITTEN. (1)'s premise
+ * has since moved and is corrected in place beneath it; (2) is unaffected and is
+ * sufficient on its own.
  *
  *   1. IDENTITY LIVES IN THE BODY. `CEE_REQUIRE_USER_JWT` is off on staging, so
  *      `resolveUserIdentity` returns `mode: "off"` and `authorizeScenarioOwnership`
@@ -19,6 +21,46 @@
  *      so `claimedUserId` would be null on every request, and a null caller
  *      against a stored owner is precisely the IDOR case the pre-flight refuses.
  *      Every OWNED scenario would be permanently unreadable by its own owner.
+ *
+ *      ⚠⚠ THE PREMISE OF (1) NO LONGER HOLDS. THE PARAGRAPH ABOVE IS LEFT
+ *         STANDING ON PURPOSE — it is an accurate record of the deployment it
+ *         was written against, it is FALSE about the deployment today, and both
+ *         halves are load-bearing: it is WHY this route is a POST, so a tidy
+ *         rewrite would hide that a premise which no longer holds once governed
+ *         the shape of the route.
+ *
+ *         WHEN WRITTEN — staging deployed `CEE_REQUIRE_USER_JWT` OFF, so
+ *         `resolveUserIdentity` answered `mode: "off"` and the body-supplied
+ *         `user_id` was the only identity this route had.
+ *
+ *         TODAY (26 Aug 2026) — staging deploys it ON.
+ *
+ *         HOW THAT WAS ESTABLISHED — BEHAVIOURALLY, at the DEPLOYED build. Not
+ *         from `render.yaml`, not from this comment, not from any prose: the
+ *         YAML is a drifting subset of the Render dashboard and has been wrong
+ *         about this class of question before (trap 18). Witnessed on this
+ *         route: a real user token resolves as a VERIFIED SUBJECT and reads a
+ *         scenario that subject owns, while a caller presenting no verified
+ *         identity is answered the ordinary refusal. Ownership on this surface
+ *         is therefore the verified token subject, and a request-supplied
+ *         identifier is not an input to it — see
+ *         `CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call site below.
+ *
+ *         ⚠ DO NOT CITE (1) AS AN ARGUMENT ABOUT THE CURRENT DEPLOYMENT. Its
+ *           conclusion — "every OWNED scenario would be permanently unreadable
+ *           by its own owner" — follows from the flag being OFF and does not
+ *           follow while it is ON. A reviewer reading (1) in good faith as a
+ *           live statement would reach the wrong verdict about this file.
+ *
+ *         WHAT DOES NOT CHANGE — the route stays a POST. Reason (2) below never
+ *         depended on the flag, is sufficient on its own, and the method is
+ *         part of a shipped wire contract the UI already builds against.
+ *
+ *         ⚠ AND RE-DERIVE THIS BEFORE YOU RELY ON IT. A flag posture written
+ *           into a comment is a hand-maintained mirror of a dashboard value
+ *           (trap 12) — which is exactly how (1) came to be false here. The
+ *           dated sentence above is a record of a measurement, never a
+ *           standing guarantee, and that applies to this sentence too.
  *
  *   2. THE ALTERNATIVE PUTS A USER ID IN A URL. Carrying `user_id` as a query
  *      parameter would write an account identifier into proxy logs, browser
@@ -37,8 +79,10 @@
  *     pathname.replace(/^\/bff\/cee/, "/assist/v1")
  *     methods GET/HEAD/POST/OPTIONS   → POST is allowed
  *     injects X-Olumi-Assist-Key, forwards `authorization` (the user's
- *     Supabase token, which is what this route's identity step will read once
- *     CEE_REQUIRE_USER_JWT is on)
+ *     Supabase token, which is what this route's identity step reads — this
+ *     line said "will read once CEE_REQUIRE_USER_JWT is on", in the future
+ *     tense, for the same reason (1) above is now wrong: it was written against
+ *     a deployment where the flag was off)
  * The rewrite is a PREFIX replace, so the multi-segment
  * `/bff/cee/scenarios/<uuid>/graph` lands on
  * `/assist/v1/scenarios/<uuid>/graph`. The key never reaches the browser.
