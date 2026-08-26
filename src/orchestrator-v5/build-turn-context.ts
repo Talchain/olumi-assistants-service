@@ -2429,7 +2429,38 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // projection the panel publishes, so offer and admission are now one answer.
   const admission = resolveRunAdmission(sigmaFloor.graph);
   if (!admission.willProceed) {
-    throw new AnalysisNotReadyError(admission.strict);
+    // ⭐ HAND OVER THE IDENTITY THIS ASSESSMENT ALREADY COMPUTED, rather than
+    // discarding it one line before the user needs it.
+    //
+    // The refusal downstream of this throw used to name no goal and no options
+    // (`goal_node_id:"" options:[]`), so nothing could tell the user WHAT to
+    // fix — witnessed on a signed-in user's freshly drafted model. The reason
+    // was never that the refusal filtered honestly; it was that
+    // `AnalysisNotReadyError` carried one field, so the chip arm had nothing to
+    // pass its composer and `analysis-ready-helper.ts` returned the empty
+    // carrier before its `may_run` discriminator was ever consulted.
+    //
+    // NOT a second derivation. `admission` is the assessment made on
+    // `sigmaFloor.graph` — GraphV3-valid, parsed above — and `assessment` is
+    // exposed for precisely this reuse. `{ ...analysisReady, may_run }` is
+    // literally `buildCanonicalAnalysisReadyFromGraph`'s body, so the carrier
+    // is byte-identical to the canonical projection of the same graph.
+    //
+    // `may_run` is `willProceed`, which is FALSE on this branch by construction
+    // — carried rather than hardcoded so the field keeps one source and cannot
+    // drift from the boolean that decided the throw.
+    //
+    // ⛔ THE OTHER THREE THROWS IN THIS FUNCTION STAY ONE-ARGUMENT, and that is
+    // measured, not assumed: `assessCanonicalAnalysisReadiness` returns
+    // `analysisReady: undefined` for NO_GRAPH (:2331) and for a graph that
+    // fails GraphV3 (:2400 / :2407). There is no model to name, and inventing
+    // one would be the mirror of the defect being closed.
+    throw new AnalysisNotReadyError(
+      admission.strict,
+      admission.assessment.analysisReady
+        ? { ...admission.assessment.analysisReady, may_run: admission.willProceed }
+        : undefined,
+    );
   }
   const verdict = admittedVerdict(admission);
   const graphForSnapshot: unknown = verdict.canonicalGraph ?? sigmaFloor.graph;

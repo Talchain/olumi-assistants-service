@@ -16,6 +16,10 @@ import {
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+// The PUBLISHED blocker contract, used to decide which rows the refusal carrier
+// may keep. Imported rather than restated: a hand-copied field list here would
+// be a mirror of the schema and would drift the first time a field is added.
+import { AnalysisBlocker } from "../../schemas/analysis-ready.js";
 import {
   validateGraphStructure,
   CURRENT_STATE_VIOLATION_MESSAGES,
@@ -1474,8 +1478,62 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * `needs_input` and auto-expands "Olumi needs a little more from you" over a
  * gap that does not exist. Neither piece is wrong; the pair is.
  *
- * THE DISCRIMINATOR IS THE STRUCTURAL PROJECTION'S OWN STATUS, because that is
- * the fact the disputed UI surface is about:
+ * ⚠⚠ THE DISCRIMINATOR WAS `status`, AND `status` CANNOT SEPARATE THE TWO CASES.
+ * WITHDRAWN, measured at staging tip c24bfe37 with production code untouched:
+ *
+ *   class                                       | status           | may_run
+ *   --------------------------------------------|------------------|--------
+ *   A mid-session, ONE un-encoded option         | needs_user_input | TRUE
+ *     (#942's own ADDED_OPTION_GRAPH — the case  |                  |
+ *      the empty carrier exists to protect)      |                  |
+ *   B complete model, every option valued        | ready            | true
+ *   C fresh draft, NO option valued (the defect) | needs_user_input | FALSE
+ *
+ * BOTH cases the estate needs separated are `needs_user_input`; the `ready`
+ * term fires on NEITHER and gives A and C the SAME answer. That was invisible
+ * only because the chip arm never passed the second argument, leaving this
+ * function exactly ONE live caller — so two live tests could assert opposite
+ * answers to one question and both stay green.
+ *
+ * ⭐ AND THIS FILE ALREADY KNEW. `buildCanonicalAnalysisReadyFromGraph`'s doc
+ * block ~300 lines above records the same fact from an INDEPENDENT capture:
+ * *"one unconfigured option gives `status: needs_user_input, willProceed:
+ * TRUE`, while two and three give `needs_user_input, willProceed: false` — one
+ * status, both verdicts, which is exactly why no reading of `status` can
+ * recover the answer."* The guard contradicted its own module's doctrine.
+ *
+ * THE DISCRIMINATOR IS THE ADMISSION VERDICT — `may_run`, i.e.
+ * `resolveRunAdmission(...).willProceed`, the boolean `build-turn-context.ts`
+ * throws `AnalysisNotReadyError` on. The question this function answers is
+ * *"is this refusal ABOUT the model?"*:
+ *
+ *   · `may_run === true`  → the analysis COULD have proceeded, so the refusal
+ *     came from somewhere else and the model's identity is not the answer. The
+ *     empty carrier is right, and this is exactly what #942/RED-3 pinned.
+ *   · `may_run === false` → the refusal IS about model readiness, so the
+ *     identity is precisely what the user needs in order to fix it.
+ *
+ * ⚠ ABSENCE CARRIES, AND THAT IS A CHOICE. `may_run` is optional and two
+ * `turn-executor` sites assign readiness without the canonical stamp
+ * (`current.assessment?.analysisReady`, `readback.analysisReady`), so a
+ * present-but-unstamped payload is constructible. Absence falls toward
+ * CARRYING: the degeneracy guard below already refuses a degenerate payload —
+ * it is verbatim the UI's own accept predicate — so carrying can never ship
+ * something the consumer discards, whereas withholding the identity on a
+ * refusal that needed it IS the defect being fixed. It is also the polarity the
+ * rest of the estate mandates for this field: *"absence means an older
+ * producer, never 'no'"*. (At this tip those two sites sit in closures that end
+ * in `return finalizeRun()`, so they cannot reach this guard — the pin is
+ * DEFENSIVE, and it is here because one mutable `analysisReadyForTurn` is
+ * shared across eight assignment sites in a 14,000-line function.)
+ *
+ * ⚠ `status === 'ready'` IS KEPT AS A SECOND SUFFICIENT REASON, and that is a
+ * measurement rather than a hedge: an 18-case sweep at this tip found the
+ * (`ready` AND `may_run === false`) cell EMPTY, so the two terms cannot
+ * disagree on anything reachable, and keeping it preserves the pin for a
+ * `ready` projection that carries no verdict at all. What is withdrawn is the
+ * claim that it is THE discriminator. Its original reasoning, still sound as a
+ * second reason:
  *
  *   · structural NOT ready → "this model needs input" is TRUE. Preserving the
  *     model's identity is then strictly more truthful than denying it, and the
@@ -1493,26 +1551,45 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * emptiness.
  *
  * WHAT IS CARRIED, AND WHAT IS STILL REFUSED. `options` and `goal_node_id` are
- * the model's IDENTITY and come from the canonical readiness authority. Every
- * other field — blockers, bias findings, model adjustments, readiness issues,
- * repair proposals — is OUTPUT this turn declined to produce, and is dropped.
+ * the model's IDENTITY, and `blockers` is the REPAIR ROUTE — both come from the
+ * canonical readiness authority and neither is composed here. Every other field
+ * — bias findings, model adjustments, readiness issues, repair proposals — is
+ * OUTPUT this turn declined to produce, and is dropped.
+ *
+ * ⚠ `blockers` WAS IN THAT DROPPED LIST UNTIL NOW, and the sentence read
+ * "blockers, bias findings, …". That was right about the OUTPUT class and wrong
+ * about this member: a blocker is not something the turn declined to compute —
+ * it is the reason the turn refused, already written down. Dropping it is what
+ * left `analysis_state.run_state.blockers` empty
+ * (`compose/analysis-state-v1.ts:493` calls `mapWireBlockers(input.readiness
+ * ?.blockers)`, and `mapWireBlockers(undefined)` returns `[]`), which
+ * `chip-click-dispatch.ts:709-714` already records as ONE defect with the
+ * missing identity rather than two.
  * ROADMAP 2.1134(a)'s surviving requirement holds unchanged: this function
  * writes no per-option status of its own. A refusal turn produces no
  * `option_comparison` and names no leader, so there is nothing for
  * `isRecommendableOption` to read and nothing to reconcile.
  *
  * The one-argument call is BYTE-IDENTICAL to the previous behaviour, so callers
- * with no structural payload — including the chip-click arm, deliberately: see
- * `chip-click-dispatch.ts`, where a user clicking "Run analysis" mid-session is
- * the very case the empty carrier was measured for — are unchanged.
+ * with no structural payload are unchanged.
+ *
+ * ⚠ THE CHIP ARM IS NO LONGER ONE OF THEM. It used to pass one argument, on the
+ * stated grounds that a user clicking "Run analysis" mid-session is the case the
+ * empty carrier was measured for. That reasoning was right about the CASE and
+ * wrong about the ARM: mid-session is class A above and is now held bare by
+ * `may_run === true`, on the same shared rule the routed arm uses. A user
+ * clicking the same chip on a FRESH DRAFT is class C, and the one-argument call
+ * denied that user's model exists — the defect this table was measured to fix.
+ * Both arms now ask one question of one authority (CLAUDE.md trap 21).
  *
  * @param blockedReason Stable, SPECIFIC code. Callers derive it with
  *                     `blockedReasonForHandlerFailure`, which cannot return
  *                     an empty or generic value.
  * @param structuralReadiness The readiness this turn already projected from the
  *                     canonical graph, when it has one. Consulted ONLY for the
- *                     model's identity, and ONLY when it is both non-`ready`
- *                     and actually carries an identity to preserve.
+ *                     model's identity, and ONLY when the admission verdict did
+ *                     NOT admit (`may_run !== true`), the projection is not
+ *                     `ready`, and it actually carries an identity to preserve.
  */
 export function buildAnalysisRefusalReadiness(
   blockedReason: string,
@@ -1550,7 +1627,8 @@ export function buildAnalysisRefusalReadiness(
   const goalNodeId = structuralReadiness.goal_node_id;
   const options = structuralReadiness.options;
   if (
-    structuralReadiness.status === 'ready'
+    structuralReadiness.may_run === true
+    || structuralReadiness.status === 'ready'
     || typeof goalNodeId !== 'string'
     || goalNodeId.length === 0
     || !Array.isArray(options)
@@ -1558,5 +1636,78 @@ export function buildAnalysisRefusalReadiness(
   ) {
     return refusal;
   }
-  return { ...refusal, goal_node_id: goalNodeId, options };
+  // ⭐ AND THE REPAIR ROUTE, WHICH IS ALREADY WRITTEN.
+  //
+  // Identity alone answers *"what is being refused?"*. It does not answer
+  // *"what do I do about it?"* — and until now the only thing that crossed was
+  // `nextStep`, which on a four-blocker draft reads "Review all 4 readiness
+  // issues together before analysis": a COUNT, offered where four routes were
+  // already in hand.
+  //
+  // `blockers[]` IS those routes, authored by the semantic projector at the
+  // same moment as the identity, one row per option × factor, each naming the
+  // option label, the factor label, the factor's current value and a
+  // `suggested_action`. NOTHING IS COMPOSED HERE. A second renderer of the same
+  // fact is the mirror defect this module exists to prevent; this is the same
+  // carry as `goal_node_id` and `options`, from the same payload, one line up.
+  //
+  // ⚠ SCOPED TO THE IDENTITY BRANCH ON PURPOSE. Everything above this line
+  // returns the bare carrier, and blockers must not soften that: the admitting
+  // case (`may_run === true`) and the `ready` case have no refusal to explain,
+  // and #1126 measured what happens when a complete model is described as
+  // needing input.
+  //
+  // ⚠ CARRIED ONLY WHEN THE PRODUCER HAS SOME. Absence stays absence — an
+  // empty array is never substituted for "nothing specific to name", because a
+  // manufactured blocker is exactly the invention this whole seam refuses. A
+  // refusal that cannot name a pair says nothing rather than something empty.
+  //
+  // ⚠ THIS ARMS A GUARD RATHER THAN BYPASSING ONE. On the routed arm
+  // `turn-executor.ts:12750` feeds `analysisReadyForTurn?.blockers` to
+  // `applyBlockedSlotClaimGuard`, which today short-circuits `no_blockers` on a
+  // refusal because the field is absent. Populating it lets that guard do the
+  // job it was written for — removing a claim that a value exists where the
+  // payload's own readiness says it does not. The chip arm has no such guard
+  // and needs none: its refusal text is template-composed and LLM-free, so
+  // there is no model claim for it to contradict.
+  // ⭐ SHAPE-CHECKED AGAINST THE CONTRACT, AND THE EXISTING PINS ARE WHY.
+  //
+  // Two #1126 specs attach `blockers: [{ kind: 'missing_value' }]` to a payload
+  // and assert it does not reach the wire. When this carry was first written
+  // without a shape check, BOTH went red — and they were RIGHT to. That object
+  // is not an `AnalysisBlocker`: no `factor_id`, no `factor_label`, no
+  // `message`, no `suggested_action`, and `kind` is not even the field name.
+  // It is a SMUGGLE FIXTURE, and the property it pins — this carrier passes
+  // through nothing it was merely handed — is exactly right and must survive.
+  //
+  // So the rule is not "carry `.blockers`". It is CARRY THE PRODUCER'S OWN
+  // AUTHORED ROWS: only entries that satisfy the published `AnalysisBlocker`
+  // contract, parsed BY that schema rather than by a hand-copied field list
+  // here (a mirror of a contract is the drift this estate keeps paying for).
+  // Anything else is dropped exactly as `bias_findings`, `model_adjustments`,
+  // `readiness_issues` and `repair_proposal` are.
+  //
+  // ⚠ WHAT CHANGED IN THE RULING, STATED PLAINLY RATHER THAN EDITED AWAY: those
+  // two specs grouped `blockers` with "OUTPUT this turn did not produce". That
+  // is right about bias findings and adjustments and wrong about this member —
+  // a blocker is not work the turn declined to do, it is THE REASON IT REFUSED,
+  // minted by the same assessment as the identity. The specs stay green
+  // UNTOUCHED because their fixtures are malformed; the real-graph pins that
+  // enumerate the key set do change, deliberately, and say so.
+  const authored = Array.isArray(structuralReadiness.blockers)
+    ? structuralReadiness.blockers.filter(
+        (blocker): blocker is NonNullable<typeof blocker> =>
+          AnalysisBlocker.safeParse(blocker).success,
+      )
+    : [];
+  return {
+    ...refusal,
+    goal_node_id: goalNodeId,
+    options,
+    // Absence stays absence. An empty array is never substituted for "nothing
+    // specific to name" — a manufactured blocker is the invention this seam
+    // refuses, and an empty `blockers` reads to a consumer as "checked, none",
+    // which is a different and false claim.
+    ...(authored.length > 0 ? { blockers: authored } : {}),
+  };
 }

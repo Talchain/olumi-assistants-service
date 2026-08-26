@@ -1,56 +1,16 @@
 /**
- * ROADMAP 2.388 — THE MINUTE-ONE DEAD END.
+ * ROADMAP 2.388 + Core System B — empty-model edit-word intake.
  *
- * ═══════════════════════════════════════════════════════════════════════════
- * THE DEFECT, measured live on staging build `672b634` by L56
- * (`PHASE0-EVIDENCE-2026-07-28/diagnosis-first-message-deadend.md`, 27 turns /
- * 23 distinct first messages, 9/9 pre-registered predictions matched):
+ * The original defect was an edit-word first turn returning a graph-unavailable
+ * error. The first repair fell through to a deterministic "single decision +
+ * options" prompt. Open-frame semantic intake now completes that repair:
+ * grounded strategic goals start the existing draft producer, while a genuinely
+ * referent-free edit request reaches ordinary conversation for clarification.
  *
- *   A user's FIRST message — "Increase annual revenue from £4 million today to
- *   £6 million within 12 months." — comes back
- *
- *     "I can see you want to update the model, but I couldn't access the
- *      current graph. Please try again in a moment."
- *
- *   with `llm_calls: []` and `suggested_actions: []`. **Retrying the same
- *   message never works** (3/3 here, 10/10 on the walk): the advice the copy
- *   gives is the one thing that cannot succeed.
- *
- * WHY. `editIntentDetected` is decided from the message TEXT ALONE — an edit
- * verb (`increase|add|raise|reduce|set|…`) with no draft-shaped brief around
- * it. The route then asks whether a graph exists, and the ONLY thing it does
- * with the answer "no" is emit an error. There was no fall-back edge from
- * "edit intent + nothing to edit" to "help them start".
- *
- * ⭐ THE FIX, and why it needs no new copy. `no_persisted_graph` stops
- * returning and simply falls through. `route-v2.ts` already computes
- *
- *     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
- *     const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
- *
- * and both operands of that `??` are null on this branch — so declining to
- * return IS the complete fall-through. The turn lands on
- * `frame_no_brief_guard`, which is what the SAME user already gets today when
- * their sentence happens to miss the edit-verb list (L56 case X5, "Grow annual
- * revenue…" → the framing coaching PLUS a "Build the model" chip). Shipped
- * copy, shipped affordance, one branch.
- *
- * ⚠ WHAT IS DELIBERATELY *NOT* CHANGED. `session_store_failed` and
- * `persisted_graph_invalid` KEEP the recovery copy. Those are genuine
- * transient / infrastructure failures where "try again in a moment" is honest
- * advice — which is the whole reason the three reasons were discriminated in
- * `sendEditGraphRecovery` in the first place. Both are pinned below; a fix
- * that swept all three into the fall-through turns those arms red.
- *
- * ⚠ THE CORPUS IS HAND-WRITTEN, NOT DERIVED (CLAUDE.md trap 12d). A guard
- * derived from the regexes can only prove the regexes agree with themselves;
- * it is structurally blind to a message shape nobody listed. The ten messages
- * below are L56's MEASURED dead ends, verbatim from the probe case files.
- *
- * ⚠ IDENTITY BINDING (trap 19). The chip is asserted against the PRODUCTION
- * constants imported from `route-v2.ts` — never a retyped string, and never
- * "there is at least one suggested action", which any other chip would satisfy.
- * ═══════════════════════════════════════════════════════════════════════════
+ * This remains a hand-written corpus from the measured failure. It also keeps
+ * the two operational carve-outs exact: a session-store failure and an invalid
+ * persisted graph still return typed recovery once the semantic router chooses
+ * conversation and the established edit lane performs its canonical read.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -59,11 +19,33 @@ import type { FastifyInstance } from 'fastify';
 import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import { _resetConfigCache } from '../../config/index.js';
 
+const runtimeMocks = vi.hoisted(() => ({
+  understandOpenFrameIntake: vi.fn(),
+  dispatchDraftGraph: vi.fn(),
+  dispatchEditGraph: vi.fn(),
+  runTurnExecutor: vi.fn(),
+}));
+
+vi.mock('../../orchestrator-v5/routing/open-frame-intake.js', () => ({
+  understandOpenFrameIntake: runtimeMocks.understandOpenFrameIntake,
+}));
+vi.mock('../../orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
+  dispatchDraftGraph: runtimeMocks.dispatchDraftGraph,
+}));
+vi.mock('../../orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
+  dispatchEditGraph: runtimeMocks.dispatchEditGraph,
+}));
+vi.mock('../../orchestrator-v5/turn-executor.js', () => ({
+  runTurnExecutor: runtimeMocks.runTurnExecutor,
+}));
+
 // ── Session store: the ONE fact under test is what `loadGraph` does ────────
 /** `null` ⇒ no persisted graph (the defect's precondition). */
 let persistedGraphForRead: unknown = null;
 /** `true` ⇒ `loadGraph` throws ⇒ `session_store_failed`. */
 let loadGraphThrows = false;
+let loadGraphCalls = 0;
+let hasPriorTurnsForRead = false;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
@@ -77,6 +59,7 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
     loadGraph: async () => {
+      loadGraphCalls += 1;
       if (loadGraphThrows) throw new Error('simulated session store failure');
       return persistedGraphForRead;
     },
@@ -85,20 +68,16 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
       briefText: null,
     }),
     readMostRecentPendingActions: async () => [],
-    hasPriorTurns: async () => false,
+    hasPriorTurns: async () => hasPriorTurnsForRead,
     countTurns: async () => 0,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
 
-/**
- * The frame guard is DETERMINISTIC — reaching an LLM on these turns is itself
- * the failure. A throwing adapter turns "the route answered without a model"
- * into an observable, rather than something inferred from a body.
- */
+/** Any model call outside the explicitly mocked semantic/dispatch seams fails. */
 const chatWithToolsMock = vi.fn().mockImplementation(async () => {
-  throw new Error('LLM router must NOT be called on a deterministic frame-guard turn');
+  throw new Error('unexpected unmocked LLM call');
 });
 vi.mock('../../adapters/llm/router.js', () => ({
   getAdapter: () => ({
@@ -132,52 +111,116 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
 const {
   ceeOrchestratorRouteV2,
   EDIT_GRAPH_RECOVERY_TEXT,
-  DRAFT_OFFER_CHIP_LABEL,
-  DRAFT_OFFER_CHIP_MESSAGE,
 } = await import('../route-v2.js');
 
 const SCENARIO_ID = '23880000-2388-4388-8388-238823882388';
 
-/** The guard's own opening clause — the coaching the user should see instead. */
 const FRAME_GUARD_COPY = 'I need a single decision question to start';
+
+function modelRoute(route: 'start_model' | 'continue_conversation') {
+  runtimeMocks.understandOpenFrameIntake.mockResolvedValueOnce({
+    route,
+    source: 'model' as const,
+    model: 'test-frontier-model',
+    latencyMs: 7,
+    inputTokens: 18,
+    outputTokens: 2,
+  });
+}
+
+function mockDraftResult(): void {
+  runtimeMocks.dispatchDraftGraph.mockResolvedValueOnce({
+    response: {
+      response_version: 2,
+      assistant_text: 'I have started a provisional Living Model from your strategic goal.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse',
+    },
+    commitPerformed: true,
+    graph: null,
+  });
+}
+
+function mockConversationResult(): void {
+  runtimeMocks.runTurnExecutor.mockResolvedValueOnce({
+    response: {
+      response_version: 2,
+      assistant_text: 'What does “it” refer to, and what outcome are you trying to improve?',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'frame',
+    },
+    analysisReady: undefined,
+    effectiveGraph: null,
+    answerKind: 'substantive',
+    mayNameLeadingOption: true,
+    mayNameLeadingOptionProvenance: { kind: 'no_analysis' },
+    telemetry: {
+      stages_completed: ['orient', 'compose', 'commit'],
+      response_emitted: true,
+      llm_calls_used: 1,
+      commit_performed: true,
+      failure_type: null,
+      wall_clock_ms: 5,
+      turn_class: 'explore',
+      intent_class: 'converse',
+      coaching_mode: null,
+      validation_error_code: null,
+    },
+  });
+}
+
+function mockEditResult(): void {
+  runtimeMocks.dispatchEditGraph.mockResolvedValueOnce({
+    response: {
+      response_version: 2,
+      assistant_text: 'Applied the requested change to the existing model.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse',
+    },
+    commitPerformed: true,
+  });
+}
 
 /**
  * ⭐ L56'S MEASURED DEAD ENDS, VERBATIM. Each of these returned
  * `exit_path: edit_graph` + `EDIT_GRAPH_RECOVERY_TEXT` + zero chips on the
  * deployed build, as a FIRST message on a fresh scenario. Tags are L56's.
  *
- * `expectChip` is DERIVED from the shipped rule, not wished for: the frame
- * guard seeds the "Build the model" offer only when the normalised message
- * clears `DRAFT_GRAPH_MIN_BRIEF_LENGTH` (30). X2 is 24 characters, so it gets
- * the coaching WITHOUT a chip — recorded honestly rather than asserted away,
- * because a corpus that quietly expects the wrong thing is how a short list
- * survives.
+ * Nine messages contain enough strategic subject to start a provisional model.
+ * X2 is genuinely referent-free: "it" cannot be resolved on a fresh scenario,
+ * so it should be answered with a material clarification rather than drafted.
  */
 const MEASURED_DEAD_ENDS: ReadonlyArray<
-  readonly [tag: string, message: string, expectChip: boolean]
+  readonly [tag: string, message: string, expectedRoute: 'start_model' | 'continue_conversation']
 > = [
-  ['S1', 'Increase annual revenue from £4 million today to £6 million within 12 months.', true],
-  ['S2', 'We need to reduce churn to under 5% this year.', true],
-  ['S5', 'Add a second sales team in Berlin.', true],
-  ['S7', 'Raise the price from £49 to £59.', true],
+  ['S1', 'Increase annual revenue from £4 million today to £6 million within 12 months.', 'start_model'],
+  ['S2', 'We need to reduce churn to under 5% this year.', 'start_model'],
+  ['S5', 'Add a second sales team in Berlin.', 'start_model'],
+  ['S7', 'Raise the price from £49 to £59.', 'start_model'],
   [
     'X1',
     'Increase annual recurring revenue from £4 million today to £6 million within twelve months, while keeping the marketing budget flat and the engineering headcount exactly where it is right now.',
-    true,
+    'start_model',
   ],
-  ['X2', 'Launch it and add a fee.', false],
+  ['X2', 'Launch it and add a fee.', 'continue_conversation'],
   [
     'X7',
     'Our board wants us to increase annual recurring revenue to £6 million next year while reducing support costs by a fifth. Nothing else has been agreed yet.',
-    true,
+    'start_model',
   ],
-  ['X9', 'Increase revenue to £6 million? That is the plan for the year ahead.', true],
+  ['X9', 'Increase revenue to £6 million? That is the plan for the year ahead.', 'start_model'],
   [
     'Z3',
     'After weighing our options, we will increase annual revenue from £4 million to £6 million within 12 months.',
-    true,
+    'start_model',
   ],
-  ['Z4', 'We could increase the price from £49 to £59 to improve margins.', true],
+  ['Z4', 'We could increase the price from £49 to £59 to improve margins.', 'start_model'],
 ];
 
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
@@ -208,7 +251,7 @@ function exitPath(body: Record<string, any>): unknown {
   return body._diagnostic_trace?.exit_path;
 }
 
-describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of erroring', () => {
+describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical read', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -231,102 +274,125 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
   beforeEach(() => {
     persistedGraphForRead = null;
     loadGraphThrows = false;
+    loadGraphCalls = 0;
+    hasPriorTurnsForRead = false;
     events = [];
     setTestSink((name, data) => {
       events.push({ name, data: data as Record<string, unknown> });
     });
+    runtimeMocks.understandOpenFrameIntake.mockReset();
+    runtimeMocks.dispatchDraftGraph.mockReset();
+    runtimeMocks.dispatchEditGraph.mockReset();
+    runtimeMocks.runTurnExecutor.mockReset();
     chatWithToolsMock.mockClear();
     appendMock.mockClear();
   });
 
-  // ── INSTRUMENT FIRST: an unmeasurable assertion is a vacuous one ──────────
-
-  it('INSTRUMENT: `_diagnostic_trace.exit_path` really is on the wire', async () => {
-    const { body } = await turn(app, MEASURED_DEAD_ENDS[0]![1]);
-    expect(
-      exitPath(body),
-      'the flag-gated trace is the surface every exit_path assertion below reads',
-    ).toBeDefined();
-  });
-
-  // ── THE HEADLINE CASE, identity-bound ────────────────────────────────────
-
-  it('THE WALK\'S CASE A: a first message with an edit verb and no graph reaches the frame guard\'s coaching', async () => {
+  it('null canonical graph + grounded edit-word goal starts the existing draft with exact user text', async () => {
+    const message = 'Increase annual revenue from £4 million today to £6 million within 12 months.';
+    modelRoute('start_model');
+    mockDraftResult();
     const { status, body } = await turn(
       app,
-      'Increase annual revenue from £4 million today to £6 million within 12 months.',
+      message,
     );
 
     expect(status).toBe(200);
-    expect(exitPath(body)).toBe('frame_no_brief_guard');
-    expect(body.assistant_text).toContain(FRAME_GUARD_COPY);
-    expect(
-      body.assistant_text,
-      'the "try again in a moment" dead end must be gone from this turn entirely',
-    ).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
-
-    // IDENTITY: the affordance is THE draft offer, matched against the
-    // producer's own constants — not "some chip exists".
-    expect(body.suggested_actions).toHaveLength(1);
-    expect(body.suggested_actions[0]).toMatchObject({
-      label: DRAFT_OFFER_CHIP_LABEL,
-      message: DRAFT_OFFER_CHIP_MESSAGE,
-    });
-  });
-
-  it('no LLM is called — the recovery is deterministic, as the dead end was', async () => {
-    await turn(app, 'Increase annual revenue from £4 million today to £6 million within 12 months.');
+    expect(exitPath(body)).toBe('draft_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessage: message }),
+    );
+    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+    const dispatch = runtimeMocks.dispatchDraftGraph.mock.calls[0]![0] as {
+      payload: { message: string };
+      briefOverride?: string;
+    };
+    expect(dispatch.payload.message).toBe(message);
+    if (dispatch.briefOverride !== undefined) expect(dispatch.briefOverride).toBe(message);
+    expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.runTurnExecutor).not.toHaveBeenCalled();
+    expect(loadGraphCalls).toBe(1);
+    expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+    expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
     expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
-  // ── THE HAND-WRITTEN CORPUS ──────────────────────────────────────────────
-
   it.each(MEASURED_DEAD_ENDS)(
-    '%s recovers: coaching, never the recovery error',
-    async (_tag, message, expectChip) => {
+    '%s follows the semantic route without canned or graph-unavailable rejection',
+    async (_tag, message, expectedRoute) => {
+      modelRoute(expectedRoute);
+      if (expectedRoute === 'start_model') mockDraftResult();
+      else mockConversationResult();
       const { status, body } = await turn(app, message);
 
       expect(status).toBe(200);
-      expect(
-        body.assistant_text,
-        'this exact message returned the dead-end copy on staging 672b634',
-      ).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
-      expect(exitPath(body)).toBe('frame_no_brief_guard');
-      expect(body.assistant_text).toContain(FRAME_GUARD_COPY);
+      expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ currentMessage: message }),
+      );
+      expect(loadGraphCalls).toBe(1);
+      expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
+      expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
 
-      if (expectChip) {
-        expect(body.suggested_actions).toHaveLength(1);
-        expect(body.suggested_actions[0]).toMatchObject({
-          label: DRAFT_OFFER_CHIP_LABEL,
-          message: DRAFT_OFFER_CHIP_MESSAGE,
-        });
+      if (expectedRoute === 'start_model') {
+        expect(exitPath(body)).toBe('draft_graph');
+        expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+        expect(
+          (runtimeMocks.dispatchDraftGraph.mock.calls[0]![0] as { payload: { message: string } })
+            .payload.message,
+        ).toBe(message);
+        expect(runtimeMocks.runTurnExecutor).not.toHaveBeenCalled();
       } else {
-        // Below the shipped brief-seed floor — coaching, no offer. Asserted
-        // rather than skipped so a change to that floor is visible here.
-        expect(body.suggested_actions).toHaveLength(0);
+        expect(exitPath(body)).toBe('turn_executor');
+        expect(runtimeMocks.runTurnExecutor).toHaveBeenCalledTimes(1);
+        expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
       }
+      expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+      expect(chatWithToolsMock).not.toHaveBeenCalled();
     },
   );
 
-  // ── TELEMETRY: the class must stay observable ────────────────────────────
+  it('null canonical graph + referent-free edit converses after one memoised route-level strict read', async () => {
+    const message = 'Launch it and add a fee.';
+    modelRoute('continue_conversation');
+    mockConversationResult();
 
-  it('the fall-through emits its OWN event, so the class does not vanish from dashboards', () => {
-    // A defect that stops erroring and stops being counted is a defect that
-    // stops being measurable. The reason moved doors; it did not disappear.
-    return turn(
-      app,
-      'Increase annual revenue from £4 million today to £6 million within 12 months.',
-    ).then(() => {
-      const fallthrough = events.filter(
-        (e) => e.name === TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough,
-      );
-      expect(fallthrough).toHaveLength(1);
-      expect(fallthrough[0]!.data).toMatchObject({ scenario_id: SCENARIO_ID });
-    });
+    const { status, body } = await turn(app, message);
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('turn_executor');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runTurnExecutor).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+    expect(loadGraphCalls).toBe(1);
+    expect(
+      events.filter((e) => e.name === TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough),
+    ).toHaveLength(1);
+    expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+    expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
   });
 
-  it('`graph_state_unavailable{no_persisted_graph}` is NO LONGER emitted on a first turn', async () => {
-    await turn(app, 'Increase annual revenue from £4 million today to £6 million within 12 months.');
+  it('continuation with no canonical model shares one route-level strict read across unstrand and intake', async () => {
+    const message = 'How can we increase enterprise conversion?';
+    hasPriorTurnsForRead = true;
+    modelRoute('start_model');
+    mockDraftResult();
+
+    const { status, body } = await turn(app, message);
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('draft_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessage: message }),
+    );
+    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+    expect(loadGraphCalls).toBe(1);
+  });
+
+  it('null canonical graph is never reported as unavailable', async () => {
+    modelRoute('continue_conversation');
+    mockConversationResult();
+    await turn(app, 'Launch it and add a fee.');
     const unavailable = events.filter(
       (e) =>
         e.name === TelemetryEvents.V5EditGraphGraphStateUnavailable &&
@@ -334,21 +400,11 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
     );
     expect(
       unavailable,
-      'the dashboard must stop counting an error path that no longer errors',
+      'a genuine empty model is not an infrastructure failure',
     ).toHaveLength(0);
   });
 
-  // ── THE DISCLOSED CARVE-OUT, pinned so it is a decision and not a gap ────
-
   it('SCOPE: at ANALYSE stage the typed recovery is UNCHANGED — the frame guard cannot catch it there', async () => {
-    // Not an oversight. `isFrameNoBriefShape` requires `stage === 'frame'`, so
-    // an analyse-stage fall-through would reach `runTurnExecutor` — a broad
-    // LLM call, and a breach of the standing edit-lane routing contract
-    // asserted in tests/integration/orchestrator/route-v2-edit-graph-recovery.
-    // Every dead end L56 measured arrived at `stage: 'frame'`, which is what
-    // the UI sends on a first message, so the narrow scoping fixes all of the
-    // observed defect and moves nothing else. Pinned here so that a later lane
-    // widening the scope has to come through this test deliberately.
     const { status, body } = await turn(
       app,
       'Add opportunity cost of founder time as a risk',
@@ -358,6 +414,8 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
     expect(status).toBe(200);
     expect(body.assistant_text).toBe(EDIT_GRAPH_RECOVERY_TEXT);
     expect(exitPath(body)).toBe('edit_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).not.toHaveBeenCalled();
+    expect(loadGraphCalls).toBe(1);
     expect(
       events.filter(
         (e) =>
@@ -371,7 +429,26 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
     ).toHaveLength(0);
   });
 
-  // ── PRESERVATION: the two genuinely transient reasons keep the copy ──────
+  it('valid persisted graph bypasses advisory intake and reaches the canonical edit lane after one route-level strict read', async () => {
+    const persistedGraph = {
+      nodes: [{ id: 'opt-a', kind: 'option', label: 'Current approach' }],
+      edges: [],
+    };
+    persistedGraphForRead = persistedGraph;
+    mockEditResult();
+
+    const { status, body } = await turn(app, 'Add a second sales team in Berlin.');
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('edit_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchEditGraph).toHaveBeenCalledWith(
+      expect.objectContaining({ graphState: persistedGraph }),
+    );
+    expect(loadGraphCalls).toBe(1);
+    expect(body.assistant_text).toContain('Applied the requested change');
+  });
 
   describe('PRESERVATION — the transient failures still say "try again in a moment"', () => {
     it('`session_store_failed`: the store throwing still returns the recovery copy at `edit_graph`', async () => {
@@ -384,6 +461,9 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
         'a store outage IS transient — "try again in a moment" is honest advice here',
       ).toBe(EDIT_GRAPH_RECOVERY_TEXT);
       expect(exitPath(body)).toBe('edit_graph');
+      expect(runtimeMocks.understandOpenFrameIntake).not.toHaveBeenCalled();
+      expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+      expect(loadGraphCalls).toBe(1);
       expect(
         events.filter(
           (e) =>
@@ -402,6 +482,9 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
       expect(status).toBe(200);
       expect(body.assistant_text).toBe(EDIT_GRAPH_RECOVERY_TEXT);
       expect(exitPath(body)).toBe('edit_graph');
+      expect(runtimeMocks.understandOpenFrameIntake).not.toHaveBeenCalled();
+      expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+      expect(loadGraphCalls).toBe(1);
       expect(
         events.filter(
           (e) =>

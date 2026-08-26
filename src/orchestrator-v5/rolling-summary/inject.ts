@@ -55,6 +55,7 @@ import { computeSummaryLag, isSummaryStale, isWatermarkCovered } from './lag.js'
 import type { LagTurn } from './lag.js';
 import { ROLLING_SUMMARY_SLOT_LABELS, ROLLING_SUMMARY_SLOTS } from './summary-types.js';
 import type { RollingSummary } from './summary-types.js';
+import { RollingSummaryStoreError } from './store-adapter.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -218,9 +219,56 @@ const NO_INJECTION: SummaryInjectionOutcome = Object.freeze({
 });
 
 /**
+ * Database failures for which one immediate read retry is both bounded and
+ * meaningful. SQLSTATE class 08 is the connection-exception family; 57P03 is
+ * cannot_connect_now and 53300 is too_many_connections. PGRST001–003 are the
+ * bounded PostgREST connection/internal/schema-cache/pool-acquisition cases.
+ * PGRST000 is deliberately excluded because it also represents a bad database
+ * URI, which an immediate retry cannot repair. Everything else — including
+ * missing RPCs, schema drift, malformed stored bytes and code-less
+ * test/transport errors — remains single-attempt and fails into the existing
+ * hot-window fallback.
+ */
+function isTransientSummaryReadError(error: unknown): error is RollingSummaryStoreError {
+  if (!(error instanceof RollingSummaryStoreError)) return false;
+  const code = error.code?.toUpperCase() ?? '';
+  return (
+    /^08[A-Z0-9]{3}$/.test(code) ||
+    code === '57P03' ||
+    code === '53300' ||
+    code === 'PGRST001' ||
+    code === 'PGRST002' ||
+    code === 'PGRST003'
+  );
+}
+
+async function loadSummaryWithBoundedTransientRetry(
+  store: RollingSummaryStorePort,
+  args: Pick<SummaryInjectionArgs, 'scenarioId' | 'requestId'>,
+): Promise<RollingSummary | null> {
+  try {
+    return await store.loadSummary(args.scenarioId);
+  } catch (error) {
+    if (!isTransientSummaryReadError(error)) throw error;
+    log.debug(
+      {
+        scenario_id: args.scenarioId,
+        request_id: args.requestId ?? null,
+        error_code: error.code,
+        attempt: 1,
+        max_attempts: 2,
+      },
+      'RollingSummary — transient injection read failed; retrying once',
+    );
+    return store.loadSummary(args.scenarioId);
+  }
+}
+
+/**
  * Load + project the stored rolling summary for injection. Non-throwing by
  * contract: any failure returns NO_INJECTION (the turn must never fail or
- * slow beyond the one RPC read this performs).
+ * perform more than two RPC reads: one normal read plus one immediate retry
+ * only for an explicitly attested transient connection code).
  *
  * ACTIVATION CONDITION (O-2, replaces the deleted CEE_ROLLING_SUMMARY flag
  * ladder): inject ONLY when the conversation extends beyond the verbatim
@@ -235,7 +283,7 @@ export async function loadConversationSummaryForInjection(
   if (args.windowTurnsNewestFirst.length <= args.windowDepth) return NO_INJECTION;
   try {
     const store = args.summaryStore ?? getRollingSummaryStore();
-    const summary = await store.loadSummary(args.scenarioId);
+    const summary = await loadSummaryWithBoundedTransientRetry(store, args);
     if (summary === null) return NO_INJECTION;
 
     const lag = computeSummaryLag(summary, args.windowTurnsNewestFirst);
@@ -309,7 +357,21 @@ export async function loadConversationSummaryForInjection(
           current_to_turn_id: summary.updated_turn_id,
           lag_turns: lag,
           stale: true,
-          note: `(conversation summary withheld: it is ${gapPhrase} and only the latest ${verbatimCount} turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
+          // ⚠ NO VERBATIM COUNT HERE (F1, independent review of PR #1102).
+          // This arm returns `summarisedTurns: 0`, and the assembler reads
+          // that 0 as "checked, no coverage" and EXPANDS the verbatim window
+          // from CONTEXT_PACK_RECENT_TURNS_CAP to `priorTurns.length`. So
+          // `verbatimCount` (computed above from `windowDepth`) is NOT the
+          // number the pack goes on to show, and stating it here made the
+          // prompt contradict itself about its own contents — on precisely
+          // the memory-hole path this block exists to serve.
+          //
+          // `verbatimCount` still GATES the refusal above; it just no longer
+          // describes the result. The count belongs to the assembler's window
+          // notice ("the N most recent are shown above and M earlier ones are
+          // not shown"), which derives it from what was actually projected —
+          // one authority for the number, and this note is not it.
+          note: `(conversation summary withheld: it is ${gapPhrase} and only the most recent turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
         },
         lagTurns: lag,
         // The four-slot block was WITHHELD — nothing is summarised here.

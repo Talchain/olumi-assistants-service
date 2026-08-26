@@ -297,6 +297,8 @@ export interface ContextPolicy {
   readonly memory_window: {
     readonly verbatim_turns: number; // DERIVED from CONTEXT_PACK_RECENT_TURNS_CAP
     readonly rolling_summary: boolean; // does this site inject the rolling summary?
+    /** Summary absent/zero coverage: retain the already-fetched hot window. */
+    readonly degraded_summary_fallback?: 'fetched_hot_window';
   } | null;
   /**
    * F10 (2026-07-24): a call site whose OWN dispatch is deterministic (`llm:false`)
@@ -338,7 +340,11 @@ const COACH_CONVERSE: ContextPolicy = {
   turn_class: 'coach-converse (coach-explain · analytical pill · run_analysis-by-message)',
   llm: true,
   model_ref: 'routing.sonnet',
-  memory_window: { verbatim_turns: POLICY_VERBATIM_TURNS, rolling_summary: true },
+  memory_window: {
+    verbatim_turns: POLICY_VERBATIM_TURNS,
+    rolling_summary: true,
+    degraded_summary_fallback: 'fetched_hot_window',
+  },
   total_char_budget: T_ROUTING_TOTAL,
   sections: [
     { name: 'version', source: 'identity', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
@@ -360,7 +366,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // driven by `total_char_budget`, NOT by the 34,000 below — hence
     // `enforced_by_total` rather than a false `enforced`. `cut_rank` is derived
     // from CONTEXT_PACK_CEILING_CUT_ORDER, the array the pass iterates.
-    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation; whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
+    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation (8 turns with summary coverage; fetched hot window when summary absent/zero); whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
@@ -395,6 +401,13 @@ const COACH_CONVERSE: ContextPolicy = {
     // statement in either direction and answered from the transcript.
     { name: 'goal_target', source: 'graph', projection: 'projectGoalTargetRecord → extractPersistedGoalTarget (single authority, shared with the receipt guard; reads the PERSISTED graph, never the request-first graphStateForTurn; key ABSENT when no graph was read — absence means UNKNOWN, never "unset")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'readiness', source: 'readiness', projection: 'projectContextPackReadiness → summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Factor value state — the ONLY section answering "which factors still have
+    // no value?". `readiness` cannot: it answers CAN THE ANALYSIS RUN, and on a
+    // ready payload it projects nothing at all, which is how the model came to
+    // tell a user it could not see unset factors while the Model tab named them.
+    // Two axes kept separate on purpose (a factor can be valueless AND stamped
+    // as an AI estimate); both come from existing authorities, never re-derived.
+    { name: 'factor_values', source: 'graph', projection: 'projectFactorValueRecord → factorHasExtractedValue (value presence) + structureProvenance → classifyValueSource (authorship); reads the PERSISTED graph, never the request-first graphStateForTurn; key ABSENT when no graph was read — absence means UNKNOWN, never "nothing missing"; a fully-valued graph is PRESENT with without_value_count: 0; truncation disclosed via factors_omitted', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },

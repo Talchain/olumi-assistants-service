@@ -56,6 +56,8 @@ import {
   buildPreconditionAssistantText,
   resolveBlockedOptionLabels,
   decideExplanationPrecondition,
+  explanationVerdictBlocks,
+  finaliseExplanationText,
   resolveOptionCount,
 } from './no-op-helpers.js';
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
@@ -83,7 +85,11 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     const optionCount = resolveOptionCount(invocation);
     const verdict = decideExplanationPrecondition(invocation);
 
-    if (verdict !== 'execute') {
+    // ⚠ NOT `verdict !== 'execute'` — see the note in `explanationVerdictBlocks`.
+    // `stale`/`unconfirmed` carry a result that may be referenced in prose with
+    // a caveat, so they are ANSWERED and caveated below; only `missing` and
+    // `degraded` block, because there is nothing to answer with.
+    if (explanationVerdictBlocks(verdict)) {
       const assistantText = buildPreconditionAssistantText(
         verdict,
         optionCount,
@@ -185,10 +191,14 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
               invocation.defaultedAssumptions ?? null,
             );
 
-    // V5 state-trust: CEE no longer prefixes assistant_text with the
-    // staleness caveat. See explain-results.ts for the rationale; same
-    // contract applies here. staleness_prefixed stays on the fact as
-    // false for backwards-compat with telemetry consumers.
+    // ⚠⚠ THIS COMMENT PREVIOUSLY SAID THE OPPOSITE AND IS NOW FALSE AS WRITTEN.
+    // It read: "CEE no longer prefixes assistant_text with the staleness caveat
+    // … staleness_prefixed stays on the fact as false for backwards-compat with
+    // telemetry consumers." CEE DOES prefix again, on this path, and the flag is
+    // now derived rather than pinned to `false` — a hard-coded `false` beside a
+    // caveated string would be a fabrication in the telemetry it claims to serve
+    // (CLAUDE.md trap 14). The rationale still lives in explain-results.ts and
+    // the same contract still applies here — via the SHARED funnel, not a copy.
     //
     // What-if (counterfactual) lens EXTENSION — runs only here, on the execute
     // path, and only APPENDS. `runCounterfactualLens` is fully fail-loud and
@@ -219,7 +229,14 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
           requestId: invocation.requestId,
           signal: invocation.signal,
         });
-    const assistantText = lens ? `${rawText} ${lens.card}` : rawText;
+    // ⭐ Applied to the FINAL assembled string — AFTER the counterfactual card is
+    // appended — so the caveat leads everything the user reads. One call returns
+    // the text and its flag together; never recompute one without the other.
+    const finalised = finaliseExplanationText(
+      lens ? `${rawText} ${lens.card}` : rawText,
+      verdict,
+    );
+    const assistantText = finalised.text;
 
     const fact: WhatWouldFlipHandlerFact = {
       fact_type: 'what_would_flip',
@@ -242,7 +259,13 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
-        staleness_prefixed: false,
+        // DERIVED from the same call that produced the text, never hand-set.
+        // Carries `caveated`, not `stalenessPrefixed` — see the full note at the
+        // twin write site in `explain-results.ts`. Both handlers must agree:
+        // `ui-directive.ts` gates BOTH explanation rows on this field, and a
+        // flag that means one thing on one handler and another on its twin is
+        // the differently-named-twin defect this estate keeps paying for.
+        staleness_prefixed: finalised.caveated,
       },
     };
     const parsed = WhatWouldFlipHandlerFactSchema.safeParse(fact);

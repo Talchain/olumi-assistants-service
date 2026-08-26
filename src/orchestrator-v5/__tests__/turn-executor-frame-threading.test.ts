@@ -29,6 +29,31 @@ import { summariseGraphCounts } from '../context/build-context-summary.js';
 
 const mockState = vi.hoisted(() => ({
   priorTurns: [] as Array<Record<string, unknown>>,
+  /** Stored rolling summary the injector should read. `null` ⇒ no summary. */
+  summary: null as Record<string, unknown> | null,
+}));
+
+/**
+ * The rolling-summary store seam. Without it `getRollingSummaryStore()` throws
+ * on the missing Supabase env, the injector swallows that into NO_INJECTION,
+ * and EVERY fixture lands in the no-coverage branch — which is exactly how the
+ * assembled window silently became indistinguishable from the raw store read
+ * (see the priorTurnCount spec below). Defaulting `summary` to `null` keeps the
+ * other specs byte-identical to the un-mocked behaviour (both routes reach
+ * NO_INJECTION); a spec that needs real coverage sets it.
+ *
+ * `importOriginal` is spread rather than hand-listing the module's exports —
+ * a hand-maintained mock allowlist goes stale silently and takes the whole
+ * file's collection with it.
+ */
+vi.mock('../rolling-summary/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../rolling-summary/index.js')>()),
+  getRollingSummaryStore: () => ({
+    loadSummary: async () => mockState.summary,
+    upsertSummary: async () => {
+      throw new Error('the injector must never write');
+    },
+  }),
 }));
 
 vi.mock('../session/index.js', () => ({
@@ -169,6 +194,7 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
   beforeEach(() => {
     setTestSink(() => {});
     mockState.priorTurns = [];
+    mockState.summary = null;
   });
   afterEach(() => {
     setTestSink(null);
@@ -251,22 +277,104 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
     expect(frame.model.graphHash).toBe(result.freshness!.current_graph_hash);
   });
 
-  it('priorTurnCount reports the ASSEMBLED (capped) context, never the uncapped store total', async () => {
-    // cap+2 prior turns in the store; the ContextPack conversation projection
-    // caps at CONTEXT_PACK_RECENT_TURNS_CAP. The frame must report what the turn
-    // actually reasoned over — the uncapped store total would over-report context
-    // completeness to the harness (A2 fabricated-completeness hazard flagged in
-    // the slice-2 fail-open review). Derived from the constant so the cap binds
-    // whatever its value.
-    const storeTotal = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
-    mockState.priorTurns = Array.from({ length: storeTotal }, (_, i) => i + 1).map(mkPriorTurn);
+  /**
+   * F5 (independent review of PR #1102) — THE DISCRIMINATING FIXTURE.
+   *
+   * `priorTurnCount` must report the ASSEMBLED conversation window, never the
+   * raw store read. The previous version of this spec fetched 10 turns with no
+   * summary seam, where the assembler's no-coverage branch expands the window
+   * to `priorTurns.length` — so assembled (10) EQUALLED the raw read (10), and
+   * a mutant sourcing `priorTurnCount` from `context.prior_turns.length` — the
+   * exact defect this spec names — stayed GREEN. A guard whose two candidate
+   * answers are the same number is not a guard.
+   *
+   * The fix is a fixture where the two genuinely differ: a HEALTHY summary
+   * (real coverage) puts the assembler back on `CONTEXT_PACK_RECENT_TURNS_CAP`,
+   * so 10 are fetched and 8 assembled. The assertion below is satisfiable ONLY
+   * on that path — if the fixture ever degrades into the floor / memory-hole
+   * arm, `summarisedTurns` stops being > 0, the window expands to 10, and this
+   * spec goes red rather than quietly passing for the wrong reason.
+   */
+  it('priorTurnCount reports the ASSEMBLED window (8), not the raw store read (10)', async () => {
+    const fetchedWindow = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
+    // ANTI-VACUITY: the whole discrimination rests on these two differing. If
+    // the cap ever moves to equal the fetched window, this spec stops telling
+    // the two candidate sources apart and must fail loudly, not silently pass.
+    expect(
+      fetchedWindow,
+      'fetched and assembled must differ or this spec discriminates nothing',
+    ).not.toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+
+    mockState.priorTurns = Array.from({ length: fetchedWindow }, (_, i) => i + 1).map(mkPriorTurn);
+    // Watermark at prior turn 3 (2026-04-30T03:00Z): it is present in the
+    // window (so the watermark is provably COVERED) and 7 turns are newer than
+    // it — lag 7, inside the 8-turn verbatim slice, so the memory-hole guard
+    // does NOT refuse and the block earns real coverage (10 − 8 = 2 turns).
+    mockState.summary = {
+      text: [
+        'DECISION FRAME: Choosing a supplier for the new product line.',
+        'CONSTRAINTS & PREFERENCES: Keep Maria on the team.',
+        'RESOLVED: (none)',
+        'OPEN: Which region to launch first?',
+      ].join('\n'),
+      slots: [
+        {
+          slot: 'FRAME',
+          entries: [
+            { text: 'Choosing a supplier for the new product line.', source_turn_ids: [] },
+          ],
+        },
+        {
+          slot: 'CONSTRAINTS',
+          entries: [{ text: 'Keep Maria on the team.', source_turn_ids: ['prior-turn-2'] }],
+        },
+        { slot: 'RESOLVED', entries: [] },
+        {
+          slot: 'OPEN',
+          entries: [
+            { text: 'Which region to launch first?', source_turn_ids: ['prior-turn-3'] },
+          ],
+        },
+      ],
+      updated_turn_id: 'prior-turn-3',
+      updated_turn_created_at: '2026-04-30T03:00:00.000Z',
+      version: 3,
+      generator: 'incremental',
+      schema_version: 1,
+    };
+
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-frame-cap', {
       routingAdapter: mockRoutingAdapter(async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…')),
       handlerRegistry: makeSuccessRegistry(GRAPH_HASH),
       graphState: GRAPH_WITH_OPTIONS,
     });
     expect(result.frame).toBeDefined();
+    // THE PIN: the assembled window, which on this path is the cap — and is
+    // NOT the number of rows the store returned.
     expect(result.frame!.conversation.priorTurnCount).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(result.frame!.conversation.priorTurnCount).not.toBe(fetchedWindow);
+  });
+
+  /**
+   * The degraded arm, kept as an honest record of current behaviour: with no
+   * stored summary the assembler retains every fetched row, so the assembled
+   * window legitimately equals the fetched one.
+   *
+   * ⚠ This spec CANNOT discriminate assembled-vs-raw — the two are the same
+   * number here by construction. That is the point of the spec above, and this
+   * one must never be mistaken for the guard.
+   */
+  it('degraded (no summary): the assembled window retains every fetched row', async () => {
+    const fetchedWindow = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
+    mockState.priorTurns = Array.from({ length: fetchedWindow }, (_, i) => i + 1).map(mkPriorTurn);
+    mockState.summary = null;
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-frame-cap-degraded', {
+      routingAdapter: mockRoutingAdapter(async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…')),
+      handlerRegistry: makeSuccessRegistry(GRAPH_HASH),
+      graphState: GRAPH_WITH_OPTIONS,
+    });
+    expect(result.frame).toBeDefined();
+    expect(result.frame!.conversation.priorTurnCount).toBe(fetchedWindow);
   });
 
   it('read-only posture: the frame never alters the user-facing response', async () => {

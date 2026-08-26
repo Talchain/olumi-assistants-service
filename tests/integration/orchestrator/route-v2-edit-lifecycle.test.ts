@@ -183,7 +183,7 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     expect(intercept!.source).toBe('exact_text');
 
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('The model is unchanged so far.');
+    expect(body.assistant_text).toContain("I haven't changed anything from that.");
     expect(body.assistant_text).toContain('apply it directly');
     expect(Array.isArray(body.suggested_actions)).toBe(true);
     expect(body.suggested_actions.length).toBeGreaterThan(0);
@@ -232,7 +232,7 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     expect(emittedNames()).toContain('v5.edit_graph.intercepted_vague_edit');
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('The model is unchanged so far.');
+    expect(body.assistant_text).toContain("I haven't changed anything from that.");
   });
 
   // Test #3c — conversational messages MUST NOT be intercepted as

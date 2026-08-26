@@ -15,6 +15,7 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
+import { STALENESS_PREFIX } from '../staleness-prefix.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
@@ -465,7 +466,7 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
     expect(outcome.suppress_orientation).toBe(true);
   });
 
-  it('stale: successful fact + freshness=stale → stale template, never the projection answer', async () => {
+  it('stale: successful fact + freshness=stale → caveat LEADS, and the answer is KEPT (S8b narrowing)', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
@@ -476,7 +477,13 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
       }),
     );
     expect(outcome.assistant_text).toMatch(/model has changed since the last analysis/);
-    expect(outcome.assistant_text).not.toContain('Engineering Capacity');
+    // ⚠ EXPECTATION DELIBERATELY FLIPPED BY THE S8b NARROWING — see the twin in
+    // `explain-results.test.ts`. This asserted the stale turn DELETED the
+    // answer; the caveat now accompanies it. The caveat-leads pin above is
+    // unchanged, and this handler shares the SAME enforcement funnel
+    // (`finaliseExplanationText`) rather than carrying its own prefixer.
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text.startsWith(STALENESS_PREFIX)).toBe(true);
   });
 
   it('defensive: successful (fresh) fact + null projection → degraded template, never "no analysis"', async () => {

@@ -562,6 +562,39 @@ const ContextPackFocusSchema = z
  * `.strict()` on both arms: a value plus its unit is the whole contract, and
  * nothing else from the goal node belongs in the prompt.
  */
+/**
+ * Mirrors `ContextPackFactorValueEntry` (context/factor-value-record.ts).
+ *
+ * ⚠ `has_value` and `provenance` are SEPARATE AXES and must stay separate: the
+ * witnessed model carried factors that were BOTH valueless AND stamped as AI
+ * estimates. `provenance` is AUTHORSHIP (`classifyValueSource`), which is a
+ * weaker claim than a user-write receipt — see the record module's header.
+ */
+const ContextPackFactorValueEntrySchema = z
+  .object({
+    label: z.string().min(1),
+    has_value: z.boolean(),
+    provenance: z.enum(['user_stated', 'ai_drafted', 'system_repaired', 'unattributed']),
+  })
+  .strict();
+
+/** Mirrors `ContextPackFactorValues` (context/factor-value-record.ts). */
+export const ContextPackFactorValuesSchema = z
+  .object({
+    factors: z.array(ContextPackFactorValueEntrySchema).readonly(),
+    /**
+     * ZERO IS A POSITIVE CLAIM — `nonnegative()`, deliberately NOT `positive()`.
+     * The sibling `items_omitted` markers omit their key at zero because a
+     * marker disclosing nothing is noise; this is the opposite kind of field.
+     * "Every factor has a value" is the answer to the user's question, and it
+     * must be sayable.
+     */
+    without_value_count: z.number().int().nonnegative(),
+    /** Disclosed truncation — present ONLY when the cap dropped factors. */
+    factors_omitted: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
   z
     .object({
@@ -659,6 +692,23 @@ export const ContextPackSchema = z
      * cap or a fabricated provenance cannot ride along into the prompt.
      */
     goal_target: ContextPackGoalTargetSchema.optional(),
+    /**
+     * FACTOR VALUE STATE: which factors still have no value, and whose value is
+     * on the ones that do. Mirrors `ContextPackFactorValues`
+     * (context/factor-value-record.ts) — see that module for the witnessed
+     * defect this closes.
+     *
+     * Present ONLY when a graph was read this turn (key absent otherwise).
+     * ⚠ ABSENCE MEANS UNKNOWN, NEVER "nothing is missing". When a graph WAS
+     * read and every factor carries a value the slice is PRESENT with
+     * `without_value_count: 0` — a positive claim. Encoding "none missing" as
+     * absence is precisely how the model came to say it could not see which
+     * factors were unset while the Model tab named all three.
+     *
+     * `.strict()` so a raw coefficient or a fabricated provenance cannot ride
+     * into the prompt alongside the label.
+     */
+    factor_values: ContextPackFactorValuesSchema.optional(),
     /**
      * SELECTION-AWARE ANSWERING (hop 4): the user's canvas selection, resolved
      * against canonical state and projected display-safe by `projectFocus`.

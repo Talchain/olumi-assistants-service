@@ -129,9 +129,28 @@ describe('SupabaseRollingSummaryStore.loadSummary', () => {
   });
 
   it('surfaces a read RPC error as a typed store error', async () => {
-    const { client } = clientWith(() => ({ data: null, error: { message: 'boom' } }));
-    await expect(
-      new SupabaseRollingSummaryStore(client).loadSummary('sc-1'),
-    ).rejects.toBeInstanceOf(RollingSummaryStoreError);
+    const { client } = clientWith(() => ({
+      data: null,
+      error: { message: 'database is starting', code: '57P03' },
+    }));
+    const error = await new SupabaseRollingSummaryStore(client)
+      .loadSummary('sc-1')
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(RollingSummaryStoreError);
+    expect((error as RollingSummaryStoreError).code).toBe('57P03');
+  });
+
+  it('preserves a PostgREST connection code for the bounded read-retry policy', async () => {
+    const { client } = clientWith(() => ({
+      data: null,
+      error: { message: 'pool acquisition timed out', code: 'PGRST003' },
+    }));
+    const error = await new SupabaseRollingSummaryStore(client)
+      .loadSummary('sc-1')
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(RollingSummaryStoreError);
+    expect((error as RollingSummaryStoreError).code).toBe('PGRST003');
   });
 });

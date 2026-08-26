@@ -91,6 +91,7 @@ import {
   readMayNameLeadingOptionVerdict,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { AnalysisNotReadyError } from '../tools/handlers/analysis-ready-core.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
@@ -592,6 +593,22 @@ async function tryComposeRecoverableChipOutcome(
   payload: MessageTurnPayload,
   startedAt: number,
   coachingState: CommitMetadata['coaching_state'],
+  /**
+   * The readiness this turn ALREADY projected from the canonical snapshot,
+   * before the handler was invoked — `deriveAnalysisReadyFromSnapshot`'s single
+   * per-turn derivation, the same one the success path, the chip generator and
+   * the wire response reuse. NOT a second assessment: passing it here is the
+   * whole point, because re-deriving would put two computations of one fact in
+   * the tree (`analysis-ready-core`'s "ONE assessment, not two").
+   *
+   * `buildAnalysisRefusalReadiness` decides from its `may_run` verdict whether
+   * this refusal is about the MODEL (carry the identity) or about something
+   * else (the empty carrier). See that function for the measured three-class
+   * table; the short version is that a mid-session refusal admits and stays
+   * bare, while a fresh draft's refusal does not admit and must name the model
+   * the user has to fix.
+   */
+  structuralReadiness: AnalysisReadyPayload | undefined,
 ): Promise<
   | Extract<
       DispatchChipClickRunAnalysisResult,
@@ -679,12 +696,63 @@ async function tryComposeRecoverableChipOutcome(
     retryable: err.retryable,
   });
 
-  // ROADMAP 2.1085 (root 2.1041) / EXT-2 — the typed refusal: a PRESENT-but-empty carrier.
-  // It deliberately carries no options (see `buildAnalysisRefusalReadiness`
-  // for why carrying the real ones ships a false UI surface), so `graph` is
-  // used only for label resolution downstream, exactly as before.
+  // ROADMAP 2.1085 (root 2.1041) / EXT-2 — the typed refusal.
+  //
+  // ⭐ THE STRUCTURAL PROJECTION IS HANDED IN, NOT DISCARDED. This call used to
+  // pass one argument, so the refusal was ALWAYS the empty carrier on this arm.
+  // The routed arm (`turn-executor.ts:10097`) has passed the two-argument form
+  // since #1023: the fix existed and shipped to one arm only, and the arm it
+  // missed is the one the deployed "Run analysis" chip actually takes.
+  //
+  // MEASURED CONSEQUENCE, two authenticated runs at deployed CEE c24bfe37: a
+  // signed-in user clicking "Run analysis" on a freshly drafted model received
+  // `status="blocked" goal_node_id="" options=[] blocked_reason=
+  // "MISSING_OPTION_VALUE"` with `blockers` ABSENT — a refusal naming no model
+  // and no blockers, so nothing downstream could say what to fix. That absence
+  // is also why `analysis_state.run_state.blockers` is `[]`: it is ONE defect,
+  // not two — `compose/analysis-state-v1.ts:486-493` calls
+  // `mapWireBlockers(input.readiness?.blockers)` and `mapWireBlockers(undefined)`
+  // returns `[]`.
+  //
+  // `buildAnalysisRefusalReadiness` — not this arm — decides which refusals keep
+  // the identity, from the admission verdict the projection already carries. So
+  // the mid-session case the empty carrier was measured for still gets the empty
+  // carrier (it ADMITS: `may_run === true`), and the rule lives with the
+  // vocabulary instead of being restated per arm. Restating it here is the
+  // two-arms-disagreeing defect (CLAUDE.md trap 21) that produced this bug.
+  //
+  // `graph` remains used only for label resolution downstream, exactly as before.
   const blockedReason = blockedReasonForHandlerFailure(err);
-  const analysisReady = buildAnalysisRefusalReadiness(blockedReason);
+  // ⭐ AND WHEN THIS TURN HAS NO PROJECTION OF ITS OWN, READ THE ONE THE
+  // REFUSAL BROUGHT WITH IT.
+  //
+  // `structuralReadiness` is the `:955` binding, and `:955` is
+  // `cachedSnapshot ? derive(...) : undefined`. On the path where the LOADER
+  // ITSELF refused, `cachedSnapshot` is null by construction (`:904`) — so the
+  // arm passed `undefined` and `buildAnalysisRefusalReadiness` returned the
+  // bare carrier at its first line, before the `may_run` discriminator #1126
+  // gave it could be consulted. The rule was right and had nothing to rule on.
+  //
+  // That is exactly the path a signed-in user takes clicking "Run analysis" on
+  // a freshly drafted model, and it is why the fix that shipped to this arm did
+  // not close the case it was written for.
+  //
+  // Preference order is deliberate: a projection derived from THIS turn's
+  // snapshot wins, because it is the more current read. The verdict's payload
+  // is a fallback for the one case where no snapshot exists — and on that path
+  // the two cannot disagree, because there is only one.
+  //
+  // ⚠ `cause`, NOT `details`. `run-analysis.ts:337` preserves the original error
+  // as the standard ES2022 `cause`; `details` is an untyped telemetry record
+  // (`[key: string]: unknown`) that would give this read no type safety at all.
+  // No change is needed there — the link already exists.
+  const fromVerdict = err.cause instanceof AnalysisNotReadyError
+    ? err.cause.structuralReadiness
+    : undefined;
+  const analysisReady = buildAnalysisRefusalReadiness(
+    blockedReason,
+    structuralReadiness ?? fromVerdict,
+  );
   // ROADMAP 2.1085 (root 2.1041) R2/R3 — clamp the verdict this carrier may
   // report. See `clampRefusalFreshness` for why `fresh`/`none` are forbidden
   // on a refusal turn and why the hash PAIR (not just the verdict) is broken.
@@ -1037,6 +1105,10 @@ export async function dispatchChipClickRunAnalysis(
           payload,
           startedAt,
           context.coaching_state,
+          // The SAME single per-turn derivation computed above and reused by
+          // the chips, Phase 3 composition and the wire response — never a
+          // second assessment of the same graph.
+          analysisReady,
         );
         if (recovered) return recovered;
         log.warn(

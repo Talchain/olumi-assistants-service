@@ -195,8 +195,58 @@ export function buildOptionEffectReference(optionRef: string, factorRef: string)
   // estate has already paid for twice.** Any copy that puts an exemplar in front
   // of a user must use the form that routes.
   return ref.length > 0
-    ? `the ${ref} option's effect on ${factorRef}`
-    : `the option's effect on ${factorRef}`;
+    ? `the ${ref} ${OPTION_EFFECT_ANCHOR} ${factorRef}`
+    : `the ${OPTION_EFFECT_ANCHOR} ${factorRef}`;
+}
+
+/**
+ * ⭐ THE LABEL-INDEPENDENT ANCHOR of the option-effect noun phrase, and the one
+ * spelling of it. `buildOptionEffectReference` composes FROM it and
+ * `messageNamesOptionEffectSlot` recognises BY it, so the sentence the product
+ * advises and the sentence it can recognise cannot drift apart (trap 12 — the
+ * second spelling is the one that rots). The dependency deliberately points
+ * this way: the constant is the source, both directions derive.
+ */
+const OPTION_EFFECT_ANCHOR = "option's effect on";
+
+/**
+ * ⭐⭐ DOES THIS MESSAGE ALREADY NAME AN OPTION × FACTOR SLOT? — i.e. is the
+ * IDENTIFICATION complete, whatever the message does or does not say about a
+ * value?
+ *
+ * ## Why this is a SHAPE predicate and not a string comparison
+ *
+ * The obvious implementation is `message === buildRepairPairChipMessage(option,
+ * factor)` for the pair the composer holds. **It would be dark in production,
+ * and green in any fixture that supplies both sides.** Derived at the bytes:
+ * the chip's message is built in `coaching/readiness-recovery.ts` from
+ * `deriveAskedEffectPair(analysisReady)` — `asked.optionLabel` /
+ * `asked.factorLabel` — while the composer's labels arrive from
+ * `configure-option-outcome.ts` as `recovery.optionLabel` /
+ * `recovery.factorLabels`, a SECOND resolution against a DIFFERENT graph whose
+ * own header states that nothing structurally forces it onto the same shape.
+ * Two derivations, no guarantee of equality — so an equality predicate is a
+ * guard that agrees with the test fixture and nothing else (trap 13b).
+ *
+ * Matching the ANCHOR instead asks the question that actually matters, and asks
+ * it about the message alone: *does this sentence name an option's effect on a
+ * factor?* Labels never enter, so the two derivations cannot desynchronise it.
+ *
+ * ## What it deliberately does NOT decide
+ *
+ * Nothing about a value. `"…effect on Y to 0.6"` satisfies this too — and must,
+ * because the predicate answers "is the slot named?", not "did the user give me
+ * a number?" (trap 21: two questions, two names). The caller composes it with
+ * the value predicates that already exist; conflating them here would rebuild
+ * the same conjunction in a second place.
+ */
+export function messageNamesOptionEffectSlot(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  // Normalise the typographic apostrophe: user-facing copy round-trips through
+  // surfaces that substitute it, and a slot named with a curly quote is the
+  // same slot.
+  const normalised = message.replace(/[‘’]/g, "'").toLowerCase();
+  return normalised.includes(OPTION_EFFECT_ANCHOR);
 }
 
 /**
@@ -314,40 +364,80 @@ export const CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE = buildConfigureOptionAdvi
  * absence is real, not a blind read. A witness followed that sentence to a
  * dead end on 2026-08-19.
  *
- * ## Why the OPTION is the true locus
+ * ## ⛔ AND THE CANVAS SPELLING THAT REPLACED IT WENT FALSE TOO — ROADMAP 2.1269
  *
- * The field CEE writes for this slot is `data/interventions/<factorId>` on the
- * OPTION node (`op: 'update_node'`, pinned by
- * `graph-management/__tests__/option-effect-write-apply-chain.test.ts`). The
- * canvas edits THAT SAME FIELD, and only from the option panel:
- * `inspector-v2/panels/OptionPanel.tsx` — "Primary editing surface: intervention
- * inputs MUST remain editable" — renders an editable `InterventionRow` per
- * intervention plus an always-rendered "+ Add a change" dropdown calling
- * `mutations.setIntervention(factorId, …)`, which is precisely the add path for
- * the state this reply describes (linked, no value yet). Mounted via
- * `InspectorModal` ← `ReactFlowGraph.tsx:47`.
+ * The second spelling was:
  *
- * The UI already says the same thing in its own words on that panel
- * (`inspectorStrings.ts:409`): "…no change values are set yet — set one to give
- * this option an effect in the analysis." And CEE's own served prompt already
- * says it too (`prompts/orchestrator-cf-v19.ts:1331`: "click each option on the
- * canvas and set …"). The clarify composer was the ESTATE'S ONLY SPELLING that
- * named the link, so this is a convergence, not a new rule: one owner here, the
- * divergent inline spelling deleted rather than left beside it.
+ *   "To set it directly, open "<option>" on the canvas and add <factor> to what
+ *    it changes."
  *
- * ## Deliberately coarse
+ * It was right about WHICH FIELD the write targets (`data/interventions/<factorId>`
+ * on the OPTION node, `op: 'update_node'`, pinned by
+ * `graph-management/__tests__/option-effect-write-apply-chain.test.ts`) and wrong
+ * about whether a user can reach it. The canvas option panel renders the
+ * intervention row inside a DISABLED fieldset and writes nothing.
  *
- * It names the OPTION and the OUTCOME ("what it changes" — the same vocabulary
- * as the panel's own `What this option changes` group and as this product's
- * "Tell me what it changes"), and it does NOT name a section, a button or a
- * click path. A sentence that spelled the UI's furniture would be a
- * cross-service hand-maintained mirror (CLAUDE.md trap 12) that goes silently
- * false on the next rename — which is exactly how the sentence it replaces
- * became false.
+ * DERIVED AT THE SERVED BUNDLE (`ReactFlowGraph-ozVez5O5.js`): `disabled:!0` is a
+ * literal there; EXACTLY TWO fieldset sites exist in the whole bundle and BOTH
+ * are disabled; ZERO `removeAttribute("disabled")`; ZERO `createPortal` in
+ * `inspector-v2`, against a live contrast elsewhere in the same bundle. A forced
+ * native write on 2026-08-25 produced ZERO wire calls, and the panel's own notice
+ * says the change "cannot yet be saved to the shared model".
+ *
+ * ⚠⚠ RUNG, STATED EXACTLY: **DERIVED AT THE SERVED BUNDLE — NOT DOM-WITNESSED.**
+ * No lane has observed a real `:disabled` computed state in a browser. Do not
+ * read this header as claiming that rung.
+ *
+ * The old sentence was WITNESSED reaching a real user's read surface verbatim on
+ * deployed CEE `c24bfe3` (signed-in wire drive, 14/14 Route-A probes, 2 users,
+ * 2 scenarios, `llm_calls: []`).
+ *
+ * ## Why the destination is now CHAT, and why it takes no arguments
+ *
+ * Chat is the only destination witnessed to land this write
+ * (`interventions: {…, source: "user_specified"}`, verified after reload). Every
+ * hand-editing surface in the UI is currently inert for an option's effect value
+ * — the canvas panel (above), the Model tab (`editConnectedIds` is built from
+ * FACTOR nodes only, `ModelTabV2Panel.tsx:216-220`, so `editorAvailable` is false
+ * for every option and `ValueCell` renders a `<span>`), and the Model tab's
+ * options section (`OptionsSection.tsx:321-330` does render a real `InlineEdit`,
+ * but `ModelTabBody.tsx:120` sets `LEGACY_DETAILED_EDITOR_MOUNTED = false`, so it
+ * is DEAD). Naming any of them would repeat this sentence's own history.
+ *
+ * ⭐⭐ IT TAKES NO ARGUMENTS, AND THAT IS THE POINT. It must not ask the user to
+ * reproduce the option label: the UI's `safeLabel` truncates option labels at 60
+ * characters (the 2026-08-18 capture recorded real labels of 84-101), and
+ * `resolveOptionEffectWrite` returns `option_not_named` on a truncated label — so
+ * a user who copies the label AS THE PRODUCT RENDERS IT cannot name it back. Chat
+ * works for the BARE-NUMBER form and fails for the label-bearing form. A builder
+ * that CANNOT receive a label cannot invite one; that is a structural guarantee
+ * rather than a promise the next reword could quietly drop. The caller still
+ * names the option once, honestly, in the sentence above this one.
+ *
+ * ⚠ THE DECIMAL EXEMPLAR IS LOAD-BEARING, NOT STYLE. `matchBareRepairValue`
+ * deliberately REFUSES a bare integer as "an ordinal in disguise" (a naked `1`
+ * measured binding as an effect value of 1.0 while the user meant "the first
+ * one"), so copy inviting "1" would invite the one token that will not bind.
+ * `0.6` is the estate's existing exemplar and is wire-proven to route; #1113
+ * created exactly this collision in its own copy and had to correct it.
+ *
+ * The literal is spelled here rather than imported: this module is
+ * dependency-free ON PURPOSE (compose imports IT), so importing
+ * `CONFIGURE_OPTION_EXAMPLE_VALUE` would be a cycle — and minting a local
+ * constant would be the fifth name for one number, the accretion the
+ * `buildRepairPairChip` header above already refuses. Agreement between the two
+ * is asserted in
+ * `compose/__tests__/configure-option-answered-locus-can-save.test.ts`, so drift
+ * REDs instead of going quiet.
+ *
+ * ## The shape to notice
+ *
+ * Twice now this sentence named a locus that was correct when written and went
+ * false when the surface beneath it changed — a cross-service hand-maintained
+ * mirror (CLAUDE.md trap 12), exactly as the header of its own previous version
+ * warned. Pointing at chat removes the mirror: the destination is a surface this
+ * service owns.
  */
-export function buildConfigureOptionDirectSetSentence(
-  optionRef: string,
-  factorRef: string,
-): string {
-  return `To set it directly, open "${optionRef}" on the canvas and add ${factorRef} to what it changes.`;
+export function buildConfigureOptionDirectSetSentence(): string {
+  return "Send me just the number here — 0.6, say — and I'll set it on that link.";
 }

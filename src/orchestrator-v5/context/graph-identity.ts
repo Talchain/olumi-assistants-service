@@ -38,7 +38,10 @@ import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
+import {
+  computeAnalysisAffectingGraphHash,
+  computeAnalysisAffectingGraphHashSha256,
+} from './graph-hash.js';
 
 // ---------------------------------------------------------------------------
 // Versioned projection metadata (contract §8 "Normalisation must be versioned",
@@ -111,7 +114,13 @@ export interface GraphIdentityHash {
 // stripped: if such a field ever appears it stays in identity, which is the
 // safe direction. A leaked bare `viewport.zoom` is still covered — the whole
 // `viewport` object is stripped.
-const TRANSIENT_UI_KEYS: ReadonlySet<string> = new Set(
+// EXPORTED (C8-A review, 2026-08-25) so guards DERIVE this set instead of
+// mirroring it. A hand-written copy in a test was measured unable to see the
+// set GROW: it REDded when a key was removed and stayed fully green when one
+// was added — the hand-maintained-mirror defect living inside the guard that
+// exists to prevent it. Export only; the membership and the projection are
+// unchanged, so no persisted hash moves and IDENTITY_NORMALISER_VERSION stands.
+export const TRANSIENT_UI_KEYS: ReadonlySet<string> = new Set(
   [
     'selected',
     'selection',
@@ -261,6 +270,40 @@ function isNonEmptyArray(value: unknown): value is unknown[] {
  * each other — different purposes); returning `null` for an empty graph is the
  * safe identity outcome and drives the CAS evaluator's `unavailable` result.
  */
+export function isIdentityEmptyGraph(
+  graph: GraphStateIngress | null | undefined,
+): boolean {
+  return !graph || isIdentityEmpty(graph);
+}
+
+/**
+ * Deterministic ORDERING ONLY — no key stripping, no hashing, no envelope.
+ *
+ * Added (C8-A review, 2026-08-25) so a consumer that must NOT inherit the
+ * transient strip can still be order-invariant. `normaliseGraphForIdentity`
+ * couples the two: it strips `TRANSIENT_UI_KEYS` at every depth AND orders the
+ * entry arrays. The model-version creation policy needs the ordering and must
+ * not have the strip — a factor whose id normalises into that set (a factor
+ * labelled "UI" → `ui`) had its interventions entry deleted from both sides of
+ * the comparison, so a real edit compared equal and its version was silently
+ * dropped.
+ *
+ * Reuses the SAME comparators as the identity normaliser rather than restating
+ * them; a second copy of an ordering rule is the hand-maintained twin this file
+ * already warns about. Pure; never mutates its input. Does not alter any
+ * persisted hash — nothing calls it from the identity or CAS paths.
+ */
+export function orderGraphEntriesForComparison(graph: unknown): unknown {
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) {
+    return graph;
+  }
+  const out: Record<string, unknown> = { ...(graph as Record<string, unknown>) };
+  if (Array.isArray(out.nodes)) out.nodes = sortByIdThenSerialised(out.nodes);
+  if (Array.isArray(out.edges)) out.edges = sortEdges(out.edges);
+  if (Array.isArray(out.options)) out.options = sortByIdThenSerialised(out.options);
+  return out;
+}
+
 function isIdentityEmpty(graph: GraphStateIngress): boolean {
   const g = graph as Record<string, unknown>;
   const nodes = g.nodes;
@@ -363,6 +406,26 @@ export function computeAnalysisAffectingHashRecord(
   graph: GraphStateIngress | null | undefined,
 ): AnalysisAffectingHash | null {
   const value = computeAnalysisAffectingGraphHash(graph);
+  if (value === null) return null;
+  return {
+    kind: 'analysis_affecting_hash',
+    value,
+    algorithm: HASH_ALGORITHM,
+    projection_version: ANALYSIS_PROJECTION_VERSION,
+    graph_schema_version: GRAPH_SCHEMA_VERSION,
+    normaliser_version: ANALYSIS_NORMALISER_VERSION,
+  };
+}
+
+/**
+ * Durable-version form of the analysis-affecting identity. It uses the same
+ * projection/normaliser as freshness but retains the complete SHA-256 rather
+ * than the established 16-hex freshness token.
+ */
+export function computeVersionAnalysisAffectingHashRecord(
+  graph: GraphStateIngress | null | undefined,
+): AnalysisAffectingHash | null {
+  const value = computeAnalysisAffectingGraphHashSha256(graph);
   if (value === null) return null;
   return {
     kind: 'analysis_affecting_hash',

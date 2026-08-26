@@ -86,6 +86,10 @@ export const EXTERNAL_SERVICE_ENV_VARS = [
   "CEE_BASE_URL",
   "CEE_API_KEY",
   // Explicit opt-in flags for the staging/e2e suites —
+  // C4 canonical-state acceptance fixtures: a LOCAL Postgres with the repo's
+  // migrations applied (never staging — the suite installs failure-injection
+  // triggers). See tests/integration/README-c4-local-db.md.
+  "RUN_C4_CANONICAL_STATE",
   "RUN_CANARY",
   "RUN_E2E_GOLDEN_V2",
   "RUN_WAVE0_STAGING",
@@ -117,6 +121,10 @@ export const EXTERNAL_SERVICE_ENV_VARS = [
  */
 export const REQUIRED_GATE_INTEGRATION_EXCLUSIONS = [
   "tests/integration/adversarial.test.ts",
+  // Component 4 — needs a REAL Postgres, because no plpgsql executes in the
+  // required gate and a regex cannot observe a transaction boundary. Self-gated
+  // on RUN_C4_CANONICAL_STATE + DATABASE_URL; skips (never errors) without them.
+  "tests/integration/c4-canonical-state-restore.contract.test.ts",
   "tests/integration/prompts.repository.test.ts",
   "tests/integration/slice-b-commit-failure.test.ts",
   "tests/integration/slice-b-concurrent-writes.test.ts",

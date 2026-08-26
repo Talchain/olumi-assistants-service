@@ -717,13 +717,17 @@ script here.
 
 **The question.** A scenario's entire durable conversational memory is the rolling
 summary: `SUMMARY_HARD_CAP_CHARS` 1,600 (hard reject → keep prior),
-`SUMMARY_TARGET_MAX_CHARS` 1,200 quoted into the summariser prompt with *"Never
-exceed the length — drop the least important detail instead."* Every gate in
+`SUMMARY_TARGET_MAX_CHARS` 1,400 quoted into the summariser prompt with *"Never
+exceed the length — drop the least important detail instead."* The prior 1,200
+target silently lost 2/10 durable facts in this journey despite a faithful
+1,371-char summary fitting under the existing hard cap. The target is that
+measured peak rounded up to the next 100-character operating boundary, and the
+harness pins the relationship so it cannot drift into an unmeasured allowance. Every gate in
 `rolling-summary/` defends against a slot being EMPTIED, MIS-ATTRIBUTED, STALE or
 ABSENT. **Nothing defends against — or notices — a slot losing one stated fact
-among several**, because `findErasedSlots` fires only on a slot that is *entirely*
-empty, and `assembleSummaryFromParsed` stores AT MOST ONE ENTRY PER SLOT, so no
-count in the system could see a statement go missing.
+among several**, so the licensed envelope now preserves every seeded durable
+fact and the former 1,200 policy remains as a red mutant rather than an accepted
+measurement.
 
 **What it runs.** The real chain, seam for seam: `maintainRollingSummaryForCommit`
 once per turn → `buildSummariserInput` / `shouldRegenerate` → the injected
@@ -740,17 +744,20 @@ the `activation-acceptance.test.ts` anti-theatre pattern):
 | arm | what it is | what its number means |
 |---|---|---|
 | **A faithful** | never drops | whether the PIPELINE can carry a turn-1 fact to turn 19. A loss here is a code defect — this is what the floors gate. |
-| **B1/B2 budget** | drops at 1,200 chars, oldest-/newest-first | what a drop costs, and **whether anything in the system notices**. The drop is supplied by the fixture; the measurement is the system's silence. |
+| **B1/B2 production budget** | applies the current 1,400-char target, oldest-/newest-first | required all-facts continuity through both incremental and full-regeneration turns. |
+| **M1/M2 legacy mutant** | replays the former 1,200-char target, oldest-/newest-first | proves the new floor turns red on the exact superseded policy: each order loses a different 2/10 facts. |
 | **C erasure** | empties CONSTRAINTS on the measurement pass | reproduces the estate's own measured 57/57 doubt-turn erasure, so the floor's green DEPENDS on `assemble.ts`'s carry-forward. |
 | **live** | the real haiku summariser | **NOT MEASURED.** `runRetentionEval` takes any `SummariserModel`, so `new AnthropicSummariserModel()` produces the live table — deliberately not wired to CI and deliberately not shipped as a `skipIf` test (a skipping control tests nothing). Needs `ANTHROPIC_API_KEY` and costs money; the lexical detector also reads a paraphrase as a loss, so a live run is a TABLE, never a gate. |
 
-**Floors** (`MEM-FLOOR 1`/`2` RED the build; 3/4/5 protect the measurement):
-the DECISION GOAL and a USER CORRECTION must survive; a SUPERSEDED value must
-never outlive its correction; the detector must discriminate both ways; no
-measured fact may sit in the verbatim window at the measurement turn (with a
-positive control proving that channel can report a presence); and the fixture's
-verbatim size must sit between the real 1,200 target and the real 1,600 cap, so
-the budget pressure is produced by production constants rather than by padding.
+**Floors:** every seeded durable fact must survive both production-budget arms
+at turns 19 and 20 and reach the active routing prompt; the never-stated control
+must remain absent; a SUPERSEDED value must never outlive its correction; the
+detector must discriminate both ways; and no measured fact may sit in the
+verbatim window at the measurement turn. The fixture's faithful peak must remain
+above the 1,200 legacy mutant while fitting the 1,400 production target and
+1,600 hard cap; the production target must remain the peak rounded up to the
+next 100-character boundary. This keeps both the reproduced failure and the
+repaired path live.
 
 ```bash
 pnpm harness:test   # includes the eval; the report prints even on a green run
@@ -762,6 +769,54 @@ MEMORY_RETENTION_REPORT_PATH=/tmp/retention.md pnpm harness:test   # + write the
 `Conversation Harness Gates (advisory)`, which triggers on
 `tools/conversation-harness/**` and `src/orchestrator-v5/**` — so it executes on
 every PR that can move the memory path, it just does not block.
+
+## Canonical-state precedence and long-session continuity
+
+`__tests__/canonical-state-precedence.harness-test.ts` +
+`fixtures/canonical-precedence-case.json` +
+`fixtures/summary-retention-case.json` +
+`scorer/canonical-state-precedence.ts`.
+
+This evaluator answers a narrower question than the retention table: when
+current structured state and older conversation disagree, does the routing
+model use the current model without losing a durable summary-only dependency?
+It reuses the production ContextPack assembler and routing serialiser. It does
+not create another state, memory, prompt, or scientific authority.
+
+The deterministic gate carries two 20-turn journeys through the real assembly
+path. One puts a current target, constraints, evidence source, accepted change,
+open item, and stale AnalysisState beside deliberately obsolete transcript and
+summary claims. The other places a standing dependency only in the rolling
+summary, outside the eight-turn verbatim window, beside a resolved distraction.
+Preconditions prove every conflict really reaches the prompt and that the
+negative controls are non-vacuous. Exact payload canaries, channel-aware answer
+extraction, and wrong-answer mutants make the scorer fail closed.
+
+```bash
+pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts \
+  tools/conversation-harness/__tests__/canonical-state-precedence.harness-test.ts
+```
+
+An optional live routing-model witness is double-gated and bounded to 24
+provider HTTP attempts (two cases x three reruns x the route's cache-fallback
++ max-token-retry + repair ceiling of four). The evaluator process disables
+both repository and provider-SDK retries; production retry behaviour is
+byte-identical while that process-local evaluator scope is inactive. The runner refuses
+fallback/default prompt bytes and
+requires the loaded PMS routing prompt to match the repo-canonical version and
+hash before the first model call. Any miss fails the N=3 run; no majority or
+median can hide it.
+
+```bash
+ORCHESTRATOR_EVAL_LIVE_CANDIDATES=1 \
+  pnpm exec tsx tools/conversation-harness/canonical-precedence-cli.ts --live
+```
+
+The live report records only visible answer text, intent, actual responding
+model, resolution plan, usage, latency, stop reason, prompt identity, fixture
+hashes, and scores. It never serialises provider thinking/signature blocks.
+This is advisory `LIVE_MODEL_ROUTING` evidence, not summary-generation,
+persistence-reload, HTTP/UI, mounted, or reliability evidence.
 
 ## Residuals for v1
 

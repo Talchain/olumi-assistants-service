@@ -34,7 +34,11 @@
  */
 
 import { synthesiseDisplayValue } from '../../cee/factor-extraction/display-value.js';
-import type { CompactProvenance } from '../../orchestrator/context/graph-compact.js';
+import {
+  projectUncertaintyDriversForContext,
+  type CompactProvenance,
+  type CompactUncertaintyDriversDisclosure,
+} from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../context/context-pack-assembler.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
 
@@ -45,6 +49,10 @@ export interface DisplaySafeNode {
   readonly category?: string;
   readonly unit?: string;
   readonly intervention_summary?: string;
+  /** Exact producer text, bounded upstream without local interpretation. */
+  readonly uncertainty_drivers?: readonly string[];
+  /** Truthful notice when source text was bounded or had to be withheld. */
+  readonly uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
   /**
    * Pre-formatted user-facing quantity string ("5%", "£50,000",
    * "18 months"). Reintroduced in A2.2 because A3.1's full
@@ -125,6 +133,8 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
+  readonly uncertainty_drivers?: unknown;
+  readonly uncertainty_drivers_disclosure?: unknown;
   /**
    * A3.1 Task 3 sets this on the raw graph after a
    * `set_factor_value` mutation via `synthesiseDisplayValue`.
@@ -316,6 +326,8 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     category?: string;
     unit?: string;
     intervention_summary?: string;
+    uncertainty_drivers?: readonly string[];
+    uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
   } = { id, label, kind };
   const category = asString(raw.category);
@@ -324,6 +336,20 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
+
+  // Producer-owned uncertainty only: the shared projector preserves exact
+  // strings/order within its bounds and refuses conflicting permitted source
+  // locations. The formatter neither ranks nor interprets it.
+  if (kind === 'factor') {
+    const uncertaintyProjection = projectUncertaintyDriversForContext(raw);
+    if (uncertaintyProjection.uncertainty_drivers !== undefined) {
+      node.uncertainty_drivers = uncertaintyProjection.uncertainty_drivers;
+    }
+    if (uncertaintyProjection.uncertainty_drivers_disclosure !== undefined) {
+      node.uncertainty_drivers_disclosure =
+        uncertaintyProjection.uncertainty_drivers_disclosure;
+    }
+  }
 
   // V5 A2.2 — display_value re-introduction.
   //
@@ -449,7 +475,9 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *
  *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?` (label only),
- *     `intervention_summary?`, and `display_value?` (A2.2) survive.
+ *     `intervention_summary?`, producer-supplied `uncertainty_drivers?`
+ *     (bounded/disclosed without interpretation), and `display_value?`
+ *     (A2.2) survive.
  *     Per V5 D1 golden-path
  *     closure (A3.1 Task 6), node-level `value`, `raw_value`, and
  *     `cap` are stripped from the LLM-facing projection (including

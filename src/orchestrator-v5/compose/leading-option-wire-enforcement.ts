@@ -290,6 +290,44 @@ export function optionRosterFromGraph(graph: unknown): readonly string[] {
 }
 
 /**
+ * The scenario's OPTION ROSTER, read off the `analysis_ready` payload the exit
+ * is already shipping — the FALLBACK source when no graph is in scope.
+ *
+ * ⭐ WHY THIS EXISTS. {@link optionRosterFromGraph} is the primary reader, and on
+ * a graph-less exit it necessarily returns empty, which stands the gate down.
+ * That is not a rare corner: `enforceLeadingOptionClaimsAtWire` has exactly ONE
+ * call site (inside `sendFinalised200`), so the set of `sendFinalised200` exits
+ * IS the population, and 17 of 23 of them pass a literal `graph: null`
+ * (measured at `0d070df0` with the repo's own balanced-paren scan; a FLOOR, since
+ * the remaining six pass nullable expressions). On every one of those the
+ * withheld-leader claim shipped intact.
+ *
+ * ⚠ THIS IS NOT A SECOND VERDICT, and the distinction is the whole licence for
+ * reading the payload here. It answers "which options exist" — never "which one
+ * leads". `leader_claim.permitted` is untouched, and this module still refuses to
+ * derive it (CLAUDE.md trap #12). Same rule as the graph reader it backs up.
+ *
+ * DELIBERATELY THE SAME NORMALISATION as {@link optionRosterFromGraph}: trimmed,
+ * and dropped below {@link MIN_OPTION_LABEL_LENGTH}. Two roster readers that
+ * disagreed about which labels count would be two authorities on "is this option
+ * named", which is exactly the drift class this estate keeps paying for.
+ */
+export function optionRosterFromAnalysisReady(analysisReady: unknown): readonly string[] {
+  const options = (analysisReady as { readonly options?: unknown } | null | undefined)?.options;
+  if (!Array.isArray(options)) return [];
+  const roster: string[] = [];
+  for (const raw of options) {
+    const option = raw as { readonly label?: unknown } | null;
+    if (option === null || typeof option !== 'object') continue;
+    if (typeof option.label !== 'string') continue;
+    const label = option.label.trim();
+    if (label.length < MIN_OPTION_LABEL_LENGTH) continue;
+    roster.push(label);
+  }
+  return roster;
+}
+
+/**
  * Does this text NAME one of the scenario's options?
  *
  * Whole-token, case-insensitive. The boundaries are written as Unicode
@@ -387,6 +425,22 @@ export interface WireLeaderClaimEnforcementOpts {
    * user's prose. The Layer-3 alarm still reports the leak.
    */
   readonly graph: unknown;
+  /**
+   * The `analysis_ready` payload this exit is shipping (`ctx.analysisReady`),
+   * read ONLY for the option ROSTER when {@link graph} yields none — see
+   * {@link optionRosterFromAnalysisReady}.
+   *
+   * ⭐ THIS IS WHAT CLOSES THE HOLE THE `graph` DOCSTRING ABOVE DESCRIBES. That
+   * note is retained verbatim because it is still true of the graph reader; it
+   * is no longer the last word on whether the gate can act, because a graph-less
+   * exit that carries a readiness payload now has a roster after all.
+   *
+   * Optional, and absence is honest: an exit carrying NEITHER a graph NOR a
+   * readiness payload still stands down (`mode: 'roster_unavailable'`), because
+   * the epistemic position is unchanged — we cannot establish that a designation
+   * is present, so we do not delete the user's prose.
+   */
+  readonly analysisReady?: unknown;
 }
 
 export interface WireLeaderClaimEnforcementResult {
@@ -507,7 +561,14 @@ export function enforceLeadingOptionClaimsAtWire(
   if (opts.mayNameLeadingOption) return unchanged(response);
 
   try {
-    const roster = optionRosterFromGraph(opts.graph);
+    // GRAPH FIRST, READINESS AS THE FALLBACK. The graph is the richer source and
+    // stays primary so nothing changes on the exits that already had one; the
+    // readiness payload is consulted ONLY when the graph yields no roster, which
+    // is the graph-less majority of exits. Neither source supplies a verdict —
+    // both answer only "which options exist".
+    const graphRoster = optionRosterFromGraph(opts.graph);
+    const roster =
+      graphRoster.length > 0 ? graphRoster : optionRosterFromAnalysisReady(opts.analysisReady);
 
     if (roster.length === 0) {
       // STAND DOWN, LOUDLY. Without a roster the gate cannot establish that any

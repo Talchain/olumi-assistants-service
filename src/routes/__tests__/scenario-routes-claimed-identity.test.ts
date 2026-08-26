@@ -29,6 +29,7 @@ const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
 const OTHER_USER = "9e8d7c6b-5a49-4382-b716-0c5d4e3f2a1b";
 const VERSION_ID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const MUTATION_ID = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
 
 const { mockConfig } = vi.hoisted(() => ({ mockConfig: { value: null as unknown } }));
 vi.mock("../../config/index.js", async (importOriginal) => {
@@ -407,12 +408,21 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
     });
   });
 
+  /**
+   * ⚠ THE RESTORE BODY MUST STAY VALID, OR THE REFUSAL CASES GO VACUOUS.
+   * `mutation_id` and `expected_graph_identity_hash` are required by
+   * `RestoreBodySchema` — derived from the route's own refusal, not assumed.
+   * An invalid body 422s BEFORE the ownership step, so "getVersion was not
+   * called" would then hold for the wrong reason. The ADMISSION twin is what
+   * pins this: it fails loudly if the fixture can no longer reach the gate,
+   * and it did exactly that when `/compare` landed and the schema moved.
+   */
   describe("restore (write tier)", () => {
     it("REFUSES an unverified caller who supplies the owner's identifier — the target is never even read", async () => {
       resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
 
       const app = await buildVersionsApp();
-      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID });
+      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
       expect(restoreVersion).not.toHaveBeenCalled();
@@ -423,7 +433,7 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
 
       const app = await buildVersionsApp();
-      await post(app, "/versions/restore", { version_id: VERSION_ID });
+      await post(app, "/versions/restore", { version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).toHaveBeenCalled();
       await app.close();
@@ -433,7 +443,7 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
       resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
 
       const app = await buildVersionsApp();
-      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID });
+      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID, mutation_id: MUTATION_ID, expected_graph_identity_hash: null });
 
       expect(getVersion).not.toHaveBeenCalled();
       expect(restoreVersion).not.toHaveBeenCalled();

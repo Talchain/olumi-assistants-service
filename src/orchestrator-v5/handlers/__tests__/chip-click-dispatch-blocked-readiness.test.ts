@@ -42,7 +42,10 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-causes.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  computeStructuralReadiness,
+  buildCanonicalAnalysisReadyFromGraph,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { clampRefusalFreshness } from '../../compose/analysis-ready-emit.js';
 import { deriveAnalysisFreshness, enforceInvariants } from '../../context/freshness.js';
 import { ANALYSE_HANDLER_ID } from '../../tools/handler-errors.js';
@@ -167,6 +170,28 @@ const ADDED_OPTION_GRAPH: GraphV3T = {
     { from: 'opt_migrate', to: 'fac_licence', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
     { from: 'fac_licence', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
+} as unknown as GraphV3T;
+
+/**
+ * THE FRESH DRAFT — the same graph with NO option carrying an encoded value.
+ *
+ * This is the state a just-drafted model lands in, and `build-turn-context.ts`
+ * says so in its own comment at :2427-2429. It differs from
+ * `ADDED_OPTION_GRAPH` in EXACTLY one respect — how many options are valued —
+ * and that single difference flips the run-admission verdict from TRUE to
+ * FALSE while leaving canonical `status` at `needs_user_input` in BOTH cases.
+ * That is the entire reason `status` cannot discriminate here and the admission
+ * verdict can.
+ */
+const FRESH_DRAFT_GRAPH: GraphV3T = {
+  nodes: ADDED_OPTION_GRAPH.nodes.map((n) => {
+    const node = n as { kind?: string; interventions?: unknown };
+    if (node.kind !== 'option') return n;
+    const stripped = { ...node } as Record<string, unknown>;
+    delete stripped.interventions;
+    return stripped;
+  }),
+  edges: ADDED_OPTION_GRAPH.edges,
 } as unknown as GraphV3T;
 
 /** Same graph with the goal node removed — structural readiness is undefined. */
@@ -675,5 +700,153 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     const ar = out.analysisReady!;
     expect(ar.status).toBe('needs_user_input');
     expect((ar as { blocked_reason?: string }).blocked_reason).toBeUndefined();
+  });
+
+  /**
+   * ⭐ WHAT RED-3 ACTUALLY RESTS ON, PINNED SO IT CANNOT ROT.
+   *
+   * RED-3 asserts the empty carrier for `ADDED_OPTION_GRAPH`. Since the chip
+   * arm began passing its structural projection, that bare result is produced
+   * by `buildAnalysisRefusalReadiness`'s `may_run === true` term — NOT by the
+   * arm discarding the payload, which is what used to produce it. The two are
+   * indistinguishable from RED-3's assertions alone, so if this graph's
+   * admission verdict ever flipped to `false`, RED-3 would start failing with
+   * no clue as to why.
+   *
+   * This is CLAUDE.md trap 13b's third face: a guard whose DISCRIMINATION
+   * depends on a fixture that nothing pins. Here is the pin.
+   */
+  it('PRECONDITION FOR RED-3: `ADDED_OPTION_GRAPH` ADMITS — its bare carrier is the verdict\'s doing', () => {
+    const canonical = buildCanonicalAnalysisReadyFromGraph(ADDED_OPTION_GRAPH);
+    expect(canonical).toBeDefined();
+    // The case #942 measured: mid-session, one un-encoded option. The run would
+    // proceed by excluding it, so a refusal here is NOT about the model.
+    expect(canonical!.may_run).toBe(true);
+    expect(canonical!.status).toBe('needs_user_input');
+    // ...and it genuinely holds an identity, so "bare" is a decision about a
+    // payload that had something to lose, not an artefact of an empty fixture.
+    expect(canonical!.goal_node_id).toBe('goal_revenue');
+    expect(canonical!.options.length).toBe(3);
+  });
+
+  /**
+   * ⭐⭐ THE DEFECT, END TO END THROUGH THE ARM — RED-3's OPPOSITE-DIRECTION TWIN.
+   *
+   * MEASURED on two authenticated runs at deployed CEE `c24bfe37`, identical
+   * both times: a signed-in user clicks "Run analysis" on a freshly drafted
+   * model and the turn comes back
+   *
+   *     analysis_ready = { options: [], goal_node_id: "", status: "blocked",
+   *                        blocked_reason: "MISSING_OPTION_VALUE", computed_at }
+   *     analysis_state.run_state = { kind: "blocked", reason_code, blockers: [] }
+   *
+   * — a refusal carrying NO model identity and NO blockers, so nothing
+   * downstream can tell the user what to fix. It is the Core PoC journey's
+   * first failing step. `blockers: []` is the SAME defect, not a second one:
+   * `compose/analysis-state-v1.ts:486-493` calls
+   * `mapWireBlockers(input.readiness?.blockers)`, and `mapWireBlockers(undefined)`
+   * returns `[]`.
+   *
+   * This graph and `ADDED_OPTION_GRAPH` differ ONLY in how many options carry
+   * an encoded value, and they take opposite branches — which is exactly why
+   * `status` could never have separated them: BOTH are `needs_user_input`.
+   */
+  it('THE DEFECT: a FRESH-DRAFT refusal PRESERVES the model identity the user has to fix', async () => {
+    // PRECONDITION PINNED IN-TEST, and it is the whole ruling in three lines:
+    // same status as RED-3's graph, opposite admission verdict.
+    const canonical = buildCanonicalAnalysisReadyFromGraph(FRESH_DRAFT_GRAPH);
+    expect(canonical).toBeDefined();
+    expect(canonical!.status).toBe('needs_user_input');
+    expect(canonical!.status).toBe(buildCanonicalAnalysisReadyFromGraph(ADDED_OPTION_GRAPH)!.status);
+    expect(canonical!.may_run).toBe(false);
+
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(FRESH_DRAFT_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-fresh-draft',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+    const ar = out.analysisReady;
+
+    // THE FIX: the refusal names the model. Bound by IDENTITY, never by a count
+    // (CLAUDE.md trap 19) — "three different options" is the fabrication class
+    // the continuity check exists to catch.
+    expect(ar.goal_node_id).toBe('goal_revenue');
+    expect(
+      ar.options.map((o) => (o as { option_id?: string; id?: string }).option_id
+        ?? (o as { id?: string }).id),
+    ).toEqual(['opt_hubspot', 'opt_stay', 'opt_migrate']);
+
+    // THE VERDICT IS STILL WITHDRAWN. Preserving identity must not buy a pass,
+    // or this fix re-opens the defect the carrier was introduced for.
+    expect(ar.status).toBe('blocked');
+    expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
+
+    // AND NO SCIENCE THE REFUSAL DECLINED TO PRODUCE.
+    //
+    // ⚠ THE ENUMERATION CHANGED; THE PROPERTY DID NOT. `blockers` now rides the
+    // refusal — the producer's own authored option × factor repair rows, which
+    // are not work this turn declined to do but THE REASON IT REFUSED. What the
+    // line below was written to forbid is science the refusal did not compute,
+    // and that is asserted BY NAME underneath rather than left to an
+    // enumeration that only says "four keys".
+    expect(Object.keys(ar).sort()).toEqual(
+      ['blocked_reason', 'blockers', 'goal_node_id', 'options', 'status'].sort(),
+    );
+    for (const forbidden of [
+      'bias_findings',
+      'model_adjustments',
+      'readiness_issues',
+      'repair_proposal',
+      'option_comparison',
+      'leading_option_id',
+    ]) {
+      expect(forbidden in ar).toBe(false);
+    }
+    // The rows are the producer's, and they name the pairs — not a count.
+    const carried = (ar as { blockers?: Array<{ option_id?: string; factor_id?: string }> }).blockers;
+    expect(carried?.length).toBeGreaterThan(0);
+    expect([...(carried ?? [])].map((b) => `${b.option_id}::${b.factor_id}`).sort()).toEqual(
+      [...(buildCanonicalAnalysisReadyFromGraph(FRESH_DRAFT_GRAPH)!.blockers ?? [])]
+        .map((b) => `${(b as { option_id?: string }).option_id}::${(b as { factor_id?: string }).factor_id}`)
+        .sort(),
+    );
+  });
+
+  /**
+   * The arm-level discriminating pair, stated as one assertion so a future
+   * reader cannot miss that these two results come from ONE code path fed two
+   * graphs — not from two behaviours written down separately.
+   */
+  it('⭐ ARM-LEVEL DISCRIMINATION: one arm, two graphs, opposite answers, same status', async () => {
+    const results: Record<string, { status: unknown; carries: boolean; mayRun: unknown }> = {};
+    for (const [name, graph] of [
+      ['admits', ADDED_OPTION_GRAPH],
+      ['refuses', FRESH_DRAFT_GRAPH],
+    ] as const) {
+      handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+      loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(graph));
+      const out = await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: `req-ext2-pair-${name}`,
+      });
+      if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+      results[name] = {
+        status: buildCanonicalAnalysisReadyFromGraph(graph)!.status,
+        mayRun: buildCanonicalAnalysisReadyFromGraph(graph)!.may_run,
+        carries: out.analysisReady.goal_node_id !== '' && out.analysisReady.options.length > 0,
+      };
+    }
+    // SAME structural status — so `status` cannot be what separated them.
+    expect(results.admits.status).toBe(results.refuses.status);
+    // DIFFERENT admission verdict — which is what did.
+    expect(results.admits.mayRun).toBe(true);
+    expect(results.refuses.mayRun).toBe(false);
+    // OPPOSITE outcomes.
+    expect(results.admits.carries).toBe(false);
+    expect(results.refuses.carries).toBe(true);
   });
 });

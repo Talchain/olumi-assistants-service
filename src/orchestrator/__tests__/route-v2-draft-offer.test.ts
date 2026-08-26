@@ -300,35 +300,10 @@ describe('POST /orchestrate/v2/turn — draft/redraft offer (ROADMAP 2.63 C3+C4)
     pendingActionsForRead = [];
   });
 
-  // ── C3 — the guard seeds the offer ───────────────────────────────────────
-  it('frame guard on a typed unshaped >=30-char message emits the Build-the-model chip AND commits a seeded draft_graph pending', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payload(),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    expect(chatWithToolsMock).not.toHaveBeenCalled();
-    const body = JSON.parse(res.body);
-    // The guard's original copy is preserved, the offer sentence appended.
-    expect(body.assistant_text).toContain(FRAME_GUARD_COPY);
-    expect(body.assistant_text).toContain('draft a first model');
-    expect(body.suggested_actions).toHaveLength(1);
-    expect(body.suggested_actions[0].label).toBe(BUILD_OFFER_LABEL);
-    expect(body.suggested_actions[0].message).toBe(BUILD_OFFER_MESSAGE);
-    // Commit carries the pending: kind draft_graph, seed = the message,
-    // chip_id linked to the rendered chip.
-    expect(appendMock).toHaveBeenCalledTimes(1);
-    const write = appendMock.mock.calls[0]![0] as AppendWrite;
-    expect(write.pending_actions).toHaveLength(1);
-    expect(write.pending_actions[0]!.action.kind).toBe('draft_graph');
-    expect(write.pending_actions[0]!.action.brief_seed).toBe(UNSHAPED_CONTEXT);
-    expect(write.pending_actions[0]!.action.redraft).toBeUndefined();
-    expect(write.pending_actions[0]!.chip_id).toBe(body.suggested_actions[0].id);
-  });
-
-  // ── C3 goldens — unusable-seed guard turns stay byte-identical ──────────
+  // ── C3 compatibility goldens ────────────────────────────────────────────
+  // Free-text composer turns now go through semantic open-frame intake. The
+  // guard remains reachable for untyped legacy chip traffic, and persisted C3
+  // offers created before the change must remain resumable below.
   it('GOLDEN: the P2 chip-click guard turn is unchanged (no chip, no commit — canned chip text never seeds)', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -343,19 +318,6 @@ describe('POST /orchestrate/v2/turn — draft/redraft offer (ROADMAP 2.63 C3+C4)
     expect(appendMock).not.toHaveBeenCalled();
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
     expect(chatWithToolsMock).not.toHaveBeenCalled();
-  });
-
-  it('GOLDEN: a short typed message (<30 chars) guard turn is unchanged (no chip, no commit)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payload({ message: 'help me decide' }),
-    });
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain(FRAME_GUARD_COPY);
-    expect(body.suggested_actions).toEqual([]);
-    expect(appendMock).not.toHaveBeenCalled();
   });
 
   it('GOLDEN: a shaped brief on a FRESH scenario still drafts via the heuristic with no briefOverride and no consumedPendingRefs', async () => {
@@ -441,30 +403,6 @@ describe('POST /orchestrate/v2/turn — draft/redraft offer (ROADMAP 2.63 C3+C4)
     expect(args.briefOverride).toBeUndefined();
     expect(args.consumedPendingRefs).toEqual(['draft-offer-chip-1']);
     expect(chatWithToolsMock).not.toHaveBeenCalled();
-  });
-
-  it('a second unshaped non-confirm message RE-FIRES the guard deterministically with a fresh seeded offer', async () => {
-    hasPriorTurnsForRead = true;
-    pendingActionsForRead = [offerPending({ brief_seed: UNSHAPED_CONTEXT })];
-    const secondContext =
-      'Also worth knowing: the enterprise tier depends on a partner integration landing first.';
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payload({ message: secondContext }),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    expect(chatWithToolsMock).not.toHaveBeenCalled();
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain(FRAME_GUARD_COPY);
-    expect(body.suggested_actions).toHaveLength(1);
-    // Fresh offer committed, re-seeded from the NEW message.
-    expect(appendMock).toHaveBeenCalledTimes(1);
-    const write = appendMock.mock.calls[0]![0] as AppendWrite;
-    const offers = write.pending_actions.filter((pa) => pa.action.kind === 'draft_graph');
-    expect(offers).toHaveLength(1);
-    expect(offers[0]!.action.brief_seed).toBe(secondContext);
   });
 
   // ── Non-shadowing goldens ────────────────────────────────────────────────
@@ -698,39 +636,6 @@ describe('POST /orchestrate/v2/turn — draft/redraft offer (ROADMAP 2.63 C3+C4)
     const body = JSON.parse(res.body);
     expect(body.assistant_text).toContain('already has a model');
     expect(body.assistant_text).toContain('or reply yes');
-  });
-
-  it('P1-1 C3: guard re-fire with another live pending derives the guard sentence chip-only (no "just reply yes")', async () => {
-    hasPriorTurnsForRead = true;
-    pendingActionsForRead = [
-      offerPending({ brief_seed: UNSHAPED_CONTEXT }),
-      liveRunAnalysisPending(),
-    ];
-    const secondContext =
-      'Also worth knowing: the enterprise tier depends on a partner integration landing first.';
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payload({ message: secondContext }),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('draft a first model');
-    expect(body.assistant_text).toContain('Build the model');
-    expect(body.assistant_text).not.toMatch(/reply yes/i);
-  });
-
-  it('P1-1 C3 golden: guard offer on a fresh scenario (sole-live) keeps "just reply yes"', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payload(),
-    });
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('draft a first model');
-    expect(body.assistant_text).toContain('just reply yes');
   });
 
   // ── P1-2 (adversarial review) — GraphStateIngressSchema accepts

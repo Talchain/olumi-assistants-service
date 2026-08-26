@@ -257,6 +257,33 @@ export function transformNodeToV3(
       node.goal_threshold_frame != null && {
         goal_threshold_frame: node.goal_threshold_frame,
       }),
+    // The per-factor scale frame is carried ACROSS THIS TRANSFORM with the
+    // levels it produced. This copy is REQUIRED for exactly the reason the
+    // `goal_threshold_frame` note above gives — the transform rebuilds the node
+    // field-by-field, so an unnamed key is dropped here silently, under a green
+    // suite. Its sibling "nearly shipped dark on the node channel" this way
+    // (`schemas/assist.ts`).
+    //
+    // ⚠ IT DOES NOT REACH PLOT OR ISL, AND THIS COMMENT USED TO IMPLY IT DID.
+    // Corrected in place rather than deleted. `scale_frame` is structurally
+    // stripped at four later points, none of which fails loud:
+    // `graph-normaliser.ts` (object literal, no spread) · the `observed_state`
+    // allowlist · `translator-v3.ts` (fixed-field constructor) · ISL's
+    // `robustness_v2.py` (`extra: "ignore"`). That is NOT a functional defect —
+    // the LEVELS carry the semantics downstream and the frame is a CEE-internal
+    // normalisation reference — but a reader who believed the frame travelled
+    // would design against a field that is not there.
+    //
+    // ⚠ AND THE CONTRACT ALREADY HAS A NAME FOR THIS CONCEPT:
+    // `observed_state.declared_scale`, with authority bounds, read zero times
+    // in PLoT and ISL. A second name for one concept is the twins defect this
+    // estate keeps paying for — resolve the two before either ships wider.
+    //
+    // No coupling clause like the threshold's: a frame is meaningful on a
+    // factor with NO baseline of its own (that is the defect class it exists to
+    // close — the factor's magnitudes live on its options' interventions), so
+    // gating it on a companion value would delete it exactly where it matters.
+    ...(node.scale_frame != null && { scale_frame: node.scale_frame }),
   };
 
   // Transform data to observed_state.

@@ -31,6 +31,37 @@ export type CompactNodeSource = 'user' | 'assumption' | 'system';
  */
 export type CompactProvenance = 'from_brief' | 'ai_inferred' | 'user_set';
 
+/**
+ * Hard prompt bounds for producer-supplied uncertainty text. The entry cap
+ * matches the strict observed-state contract; the character cap matches the
+ * existing producer-side proposal guard. Neither constant is a ranking rule:
+ * the producer's order is preserved and only a deterministic prefix is kept.
+ */
+export const CONTEXT_UNCERTAINTY_DRIVER_MAX_ENTRIES = 2;
+export const CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS = 120;
+
+/**
+ * In-band disclosure for the only cases where the compact projection cannot
+ * pass the producer bytes through in full. A conflict is withheld rather than
+ * resolved locally: choosing one of two canonical-looking sources here would
+ * create a second authority for model truth.
+ */
+export type CompactUncertaintyDriversDisclosure =
+  | {
+      readonly status: 'truncated';
+      readonly original_entries: number;
+      readonly retained_entries: number;
+      readonly entries_omitted_by_count: number;
+      readonly entries_truncated_by_chars: number;
+      readonly per_entry_char_limit: number;
+    }
+  | { readonly status: 'conflicting_sources_withheld' };
+
+export interface CompactUncertaintyDriversProjection {
+  readonly uncertainty_drivers?: string[];
+  readonly uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
+}
+
 export interface CompactNode {
   id: string;
   kind: string;
@@ -55,6 +86,10 @@ export interface CompactNode {
   _raw_provenance?: string;
   /** Human-readable summary of option interventions (option nodes only). */
   intervention_summary?: string;
+  /** Producer-supplied epistemic uncertainty, in producer order. */
+  uncertainty_drivers?: string[];
+  /** Present only when uncertainty text was bounded or had to be withheld. */
+  uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
 }
 
 export interface CompactEdge {
@@ -88,6 +123,148 @@ export { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 
 /** Max interventions shown before truncation. */
 const MAX_INTERVENTION_ENTRIES = 5;
+
+function readDriverSource(value: unknown): readonly string[] | null | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? value
+    : null;
+}
+
+function sameDriverBytes(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+}
+
+function boundDriverText(entry: string): { readonly text: string; readonly truncated: boolean } {
+  let codePoints = 0;
+  let endCodeUnit = 0;
+  for (const codePoint of entry) {
+    if (codePoints === CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS) {
+      return { text: entry.slice(0, endCodeUnit), truncated: true };
+    }
+    codePoints += 1;
+    endCodeUnit += codePoint.length;
+  }
+  return { text: entry, truncated: false };
+}
+
+/**
+ * Project producer-supplied factor uncertainty into bounded prompt context.
+ *
+ * Two source locations are permitted while repair stages promote factor
+ * metadata: `node.uncertainty_drivers` and
+ * `node.observed_state.uncertainty_drivers`. Equal arrays are the same fact;
+ * unequal arrays are a conflict and are withheld. This function never merges,
+ * sorts, ranks, rewrites, or infers entries. Within the hard bounds it returns
+ * the exact producer strings in the exact producer order. When a bound cuts
+ * content it retains only the exact leading characters and discloses both the
+ * entry and character loss.
+ *
+ * The function also accepts its own already-compacted output so the downstream
+ * display-safe formatter can use the same conflict/bounds authority without
+ * losing a prior truncation disclosure.
+ */
+export function projectUncertaintyDriversForContext(
+  input: unknown,
+): CompactUncertaintyDriversProjection {
+  if (typeof input !== 'object' || input === null) return {};
+  const raw = input as Record<string, unknown>;
+  const existingRaw = raw.uncertainty_drivers_disclosure;
+  if (typeof existingRaw === 'object' && existingRaw !== null) {
+    const existing = existingRaw as Record<string, unknown>;
+    if (existing.status === 'conflicting_sources_withheld') {
+      return {
+        uncertainty_drivers_disclosure: { status: 'conflicting_sources_withheld' },
+      };
+    }
+  } else if (existingRaw !== undefined) {
+    return {};
+  }
+
+  const topLevel = readDriverSource(raw.uncertainty_drivers);
+  const observedState = raw.observed_state;
+  const observed = readDriverSource(
+    typeof observedState === 'object' && observedState !== null
+      ? (observedState as Record<string, unknown>).uncertainty_drivers
+      : undefined,
+  );
+  if (topLevel === null || observed === null) return {};
+  if (
+    topLevel !== undefined
+    && observed !== undefined
+    && !sameDriverBytes(topLevel, observed)
+  ) {
+    return {
+      uncertainty_drivers_disclosure: { status: 'conflicting_sources_withheld' },
+    };
+  }
+
+  const source = topLevel ?? observed;
+  if (source === undefined || source.length === 0) return {};
+
+  const retainedSource = source.slice(0, CONTEXT_UNCERTAINTY_DRIVER_MAX_ENTRIES);
+  let entriesTruncatedByChars = 0;
+  const uncertaintyDrivers = retainedSource.map((entry) => {
+    const bounded = boundDriverText(entry);
+    if (bounded.truncated) entriesTruncatedByChars += 1;
+    return bounded.text;
+  });
+  const entriesOmittedByCount = source.length - uncertaintyDrivers.length;
+
+  if (typeof existingRaw === 'object' && existingRaw !== null) {
+    const existing = existingRaw as Record<string, unknown>;
+    const originalEntries = existing.original_entries;
+    const retainedEntries = existing.retained_entries;
+    const omittedByCount = existing.entries_omitted_by_count;
+    const truncatedByChars = existing.entries_truncated_by_chars;
+    const existingIsValidTruncation =
+      existing.status === 'truncated'
+      && typeof originalEntries === 'number'
+      && typeof retainedEntries === 'number'
+      && typeof omittedByCount === 'number'
+      && typeof truncatedByChars === 'number'
+      && Number.isInteger(originalEntries)
+      && Number.isInteger(retainedEntries)
+      && Number.isInteger(omittedByCount)
+      && Number.isInteger(truncatedByChars)
+      && originalEntries >= retainedEntries
+      && retainedEntries === uncertaintyDrivers.length
+      && omittedByCount === originalEntries - retainedEntries
+      && truncatedByChars >= 0
+      && truncatedByChars <= retainedEntries
+      && (omittedByCount > 0 || truncatedByChars > 0)
+      && existing.per_entry_char_limit === CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS
+      && entriesOmittedByCount === 0
+      && entriesTruncatedByChars === 0;
+    if (!existingIsValidTruncation) return {};
+    return {
+      uncertainty_drivers: uncertaintyDrivers,
+      uncertainty_drivers_disclosure: {
+        status: 'truncated',
+        original_entries: originalEntries,
+        retained_entries: retainedEntries,
+        entries_omitted_by_count: omittedByCount,
+        entries_truncated_by_chars: truncatedByChars,
+        per_entry_char_limit: CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+      },
+    };
+  }
+
+  if (entriesOmittedByCount === 0 && entriesTruncatedByChars === 0) {
+    return { uncertainty_drivers: uncertaintyDrivers };
+  }
+  return {
+    uncertainty_drivers: uncertaintyDrivers,
+    uncertainty_drivers_disclosure: {
+      status: 'truncated',
+      original_entries: source.length,
+      retained_entries: uncertaintyDrivers.length,
+      entries_omitted_by_count: entriesOmittedByCount,
+      entries_truncated_by_chars: entriesTruncatedByChars,
+      per_entry_char_limit: CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+    },
+  };
+}
 
 /**
  * Build a human-readable intervention summary for an option node.
@@ -218,7 +395,8 @@ function buildPlainInterpretation(
  * source (legacy CompactNodeSource — derived from extractionType),
  * provenance (display-safe CompactProvenance — also derived from extractionType),
  * _raw_provenance (raw extractionType string for diagnostics),
- * intervention_summary (option nodes with data.interventions).
+ * intervention_summary (option nodes with data.interventions),
+ * producer-supplied uncertainty_drivers (bounded with in-band disclosure).
  *
  * Dropped per node: body, state_space, goal_threshold, observed_state.std,
  * observed_state.baseline, observed_state.extractionType (projected to source + provenance).
@@ -320,6 +498,17 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // No observed_state — treat as system-derived / ai_inferred.
         n.source = 'system';
         n.provenance = 'ai_inferred';
+      }
+
+      if (node.kind === 'factor') {
+        const uncertaintyProjection = projectUncertaintyDriversForContext(anyNode);
+        if (uncertaintyProjection.uncertainty_drivers !== undefined) {
+          n.uncertainty_drivers = uncertaintyProjection.uncertainty_drivers;
+        }
+        if (uncertaintyProjection.uncertainty_drivers_disclosure !== undefined) {
+          n.uncertainty_drivers_disclosure =
+            uncertaintyProjection.uncertainty_drivers_disclosure;
+        }
       }
 
       // Intervention summary for option nodes with data.interventions

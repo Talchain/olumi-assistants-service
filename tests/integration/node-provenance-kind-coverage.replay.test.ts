@@ -524,6 +524,24 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *   · And they could not reach it in any case: both are written on the TYPED
    *     record path (`schema-v3.ts:1121-1136`), which `continue`s before
    *     `carriesValue` is evaluated.
+   *
+   * ── DECISION RECORDED, 25 Aug: `scale_frame` ─────────────────────────────
+   * The per-factor scale frame pass 3d divided a factor's magnitudes by.
+   * The guard's question, answered explicitly:
+   *   · NOT value-bearing, and this is a claim about what the field MEANS, not
+   *     about its type. A frame is a NORMALISATION REFERENCE — the divisor the
+   *     stated magnitudes were projected onto — not an assertion about the
+   *     world. It is derived deterministically by CEE from magnitudes the model
+   *     or user already stated; it adds no quantity of its own, so it cannot be
+   *     the "already asserts a number" signal `carriesValue` exists to detect.
+   *     Its sibling `goal_threshold_frame` is absent from `carriesValue` for
+   *     exactly this reason while `goal_threshold`/`_raw` are present — the
+   *     NUMBER is value-bearing, the FRAME it is stated in is not.
+   *   · And it could not reach the check in any case: this loop walks OPTION
+   *     nodes (`bindOptionLabelToBrief`), and `scale_frame` is written only on
+   *     FACTOR nodes. Recorded as a second, structural reason — not relied on
+   *     as the first, because the semantic answer is the one that stays true if
+   *     the loop's scope ever widens.
    */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
@@ -548,6 +566,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "observed_state",
       "prior",
       "provenance",
+      "scale_frame",
       "source_quote",
       "uncertainty_drivers",
     ]);

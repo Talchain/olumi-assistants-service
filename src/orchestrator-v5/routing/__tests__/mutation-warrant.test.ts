@@ -264,12 +264,46 @@ describe('UNION — the derived half: the warrant predicate is a strict SUPERSET
     }
   });
 
+  /**
+   * ⭐ THE SUPERSET RELATION — UNCONDITIONAL AGAIN.
+   *
+   * ⚠ THIS TEST BRIEFLY CARRIED A "SANCTIONED EXCEPTION" BRANCH FOR AN EXPLICIT
+   * VETO, AND BOTH ITS BRANCHES WERE DEAD. Measured over the two corpora this
+   * loop reads: 43 rows, of which **0** satisfy `hasMutationSignal`. The body
+   * never executed at all, so neither the relation nor its exception was ever
+   * asserted here — proven by replacing both expectations with guaranteed-failing
+   * assertions and watching the file stay green.
+   *
+   * The exception is gone because the fork it existed to admit does not exist:
+   * `hasMutationWarrantSignal`'s Term 0 refuses only when `hasMutationSignal` is
+   * FALSE, so a canonical hit can never be vetoed. Measured over 1,093,500
+   * generated canonical-hit messages: 0 forks (850,500 before that guard).
+   *
+   * ⚠ THE VACUITY IS FIXED BY ASSERTING THE EXECUTED COUNT, NOT BY TRUSTING THE
+   * LOOP. `executed` is pinned below, so if these corpora ever stop containing
+   * canonical hits — or start containing them — this REDs and says so, instead of
+   * silently reading as coverage the way it did before.
+   */
   it('the superset relation holds structurally over both corpora', () => {
-    for (const m of [...CONSTRAINT_POSITIVE_CORPUS, ...NEGATIVE_CORPUS]) {
-      if (hasMutationSignal(m)) {
-        expect(hasMutationWarrantSignal(m), `superset violated for: ${m}`).toBe(true);
-      }
+    const corpus = [...CONSTRAINT_POSITIVE_CORPUS, ...NEGATIVE_CORPUS];
+    let executed = 0;
+    for (const m of corpus) {
+      if (!hasMutationSignal(m)) continue;
+      executed += 1;
+      expect(hasMutationWarrantSignal(m), `superset violated for: ${m}`).toBe(true);
     }
+    // ⭐ THE HONEST DISCLOSURE. These two corpora were assembled to exercise the
+    // CONSTRAINT vocabulary, which the canonical list deliberately does not
+    // carry, so no row here is a canonical hit and this loop asserts NOTHING
+    // about the superset relation. It is retained as a drift alarm: the real
+    // coverage is `canonicalExamples` above (9 rows, preconditions pinned) and
+    // the 15 canonical hits in the explicit-veto corpus.
+    expect(corpus.length, 'corpus size drifted').toBe(43);
+    expect(
+      executed,
+      'a canonical hit appeared in these corpora — this loop is no longer vacuous, ' +
+        'which is good news: fold the row into the real superset coverage and raise this number',
+    ).toBe(0);
   });
 
   it('every constraint pattern is anchored to a digit — the property the fail-safe direction rests on', () => {

@@ -382,6 +382,149 @@ describe('2.1266 — the wrong-entity write is withheld (J4 t5 wire replay)', ()
   });
 });
 
+/**
+ * ⭐⭐ S7 — A `not_honoured` TURN SHIPS NO GESTURE, AND THAT IS THE ASSERTION.
+ *
+ * ⚠⚠ THIS HEADER PREVIOUSLY ARGUED THE OPPOSITE — "A not_honoured TURN MUST SHIP
+ * THE GESTURE" — and it survived two destination changes sitting directly above
+ * tests that assert the reverse. It is corrected rather than deleted, because
+ * the correction IS the record (trap 14): a comment that outlives the change it
+ * describes is this estate's dominant defect, and this PR met it three times.
+ *
+ * Wire-witnessed (UI `326970a7` · CEE `5f2e3fd`, guest): the chip labelled
+ * "Set effect on Cash runway consumed" returned `blocks: []` and opened
+ * nothing — `activeElement: BODY`, Model tab `aria-selected: "false"`. The
+ * obvious repair is a `ui_directive`. TWO were built; live drives refuted BOTH:
+ *
+ *   1. `open_inspector` @ the OPTION — the canvas panel renders the intervention
+ *      row and `+ Add a change` (each reporting `disabled: false` ON ITSELF)
+ *      inside a `<fieldset disabled>` six ancestors up. A forced native write
+ *      produced ZERO wire calls. Read-only BY POLICY.
+ *   2. `open_section` @ {model_section,'options'} — matched pair in one session:
+ *      the OPTION row's `-value` testid resolves to an EMPTY zero-height
+ *      `<span>`, no role/tabindex/onclick, real click REFUSED; the FACTOR row's
+ *      control in the same table is a 37×42 `<button>` whose click SUCCEEDS.
+ *      Not policy (`anyDisabledFieldsetOnPage: 0`) — no control exists.
+ *
+ * So there is no working direct-manipulation surface for this entity, the user
+ * is already in chat when they click, and the loop closes there: the reply asks
+ * for the number and a bare `0.6` binds via `deriveOnScreenEffectAsk` →
+ * `resolveRepairValueBinding` — a READINESS-STATE derivation no wording can
+ * break. **The tests below therefore pin an ABSENCE, and the positive control is
+ * what stops that absence being vacuous.**
+ *
+ * ⚠ WHAT THIS FILE COVERS, EXACTLY — and it is narrower than it looks. An
+ * independent review established that `shouldInterceptBeforeEditLane` declines
+ * only on `carriesConfigureOptionValuePayload`, so the valueless REPAIR CHIP is
+ * claimed by the intercept and never reaches `dispatchEditGraph` at all. These
+ * tests therefore exercise the `not_honoured` branch as reached by the
+ * VALUE-BEARING sibling message — a real path, but NOT the capture's path. The
+ * user-facing fix for the capture is the copy branch, pinned in
+ * `repair-chip-identification-complete.test.ts`. This file's job is to stop a
+ * refuted gesture being (re-)introduced here, nothing wider.
+ *
+ * The fixture is the WIRE's, not mine (trap 16): `t4_chip_message` is a verbatim
+ * capture, and note it CARRIES A VALUE (`…to 0.12`) — which is precisely why it
+ * reaches this branch and never the identification-complete copy branch, so
+ * gesture and copy are observed independently (trap 21).
+ */
+describe('S7 — a not_honoured turn ships no gesture, because none can help', () => {
+  const directivesOf = (blocks: readonly { type: string }[]) =>
+    blocks.filter((b) => b.type === 'ui_directive') as unknown as Array<{
+      verb: string;
+      source?: string;
+      ui_target?: { kind: string; id: string };
+      targets: Array<{ id: string; kind: string; label: string }>;
+    }>;
+
+  it('PRECONDITION — the wire fixture carries a value, so it is NOT the copy branch', () => {
+    // Pins the premise the assertions below rest on: this message reaches the
+    // `not_honoured` dispatch branch WITHOUT reaching the identification-complete
+    // copy branch, so gesture and copy are observed independently (trap 21).
+    expect(WITNESS.wire.t4_chip_message).toMatch(/\d/);
+  });
+
+  /**
+   * ⛔ NO GESTURE — and that is the assertion, not the absence of one.
+   *
+   * TWO destinations were built for this row and BOTH were refuted by live
+   * drives, so this emptiness is a measured conclusion rather than an oversight:
+   *
+   *   1. `open_inspector` @ the OPTION node — the canvas panel renders the
+   *      intervention row and `+ Add a change` (each reporting `disabled: false`
+   *      ON ITSELF) inside a `<fieldset disabled>` six ancestors up; a forced
+   *      native write produced ZERO wire calls. Read-only BY POLICY.
+   *   2. `open_section` @ {model_section,'options'} — matched pair in one
+   *      session: the OPTION row's `-value` testid resolves to an EMPTY
+   *      zero-height `<span>` with no role/tabindex/onclick and a REFUSED real
+   *      click, while the FACTOR row's control in the same table is a 37×42
+   *      `<button>` whose click SUCCEEDS. Not policy — no control exists.
+   *
+   * There is no working direct-manipulation surface for this entity, and the
+   * user is already in chat when they click the chip. The loop closes there: the
+   * reply asks for the number and a bare `0.6` binds via `deriveOnScreenEffectAsk`
+   * → `resolveRepairValueBinding`, a READINESS-STATE derivation that no wording
+   * change can break.
+   */
+  it('ships NO ui_directive — there is no surface that can help', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-no-gesture');
+    expect(directivesOf(out.response.blocks)).toEqual([]);
+  });
+
+  /**
+   * ⛔ NEITHER REFUTED DESTINATION MAY COME BACK.
+   *
+   * Named individually rather than folded into the emptiness assertion above,
+   * because the machinery for both is still available and a future lane will
+   * reasonably believe one of them is the fix. This pin fails loudly if either
+   * is re-pointed at, however it is spelled.
+   */
+  it('points at NEITHER the canvas panel NOR the options section', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-neither');
+
+    const directives = directivesOf(out.response.blocks);
+    expect(directives.map((d) => d.verb)).not.toContain('open_inspector');
+    expect(directives.map((d) => d.ui_target?.id)).not.toContain('options');
+    expect(directives.flatMap((d) => d.targets)).toEqual([]);
+  });
+
+  /**
+   * ⭐ THE POSITIVE CONTROL FOR THE EMPTINESS ABOVE (CLAUDE.md trap 13).
+   *
+   * ⚠⚠ THIS REPLACES A TEST THAT WAS THEATRE, and the replacement is recorded
+   * rather than the old one quietly deleted (trap 14). The previous
+   * "DISCRIMINATING TWIN" filtered `d.verb === 'open_inspector'` and asserted
+   * length 0 — **the absence of a verb this code never emits**. An adversarial
+   * review proved it by execution: injecting the gesture onto EVERY path,
+   * honoured included, left all tests GREEN. It read as coverage and was none.
+   *
+   * The honest problem with `toEqual([])` is different and real: it passes just
+   * as happily if the dispatch threw, returned early, or produced nothing at
+   * all. So the control is not another absence — it is a PRESENCE that proves
+   * the turn genuinely ran and produced its recovery answer. Empty blocks are
+   * then an observation about a WORKING turn, not a null result.
+   */
+  it('POSITIVE CONTROL — the turn really ran, so the empty blocks mean something', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      factorBaselineAppliedResult(),
+    );
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-control');
+
+    // The dispatch produced the deterministic recovery copy for THIS option —
+    // bound by identity, not by "some text exists" (trap 19).
+    expect(out.response.assistant_text).toContain(OPTION_LABEL);
+    expect(out.response.assistant_text.length).toBeGreaterThan(40);
+    // And only THEN is the emptiness a fact about a turn that worked.
+    expect(out.response.blocks).toEqual([]);
+  });
+});
+
 describe('2.1266 opposite-direction twins — a withhold that eats a real edit is a NEW harm', () => {
   it('the effect value landing on the named option COMMITS', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
