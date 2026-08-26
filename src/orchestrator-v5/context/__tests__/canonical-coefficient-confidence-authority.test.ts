@@ -26,7 +26,7 @@ const PAYLOAD = {
   turn_id: '11111111-1111-4111-8111-111111111111',
   scenario_id: '22222222-2222-4222-8222-222222222222',
   message: 'Which relationship should we trust most?',
-  turn_class: 'coach',
+  turn_class: 'review',
   stage: 'analyse',
 } satisfies MessageTurnPayload;
 
