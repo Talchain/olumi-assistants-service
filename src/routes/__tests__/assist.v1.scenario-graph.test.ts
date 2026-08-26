@@ -108,6 +108,31 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
 
+/**
+ * IDENTITY IS NOW CARRIED BY THE VERIFIED TOKEN SUBJECT, NOT BY THE BODY.
+ *
+ * These cases previously established ownership by putting `user_id` in the
+ * request body. That is no longer an ownership input on this route, so the
+ * carrier changes and every assertion stays.
+ *
+ * ⚠ THE OVERRIDES BELOW ARE LOAD-BEARING, NOT TIDINESS. Without them the
+ * cross-user refusal cases would still PASS — because an unverified caller is
+ * refused whatever id they name — and would therefore have stopped
+ * discriminating between "someone else's scenario" and "no identity at all".
+ * A guard that passes for a reason unrelated to what it names is the failure
+ * mode these positive controls exist to prevent, so each cross-user case now
+ * states the OTHER user as a VERIFIED subject.
+ *
+ * `importOriginal` spread, never a hand-listed factory: a factory REPLACES the
+ * module and every other export in the pre-flight import chain would silently
+ * vanish.
+ */
+const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
+vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, resolveUserIdentity };
+});
+
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
@@ -159,6 +184,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
+  // The signed-in owner is the default caller. Cases about a DIFFERENT user
+  // override this explicitly — see the note on the mock.
+  resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   ensureScenarioExists.mockResolvedValue({ user_id: null });
   getScenarioOwner.mockResolvedValue(null);
   loadGraphAndBriefText.mockResolvedValue({
@@ -298,6 +326,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
     const app = await buildApp();
 
     scenarioExists.mockResolvedValue(false);
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     const absent = await read(app, ABSENT_SCENARIO, { user_id: OTHER_USER });
 
     scenarioExists.mockResolvedValue(true);
@@ -312,6 +341,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
   });
 
   it("never leaks the graph of a scenario owned by someone else", async () => {
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
 
     const app = await buildApp();

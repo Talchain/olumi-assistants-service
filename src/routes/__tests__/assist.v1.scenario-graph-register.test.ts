@@ -60,6 +60,23 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
 
+/**
+ * IDENTITY IS NOW CARRIED BY THE VERIFIED TOKEN SUBJECT, NOT BY THE BODY.
+ * See the sibling read-route suite for the full note. The cross-user case
+ * below states the OTHER user as a VERIFIED subject deliberately: without it
+ * the case would pass because an unverified caller is refused whatever id
+ * they name, and would therefore stop discriminating between "someone else's
+ * scenario" and "no identity at all".
+ *
+ * `importOriginal` spread, never a hand-listed factory: a factory REPLACES the
+ * module and every other export in the import chain would silently vanish.
+ */
+const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
+vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, resolveUserIdentity };
+});
+
 import registerRoute from "../assist.v1.scenario-graph-register.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
@@ -129,6 +146,9 @@ function writtenGraph(): WireGraph {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // The signed-in owner is the default caller; cases about a DIFFERENT user
+  // override this explicitly — see the note on the mock.
+  resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   // Default posture: guest (unowned) scenario, holding the PRE-import graph.
   ensureScenarioExists.mockResolvedValue({ user_id: null });
   getScenarioOwner.mockResolvedValue(null);
@@ -437,6 +457,7 @@ describe("register — payload refusals, all before any database work", () => {
 
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     const notMine = await post(app, SCENARIO, { graph: IMPORTED, user_id: OTHER_USER });
     expect(notMine.statusCode).toBe(404);
     // Indistinguishable bytes — a refusal that named its reason would be an
