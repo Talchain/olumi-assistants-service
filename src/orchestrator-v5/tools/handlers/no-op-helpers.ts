@@ -304,15 +304,24 @@ export function decideExplanationPrecondition(
  * every explanation turn, so the caveat CAN ACCOMPANY an answer rather than
  * REPLACE it.
  *
- * ⚠⚠ "CAN", NOT "DOES" — RUNG: CODE EXISTS. The VERDICT is genuinely live on
- * every explanation turn; that half is true and is what makes this mapping worth
- * having. But re-derived at `d7499dc9` over non-comment `src/` excluding tests,
- * THIS FUNCTION HAS ZERO CALLERS and so does `applyStalenessPrefix`. The channel
- * is TYPE-CONNECTED, NOT WIRED: nothing yet carries a caveat onto an executed
- * answer. Saying "the channel is revived" would generalise a true statement
- * about the verdict into a false one about the path (trap 20 — the overclaim
- * happens in the RECORDING, not in the measurement). The wiring is the
- * follow-up's job.
+ * ⚠⚠ RUNG UPDATED — THIS IS NOW WIRED, AND THE PREVIOUS NOTE HERE IS SUPERSEDED.
+ * It read: *"'CAN', NOT 'DOES' — RUNG: CODE EXISTS … THIS FUNCTION HAS ZERO
+ * CALLERS and so does `applyStalenessPrefix`. The channel is TYPE-CONNECTED, NOT
+ * WIRED: nothing yet carries a caveat onto an executed answer … The wiring is
+ * the follow-up's job."* That was true and correctly scoped when written, and
+ * every clause of it is now false: `finaliseExplanationText` (136 lines below,
+ * `:463`) calls this on every answered explanation turn, for both
+ * `explain_results` and `what_would_flip`, and the follow-up it defers to is the
+ * change this comment now sits inside.
+ *
+ * ⚠ CORRECTED HERE BECAUSE THE TWIN WAS CORRECTED AND THIS ONE WAS NOT.
+ * `staleness-prefix.ts` carries the same rung note and had it updated in this
+ * PR, with the reason stated: *"a rung claim is a dated measurement, not a
+ * standing fact — leaving the old one here would be the false-label defect one
+ * door down."* Exactly so — and a correction applied to one of two twins is how
+ * the next lane learns to trust the wrong one. The VERDICT half of the old note
+ * stands and is kept: it is genuinely live on every explanation turn, which is
+ * what makes this mapping worth having.
  *
  * ⚠ THE MAPPING LIVES HERE, NEXT TO THE VERDICT, ON PURPOSE. Putting it in
  * `staleness-prefix.ts` would mean that module re-deciding what a verdict means
@@ -459,11 +468,29 @@ export function explanationVerdictBlocks(
 export function finaliseExplanationText(
   rawText: string,
   verdict: ExplanationPreconditionVerdict,
-): { readonly text: string; readonly stalenessPrefixed: boolean } {
+): {
+  readonly text: string
+  readonly stalenessPrefixed: boolean
+  /**
+   * ⭐ DOES THIS ANSWER CARRY A CURRENCY CAVEAT? — which is NOT the same
+   * question as `stalenessPrefixed`, and the difference is load-bearing.
+   *
+   * `stalenessPrefixed` reports whether WE PREPENDED. It is FALSE in two
+   * different situations: no caveat was licensed, and a caveat was licensed
+   * but the model had already written an approved opening itself (the priced
+   * idempotence gap). A consumer asking "is this answer caveated?" and reading
+   * `stalenessPrefixed` therefore fails OPEN in exactly the second case —
+   * silently, and only for the turns where the model happened to caveat first.
+   *
+   * This flag is derived from the VERDICT, so it is total: true whenever a
+   * currency caveat is licensed, however the words got there.
+   */
+  readonly caveated: boolean
+} {
   const caveat = caveatForPreconditionVerdict(verdict)
   const result = applyStalenessPrefix(rawText, caveat)
   if (caveat === null) {
-    return { text: result.text, stalenessPrefixed: result.prefixed }
+    return { text: result.text, stalenessPrefixed: result.prefixed, caveated: false }
   }
   // ⭐ CAVEAT → ANSWER → THE WAY OUT. The recovery offer is appended for exactly
   // the verdicts where `requiresRerun` is true, restoring a guarantee the
@@ -473,6 +500,7 @@ export function finaliseExplanationText(
   return {
     text: `${result.text}\n\n${recoveryOfferForCaveat(caveat)}`,
     stalenessPrefixed: result.prefixed,
+    caveated: true,
   }
 }
 

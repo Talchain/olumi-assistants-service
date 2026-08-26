@@ -243,7 +243,25 @@ export function createExplainResultsHandler(): HandlerFn {
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
         // DERIVED from the same call that produced the text, never hand-set.
-        staleness_prefixed: finalised.stalenessPrefixed,
+        //
+        // ⚠⚠ THIS CARRIES `caveated`, NOT `stalenessPrefixed`, AND THE CHOICE IS
+        // DELIBERATE. `ui-directive.ts` now GATES the results-panel directive on
+        // this field, so it must answer "does this answer carry a currency
+        // caveat?" — a question `stalenessPrefixed` gets wrong whenever the
+        // model wrote an approved opening itself (the priced idempotence gap):
+        // we do not prepend, the flag reads false, and the panel would open on
+        // stale numbers for exactly those turns. Deriving from the verdict makes
+        // the gate total.
+        //
+        // ⚠ THE CONTRACT NAME NOW LAGS THE SEMANTICS. The field is
+        // `staleness_prefixed` in `@talchain/schemas` 0.48.0 and is OPTIONAL and
+        // UNDOCUMENTED there; measured at `e9cc8258`, it had ZERO behavioural
+        // readers in `src/` (writers and comments only, against a contrast
+        // control of 34 non-test `precondition_unmet` hits in the same sweep),
+        // so sharpening what it carries breaks no consumer. Renaming it to
+        // `staleness_caveated` is a cross-repo schema change and is ROWED, not
+        // smuggled in here.
+        staleness_prefixed: finalised.caveated,
       },
     };
     const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);

@@ -258,9 +258,29 @@ export function applyStalenessPrefix(
  * owns ended up with two copies in the first place. This module owns the WORDS;
  * `no-op-helpers.ts` owns WHICH CLAIM IS LICENSED.
  *
- * Total over `StalenessCaveat` by construction: the type has exactly two
- * members and both are named, so there is no default to fall through.
+ * ⚠⚠ EXHAUSTIVE WITH A `never` GUARD, MATCHING ITS SIBLING. This was a ternary,
+ * and the old note here read *"total over `StalenessCaveat` by construction: the
+ * type has exactly two members and both are named, so there is no default to
+ * fall through."* True today, and it FAILS SILENT tomorrow: a ternary's `else`
+ * absorbs any third member, so a new caveat would return the UNCONFIRMED copy —
+ * the WEAKER claim in a state that may license a stronger one, which is the
+ * fail-OPEN direction and the wrong one for a trust surface. The switch makes a
+ * new member a TYPE ERROR here instead of a quiet mis-wording in front of a
+ * user.
+ *
+ * `caveatForPreconditionVerdict` (`no-op-helpers.ts`) already states this
+ * reasoning for the same union's producer side and is written this way; the two
+ * halves of one question should not disagree about how they fail.
  */
 export function recoveryOfferForCaveat(caveat: StalenessCaveat): string {
-  return caveat === 'stale' ? STALE_RECOVERY_OFFER : UNCONFIRMED_RECOVERY_OFFER;
+  switch (caveat) {
+    case 'stale':
+      return STALE_RECOVERY_OFFER;
+    case 'unconfirmed':
+      return UNCONFIRMED_RECOVERY_OFFER;
+    default: {
+      const _exhaustive: never = caveat;
+      return _exhaustive;
+    }
+  }
 }

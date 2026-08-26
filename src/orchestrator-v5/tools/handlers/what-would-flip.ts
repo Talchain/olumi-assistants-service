@@ -260,7 +260,12 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
         // DERIVED from the same call that produced the text, never hand-set.
-        staleness_prefixed: finalised.stalenessPrefixed,
+        // Carries `caveated`, not `stalenessPrefixed` — see the full note at the
+        // twin write site in `explain-results.ts`. Both handlers must agree:
+        // `ui-directive.ts` gates BOTH explanation rows on this field, and a
+        // flag that means one thing on one handler and another on its twin is
+        // the differently-named-twin defect this estate keeps paying for.
+        staleness_prefixed: finalised.caveated,
       },
     };
     const parsed = WhatWouldFlipHandlerFactSchema.safeParse(fact);

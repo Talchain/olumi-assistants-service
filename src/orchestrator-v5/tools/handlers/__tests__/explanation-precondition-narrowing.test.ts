@@ -180,6 +180,47 @@ function makeAnsweredInvocation(freshness: 'stale' | 'unknown', reason: string) 
 }
 
 describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', () => {
+  /**
+   * ⭐⭐ THE SELF-CAVEAT CASE — where "did we prepend?" and "is this caveated?"
+   * give DIFFERENT answers, and why the fact carries the second.
+   *
+   * `applyStalenessPrefix` is idempotent: when the model's own text already
+   * opens with an APPROVED_OPENING it returns `prefixed: false`, because there
+   * is nothing to prepend. The answer is still fully caveated. Since
+   * `ui-directive.ts` now GATES the results panel on `staleness_prefixed`, a
+   * flag carrying "we prepended" would read false here and the panel would open
+   * on stale numbers for exactly the turns where the model caveated first — a
+   * hole that is invisible to every other case in this file, because every
+   * other case lets us do the prepending.
+   *
+   * The opening below is the CANONICAL `STALENESS_PREFIX` wording, so this
+   * binds to the same constant the producer uses rather than a retyped phrase.
+   */
+  it('a model answer that ALREADY carries the caveat is still marked caveated (prefixed=false, caveated=true)', async () => {
+    const handler = createExplainResultsHandler();
+    const selfCaveated = `${STALENESS_PREFIX} ${VALID_ANSWER_TEXT}`;
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        explanation: { answer_text: selfCaveated, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
+      }),
+    );
+
+    // The caveat is present exactly ONCE — the idempotence guarantee holds.
+    const occurrences = outcome.assistant_text.split(STALENESS_PREFIX).length - 1;
+    expect(occurrences, 'the approved opening must not be doubled').toBe(1);
+    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
+    expect(
+      fact.result.staleness_prefixed,
+      'the fact must report CAVEATED, not "we prepended" — the ui-directive gate reads this',
+    ).toBe(true);
+  });
+
   it('explain_results / stale: answers, leads with STALENESS_PREFIX, and KEEPS the model answer', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(makeAnsweredInvocation('stale', 'graph_hash_diverged'));
