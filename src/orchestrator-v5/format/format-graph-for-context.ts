@@ -48,6 +48,8 @@ export interface DisplaySafeNode {
   readonly id: string;
   readonly label: string;
   readonly kind: string;
+  /** Producer-attested status-quo identity (option nodes only). */
+  readonly is_baseline?: true;
   /** Saved Living Model detail, bounded without local interpretation. */
   readonly description?: string;
   readonly category?: string;
@@ -136,6 +138,7 @@ interface RawNodeShape {
   readonly id?: unknown;
   readonly label?: unknown;
   readonly kind?: unknown;
+  readonly is_baseline?: unknown;
   readonly description?: unknown;
   readonly category?: unknown;
   readonly unit?: unknown;
@@ -340,6 +343,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     id: string;
     label: string;
     kind: string;
+    is_baseline?: true;
     description?: string;
     category?: string;
     unit?: string;
@@ -348,6 +352,10 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
   } = { id, label, kind };
+  // One narrow authority: only a literal producer field on an option can
+  // identify the saved current approach. Labels such as "status quo" are not
+  // reclassified here, malformed values are ignored, and false is omitted.
+  if (kind === 'option' && raw.is_baseline === true) node.is_baseline = true;
   const description = boundNodeDescriptionForContext(raw.description);
   if (description !== undefined) node.description = description;
   const category = asString(raw.category);
@@ -517,6 +525,8 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     numerics for handlers, freshness hashing, and edit_graph
  *     dispatch — Sonnet just doesn't see them. Internal `source` /
  *     `_raw_provenance` are dropped (diagnostic-only).
+ *     A literal producer-attested `is_baseline: true` survives only on option
+ *     nodes; the formatter does not infer it from labels or IDs.
  *     The `unit` extractor still reads compact top-level `unit`
  *     first and canonical `observed_state.unit` second so the
  *     assembler raw-graph fallback preserves the user-facing label.

@@ -229,6 +229,25 @@ describe('formatGraphForContext — node transformation', () => {
     });
   });
 
+  it('carries only literal baseline identity on option nodes', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'opt_current', kind: 'option', label: 'Current approach', is_baseline: true },
+          { id: 'opt_change', kind: 'option', label: 'Change', is_baseline: false },
+          { id: 'opt_named_status_quo', kind: 'option', label: 'Status quo' },
+          { id: 'opt_malformed', kind: 'option', label: 'Malformed', is_baseline: 'true' },
+          { id: 'fac_wrong_kind', kind: 'factor', label: 'Factor', is_baseline: true },
+        ],
+      }),
+    );
+
+    expect(out.nodes.find((node) => node.id === 'opt_current')?.is_baseline).toBe(true);
+    for (const id of ['opt_change', 'opt_named_status_quo', 'opt_malformed', 'fac_wrong_kind']) {
+      expect(out.nodes.find((node) => node.id === id)).not.toHaveProperty('is_baseline');
+    }
+  });
+
   it('A3.1: node-level value (compact + canonical observed_state) is stripped from display projection', () => {
     const out = formatGraphForContext(
       rawGraph({

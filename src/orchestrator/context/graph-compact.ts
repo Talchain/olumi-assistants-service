@@ -74,6 +74,8 @@ export interface CompactNode {
   id: string;
   kind: string;
   label: string;
+  /** Producer-attested status-quo identity (option nodes only). False is omitted. */
+  is_baseline?: true;
   /** Saved Living Model detail, bounded before it reaches prompt context. */
   description?: string;
   type?: string;
@@ -440,7 +442,8 @@ function buildPlainInterpretation(
 /**
  * Compact a V3 graph for LLM context.
  *
- * Kept per node: id, kind, label, bounded description (if present), type (if present), category (if present),
+ * Kept per node: id, kind, label, literal is_baseline=true (option nodes only),
+ * bounded description (if present), type (if present), category (if present),
  * observed_state.value, raw_value, unit, cap (if present),
  * source (legacy CompactNodeSource — derived from extractionType),
  * provenance (display-safe CompactProvenance — also derived from extractionType),
@@ -475,6 +478,13 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         kind: node.kind,
         label: node.label ?? node.id,
       };
+
+      // Preserve only the producer-attested positive fact. Do not infer a
+      // baseline from the option label/id and do not spend prompt budget on
+      // false values. The canonical graph validator owns this field's shape.
+      if (node.kind === 'option' && node.is_baseline === true) {
+        n.is_baseline = true;
+      }
 
       const description = boundNodeDescriptionForContext(node.description);
       if (description !== undefined) {
