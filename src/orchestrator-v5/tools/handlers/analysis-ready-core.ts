@@ -753,12 +753,19 @@ function resolveRunAdmissionTerms(
     // ⭐ AND THE SHARPER FACT, which the counts alone hide: CEE's ENTIRE blocking
     // vocabulary is THREE kinds (`canonicalise_option_interventions`,
     // `missing_value`, `model_structure`), and **13 of PLoT's 24 codes have ZERO
-    // references anywhere in CEE `src/`, measured at CEE `02058e1e` — this PR's
+    // references anywhere in CEE `src/`, measured at CEE `02058e1f` — this PR's
     // reviewed head, and re-measured unchanged at the commit that corrected this
     // paragraph — against PLoT `3a3bee58`** (same-sweep contrast:
-    // `IDENTICAL_OPTIONS` = 50 lines / 18
-    // files, so the sweep was not blind; zero + non-zero = 24, so it was not
-    // short either). The gap is not "a few violations" — it is a refusal
+    // `IDENTICAL_OPTIONS` = 50 lines / 18 files, so the sweep was not blind;
+    // zero + non-zero = 24, so it was not short either).
+    //
+    // ⚠ THE CEE ANCHOR ABOVE READ `02058e1e` UNTIL 2026-08-27 AND DID NOT RESOLVE
+    // — one character off, and inherited from a brief rather than derived.
+    // Corrected to `02058e1f`. Recorded rather than silently repaired, because an
+    // unresolvable sha is WORSE than no sha: it reads as verifiable, so a reader
+    // who trusts it stops looking. Both anchors here are now checked with
+    // `git cat-file -t` in their own repos (a bogus sha fatals, so the check
+    // discriminates); PLoT `3a3bee58` also verified an ancestor of PLoT staging. The gap is not "a few violations" — it is a refusal
     // vocabulary CEE has largely never heard of, and a floor can only be written
     // for a code someone has read.
     //
