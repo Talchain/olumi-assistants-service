@@ -533,6 +533,58 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     });
   });
 
+  /**
+   * F1 (independent review of PR #1102) — THE REFUSAL NOTE MUST NOT COUNT THE
+   * VERBATIM TURNS, because on this path it is the one number it cannot know.
+   *
+   * The producer builds the note from `verbatimCount = min(windowDepth, len)`
+   * and returns `summarisedTurns: 0`. The consumer
+   * (`context-pack-assembler.ts`, the `summaryCoverageWasChecked &&
+   * !summaryHasCoverage` branch) reads that 0 as "checked, no coverage" and
+   * EXPANDS the verbatim window from the cap to `priorTurns.length`. So the
+   * note says "only the latest 5 turns are shown verbatim" while the pack
+   * shows every fetched turn — the prompt contradicting itself about its own
+   * contents, on the memory-hole path this PR exists to serve.
+   *
+   * The count is NOT restated here: the window notice
+   * (`context-pack-assembler.ts` — "the N most recent are shown above and M
+   * earlier ones are not shown") already carries it, derived from what was
+   * actually projected. One authority for the number, and this note is not it.
+   *
+   * The absence disclosure itself is unchanged and still asserted below —
+   * dropping the number must not quietly drop the honesty.
+   */
+  it('the refusal note makes NO verbatim-turn COUNT claim (the consumer expands the window past it)', async () => {
+    const store = storeReturning(summaryFixture());
+    // Watermark T2 covered, 7 newer turns, windowDepth 5 → verbatimCount 5,
+    // refusal fires. PRECONDITION PINNED IN-TEST (a discriminator that stops
+    // discriminating must go red, not quietly pass): if this fixture ever
+    // stops reaching the refusal arm, `summarisedTurns` is no longer 0 and the
+    // assertions below would be testing a different path.
+    const window = [...newerTurns(7), T2, T1];
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: window,
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    expect(outcome.summarisedTurns, 'precondition: the refusal arm fired').toBe(0);
+    const note = outcome.section!.note!;
+
+    // THE PIN: no "only the latest N turns are shown verbatim" claim. The
+    // number is the consumer's to state, and on this path it is not 5.
+    expect(note).not.toMatch(/only the latest \d+ turns are shown verbatim/);
+    // Nor any other spelling that re-mints a verbatim COUNT here.
+    expect(note).not.toMatch(/\d+\s+turns are shown verbatim/);
+
+    // …while the disclosure the note exists for is untouched.
+    expect(note.toLowerCase()).toContain('withheld');
+    expect(note.toLowerCase()).toContain('not shown');
+    // The GAP figure stays — it is this producer's own measurement (lag 7),
+    // unlike the verbatim count, which belongs to the assembler.
+    expect(note).toContain('7');
+  });
+
   it('REFUSES when the gap exceeds verbatim coverage even though the watermark is visible', async () => {
     // Watermark T2 covered by the window (T2 present), but 7 newer turns exist
     // and only 5 are verbatim → 2 turns are neither summarised nor shown.

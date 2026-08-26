@@ -357,7 +357,21 @@ export async function loadConversationSummaryForInjection(
           current_to_turn_id: summary.updated_turn_id,
           lag_turns: lag,
           stale: true,
-          note: `(conversation summary withheld: it is ${gapPhrase} and only the latest ${verbatimCount} turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
+          // ⚠ NO VERBATIM COUNT HERE (F1, independent review of PR #1102).
+          // This arm returns `summarisedTurns: 0`, and the assembler reads
+          // that 0 as "checked, no coverage" and EXPANDS the verbatim window
+          // from CONTEXT_PACK_RECENT_TURNS_CAP to `priorTurns.length`. So
+          // `verbatimCount` (computed above from `windowDepth`) is NOT the
+          // number the pack goes on to show, and stating it here made the
+          // prompt contradict itself about its own contents — on precisely
+          // the memory-hole path this block exists to serve.
+          //
+          // `verbatimCount` still GATES the refusal above; it just no longer
+          // describes the result. The count belongs to the assembler's window
+          // notice ("the N most recent are shown above and M earlier ones are
+          // not shown"), which derives it from what was actually projected —
+          // one authority for the number, and this note is not it.
+          note: `(conversation summary withheld: it is ${gapPhrase} and only the most recent turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
         },
         lagTurns: lag,
         // The four-slot block was WITHHELD — nothing is summarised here.
