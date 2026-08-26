@@ -412,8 +412,26 @@ export function synthesiseRangeDisplayValue(
   let percentMultiplier = 1;
   if (unit === "%") {
     const magnitudes: number[] = [];
-    if (hasMin) magnitudes.push(Math.abs(rangeMin!));
-    if (hasMax) magnitudes.push(Math.abs(rangeMax!));
+    // ⭐ A BOUND OF ZERO IS SCALE-INVARIANT AND MUST NOT VOTE ON THE SCALE.
+    // `0 * 100 === 0`, so a zero bound renders identically under BOTH
+    // conventions and carries no evidence about which one the pair is on.
+    // Counting it as "within the unit interval" made every `[0, N>1]` percent
+    // range a FALSE STRADDLE: `[0, 25]` — unambiguously "0% to 25%" under
+    // either reading — silently lost its `display_value`. Measured against the
+    // merge base 7401725f: base rendered "0% to 25%", "0% to 75%" and
+    // "25% to 0%"; head rendered nothing for all three.
+    //
+    // ⚠ This is the SECOND harm of the pair this function is about, and the two
+    // cannot share one window: a mis-scaled number is a LIE, a silently missing
+    // display is a GAP. Fixing the lie by widening the decline traded one for
+    // the other, and the author suite could not see it because every case it
+    // added pointed at the lie.
+    //
+    // Both-zero is unaffected: `magnitudes` is then empty, `every()` is
+    // vacuously true, the pair is not a straddle, and `[0, 0]` renders "0% to
+    // 0%" exactly as the base did.
+    if (hasMin && rangeMin !== 0) magnitudes.push(Math.abs(rangeMin!));
+    if (hasMax && rangeMax !== 0) magnitudes.push(Math.abs(rangeMax!));
     const allWithinUnitInterval = magnitudes.every((m) => m <= 1);
     const allOutsideUnitInterval = magnitudes.every((m) => m > 1);
     // A single bound can never straddle: it is trivially all-within or

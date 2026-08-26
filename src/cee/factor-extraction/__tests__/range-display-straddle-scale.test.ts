@@ -117,3 +117,114 @@ describe("C — the decline is SCOPED to the percent limb and to genuine straddl
     );
   });
 });
+
+/**
+ * D — A BOUND OF ZERO IS SCALE-INVARIANT AND MUST NOT VOTE ON THE SCALE.
+ *
+ * `0 * 100 === 0`. A zero bound renders identically under BOTH conventions, so
+ * it carries no evidence about which one the pair is on. Counting it as
+ * "within the unit interval" made every `[0, N>1]` percent range a FALSE
+ * STRADDLE and silently dropped its `display_value` — `"0% to 25%"` is
+ * unambiguous under either reading, and the pre-PR code rendered it correctly.
+ *
+ * ⭐ THE SHAPE OF THE MISS, because it is the reusable part: this PR traded one
+ * harm for its opposite and its own suite applauded 13/13. A mis-scaled number
+ * (a LIE) and a silently missing display (a GAP) are two different harms, and
+ * they cannot share one window — every case the author added pointed at the
+ * lie, so nothing could observe the gap. Same family as CEE #888/#891.
+ *
+ * Expected strings below are the BYTE-IDENTICAL output measured at the merge
+ * base 7401725f, not values chosen here.
+ */
+describe("D — zero bounds are scale-invariant and do not create a straddle", () => {
+  it("[0, 25] renders, exactly as the base did — the canonical false straddle", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 25 }, "%")).toBe("0% to 25%");
+  });
+
+  it("[0, 75] renders — a zero lower bound with a percentage-point upper", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 75 }, "%")).toBe("0% to 75%");
+  });
+
+  it("[25, 0] renders — the zero is the UPPER bound, so order is not the rule", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 25, range_max: 0 }, "%")).toBe("25% to 0%");
+  });
+
+  it("[0, 0.25] still multiplies — a zero must not force the outside convention either", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 0.25 }, "%")).toBe("0% to 25%");
+  });
+
+  it("[0, 0] renders — both bounds zero leaves the magnitude set EMPTY (vacuous every())", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 0 }, "%")).toBe("0% to 0%");
+  });
+
+  /**
+   * THE OPPOSITE-DIRECTION TWIN of this whole block. Skipping zero bounds must
+   * not re-admit a GENUINE straddle — otherwise the gap fix reopens the lie,
+   * which is precisely the oscillation this seam has already paid for.
+   */
+  it("a genuine straddle is STILL declined — the zero-skip did not reopen the lie", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: 0.56, range_max: 1.68 }, "%")).toBeUndefined();
+    expect(synthesiseRangeDisplayValue({ range_min: 1, range_max: 25 }, "%")).toBeUndefined();
+    expect(synthesiseRangeDisplayValue({ range_min: -0.4, range_max: 1.95 }, "%")).toBeUndefined();
+  });
+
+  it("the full normalised domain is STILL declined — a domain is not an estimate", () => {
+    // [0, 1] and [0, 100] both carry a zero bound, so this pins that the
+    // zero-skip did not leak them past the earlier domain rule.
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 1 }, "%")).toBeUndefined();
+    expect(synthesiseRangeDisplayValue({ range_min: 0, range_max: 100 }, "%")).toBeUndefined();
+  });
+});
+
+/**
+ * E — THE NEGATIVE LIMB, WHERE IT RENDERS.
+ *
+ * ⛔ The corpus's only negative case (`[-0.4, 1.95]`) DECLINES, so before this
+ * block the negative limb was never tested anywhere it produces a string. Two
+ * negative behaviours changed in this PR and were pinned by NOTHING:
+ *
+ *   [-0.5, -0.2]  base "-0.5% to -0.2%"  ->  head "-50% to -20%"   (100x)
+ *   [-1,  -25]    base "-1% to -25%"     ->  head  undefined       (declines)
+ *
+ * Both are measured, not asserted from reading. The 100x move is the CORRECT
+ * direction — `Math.abs` puts both bounds inside the unit interval, so the pair
+ * is normalised and multiplies — but a 100x change in a user-visible string
+ * with no test is exactly how this repo previously shipped a sign-asymmetric
+ * classifier that suppressed a cost factor by 100,000x while self-reporting
+ * all-green (CEE #891). Negatives are not an edge case on this seam.
+ */
+describe("E — negatives, pinned where they RENDER and not only where they decline", () => {
+  it("[-0.5, -0.2] multiplies: both magnitudes are sub-unit, so the pair is normalised", () => {
+    // 100x change from the base's "-0.5% to -0.2%", which came from the
+    // per-bound sniff `n >= 0 && n <= 1` failing on the SIGN and passing the
+    // value through unscaled. The new value is right; it is pinned so it can
+    // never move again unobserved.
+    expect(synthesiseRangeDisplayValue({ range_min: -0.5, range_max: -0.2 }, "%")).toBe(
+      "-50% to -20%",
+    );
+  });
+
+  it("[-25, -5] is used as-is: both magnitudes are outside the unit interval", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: -25, range_max: -5 }, "%")).toBe(
+      "-25% to -5%",
+    );
+  });
+
+  it("[-1, -25] STRADDLES by magnitude and is declined — the |1| boundary holds for negatives", () => {
+    // |-1| = 1 counts as within, |-25| = 25 is outside. Base rendered
+    // "-1% to -25%", a range whose lower bound reads further from zero than its
+    // upper. Declining it is the same judgement as the positive [1, 25] twin.
+    expect(synthesiseRangeDisplayValue({ range_min: -1, range_max: -25 }, "%")).toBeUndefined();
+  });
+
+  it("a negative bound paired with a ZERO still renders — sign and zero-skip compose", () => {
+    // The intersection of blocks D and E: a zero contributes no magnitude, so
+    // the surviving negative bound alone decides the scale.
+    expect(synthesiseRangeDisplayValue({ range_min: -0.2, range_max: 0 }, "%")).toBe("-20% to 0%");
+    expect(synthesiseRangeDisplayValue({ range_min: -25, range_max: 0 }, "%")).toBe("-25% to 0%");
+  });
+
+  it("one-bound negative percent forms still render", () => {
+    expect(synthesiseRangeDisplayValue({ range_min: -0.1 }, "%")).toBe("At least -10%");
+  });
+});
