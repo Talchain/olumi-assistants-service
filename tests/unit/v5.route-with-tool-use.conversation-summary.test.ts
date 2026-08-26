@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 
 import {
+  BRIEF_INSTRUCTION,
   buildUserMessage,
   SUMMARY_PRECEDENCE_INSTRUCTION,
 } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
@@ -92,12 +93,12 @@ function baselinePack(): ContextPack {
 }
 
 /** sha256 of buildUserMessage(baselinePack(), PAYLOAD.message). Re-captured
- *  when context disclosure became UNCONDITIONAL: projectConversation now
- *  always emits `window: {shown, available}` on the pack conversation (here
- *  2 of 2), which is the only delta from the pre-S4-inject golden
- *  (360b01f34, 1,376 chars). The rolling-summary block is still absent. */
+ *  when the existing `brief` field gained its conditional, code-owned
+ *  historical-context instruction. The rolling-summary block is still absent;
+ *  this baseline deliberately contains a brief, so that independent additive
+ *  instruction is now part of the exact bytes. */
 const PRE_CHANGE_SHA256 =
-  '31f3eb091ef8ac382cdae9e19ae0a15390623b6fa4f8df586bf470a4b5eb03d4';
+  '0b7ddf441acc5c9367ed845a7525b1bbe65f87087544e9324ff6764c282a6348';
 
 const SECTION: ContextPackConversationSummary = {
   text: [
@@ -118,10 +119,11 @@ function withSummary(pack: ContextPack): ContextPack {
 describe('buildUserMessage — conversation_summary (S4-inject)', () => {
   it('no section on the pack → byte-identical to the pre-change baseline (off + maintain)', () => {
     const out = buildUserMessage(baselinePack(), PAYLOAD.message);
-    expect(out.length).toBe(1438);
+    expect(out.length).toBe(2535);
     expect(createHash('sha256').update(out).digest('hex')).toBe(PRE_CHANGE_SHA256);
     expect(out).not.toContain('conversation_summary');
     expect(out).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
+    expect(out.split(BRIEF_INSTRUCTION)).toHaveLength(2);
   });
 
   it('section present → adds EXACTLY the block + instruction, below ground-truth state', () => {
@@ -148,7 +150,7 @@ describe('buildUserMessage — conversation_summary (S4-inject)', () => {
     // its final key, and insert the instruction before '## User turn'.
     const baseJson = base.slice(
       base.indexOf('{'),
-      base.lastIndexOf('\n\n## User turn'),
+      base.lastIndexOf(`\n\n${BRIEF_INSTRUCTION}`),
     );
     const parsed = JSON.parse(baseJson) as Record<string, unknown>;
     const expectedJson = JSON.stringify(

@@ -55,6 +55,7 @@ import {
   FOCUS_INSTRUCTION,
   READINESS_INSTRUCTION,
   GOAL_TARGET_INSTRUCTION,
+  BRIEF_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -110,24 +111,40 @@ function shortSha256(s: string): string {
  * genuinely sanctioned — checking the PMS prompt alone would false-fire on
  * `conversation_summary` and `coaching_context`.
  */
-const MODEL_FACING_CORPUS = [
-  SERVED_PROMPT,
-  COACHING_CONTEXT_INSTRUCTION,
-  SUMMARY_PRECEDENCE_INSTRUCTION,
+/**
+ * The code-owned instruction blocks, NAMED so the corpus and the emission
+ * assertion below are single-sourced (CLAUDE.md trap 12 — a second hand-written
+ * list of these would drift silently, and the drift always reads as green).
+ * Adding an instruction here puts it in the sanctioning corpus AND under the
+ * EMISSION check in one edit; there is no way to gain sanctioning power without
+ * also having to prove the prompt actually carries it.
+ */
+const CODE_OWNED_INSTRUCTIONS = [
+  ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
+  ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
   // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
   // `focus` on the pack, so a field sanctioned only here is genuinely
   // sanctioned — the same reasoning as its two siblings above.
-  FOCUS_INSTRUCTION,
+  ['FOCUS_INSTRUCTION', FOCUS_INSTRUCTION],
   // Readiness. Emitted by the SAME condition that puts `readiness` on the pack
   // — same reasoning as its three siblings above. The served PMS prompt cannot
   // sanction it (it is operator-managed and not editable from this repo), which
   // is precisely why the instruction is code-owned.
-  READINESS_INSTRUCTION,
+  ['READINESS_INSTRUCTION', READINESS_INSTRUCTION],
   // Success target. Emitted by the SAME condition that puts `goal_target` on
   // the pack — same reasoning as its four siblings above. Like `readiness`, the
   // served PMS prompt cannot sanction it (operator-managed, not editable from
   // this repo), which is exactly why the instruction is code-owned.
-  GOAL_TARGET_INSTRUCTION,
+  ['GOAL_TARGET_INSTRUCTION', GOAL_TARGET_INSTRUCTION],
+  // Saved opening framing. Emitted by the SAME condition that puts `brief` on
+  // the pack. It licences continuity while keeping historical framing below
+  // the current Living Model and explicit current-user corrections.
+  ['BRIEF_INSTRUCTION', BRIEF_INSTRUCTION],
+] as const satisfies ReadonlyArray<readonly [string, string]>;
+
+const MODEL_FACING_CORPUS = [
+  SERVED_PROMPT,
+  ...CODE_OWNED_INSTRUCTIONS.map(([, text]) => text),
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -150,11 +167,6 @@ const KNOWN_UNSANCTIONED: ReadonlyArray<{
   readonly promptSha: string;
   readonly note: string;
 }> = [
-  {
-    field: 'brief',
-    promptSha: 'adcc5128d4e6e6bc',
-    note: "FOUND BY THIS GATE, STILL OPEN AT v120. The user's OWN persisted decision brief (Lane 28) is model-facing and prose-bearing; v120 contains ZERO occurrences of \"brief\" (case-insensitive) in 25,149 chars, exactly as v119 did. v120 fixed older_relevant_facts and did not touch this. Same defect class, same closed-world instructions.",
-  },
   {
     field: 'analysis.staleness_reason',
     promptSha: 'adcc5128d4e6e6bc',
@@ -454,7 +466,14 @@ function applyWaivers(found: string[], promptSha: string): string[] {
 // ---------------------------------------------------------------------------
 
 const PACK = assembleMaximalPack();
-const SERIALISED = observeSerialisedPack(buildUserMessage(PACK, USER_MESSAGE));
+/**
+ * The message `buildUserMessage` ACTUALLY renders — kept, not discarded. The
+ * gate previously parsed the pack out of this and threw the prompt away, which
+ * is why it could certify a field as sanctioned by an instruction the prompt
+ * did not contain (see EMISSION below).
+ */
+const RENDERED = buildUserMessage(PACK, USER_MESSAGE);
+const SERIALISED = observeSerialisedPack(RENDERED);
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
 
 describe('prompt ↔ pack sanction gate', () => {
@@ -485,6 +504,47 @@ describe('prompt ↔ pack sanction gate', () => {
       Object.keys(ContextPackSchema.shape).filter(
         (k) => !facing.has(k) && !(STRIPPED_BY_SERIALISER as readonly string[]).includes(k),
       ),
+    ).toEqual([]);
+  });
+
+  /**
+   * F2 (independent review of PR #1111) — THE CORPUS MUST BE EVIDENCE, NOT A
+   * CLAIM.
+   *
+   * `MODEL_FACING_CORPUS` is composed from exported CONSTANTS. Importing a
+   * constant proves it was authored; it proves nothing about whether
+   * `buildUserMessage` ever puts it in front of the model. So the gate could
+   * certify a field as "sanctioned" on the strength of an instruction the
+   * rendered prompt did not contain — and that is not hypothetical: deleting
+   * the production emission block left this gate 15/15 GREEN while five tests
+   * in sibling suites went red. A waiver removed from KNOWN_UNSANCTIONED on
+   * that evidence would be trading a recorded known gap for a false claim.
+   *
+   * This assertion closes the loop by checking the ONE artefact that settles
+   * it: the message the model actually receives. It REDs under that mutant.
+   *
+   * It is deliberately placed BEFORE `THE GATE`: it is the precondition that
+   * makes the gate's corpus mean anything, and a reader should meet it first.
+   */
+  it('EMISSION — every code-owned instruction in the corpus is actually rendered into the prompt', () => {
+    // PRECONDITIONS PINNED IN-TEST: an assertion over an empty corpus, or over
+    // a prompt that failed to render, would pass by testing nothing (trap #13).
+    expect(
+      CODE_OWNED_INSTRUCTIONS.length,
+      'the corpus must carry code-owned instructions or this check is vacuous',
+    ).toBeGreaterThan(0);
+    expect(RENDERED).toContain('## ContextPack');
+
+    const missing = CODE_OWNED_INSTRUCTIONS.filter(([, text]) => !RENDERED.includes(text)).map(
+      ([name]) => name,
+    );
+    expect(
+      missing,
+      `These instructions are counted as SANCTIONING text by MODEL_FACING_CORPUS, but ` +
+        `buildUserMessage did not render them into the prompt for a pack that populates every ` +
+        `schema key: ${missing.join(', ')}. Either the emission is missing (the model never ` +
+        `sees the licence, so any waiver removed on its authority is a false claim), or the ` +
+        `instruction is no longer code-owned and must leave MODEL_FACING_CORPUS.`,
     ).toEqual([]);
   });
 
@@ -580,7 +640,8 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
   it('WAIVER EXPIRY — EVERY waiver granted for v119 expires on a prompt change, on BOTH discriminators', () => {
     // The waiver path must be exercised by REAL waivers, not a synthetic one —
     // an untested waiver path is the same guarantee theatre this gate hunts.
-    // All three live divergences flow through it, across both discriminators.
+    // The remaining live divergence flows through it on the phantom-field
+    // discriminator. The brief sanction is now code-owned and needs no waiver.
     const otherSha = 'deadbeefdeadbeef';
     const sanction = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
     const phantom = findPhantomFields(SERVED_PROMPT, SERIALISED);
@@ -594,7 +655,7 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     expect(applyWaivers(phantom, LIVE_SHA)).toEqual([]);
 
     // AFTER A RE-PIN: every waiver expires and every divergence resurfaces.
-    expect(applyWaivers(sanction, otherSha).sort()).toEqual(['brief']);
+    expect(applyWaivers(sanction, otherSha)).toEqual([]);
     expect(applyWaivers(phantom, otherSha)).toEqual(['analysis.staleness_reason']);
 
     // No waiver is inert: each one is doing real suppression work today.
@@ -614,9 +675,9 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     ]) {
       expect(found, `${quiet} should not fire`).not.toContain(quiet);
     }
-    // One live sanction finding at v120: older_relevant_facts was FIXED by the
-    // prompt lane; `brief` was not touched and remains open.
-    expect(found.sort()).toEqual(['brief']);
+    // No live sanction finding remains at v120: older_relevant_facts is named
+    // by the served prompt and `brief` is conditionally sanctioned in code.
+    expect(found).toEqual([]);
   });
 
   it('FIXTURE-BLINDNESS CONTROL — an unpopulated field is CAUGHT, not silently skipped', () => {
