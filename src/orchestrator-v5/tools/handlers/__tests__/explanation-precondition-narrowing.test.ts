@@ -74,7 +74,12 @@ const ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
     { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
     { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
   ],
-  staleness_reason: null,
+  // NOTE: deliberately NOT setting `staleness_reason`. Sibling fixtures still
+  // do, and it no longer exists on `AnalysisProjectionSummary` — it is the very
+  // field whose removal left `applyStalenessPrefix` with zero callers and the
+  // estate with no way to caveat an executed explanation. Copying it forward
+  // here would have added a NEW instance of a pre-existing type error to the
+  // drift ratchet. Currency now travels via the freshness verdict, not this.
 };
 
 function makeRunAnalysisFactWithStatus(status: string | null): RunAnalysisHandlerFact {

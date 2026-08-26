@@ -373,8 +373,32 @@ export function caveatForPreconditionVerdict(
  *
  * Exhaustive with a `never` guard: a new verdict variant must decide here rather
  * than silently inheriting "answer", which is the fail-OPEN direction.
+ *
+ * ⭐ IT IS A TYPE PREDICATE, AND THAT IS LOAD-BEARING, NOT A FLOURISH. The
+ * handlers previously narrowed by `verdict !== 'execute'`, which gave the
+ * compiler control-flow narrowing for free; a plain boolean helper would have
+ * silently thrown that away and let a `stale` verdict reach
+ * `buildPreconditionAssistantText` — i.e. reach the very canned template this
+ * change exists to stop emitting. The gate caught exactly that (TS2345, both
+ * handlers). Narrowing to {@link BlockingExplanationVerdict} makes "only a
+ * verdict with nothing to answer with can reach the block template" a
+ * COMPILE-TIME fact rather than a convention.
+ *
+ * ⚠ A type predicate is ASSERTED, not verified, so it and the switch below must
+ * be changed together: making `stale` return `true` without widening
+ * `BlockingExplanationVerdict` would be a lie the compiler believes. The
+ * exhaustive switch forces the decision to be visible, and the TWIN cases in
+ * `__tests__/explanation-precondition-narrowing.test.ts` pin the behaviour in
+ * both directions.
  */
-export function explanationVerdictBlocks(verdict: ExplanationPreconditionVerdict): boolean {
+export type BlockingExplanationVerdict = Extract<
+  ExplanationPreconditionVerdict,
+  'missing' | 'degraded'
+>;
+
+export function explanationVerdictBlocks(
+  verdict: ExplanationPreconditionVerdict,
+): verdict is BlockingExplanationVerdict {
   switch (verdict) {
     // Nothing exists to answer with.
     case 'missing':
