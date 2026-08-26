@@ -245,22 +245,28 @@ export function composeConfigureOptionClarifyResponse(
   // (`interventions: {…, source: "user_specified"}`, verified after reload).
   //
   // ⚠⚠ AND IT DELIBERATELY DOES **NOT** APPEND
-  // `buildConfigureOptionDirectSetSentence`. That sentence — "open <option> on
-  // the canvas and add <factor> to what it changes" — was REFUTED BY A LIVE
-  // DRIVE on 2026-08-25: the canvas option panel renders the intervention row
-  // inside a `<fieldset disabled>` and writes NOTHING (a forced native write
-  // produced zero wire calls), and the panel's own notice says it is read-only
-  // because the change "cannot yet be saved to the shared model".
+  // `buildConfigureOptionDirectSetSentence`. This branch already asks for the
+  // number in its own words; appending a second ask would be the restatement
+  // this branch exists to stop.
   //
-  // ⛔ THE SENTENCE IS THEREFORE FALSE WHEREVER IT IS EMITTED, INCLUDING THE
-  // `answered` BRANCH BELOW, WHICH THIS CHANGE DELIBERATELY DOES NOT TOUCH.
-  // That is a pre-existing defect on a different branch with its own pins, and
-  // silently rewriting it here would put one lane's fix inside another's
-  // evidence. It is REPORTED, not absorbed (CLAUDE.md scope-expansion rule).
-  // Note the shape: this sentence was itself introduced to FIX a dead-end
-  // locus, was correct about which field the write targets, and went false when
-  // the surface was disabled underneath it — a cross-service hand-maintained
-  // mirror going stale exactly as its own header warned (trap 12).
+  // ⚠ HISTORY, because the reason has changed and a stale reason is worse than
+  // none: when #1113 wrote this note the sentence read "open <option> on the
+  // canvas and add <factor> to what it changes", and it was withheld here
+  // because it was FALSE — REFUTED BY A LIVE DRIVE on 2026-08-25 (the canvas
+  // option panel renders the intervention row inside a `<fieldset disabled>` and
+  // writes NOTHING; a forced native write produced zero wire calls; the panel's
+  // own notice says it is read-only because the change "cannot yet be saved to
+  // the shared model"). #1113 correctly declined to rewrite the `answered`
+  // branch from inside its own evidence and REPORTED it instead. ROADMAP 2.1269
+  // then fixed that branch: the sentence now points at chat and is no longer
+  // false anywhere. It stays out of THIS branch for the redundancy reason above,
+  // not the falsity one.
+  //
+  // Note the shape, which is why the sentence has its own owner and its own
+  // spec: it was introduced to FIX a dead-end locus, was correct about which
+  // field the write targets, and went false when the surface was disabled
+  // underneath it — a cross-service hand-maintained mirror going stale exactly
+  // as its own header warned (trap 12). It has now done that twice.
   const identificationComplete =
     !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
 
@@ -287,14 +293,16 @@ export function composeConfigureOptionClarifyResponse(
     ? [
         `"${optionLabel}" still has no effect value on ${primaryFactor}, so that link is not carrying anything yet.`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
-        // ⚠ THE LOCUS, NOT THE COPY, WAS THE DEFECT. This sentence used to be
-        // spelled inline here and sent the user to the option→factor LINK —
-        // `EdgePanel`'s intervention branch, which renders two `<p>` tags and
-        // no controls. A witness followed it to a dead end (2026-08-19). It is
-        // now built by the single owner beside the chip/advised-format
-        // builders, which carries the derivation for why the OPTION is the
-        // locus the canvas actually edits.
-        buildConfigureOptionDirectSetSentence(optionLabel, primaryFactor),
+        // ⚠ THE LOCUS, NOT THE COPY, HAS BEEN THE DEFECT TWICE. This sentence
+        // first sent the user to the option→factor LINK (`EdgePanel`'s
+        // intervention branch: two `<p>` tags, no controls — a witness reached a
+        // dead end on 2026-08-19), then to the CANVAS OPTION PANEL, which renders
+        // its intervention row inside a disabled fieldset and writes nothing
+        // (ROADMAP 2.1269). It now points at CHAT — the only destination
+        // witnessed to land this write. The single owner beside the
+        // chip/advised-format builders carries the full derivation and states its
+        // evidentiary rung exactly.
+        buildConfigureOptionDirectSetSentence(),
       ].join(' ')
     : [
         `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,

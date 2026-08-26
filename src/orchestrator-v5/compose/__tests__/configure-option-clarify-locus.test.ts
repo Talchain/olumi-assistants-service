@@ -19,34 +19,37 @@
  *     strength/existence/std sliders. The probe can see controls where they
  *     exist, so the absence above is real absence and not a blind read.
  *
- * ## The locus that DOES work, and why this is a locus fix and not a copy fix
+ * ## ⛔ THE CANVAS ANSWER THIS FILE ORIGINALLY GAVE HAS BEEN REFUTED — 2.1269
  *
- * The value CEE writes for this slot is `data/interventions/<factorId>` on the
- * OPTION node (`graph-management/__tests__/option-effect-write-apply-chain.test.ts`,
- * `op: 'update_node'`). The live canvas edits THAT SAME FIELD from the OPTION
- * panel, never from the edge:
+ * This header used to continue "the locus that DOES work" and argue that the
+ * OPTION panel edits the same field the edge cannot. The field claim is still
+ * right — CEE writes `data/interventions/<factorId>` on the OPTION node
+ * (`graph-management/__tests__/option-effect-write-apply-chain.test.ts`,
+ * `op: 'update_node'`) — but the reachability claim is FALSE at the served
+ * bundle, and it was drawn from `OptionPanel.tsx`'s own comment ("Primary
+ * editing surface: intervention inputs MUST remain editable"), which is a
+ * statement of INTENT that the shipped code no longer honours.
  *
- *   - `inspector-v2/panels/OptionPanel.tsx:4` — "Primary editing surface:
- *     intervention inputs MUST remain editable" — renders `InterventionRow`
- *     (a real `<input>`, `disabled={false}`) per intervention, plus an
- *     always-rendered "+ Add a change" dropdown whose `handleAddFactor` calls
- *     `mutations.setIntervention(factorId, …)`. That is the add path for
- *     exactly the state this reply describes: linked, no value yet.
- *   - Mounted: `InspectorModal` ← `ReactFlowGraph.tsx:47`. (The legacy
- *     `NodeInspector.tsx` route is dark — `PropertiesPanel` has no product
- *     import, contrast control: `OutputsDock` has many.)
- *   - The UI says the same thing in its own copy when an option is linked with
- *     no values set — `inspectorStrings.ts:409`: "…no change values are set yet
- *     — set one to give this option an effect in the analysis." Shown ON THE
- *     OPTION PANEL.
- *   - CEE's own served prompt already agrees: `prompts/orchestrator-cf-v19.ts:1331`
- *     — "click each option on the canvas and set …". It names the OPTION.
+ * DERIVED AT THE SERVED BUNDLE (`ReactFlowGraph-ozVez5O5.js`): `disabled:!0` is a
+ * literal there; EXACTLY TWO fieldset sites exist in the whole bundle and BOTH
+ * are disabled; ZERO `removeAttribute("disabled")`; ZERO `createPortal` in
+ * `inspector-v2`, against a live contrast elsewhere in the same bundle. A forced
+ * native write on 2026-08-25 produced ZERO wire calls.
  *
- * So `configure-option-clarify-response.ts` was the ESTATE'S ONLY SPELLING that
- * named the LINK. This is Paul's convergence rule applied: the locus has one
- * owner (`buildConfigureOptionDirectSetSentence`, beside the chip/advised-format
- * builders that are already declared the single source of configure-option
- * copy), and the divergent spelling is superseded rather than duplicated.
+ * ⚠⚠ RUNG, STATED EXACTLY: **DERIVED AT THE SERVED BUNDLE — NOT DOM-WITNESSED.**
+ *
+ * ⭐ THE LESSON THIS FILE NOW CARRIES: reasoning from a component's own header
+ * comment is reading a hand-maintained mirror (trap 12). The 2026-08-19 witness
+ * above was direct evidence and has held; the canvas derivation was inference
+ * from prose and lasted six days.
+ *
+ * The convergence point stands unchanged: the locus has ONE owner
+ * (`buildConfigureOptionDirectSetSentence`, beside the chip/advised-format
+ * builders already declared the single source of configure-option copy), which is
+ * precisely why re-pointing it at chat was a one-line change rather than a sweep.
+ * The properties of the replacement are pinned in
+ * `configure-option-answered-locus-can-save.test.ts`; this file keeps pinning the
+ * ORIGINAL witnessed defect, which must never return.
  *
  * ## Why these assertions are shaped this way
  *
@@ -101,7 +104,7 @@ describe('2.1268 — the terminating reply names a locus that has controls', () 
     const terminating = compose(ANSWERED);
     // IDENTITY BINDING: the exported builder, not the sentence text. If the
     // composer ever re-spells this sentence locally, this REDs.
-    expect(terminating).toContain(buildConfigureOptionDirectSetSentence(OPTION, FACTOR));
+    expect(terminating).toContain(buildConfigureOptionDirectSetSentence());
   });
 
   it('it does NOT direct the user to enter the value on the option→factor LINK', () => {
