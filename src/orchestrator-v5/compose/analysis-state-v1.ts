@@ -90,9 +90,36 @@
  *      halves hold, and an unknown half is not a held half. CONSEQUENCE, named
  *      here because step 7 is where it bites: on a turn that displays a PRIOR
  *      analysis without re-shipping its `analysis_result` block, the separation
- *      half is unreadable at this seam, so `permitted` is false. Nothing
- *      consumes this field yet; a UI conjunct built on it (step 7) must first
- *      settle whether the separation verdict should be persisted with the fact.
+ *      half is unreadable at this seam, so `permitted` is false.
+ *
+ *      ⚠⚠ THIS LIMIT'S LICENCE HAS LAPSED, AND THE OLD TEXT IS CORRECTED RATHER
+ *      THAN DELETED (trap 14). It used to end: "Nothing consumes this field
+ *      yet; a UI conjunct built on it (step 7) must first settle whether the
+ *      separation verdict should be persisted with the fact."
+ *
+ *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
+ *      (2026-08-26), contrast control in the same run:
+ *        - `canvas/state/analysisStateSelector.ts:671` reads
+ *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
+ *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
+ *          QUESTION WAS SETTLED. It was built. The question was not settled.
+ *        - `lib/coherence/crossSurfaceCoherence.ts:863` emits
+ *          `withheld_leader_claim_with_named_conditional_winner` on exactly
+ *          this payload; its own `:408` records it is "NOT YET ENFORCED in the
+ *          Compare tab". The detector for this defect exists and is dark.
+ *
+ *      A DOCUMENTED LIMIT WHOSE ENABLING CONDITION LAPSED IS WORSE THAN AN
+ *      UNDOCUMENTED ONE, because it reads as considered. The condition that
+ *      would void it was named precisely and nothing re-surfaced it when it
+ *      fired.
+ *
+ *      RE-STATED ENABLING CONDITION, so the next lane inherits a live one:
+ *      this limit is acceptable ONLY while consumers treat
+ *      `separation_unavailable` as NOT EVALUATED (see
+ *      `LEADER_CLAIM_REASON_KINDS`) rather than as a withheld permission. A3
+ *      currently does NOT — it reads `permitted` as a permission. Closing that,
+ *      and turning on the dark detector, is ROWED to a UI lane; this producer
+ *      is deliberately non-breaking for the current readers.
  * L-D. The three DISCLOSED LIMITS the contract itself pins (L1 permitted vs
  *      withheld_reason, L2 usability vs run_state, L3 contradictions semantics)
  *      stay disclosed. This producer invents no cross-field rule the
@@ -134,6 +161,72 @@ export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
 export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
 export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
+
+/**
+ * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
+ *
+ * WIRE-WITNESSED on the stale route: `leader_claim.permitted: false,
+ * withheld_reason: 'separation_unavailable'` shipped beside
+ * `claim_safety.may_name_leading_option: true`, while the prose named the
+ * leader. Read as a permission that reads as a contradiction. It is not one:
+ *
+ *   - `constraint_verdict_withheld` / `options_do_not_separate` mean
+ *     **WE LOOKED AND DECLINED**. A leader must not be named.
+ *   - `separation_unavailable` means **WE DID NOT LOOK.** The separation half
+ *     was unreadable at this seam (see L-C). It is an ABSENCE OF EVIDENCE, and
+ *     it carries no verdict about whether a leader may be named — the
+ *     entitlement question is answered elsewhere, by CEE's claim-safety read.
+ *
+ * Collapsing those two into "withheld" is what makes the capture look like a
+ * contradiction, and it is the read a consumer makes by default because the
+ * FIELD IS CALLED `withheld_reason`. The kind below is the producer's own
+ * declaration of which it means, so a consumer never has to infer it from the
+ * code string.
+ *
+ * ⚠ THIS DOES NOT ALIGN THE TWO AUTHORITIES, DELIBERATELY. `permitted` and
+ * `may_name_leading_option` answer DIFFERENT questions — "are both halves
+ * provable on this payload?" versus "is this turn entitled?" — and making one
+ * call the other is exactly how the #709/#737 defect was created (one PR added
+ * a display-scoped conjunct to a verdict-scoped predicate, and nothing in the
+ * code or the names said the questions differed). Naming the concepts apart is
+ * the fix; reconciling their defaults is the trap.
+ */
+export type LeaderClaimReasonKind = 'not_evaluated' | 'withheld' | 'unknown';
+
+/**
+ * The SINGLE source for both the code list and the classification. Every code
+ * this producer can emit appears here exactly once with its kind, so minting a
+ * fourth code without classifying it is a type error at the mint site rather
+ * than an unclassified reason reaching a consumer.
+ */
+export const LEADER_CLAIM_REASON_KINDS: Readonly<
+  Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
+> = {
+  [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+  [WITHHELD_NEAR_TIE]: 'withheld',
+  [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
+};
+
+/**
+ * Classify a `withheld_reason`. An unrecognised code is `'unknown'` and is
+ * NEVER folded into either real kind: a consumer must not read a code this
+ * producer did not mint as a licence to name a leader, nor as a positive claim
+ * that the separation was evaluated.
+ */
+export function leaderClaimReasonKind(reason: string | null | undefined): LeaderClaimReasonKind {
+  if (typeof reason !== 'string') return 'unknown';
+  return LEADER_CLAIM_REASON_KINDS[reason] ?? 'unknown';
+}
+
+/**
+ * Did the product actually evaluate the separation before withholding?
+ *
+ * FAIL-CLOSED on `'unknown'`: an unrecognised code cannot support a positive
+ * claim that anything was measured.
+ */
+export function separationWasEvaluated(reason: string | null | undefined): boolean {
+  return leaderClaimReasonKind(reason) === 'withheld';
+}
 
 /** `separation` statements. Producer-owned; absence means "not computed". */
 export const SEPARATION_SEPARATED = 'separated';
