@@ -28,6 +28,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
 const OTHER_USER = "9e8d7c6b-5a49-4382-b716-0c5d4e3f2a1b";
+const VERSION_ID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 
 const { mockConfig } = vi.hoisted(() => ({ mockConfig: { value: null as unknown } }));
 vi.mock("../../config/index.js", async (importOriginal) => {
@@ -65,8 +66,31 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
 
+// ── The model-management service double — the versions family's first reads
+// AFTER its ownership gate. Same `importOriginal` spread rule as above.
+const listVersions = vi.fn();
+const getCurrentVersionPointer = vi.fn();
+const saveVersion = vi.fn();
+const getVersion = vi.fn();
+const restoreVersion = vi.fn();
+vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../orchestrator-v5/model-management/index.js")>();
+  return {
+    ...actual,
+    getModelManagementService: () => ({
+      listVersions,
+      getCurrentVersionPointer,
+      saveVersion,
+      getVersion,
+      restoreVersion,
+    }),
+  };
+});
+
 const scenarioGraphRoute = (await import("../assist.v1.scenario-graph.js")).default;
 const scenarioRegisterRoute = (await import("../assist.v1.scenario-graph-register.js")).default;
+const scenarioVersionsRoute = (await import("../assist.v1.scenario-versions.js")).default;
 
 const GRAPH = {
   nodes: [{ id: "n1", label: "Take the job", category: "option" }],
@@ -112,6 +136,17 @@ beforeEach(() => {
   getScenarioOwner.mockResolvedValue(OWNER);
   loadGraph.mockResolvedValue(GRAPH);
   append.mockResolvedValue({ ok: true });
+  // Versions-family defaults. Shapes are plausible so an ADMITTED caller runs
+  // past the gate into real handler code rather than dying on a malformed
+  // result — the refusal cases bind to "was this reached", not to a status.
+  listVersions.mockResolvedValue({ status: "ok", value: [] });
+  getCurrentVersionPointer.mockResolvedValue({ status: "ok", value: null });
+  saveVersion.mockResolvedValue({
+    status: "ok",
+    value: { id: VERSION_ID, version_number: 1, graph_identity_hash: "a".repeat(64) },
+  });
+  getVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID, graph: GRAPH } });
+  restoreVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID } });
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
@@ -243,6 +278,201 @@ describe("registering a model is not authorised on a caller's say-so", () => {
 
     expect(loadGraph).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * THE THIRD MEMBER OF THE FAMILY — versions list / save / restore.
+ *
+ * All three endpoints share ONE `preflight` helper, so one call site governs
+ * them all; they are exercised separately anyway because two of them are
+ * WRITES (`/versions/save`, `/versions/restore`) and a gate that admits a
+ * write on a caller's say-so is not the same finding as one that admits a read.
+ *
+ * Bound to the OUTCOME rather than to a status code — each endpoint's first
+ * service read AFTER the ownership gate answers "did this caller get past the
+ * gate" without depending on how a refusal is shaped:
+ *   list → listVersions · save → saveVersion · restore → getVersion
+ *
+ * These also extend the DISCRIMINATING MUTANT PAIR to three routes: reverting
+ * this route's call site must leave the read and register cases GREEN, and
+ * reverting either of theirs must leave these GREEN.
+ */
+describe("scenario version history is not reachable on a caller's say-so", () => {
+  async function buildVersionsApp(): Promise<FastifyInstance> {
+    const app = Fastify();
+    await scenarioVersionsRoute(app);
+    await app.ready();
+    return app;
+  }
+
+  async function post(
+    app: FastifyInstance,
+    path: string,
+    body: Record<string, unknown> = {},
+  ) {
+    return await app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}${path}`,
+      payload: body,
+    });
+  }
+
+  describe("list (read tier)", () => {
+    it("REFUSES an unverified caller who supplies the owner's identifier", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
+
+      const app = await buildVersionsApp();
+      const res = await post(app, "/versions", { user_id: OWNER });
+
+      expect(res.statusCode).toBe(404);
+      expect(listVersions).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("ADMITS the owner when the same id is VERIFIED — the only variable that changed", async () => {
+      // ⚠ THE DISCRIMINATOR. Without it the refusal above would pass on a
+      // route that refuses everything, and the fix would be indistinguishable
+      // from an outage.
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+      const app = await buildVersionsApp();
+      const res = await post(app, "/versions", {});
+
+      expect(res.statusCode).toBe(200);
+      expect(listVersions).toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("REFUSES a verified caller who is not the owner", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
+
+      const app = await buildVersionsApp();
+      const res = await post(app, "/versions", { user_id: OWNER });
+
+      expect(res.statusCode).toBe(404);
+      expect(listVersions).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("the body is not consulted in either direction — and the VERIFIED subject is what threads to the store", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+      const app = await buildVersionsApp();
+      const res = await post(app, "/versions", { user_id: OTHER_USER });
+
+      // ⭐ THE VERIFIED-MODE EXECUTION PROOF, and it is identity-bound rather
+      // than a status code: the ownership oracle is consulted with the TOKEN
+      // subject while the body names someone else. A mock that silently failed
+      // to bind would leave `resolveUserIdentity` uncalled and the real
+      // resolver in the chain, so both assertions below would fail — which is
+      // what makes this a precondition pin and not a tautology.
+      expect(resolveUserIdentity).toHaveBeenCalled();
+      expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
+      expect(res.statusCode).toBe(200);
+      await app.close();
+    });
+  });
+
+  describe("save (write tier)", () => {
+    it("REFUSES an unverified caller who supplies the owner's identifier — nothing is written", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/save", { user_id: OWNER, label: "Before pivot" });
+
+      expect(saveVersion).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("ADMITS the VERIFIED owner past the gate — the only variable that changed", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/save", { label: "Before pivot" });
+
+      expect(saveVersion).toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("REFUSES a verified caller who is not the owner", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/save", { user_id: OWNER, label: "Before pivot" });
+
+      expect(saveVersion).not.toHaveBeenCalled();
+      await app.close();
+    });
+  });
+
+  describe("restore (write tier)", () => {
+    it("REFUSES an unverified caller who supplies the owner's identifier — the target is never even read", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID });
+
+      expect(getVersion).not.toHaveBeenCalled();
+      expect(restoreVersion).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("ADMITS the VERIFIED owner past the gate — the only variable that changed", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/restore", { version_id: VERSION_ID });
+
+      expect(getVersion).toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("REFUSES a verified caller who is not the owner", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/restore", { user_id: OWNER, version_id: VERSION_ID });
+
+      expect(getVersion).not.toHaveBeenCalled();
+      expect(restoreVersion).not.toHaveBeenCalled();
+      await app.close();
+    });
+  });
+
+  describe("every unverified mode behaves identically — no mode is a side door", () => {
+    const modes = [
+      { label: "service_legacy", identity: { mode: "service_legacy" } },
+      { label: "off (flag down)", identity: { mode: "off" } },
+    ];
+
+    for (const { label, identity } of modes) {
+      it(`${label}: a request-supplied owner identifier is not honoured on a WRITE`, async () => {
+        resolveUserIdentity.mockResolvedValue(identity);
+
+        const app = await buildVersionsApp();
+        await post(app, "/versions/save", { user_id: OWNER, label: "Before pivot" });
+
+        expect(saveVersion).not.toHaveBeenCalled();
+        await app.close();
+      });
+    }
+  });
+
+  it("guest (unowned) access is untouched here too — an anonymous caller still lists", async () => {
+    // ⚠ Deliberate, and the same carve-out the read route pins. If this goes
+    // red as a side effect of a change to THIS route, the two halves have been
+    // conflated.
+    ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
+    resolveUserIdentity.mockResolvedValue({ mode: "off" });
+
+    const app = await buildVersionsApp();
+    const res = await post(app, "/versions", {});
+
+    expect(res.statusCode).toBe(200);
+    expect(listVersions).toHaveBeenCalled();
     await app.close();
   });
 });

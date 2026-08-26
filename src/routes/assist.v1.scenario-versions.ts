@@ -16,7 +16,37 @@
  *
  * ── THE FAMILY RULES, INHERITED VERBATIM (scenario-graph read/register) ─────
  * · POST always; identity travels in the BODY (`parseRequestExtensions`), never
- *   a URL. · Order: identity → UUID → EXISTENCE → ownership → route-local BODY
+ *   a URL.
+ *
+ *   ⚠⚠ THE SECOND HALF OF THAT SENTENCE NO LONGER DESCRIBES OWNERSHIP, AND THE
+ *      HEADING ABOVE IT WAS FALSE FOR ONE COMMIT. Both are left standing and
+ *      corrected here rather than rewritten, because WHY they drifted is the
+ *      load-bearing part.
+ *
+ *      WHAT WAS TRUE WHEN WRITTEN — the body-supplied `user_id` was the
+ *      ownership input on all three routes of this family, so "identity
+ *      travels in the BODY" described the authorization decision as well as
+ *      the transport.
+ *
+ *      WHAT IS TRUE NOW (26 Aug 2026) — ownership on every route of this
+ *      family is the VERIFIED TOKEN SUBJECT. A request-supplied identifier is
+ *      not an input to it, in either direction: it can neither grant access
+ *      nor withdraw it. The call site below passes
+ *      `CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE`, exactly as the read and
+ *      register routes do. The body is still parsed, and a body that fails to
+ *      parse is still refused — so the sentence remains true of TRANSPORT and
+ *      of every non-identity extension. It is only ownership that moved.
+ *
+ *      ⚠ WHY THE HEADING IS RESTORED RATHER THAN DELETED. "INHERITED VERBATIM"
+ *        was accurate until the read and register routes were cut over and this
+ *        one was not; for that interval the file asserted it followed rules it
+ *        no longer followed, which is worse than claiming nothing — a partial
+ *        cutover on one prefix family reads as a closed seam. The heading is
+ *        true again because this route was cut over to the same shape, not
+ *        because the claim was softened. If a future change moves one member of
+ *        this family, it moves all three or this heading comes out with it.
+ *
+ * · Order: identity → UUID → EXISTENCE → ownership → route-local BODY
  *   → the operation — existence BEFORE ownership because
  *   `authorizeScenarioOwnership` UPSERTS and none of these routes may create the
  *   row it addresses (the read route's pin; restore is a write to the GRAPH but
@@ -123,6 +153,7 @@ import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-exte
 import {
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,
+  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
@@ -335,7 +366,12 @@ export default async function route(app: FastifyInstance) {
     try {
       owned = await authorizeScenarioOwnership(
         scenarioId,
-        extensions.value.userId,
+        // Ownership on this surface is derived from the verified token
+        // subject. A request-supplied identifier is not an input to that
+        // decision, so the sentinel is passed rather than the parsed
+        // extension. See the constant for why this is expressed here and not
+        // in the shared function.
+        CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
         resolved.identity,
         requestId,
       );
