@@ -148,7 +148,9 @@ export type ContextSource =
    * ⚠ EDIT-SCOPED. This is the V4 `## FOCUS` section of the edit_graph prompt
    * (`serialiseEditContextForLLMWithMeta`), whose literal copy is *"The user
    * has selected these elements. Prioritise changes to these"*. Its field
-   * (`ConversationContext.selected_elements`) has ZERO writers.
+   * (`ConversationContext.selected_elements`) is populated only by
+   * `projectEditSelectionFocus` in the edit dispatcher, from node identities
+   * resolved against the same strict graph snapshot handed to edit_graph.
    *
    * It answers "WHAT SHOULD I CHANGE?" — NOT "what should I answer about?".
    * Do not reuse it for selection-aware ANSWERING; see `turn_selection`.
@@ -434,7 +436,7 @@ const EDIT_GRAPH_SECTIONS: readonly ContextSectionPolicy[] = [
   { name: 'conversation', source: 'conversation_window', projection: 'renderRecentConversationForEdit', char_budget: POLICY_EDIT_CONVERSATION_CAP, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'framing', source: 'framing', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'analysis_summary', source: 'analysis_enrichment', projection: 'summariseAnalysisResponse', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-  { name: 'focus', source: 'focus', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+  { name: 'focus', source: 'focus', projection: 'projectEditSelectionFocus (strict edit-graph node identities; 20-element cap; JSON-encoded records) → serialiseEditContextForLLMWithMeta', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_EDIT_CONVERSATION_SUMMARY, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
 ];
 
