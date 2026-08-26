@@ -171,6 +171,38 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     );
   });
 
+  /**
+   * ⭐ THE TWO READERS MUST AGREE ON WHICH LABELS COUNT — caught by a surviving
+   * mutant, not by inspection. Stripping `MIN_OPTION_LABEL_LENGTH` from the new
+   * reader left the whole suite GREEN, so the "same normalisation" claim was
+   * asserted in a comment and tested nowhere. Two roster readers that disagreed
+   * about a label would be two authorities on "is this option named" — the exact
+   * drift class the fallback was written to avoid.
+   *
+   * A short label is the discriminator: it must be dropped by BOTH, so a
+   * scenario with an option called "AI" cannot have prose suppressed on one path
+   * and shipped on the other.
+   */
+  it('both roster readers apply the SAME minimum label length', () => {
+    const shortLabel = 'AI'; // below MIN_OPTION_LABEL_LENGTH
+    const fromGraph = optionRosterFromGraph({
+      nodes: [
+        { kind: 'option', label: shortLabel },
+        { kind: 'option', label: 'go through a reseller partner' },
+      ],
+    });
+    const fromReady = optionRosterFromAnalysisReady({
+      options: [
+        { option_id: 'o1', label: shortLabel },
+        { option_id: 'o2', label: 'go through a reseller partner' },
+      ],
+    });
+    expect(fromGraph).not.toContain(shortLabel);
+    expect(fromReady).not.toContain(shortLabel);
+    // …and they agree on the whole roster, not merely on the exclusion.
+    expect([...fromReady].sort()).toEqual([...fromGraph].sort());
+  });
+
   it('THE HARM CLOSED: withheld record + null graph + analysis_ready ⇒ the leader claim is removed', () => {
     const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-null-graph',
