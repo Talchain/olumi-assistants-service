@@ -888,7 +888,6 @@ const ROW7_DISPATCHABLE_KINDS: ReadonlySet<string> = new Set(['factor', 'option'
  *  `focus @ <factor>` and the block bytes are identical. */
 const DISCUSSED_ENTITY_TAG = 'discussed_entity';
 
-
 /** A block's `target_refs`, read defensively. Blocks that do not carry the
  *  field (graph_patch, text, analysis_result, the directive itself) yield []. */
 function readTargetRefs(block: OlumiResponse['blocks'][number]): readonly GraphNodeRef[] {
@@ -1013,4 +1012,3 @@ export function buildFocusInspectorDirective(
       return null;
   }
 }
-

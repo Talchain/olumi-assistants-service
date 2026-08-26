@@ -482,19 +482,33 @@ describe('S7 — a not_honoured turn ships no gesture, because none can help', (
   });
 
   /**
-   * ⭐ DISCRIMINATING CONTROL. The emptiness above must be a property of THIS
-   * branch, not of the whole dispatch — otherwise a turn that stopped emitting
-   * directives entirely would satisfy it. An honoured write takes a different
-   * path and is asserted separately so the two cannot be confused.
+   * ⭐ THE POSITIVE CONTROL FOR THE EMPTINESS ABOVE (CLAUDE.md trap 13).
+   *
+   * ⚠⚠ THIS REPLACES A TEST THAT WAS THEATRE, and the replacement is recorded
+   * rather than the old one quietly deleted (trap 14). The previous
+   * "DISCRIMINATING TWIN" filtered `d.verb === 'open_inspector'` and asserted
+   * length 0 — **the absence of a verb this code never emits**. An adversarial
+   * review proved it by execution: injecting the gesture onto EVERY path,
+   * honoured included, left all tests GREEN. It read as coverage and was none.
+   *
+   * The honest problem with `toEqual([])` is different and real: it passes just
+   * as happily if the dispatch threw, returned early, or produced nothing at
+   * all. So the control is not another absence — it is a PRESENCE that proves
+   * the turn genuinely ran and produced its recovery answer. Empty blocks are
+   * then an observation about a WORKING turn, not a null result.
    */
-  it('DISCRIMINATING TWIN — an honoured write also ships no repair gesture', async () => {
+  it('POSITIVE CONTROL — the turn really ran, so the empty blocks mean something', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      optionEffectAppliedResult(),
+      factorBaselineAppliedResult(),
     );
-    const out = await dispatch(WITNESS.wire.t5_user_message, 'req-s7-honoured');
-    expect(
-      directivesOf(out.response.blocks).filter((d) => d.verb === 'open_inspector'),
-    ).toHaveLength(0);
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-control');
+
+    // The dispatch produced the deterministic recovery copy for THIS option —
+    // bound by identity, not by "some text exists" (trap 19).
+    expect(out.response.assistant_text).toContain(OPTION_LABEL);
+    expect(out.response.assistant_text.length).toBeGreaterThan(40);
+    // And only THEN is the emptiness a fact about a turn that worked.
+    expect(out.response.blocks).toEqual([]);
   });
 });
 
