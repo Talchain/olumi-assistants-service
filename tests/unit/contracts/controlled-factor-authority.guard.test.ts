@@ -324,8 +324,13 @@ describe('single-snapshot authority rule', () => {
     const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
     expect(selectorCall, 'selector call did not balance').not.toBeNull();
     const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
-    expect(selectorText).toContain('canonicalRead: context.persistedGraphRead');
-    expect(selectorText).toContain('requestGraph: options.graphState');
+    expect(selectorText).toMatch(
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+    );
+    expect(
+      selectorText,
+      'a missing canonical read must reach the selector as unavailable; absence must never be inferred',
+    ).not.toContain('??');
 
     const binding = 'const contextGraphForReasoning = contextGraphSelection.graph';
     expect(structural).toContain(binding);
@@ -372,6 +377,23 @@ describe('single-snapshot authority rule', () => {
       assemblySites.map((site) => site.argText),
       'ContextPack suppression must be the sole selector-backed authority call',
     ).toEqual(['contextGraphForReasoning']);
+  });
+
+  it('turns red if a missing canonical read is laundered into proven absence', () => {
+    const { structural } = tokenise(source);
+    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
+    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
+    expect(selectorCall, 'selector call did not balance').not.toBeNull();
+    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
+    const forbiddenFallback = selectorText.replace(
+      'context.persistedGraphRead',
+      'context.persistedGraphRead ?? ({ status: ok_absent } as const)',
+    );
+
+    expect(forbiddenFallback).toContain('??');
+    expect(forbiddenFallback).not.toMatch(
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+    );
   });
 
   it('turns red when an unrelated executor projection is switched to selector authority', () => {
