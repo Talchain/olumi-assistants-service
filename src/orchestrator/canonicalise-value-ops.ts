@@ -607,6 +607,58 @@ function snapToPercentConvention(frame: number | undefined): number | undefined 
     : frame;
 }
 
+/**
+ * The top of the percentage family, taken from the producer rather than minted
+ * here: `deriveFactorScaleFrame`'s basis-points sibling
+ * (`cee/draft/records/projector.ts:1182`) pins 10,000 as the largest frame the
+ * percentage-family ladder sanctions.
+ */
+const PERCENT_FRAME_CEILING = 10_000;
+
+/**
+ * ⭐⭐ A PERCENT FRAME IS BOUNDED AT BOTH ENDS, AND IT WAS ONLY BOUNDED AT ONE.
+ *
+ * Every guard in the frame chain is a LOWER bound plus a finiteness check:
+ * `recoverScaleFrame` refuses `frame <= 1` (`scale-frame.ts:50`), the stored
+ * domain check requires `stored > 1` (`:209`), and the divisor admission
+ * requires `scaleFrame > 1` (`evaluate-factor-value-proposal.ts:305-306`).
+ * NOTHING bounded the top, and `snapToPercentConvention` above is a 1e-9
+ * tightening toward 100 — not a bound.
+ *
+ * MEASURED through this very function before this guard existed:
+ *
+ *   stored frame 1e9,           level 0.9  ->  raw_value 900000000
+ *   stored frame 1.0000000001,  level 0.9  ->  raw_value 0.90000000009
+ *   recovered {1e-7, 100},      level 0.9  ->  raw_value 900000000
+ *
+ * ⭐ TWO HARMS IN OPPOSITE DIRECTIONS, AND ONE LOWER BOUND SERVES NEITHER — a
+ * huge frame OVER-states `raw_value`, a frame fractionally above 1 UNDER-states
+ * it by 100x. Neither is visible to #1127's coherence check, because
+ * `raw = value x frame` is coherent with that frame BY CONSTRUCTION. A guard
+ * whose tolerance cannot see the error it would need to see is not the guard.
+ *
+ * ── THE BAND IS THE PRODUCER'S, NOT THIS MODULE'S ─────────────────────────
+ * `deriveFactorScaleFrame` (`cee/draft/records/projector.ts:1173-1189`) is the
+ * only producer of a factor frame. For a percent-scaled unit it emits exactly
+ * `100` when `max <= 100`, else the {1,2,5}x10^k ladder — NRR 115% -> 200,
+ * ROI 300% -> 500 — and its basis-points sibling pins 10,000. So a percent
+ * frame below 100 or above 10,000 is not a producer state at all.
+ *
+ * ── REFUSE, NEVER REPAIR ──────────────────────────────────────────────────
+ * `scale-frame.ts:166-168` states the doctrine for the bottom of the range
+ * verbatim: "A `<= 1` frame is not a near-miss to be rounded - it is a value no
+ * producer emits, so it is refused rather than repaired." This is that
+ * sentence's missing symmetric half. Returning `undefined` degrades the divisor
+ * to 100 — the same fail-safe this module already documents for an INCOHERENT
+ * stored frame, so out-of-band and incoherent now behave identically.
+ */
+function percentDivisorFrameWithinLadder(frame: number | undefined): number | undefined {
+  const snapped = snapToPercentConvention(frame);
+  if (snapped === undefined) return undefined;
+  if (snapped < PERCENT_CONVENTION_FRAME || snapped > PERCENT_FRAME_CEILING) return undefined;
+  return snapped;
+}
+
 export function reconcileObservedValuePair(
   operations: readonly PatchOperation[],
   currentGraph: unknown,
@@ -674,17 +726,49 @@ export function reconcileObservedValuePair(
     // it — so the guard yields to it and to nothing else. Everything without a
     // stored frame stays exactly as narrow as it was.
     //
-    // ⚠⚠ AND THE EXCEPTION EXCLUDES PERCENT FACTORS ON A NON-100 FRAME, because
-    // the key would otherwise unlock a path that then IGNORES the frame that
-    // unlocked it. `deriveFactorScaleFrame` only pins 100 when
-    // `isPercentScaledUnit(unit) && max <= 100`; above 100 it FALLS THROUGH to
-    // the {1,2,5}·10^k ladder, so an NRR of 115% frames at 200 and an ROI of
-    // 300% frames at 500. The frame branch below is gated `unit !== '%'`, so
-    // those never reach it — they fall to `resolveExistingRawValue`, which
-    // hard-codes `value * 100`. Measured base vs head: NRR wrote `raw_value` 50
-    // where the truth is 100 (2×), ROI wrote 50 where the truth is 250 (5×),
-    // while a 3–5% churn factor (frame 100) stayed correct — the contrast
-    // control that proves the probe discriminates.
+    // ⚠⚠ AND THE EXCEPTION EXCLUDES PERCENT FACTORS ON A NON-100 FRAME.
+    //
+    // ⚠⚠⚠ THE JUSTIFICATION RECORDED HERE IS SPENT, AND IT WAS THIS PR THAT
+    // SPENT IT. The original text — kept below in full, because a superseded
+    // reason is evidence and deleting it would hide why the guard exists —
+    // read:
+    //
+    //   "the key would otherwise unlock a path that then IGNORES the frame that
+    //    unlocked it. `deriveFactorScaleFrame` only pins 100 when
+    //    `isPercentScaledUnit(unit) && max <= 100`; above 100 it FALLS THROUGH
+    //    to the {1,2,5}·10^k ladder, so an NRR of 115% frames at 200 and an ROI
+    //    of 300% frames at 500. The frame branch below is gated `unit !== '%'`,
+    //    so those never reach it — they fall to `resolveExistingRawValue`,
+    //    which hard-codes `value * 100`. Measured base vs head: NRR wrote
+    //    `raw_value` 50 where the truth is 100 (2×), ROI wrote 50 where the
+    //    truth is 250 (5×), while a 3–5% churn factor (frame 100) stayed
+    //    correct — the contrast control that proves the probe discriminates."
+    //
+    // The load-bearing clause is "which hard-codes `value * 100`". THAT WAS
+    // TRUE AT THE MERGE-BASE AND IS FALSE AT THIS HEAD: this PR removed the
+    // hard-code. Roughly 100 lines below, the percent divisor is now resolved
+    // from the node's own frame and handed to `resolveExistingRawValue`, which
+    // computes `value * (framedDivisor ?? 100)`. Measured with the exclusion
+    // lifted, on the exact shapes the pinned refusals build: a frame-200 node
+    // asked for 0.575 returns raw 114.99999999999999 (correct, not 57.5), and a
+    // frame-500 node asked for 0.6 returns 300 (correct, not 60). For the very
+    // class this text names, the path no longer ignores the frame.
+    //
+    // ⚠ BUT IT IS NOT WHOLLY FALSE, AND THE REMAINING TRUTH IS NARROW. The new
+    // block gates on the NODE's `observed_state.unit`; this guard's
+    // `unitAtGuard` falls back to the PAYLOAD's unit. On a node carrying no
+    // unit of its own the two disagree, no frame is offered, and the divisor
+    // below IS still the hard-coded 100 — measured: raw 57.49999999999999.
+    //
+    // So the honest claim is: this exclusion no longer restores base behaviour
+    // for the class it names — it now also refuses a class the code below would
+    // answer correctly — and its surviving justification is confined to
+    // unit-less nodes. ⭐ THE TWO GATES ASK THE SAME QUESTION OF DIFFERENT
+    // OBJECTS, which is the exact shape this PR's own comment prescribes a
+    // remedy for one level down ("ask the SAME question of BOTH objects, in the
+    // same spelling the consumer uses"). Aligning `storedFrameAdmits` onto
+    // `nodeObserved.unit` is a BEHAVIOUR change that would move the pinned
+    // refusals, so it is reported rather than smuggled in here.
     //
     // ⭐ THE DIRECTION OF THE TRADE IS WHAT DECIDES THIS, not the magnitude.
     // Base refused these outright (`baseline_scale_unresolved`); head ADMITTED
@@ -821,7 +905,7 @@ export function reconcileObservedValuePair(
       typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
     const percentDivisorFrame =
       nodeUnitForFrame === '%'
-        ? snapToPercentConvention(
+        ? percentDivisorFrameWithinLadder(
             resolveScaleFrame({
               storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
               value: nodeObserved.value,

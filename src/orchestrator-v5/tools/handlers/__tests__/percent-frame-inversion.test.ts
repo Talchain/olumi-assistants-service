@@ -36,6 +36,7 @@
 import { describe, expect, it } from 'vitest';
 import { reconcileObservedValuePair } from '../../../../orchestrator/canonicalise-value-ops.js';
 import { resolveExistingRawValue } from '../d1-shared/evaluate-factor-value-proposal.js';
+import { resolveRunAdmission } from '../analysis-ready-core.js';
 
 describe('resolveExistingRawValue honours a supplied scale frame for percent factors', () => {
   it('inverts a percent level on a frame of 200 as value*200, not value*100', () => {
@@ -124,6 +125,21 @@ describe('resolveExistingRawValue honours a supplied scale frame for percent fac
  * `storedFrameAdmits` declines a percent factor on a non-100 frame by reference
  * and the analysis seam refuses honestly — that refusal is deliberate, is NOT
  * changed here, and is pinned by `stored-scale-frame-edit.test.ts`.
+ *
+ * ⚠⚠ BUT "DELIBERATE" NOW MEANS SOMETHING NARROWER THAN IT DID, AND SAYING SO
+ * HERE IS THE POINT. The refusal's ORIGINAL recorded reason was that the
+ * unlocked path "hard-codes `value * 100`" and would therefore ignore the frame
+ * that unlocked it. THIS PR REMOVED THAT HARD-CODE, so for a node whose own
+ * `observed_state.unit` is `'%'` the path below now honours the frame and would
+ * answer correctly. The guard's own gate reads the PAYLOAD's unit, so the two
+ * disagree on a unit-less node — and only there does the old reason still hold.
+ *
+ * The behaviour is unchanged and the pin still passes; what changed is that the
+ * JUSTIFICATION is now confined to a narrower class than the text it inherits
+ * implies. Recorded so the comment and the pin cannot drift apart again — a
+ * refusal kept for a reason that has expired is how an honest label becomes a
+ * false one (trap 14), and the falsification here was self-inflicted by this
+ * very PR rather than introduced by someone else.
  */
 describe('reconcileObservedValuePair resolves the percent divisor from the factor frame', () => {
   const nrrGraph = (frame: number, unit: string, pair: Record<string, unknown>) => ({
@@ -331,5 +347,253 @@ describe('reconcileObservedValuePair resolves the percent divisor from the facto
       const ops = [carryForwardOp('%', { value: 0.9, raw_value: 115 }) as never];
       expect(observedFor(reconcileObservedValuePair(ops, graph as never)[0]).raw_value).toBe(180);
     });
+  });
+});
+
+/**
+ * ⛔⛔ THE RECOVERED PERCENT FRAME WAS BOUNDED ONLY FROM BELOW.
+ *
+ * Every guard in the frame chain is a LOWER bound plus a finiteness check —
+ * `recoverScaleFrame` (`scale-frame.ts:50`) `frame <= 1`, the stored-frame
+ * domain check (`:209`) `stored > 1`, and the divisor admission
+ * (`evaluate-factor-value-proposal.ts:305-306`) `scaleFrame > 1`. NOTHING
+ * bounds the top, and `snapToPercentConvention` is a 1e-9 tightening toward
+ * 100, not a bound — anything outside that window passes through untouched.
+ *
+ * ── MEASURED THROUGH THE REAL `reconcileObservedValuePair`, NOT A MODEL ────
+ * (a reimplementation of the pure functions agreed, but the shipped chain is
+ * what decides, and these are the shipped chain's own numbers):
+ *
+ *   stored frame 1e9,           level 0.9  ->  raw_value 900000000
+ *   stored frame 1e300,         level 0.9  ->  raw_value 9e+299
+ *   stored frame 1.0000000001,  level 0.9  ->  raw_value 0.90000000009
+ *   recovered {1e-7, 100},      level 0.9  ->  raw_value 900000000
+ *
+ * ⭐ TWO HARMS, OPPOSITE DIRECTIONS, AND ONE LOWER BOUND SERVES NEITHER: a huge
+ * frame OVER-states `raw_value`, a frame just above 1 UNDER-states it by 100x.
+ * #1127's coherence check cannot see either, because `raw = value x frame` is
+ * coherent with that frame BY CONSTRUCTION.
+ *
+ * ⚠ `0`, negative, `NaN` and `Infinity` are ALREADY safe — the existing lower
+ * bound catches them and the op is returned unchanged. Pinned below as the
+ * contrast control, so this block cannot pass by breaking everything.
+ *
+ * ── THE BAND IS DERIVED FROM THE PRODUCER, NOT INVENTED ───────────────────
+ * `deriveFactorScaleFrame` (`draft/records/projector.ts:1173-1189`) is the only
+ * producer of a factor frame. For a percent-scaled unit it emits exactly 100
+ * when `max <= 100`, and otherwise the {1,2,5}x10^k ladder — so NRR 115% frames
+ * at 200 and ROI 300% at 500. It can never emit a percent frame BELOW 100, and
+ * the basis-points sibling on the very next line pins 10,000 as the estate's
+ * already-sanctioned top of the percentage family.
+ *
+ * REFUSE, NEVER REPAIR — the doctrine `scale-frame.ts:166-168` states for the
+ * bottom of the range, verbatim: *"A `<= 1` frame is not a near-miss to be
+ * rounded — it is a value no producer emits, so it is refused rather than
+ * repaired."* This is that sentence's missing symmetric half. A refused frame
+ * degrades the divisor to 100, which is the fail-safe this module already
+ * documents for an incoherent stored frame.
+ */
+describe('the percent divisor frame is bounded at BOTH ends', () => {
+  const graph = (frame: number | undefined, pair: Record<string, unknown>) => ({
+    nodes: [
+      {
+        id: 'nrr',
+        kind: 'factor',
+        label: 'Net Revenue Retention',
+        observed_state: { unit: '%', ...pair },
+        ...(frame !== undefined ? { scale_frame: frame } : {}),
+      },
+    ],
+    edges: [],
+  });
+  const op = (observed: Record<string, unknown>) => ({
+    op: 'update_node' as const,
+    path: 'nrr',
+    value: { observed_state: { unit: '%', ...observed } },
+  });
+  const rawFor = (out: unknown) => {
+    const o = out as { path?: string; value?: { observed_state?: Record<string, unknown> } };
+    expect(o.path).toBe('nrr');
+    return o.value?.observed_state?.raw_value;
+  };
+
+  it('⛔ a frame far ABOVE the ladder is refused — no 900000000 raw_value', () => {
+    const out = reconcileObservedValuePair(
+      [op({ value: 0.9, raw_value: 1 }) as never],
+      graph(1e9, { value: 1e-9, raw_value: 1 }) as never,
+    )[0];
+    expect(rawFor(out)).toBe(90);
+    expect(rawFor(out)).not.toBe(900000000);
+  });
+
+  it('⛔ a frame just ABOVE 1 is refused — no 100x UNDER-statement', () => {
+    const out = reconcileObservedValuePair(
+      [op({ value: 0.9, raw_value: 1 }) as never],
+      graph(1.0000000001, { value: 1, raw_value: 1.0000000001 }) as never,
+    )[0];
+    expect(rawFor(out)).toBe(90);
+    expect(rawFor(out)).not.toBe(0.90000000009);
+  });
+
+  it('⛔ a RECOVERED frame (no stored field) is bounded too — the route that needs no stored value', () => {
+    const out = reconcileObservedValuePair(
+      [op({ value: 0.9, raw_value: 100 }) as never],
+      graph(undefined, { value: 1e-7, raw_value: 100 }) as never,
+    )[0];
+    expect(rawFor(out)).toBe(90);
+    expect(rawFor(out)).not.toBe(900000000);
+  });
+
+  it('⭐ OPPOSITE-DIRECTION TWINS — every frame the producer CAN emit still works', () => {
+    // Without these the bound could pass by refusing everything.
+    expect(
+      rawFor(
+        reconcileObservedValuePair(
+          [op({ value: 0.9, raw_value: 115 }) as never],
+          graph(200, { value: 0.575, raw_value: 115 }) as never,
+        )[0],
+      ),
+    ).toBe(180);
+    expect(
+      rawFor(
+        reconcileObservedValuePair(
+          [op({ value: 0.5, raw_value: 50 }) as never],
+          graph(500, { value: 0.1, raw_value: 50 }) as never,
+        )[0],
+      ),
+    ).toBe(250);
+    expect(
+      rawFor(
+        reconcileObservedValuePair(
+          [op({ value: 0.9, raw_value: 3 }) as never],
+          graph(100, { value: 0.03, raw_value: 3 }) as never,
+        )[0],
+      ),
+    ).toBe(90);
+  });
+
+  it('CONTRAST CONTROL: 0 / negative frames were ALREADY safe and stay untouched', () => {
+    // These never reached the divisor — the pre-existing lower bound refuses
+    // them and the op is returned by reference. If this block had "fixed" them
+    // too, it would be evidence the probe was not discriminating.
+    for (const bad of [0, -200]) {
+      const ops = [op({ value: 0.9, raw_value: 90 }) as never];
+      const out = reconcileObservedValuePair(ops, graph(bad, { value: 0.9, raw_value: 90 }) as never)[0];
+      expect(out).toBe(ops[0]);
+    }
+  });
+});
+
+/**
+ * ⭐⭐ COMPOSITION WITH #1143's `IDENTICAL_OPTIONS` FLOOR — MEASURED, NOT ARGUED.
+ *
+ * #1143 (staging `3c3d3d53`) applies PLoT's `IDENTICAL_OPTIONS` floor on the
+ * strictly-ready path. This PR canonicalises values on the EDIT path. Different
+ * files — but `edit-graph.ts:3759` builds `analysis_ready` from the POST-EDIT
+ * graph, so both genuinely bear on ONE payload in ONE turn, and "different
+ * files" is not on its own an answer.
+ *
+ * ── WHY THEY CANNOT INTERACT, DERIVED AT THE BYTES ────────────────────────
+ * They read and write DISJOINT FIELDS:
+ *
+ *   * the floor's comparator `comparisonSurvivesDedup`
+ *     (`analysis-ready-core.ts:542-562`) fingerprints each option by its
+ *     `interventions`, unwrapping `.value` — it never reads `raw_value`;
+ *   * `reconcileObservedValuePair` gates on `op.op === 'update_node'` and
+ *     writes `observed_state.raw_value`. Contrast control in the same sweep:
+ *     `interventions` occurs 16x in `canonicalise-value-ops.ts` and ZERO times
+ *     inside `reconcileObservedValuePair` itself.
+ *
+ * Measured through both shipped functions: the canonicaliser returns
+ * `{unit:'%', value:0.9, raw_value:180}` — `value` UNCHANGED, only the display
+ * carrier moved — and emits no `interventions` at all.
+ *
+ * ⚠ The two assertions below are built so the probe cannot pass by being blind:
+ * the first shows the floor's verdict is INVARIANT under the canonicaliser's
+ * output, the second shows the same fixture's verdict DOES flip when the field
+ * the floor actually reads changes. Invariance alone would be satisfied by a
+ * fixture that never reaches the floor.
+ */
+describe('composition — the percent canonicaliser cannot move the IDENTICAL_OPTIONS floor', () => {
+  const E = (id: string, from: string, to: string) => ({
+    id, from, to,
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: 'positive' as const,
+  });
+
+  /**
+   * ⚠ THE FIRST VERSION OF THIS FIXTURE NEVER REACHED THE FLOOR, AND THE
+   * CONTRAST CONTROL BELOW IS WHAT CAUGHT IT. A percent factor added without
+   * edges makes the graph `unrecoverable`, so BOTH arms refused for an
+   * unrelated reason and the invariance assertion passed by testing nothing.
+   * The factor is therefore `external` with a prior and fully wired, which
+   * keeps `strict.status === 'analysis_ready'` — the STRICT path, which is
+   * precisely the path #1143 changed.
+   */
+  const build = (interventions: Array<Record<string, number>>, nrrRawValue: number) => {
+    const options = interventions.map((iv, i) => ({
+      id: `opt_${i}`, kind: 'option', label: `Opt ${i}`, interventions: iv,
+    }));
+    return {
+      version: '1',
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Goal' },
+        { id: 'decision', kind: 'decision', label: 'Hiring' },
+        { id: 'fac_velocity', kind: 'factor', label: 'Velocity', category: 'controllable',
+          observed_state: { value: 0.5, cap: 1 } },
+        { id: 'nrr', kind: 'factor', label: 'NRR', category: 'external',
+          observed_state: { unit: '%', value: 0.575, raw_value: nrrRawValue },
+          scale_frame: 200,
+          prior: { distribution: 'uniform', range_min: 0.4, range_max: 0.8 } },
+        ...options,
+      ],
+      edges: [
+        ...options.map((o, i) => E(`ed${i}`, 'decision', o.id)),
+        ...options.map((o, i) => E(`ef${i}`, o.id, 'fac_velocity')),
+        E('eg', 'fac_velocity', 'goal'),
+        ...options.map((o, i) => E(`en${i}`, o.id, 'nrr')),
+        E('engoal', 'nrr', 'goal'),
+      ],
+    };
+  };
+  const DISTINCT = [{ fac_velocity: 0.3 }, { fac_velocity: 0.7 }];
+  const IDENTICAL = [{ fac_velocity: 0.5 }, { fac_velocity: 0.5 }];
+
+  it('PRECONDITION: the fixture actually reaches the floor on the STRICT path', () => {
+    // Pins what the invariance assertion depends on. Without this the whole
+    // block could pass because the graph refused for an unrelated reason.
+    const admission = resolveRunAdmission(build(DISTINCT, 115) as never);
+    expect(admission.strict.status).toBe('analysis_ready');
+    expect(admission.willProceed).toBe(true);
+  });
+
+  it('the admission verdict is INVARIANT under the raw_value this PR rewrites', () => {
+    // 115 is the pre-canonicalisation carrier, 180 the post- one.
+    const before = resolveRunAdmission(build(DISTINCT, 115) as never);
+    const after = resolveRunAdmission(build(DISTINCT, 180) as never);
+    expect(after.willProceed).toBe(before.willProceed);
+    expect(after.blockedNextStep).toStrictEqual(before.blockedNextStep);
+    expect(after.strict.status).toBe(before.strict.status);
+  });
+
+  it('CONTRAST CONTROL: the SAME fixture DOES flip on the field the floor reads', () => {
+    const distinct = resolveRunAdmission(build(DISTINCT, 115) as never);
+    const identical = resolveRunAdmission(build(IDENTICAL, 115) as never);
+    expect(distinct.willProceed).toBe(true);
+    expect(identical.willProceed).toBe(false);
+  });
+
+  it('the canonicaliser leaves `value` and `interventions` untouched — only the display carrier moves', () => {
+    const ops = [{
+      op: 'update_node' as const, path: 'nrr',
+      value: { observed_state: { unit: '%', value: 0.9, raw_value: 115 } },
+    } as never];
+    const out = reconcileObservedValuePair(ops, build(DISTINCT, 115) as never)[0] as {
+      value?: { observed_state?: Record<string, unknown>; interventions?: unknown };
+    };
+    expect(out.value?.observed_state?.value).toBe(0.9);
+    expect(out.value?.observed_state?.raw_value).toBe(180);
+    expect(out.value?.interventions).toBeUndefined();
   });
 });
