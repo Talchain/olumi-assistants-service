@@ -55,6 +55,38 @@ export const AUTHENTICATED_WIRE_ENV = {
   expectedGraphIdentity: 'OLUMI_EXPECTED_GRAPH_IDENTITY_HASH',
 } as const;
 
+/**
+ * The receipt's declared model-turn count.
+ *
+ * It is the product of the fixture's `scenario_count` (3) and
+ * `turns_per_scenario` (1), both `z.literal`s — so the value genuinely IS 3.
+ * TypeScript cannot multiply literal TYPES, though, so the product infers as
+ * `number` and the receipt field could not be typed from it.
+ *
+ * ⚠ THE RISK THIS CLOSES. Previously the field was declared `3` and separately
+ * COMPUTED from the fixture. They agree today; change either fixture literal and
+ * the computed value would silently diverge from the type that claims to
+ * describe it — a receipt asserting a turn count the run did not plan. The
+ * constant below is now the single declaration, and `assertPlannedModelTurns`
+ * checks the fixture still yields it. Divergence throws instead of shipping.
+ */
+const PLANNED_MODEL_TURNS = 3 as const;
+
+/**
+ * Fail loudly if the fixture no longer yields the declared model-turn count.
+ * Called on the live path, where the receipt is actually minted.
+ */
+function assertPlannedModelTurns(scenarioCount: number, turnsPerScenario: number): void {
+  const computed = scenarioCount * turnsPerScenario;
+  if (computed !== PLANNED_MODEL_TURNS) {
+    throw new Error(
+      `planned_model_turns drift: the fixture yields ${computed} `
+      + `(${scenarioCount} scenarios x ${turnsPerScenario} turns) but the receipt declares `
+      + `${PLANNED_MODEL_TURNS}. Update PLANNED_MODEL_TURNS deliberately, or fix the fixture.`,
+    );
+  }
+}
+
 const WireFixtureSchema = z.object({
   schema: z.literal('authenticated_canonical_precedence_wire.v1'),
   evidence_rung: z.literal('AUTHENTICATED_LIVE_WIRE'),
@@ -138,7 +170,7 @@ export interface AuthenticatedWireReport {
   readonly graph_identity: string;
   readonly graph_unchanged: true;
   readonly served_cee_build: string;
-  readonly planned_model_turns: 3;
+  readonly planned_model_turns: typeof PLANNED_MODEL_TURNS;
   readonly planned_provider_attempt_ceiling: number;
   readonly observations: readonly AuthenticatedWireObservation[];
   readonly caveat: string;
@@ -317,6 +349,9 @@ export function resolveAuthenticatedWirePlan(
 
   const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1000);
   const authenticatedClaims = validateAuthenticatedJwt(token, nowSeconds);
+  // The receipt's `planned_model_turns` is a declared constant; this is where we
+  // prove the fixture still agrees with it, before any turn is spent.
+  assertPlannedModelTurns(fixture.scenario_count, fixture.turns_per_scenario);
   const plannedProviderAttemptCeiling =
     fixture.scenario_count
     * fixture.turns_per_scenario
@@ -656,7 +691,21 @@ function assertCanonicalGraphAndAnalysis(
   for (const value of rawConstraints) {
     const constraint = recordOf(value);
     const id = constraint?.constraint_id ?? constraint?.id;
-    if (typeof id !== 'string' || id.length === 0 || constraintsById.has(id)) {
+    // `constraint === null` is stated EXPLICITLY rather than left implicit. The
+    // other disjuncts already exclude it — a null `constraint` makes `id`
+    // `undefined`, which fails the `typeof id !== 'string'` test — but that
+    // reasoning runs through an optional chain, so the compiler cannot follow
+    // it and `constraint` stayed `Record<string, unknown> | null` at the `set`
+    // below. Narrowing here rather than casting there: a cast would silence the
+    // compiler, this tells the next reader why the value is safe. Same throw and
+    // same message, so behaviour is unchanged — this disjunct is unreachable
+    // today and exists to make the guarantee legible.
+    if (
+      constraint === null
+      || typeof id !== 'string'
+      || id.length === 0
+      || constraintsById.has(id)
+    ) {
       throw new Error('canonical graph has a malformed or duplicate constraint identity');
     }
     constraintsById.set(id, constraint);
@@ -804,7 +853,10 @@ export async function runAuthenticatedCanonicalPrecedenceWire(
     graph_identity: plan.expectedGraphIdentity,
     graph_unchanged: true,
     served_cee_build: servedCeeBuild,
-    planned_model_turns: plan.fixture.scenario_count * plan.fixture.turns_per_scenario,
+    // The declared constant, not a re-computation — see PLANNED_MODEL_TURNS.
+    // `assertPlannedModelTurns` has already checked the fixture still yields it,
+    // so the two cannot drift apart silently.
+    planned_model_turns: PLANNED_MODEL_TURNS,
     planned_provider_attempt_ceiling: plan.plannedProviderAttemptCeiling,
     observations,
     caveat:

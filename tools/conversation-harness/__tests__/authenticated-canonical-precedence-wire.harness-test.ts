@@ -518,7 +518,11 @@ describe('worst-scenario and post-read invariants', () => {
     expect(report.observations.map((row) => row.score.pass)).toEqual([true, false, true]);
   });
 
-  it('fails on post-turn graph drift and independently on a served-build change', async () => {
+  // ⭐ SPLIT DELIBERATELY. These two invariants previously shared one `it`. Both
+  // were genuinely asserted, with distinct regexes, so coverage was real — but a
+  // failure could not say WHICH one broke, and the second assertion never ran
+  // once the first threw. One invariant per test, so the red names the defect.
+  it('fails on post-turn graph drift', async () => {
     const graphDrift = makeFetch({
       postEnvelope: (scenarioId) => graphEnvelope(
         scenarioId,
@@ -533,7 +537,9 @@ describe('worst-scenario and post-read invariants', () => {
       fetchImpl: graphDrift.fetchImpl,
       nowSeconds: NOW,
     })).rejects.toThrow(/canonical graph or analysis anchors changed/u);
+  });
 
+  it('fails independently on a served-build change', async () => {
     const buildDrift = makeFetch({ serviceBuild: (call) => call === 7 ? 'def5678' : SERVICE_BUILD });
     await expect(runAuthenticatedCanonicalPrecedenceWire({
       argv: ['--live'],
