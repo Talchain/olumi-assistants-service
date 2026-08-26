@@ -37,11 +37,8 @@
  *     `option_value`). Apply the slug-shape gate.
  */
 
-import {
-  ENTITY_ID_LEAK_RE,
-  resolveLabel,
-  type EntityLabelGraph,
-} from './entity-id-pattern.js';
+import type { GraphV3T } from '../types.js';
+import { ENTITY_ID_LEAK_RE, resolveLabel } from './entity-id-pattern.js';
 
 // ----------------------------------------------------------------------------
 // Prefix → generic fallback mapping
@@ -148,7 +145,7 @@ const UNAMBIGUOUS_SHORT_PREFIXES: ReadonlySet<string> = new Set([
  */
 function isLikelyEntityId(
   match: string,
-  graph: EntityLabelGraph | null,
+  graph: GraphV3T | null,
   split: { prefix: string; suffix: string },
 ): boolean {
   if (resolveLabel(graph, match)) return true;
@@ -220,10 +217,7 @@ export interface SanitiseResult {
  * Returns the (possibly unchanged) text plus structured match metadata for
  * caller-side telemetry. Empty/whitespace-only inputs are a no-op fast path.
  */
-export function sanitiseUserFacingText(
-  text: string,
-  graph: EntityLabelGraph | null,
-): SanitiseResult {
+export function sanitiseUserFacingText(text: string, graph: GraphV3T | null): SanitiseResult {
   if (!text || !text.trim()) return { text, matches: [] };
 
   // Per-call global matcher — never mutate the imported regex.
@@ -337,10 +331,7 @@ function isHighConfidenceCoachingOrphan(split: { prefix: string; suffix: string 
  * `matches[]` is only populated for actual replacements; preserved
  * tokens (rule 3) do not generate entries.
  */
-export function sanitiseCoachingProse(
-  text: string,
-  graph: EntityLabelGraph | null,
-): SanitiseResult {
+export function sanitiseCoachingProse(text: string, graph: GraphV3T | null): SanitiseResult {
   if (!text || !text.trim()) return { text, matches: [] };
 
   // Build the lookup once per call. `idSet` answers "is this token a real

@@ -20,13 +20,7 @@
  * output-safety.ts).
  */
 
-/** Minimal read-only graph shape needed for entity label resolution. */
-export interface EntityLabelGraph {
-  readonly nodes: ReadonlyArray<{
-    readonly id?: unknown;
-    readonly label?: unknown;
-  }>;
-}
+import type { GraphV3T } from '../types.js';
 
 export const ENTITY_ID_LEAK_RE =
   /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-][a-z0-9_:-]+\b/i;
@@ -39,10 +33,7 @@ export const ENTITY_ID_LEAK_RE =
  * (the new node is not in the graph yet) and only fall through to this helper
  * for existing-entity references.
  */
-export function resolveLabel(
-  graph: EntityLabelGraph | null | undefined,
-  id: string,
-): string | null {
+export function resolveLabel(graph: GraphV3T | null | undefined, id: string): string | null {
   if (!graph) return null;
   for (const node of graph.nodes) {
     if ((node as { id?: string }).id === id) {

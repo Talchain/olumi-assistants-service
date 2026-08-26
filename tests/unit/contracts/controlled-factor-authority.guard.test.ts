@@ -23,13 +23,12 @@
  *      production files. The first drill found a real hole (alias laundering),
  *      which is why the reference-discipline rules exist.
  *
- * Rule 2 (narrow, boot-snapshot precedent): the current-model hash derivation
- * (`currentAnalysisGraphHashForTurn`) anchors to `context.persistedGraph`; the
- * request graph (`graphStateForTurn`) may appear ONLY inside the documented
- * cold-start branch (no saved model exists yet, so the request graph is the
- * only signal — hashing it there is correct, not a violation). Block capture
- * runs on the tokenised structural view, so braces inside strings cannot
- * mis-scope it.
+ * Rule 2 (single-snapshot binding): graph-derived ContextPack slices consume
+ * the pure four-state selector's coherent snapshot. Exactly one controlled-
+ * factor projection may use that selector, and it must be inside the
+ * `assembleContextPackWithSummary` call. Every other executor projection stays
+ * persisted-first. Block capture runs on the tokenised structural view, so
+ * braces inside strings cannot mis-scope it.
  */
 
 import { readFileSync } from 'node:fs';
@@ -311,6 +310,13 @@ describe('repository scan (the gate)', () => {
 describe('single-snapshot authority rule', () => {
   const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
 
+  function selectorBackedSites(candidate: string) {
+    return extractAuthorityCallSites(
+      candidate,
+      'orchestrator-v5/turn-executor.ts',
+    ).filter((site) => site.argText === 'contextGraphForReasoning');
+  }
+
   it('binds the selector once and derives freshness/readiness from its graph', () => {
     const { structural } = tokenise(source);
     const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
@@ -332,11 +338,59 @@ describe('single-snapshot authority rule', () => {
     expect(hashText).not.toContain('graphStateForTurn');
     expect(hashText).not.toContain('options.graphState');
 
-    const contextProjection = extractAuthorityCallSites(
+    const executorSites = extractAuthorityCallSites(
       source,
       'orchestrator-v5/turn-executor.ts',
-    ).find((site) => site.argText === 'contextGraphForReasoning');
-    expect(contextProjection, 'ContextPack suppression must use the selected snapshot').toBeDefined();
+    );
+    const selectorSites = selectorBackedSites(source);
+    expect(
+      selectorSites,
+      'exactly one controlled-factor projection may use the selected snapshot',
+    ).toHaveLength(1);
+    expect(
+      executorSites
+        .filter((site) => site.argText !== 'contextGraphForReasoning')
+        .every((site) => site.argText === 'context.persistedGraph ?? options.graphState'),
+      'all non-ContextPack projections must remain persisted-first',
+    ).toBe(true);
+
+    const assemblyIdx = structural.indexOf(
+      'assembleContextPackWithSummary(',
+      selectorCall!.end,
+    );
+    expect(assemblyIdx, 'ContextPack assembly after selector not found').toBeGreaterThan(
+      selectorCall!.end,
+    );
+    const assemblyCall = captureBalanced(structural, assemblyIdx, '(', ')');
+    expect(assemblyCall, 'ContextPack assembly call did not balance').not.toBeNull();
+    const assemblySource = source.slice(assemblyIdx, assemblyCall!.end + 1);
+    const assemblySites = extractAuthorityCallSites(
+      assemblySource,
+      'orchestrator-v5/turn-executor.ts#context-pack',
+    );
+    expect(
+      assemblySites.map((site) => site.argText),
+      'ContextPack suppression must be the sole selector-backed authority call',
+    ).toEqual(['contextGraphForReasoning']);
+  });
+
+  it('turns red when an unrelated executor projection is switched to selector authority', () => {
+    const persistedFirstCall = `collectInterventionControlledFactorIds(
+            context.persistedGraph ?? options.graphState,
+          )`;
+    const selectorCall = `collectInterventionControlledFactorIds(
+            contextGraphForReasoning,
+          )`;
+    expect(source, 'discriminating-control anchor must exist exactly as reviewed').toContain(
+      persistedFirstCall,
+    );
+    const mutant = source.replace(persistedFirstCall, selectorCall);
+
+    expect(selectorBackedSites(source)).toHaveLength(1);
+    expect(
+      selectorBackedSites(mutant),
+      'the file-wide two-form allowlist alone would miss this authority expansion',
+    ).toHaveLength(2);
   });
 
   it('normaliseArg is stable for the allowlisted forms (self-check)', () => {

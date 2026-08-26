@@ -96,7 +96,7 @@ import {
   ANALYSE_STAGE_INDICATOR,
   clampRefusalFreshness,
 } from './compose/analysis-ready-emit.js';
-import { GraphV3 } from '../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext, SuggestedAction } from './compose/types.js';
@@ -641,14 +641,12 @@ export interface TurnExecutorRunResult {
    */
   frame?: CanonicalContextFrame;
   /**
-   * V5 Conversation Context Reliability: the authoritative graph this turn
-   * reasoned over (request graphState parsed, or the persisted-graph fallback).
-   * route-v2 passes this to `sendFinalised200`'s egress sanitiser so the WIRE
-   * resolves entity-id labels against the SAME graph the durable-text scrub
-   * used at commit — stored text and wire text cannot diverge. Null when the
-   * turn had no graph (egress + storage both run graph-free, consistently).
+   * V5 egress/commit carrier: the strict GraphV3 used for entity-label
+   * sanitisation and durable assistant text. It is deliberately separate from
+   * the four-state ContextPack reasoning selector below; route-v2 consumes it
+   * only for response finalisation. Null when no strict egress graph exists.
    */
-  effectiveGraph?: GraphStateIngress | null;
+  effectiveGraph?: GraphV3T | null;
   /**
    * V5 per-stage turn timings (observability). Populated only when timings
    * capture is enabled (`V5_TIMING_DEBUG` OR `CEE_DIAGNOSTIC_TRACE_ENABLED`);
@@ -1459,15 +1457,9 @@ export async function runTurnExecutor(
           // decision-brief shape gate (undefined on non-qualifying turns —
           // the RPC then leaves brief_text untouched).
           briefText: meta.briefText ?? briefSeedForTurn,
-          // V5 Conversation Context Reliability: scrub the durable assistant text
-          // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
-          // and the SAME graph surfaced to the route egress sanitiser (below) —
-          // so the stored copy resolves entity-id labels (e.g. `goal_revenue` →
-          // "Revenue") identically to the wire copy and the two cannot diverge,
-          // even when the request graphState is stale relative to, or absent
-          // alongside, the persisted graph. (Earlier this used
-          // `context.persistedGraph`, which could differ from the request graph
-          // the wire egress used.)
+          // Existing durable/wire label-resolution carrier. This remains the
+          // strict egress graph and deliberately does not claim to be the
+          // ContextPack reasoning authority selected later in ORIENT.
           contentGraph: effectiveTurnGraph,
         },
         store,
@@ -2013,15 +2005,12 @@ export async function runTurnExecutor(
   let analysisReadyForTurn:
     | NonNullable<GraphPatchBlockData['analysis_ready']>
     | undefined;
-  // V5 Conversation Context Reliability: the single selected reasoning graph
-  // used for entity-label sanitisation. It feeds BOTH the durable assistant-
-  // text scrub (commitTurn → contentGraph) and the wire egress sanitiser
-  // (surfaced on the run result → route-v2), so stored and wire text resolve
-  // labels against the SAME authority. It starts null, is set from
-  // `selectContextGraphSnapshot`, and is replaced only by a successfully
-  // applied mutation graph. `graphStateForTurn` above remains the separate
-  // request-first validation/mutation/commit carrier.
-  let effectiveTurnGraph: GraphStateIngress | null = null;
+  // Existing strict-GraphV3 egress/commit carrier. This is used for durable
+  // assistant-text and wire entity-label sanitisation, but is NOT the AI
+  // reasoning authority: `contextGraphForReasoning` below owns that read-only
+  // concern. Keeping the two explicit avoids expanding this binding into
+  // route, output-safety, persistence, or canonical-mutation ownership.
+  let effectiveTurnGraph: GraphV3T | null = null;
   // ROADMAP 1.42 — VERBATIM reasoning captured from the real LLM routing
   // call, hoisted to outer scope (same reason as the fields above) so
   // `finalizeRun` — declared OUTSIDE the try block below — can read it.
@@ -2230,15 +2219,6 @@ export async function runTurnExecutor(
       requestGraph: options.graphState,
     });
     const contextGraphForReasoning = contextGraphSelection.graph;
-
-    // Response sanitisation, durable assistant text, the context frame and the
-    // wire graph hash all describe what the model actually reasoned over.
-    // Start them from the SAME selected snapshot.
-    // Accepted mutations replace this with their committed graph below; a
-    // failed commit restores this pre-commit authority. Request-first
-    // `graphStateForTurn` remains untouched for validation, dispatch and
-    // commit, where the in-flight carrier is legitimately required.
-    effectiveTurnGraph = contextGraphForReasoning;
 
     // ==================================================================
     // STEP 1 — ORIENT
@@ -7712,10 +7692,9 @@ export async function runTurnExecutor(
           // absent on follow-up turns — the hash helper returns null for
           // a missing graph and the pending action then carries no
           // graph_hash, making hash-divergence invalidation inert. Use
-          // `graphStateForTurn` instead: the same authoritative graph
-          // this turn reasoned over (request graphState when present,
-          // else the persisted-graph fallback loaded by
-          // buildTurnContext).
+          // `graphStateForTurn` instead: this is the request-first mutation /
+          // continuation carrier (request graphState when present, else the
+          // persisted fallback), not the read-only ContextPack authority.
           const adviceGraphHash = (() => {
             try {
               return (
@@ -11555,7 +11534,7 @@ export async function runTurnExecutor(
     // when the commit fails (mirror of commitGmHeldResume's
     // `preApplyEffectiveTurnGraph` revert): a failed commit must never
     // advertise the unpersisted committed-graph projection.
-    let preCommitEffectiveTurnGraph: GraphStateIngress | null = null;
+    let preCommitEffectiveTurnGraph: GraphV3T | null = null;
     let effectiveTurnGraphSetPreCommit = false;
     try {
       // V5 D1 mutation handlers (set_factor_value, add_constraint,
@@ -11784,9 +11763,9 @@ export async function runTurnExecutor(
         let persistedBase: unknown;
         if (!hasServerModel && incoming !== null) {
           // ROW B — adopt-then-edit: an edit ON a first-touch graph. The handler
-          // reasoned over `context.persistedGraph ?? graphStateForTurn`, so the
-          // mutation already carries the adopted base. Merge onto `incoming`
-          // (NOT the empty persisted read) so incoming's top-level fields
+          // applied the mutation against `context.persistedGraph ??
+          // graphStateForTurn`, so the mutation already carries the adopted
+          // base. Merge onto `incoming` (NOT the empty persisted read) so incoming's top-level fields
           // (options[], goal_node_id, goal_constraints) survive the merge.
           persistedBase = incoming;
         } else if (degradedRereadGraph !== undefined) {

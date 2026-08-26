@@ -336,7 +336,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       mkTextResult('explanation'),
     );
 
-    const run = await runTurnExecutor(
+    await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'why does it lead?' },
       'req-fresh-h3',
       {
@@ -362,15 +362,6 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(option?.label).not.toBe('Option A after saved edit');
     expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
 
-    // Non-mutating response egress must describe the same canonical snapshot
-    // the prompt used, not the divergent request carrier. route-v2 passes this
-    // graph to both the entity-label scrub and graph-hash stamper.
-    expect(run.effectiveGraph?.nodes.find((node) => node.id === 'opt_a')?.label).toBe(
-      'Option A',
-    );
-    expect(computeAnalysisAffectingGraphHash(run.effectiveGraph as never)).toBe(
-      PRE_EDIT_HASH,
-    );
   });
 
   it('fresh fallback (no request analysis_state, graph_hash_match) emits NO stale/unknown user-facing copy', async () => {

@@ -109,6 +109,11 @@ const baseGraph: GraphStateIngress = {
   goal_node_id: 'goal',
 } as unknown as GraphStateIngress;
 
+function optionId(option: unknown): unknown {
+  if (typeof option !== 'object' || option === null || !('id' in option)) return undefined;
+  return option.id;
+}
+
 function mkTextResult(text: string): ChatWithToolsResult {
   return {
     content: [{ type: 'text', text }],
@@ -248,7 +253,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     const frameGraph = {
       ...baseGraph,
       nodes: baseGraph.nodes.filter((node) => node.id !== 'opt_b'),
-      options: baseGraph.options?.filter((option) => option.id !== 'opt_b'),
+      options: baseGraph.options?.filter((option) => optionId(option) !== 'opt_b'),
     } as GraphStateIngress;
     persistedGraphForTest = frameGraph;
     const expectedHash = computeAnalysisAffectingGraphHash(frameGraph)!;

@@ -205,11 +205,9 @@ export interface CommitMetadata {
    * `context.persistedGraph` (turn-executor), the run_analysis snapshot graph
    * (chip-click), or the edit `appliedGraph`/ingress graph (edit-graph).
    *
-   * Accepted as `unknown` and reduced to the same minimal read-only label
-   * roster used by wire egress. This deliberately does not apply the stricter
-   * persistence GraphV3 parser: selector-valid structural-fallback graphs are
-   * legitimate reasoning/egress snapshots and must produce identical durable
-   * text. When omitted or structurally unusable the entity scrub runs graph-free: it still strips
+   * Accepted as `unknown` and `GraphV3.safeParse`d inside `commitDirectAnswer`
+   * (callers pass either a parsed `GraphV3T` or the raw persisted graph). When
+   * omitted or unparseable the entity scrub runs graph-free: it still strips
    * the unambiguous / digit / multi-segment id shapes, but CANNOT distinguish
    * an ambiguous-prefix single-segment id (`goal_revenue`) from a legitimate
    * English compound (`goal_setting`) — so those are LEFT INTACT to avoid
@@ -333,28 +331,22 @@ export function capConversationText(
  */
 function durablePublicAssistantText(
   text: string | undefined | null,
-  graph: EntityLabelGraph | null,
+  graph: GraphV3T | null,
 ): string | undefined | null {
   if (typeof text !== 'string' || text.trim().length === 0) return text;
   return sanitiseUserFacingText(applyEgressForbiddenPhraseGuard(text).text, graph).text;
 }
 
 /**
- * Reduce the optional caller-supplied `contentGraph` to the minimal read-only
- * shape entity-label resolution needs. The turn executor has already validated
- * its selected reasoning snapshot; other callers still fail weak on malformed
- * node arrays. This is not a persistence or graph-authority parser.
+ * Parse the optional caller-supplied `contentGraph` (a parsed `GraphV3T` or the
+ * raw persisted graph) into a `GraphV3T | null` for entity-id label resolution.
+ * Never throws — an unparseable / absent graph degrades to `null` (graph-free
+ * scrub), never a commit failure.
  */
-function parseContentGraph(graph: unknown): EntityLabelGraph | null {
-  if (graph == null || typeof graph !== 'object') return null;
-  const nodes = (graph as { nodes?: unknown }).nodes;
-  if (
-    !Array.isArray(nodes) ||
-    !nodes.every((node) => node !== null && typeof node === 'object')
-  ) {
-    return null;
-  }
-  return { nodes };
+function parseContentGraph(graph: unknown): GraphV3T | null {
+  if (graph == null) return null;
+  const parsed = GraphV3.safeParse(graph);
+  return parsed.success ? parsed.data : null;
 }
 
 export interface CommitResult {

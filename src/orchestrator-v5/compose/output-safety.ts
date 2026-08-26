@@ -55,7 +55,7 @@
 import { env } from 'node:process';
 
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import type { GraphV3T } from '../../orchestrator/types.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
@@ -178,7 +178,7 @@ export function assertNoRedactionMarkerInAssistantText(
 // ----------------------------------------------------------------------------
 
 export interface EgressSanitiseOpts {
-  readonly graph: GraphStateIngress | null;
+  readonly graph: GraphV3T | null;
   readonly requestId: string;
   /**
    * Exit path / handler context for telemetry correlation. REQUIRED — the

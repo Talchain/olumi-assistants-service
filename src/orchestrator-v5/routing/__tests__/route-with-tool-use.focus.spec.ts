@@ -398,8 +398,11 @@ describe('the prompt never tells a user their node is gone when the read FAILED'
     if (graphRead === 'degraded') {
       // Grounded selection is canonical-only. A failed persisted read cannot
       // carry even a defensive focus verdict from caller/request state.
-      pack.graph_context = { status: 'unavailable' };
-      delete pack.focus;
+      return {
+        ...pack,
+        graph_context: { status: 'unavailable' },
+        focus: undefined,
+      };
     }
     return pack;
   }

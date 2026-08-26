@@ -153,6 +153,7 @@ import {
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
 } from '../orchestrator-v5/routing/answer-shape.js';
+import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
 import {
@@ -706,7 +707,7 @@ async function sendFinalised200(
   candidate: import('@talchain/schemas/boundary').OlumiResponse,
   ctx: {
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
-    readonly graph: GraphStateIngress | null;
+    readonly graph: GraphV3T | null;
     /** V5 state-trust freshness derivation. Threaded into the finaliser
      *  so the analysisReady payload carries freshness fields and
      *  computed_at reflects the selected fact's timestamp. Populated on
@@ -6110,7 +6111,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // (defensive; `effectiveGraph` is always set by `finalizeRun`). Parse
     // failure / no graph → null; the sanitiser uses prefix-aware generic
     // wording without throwing.
-    const turnGraph: GraphStateIngress | null =
+    const turnGraph: GraphV3T | null =
       run.effectiveGraph !== undefined
         ? run.effectiveGraph
         : extensions.graphState
