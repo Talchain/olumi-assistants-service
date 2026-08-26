@@ -103,7 +103,12 @@
  *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
  *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
  *          QUESTION WAS SETTLED. It was built. The question was not settled.
- *        - `lib/coherence/crossSurfaceCoherence.ts:863` emits
+ *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
+ *          nearby `:863` cited in the first draft of this note is the GUARD,
+ *          not the emission — a review measured the emission at `:872`. Both
+ *          numbers are UI-repo line numbers this CEE module cannot verify at
+ *          build time, so the durable reference is the emitted string below,
+ *          not either line) emits
  *          `withheld_leader_claim_with_named_conditional_winner` on exactly
  *          this payload; its own `:408` records it is "NOT YET ENFORCED in the
  *          Compare tab". The detector for this defect exists and is dark.
@@ -195,9 +200,28 @@ export type LeaderClaimReasonKind = 'not_evaluated' | 'withheld' | 'unknown';
 
 /**
  * The SINGLE source for both the code list and the classification. Every code
- * this producer can emit appears here exactly once with its kind, so minting a
- * fourth code without classifying it is a type error at the mint site rather
- * than an unclassified reason reaching a consumer.
+ * this producer can emit appears here exactly once with its kind.
+ *
+ * ⚠⚠ THE GUARANTEE THIS COMMENT USED TO STATE WAS FALSE, AND IS CORRECTED
+ * RATHER THAN DELETED (trap 14). It read: "minting a fourth code without
+ * classifying it is a type error at the mint site rather than an unclassified
+ * reason reaching a consumer." Measured by minting a fourth `WITHHELD_*`
+ * constant and classifying it nowhere: `pnpm typecheck` **exit 0, zero
+ * errors** — the type below is `Record<string, …>`, an OPEN index signature, so
+ * there is no mint site to fail. A positive control (an injected type error in
+ * this same file) exited 2, so the probe could see a presence.
+ *
+ * ⭐ WHERE IT ACTUALLY FAILS NOW, and it is a TEST, not the compiler: the
+ * COMPLETENESS case in `__tests__/leader-claim-not-evaluated.test.ts` derives
+ * the minted list from this module's own namespace (every exported
+ * `WITHHELD_*` string) and asserts each is classified here. Proven by the
+ * mutant pair: it passes at pristine and REDs on the unclassified fourth code
+ * that the previous hand-written list survived.
+ *
+ * Runtime was never at risk either way — an unclassified code falls to
+ * `'unknown'` and fail-closed. It was the GUARANTEE that was wrong, which is
+ * the same "documented limit that reads as considered" defect this file is
+ * correcting one level up.
  */
 export const LEADER_CLAIM_REASON_KINDS: Readonly<
   Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
@@ -212,25 +236,70 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
  * NEVER folded into either real kind: a consumer must not read a code this
  * producer did not mint as a licence to name a leader, nor as a positive claim
  * that the separation was evaluated.
+ *
+ * ⚠ `hasOwnProperty.call`, NOT a bare index read. A bare
+ * `LEADER_CLAIM_REASON_KINDS[reason]` resolves INHERITED keys, so
+ * `'constructor'` / `'toString'` / `'__proto__'` returned a prototype member
+ * where this signature promises a `LeaderClaimReasonKind` — the `?? 'unknown'`
+ * fallback never fired. Fail-closed held (no prototype member equals
+ * `'withheld'`), so the runtime impact was nil and the TYPE claim was the
+ * defect. This is the guard the subsystem already uses for exactly this lookup
+ * at `orchestrator/context/constraint-feasibility.ts:937`; new code diverging
+ * from it is how one subsystem ends up with two answers to one question.
  */
 export function leaderClaimReasonKind(reason: string | null | undefined): LeaderClaimReasonKind {
   if (typeof reason !== 'string') return 'unknown';
-  return LEADER_CLAIM_REASON_KINDS[reason] ?? 'unknown';
+  return Object.prototype.hasOwnProperty.call(LEADER_CLAIM_REASON_KINDS, reason)
+    ? LEADER_CLAIM_REASON_KINDS[reason]!
+    : 'unknown';
 }
 
 /**
- * Did the product actually evaluate the separation before withholding?
+ * Did the product actually evaluate the separation on THIS payload?
  *
- * FAIL-CLOSED on `'unknown'`: an unrecognised code cannot support a positive
- * claim that anything was measured.
+ * ⚠⚠ READS THE PAYLOAD, NOT THE REASON CODE — AND THE FIRST VERSION READ THE
+ * CODE, WHICH MADE THE EXACT FALSE CLAIM THIS MODULE EXISTS TO PREVENT.
+ * It was `leaderClaimReasonKind(reason) === 'withheld'`. The reason code CANNOT
+ * answer this question, because `composeLeaderClaim` chooses `!entitled` FIRST:
+ * in the cell `entitled=false ∧ separationKnown=false` the claim carries
+ * `constraint_verdict_withheld` — a "we looked and declined" code — while
+ * `rawRobustness` is null and nothing was measured. Executed at `d097e596`:
+ * `{rawRobustness: null, separationWasActuallyEvaluated: false,
+ * separationWasEvaluated_says: TRUE}`. Same defect class as the witnessed one,
+ * opposite sign. (The code string itself is correct for its own question and is
+ * unchanged: `!entitled` genuinely is the first failing half.)
+ *
+ * ⭐ THE PAYLOAD IS THE AUTHORITY, and this producer already states it: the
+ * `separation` field is emitted IFF the separation was computed, and its
+ * ABSENCE is the deliberate signal for "not computed" (see `ABSENCE IS
+ * DISTINCT` in `composeLeaderClaim`). That is a fact about what was measured;
+ * the reason code is a fact about which half failed first. Two questions.
+ *
+ * FAIL-CLOSED: a missing, non-string, or unminted `separation` value cannot
+ * support a positive claim that anything was measured.
  */
-export function separationWasEvaluated(reason: string | null | undefined): boolean {
-  return leaderClaimReasonKind(reason) === 'withheld';
+export function separationWasEvaluated(
+  claim: { readonly separation?: unknown } | null | undefined,
+): boolean {
+  if (claim === null || typeof claim !== 'object') return false;
+  const separation = (claim as { readonly separation?: unknown }).separation;
+  return typeof separation === 'string' && SEPARATION_STATEMENTS.has(separation);
 }
 
 /** `separation` statements. Producer-owned; absence means "not computed". */
 export const SEPARATION_SEPARATED = 'separated';
 export const SEPARATION_NEAR_TIE = 'near_tie';
+
+/**
+ * The separation statements this producer can emit, DERIVED from the constants
+ * above rather than retyped, so `separationWasEvaluated` cannot drift from what
+ * `composeLeaderClaim` actually writes (trap 12). Membership is what licenses
+ * the positive claim "a separation was computed on this payload".
+ */
+const SEPARATION_STATEMENTS: ReadonlySet<string> = new Set([
+  SEPARATION_SEPARATED,
+  SEPARATION_NEAR_TIE,
+]);
 
 /**
  * STEP 4 / ROADMAP 2.1264 — the freshness derivation that is TRUE of a turn
