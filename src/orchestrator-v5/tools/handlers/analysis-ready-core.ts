@@ -38,6 +38,7 @@
  * seam (documented residual). No EP1 (write boundary), no EP3 (frontend), no CAS.
  */
 import type { StructuralViolationCode } from '../../../orchestrator/graph-structure-validator.js';
+import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 import {
   assessCanonicalAnalysisReadiness,
   type CanonicalReadinessIssue,
@@ -629,12 +630,47 @@ export function readinessQuestions(verdict: ReadinessResult): readonly string[] 
  * `unrecoverable`. The run_analysis handler maps this to a typed `analysis_not_ready`
  * recoverable failure (a 200 with honest next-step copy + recovery chip) — NOT a
  * 500. Carries the neutral verdict so the composer can surface the reason/next-step.
+ *
+ * ⭐ AND THE MODEL'S IDENTITY, WHEN THE REFUSAL HAS ONE. The verdict says WHY the
+ * run was refused; it cannot say WHAT was refused. A refusal that names no goal
+ * and no options is not honest filtering — a goal needs no value to be
+ * identified — it is the product denying the existence of the model on the
+ * user's screen. That is what a signed-in user got on a freshly drafted model:
+ * `status:"blocked" goal_node_id:"" options:[] blocked_reason:
+ * "MISSING_OPTION_VALUE"`.
+ *
+ * The identity is not derived here and nothing is invented. The Run admission at
+ * `build-turn-context.ts` has ALREADY assessed the GraphV3-valid compute
+ * projection two lines above its throw, and {@link RunAdmission.assessment} is
+ * exposed for exactly this reason: so a caller that also needs `analysisReady`
+ * reuses THAT assessment rather than running the assessor twice (two
+ * assessments of one graph could disagree, which is the hazard this module
+ * exists to remove). The thrower hands over what it already holds.
+ *
+ * ⚠ OPTIONAL, AND LEGITIMATELY ABSENT. `NO_GRAPH` and `SCHEMA_INVALID` have no
+ * identity to carry — the semantic projector returns `undefined` for both, so
+ * their throws stay one-argument and this field stays absent. Absence therefore
+ * means "this refusal has no model to name", never "withheld".
  */
 export class AnalysisNotReadyError extends Error {
   readonly verdict: ReadinessResult;
-  constructor(verdict: ReadinessResult) {
+  /**
+   * The canonical readiness projection of the graph that was refused, when one
+   * exists — `{ ...assessment.analysisReady, may_run: willProceed }`, the same
+   * shape `buildCanonicalAnalysisReadyFromGraph` publishes.
+   *
+   * Consulted ONLY for the model's identity (`goal_node_id`, `options`).
+   * `buildAnalysisRefusalReadiness` — not the thrower and not the reader —
+   * decides which refusals keep it, from the `may_run` verdict it carries.
+   */
+  readonly structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>;
+  constructor(
+    verdict: ReadinessResult,
+    structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>,
+  ) {
     super(`Persisted graph is not analysis-ready: ${verdict.reasonCodes.join(',') || 'unknown'}`);
     this.name = 'AnalysisNotReadyError';
     this.verdict = verdict;
+    if (structuralReadiness !== undefined) this.structuralReadiness = structuralReadiness;
   }
 }

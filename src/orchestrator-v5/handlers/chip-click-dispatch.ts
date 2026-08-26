@@ -91,6 +91,7 @@ import {
   readMayNameLeadingOptionVerdict,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { AnalysisNotReadyError } from '../tools/handlers/analysis-ready-core.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
@@ -722,7 +723,36 @@ async function tryComposeRecoverableChipOutcome(
   //
   // `graph` remains used only for label resolution downstream, exactly as before.
   const blockedReason = blockedReasonForHandlerFailure(err);
-  const analysisReady = buildAnalysisRefusalReadiness(blockedReason, structuralReadiness);
+  // ⭐ AND WHEN THIS TURN HAS NO PROJECTION OF ITS OWN, READ THE ONE THE
+  // REFUSAL BROUGHT WITH IT.
+  //
+  // `structuralReadiness` is the `:955` binding, and `:955` is
+  // `cachedSnapshot ? derive(...) : undefined`. On the path where the LOADER
+  // ITSELF refused, `cachedSnapshot` is null by construction (`:904`) — so the
+  // arm passed `undefined` and `buildAnalysisRefusalReadiness` returned the
+  // bare carrier at its first line, before the `may_run` discriminator #1126
+  // gave it could be consulted. The rule was right and had nothing to rule on.
+  //
+  // That is exactly the path a signed-in user takes clicking "Run analysis" on
+  // a freshly drafted model, and it is why the fix that shipped to this arm did
+  // not close the case it was written for.
+  //
+  // Preference order is deliberate: a projection derived from THIS turn's
+  // snapshot wins, because it is the more current read. The verdict's payload
+  // is a fallback for the one case where no snapshot exists — and on that path
+  // the two cannot disagree, because there is only one.
+  //
+  // ⚠ `cause`, NOT `details`. `run-analysis.ts:337` preserves the original error
+  // as the standard ES2022 `cause`; `details` is an untyped telemetry record
+  // (`[key: string]: unknown`) that would give this read no type safety at all.
+  // No change is needed there — the link already exists.
+  const fromVerdict = err.cause instanceof AnalysisNotReadyError
+    ? err.cause.structuralReadiness
+    : undefined;
+  const analysisReady = buildAnalysisRefusalReadiness(
+    blockedReason,
+    structuralReadiness ?? fromVerdict,
+  );
   // ROADMAP 2.1085 (root 2.1041) R2/R3 — clamp the verdict this carrier may
   // report. See `clampRefusalFreshness` for why `fresh`/`none` are forbidden
   // on a refusal turn and why the hash PAIR (not just the verdict) is broken.
