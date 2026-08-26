@@ -7,6 +7,10 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
+import {
+  retryConfigForLiveEval,
+  sdkMaxRetriesForLiveEval,
+} from './live-eval-retry-policy.js';
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, CallOpts, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
@@ -54,14 +58,20 @@ setGlobalDispatcher(undiciAgent);
 
 // Lazy initialization to allow testing without API key
 let client: OpenAI | null = null;
+let clientSdkMaxRetries: number | undefined;
 
 function getClient(): OpenAI {
   const apiKey = getApiKey();
+  const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY environment variable is required but not set");
   }
-  if (!client) {
-    client = new OpenAI({ apiKey });
+  if (!client || clientSdkMaxRetries !== sdkMaxRetries) {
+    client = new OpenAI({
+      apiKey,
+      ...(sdkMaxRetries === undefined ? {} : { maxRetries: sdkMaxRetries }),
+    });
+    clientSdkMaxRetries = sdkMaxRetries;
   }
   return client;
 }
@@ -1529,7 +1539,8 @@ export class OpenAIAdapter implements LLMAdapter {
               headers: { 'Idempotency-Key': idempotencyKey },
             }
           ),
-        { adapter: 'openai', model: this.model, operation: 'chat_with_tools' }
+        { adapter: 'openai', model: this.model, operation: 'chat_with_tools' },
+        retryConfigForLiveEval(),
       );
 
       clearTimeout(timeoutId);
@@ -1564,7 +1575,8 @@ export class OpenAIAdapter implements LLMAdapter {
 
       log.info(
         {
-          model: this.model,
+          model: response.model,
+          requested_model: this.model,
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
@@ -1578,7 +1590,9 @@ export class OpenAIAdapter implements LLMAdapter {
       return {
         content,
         stop_reason,
-        model: this.model,
+        // Provider-reported identity, not the requested alias. Live evidence
+        // must remain truthful under provider-side model substitution.
+        model: response.model,
         latencyMs,
         usage: {
           input_tokens: response.usage?.prompt_tokens ?? 0,

@@ -389,6 +389,22 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
 // ---------------------------------------------------------------------------
 
 describe('S4 activation — summarised marker never overclaims', () => {
+  it('no stored summary retains the already-fetched hot window instead of losing turns 9..N', async () => {
+    const store = new MonotonicRollingSummaryStoreFake();
+    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
+
+    const { pack, prompt } = await assembleLive(history, store, 'Where were we?');
+
+    expect(pack.conversation_summary).toBeUndefined();
+    expect(pack.conversation.recent_turns).toHaveLength(history.length);
+    expect(pack.conversation.window).toMatchObject({
+      shown: history.length,
+      available: history.length,
+    });
+    expect(pack.conversation.window?.summarised).toBeUndefined();
+    expect(prompt).toContain(EARLY_FACT);
+  });
+
   it('floor summary (model failed at bootstrap): section discloses itself, summarised is 0', async () => {
     const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
@@ -406,7 +422,9 @@ describe('S4 activation — summarised marker never overclaims', () => {
     expect(pack.conversation_summary!.note).toContain('NOT yet summarised');
     // A floor absorbed NO conversation history — claiming summarised:3
     // would be the exact lying-coverage class this lane must not ship.
-    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    // Zero coverage activates the already-fetched hot-window fallback. The
+    // section remains present only to disclose that it absorbed no history.
+    expect(pack.conversation.window?.shown).toBe(history.length);
     expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     expect(pack.conversation.window?.summarised).toBe(0);
   });

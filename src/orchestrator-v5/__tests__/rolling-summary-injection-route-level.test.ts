@@ -27,6 +27,7 @@ import type {
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../context/context-pack-assembler.js';
+import { RollingSummaryStoreError } from '../rolling-summary/store-adapter.js';
 import type { RollingSummary } from '../rolling-summary/summary-types.js';
 
 const SCENARIO_ID = randomUUID();
@@ -131,7 +132,7 @@ function payload(message: string): MessageTurnPayload {
   };
 }
 
-function textOnlyAdapter(): {
+function textOnlyAdapter(onRoutingCall?: () => void): {
   adapter: { chatWithTools: (a: ChatWithToolsArgs) => Promise<ChatWithToolsResult> };
   calls: ChatWithToolsArgs[];
 } {
@@ -140,6 +141,7 @@ function textOnlyAdapter(): {
     calls,
     adapter: {
       chatWithTools: async (args: ChatWithToolsArgs) => {
+        onRoutingCall?.();
         calls.push(args);
         return {
           content: [{ type: 'text', text: 'Here is what I would focus on.' }],
@@ -173,8 +175,8 @@ function contextBudgetEvents(): Array<Record<string, unknown>> {
   return events.filter((e) => e.event === 'v5.context_budget').map((e) => e.payload);
 }
 
-async function runTurn(): Promise<{ calls: ChatWithToolsArgs[] }> {
-  const { adapter, calls } = textOnlyAdapter();
+async function runTurn(onRoutingCall?: () => void): Promise<{ calls: ChatWithToolsArgs[] }> {
+  const { adapter, calls } = textOnlyAdapter(onRoutingCall);
   await runTurnExecutor(payload('What should I focus on?'), `req-${randomUUID()}`, {
     routingAdapter: adapter,
   });
@@ -241,5 +243,30 @@ describe('S4-inject — route-level (unconditional, beyond-window activation)', 
     const routing = contextBudgetEvents().find((b) => b.call_site === 'routing')!;
     expect(routing).toBeDefined();
     expect(routing.summary_lag_turns).toBeNull();
+  });
+
+  it('a transient summary-read failure recovers once and reaches the real routing prompt', async () => {
+    let attempts = 0;
+    loadSummaryImpl = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new RollingSummaryStoreError('database is starting', { code: '57P03' });
+      }
+      return STORED_SUMMARY;
+    };
+
+    let attemptsAtRouting = -1;
+    const { calls } = await runTurn(() => {
+      attemptsAtRouting = attempts;
+    });
+    const prompt = routingUserMessage(calls);
+
+    // The fire-and-forget summary maintainer performs its own post-commit read,
+    // so assert the injection-path count at the actual routing boundary.
+    expect(attemptsAtRouting).toBe(2);
+    expect(prompt).toContain('Keep Maria on the team.');
+    expect(prompt).toContain('the structured state is correct');
+    const routing = contextBudgetEvents().find((b) => b.call_site === 'routing')!;
+    expect(routing.summary_lag_turns).toBe(0);
   });
 });

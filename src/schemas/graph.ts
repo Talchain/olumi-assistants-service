@@ -337,6 +337,34 @@ export const Node = z.object({
   goal_baseline: z.number().nullable().optional(),
   /** The stated current level in RAW user units, for display and round-trip. */
   goal_baseline_raw: z.number().nullable().optional(),
+  /**
+   * ⭐⭐ THE PER-FACTOR SCALE FRAME PASS 3d DIVIDED THIS FACTOR'S MAGNITUDES BY.
+   *
+   * Factor nodes only. `deriveFactorScaleFrame` derives ONE frame per factor
+   * from the baseline PLUS every option intervention magnitude; every one of
+   * them is then divided by it, so within-factor ratios are exact. Persisting
+   * the divisor is what lets a LATER user edit land on the SAME frame instead
+   * of inventing a new one — a silent re-framing rescales every sibling
+   * intervention and was measured to distort within-factor ratios by up to
+   * 100x (PR #1103, blocked on review).
+   *
+   * Typed here rather than left to `.passthrough()` for the reason the
+   * `goal_threshold_frame` note above gives: the draft-path mint site should be
+   * contextually typed, not smuggling an unknown key across.
+   *
+   * ⚠ NOT A `cap`, AND THAT IS LOAD-BEARING. A stored `cap` flips
+   * `normaliseFactorValue` to the cap-normalised, CLAMPING branch and breaks
+   * the user-scale round-trip the golden journey binds; it also EXEMPTS the
+   * factor from the analysis seam's baseline coherence gate (`if (cap !==
+   * undefined) continue`), which is the opposite of what a frame should do. A
+   * frame is a normalisation reference, not a bound.
+   *
+   * ABSENCE MEANS NEVER FRAMED, not "the frame was lost" — pass 3d writes it
+   * on every factor it frames, and truthfully derives none where a magnitude
+   * is negative (no unit-interval representation exists) or every magnitude is
+   * already inside [0,1]. Readers must therefore NOT default it.
+   */
+  scale_frame: z.number().positive().optional(),
 }).passthrough();
 
 // Structured provenance for production trust and traceability

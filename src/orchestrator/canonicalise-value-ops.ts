@@ -80,7 +80,7 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { recoverScaleFrame } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
+import { resolveScaleFrame } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 
 /**
  * R2-1 — a bare sub-1 value against a FRAME-RECOVERABLE factor is genuinely
@@ -539,7 +539,14 @@ export function findAmbiguousScaleValueOps(
     const payloadUnit = typeof observed.unit === 'string' ? observed.unit : undefined;
     const nodeUnit = typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
     if ((payloadUnit ?? nodeUnit) === '%') continue;
-    const frame = recoverScaleFrame({
+    // ⚠ ONE PREDICATE WITH THE BACKSTOP (this module's own rule, three lines
+    // up): the ask and reconcile's throw must agree on membership, so both read
+    // the frame through `resolveScaleFrame`. Threading it here and not there —
+    // or vice versa — would put a factor in exactly one of the two sets, which
+    // is a user asked a question the backstop then refuses to act on, or a
+    // throw with no ask in front of it.
+    const frame = resolveScaleFrame({
+      storedFrame: (node as { scale_frame?: unknown } | null)?.scale_frame,
       value: nodeObserved.value,
       raw_value: nodeObserved.raw_value,
     });
@@ -574,7 +581,11 @@ export function reconcileObservedValuePair(
 
     // Scale context, and the authority on whether the value MOVED. Read before
     // any other guard, because that question decides the whole lane.
-    const nodeObserved = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
+    // The NODE, not just its observed_state: the persisted `scale_frame` lives
+    // at node level precisely because the factor this fix exists for has no
+    // observed_state at all.
+    const currentNode = findNode(currentGraph, op.path);
+    const nodeObserved = asRecord(currentNode?.observed_state) ?? {};
 
     // ⚠ THE SCOPE THE CHAIN ACTUALLY HANDS US. This function's contract is
     // "act on ops that MOVE observed_state.value", but it never receives a
@@ -608,7 +619,61 @@ export function reconcileObservedValuePair(
     // this defect (nothing stale survives a wipe), and repairing it here
     // would be the "while we're here" scope creep this programme keeps
     // paying for. Recorded, not absorbed.
-    if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value')) return op;
+    //
+    // ⭐ ONE EXCEPTION, AND IT IS THE WHOLE DEFECT: a factor the brief stated no
+    // value for has NO `observed_state`, so the canonicaliser has nothing to
+    // merge and the payload carries no `raw_value` — this guard returned before
+    // the frame branch below was ever reached. Meanwhile the prescreen
+    // (`findAmbiguousScaleValueOps`, no such guard) DID see the factor, so the
+    // user was asked a question this backstop then declined to act on. A
+    // persisted `scale_frame` is independent POSITIVE evidence that the factor
+    // is framed — it does not need the stale-carry-forward heuristic to infer
+    // it — so the guard yields to it and to nothing else. Everything without a
+    // stored frame stays exactly as narrow as it was.
+    //
+    // ⚠⚠ AND THE EXCEPTION EXCLUDES PERCENT FACTORS ON A NON-100 FRAME, because
+    // the key would otherwise unlock a path that then IGNORES the frame that
+    // unlocked it. `deriveFactorScaleFrame` only pins 100 when
+    // `isPercentScaledUnit(unit) && max <= 100`; above 100 it FALLS THROUGH to
+    // the {1,2,5}·10^k ladder, so an NRR of 115% frames at 200 and an ROI of
+    // 300% frames at 500. The frame branch below is gated `unit !== '%'`, so
+    // those never reach it — they fall to `resolveExistingRawValue`, which
+    // hard-codes `value * 100`. Measured base vs head: NRR wrote `raw_value` 50
+    // where the truth is 100 (2×), ROI wrote 50 where the truth is 250 (5×),
+    // while a 3–5% churn factor (frame 100) stayed correct — the contrast
+    // control that proves the probe discriminates.
+    //
+    // ⭐ THE DIRECTION OF THE TRADE IS WHAT DECIDES THIS, not the magnitude.
+    // Base refused these outright (`baseline_scale_unresolved`); head ADMITTED
+    // them and the analysis ran to a rendered chart. A loud refusal became a
+    // silent 2–5× error — "prefer visible failure over confident wrongness"
+    // inverted, on the exact class the founder named (NRR, growth and ROI
+    // legitimately exceed 100%). Excluding them restores base behaviour for
+    // this class EXACTLY and leaves the fix intact everywhere else.
+    //
+    // ⚠ THE BANKED CORPUS DOES NOT ABSOLVE THIS. 50 percent-unit nodes, zero
+    // above 100, observed top of range 98 — that is a corpus that EXCLUDES the
+    // class, not evidence the class is unreachable, and 98 sitting flush
+    // against the boundary says only that models emit the usual 0–100 band.
+    //
+    // The principled fix — making `deriveFactorScaleFrame` return 100 for
+    // percent units ALWAYS, per this module's own doctrine that "a percentage
+    // DECLARES its scale" — is the better long-term answer and is deliberately
+    // NOT taken here: it changes over-frame behaviour and carries its own blast
+    // radius. Rowed, not absorbed.
+    const storedScaleFrame = (currentNode as { scale_frame?: unknown } | null)?.scale_frame;
+    const unitAtGuard =
+      typeof observed.unit === 'string'
+        ? observed.unit
+        : typeof nodeObserved.unit === 'string'
+          ? nodeObserved.unit
+          : undefined;
+    const storedFrameAdmits =
+      typeof storedScaleFrame === 'number' &&
+      !(unitAtGuard === '%' && storedScaleFrame !== 100);
+    if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value') && !storedFrameAdmits) {
+      return op;
+    }
 
     // Scale context: the payload's own unit/cap (the canonicaliser already
     // merged the node's in), falling back to the node for a payload that set
@@ -653,7 +718,8 @@ export function reconcileObservedValuePair(
     // Intercepting it here misread an unambiguous 0.4 (= 40%) as the
     // ambiguous class (caught by observed-value-pair-authority.test.ts).
     if (cap === undefined && unit !== '%') {
-      const frame = recoverScaleFrame({
+      const frame = resolveScaleFrame({
+        storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
         value: nodeObserved.value,
         raw_value: nodeObserved.raw_value,
       });

@@ -133,6 +133,33 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // of the brief. The `Record<…>` is what stops that mirror re-forming.
   "cee/decision-review/value-source-extraction-type.ts":
     "reader only — maps the stamp to a sampling-width bucket (ExtractionType); the literal is a lookup key, the module has no write path and makes no authorship claim",
+  // ── The brief-audit provenance ledger. Reviewed 26 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, for the same structural reason as the two entries
+  // above: the literal appears once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, boolean>` classifying a stamp
+  // someone else already wrote. No write path; it never touches
+  // `observed_state.source` and cannot cause `user_override` to appear anywhere.
+  //
+  // ⚠ THE DIRECTION OF HARM IS THE SAFEST OF THE THREE, and it is stated rather
+  // than inherited. This module decides whether to tell the user "I supplied
+  // this figure myself, you did not state it". Reading the stamp can only ever
+  // make it WITHHOLD that claim — it cannot invent a claim about the user, and
+  // it puts no number on screen. It was added precisely BECAUSE the module was
+  // claiming user-authored values as its own inventions: wire-witnessed
+  // 2026-08-25 saying "Those are my estimates, not yours" about a value the
+  // user had set through the Confirm chip minutes earlier.
+  //
+  // ⚠ AND IT DELIBERATELY DOES NOT TRUST EVERY user_stated STAMP. It requires a
+  // USER-WRITE RECEIPT, excluding the producer-written `brief_extraction` /
+  // `explicit` — which classify as `user_stated` upstream but are the model's
+  // own labels and were measured lying by the 2026-08-08 trace. Trusting those
+  // here would delete TRUE entries from the disclosure, which is this guard's
+  // concern one level up: a false claim of USER authorship, made by believing a
+  // label the system wrote about itself.
+  "cee/context-integrity/not-modelled-manifest.ts":
+    "reader only — treats the stamp as a user-write receipt so the brief-audit ledger REFUSES to claim the user's value as its own invention; the literal is a lookup key, no write path, and a wrong read can only withhold our own claim, never invent one about the user",
 };
 
 /**

@@ -28,7 +28,7 @@ import {
   evaluatePostOperatorFactorValue,
   type ProposalRejectionReason,
 } from './evaluate-factor-value-proposal.js';
-import { recoverScaleFrame } from './scale-frame.js';
+import { resolveScaleFrame } from './scale-frame.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
 
 export interface NormaliseInput {
@@ -54,6 +54,14 @@ export interface NormaliseInput {
    */
   readonly factorObservedValue?: number;
   readonly factorObservedRawValue?: number;
+  /**
+   * The factor's persisted `scale_frame` (pass 3d's divisor), threaded from
+   * the node by `set-factor-value.ts`. Present on every factor the draft
+   * framed — INCLUDING one with no baseline of its own, which is precisely the
+   * case the observed pair above cannot speak for. Absent ⇒ fall back to the
+   * pair, then to today's raw write. See `resolveScaleFrame`.
+   */
+  readonly factorScaleFrame?: number;
   /**
    * When true, the parameter arrived as a bare number with no unit. We
    * use this to detect ambiguous proposals against capped factors —
@@ -90,6 +98,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     factorUnit,
     factorObservedValue,
     factorObservedRawValue,
+    factorScaleFrame,
     inputHasUnit,
   } = input;
 
@@ -136,12 +145,20 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
 
   const cap = proposalCap ?? factorCap;
 
-  // No cap → two shapes, told apart by the factor's own before-pair:
+  // No cap → two shapes, told apart by `resolveScaleFrame` — the factor's
+  // persisted `scale_frame` first, its own before-pair second:
   //
   //   · FRAMED (records pass 3d wrote it: value = raw/frame, raw_value = raw,
-  //     frame not persisted BY DESIGN — a stored cap would flip this very
-  //     branch and break the user-scale round-trip). The frame is recovered
-  //     from the pair (`raw_value / value`) and the write PRESERVES it:
+  //     and the frame itself on `node.scale_frame`. Still no `cap`: a stored
+  //     cap would flip this very branch to the clamping path and break the
+  //     user-scale round-trip — which is exactly why the frame needed a
+  //     carrier of its own). ⚠ THE STORED FRAME IS NOT A CONVENIENCE. Reading
+  //     the pair alone cannot speak for a factor the brief stated no value for
+  //     — it has no pair — so its options' magnitudes were framed while its
+  //     own baseline was written RAW, and the rerun refused with
+  //     `baseline_scale_unresolved` on an edit the product had just invited.
+  //     The frame is recovered through the shared owner and the write
+  //     PRESERVES it:
   //     {value: rawInput/frame, raw_value: rawInput}. Without this, the first
   //     accepted bare edit rewrote the baseline to RAW beside framed levels
   //     and the next analysis computed on it silently (PR #926 review,
@@ -152,7 +169,8 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   //   · UNFRAMED (raw == value, or no recorded pair) → store raw_value as-is
   //     in both fields, exactly as before. Counts, ratios, unbounded scales.
   if (cap === undefined) {
-    const frame = recoverScaleFrame({
+    const frame = resolveScaleFrame({
+      storedFrame: factorScaleFrame,
       value: factorObservedValue,
       raw_value: factorObservedRawValue,
     });

@@ -195,8 +195,58 @@ export function buildOptionEffectReference(optionRef: string, factorRef: string)
   // estate has already paid for twice.** Any copy that puts an exemplar in front
   // of a user must use the form that routes.
   return ref.length > 0
-    ? `the ${ref} option's effect on ${factorRef}`
-    : `the option's effect on ${factorRef}`;
+    ? `the ${ref} ${OPTION_EFFECT_ANCHOR} ${factorRef}`
+    : `the ${OPTION_EFFECT_ANCHOR} ${factorRef}`;
+}
+
+/**
+ * ⭐ THE LABEL-INDEPENDENT ANCHOR of the option-effect noun phrase, and the one
+ * spelling of it. `buildOptionEffectReference` composes FROM it and
+ * `messageNamesOptionEffectSlot` recognises BY it, so the sentence the product
+ * advises and the sentence it can recognise cannot drift apart (trap 12 — the
+ * second spelling is the one that rots). The dependency deliberately points
+ * this way: the constant is the source, both directions derive.
+ */
+const OPTION_EFFECT_ANCHOR = "option's effect on";
+
+/**
+ * ⭐⭐ DOES THIS MESSAGE ALREADY NAME AN OPTION × FACTOR SLOT? — i.e. is the
+ * IDENTIFICATION complete, whatever the message does or does not say about a
+ * value?
+ *
+ * ## Why this is a SHAPE predicate and not a string comparison
+ *
+ * The obvious implementation is `message === buildRepairPairChipMessage(option,
+ * factor)` for the pair the composer holds. **It would be dark in production,
+ * and green in any fixture that supplies both sides.** Derived at the bytes:
+ * the chip's message is built in `coaching/readiness-recovery.ts` from
+ * `deriveAskedEffectPair(analysisReady)` — `asked.optionLabel` /
+ * `asked.factorLabel` — while the composer's labels arrive from
+ * `configure-option-outcome.ts` as `recovery.optionLabel` /
+ * `recovery.factorLabels`, a SECOND resolution against a DIFFERENT graph whose
+ * own header states that nothing structurally forces it onto the same shape.
+ * Two derivations, no guarantee of equality — so an equality predicate is a
+ * guard that agrees with the test fixture and nothing else (trap 13b).
+ *
+ * Matching the ANCHOR instead asks the question that actually matters, and asks
+ * it about the message alone: *does this sentence name an option's effect on a
+ * factor?* Labels never enter, so the two derivations cannot desynchronise it.
+ *
+ * ## What it deliberately does NOT decide
+ *
+ * Nothing about a value. `"…effect on Y to 0.6"` satisfies this too — and must,
+ * because the predicate answers "is the slot named?", not "did the user give me
+ * a number?" (trap 21: two questions, two names). The caller composes it with
+ * the value predicates that already exist; conflating them here would rebuild
+ * the same conjunction in a second place.
+ */
+export function messageNamesOptionEffectSlot(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  // Normalise the typographic apostrophe: user-facing copy round-trips through
+  // surfaces that substitute it, and a slot named with a curly quote is the
+  // same slot.
+  const normalised = message.replace(/[‘’]/g, "'").toLowerCase();
+  return normalised.includes(OPTION_EFFECT_ANCHOR);
 }
 
 /**

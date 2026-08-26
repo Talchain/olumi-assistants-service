@@ -15,6 +15,10 @@ import {
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
+import {
+  retryConfigForLiveEval,
+  sdkMaxRetriesForLiveEval,
+} from './live-eval-retry-policy.js';
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock, ReplayThinkingBlock, ThinkingConfig } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
@@ -235,15 +239,22 @@ const anthropicFetch: typeof globalThis.fetch = (input, init) =>
 // Tracks the key the client was created with so we can detect rotation.
 let client: Anthropic | null = null;
 let clientApiKey: string | null = null;
+let clientSdkMaxRetries: number | undefined;
 
 function getClient(): Anthropic {
   const apiKey = getApiKey();
+  const sdkMaxRetries = sdkMaxRetriesForLiveEval();
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY environment variable is required but not set");
   }
-  if (!client || clientApiKey !== apiKey) {
-    client = new Anthropic({ apiKey, fetch: anthropicFetch });
+  if (!client || clientApiKey !== apiKey || clientSdkMaxRetries !== sdkMaxRetries) {
+    client = new Anthropic({
+      apiKey,
+      fetch: anthropicFetch,
+      ...(sdkMaxRetries === undefined ? {} : { maxRetries: sdkMaxRetries }),
+    });
     clientApiKey = apiKey;
+    clientSdkMaxRetries = sdkMaxRetries;
   }
   return client;
 }
@@ -3916,7 +3927,8 @@ export async function chatWithToolsAnthropic(
         adapter: "anthropic",
         model,
         operation: "chat_with_tools",
-      }
+      },
+      retryConfigForLiveEval(),
     );
 
     clearTimeout(timeoutId);
@@ -4001,7 +4013,8 @@ export async function chatWithToolsAnthropic(
     log.info(
       {
         provider: 'anthropic',
-        model,
+        model: response.model,
+        requested_model: model,
         latency_ms: latencyMs,
         input_tokens: response.usage.input_tokens,
         output_tokens: response.usage.output_tokens,
@@ -4021,7 +4034,9 @@ export async function chatWithToolsAnthropic(
     return {
       content,
       stop_reason: stopReason,
-      model,
+      // Provider-reported identity, not the requested alias. Live evidence and
+      // failover telemetry must describe the model that actually answered.
+      model: response.model,
       latencyMs,
       usage: {
         input_tokens: response.usage.input_tokens,

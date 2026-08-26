@@ -41,6 +41,7 @@ import { composeDirectAnswerResponse } from '../compose.js';
 import {
   buildConfigureOptionAdvisedFormat,
   buildConfigureOptionDirectSetSentence,
+  messageNamesOptionEffectSlot,
 } from '../configure-option-chip-text.js';
 
 export interface ComposeConfigureOptionClarifyInput {
@@ -217,7 +218,70 @@ export function composeConfigureOptionClarifyResponse(
       ].join(' ')
     : null;
 
-  const assistant_text = qualitativeText !== null
+  // ⭐⭐ IDENTIFICATION COMPLETE, VALUE ABSENT — the state the product's OWN
+  // repair chip puts the user in, and the one state the bare-ask branch below
+  // must never see.
+  //
+  // WITNESSED (UI `326970a7` · CEE `5f2e3fd`, guest): the chip labelled "Set
+  // effect on Cash runway consumed" replayed its message, landed here with no
+  // digit, and got the teach-the-format branch — *"Tell me what it changes, like
+  // this: Set the rebuild our product on an AI-native architecture option's
+  // effect on Cash runway consumed to 0.6."* **A button that says "Set effect on
+  // X" handing back a sentence to retype, naming the option and factor the chip
+  // had already named.**
+  //
+  // The bare-ask branch is not wrong — it is answering a DIFFERENT question. It
+  // exists to teach the routable phrasing to a user who has named nothing, and
+  // it stays exactly as it was for them (pinned by the opposite-direction cases
+  // in `repair-chip-identification-complete.test.ts`). What was missing is that
+  // naming the slot and naming a number are two different acts, and the product
+  // treated the absence of the second as the absence of both.
+  //
+  // ⚠ IT STILL ASKS FOR THE NUMBER, and that is not a shortfall. The chip
+  // withholds the value deliberately (`buildRepairPairChip`'s header): choosing
+  // it would invent the user's figure, the fabrication class P5 exists to close.
+  // So the honest move is to ask for the ONE thing that is not derivable — and
+  // the answer is written by simply typing it here, which is a PROVEN path
+  // (`interventions: {…, source: "user_specified"}`, verified after reload).
+  //
+  // ⚠⚠ AND IT DELIBERATELY DOES **NOT** APPEND
+  // `buildConfigureOptionDirectSetSentence`. That sentence — "open <option> on
+  // the canvas and add <factor> to what it changes" — was REFUTED BY A LIVE
+  // DRIVE on 2026-08-25: the canvas option panel renders the intervention row
+  // inside a `<fieldset disabled>` and writes NOTHING (a forced native write
+  // produced zero wire calls), and the panel's own notice says it is read-only
+  // because the change "cannot yet be saved to the shared model".
+  //
+  // ⛔ THE SENTENCE IS THEREFORE FALSE WHEREVER IT IS EMITTED, INCLUDING THE
+  // `answered` BRANCH BELOW, WHICH THIS CHANGE DELIBERATELY DOES NOT TOUCH.
+  // That is a pre-existing defect on a different branch with its own pins, and
+  // silently rewriting it here would put one lane's fix inside another's
+  // evidence. It is REPORTED, not absorbed (CLAUDE.md scope-expansion rule).
+  // Note the shape: this sentence was itself introduced to FIX a dead-end
+  // locus, was correct about which field the write targets, and went false when
+  // the surface was disabled underneath it — a cross-service hand-maintained
+  // mirror going stale exactly as its own header warned (trap 12).
+  const identificationComplete =
+    !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
+
+  const assistant_text = identificationComplete
+    ? [
+        `"${optionLabel}" has no effect value on ${primaryFactor} yet.`,
+        // ⚠ THE EXEMPLAR IS LOAD-BEARING, NOT DECORATION — it steers off a value
+        // the bare-answer path REFUSES BY DESIGN. `matchBareRepairValue` declines
+        // a bare INTEGER as "an ordinal in disguise" (a naked `1` measured
+        // binding as an effect value of 1.0 while the user meant "the first
+        // one"), so the one token this gloss most invites — `1` — is exactly the
+        // one that will not bind. `0.6` is the estate's existing exemplar
+        // (`CONFIGURE_OPTION_EXAMPLE_VALUE`) and is wire-proven to route.
+        //
+        // This branch asks for a BARE number where the old copy advised a whole
+        // sentence, so it raises the odds of that collision rather than
+        // inheriting it — the exemplar is how this change pays for that.
+        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully) — ${CONFIGURE_OPTION_EXAMPLE_VALUE}, say.`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+      ].join(' ')
+    : qualitativeText !== null
     ? qualitativeText
     : answered
     ? [

@@ -171,12 +171,14 @@ describe('conversation length — route-level: the prompt states the CONVERSATIO
     vi.clearAllMocks();
   });
 
-  it('78 stored / 20 read / 8 shown — the ROUTING PROMPT states 78', async () => {
+  it('78 stored / 20 read / no usable summary — the ROUTING PROMPT shows the hot window and states 78', async () => {
     const conversation = conversationBlock(await routingPrompt());
     expect(conversation.turn_count).toBe(STORED_TURNS);
     expect(conversation.window?.available).toBe(STORED_TURNS);
-    // The window read is unchanged — only the CLAIM about the conversation.
-    expect(conversation.window?.shown).toBe(8);
+    // With no usable rolling summary, all already-fetched rows remain visible
+    // rather than creating a memory cliff at turn 9. The fetched-window size
+    // still must not be passed off as the conversation total.
+    expect(conversation.window?.shown).toBe(READ_WINDOW);
     // The exact bytes the pre-fix build sent, which the coach read back to the
     // user as the total. Neither number may be the window's own size.
     expect(conversation.turn_count).not.toBe(READ_WINDOW);
@@ -186,8 +188,8 @@ describe('conversation length — route-level: the prompt states the CONVERSATIO
   it('and says so IN WORDS, with both numbers, in the same block', async () => {
     const notice = conversationBlock(await routingPrompt()).window?.notice ?? '';
     expect(notice).toContain('78 turns are on record');
-    expect(notice).toContain('the 8 most recent are shown above');
-    expect(notice).toContain('70 earlier ones are not shown');
+    expect(notice).toContain('the 20 most recent are shown above');
+    expect(notice).toContain('58 earlier ones are not shown');
     expect(notice).toContain('the true total is 78');
   });
 
@@ -204,10 +206,16 @@ describe('conversation length — route-level: the prompt states the CONVERSATIO
     storedTotal = null;
     const conversation = conversationBlock(await routingPrompt());
     const notice = conversation.window?.notice ?? '';
-    expect(notice).toContain('could not be read this turn');
-    expect(notice).toContain('do not state a total number of turns or exchanges');
-    // The load-bearing assertion: the window's size must not be passed off as
-    // the answer anywhere in the disclosure.
-    expect(notice).not.toContain(String(READ_WINDOW));
+    expect(conversation.window?.shown).toBe(READ_WINDOW);
+    // Pin the whole deterministic disclosure. Substring bans are insufficient:
+    // a mutant could keep every safe clause and append a differently worded
+    // claim that 20 is the total. Exact bytes prove 20 has one licensed meaning
+    // here—the bounded fetched window—and no authoritative-total meaning.
+    expect(notice).toBe(
+      '[INCOMPLETE — the 20 most recent turns fetched for this prompt are shown above. ' +
+        'The true total could not be read this turn, so earlier turns may exist outside the ' +
+        'fetched window. Do not describe the turns above as the whole conversation, and do ' +
+        'not state a total number of turns or exchanges.]',
+    );
   });
 });

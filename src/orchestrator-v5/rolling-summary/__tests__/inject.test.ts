@@ -28,6 +28,7 @@ import {
   buildConversationSummarySection,
   loadConversationSummaryForInjection,
 } from '../inject.js';
+import { RollingSummaryStoreError } from '../store-adapter.js';
 import type { RollingSummary } from '../summary-types.js';
 import type { RollingSummaryStorePort } from '../store-adapter.js';
 
@@ -195,6 +196,124 @@ describe('loadConversationSummaryForInjection — below-window activation gate',
     });
     expect(outcome.section).toBeNull();
     expect(outcome.lagTurns).toBeNull();
+    expect(store.loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('one attested transient read failure retries once and recovers the stored summary', async () => {
+    const loadSummary = vi
+      .fn<RollingSummaryStorePort['loadSummary']>()
+      .mockRejectedValueOnce(
+        new RollingSummaryStoreError('opaque store failure', { code: '57P03' }),
+      )
+      .mockResolvedValueOnce(summaryFixture());
+    const store: RollingSummaryStorePort = {
+      loadSummary,
+      upsertSummary: vi.fn(),
+    };
+
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      requestId: 'req-transient-recovery',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(2);
+    expect(loadSummary).toHaveBeenNthCalledWith(1, 'scn-1');
+    expect(loadSummary).toHaveBeenNthCalledWith(2, 'scn-1');
+    expect(outcome.section?.text).toContain('Keep Maria on the team.');
+    expect(outcome.lagTurns).toBe(0);
+    expect(outcome.summarisedTurns).toBe(1);
+  });
+
+  it.each(['08001', '08006', '08P01', '53300', 'PGRST001', 'PGRST002', 'PGRST003'])(
+    'retries the explicit transient code %s exactly once',
+    async (code) => {
+      const loadSummary = vi.fn(async () => {
+        throw new RollingSummaryStoreError('transient read failed', { code });
+      });
+      const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+      const outcome = await loadConversationSummaryForInjection({
+        scenarioId: 'scn-1',
+        windowTurnsNewestFirst: [T2, T1],
+        windowDepth: 1,
+        summaryStore: store,
+      });
+
+      expect(loadSummary).toHaveBeenCalledTimes(2);
+      expect(outcome).toEqual({ section: null, lagTurns: null, summarisedTurns: null });
+    },
+  );
+
+  it('does not retry transient-looking prose without an attested code', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError(
+        'could not connect: database is starting and the pool timed out',
+      );
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a producer-attested non-transient schema/RPC error', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('function not found', { code: 'PGRST202' });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+    expect(outcome.section).toBeNull();
+  });
+
+  it('does not treat an arbitrary malformed 08-prefix token as SQLSTATE class 08', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('malformed code', { code: '08oops' });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry PGRST000 because it may attest a non-transient bad database URI', async () => {
+    const loadSummary = vi.fn(async () => {
+      throw new RollingSummaryStoreError('database connection is unavailable', {
+        code: 'PGRST000',
+      });
+    });
+    const store: RollingSummaryStorePort = { loadSummary, upsertSummary: vi.fn() };
+
+    await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 1,
+      summaryStore: store,
+    });
+
+    expect(loadSummary).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -412,6 +531,58 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
       refused: true,
       generator: 'incremental',
     });
+  });
+
+  /**
+   * F1 (independent review of PR #1102) — THE REFUSAL NOTE MUST NOT COUNT THE
+   * VERBATIM TURNS, because on this path it is the one number it cannot know.
+   *
+   * The producer builds the note from `verbatimCount = min(windowDepth, len)`
+   * and returns `summarisedTurns: 0`. The consumer
+   * (`context-pack-assembler.ts`, the `summaryCoverageWasChecked &&
+   * !summaryHasCoverage` branch) reads that 0 as "checked, no coverage" and
+   * EXPANDS the verbatim window from the cap to `priorTurns.length`. So the
+   * note says "only the latest 5 turns are shown verbatim" while the pack
+   * shows every fetched turn — the prompt contradicting itself about its own
+   * contents, on the memory-hole path this PR exists to serve.
+   *
+   * The count is NOT restated here: the window notice
+   * (`context-pack-assembler.ts` — "the N most recent are shown above and M
+   * earlier ones are not shown") already carries it, derived from what was
+   * actually projected. One authority for the number, and this note is not it.
+   *
+   * The absence disclosure itself is unchanged and still asserted below —
+   * dropping the number must not quietly drop the honesty.
+   */
+  it('the refusal note makes NO verbatim-turn COUNT claim (the consumer expands the window past it)', async () => {
+    const store = storeReturning(summaryFixture());
+    // Watermark T2 covered, 7 newer turns, windowDepth 5 → verbatimCount 5,
+    // refusal fires. PRECONDITION PINNED IN-TEST (a discriminator that stops
+    // discriminating must go red, not quietly pass): if this fixture ever
+    // stops reaching the refusal arm, `summarisedTurns` is no longer 0 and the
+    // assertions below would be testing a different path.
+    const window = [...newerTurns(7), T2, T1];
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: window,
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    expect(outcome.summarisedTurns, 'precondition: the refusal arm fired').toBe(0);
+    const note = outcome.section!.note!;
+
+    // THE PIN: no "only the latest N turns are shown verbatim" claim. The
+    // number is the consumer's to state, and on this path it is not 5.
+    expect(note).not.toMatch(/only the latest \d+ turns are shown verbatim/);
+    // Nor any other spelling that re-mints a verbatim COUNT here.
+    expect(note).not.toMatch(/\d+\s+turns are shown verbatim/);
+
+    // …while the disclosure the note exists for is untouched.
+    expect(note.toLowerCase()).toContain('withheld');
+    expect(note.toLowerCase()).toContain('not shown');
+    // The GAP figure stays — it is this producer's own measurement (lag 7),
+    // unlike the verbatim count, which belongs to the assembler.
+    expect(note).toContain('7');
   });
 
   it('REFUSES when the gap exceeds verbatim coverage even though the watermark is visible', async () => {
