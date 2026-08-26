@@ -37,42 +37,25 @@ import {
 import { isProcessMetaIntake } from "../../orchestrator-v5/routing/process-meta-intake.js";
 import { CLARIFY_V2_QUESTION_REPLY_PATTERN } from "../../orchestrator-v5/clarify-v2/preflight.js";
 import { deriveBriefTextSeed } from "../../orchestrator-v5/session/derive-brief-seed.js";
+import {
+  A7_MUST_DEFLECT,
+  CAPTURED_QUESTIONS,
+  GENUINE_INTERROGATIVE_BRIEFS,
+} from "./fixtures/inv-q-protected-class.js";
 
 /** The measured capture predicate: the two message-TEXT terms of `draftShapedTurn`. */
 function capturesAsBrief(message: string): boolean {
   return isDraftShapedText(message) && !isProcessMetaIntake(message);
 }
 
-/** capture-semantics-derivation-2026-08-08.md §1.4 — the 11 that captured. */
-const CAPTURED_QUESTIONS: readonly string[] = [
-  "What assumption matters most, and why?",
-  "What risks and upsides am I missing from my model?",
-  "Is this the right question for me to be asking here?",
-  "What should I be checking before I run this?",
-  "Can you take the outside view on this one, what do base rates suggest?",
-  "Could you run a pre-mortem with me on this decision?",
-  "How confident are you in the estimate you used for churn?",
-  "Where do you and I differ on this, and why?",
-  "Can you explain what the simulation actually does here?",
-  "What does the confidence interval on that edge mean?",
-  "Why did you pick 0.4 for that coefficient?",
-];
-
 /**
- * The precision bias, ratified in META-DECISION-DIAGNOSIS-2026-07-20 and
- * restated in `process-meta-intake.ts`: over-blocking a genuine decision brief
- * is a WORSE defect than the one this fixes. Every entry is interrogative and
- * MUST keep drafting.
+ * ⭐ THE CORPUS IS SINGLE-SOURCED (CLAUDE.md trap 12 — the hand-maintained
+ * mirror). It moved to `./fixtures/inv-q-protected-class.js` when the
+ * routing-level suite (`src/orchestrator/__tests__/route-v2-inv-q-protected-
+ * class.test.ts`) became a second consumer: a copied corpus would have drifted
+ * silently, and the drift always reads as green. The strings are unchanged —
+ * they are historic captures and are append-only.
  */
-const GENUINE_INTERROGATIVE_BRIEFS: readonly string[] = [
-  "Should we expand into Germany or double down on the UK?",
-  "Should we expand into Germany or add a second warehouse in Poland?",
-  "Whether to migrate the CRM to HubSpot this quarter or stay on Salesforce?",
-  "Is it better to hire two engineers now or wait until Q3?",
-  "Which vendor should we choose for the data platform migration?",
-  "Shall we launch the new pricing tier in Q3 or hold it for Q4?",
-  "Do we buy the warehouse outright or lease it for three years?",
-];
 
 describe("INV-Q — an interrogative with no decision verb is not a decision brief", () => {
   describe("A1 — the row's own string", () => {
@@ -199,17 +182,8 @@ describe("INV-Q — an interrogative with no decision verb is not a decision bri
    *     the user ("do you agree WE should acquire…", "…in your view?").
    */
   describe("A7 — a decision verb whose subject is the assistant is not decision-bearing", () => {
-    const MUST_DEFLECT: readonly string[] = [
-      // Reviewer's blocker cases (execution-proven drafting at 7d27adef).
-      "How do you decide which factors matter in the analysis?",
-      "How does Olumi decide which options to include?",
-      // Product-authored (bias library) — forces the optional-adverb slot.
-      "Would you still choose to invest in this option?",
-      // Auxiliary × subject alphabet walks.
-      "Could Olumi choose the best option for us automatically?",
-      "Will you launch the analysis for me once the model is ready?",
-      "Did you decide the baseline values yourself when drafting?",
-    ];
+    // Single-sourced with the routing-level suite — see the import block.
+    const MUST_DEFLECT: readonly string[] = A7_MUST_DEFLECT;
 
     const MUST_STILL_DRAFT: readonly string[] = [
       // Reviewer's pre-validated opposite-direction twins.
