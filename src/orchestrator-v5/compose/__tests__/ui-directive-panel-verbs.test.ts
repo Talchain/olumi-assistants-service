@@ -74,9 +74,11 @@ function persistedGraph(contestedCount: number, agreedCount = 1): unknown {
   };
 }
 
-function explainResultsFact(opts: { preconditionUnmet?: boolean } = {}): HandlerFact {
+function explainResultsFact(
+  opts: { preconditionUnmet?: boolean; stalenessPrefixed?: boolean } = {},
+): HandlerFact {
   // noop is ALWAYS true on the live handler (no-op explanation handler) —
-  // byte-derived; the discriminator is precondition_unmet.
+  // byte-derived; the discriminators are precondition_unmet + staleness_prefixed.
   return {
     fact_type: 'explain_results',
     fact_version: 1,
@@ -85,6 +87,9 @@ function explainResultsFact(opts: { preconditionUnmet?: boolean } = {}): Handler
       precondition_unmet: opts.preconditionUnmet ?? false,
       option_count: 2,
       answer_source: opts.preconditionUnmet ? 'precondition_template' : 'sonnet',
+      ...(opts.stalenessPrefixed === undefined
+        ? {}
+        : { staleness_prefixed: opts.stalenessPrefixed }),
     },
   } as unknown as HandlerFact;
 }
@@ -166,6 +171,52 @@ describe('§2.1 row 5 — explain_results opens the results panel', () => {
     });
     expect(directives(env)).toHaveLength(0);
     expect(suppressed('precondition_unmet').some((e) => e.data.fact_type === 'explain_results')).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ THE CAVEATED-ANSWER GATE — the panel must NOT open on a stale answer.
+   *
+   * The explanation-precondition narrowing lets `stale`/`unconfirmed` REACH the
+   * answered branch, which flips `precondition_unmet` true → false. That field
+   * is this row's gate, so without the term added alongside it the product
+   * opens a panel of numbers the sentence above it has just called
+   * possibly-wrong — honest prose beside an unmarked surface, which is the
+   * exact split this estate keeps paying for.
+   *
+   * The narrowing's licence is for PROSE: `usableForProse` admits stale WITH a
+   * caveat; `usableForChips` is fresh-only. A panel is nearer a chip than a
+   * sentence. Whether the results panel should ever open on stale state WITH
+   * ITS OWN MARKER is a real product question and is rowed, not answered here.
+   */
+  it('a CAVEATED (stale/unconfirmed) explain_results turn emits NOTHING — the panel must not open on stale numbers', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [explainResultsFact({ preconditionUnmet: false, stalenessPrefixed: true })],
+    });
+
+    expect(directives(env)).toHaveLength(0);
+    expect(
+      suppressed('staleness_caveated').some((e) => e.data.fact_type === 'explain_results'),
+      'the suppression must be telemetered under its own reason, not silently folded into precondition_unmet',
+    ).toBe(true);
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWIN (trap 22b). A gate that suppresses on stale
+   * is only useful if it still emits on fresh — otherwise it is indistinguishable
+   * from deleting the row. `staleness_prefixed: false` is the answered-and-fresh
+   * state and MUST still open the panel.
+   */
+  it('an ANSWERED, UNCAVEATED explain_results turn still opens the panel', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [explainResultsFact({ preconditionUnmet: false, stalenessPrefixed: false })],
+    });
+    const ds = directives(env);
+
+    expect(ds).toHaveLength(1);
+    expect(ds[0].verb).toBe('open_panel');
+    expect(ds[0].ui_target).toEqual({ kind: 'tab', id: 'results' });
   });
 
   it('determinism pin: the same input twice produces deep-equal directive bytes (zero LLM authorship)', () => {

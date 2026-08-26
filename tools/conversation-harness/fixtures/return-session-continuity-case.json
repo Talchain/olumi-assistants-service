@@ -1,0 +1,275 @@
+{
+  "schema": "return_session_continuity_case.v1",
+  "id": "northstar_fresh_facade_return",
+  "scenario_id": "0f36950f-767b-421d-84bb-cc64fd22d2ad",
+  "other_scenario_id": "07a15bb0-3f9e-4a14-b0c1-891f3f4584c1",
+  "question": "Reconcile the current model, unresolved tension, accepted change and prior analysis after this reload.",
+  "brief": "Choose a launch shape for Project Northstar that is reversible, legally cleared and supportable within the approved operating envelope.",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_safe_launch",
+        "kind": "goal",
+        "label": "Launch Northstar safely without losing reversibility"
+      },
+      {
+        "id": "opt_phased_pilot",
+        "kind": "option",
+        "label": "Controlled regional pilot",
+        "interventions": {
+          "factor_support_capacity": 42
+        }
+      },
+      {
+        "id": "opt_full_launch",
+        "kind": "option",
+        "label": "Full national launch",
+        "interventions": {
+          "factor_support_capacity": 55
+        }
+      },
+      {
+        "id": "factor_support_capacity",
+        "kind": "factor",
+        "label": "Support capacity",
+        "observed_state": {
+          "value": 42,
+          "unit": "specialists",
+          "source": "user_edited"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "factor_support_capacity",
+        "to": "goal_safe_launch",
+        "strength": {
+          "mean": 0.64,
+          "std": 0.12
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.87
+      }
+    ],
+    "goal_constraints": [
+      {
+        "constraint_id": "constraint_legal_gate",
+        "node_id": "goal_safe_launch",
+        "operator": ">=",
+        "value": 1,
+        "label": "Written regulatory clearance before launch",
+        "unit": "written clearance",
+        "source_quote": "Legal counsel memo LC-17 requires written clearance before any customer-facing launch.",
+        "provenance": "explicit"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "n": 1,
+      "turn_id": "11000001-0000-4000-8000-000000000001",
+      "user": "We need to frame Project Northstar as a reversible launch strategy before choosing a launch shape.",
+      "assistant": "I will keep the goal, constraints, evidence and tensions distinct without assuming a winner."
+    },
+    {
+      "n": 2,
+      "turn_id": "90000002-0000-4000-8000-000000000002",
+      "user": "The launch must remain reversible if support demand spikes.",
+      "assistant": "Reversibility is part of the strategic frame."
+    },
+    {
+      "n": 3,
+      "turn_id": "90000003-0000-4000-8000-000000000003",
+      "user": "Legal clearance must be evidenced rather than assumed.",
+      "assistant": "I will retain the source and avoid converting an unresolved check into certainty."
+    },
+    {
+      "n": 4,
+      "turn_id": "90000004-0000-4000-8000-000000000004",
+      "user": "A regional pilot and a national launch are the live alternatives.",
+      "assistant": "Both alternatives belong in the living model."
+    },
+    {
+      "n": 5,
+      "turn_id": "44000005-0000-4000-8000-000000000005",
+      "user": "Supplier capacity may undermine a reversible pilot even though procurement favours speed.",
+      "assistant": "That belongs in the unresolved reasoning, not as a settled fact."
+    },
+    {
+      "n": 6,
+      "turn_id": "90000006-0000-4000-8000-000000000006",
+      "user": "The board wants an explicit evidence trail.",
+      "assistant": "The model should retain evidence provenance with its constraint."
+    },
+    {
+      "n": 7,
+      "turn_id": "22000007-0000-4000-8000-000000000007",
+      "user": "Keep the operating envelope fixed and visible while regulatory evidence is checked.",
+      "assistant": "I will keep recorded constraints above conversational shorthand."
+    },
+    {
+      "n": 8,
+      "turn_id": "33000008-0000-4000-8000-000000000008",
+      "user": "Accept a weekly cross-functional review cadence for the unresolved dependencies.",
+      "assistant": "The weekly cross-functional review cadence is accepted."
+    },
+    {
+      "n": 9,
+      "turn_id": "90000009-0000-4000-8000-000000000009",
+      "user": "Who should own escalation?",
+      "assistant": "Use an owner able to resolve cross-functional blockers."
+    },
+    {
+      "n": 10,
+      "turn_id": "90000010-0000-4000-8000-000000000010",
+      "user": "How should a stop condition be worded?",
+      "assistant": "Tie it to an observable support-capacity threshold."
+    },
+    {
+      "n": 11,
+      "turn_id": "90000011-0000-4000-8000-000000000011",
+      "user": "What should the next review cover?",
+      "assistant": "Cover evidence currency, reversibility and unresolved capacity."
+    },
+    {
+      "n": 12,
+      "turn_id": "90000012-0000-4000-8000-000000000012",
+      "user": "Fallback continuity marker ORCHID-12 must survive a summary outage.",
+      "assistant": "ORCHID-12 is retained only as a context-fallback witness."
+    },
+    {
+      "n": 13,
+      "turn_id": "90000013-0000-4000-8000-000000000013",
+      "user": "How should we communicate uncertainty?",
+      "assistant": "Separate what is recorded, inferred and still unresolved."
+    },
+    {
+      "n": 14,
+      "turn_id": "90000014-0000-4000-8000-000000000014",
+      "user": "Would a small first region make learning easier?",
+      "assistant": "It could improve reversibility without deciding the outcome for you."
+    },
+    {
+      "n": 15,
+      "turn_id": "90000015-0000-4000-8000-000000000015",
+      "user": "What evidence should procurement supply?",
+      "assistant": "Ask for capacity evidence tied to the launch demand assumptions."
+    },
+    {
+      "n": 16,
+      "turn_id": "90000016-0000-4000-8000-000000000016",
+      "user": "Accept the support-capacity update from 30 to 42 specialists.",
+      "assistant": "The change was applied and recorded."
+    },
+    {
+      "n": 17,
+      "turn_id": "90000017-0000-4000-8000-000000000017",
+      "user": "Run the current model analysis.",
+      "assistant": "The analysis was recorded against this model."
+    },
+    {
+      "n": 18,
+      "turn_id": "90000018-0000-4000-8000-000000000018",
+      "user": "What should we monitor after the analysis?",
+      "assistant": "Monitor evidence currency, support capacity and any model changes that would make the analysis stale."
+    },
+    {
+      "n": 19,
+      "turn_id": "90000019-0000-4000-8000-000000000019",
+      "user": "An obsolete workshop note says Full national launch is already selected under PROJECT-COMET-OBSOLETE.",
+      "assistant": "That is discussion history, not current model authority."
+    },
+    {
+      "n": 20,
+      "turn_id": "90000020-0000-4000-8000-000000000020",
+      "user": "I am reopening this in a fresh session; reconcile what still stands.",
+      "assistant": "I will use the persisted model, facts and summary rather than reconstructing state from this message."
+    }
+  ],
+  "summary": {
+    "updated_turn_number": 12,
+    "version": 4,
+    "slots": {
+      "FRAME": [
+        {
+          "text": "Northstar is a reversible launch strategy, not a race to name a winner.",
+          "sources": [
+            {
+              "turn_id": "11000001-0000-4000-8000-000000000001",
+              "speaker": "user",
+              "witnesses": ["Northstar", "reversible", "launch"]
+            },
+            {
+              "turn_id": "11000001-0000-4000-8000-000000000001",
+              "speaker": "assistant",
+              "witnesses": ["winner"]
+            }
+          ]
+        }
+      ],
+      "CONSTRAINTS": [
+        {
+          "text": "The operating envelope remains fixed while regulatory evidence is checked.",
+          "sources": [
+            {
+              "turn_id": "22000007-0000-4000-8000-000000000007",
+              "speaker": "user",
+              "witnesses": ["operating envelope", "fixed", "regulatory evidence", "checked"]
+            }
+          ]
+        }
+      ],
+      "RESOLVED": [
+        {
+          "text": "Weekly cross-functional review cadence was accepted.",
+          "sources": [
+            {
+              "turn_id": "33000008-0000-4000-8000-000000000008",
+              "speaker": "assistant",
+              "witnesses": ["weekly", "cross-functional", "review cadence", "accepted"]
+            }
+          ]
+        }
+      ],
+      "OPEN": [
+        {
+          "text": "Unresolved tension TENSION-SAFFRON: supplier capacity may undermine a reversible pilot even though procurement favours speed.",
+          "sources": [
+            {
+              "turn_id": "44000005-0000-4000-8000-000000000005",
+              "speaker": "user",
+              "witnesses": ["supplier capacity", "undermine", "reversible pilot", "procurement", "speed"]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "accepted_change": {
+    "turn_number": 16,
+    "target_id": "factor_support_capacity",
+    "target_label": "Support capacity",
+    "before_value": 30,
+    "after_value": 42,
+    "unit": "specialists"
+  },
+  "analysis": {
+    "turn_number": 17,
+    "leading_option_id": "opt_phased_pilot",
+    "leading_option_label": "Controlled regional pilot",
+    "other_option_id": "opt_full_launch",
+    "win_probabilities": {
+      "opt_phased_pilot": 0.68,
+      "opt_full_launch": 0.32
+    },
+    "computed_at": "2026-08-25T09:17:00.000Z"
+  },
+  "other_scenario": {
+    "brief": "OTHER-SCENARIO-CANARY: Project Nightfall expansion into Tokyo.",
+    "graph_label": "OTHER-SCENARIO-GRAPH-CANARY Tokyo acquisition",
+    "fact_canary": "FOREIGN-OUT-OF-WINDOW-FACT-CANARY"
+  },
+  "client_claims": {
+    "history": "CLIENT-HISTORY-CANARY says the legal gate was removed."
+  }
+}

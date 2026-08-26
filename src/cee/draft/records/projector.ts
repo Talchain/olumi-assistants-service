@@ -630,6 +630,23 @@ export interface ProjectedNode {
    */
   goal_threshold_frame?: typeof CEE_GOAL_THRESHOLD_FRAME;
   /**
+   * `factor` nodes only. The frame pass 3d divided this factor's magnitudes
+   * by — see the pass 3d write site and `schemas/graph.ts:scale_frame`.
+   *
+   * NODE-LEVEL, not in `data` or `observed_state`, for three reasons. (1) The
+   * defect class this closes is a factor with NO `observed_state` at all, so
+   * there is no object to put it in without minting one — and a factor
+   * carrying an `observed_state` with no `value` states something different to
+   * the analysis-readiness gate than a factor carrying none. (2)
+   * `observed_state` is `.passthrough()`, so a key there would be carried
+   * unvalidated and unnoticed — the silently-carried-never-checked class.
+   * (3) `data` does not survive the canonical `NodeV3` parse at all (measured:
+   * `NodeV3` declares no `data`, and `normalise-option-interventions.ts:13`
+   * says the same). Node level is the established path its sibling
+   * `goal_threshold_frame` already takes.
+   */
+  scale_frame?: number;
+  /**
    * `option` nodes only. NODE-LEVEL for the same union reason: `OptionData`
    * REQUIRES `interventions` (`graph.ts:163-165`), so `data = {is_baseline}` on an
    * option with no interventions matches nothing and 400s the draft.
@@ -2772,6 +2789,31 @@ function projectOnce(
       const unit = (factor.data as { unit?: unknown } | undefined)?.unit;
       const frame = deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
       if (frame === undefined) continue;
+      // ⭐⭐ PERSIST THE DIVISOR. Everything below divides by `frame` and, until
+      // this line existed, then discarded it — so the ONLY surviving trace of
+      // the frame was the `{value, raw_value}` pair on a baseline-bearing
+      // factor. A factor the brief states no value for got no pair, and a later
+      // user edit had nothing to land on: the edit succeeded raw, and the rerun
+      // REFUSED with `baseline_scale_unresolved` (wire-witnessed 3/3). The
+      // product advertised the action and then declined to act on it.
+      //
+      // ⚠ Re-deriving the frame at the edit instead is strictly WORSE than that
+      // refusal, and it was measured, not reasoned: a frame derived from the
+      // edited baseline ALONE ignores the sibling interventions this one was
+      // derived WITH, so £600,000 lands at level 0.6 beside a £400,000 option
+      // at 0.8 — the status quo scored cheaper than an option that costs less,
+      // and the analysis recommends the wrong one with no refusal anywhere.
+      // 9 of 25 framings distorted the ratio, worst 100x. That is the "silent
+      // re-framing (which would rescale every sibling intervention)" this
+      // module's own header forbids.
+      //
+      // WRITTEN ON EVERY FRAMED FACTOR, including baseline-bearing ones whose
+      // pair already encodes it. Redundant there BY DESIGN: it is what makes
+      // "absent ⇒ this factor was never framed" a true statement for the edit
+      // seam, rather than one it has to guess at. The two carriers must agree,
+      // and `__tests__/scale-frame-carriage.test.ts` asserts they do (trap 21 —
+      // two authorities on one question do not get to drift).
+      factor.scale_frame = frame;
       if (baseline !== undefined) {
         // The raw user magnitude is KEPT (`raw_value`), never overwritten with
         // the level: the display chain and the edit path's delta operators both

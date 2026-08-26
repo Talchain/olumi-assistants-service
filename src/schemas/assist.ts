@@ -166,7 +166,13 @@ const UNAMBIGUOUS_DECISION_VERB_REGEX = new RegExp(
  * stateful across calls.
  */
 const ASSISTANT_SUBJECT_AUXILIARY_ALTERNATION_SOURCE = "do|does|did|would|will|can|could";
-const ASSISTANT_SUBJECT_ALTERNATION_SOURCE = "you|olumi";
+/**
+ * The assistant as a grammatical subject. EXPORTED (was module-private) so the
+ * route's ROADMAP 2.715 protected-class floor can derive its referent test from
+ * this single source instead of hand-writing a second copy — the estate's
+ * dominant defect class (trap 12).
+ */
+export const ASSISTANT_SUBJECT_ALTERNATION_SOURCE = "you|olumi";
 const ASSISTANT_SUBJECT_DECISION_VERB_REGEX = (() => {
   const openers = INTERROGATIVE_OPENER_ALTERNATION_SOURCE.split("|");
   for (const aux of ASSISTANT_SUBJECT_AUXILIARY_ALTERNATION_SOURCE.split("|")) {
@@ -219,6 +225,53 @@ export function isQuestionToAssistant(message: string): boolean {
   // (subject "we") and drafts. See ASSISTANT_SUBJECT_DECISION_VERB_REGEX.
   const neutralised = trimmed.replace(ASSISTANT_SUBJECT_DECISION_VERB_REGEX, " ");
   return !UNAMBIGUOUS_DECISION_VERB_REGEX.test(neutralised);
+}
+
+const ASSISTANT_SUBJECT_MENTION_REGEX = new RegExp(
+  `\\b(?:${ASSISTANT_SUBJECT_ALTERNATION_SOURCE})\\b`,
+  "i",
+);
+
+/**
+ * Does this message name the ASSISTANT at all ("you" / "Olumi")?
+ *
+ * WHY THIS IS NOT `isQuestionToAssistant`, AND WHY BOTH EXIST. Measured
+ * 2026-08-26 against three corpora (the 17-message 2.715 protected class,
+ * PR #1110's six `SEMANTIC_START_PROMPTS`, and the seven genuine
+ * interrogative briefs):
+ *
+ *   isQuestionToAssistant alone        protected 17/17 · #1110 starts 4/6 · briefs 0/7
+ *   + this referent test               protected 12/17 · #1110 starts 0/6 · briefs 0/7
+ *
+ * `isQuestionToAssistant` answers "is this interrogative-shaped WITHOUT a
+ * decision verb?" — which is ALSO true of a broad strategic challenge ("Why
+ * are enterprise customers not converting?", "How can we increase enterprise
+ * conversion?"). Those are exactly what PR #1110 exists to ACCEPT, so using
+ * that predicate alone as a drafting floor re-creates the harm #1110 removes
+ * (measured: +9 regressions, 8 of them in #1110's own suite). This conjunct
+ * is what separates "question ABOUT Olumi" from "broad question ABOUT THE
+ * USER'S BUSINESS" — the two differ by REFERENT, and no existing authority
+ * encoded that distinction.
+ *
+ * ⚠ IT IS DELIBERATELY INCOMPLETE, AND THE GAP IS PINNED, NOT ASSUMED. Five
+ * protected prompts name no assistant subject ("What assumption matters most,
+ * and why?", "…missing from my model?", "Is this the right question for me to
+ * be asking here?", "What should I be checking before I run this?", "What does
+ * the confidence interval on that edge mean?"). They refer to WORKSPACE
+ * ARTEFACTS rather than to Olumi, and separating those from business-domain
+ * questions needs a referent vocabulary that would be a second hand-maintained
+ * mirror. Those five are enumerated as KNOWN-UNFLOORED in
+ * `route-v2-inv-q-protected-class-armed.test.ts`, with a test that REDs if the
+ * set GROWS or SHRINKS. The durable home for them is a widened
+ * `isProcessMetaIntake` (which already owns "question about the
+ * product/process"), rowed rather than done in passing.
+ *
+ * Pure and total. No LLM, no new vocabulary — the alternation is the existing
+ * assistant-subject source above.
+ */
+export function mentionsAssistantSubject(message: string): boolean {
+  if (typeof message !== "string") return false;
+  return ASSISTANT_SUBJECT_MENTION_REGEX.test(message);
 }
 
 /**

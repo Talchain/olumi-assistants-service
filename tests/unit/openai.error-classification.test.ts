@@ -186,6 +186,34 @@ describe("OpenAI draftGraph error classification", () => {
     }
   });
 
+  it("chatWithTools reports the provider-returned model rather than the requested alias", async () => {
+    mockCreate = vi.fn().mockResolvedValue({
+      id: 'chatcmpl-provider-model',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-provider-resolved-actual',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'ok', refusal: null },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+    });
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter('gpt-requested-alias');
+    const result = await adapter.chatWithTools!(
+      {
+        system: 'system',
+        messages: [{ role: 'user', content: 'hello' }],
+        tools: [{ name: 't', description: 'd', input_schema: { type: 'object', properties: {} } }],
+      },
+      { requestId: 'provider-model-test', timeoutMs: 80_000 },
+    );
+
+    expect(mockCreate.mock.calls[0]![0].model).toBe('gpt-requested-alias');
+    expect(result.model).toBe('gpt-provider-resolved-actual');
+  });
+
   it("serialises cause with name and message (not empty object)", async () => {
     const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
     const { UpstreamTimeoutError } = await import("../../src/adapters/llm/errors.js");

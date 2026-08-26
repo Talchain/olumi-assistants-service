@@ -191,6 +191,38 @@ export const NodeV3 = z.object({
    * contract's own enum rather than restated as a local literal union.
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
+  /**
+   * ⭐⭐ THE PER-FACTOR SCALE FRAME (factor nodes only) — the divisor pass 3d
+   * projected this factor's baseline and every option intervention magnitude
+   * onto, so within-factor ratios are exact.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `goal_threshold_frame` carries above, and it was measured here with a
+   * positive control before this line was written. `NodeV3` is a plain
+   * `z.object` (see the closing comment), so an undeclared `scale_frame` is
+   * SILENTLY DELETED by `GraphV3.safeParse` and the edit seam would find
+   * nothing, with no error anywhere.
+   *
+   * ⚠ AND IT IS THIS SCHEMA THAT STRIPS, NOT THE SHARED CONTRACT.
+   * `@talchain/schemas`' own `NodeV3Schema` is `.passthrough()` and keeps
+   * unknown keys; a fix applied there alone would change nothing. Two
+   * same-named `NodeV3`s — name the twin before you fix one.
+   *
+   * WHY NOT `cap`: a stored cap flips `normaliseFactorValue` to the
+   * cap-normalised, clamping branch (breaking the user-scale round-trip the
+   * golden journey binds) and EXEMPTS the factor from the analysis seam's
+   * baseline coherence gate. A frame is a normalisation reference, not a bound.
+   *
+   * NOT AI-EDITABLE, and deny-by-default already enforces it: the root is
+   * absent from `aiEditableFieldRoots('node')` (17 roots, measured), so
+   * `field-safety.ts` refuses any `update_node` op naming it — the same posture
+   * its sibling `goal_threshold_frame` has. CEE mints it; no model authors it.
+   *
+   * ABSENCE MEANS NEVER FRAMED. Consumers MUST NOT default it — a defaulted
+   * frame is a manufactured scale, the fabrication class this field exists to
+   * kill.
+   */
+  scale_frame: z.number().positive().optional(),
   /** Encoding map for categorical factor labels (v191+). Maps encoded integer keys to display strings.
    * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
    * Node-level field (not in observed_state) — describes label encoding, not observed state. */

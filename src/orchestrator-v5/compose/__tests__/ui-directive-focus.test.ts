@@ -157,7 +157,9 @@ function mutationFact(
  * proof through `runTurnExecutor`, which is what establishes that the shape
  * asserted here is the shape production actually produces.
  */
-function flipFact(opts: { preconditionUnmet?: boolean } = {}): HandlerFact {
+function flipFact(
+  opts: { preconditionUnmet?: boolean; stalenessPrefixed?: boolean } = {},
+): HandlerFact {
   return {
     fact_type: 'what_would_flip',
     fact_version: 1,
@@ -168,6 +170,9 @@ function flipFact(opts: { preconditionUnmet?: boolean } = {}): HandlerFact {
       answer_source: 'deterministic_fallback',
       fallback_reason: null,
       answer_text_length: 42,
+      ...(opts.stalenessPrefixed === undefined
+        ? {}
+        : { staleness_prefixed: opts.stalenessPrefixed }),
     },
   } as unknown as HandlerFact;
 }
@@ -340,6 +345,38 @@ describe('δ2 row 4 — what_would_flip focuses the factor its own proposal targ
       flipFocusFactorId: 'fac_a',
     });
     expect(directives(env)).toHaveLength(0);
+  });
+
+  /**
+   * ⭐ THE SAME CAVEATED-ANSWER GATE AS ROW 5, AND IT IS HERE FOR THE SAME
+   * REASON THE TWIN EXISTS AT ALL. The explanation-precondition narrowing
+   * applies to BOTH explanation handlers, so `precondition_unmet` flips
+   * true → false on a stale `what_would_flip` turn exactly as it does on
+   * `explain_results`. Gating only row 5 would leave this row pointing the
+   * user at a factor derived from an analysis the sentence above just called
+   * possibly-wrong — a correction applied to one of two twins, which is how
+   * the next lane learns to trust the wrong one.
+   */
+  it('a CAVEATED (stale/unconfirmed) flip turn emits NOTHING, even with a resolvable proposal factor', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [flipFact({ preconditionUnmet: false, stalenessPrefixed: true })],
+      persistedGraph: GRAPH,
+      flipFocusFactorId: 'fac_a',
+    });
+    expect(directives(env)).toHaveLength(0);
+  });
+
+  it('OPPOSITE-DIRECTION TWIN: an answered, UNCAVEATED flip turn still focuses its factor', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [flipFact({ preconditionUnmet: false, stalenessPrefixed: false })],
+      persistedGraph: GRAPH,
+      flipFocusFactorId: 'fac_a',
+    });
+    const dir = directives(env);
+    expect(dir).toHaveLength(1);
+    expect(dir[0]!.targets[0]!.id).toBe('fac_a');
   });
 
   it('no proposal on this turn → NOTHING, and the row says so honestly', () => {

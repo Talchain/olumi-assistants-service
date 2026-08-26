@@ -717,7 +717,7 @@ describe("envelope and coaching wiring", () => {
     expect(result.assistantText).not.toContain("value set");
     // Deterministic forward-looking clarify copy used instead (Lane 22).
     expect(result.assistantText).toMatch(/Tell me the specific factor/i);
-    expect(result.assistantText).toContain("The model is unchanged so far.");
+    expect(result.assistantText).toContain("I haven't changed anything from that.");
   });
 
   // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip

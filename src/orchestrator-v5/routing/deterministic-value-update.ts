@@ -1422,9 +1422,16 @@ function articleFor(kind: string): string {
  *   1. Say plainly that the operation is not supported, and say WHY in the
  *      user's terms (the node's real kind) — never re-describe a risk as a
  *      "factor", which the old clarify copy did.
- *   2. State the mutation status, using the SANCTIONED lead
- *      "The model is unchanged so far." (`compose/edit-clarify-response.ts`
- *      LEAD_TEXT). Note the phrasings that read naturally here — "No change
+ *   2. State the mutation status. ⚠ THIS BRANCH CARRIES ITS OWN HAND-COPIED
+ *      SENTENCE ("The model is unchanged so far.", below) — it does NOT import
+ *      `compose/edit-clarify-response.ts` LEAD_TEXT, and as of 26 Aug 2026 the
+ *      two have DIVERGED: LEAD_TEXT was rewritten to the turn-scoped
+ *      "I haven't changed anything from that." because "so far" is a
+ *      SESSION-scoped claim that the emitting branch has no state to support,
+ *      and it twice contradicted the product's own UI. This branch has the
+ *      same defect and is ROWED separately, deliberately out of that fix's
+ *      scope. Do not read the wording here as sanctioned.
+ *      Note the phrasings that read naturally here — "No change
  *      was made", "nothing changed" — are BANNED by
  *      FORBIDDEN_USER_FACING_PHRASES as state-mutation denials; the egress
  *      guard replaces the whole response when one fires. Positive framing

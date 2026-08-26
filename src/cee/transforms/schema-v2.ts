@@ -138,6 +138,19 @@ export interface V1Node {
   goal_baseline?: number;
   /** The stated current level in raw user units. */
   goal_baseline_raw?: number;
+  /**
+   * The per-factor scale frame pass 3d divided this factor's magnitudes by
+   * (`schemas/graph.ts:scale_frame`). Declared here for exactly the reason the
+   * two fields above give: `transformNodeToV3` rebuilds each node
+   * field-by-field and drops anything it does not name, and it cannot name a
+   * field this type does not declare without casting round the type system.
+   *
+   * ⭐ The typecheck is the mechanism here, not the documentation. Adding the
+   * carry in `schema-v3.ts` without this line fails to compile — which is how
+   * this hop was found at all. A field that travelled as an untyped rider would
+   * have compiled green and shipped dark, the way its sibling nearly did.
+   */
+  scale_frame?: number;
 }
 
 export interface V1Edge {

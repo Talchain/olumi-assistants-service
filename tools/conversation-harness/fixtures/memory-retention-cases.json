@@ -21,10 +21,10 @@
     "    REGEN from full history (where the estate's anti-compounding guard gets its",
     "    chance to repair one).",
     "  * The durable statements are ordinary length (~110-140 chars), NOT padded.",
-    "    That is the point: ten of them, carried verbatim, land BETWEEN the 1,200",
-    "    target and the 1,600 hard cap, so budget pressure is produced by the real",
-    "    constants rather than by a tuned fixture. MEM-FLOOR 5 pins that band and",
-    "    fails loud if editing the pack drifts out of it.",
+    "    That is the point: ten of them, carried verbatim, exceed the explicit",
+    "    legacy 1,200-char mutant but fit the production target and 1,600 hard cap.",
+    "    MEM-FLOOR 5 pins that discriminating band and fails loud if editing the",
+    "    pack makes either the old failure or the new success vacuous.",
     "  * Every durable statement is exactly ONE sentence ending in a single full",
     "    stop — the contract splitStatements() depends on, asserted at load.",
     "",
@@ -155,7 +155,7 @@
           "stated_at_turn": 2,
           "witness": ["180000"],
           "floor": false,
-          "note": "A hard number the user called non-negotiable. MEASURED, not floored — see the floor rationale in evaluateFloors."
+          "note": "A hard number the user called non-negotiable. The generic live-model evaluator leaves this lexical claim advisory, while the deterministic production-budget journey requires it to survive."
         },
         {
           "id": "earliest_start",

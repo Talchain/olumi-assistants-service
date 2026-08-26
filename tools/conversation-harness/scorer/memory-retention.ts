@@ -4,7 +4,9 @@
  * WHAT THIS EXISTS TO ANSWER. The entire durable conversational memory of a
  * scenario is the rolling summary: one pass's output is hard-rejected over
  * `SUMMARY_HARD_CAP_CHARS` (1,600) and the model is instructed to stay under
- * `SUMMARY_TARGET_MAX_CHARS` (1,200) by "dropping the least important detail".
+ * `SUMMARY_TARGET_MAX_CHARS` by "dropping the least important detail". The
+ * harness exercises both the current production target and an explicit legacy
+ * 1,200-char mutant that reproduces the silent-loss defect.
  * Every existing gate defends against a slot being EMPTIED, MIS-ATTRIBUTED,
  * STALE or ABSENT. Nothing defends against — or even notices — a slot quietly
  * losing one stated fact among several. That is the mechanism by which a user's
@@ -36,8 +38,9 @@
  * Therefore:
  *   - a fact lost in the FAITHFUL arm is a **code** defect (the pipeline cannot
  *     carry what it was given) — that is what the floors gate;
- *   - the BUDGET arm supplies the drop from the fixture and measures **the
- *     system's response to it** (does anything reject, disclose, or count?);
+ *   - the production BUDGET arms prove the licensed envelope carries every
+ *     seeded fact; the legacy mutant supplies a drop and proves those floors
+ *     would have failed under the former target;
  *   - the real model's retention is NOT measured here. `runRetentionEval` takes
  *     any `SummariserModel`, so passing `new AnthropicSummariserModel()`
  *     produces the live table — deliberately not wired to any CI path, and
@@ -113,10 +116,12 @@ export interface RetentionFactSpec {
    */
   readonly witness: readonly string[];
   /**
-   * TRUE ⇒ losing this fact REDs the build (the defect floor). Kept to the two
-   * classes a tester experiences directly as "it forgot what I said": the
-   * DECISION GOAL and a USER CORRECTION. Everything else is MEASURED, because
-   * the truth there is graded and the honest deliverable is a table.
+   * TRUE ⇒ losing this fact triggers the generic semantic defect floor. Kept to
+   * the two classes a tester experiences directly as "it forgot what I said":
+   * the DECISION GOAL and a USER CORRECTION. Other live-model readings remain
+   * graded because lexical matching cannot judge paraphrases. Separately, the
+   * deterministic production-budget journey requires every stated fact to
+   * survive because that stand-in carries the user's words verbatim.
    */
   readonly floor: boolean;
   /**
@@ -853,10 +858,11 @@ export const DETECTOR_UNSOUND_FOR_FLOORS =
   'possible detector artefacts.';
 
 /**
- * Evaluate the two floors that RED the build. Everything else the eval produces
- * is a MEASUREMENT: retention of a mid-conversation constraint is graded, and
- * gating on a graded number would either be arbitrary or would freeze today's
- * behaviour as correct.
+ * Evaluate the two generic semantic floors that RED the build. Other live-model
+ * readings are measurements: retention of a paraphrased mid-conversation
+ * constraint is graded, and gating on the lexical detector would freeze a
+ * false-negative as product truth. The deterministic production-budget suite
+ * applies its separate all-stated-facts floor only to verbatim-carrying arms.
  *
  * MEM-FLOOR 1 — a fact marked `floor` (the DECISION GOAL, a USER CORRECTION) is
  *   absent from the injected summary. This is what a tester experiences as "it

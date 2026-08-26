@@ -15,12 +15,14 @@
  */
 
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   projectReadinessRecovery,
   type ReadinessRecoveryKind,
 } from '../coaching/readiness-recovery.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+type CanonicalIssue = NonNullable<AnalysisReadyPayload['readiness_issues']>[number];
 /**
  * Single canonical recovery item. `description` is user-safe prose produced
  * by `projectReadinessRecovery` from status + blockers.
@@ -109,6 +111,72 @@ function asDescription(nextStep: string): string {
     .replace(/[.!?]+$/u, '');
 }
 
+/** An issue is usable here only if it carries prose a user could act on. */
+function usableIssues(
+  issues: AnalysisReadyPayload['readiness_issues'],
+): CanonicalIssue[] {
+  return Array.isArray(issues)
+    ? issues.filter(
+        (issue) => issue && typeof issue.message === 'string' && issue.message.trim().length > 0,
+      )
+    : [];
+}
+
+/**
+ * The exhaustive issue record for a payload whose producer does not emit
+ * `readiness_issues` — recovered from `blockers`, which every producer does.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS — ONE PAYLOAD, TWO PRODUCERS, TWO SHAPES
+ *
+ * `analysis_ready` is built two ways and they disagree in SHAPE (measured on a
+ * four-valueless-factor graph, both producers driven):
+ *
+ *   canonical (`buildCanonicalAnalysisReadyFromGraph`)
+ *       8 blockers · 8 readiness_issues · repair_proposal PRESENT
+ *   pipeline  (`cee/transforms/analysis-ready.ts`)
+ *       8 blockers · 0 readiness_issues · repair_proposal ABSENT
+ *
+ * `cee/transforms/analysis-ready.ts` never computes either field (zero
+ * occurrences of both names; contrast control `blockers` = 20 in the same
+ * sweep), and `extractAnalysisReady` (`orchestrator/tools/draft-graph.ts`) is a
+ * NAMED-FIELD RE-PROJECTION that names `blockers` but not the other two — the
+ * same mechanism that already lost `may_run`, by that function's own comment.
+ *
+ * The cost, wire-witnessed twice: `summariseReadiness` gated its multi-item
+ * branch on `repair_proposal`, fell through to the single-recovery projection,
+ * and told a user *"One factor still has no value set"* while FOUR had none —
+ * understating the remaining work by 4× on a blocked analysis. The truncation
+ * was SILENT because the collapse happens BEFORE the cap that discloses
+ * (`items_omitted` never fires; the loss is upstream of the guard).
+ *
+ * ⭐ NOT A SECOND COUNTER — THE COUNT WAS ALREADY IN THE PAYLOAD. `blockers`
+ * survives both paths intact, carrying `factor_label` on every entry. That is
+ * precisely why the provenance surface reported all four correctly from the
+ * same state: it never reads `readiness_issues` at all. This function does not
+ * classify, count or re-derive anything — it routes each blocker through
+ * {@link blockerIssue}, the canonical mapper, which is EXPORTED for exactly
+ * this reason ("two mappers would be two authorities on what
+ * `missing_connection` means"). A local blocker→issue mapping here would be
+ * that second authority.
+ *
+ * ⚠ NEVER ON A `ready` PAYLOAD. Mirrors `appendSemanticIssues`, which returns
+ * early on exact status `ready` for the same reason: advisory blockers can
+ * co-exist with a ready verdict, and minting open items from them would invent
+ * work the canonical authority says is not there — turning an under-report into
+ * an over-report, which is the worse failure of the two.
+ */
+function issuesFromBlockers(analysisReady: AnalysisReadyPayload): CanonicalIssue[] {
+  if (analysisReady.status === 'ready') return [];
+  const blockers = Array.isArray(analysisReady.blockers) ? analysisReady.blockers : [];
+  const mapped: CanonicalIssue[] = [];
+  for (const [ordinal, blocker] of blockers.entries()) {
+    const issue = blockerIssue(blocker, ordinal, analysisReady.status);
+    if (issue !== null) mapped.push(issue as CanonicalIssue);
+  }
+  return usableIssues(mapped);
+}
+
 /**
  * Project canonical readiness into one qualitative recovery. Returns an empty
  * `open_items` array (and empty prose) only when the shared projection admits
@@ -129,16 +197,23 @@ export function summariseReadiness(
   // every item instead of collapsing back to the historical first-blocker
   // projection. The established targeted projection remains byte-for-byte for
   // zero/one issue, so ordinary edits are unaffected.
-  const canonicalIssues = Array.isArray(analysisReady.readiness_issues)
-    ? analysisReady.readiness_issues.filter(
-        (issue) => issue && typeof issue.message === 'string' && issue.message.trim().length > 0,
-      )
-    : [];
+  const declaredIssues = usableIssues(analysisReady.readiness_issues);
+  // ⭐ THE EXHAUSTIVE RECORD IS NOT ALWAYS IN THE SAME FIELD — see
+  // `issuesFromBlockers`. When the declared array is absent the blockers ARE the
+  // record, and reading only the declared one understates the open work.
+  const derivedIssues = declaredIssues.length > 0 ? [] : issuesFromBlockers(analysisReady);
+  const canonicalIssues = declaredIssues.length > 0 ? declaredIssues : derivedIssues;
   const hasSpecificStructuralRecovery = canonicalIssues.some(
     (issue) => issue.code === 'NO_GOAL' || issue.code === 'FEWER_THAN_TWO_OPTIONS',
   );
   if (
     (analysisReady.repair_proposal && canonicalIssues.length >= 2)
+    // The pipeline-shaped payload has no `repair_proposal` to gate on, so the
+    // derived record gates on itself. Deliberately a SEPARATE disjunct rather
+    // than a relaxation of the one above: the declared-array path keeps its
+    // exact previous condition, so the canonical shape is byte-for-byte
+    // unchanged and only the shape that was collapsing can move.
+    || derivedIssues.length >= 2
     || hasSpecificStructuralRecovery
   ) {
     const openItems: ReadinessOpenItem[] = canonicalIssues

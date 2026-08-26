@@ -25,10 +25,25 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseStoredRollingSummary } from './summary-types.js';
 import type { RollingSummary } from './summary-types.js';
 
+interface RollingSummaryStoreErrorOptions extends ErrorOptions {
+  /**
+   * Producer-attested database/PostgREST code, when the client supplied one.
+   * Kept separate from the human-readable message so read consumers can make
+   * a bounded retry decision without parsing prose.
+   */
+  readonly code?: string | null;
+}
+
 export class RollingSummaryStoreError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly code: string | null;
+
+  constructor(message: string, options?: RollingSummaryStoreErrorOptions) {
     super(message, options);
     this.name = 'RollingSummaryStoreError';
+    this.code =
+      typeof options?.code === 'string' && options.code.trim().length > 0
+        ? options.code.trim()
+        : null;
   }
 }
 
@@ -55,6 +70,11 @@ function errMsg(e: unknown): string {
   return (e as SupabaseErrorLike | null)?.message ?? String(e);
 }
 
+function errCode(e: unknown): string | null {
+  const code = (e as SupabaseErrorLike | null)?.code;
+  return typeof code === 'string' && code.trim().length > 0 ? code.trim() : null;
+}
+
 export class SupabaseRollingSummaryStore implements RollingSummaryStorePort {
   constructor(private readonly client: SupabaseClient) {}
 
@@ -70,7 +90,7 @@ export class SupabaseRollingSummaryStore implements RollingSummaryStorePort {
     if (error) {
       throw new RollingSummaryStoreError(
         `upsert_rolling_summary RPC failed: ${errMsg(error)}`,
-        { cause: error },
+        { cause: error, code: errCode(error) },
       );
     }
     return parseUpsertOutcome(data);
@@ -83,7 +103,7 @@ export class SupabaseRollingSummaryStore implements RollingSummaryStorePort {
     if (error) {
       throw new RollingSummaryStoreError(
         `get_rolling_summary RPC failed: ${errMsg(error)}`,
-        { cause: error },
+        { cause: error, code: errCode(error) },
       );
     }
     // Unparseable stored summary reads as null — the maintainer treats it the

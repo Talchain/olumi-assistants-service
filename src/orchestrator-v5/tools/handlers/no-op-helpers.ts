@@ -10,6 +10,18 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { HandlerInvocation } from '../registry.js';
+// The canonical user-facing currency sentences. Imported, never re-typed —
+// see the note on `buildAnalysisStaleTemplate`. `staleness-prefix.ts` imports
+// nothing, so this edge cannot form a cycle.
+import {
+  applyStalenessPrefix,
+  recoveryOfferForCaveat,
+  STALENESS_PREFIX,
+  STALE_RECOVERY_OFFER,
+  UNCONFIRMED_PREFIX,
+  UNCONFIRMED_RECOVERY_OFFER,
+  type StalenessCaveat,
+} from './staleness-prefix.js';
 import {
   isSuccessfulRunAnalysisFact,
   selectDegradedRunAnalysisFact,
@@ -281,6 +293,226 @@ export function decideExplanationPrecondition(
 }
 
 /**
+ * Which currency caveat, if any, does a precondition verdict carry?
+ *
+ * ⭐ THE CHANNEL'S INTENDED INPUT — and note the tense, because the honest fact
+ * here is narrower than it first reads. `applyStalenessPrefix` used to be driven
+ * by `analysisProjection.staleness_reason`, a field since removed from the
+ * projection — leaving the helper with zero live callers and the estate with no
+ * way to caveat an executed explanation (its only staleness enforcement was to
+ * REFUSE to answer). This maps the verdict the precondition already computes on
+ * every explanation turn, so the caveat CAN ACCOMPANY an answer rather than
+ * REPLACE it.
+ *
+ * ⚠⚠ RUNG UPDATED — THIS IS NOW WIRED, AND THE PREVIOUS NOTE HERE IS SUPERSEDED.
+ * It read: *"'CAN', NOT 'DOES' — RUNG: CODE EXISTS … THIS FUNCTION HAS ZERO
+ * CALLERS and so does `applyStalenessPrefix`. The channel is TYPE-CONNECTED, NOT
+ * WIRED: nothing yet carries a caveat onto an executed answer … The wiring is
+ * the follow-up's job."* That was true and correctly scoped when written, and
+ * every clause of it is now false: `finaliseExplanationText` (136 lines below,
+ * `:463`) calls this on every answered explanation turn, for both
+ * `explain_results` and `what_would_flip`, and the follow-up it defers to is the
+ * change this comment now sits inside.
+ *
+ * ⭐ THE METHOD IN THE OLD NOTE STANDS AND IS KEPT VERBATIM, because it is what
+ * stops the next reader repeating the error rather than merely inheriting its
+ * conclusion: *"Saying 'the channel is revived' would generalise a true
+ * statement about the verdict into a false one about the path (trap 20 — the
+ * overclaim happens in the RECORDING, not in the measurement)."* That reasoning
+ * is exactly why the rung claim above is now stated at the CALL SITE (`:463`,
+ * named and checkable) instead of as a standing adjective.
+ *
+ * ⚠ CORRECTED HERE BECAUSE THE TWIN WAS CORRECTED AND THIS ONE WAS NOT.
+ * `staleness-prefix.ts` carries the same rung note and had it updated in this
+ * PR, with the reason stated: *"a rung claim is a dated measurement, not a
+ * standing fact — leaving the old one here would be the false-label defect one
+ * door down."* Exactly so — and a correction applied to one of two twins is how
+ * the next lane learns to trust the wrong one. The VERDICT half of the old note
+ * stands and is kept: it is genuinely live on every explanation turn, which is
+ * what makes this mapping worth having.
+ *
+ * ⚠ THE MAPPING LIVES HERE, NEXT TO THE VERDICT, ON PURPOSE. Putting it in
+ * `staleness-prefix.ts` would mean that module re-deciding what a verdict means
+ * — a second authority for one question, which is how the sentence it owns
+ * ended up with two copies in the first place. That module owns the WORDS; this
+ * one owns WHICH CLAIM IS LICENSED.
+ *
+ * Exhaustive with a `never` guard: a new verdict variant fails to typecheck
+ * here rather than silently inheriting "no caveat", which is the fail-OPEN
+ * direction and the wrong one for a trust claim.
+ */
+export function caveatForPreconditionVerdict(
+  verdict: ExplanationPreconditionVerdict,
+): StalenessCaveat | null {
+  switch (verdict) {
+    case 'stale':
+      return 'stale'
+    case 'unconfirmed':
+      return 'unconfirmed'
+    // No currency claim to make: `missing`/`degraded` have no result to
+    // caveat at all, and `execute` means the result IS current. Returning a
+    // caveat for any of these would invent a freshness claim.
+    case 'missing':
+    case 'degraded':
+    case 'execute':
+      return null
+    default: {
+      const _exhaustive: never = verdict
+      return _exhaustive
+    }
+  }
+}
+
+/**
+ * Does this verdict BLOCK the answer, or merely CAVEAT it?
+ *
+ * ⚠⚠ TWO HARMS, TWO PARAMETERS — DO NOT FOLD THIS BACK INTO
+ * `caveatForPreconditionVerdict` OR INTO A `verdict !== 'execute'` TEST.
+ * A swallowed answerable question and an uncaveated stale figure are OPPOSITE
+ * harms, and a single predicate cannot be tuned for both (CLAUDE.md traps 21 and
+ * 22b — one window guarding two doors is how four rounds got burned). The two
+ * questions are:
+ *   • THIS function: "is there anything to answer WITH?"   → block or answer
+ *   • `caveatForPreconditionVerdict`: "which claim is licensed?" → which caveat
+ * They are deliberately separate switches over the same union, and they
+ * disagree on purpose: `stale` BLOCKS=false but CAVEAT='stale'.
+ *
+ * ⭐ WHY `stale`/`unconfirmed` NO LONGER BLOCK — this is CONVERGENCE, not new
+ * licence. `canonical-analysis-state.ts` already computes
+ * `usableForProse = hasFact && !blockedUnusable && (fresh || stale || unknown)`
+ * under the comment "Prose may reference fresh / stale / (legacy) unknown
+ * analysis WITH A CAVEAT", with `usableForChips` fresh-only. The handlers were
+ * DISOBEYING a predicate the canonical state already defines; this makes the two
+ * authorities agree. The caveat that comment promises is enforced by
+ * {@link finaliseExplanationText}, not left to the model's good behaviour.
+ *
+ * `missing`/`degraded` still block, and NOT for a currency reason: there is no
+ * result to caveat at all. Caveating a fabricated analysis would not make it
+ * true — that is the opposite-direction harm, pinned by the TWIN cases in
+ * `__tests__/explanation-precondition-narrowing.test.ts`.
+ *
+ * Exhaustive with a `never` guard: a new verdict variant must decide here rather
+ * than silently inheriting "answer", which is the fail-OPEN direction.
+ *
+ * ⭐ IT IS A TYPE PREDICATE, AND THAT IS LOAD-BEARING, NOT A FLOURISH. The
+ * handlers previously narrowed by `verdict !== 'execute'`, which gave the
+ * compiler control-flow narrowing for free; a plain boolean helper would have
+ * silently thrown that away and let a `stale` verdict reach
+ * `buildPreconditionAssistantText` — i.e. reach the very canned template this
+ * change exists to stop emitting. The gate caught exactly that (TS2345, both
+ * handlers). Narrowing to {@link BlockingExplanationVerdict} makes "only a
+ * verdict with nothing to answer with can reach the block template" a
+ * COMPILE-TIME fact rather than a convention.
+ *
+ * ⚠ A type predicate is ASSERTED, not verified, so it and the switch below must
+ * be changed together: making `stale` return `true` without widening
+ * `BlockingExplanationVerdict` would be a lie the compiler believes. The
+ * exhaustive switch forces the decision to be visible, and the TWIN cases in
+ * `__tests__/explanation-precondition-narrowing.test.ts` pin the behaviour in
+ * both directions.
+ */
+export type BlockingExplanationVerdict = Extract<
+  ExplanationPreconditionVerdict,
+  'missing' | 'degraded'
+>;
+
+export function explanationVerdictBlocks(
+  verdict: ExplanationPreconditionVerdict,
+): verdict is BlockingExplanationVerdict {
+  switch (verdict) {
+    // Nothing exists to answer with.
+    case 'missing':
+    case 'degraded':
+      return true
+    // A result EXISTS and may be referenced in prose; currency is carried by a
+    // caveat rather than by refusing to answer.
+    case 'stale':
+    case 'unconfirmed':
+    case 'execute':
+      return false
+    default: {
+      const _exhaustive: never = verdict
+      return _exhaustive
+    }
+  }
+}
+
+/**
+ * THE SINGLE ENFORCEMENT FUNNEL for an answered explanation turn.
+ *
+ * ⭐⭐ THE TEXT AND ITS FLAG COME BACK FROM ONE CALL, AND THAT IS THE POINT.
+ * Before this existed, `staleness_prefixed: false` was HAND-SET in both
+ * handlers beside a separately-computed string — a hand-maintained mirror
+ * (CLAUDE.md trap 12) that became a lie the moment a caveat was actually
+ * attached. Returning both together makes "text without its caveat, reported as
+ * caveated" UNREPRESENTABLE rather than merely discouraged. Never destructure
+ * the text and recompute the flag.
+ *
+ * ⚠ BOTH explanation handlers call THIS — `explain_results` and
+ * `what_would_flip`. Enforcing the prefix separately in each is the mirror
+ * defect this function exists to prevent, and a third handler must call it too
+ * rather than growing a second prefixer. The wording itself lives in
+ * `staleness-prefix.ts`, which imports nothing by design; this module owns only
+ * WHICH CLAIM IS LICENSED.
+ *
+ * ⚠ CALL IT ON THE FINAL ASSEMBLED STRING, not on an intermediate. The caveat
+ * must LEAD what the user reads, so anything appended by the caller (the
+ * what-would-flip counterfactual card, a validation beat) must already be in
+ * `rawText`.
+ *
+ * ⚠⚠ KNOWN AND ACCEPTED GAP, PRICED NOT SOLVED. `applyStalenessPrefix`
+ * recognises CANONICAL openers only, so a caveat the model wrote IN ITS OWN
+ * WORDS is not detected and the user reads a caveat twice. This is not an
+ * oversight and MUST NOT be fixed by widening the opener regex: "did this
+ * arbitrary prose already caveat?" is an unbounded natural-language predicate,
+ * and this estate burned four rounds proving that class unwinnable (trap 22f).
+ * The ratified asymmetry governs the choice — A MISSING CAVEAT IS A TRUST
+ * DEFECT; A DOUBLED ONE IS ONLY CLUMSY — so the gap is pinned with an
+ * append-only corpus of real model output in
+ * `__tests__/staleness-prefix.test.ts`, which REDs if that set grows OR shrinks.
+ * The real fix is a STRUCTURAL surface (a badge that cannot collide with prose),
+ * rowed as a follow-up and keyed on the VERDICT, never on the graph hash.
+ */
+export function finaliseExplanationText(
+  rawText: string,
+  verdict: ExplanationPreconditionVerdict,
+): {
+  readonly text: string
+  readonly stalenessPrefixed: boolean
+  /**
+   * ⭐ DOES THIS ANSWER CARRY A CURRENCY CAVEAT? — which is NOT the same
+   * question as `stalenessPrefixed`, and the difference is load-bearing.
+   *
+   * `stalenessPrefixed` reports whether WE PREPENDED. It is FALSE in two
+   * different situations: no caveat was licensed, and a caveat was licensed
+   * but the model had already written an approved opening itself (the priced
+   * idempotence gap). A consumer asking "is this answer caveated?" and reading
+   * `stalenessPrefixed` therefore fails OPEN in exactly the second case —
+   * silently, and only for the turns where the model happened to caveat first.
+   *
+   * This flag is derived from the VERDICT, so it is total: true whenever a
+   * currency caveat is licensed, however the words got there.
+   */
+  readonly caveated: boolean
+} {
+  const caveat = caveatForPreconditionVerdict(verdict)
+  const result = applyStalenessPrefix(rawText, caveat)
+  if (caveat === null) {
+    return { text: result.text, stalenessPrefixed: result.prefixed, caveated: false }
+  }
+  // ⭐ CAVEAT → ANSWER → THE WAY OUT. The recovery offer is appended for exactly
+  // the verdicts where `requiresRerun` is true, restoring a guarantee the
+  // blocking templates always carried and the first cut of this narrowing
+  // silently dropped. It is composed from the same constant the template uses,
+  // never re-typed (SINGLE_COPY pins that).
+  return {
+    text: `${result.text}\n\n${recoveryOfferForCaveat(caveat)}`,
+    stalenessPrefixed: result.prefixed,
+    caveated: true,
+  }
+}
+
+/**
  * Render the precondition-fail assistant_text for a non-execute verdict.
  * Pure function over the verdict + invocation context.
  */
@@ -333,11 +565,22 @@ export function buildPreconditionAssistantText(
  * scope by the same rule.
  */
 export function buildAnalysisStaleTemplate(): string {
-  return (
-    `These results may be out of date because the model has changed ` +
-    `since the last analysis. Would you like to re-run analysis to see ` +
-    `how your changes affect the results?`
-  );
+  // ⚠ COMPOSED, NOT RE-TYPED. This spelled the opening sentence out in full
+  // while `staleness-prefix.ts` held a character-identical copy under a
+  // docstring claiming to BE its single source of truth. One user-facing
+  // sentence, two hand-maintained copies (CLAUDE.md trap 12). Now one constant.
+  //
+  // Two DIFFERENT tests in `__tests__/staleness-prefix.test.ts` hold this, and
+  // the distinction matters: SINGLE_COPY scans the SOURCE BYTES of `src/` and
+  // REDs if this sentence is re-inlined here — drifted OR character-identical —
+  // while BYTE-PRESERVATION pins the ASSEMBLED bytes so the refactor cannot
+  // move user-facing copy. Only the first can see an identical re-type; a
+  // runtime value check never can, and the label here previously claimed
+  // otherwise.
+  // Both halves composed: the caveat AND the recovery offer. The offer used to
+  // be inlined here, which is why narrowing the precondition silently deleted
+  // the user's way out — the answered path had no sentence to reuse.
+  return `${STALENESS_PREFIX} ${STALE_RECOVERY_OFFER}`;
 }
 
 /**
@@ -358,10 +601,9 @@ export function buildAnalysisStaleTemplate(): string {
  * internal terms (no graph hash, fact_type, analysis_status).
  */
 export function buildAnalysisUnconfirmedTemplate(): string {
-  return (
-    `The last analysis may be out of date because I can't confirm it ` +
-    `still matches the current model. Re-run analysis to see the current result.`
-  );
+  // Composed from the constants for the same reason as its stale twin above —
+  // both halves, so the answered path can reuse the offer instead of re-typing.
+  return `${UNCONFIRMED_PREFIX} ${UNCONFIRMED_RECOVERY_OFFER}`;
 }
 
 /**

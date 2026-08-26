@@ -398,6 +398,17 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.raw_value !== undefined
         ? { factorObservedRawValue: before.raw_value }
         : {}),
+      // ⭐ THE FRAME COMES OFF THE NODE, NOT OFF `before`. `snapshotObservedState`
+      // reads `observed_state`, and the whole point of the persisted frame is
+      // the factor that HAS no observed_state — the one whose options carry
+      // framed magnitudes while it carries nothing. Reading it from the same
+      // snapshot would reintroduce the blind spot it exists to close.
+      // Deliberately NOT passed to `preEvaluation` above: that predicate judges
+      // scale REDECLARATION (unit/cap), a different question (trap 21), and the
+      // frame is not a declaration the user can make or contradict.
+      ...(typeof (targetNode as { scale_frame?: unknown }).scale_frame === 'number'
+        ? { factorScaleFrame: (targetNode as { scale_frame: number }).scale_frame }
+        : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
       // a bare-number proposal "200" against a cap=100 factor is ambiguous
