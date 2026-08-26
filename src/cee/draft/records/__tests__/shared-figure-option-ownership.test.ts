@@ -47,13 +47,21 @@ const FULL_SWITCH = "replace our current CRM with HubSpot next quarter";
 const STATUS_QUO = "keep what we have";
 const LICENCE = "CRM Annual Licence Cost";
 const MIGRATION = "One-Off Migration Cost";
+/** Deliberately never linked to the goal, so the connectivity prune removes it. */
+const ORPHAN = "Unconnected Licence Sub-Cost";
 
 /**
- * The four live specimens this suite exists for, pinned BY IDENTITY so a
- * reword cannot quietly detach the test from its evidence. Golden-journey
- * capture ids, CEE builds `c24bfe3` / `7a5cd91` / `58fdb11`, all 26 Aug 2026.
+ * The four live specimens this suite exists for: golden-journey captures
+ * `c96f01`, `17c4a0`, `d30b34`, `693ddb` (CEE builds `c24bfe3` / `7a5cd91` /
+ * `58fdb11`, all 26 Aug 2026).
+ *
+ * ⚠ DOCUMENTATION ONLY — deliberately NOT asserted. An earlier version compared
+ * this constant to a copy of its own literals, which drives no fixture and
+ * cannot RED on a reword: a constant compared to itself has no honest version.
+ * What actually binds this suite to those specimens is the fixture reproducing
+ * their exact quote/value/role and `bindingOf`/`nodeByLabel` selecting by option
+ * AND factor IDENTITY (trap 19), not by any value predicate.
  */
-const LIVE_SPECIMEN_RUNS = ["c96f01", "17c4a0", "d30b34", "693ddb"] as const;
 
 /** The exact sentence all four specimens bound to BOTH options. */
 const SHARED_FIGURE_QUOTE = "Annual CRM cost is about £50,000";
@@ -74,7 +82,23 @@ const BRIEF =
  * the licence figure has one owner and must keep its brief authority; with it
  * true two mutually exclusive options claim the same sentence and neither may.
  */
-function records(args: { baselineAlsoClaimsSharedFigure: boolean }): DraftRecordSet {
+function records(args: {
+  baselineAlsoClaimsSharedFigure: boolean;
+  /**
+   * Only meaningful with `baselineAlsoClaimsSharedFigure`. The rival link keeps
+   * the same `sets_to` but cites NO basis, so it names no evidence at all. This
+   * is the axis that pins the basis-membership conjunct: a rival that cites
+   * nothing has not claimed the figure and must not contest it.
+   */
+  rivalOmitsBasis?: boolean;
+  /**
+   * Only meaningful with `baselineAlsoClaimsSharedFigure`. The rival link points
+   * at a factor with no path to the goal, so the connectivity prune removes it
+   * and the rival's EDGE never reaches the graph — while its CLAIM survives in
+   * the records the model emitted.
+   */
+  rivalTargetsOrphanFactor?: boolean;
+}): DraftRecordSet {
   return {
     stated_items: [
       { kind: "option", source_quote: FULL_SWITCH, is_baseline: false },
@@ -90,6 +114,7 @@ function records(args: { baselineAlsoClaimsSharedFigure: boolean }): DraftRecord
     claims: [
       { claim_kind: "factor", label: LICENCE, basis: [3], value: 50_000 },
       { claim_kind: "factor", label: MIGRATION, basis: [4], value: 0 },
+      { claim_kind: "factor", label: ORPHAN, basis: [3], value: 50_000 },
       {
         claim_kind: "causal_link",
         label: "HubSpot sets the annual licence cost",
@@ -104,9 +129,9 @@ function records(args: { baselineAlsoClaimsSharedFigure: boolean }): DraftRecord
             {
               claim_kind: "causal_link",
               label: "Status quo sets the annual licence cost",
-              basis: [3],
+              ...(args.rivalOmitsBasis === true ? {} : { basis: [3] }),
               from_stated: 1,
-              to_claim: 0,
+              to_claim: args.rivalTargetsOrphanFactor === true ? 2 : 0,
               effect: "positive",
               sets_to: 50_000,
             },
@@ -202,10 +227,6 @@ describe("a stated figure may license at most one option (direct binding branch)
     expect(String(challenger?.reasoning)).toContain("unresolved stated-item binding");
     expect(String(baseline?.reasoning)).toContain("unresolved stated-item binding");
 
-    // Evidence pinned by identity, not by count: these four captures are the
-    // measured population this refusal was written against (4 of the 6 corpus
-    // runs that used this branch). Kept in-test so the suite names its evidence.
-    expect(LIVE_SPECIMEN_RUNS).toEqual(["c96f01", "17c4a0", "d30b34", "693ddb"]);
   });
 
   it("keeps brief authority when the figure has exactly ONE owning option", () => {
@@ -230,5 +251,60 @@ describe("a stated figure may license at most one option (direct binding branch)
         `£20,000 authority must survive (collision=${baselineAlsoClaimsSharedFigure})`,
       ).toMatchObject({ raw_value: 20_000, unit: "£", source: "brief_extraction" });
     }
+  });
+});
+
+describe("what counts as a rival claim", () => {
+  it("a rival that cites NO evidence has not claimed the figure — authority stands", () => {
+    // ⭐ THIS PINS THE BASIS-MEMBERSHIP CONJUNCT, the claim doing the most work in
+    // the fix. Reproduced as a SURVIVOR first: deleting that conjunct left all 475
+    // records tests green, so the guard's own load-bearing condition was untested.
+    // Non-equivalent, not merely uncovered — without it this case demotes.
+    const projection = projectRecordsToGraph(
+      records({ baselineAlsoClaimsSharedFigure: true, rivalOmitsBasis: true }),
+      BRIEF,
+    );
+
+    // Precondition pinned in-test: the rival link really is present and really
+    // does set the SAME magnitude — otherwise this passes for want of a rival
+    // rather than for want of its evidence. Measured: a basis-less rival carries
+    // the value but NO binding detail (it cites nothing, so it earns nothing),
+    // which is exactly the shape this case is about.
+    expect(rawOf(projection, STATUS_QUO, LICENCE)).toBe(50_000);
+    expect(bindingOf(projection, STATUS_QUO, LICENCE)).toBeUndefined();
+
+    expect(bindingOf(projection, FULL_SWITCH, LICENCE)).toMatchObject({
+      raw_value: 50_000,
+      source: "brief_extraction",
+    });
+  });
+
+  it("a rival whose EDGE is pruned still contests the figure — decided, not incidental", () => {
+    // ⛔ A DELIBERATE, NAMED COST. The rival's target factor has no path to the
+    // goal, so the connectivity prune removes its edge — yet its CLAIM still
+    // withdraws the challenger's brief authority.
+    //
+    // KEPT, on the file's own doctrine. This guard asks a question about the
+    // RECORDS the model emitted — "did the user's sentence name one option or
+    // two?" — not about which nodes survived graph shaping. Binding it to
+    // surviving edges would make AUTHORSHIP depend on the connectivity prune and
+    // the option budget: the same brief and the same sentence would earn brief
+    // authority or not according to whether an unrelated factor got pruned. That
+    // is a worse coupling than the extra ask, and `projector.ts`'s own pass 3c
+    // reads surviving edges because it answers a DIFFERENT question (which edges
+    // exist) — aligning the two would be two questions under one name (trap 21).
+    //
+    // Direction is FAIL-CLOSED: one extra confirm-value ask, never a false claim.
+    const projection = projectRecordsToGraph(
+      records({ baselineAlsoClaimsSharedFigure: true, rivalTargetsOrphanFactor: true }),
+      BRIEF,
+    );
+
+    // Precondition pinned in-test: the prune really did fire.
+    expect(projection.graph.nodes.filter((node) => node.label === ORPHAN)).toHaveLength(0);
+
+    expect(bindingOf(projection, FULL_SWITCH, LICENCE)).toMatchObject({
+      source: "cee_hypothesis",
+    });
   });
 });
