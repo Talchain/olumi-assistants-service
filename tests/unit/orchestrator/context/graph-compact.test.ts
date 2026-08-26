@@ -67,6 +67,29 @@ describe("compactGraph", () => {
     expect(n).not.toHaveProperty("goal_threshold");
   });
 
+  it("preserves only a producer-attested baseline option without label inference", () => {
+    const result = compactGraph(
+      makeGraph(
+        [
+          makeNode("opt_current", { kind: "option", label: "Current approach", is_baseline: true }),
+          makeNode("opt_change", { kind: "option", label: "Change", is_baseline: false }),
+          makeNode("opt_named_status_quo", { kind: "option", label: "Status quo" }),
+          makeNode("fac_malformed", { kind: "factor", is_baseline: true }),
+        ],
+        [],
+      ),
+    );
+
+    expect(result.nodes.find((node) => node.id === "opt_current")?.is_baseline).toBe(true);
+    expect(result.nodes.find((node) => node.id === "opt_change")).not.toHaveProperty("is_baseline");
+    expect(result.nodes.find((node) => node.id === "opt_named_status_quo")).not.toHaveProperty(
+      "is_baseline",
+    );
+    expect(result.nodes.find((node) => node.id === "fac_malformed")).not.toHaveProperty(
+      "is_baseline",
+    );
+  });
+
   it("bounds saved descriptions with a visible ellipsis", () => {
     const description = "D".repeat(NODE_DESCRIPTION_CONTEXT_MAX_CHARS + 20);
     const result = compactGraph(makeGraph([makeNode("node_a", { description })], []));

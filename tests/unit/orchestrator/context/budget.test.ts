@@ -278,6 +278,7 @@ describe("enforceContextBudget (pathological-input safety valve — graph/analys
         id: `n${i}`,
         kind: "option",
         label: `Option ${i}`,
+        ...(i === 0 ? { is_baseline: true as const } : {}),
         type: "some_type_value",
         category: "controllable",
         intervention_summary: "sets Factor A=0.9, Factor B=0.7, Factor C=0.8",
@@ -308,6 +309,8 @@ describe("enforceContextBudget (pathological-input safety valve — graph/analys
     }
     // But label must survive (never trimmed)
     expect(result.graph_compact?.nodes[0].label).toBe("Option 0");
+    // Canonical option role is structural identity, not expendable prose.
+    expect(result.graph_compact?.nodes[0].is_baseline).toBe(true);
   });
 
   it("returns a copy — does not mutate the original context", async () => {
