@@ -239,4 +239,40 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     expect(summariseReadiness(payload).open_items).toHaveLength(0);
     expect(projectContextPackReadiness(payload)?.open_items ?? []).toHaveLength(0);
   });
+
+  /**
+   * ⭐ THE OVER-REPORT DIRECTION, AND THE TEST ABOVE CANNOT SEE IT.
+   *
+   * Measured: the `ready` payload the canonical builder produces here carries
+   * ZERO blockers, so `issuesFromBlockers` returns empty whether or not its
+   * `status === 'ready'` guard exists. A mutant deleting that guard SURVIVED
+   * the test above — it passed for the wrong reason, because its fixture had
+   * nothing to over-report from. A guard whose fixture cannot trigger the
+   * transformation asserts nothing.
+   *
+   * `ready`-with-blockers is not hypothetical: `canonical-analysis-state.ts`
+   * tracks `status_ready_with_actionable_blockers` as a named contradiction,
+   * which is the producer declaring the state reachable. Advisory blockers
+   * (`constraint_dropped`) are explicitly expected to co-exist with `ready`.
+   *
+   * So the fixture is built to that declared state. Without the guard this
+   * mints open items on a model the canonical authority says may run — turning
+   * the 4× under-report this PR fixes into an over-report, which is the worse
+   * of the two failures.
+   */
+  it("invents NOTHING on a ready payload that DOES carry blockers", () => {
+    const graph = graphWithFourValuelessFactors(false);
+    const blocked: any = buildAnalysisReadyPayload(pipelineOptions(false) as any, "goal_1", graph as any);
+
+    // Borrow the real blockers, then assert the canonical `ready` verdict over
+    // them — the exact shape the contradiction code above names.
+    const readyWithBlockers = { ...blocked, status: "ready" };
+
+    // Precondition pinned in-test: this fixture genuinely COULD over-report.
+    expect(readyWithBlockers.status).toBe("ready");
+    expect((readyWithBlockers.blockers ?? []).length).toBeGreaterThanOrEqual(2);
+
+    expect(summariseReadiness(readyWithBlockers).open_items).toHaveLength(0);
+    expect(projectContextPackReadiness(readyWithBlockers)?.open_items ?? []).toHaveLength(0);
+  });
 });
