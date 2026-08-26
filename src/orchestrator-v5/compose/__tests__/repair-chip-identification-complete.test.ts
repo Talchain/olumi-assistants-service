@@ -145,22 +145,23 @@ describe('clicking the repair chip — identification is complete', () => {
   });
 
   /**
-   * ⛔ THE CANVAS-LOCUS SENTENCE MUST NOT APPEAR — it is now FALSE.
+   * ⛔ THE DIRECT-SET SENTENCE MUST NOT APPEAR ON THIS BRANCH.
    *
-   * A live drive on 2026-08-25 found the canvas option panel renders the
-   * intervention row inside a `<fieldset disabled>`; a forced native write
-   * produced ZERO wire calls, and the panel states it is read-only because the
-   * change "cannot yet be saved to the shared model". Sending a user there is a
-   * detour to a surface that tells them it cannot help.
+   * WHEN WRITTEN (#1113) the reason was FALSITY: the sentence then read "open
+   * <option> on the canvas and add <factor> to what it changes", and a live
+   * drive on 2026-08-25 found the canvas option panel renders the intervention
+   * row inside a `<fieldset disabled>` — a forced native write produced ZERO
+   * wire calls, and the panel states it is read-only because the change "cannot
+   * yet be saved to the shared model".
    *
-   * ⚠ This asserts only about THIS branch. The `answered` branch still emits the
-   * sentence; that is a reported pre-existing defect with its own pins, not
-   * something this lane silently rewrites.
+   * ⚠ THE REASON HAS CHANGED; THE ASSERTION HAS NOT. ROADMAP 2.1269 fixed the
+   * `answered` branch (this note used to record that branch as an outstanding
+   * defect — it is closed, and the sentence now points at chat). What this case
+   * pins today is that the two branches stay DISTINCT: this branch makes its own
+   * ask in its own words, and must not also append the shared sentence.
    */
-  it('does NOT send the user to the canvas panel, which cannot save', () => {
-    expect(compose(CHIP.message)).not.toContain(
-      buildConfigureOptionDirectSetSentence(OPTION, FACTOR),
-    );
+  it('makes its own ask and does not append the shared direct-set sentence', () => {
+    expect(compose(CHIP.message)).not.toContain(buildConfigureOptionDirectSetSentence());
   });
 });
 
