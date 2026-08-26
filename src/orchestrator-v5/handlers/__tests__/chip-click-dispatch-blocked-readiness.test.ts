@@ -785,9 +785,34 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     expect(ar.status).toBe('blocked');
     expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
 
-    // AND NO SCIENCE THE REFUSAL DECLINED TO PRODUCE — identity only.
+    // AND NO SCIENCE THE REFUSAL DECLINED TO PRODUCE.
+    //
+    // ⚠ THE ENUMERATION CHANGED; THE PROPERTY DID NOT. `blockers` now rides the
+    // refusal — the producer's own authored option × factor repair rows, which
+    // are not work this turn declined to do but THE REASON IT REFUSED. What the
+    // line below was written to forbid is science the refusal did not compute,
+    // and that is asserted BY NAME underneath rather than left to an
+    // enumeration that only says "four keys".
     expect(Object.keys(ar).sort()).toEqual(
-      ['blocked_reason', 'goal_node_id', 'options', 'status'].sort(),
+      ['blocked_reason', 'blockers', 'goal_node_id', 'options', 'status'].sort(),
+    );
+    for (const forbidden of [
+      'bias_findings',
+      'model_adjustments',
+      'readiness_issues',
+      'repair_proposal',
+      'option_comparison',
+      'leading_option_id',
+    ]) {
+      expect(forbidden in ar).toBe(false);
+    }
+    // The rows are the producer's, and they name the pairs — not a count.
+    const carried = (ar as { blockers?: Array<{ option_id?: string; factor_id?: string }> }).blockers;
+    expect(carried?.length).toBeGreaterThan(0);
+    expect([...(carried ?? [])].map((b) => `${b.option_id}::${b.factor_id}`).sort()).toEqual(
+      [...(buildCanonicalAnalysisReadyFromGraph(FRESH_DRAFT_GRAPH)!.blockers ?? [])]
+        .map((b) => `${(b as { option_id?: string }).option_id}::${(b as { factor_id?: string }).factor_id}`)
+        .sort(),
     );
   });
 
