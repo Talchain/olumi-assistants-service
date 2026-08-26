@@ -554,22 +554,83 @@ const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
  *
  * The trace's lying labels were all PRODUCER-WRITTEN: CEE's own extraction and
  * inference writers stamping the model's opinion of itself. A user-write
- * receipt is written by a different mechanism entirely, and three INDEPENDENT
- * structural guarantees keep it honest:
+ * receipt is written by a different mechanism, and three structural guarantees
+ * constrain it — each WEAKER than the first version of this header claimed.
+ * The corrected statements, all re-derived at the bytes 2026-08-26:
  *
  *   1. `observed_state.source` is `field_class: 'provenance_owned'` — DENIED to
- *      the AI edit lane (`orchestrator-v5/graph-management/field-safety.ts`,
- *      whose depth-1 rule was restored SPECIFICALLY because a root relaxation
- *      had sanctioned this sub-field).
- *   2. The drafting model cannot emit `observed_state` AT ALL — the draft
- *      schema is `additionalProperties: false`, "No exceptions"
- *      (`cee/draft/anthropic-graph-schema.ts`), and declares no such property.
- *   3. The one rule that ever forged `user_override` from the system's own
- *      reading of prose (#853) was REVERTED, not narrowed, on 8 Aug 2026, and
- *      is now pinned by both a measured corpus and a derived writer manifest
- *      (`cee/transforms/__tests__/no-brief-derived-user-override.*`).
+ *      the AI edit lane (`src/orchestrator-v5/graph-management/field-safety.ts`
+ *      — NOT `src/cee/orchestrator-v5/…`, which does not exist; the first
+ *      version of this line cited a path that resolves to nothing). The denial
+ *      is real and well-pinned, but it governs ONLY the `edit_graph`
+ *      candidate-mutation lane. ⚠ `set_factor_value` BYPASSES field-safety
+ *      entirely (measured: zero `field-safety` imports against 18 imports in
+ *      that handler).
+ *   2. ⚠ THE STATED REASON WAS REFUTED. The first version said the drafting
+ *      model "cannot emit `observed_state` AT ALL" because
+ *      `cee/draft/anthropic-graph-schema.ts` is `additionalProperties: false`.
+ *      That file's `additionalProperties: false` is real, but THE SCHEMA IS
+ *      RETIRED AND NO LONGER SENT — measured: exactly one live import of that
+ *      module and it takes only `DRAFT_SOFT_NODE_CAP` / `DRAFT_SOFT_EDGE_CAP`,
+ *      two numeric constants, never the schema (contrast control: 6 for a
+ *      known-live sibling). The conclusion survives via the LIVE records
+ *      grammar, not via the cited artefact. And `data.extractionType` IS
+ *      model-emitted and maps into `observed_state.source`; what makes that
+ *      safe is its CLOSED CODOMAIN — a request-side hint, never a server-side
+ *      guarantee.
+ *   3. The rule that forged `user_override` from the system's own reading of
+ *      prose (#853) was genuinely REVERTED, not narrowed (`f950e4b8`, a
+ *      deletion). ⚠ But the writer manifest guarding it pins ONE literal of
+ *      seven and is a STRING SCAN, not a writer derivation:
+ *      `src/orchestrator-v5/system-events/factor-value-edit.ts:346` stamps
+ *      `panel_elicited` and is INVISIBLE to it.
  *
- * Any one of those failing still leaves two.
+ * ⚠⚠ AND THE INDEPENDENCE CLAIM WAS FALSE — it read "any one of those failing
+ * still leaves two". IT DOES NOT. Guarantees 1 and 2 both constrain WHAT THE
+ * MODEL MAY EMIT; NEITHER constrains WHAT CEE STAMPS ON THE MODEL'S BEHALF,
+ * which is the actual hole (see the KNOWN GAP below). Three guarantees pointed
+ * at one door. A confidently wrong trust argument is worse than none, and this
+ * header is inherited by every later session — which is why the correction sits
+ * here rather than only in a PR body.
+ *
+ * ── ⚠⚠ KNOWN GAP: `user_override` IS NOT A SINGLE-MEANING RECEIPT ──────────
+ * One literal serves TWO different writes, and THIS LEDGER CANNOT TELL THEM
+ * APART:
+ *
+ *   (a) a genuine Confirm-chip / inspector edit — the user authored the number;
+ *   (b) a MODEL-AUTHORED `update_node` op. `stampUserEditProvenance`
+ *       (`orchestrator/canonicalise-value-ops.ts`) deliberately OVERWRITES an
+ *       LLM's own `cee_inference` label with `user_override`, resting on the
+ *       premise that "every op that reaches either edit seam is a CHAT-SET,
+ *       USER-CONFIRMED write". ⚠ THIS REPO CONTRADICTS THAT PREMISE IN WRITING:
+ *       `mutation-consent.ts` records that "`edit_graph` is genuinely UNCOVERED
+ *       by withheld-consent enforcement", with `update_node` ops applying
+ *       "regardless of what the user's message asked for" (gap ROADMAP 2.628a).
+ *
+ * CONSEQUENCE, STATED PLAINLY: for class (b) this suppressor can drop a
+ * MODEL-AUTHORED number from the disclosure — the same harm the anti-downgrade
+ * arms exist to stop, arriving through a different literal. We guarded the door
+ * we were looking at.
+ *
+ * WHY IT IS ACCEPTED HERE RATHER THAN CLOSED: it lands in the LESS-BAD
+ * direction this module already commits to — an OMISSION, covered by the
+ * unconditional "This is not a complete account of what was left out" sentence
+ * — never a false claim about the user. The common case (the user states the
+ * number) is unaffected, and `set_factor_value` is milder than it looks because
+ * CEE does the arithmetic server-side, so the operand is the user's stated
+ * delta. Closing it needs a SEPARABLE stamp for model-authored edit ops, which
+ * is the owning lane's call, not this module's.
+ *
+ * ⭐ RE-SURFACE TRIGGER — concrete, so this gap cannot acquire a lapsed licence
+ * and no detector. Re-open THIS suppressor's trust set when ANY of:
+ *   · ROADMAP 2.628a closes (withheld-consent enforcement reaches `edit_graph`)
+ *     — the premise under (b) becomes true and the gap dissolves;
+ *   · `stampUserEditProvenance` gains a distinct stamp for model-authored ops
+ *     (grep `USER_EDIT_SOURCE` in `orchestrator/canonicalise-value-ops.ts`);
+ *   · the writer manifest becomes a DERIVATION over all seven receipt literals
+ *     rather than a string scan for one.
+ * `not-modelled-manifest.user-authorship.test.ts` carries this trigger list
+ * beside the corpus-limit note, so the gap is visible from the suite too.
  *
  * ── ⚠ THE ASYMMETRY, STATED BECAUSE IT DECIDES EVERY OPEN CASE ─────────────
  * WRONGLY CLAIMING A USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY

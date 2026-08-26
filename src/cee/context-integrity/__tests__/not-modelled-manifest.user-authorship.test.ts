@@ -42,6 +42,41 @@
  *
  * Assertions bind by NODE ID, never by a value predicate another node could
  * satisfy (CLAUDE.md trap 19).
+ *
+ * ── ⚠⚠ WHAT THIS SUITE DOES NOT ESTABLISH — READ BEFORE TRUSTING IT ────────
+ *
+ * 1. KNOWN GAP: `user_override` IS NOT A SINGLE-MEANING RECEIPT. One literal
+ *    serves both a genuine Confirm-chip write AND a model-authored
+ *    `update_node` op — `stampUserEditProvenance` deliberately overwrites an
+ *    LLM's `cee_inference` with `user_override`, on a premise
+ *    `mutation-consent.ts` contradicts in writing ("`edit_graph` is genuinely
+ *    UNCOVERED by withheld-consent enforcement"; gap ROADMAP 2.628a). For that
+ *    class the suppressor can drop a MODEL-AUTHORED number from the
+ *    disclosure. Accepted because it lands in the OMISSION direction, which the
+ *    composed answer discloses unconditionally — never a false claim about the
+ *    user. Full argument at `USER_WRITE_RECEIPT` in the module.
+ *
+ *    ⭐ RE-SURFACE TRIGGER (so this gap cannot acquire a lapsed licence):
+ *      · ROADMAP 2.628a closes — the premise becomes true, gap dissolves;
+ *      · `stampUserEditProvenance` gains a distinct stamp for model-authored
+ *        ops (grep `USER_EDIT_SOURCE` in `canonicalise-value-ops.ts`);
+ *      · the `user_override` writer manifest becomes a DERIVATION over all
+ *        seven receipt literals rather than a string scan for one.
+ *
+ * 2. THE STAMPS HERE ARE SYNTHETIC INJECTIONS INTO COLD-READ CAPTURES, NOT
+ *    REAL POST-EDIT CAPTURES. A fixture you wrote yourself is not evidence
+ *    about the wire (CLAUDE.md trap 16-inverse). These arms prove the
+ *    CLASSIFIER behaves correctly over the stamp vocabulary; they do NOT prove
+ *    the deployed product emits these stamps in these places.
+ *
+ * 3. FOUR LITERALS HAVE NO CEE WRITER AND ARE UNVERIFIED HERE.
+ *    `user_confirmed` / `user` / `user_edited` / `user_calibration` are
+ *    believed to correspond to real user actions on the strength of a
+ *    CROSS-REPO HAND-MAINTAINED COMMENT (`schemas/cee-v3.ts`, citing the UI's
+ *    `isReviewedByUser.ts`) — a hand-maintained mirror (trap 12), with zero CEE
+ *    write sites. Nobody on this lane or its review could verify it. Treated as
+ *    receipts because the direction of error is omission, not a false claim —
+ *    but the claim is UNVERIFIED and is stated as such rather than assumed.
  */
 
 import { describe, it, expect } from "vitest";
