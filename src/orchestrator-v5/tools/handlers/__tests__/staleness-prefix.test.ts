@@ -9,6 +9,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   applyStalenessPrefix,
@@ -225,9 +228,23 @@ describe('S8 — the caveat channel is driven by a LIVE verdict, with ONE author
     expect(caveatForPreconditionVerdict('degraded')).toBeNull();
   });
 
-  it('DERIVED: both templates are composed from the constants, not re-typed', () => {
-    // Fails loud if anyone re-inlines the sentence in `no-op-helpers.ts`, which
-    // is exactly how the two copies drifted apart in the first place.
+  it('BYTES: both templates OPEN with the canonical constants', () => {
+    // ⚠ WHAT THIS DOES AND DOES NOT PROVE. It is a RUNTIME string comparison,
+    // so it pins the assembled bytes: a template that stops opening with the
+    // canonical sentence REDs here, whether it was recomposed, reworded or
+    // re-inlined WITH A DRIFT.
+    //
+    // It CANNOT prove "composed, not re-typed". That is a SYNTACTIC property of
+    // the source, and no comparison of runtime VALUES can distinguish a
+    // composed template from a character-identical re-typed one — both produce
+    // the same string. This test named itself DERIVED and claimed exactly that;
+    // measured with a discriminating pair, a re-inline with a one-character
+    // drift RED-ed it while a CHARACTER-IDENTICAL re-inline passed the whole
+    // suite (CLAUDE.md trap 14 — a false label about a guard is what teaches
+    // the next lane to stop looking).
+    //
+    // The syntactic claim is enforced instead by SINGLE_COPY below, which
+    // counts occurrences in the SOURCE.
     expect(buildAnalysisStaleTemplate().startsWith(STALENESS_PREFIX)).toBe(true);
     expect(buildAnalysisUnconfirmedTemplate().startsWith(UNCONFIRMED_PREFIX)).toBe(true);
   });
@@ -294,4 +311,214 @@ describe('S8 — the caveat channel is driven by a LIVE verdict, with ONE author
         'Re-run analysis to see the current result.',
     );
   });
+});
+
+/* ===========================================================================
+ * SINGLE_COPY — THE GENUINELY DERIVED GUARD.
+ *
+ * WHY IT EXISTS. The sibling `BYTES` test above once called itself DERIVED and
+ * claimed it "fails loud if a copy reappears". That was FALSE AS STATED, and it
+ * was false structurally rather than by a slip: its assertion is
+ * `buildAnalysisStaleTemplate().startsWith(STALENESS_PREFIX)` — a comparison of
+ * RUNTIME VALUES — while "composed vs re-typed" is a property of the SOURCE
+ * TEXT. A character-identical re-typed copy produces a byte-identical string,
+ * so no runtime value check can ever tell the two apart. Measured with a
+ * discriminating pair: a re-inline carrying a one-character drift RED-ed both
+ * that test and BYTE-PRESERVATION, while a re-inline typed CHARACTER FOR
+ * CHARACTER — precisely the state this file's own history records the codebase
+ * being in — passed the entire suite green.
+ *
+ * The estate had therefore replaced a false "single source of truth" label with
+ * a false "REDs if a copy reappears" label, in the same file (CLAUDE.md trap 14
+ * reproduced inside the fix for trap 14). This guard makes the claim TRUE
+ * instead of softening it: it counts occurrences of the sentence in the SOURCE
+ * BYTES of `src/`, excluding tests, and REDs on a second one — drifted or
+ * identical.
+ *
+ * DERIVED, NOT MIRRORED (trap 12): the needle is the exported constant itself,
+ * not a re-typed literal, so rewording the constant moves the guard with it.
+ *
+ * ANTI-VACUITY (trap 13 / trap 20): a scan that silently stopped would report
+ * ZERO occurrences and RED, so blindness cannot masquerade as "no copies" in
+ * the failing direction. The dangerous direction is a scan scoped so narrowly
+ * that it still sees the definition and nothing else — it would read exactly 1
+ * and pass while blind to a copy elsewhere. PART A closes that: it proves the
+ * walk spans the codebase and that the counter can COUNT ABOVE ONE, with a
+ * CONTRAST CONTROL, before PART B trusts a single number.
+ * ======================================================================== */
+
+const SRC_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+
+/**
+ * Budget for the disk scan, sized off the sibling derivation guard
+ * (`config/__tests__/store-model-config-call-sites.test.ts`), which RED-ed at
+ * random under vitest's 5,000 ms default when parallel workers saturated the
+ * box. A guard that fails at random is trap 7's broken alarm.
+ */
+const SCAN_TIMEOUT_MS = 60_000;
+
+/**
+ * A symbol known to appear in SEVERAL non-test files across MORE THAN ONE
+ * directory. It is the contrast control: absence proves the instrument, not
+ * the codebase (trap 13e — a target reading zero is only evidence when a
+ * contrast reads non-zero IN THE SAME RUN).
+ */
+const CONTRAST_NEEDLE = 'buildAnalysisStaleTemplate';
+
+interface SourceScan {
+  /** Every non-test .ts file under src/, repo-relative, posix separators. */
+  readonly files: readonly string[];
+  /** Files actually read (must equal `files` — a silent skip shrinks the search). */
+  readonly read: readonly string[];
+  /** Total occurrences of each needle, and the files carrying them. */
+  count(needle: string): number;
+  filesContaining(needle: string): readonly string[];
+}
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (
+        entry.name === '__tests__' ||
+        entry.name === 'node_modules' ||
+        entry.name === 'generated'
+      ) {
+        continue;
+      }
+      walk(full, out);
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+let scanCache: SourceScan | null = null;
+
+function scanSrc(): SourceScan {
+  if (scanCache !== null) return scanCache;
+
+  const absolute = walk(SRC_ROOT);
+  const files: string[] = [];
+  const read: string[] = [];
+  const texts: string[] = [];
+
+  for (const file of absolute) {
+    files.push(`src/${relative(SRC_ROOT, file).split(sep).join('/')}`);
+    // NOTE: `readFileSync`, deliberately NOT `grep`. CLAUDE.md trap 17: plain
+    // grep is silently blind to NUL-bearing source files and this repo carries
+    // them (`edit-graph-referee-gate.ts` holds a deliberate '\0' sentinel), so
+    // a grep-based derivation would report a clean sweep it never performed.
+    texts.push(readFileSync(file, 'utf8'));
+    read.push(`src/${relative(SRC_ROOT, file).split(sep).join('/')}`);
+  }
+
+  scanCache = {
+    files,
+    read,
+    count: (needle) =>
+      texts.reduce((total, text) => total + (text.split(needle).length - 1), 0),
+    filesContaining: (needle) =>
+      files.filter((_, index) => texts[index]!.includes(needle)).sort(),
+  };
+  return scanCache;
+}
+
+describe('SINGLE_COPY — the canonical sentences occur exactly once in src/', () => {
+  /* ---------------- PART A — the instrument is not blind ---------------- */
+
+  it(
+    'DERIVATION_WALKED_SRC — the walk found a plausible number of TypeScript files',
+    () => {
+      const { files } = scanSrc();
+      expect(
+        files.length,
+        `The src/ walk found ${files.length} .ts files. That is not a codebase — SRC_ROOT ` +
+          `(${SRC_ROOT}) is almost certainly wrong, and every count below is therefore ` +
+          `taken over a near-empty scan that would read "exactly one" for the wrong reason.`,
+      ).toBeGreaterThan(200);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  it(
+    'DERIVATION_READ_EVERY_FILE_IT_LISTED — no file was silently skipped',
+    () => {
+      const { files, read } = scanSrc();
+      expect(
+        read.length,
+        `The walk listed ${files.length} files but read ${read.length}. A silent skip shrinks ` +
+          `the search space without shrinking the apparent result.`,
+      ).toBe(files.length);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  it(
+    'CONTRAST_CONTROL — the counter can count ABOVE ONE, across several directories',
+    () => {
+      const scan = scanSrc();
+      const occurrences = scan.count(CONTRAST_NEEDLE);
+      const carriers = scan.filesContaining(CONTRAST_NEEDLE);
+
+      // This is the assertion that makes "exactly 1" mean something. A scan
+      // scoped to one file, or a counter that saturates at 1, would still
+      // report 1 for the target and pass Part B while blind to a copy
+      // elsewhere. Requiring a KNOWN-MULTIPLE needle to read multiple, in more
+      // than one directory, is a discrimination a blind instrument cannot fake.
+      expect(
+        occurrences,
+        `The contrast needle '${CONTRAST_NEEDLE}' was found ${occurrences} time(s). It is ` +
+          `referenced many times in src/; a low count means the scan or the counter is ` +
+          `broken, so the target's count proves nothing.`,
+      ).toBeGreaterThan(3);
+
+      const directories = new Set(
+        carriers.map((path) => path.split('/').slice(0, -1).join('/')),
+      );
+      expect(
+        directories.size,
+        `The contrast needle was found in ${directories.size} directory/ies ` +
+          `(${[...directories].join(', ')}). The scan must span more than one directory or ` +
+          `it cannot see a copy re-inlined outside this folder.`,
+      ).toBeGreaterThan(1);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  /* ---------------- PART B — the claim itself ---------------- */
+
+  it(
+    'the STALENESS_PREFIX sentence occurs EXACTLY ONCE in src/ (non-test)',
+    () => {
+      const scan = scanSrc();
+      const carriers = scan.filesContaining(STALENESS_PREFIX);
+      expect(
+        scan.count(STALENESS_PREFIX),
+        `Expected exactly one occurrence (the definition in staleness-prefix.ts). Found ` +
+          `${scan.count(STALENESS_PREFIX)}, in: ${carriers.join(', ') || '(nowhere)'}. ` +
+          `A second occurrence means the sentence has been RE-INLINED — compose it from ` +
+          `STALENESS_PREFIX instead. This REDs on a character-identical copy, which is the ` +
+          `case the runtime BYTES test structurally cannot see.`,
+      ).toBe(1);
+      expect(carriers).toEqual(['src/orchestrator-v5/tools/handlers/staleness-prefix.ts']);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  it(
+    'the UNCONFIRMED_PREFIX sentence occurs EXACTLY ONCE in src/ (non-test)',
+    () => {
+      const scan = scanSrc();
+      const carriers = scan.filesContaining(UNCONFIRMED_PREFIX);
+      expect(
+        scan.count(UNCONFIRMED_PREFIX),
+        `Expected exactly one occurrence (the definition in staleness-prefix.ts). Found ` +
+          `${scan.count(UNCONFIRMED_PREFIX)}, in: ${carriers.join(', ') || '(nowhere)'}.`,
+      ).toBe(1);
+      expect(carriers).toEqual(['src/orchestrator-v5/tools/handlers/staleness-prefix.ts']);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });
