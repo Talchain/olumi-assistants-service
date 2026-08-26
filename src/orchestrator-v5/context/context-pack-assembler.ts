@@ -1476,9 +1476,12 @@ export function assembleContextPackWithSummary(
   const coefficientConfidenceLicensed =
     graphContext.status === 'canonical' &&
     isCanonicalStrictContextGraphCompaction(input.compactedGraph);
-  const compactedGraphForBudget = coefficientConfidenceLicensed
-    ? input.compactedGraph ?? null
-    : stripCoefficientConfidence(input.compactedGraph ?? null);
+  const compactedGraphForBudget =
+    input.compactedGraph == null
+      ? null
+      : coefficientConfidenceLicensed
+        ? input.compactedGraph
+        : stripCoefficientConfidence(input.compactedGraph);
   // O-3 — context-size budget (graceful degradation). Applied BEFORE
   // projection so both the handler-facing slots and the LLM-facing
   // display projections are built from the budgeted objects. Under
@@ -1744,9 +1747,8 @@ export function assembleContextPackWithSummary(
  * identity is preserved when no edge carries the field.
  */
 function stripCoefficientConfidence<T extends { readonly edges: readonly unknown[] }>(
-  graph: T | null,
-): T | null {
-  if (graph === null) return null;
+  graph: T,
+): T {
   let changed = false;
   const edges = graph.edges.map((edge) => {
     if (
