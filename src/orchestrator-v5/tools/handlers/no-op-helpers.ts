@@ -14,6 +14,7 @@ import type { HandlerInvocation } from '../registry.js';
 // see the note on `buildAnalysisStaleTemplate`. `staleness-prefix.ts` imports
 // nothing, so this edge cannot form a cycle.
 import {
+  applyStalenessPrefix,
   STALENESS_PREFIX,
   UNCONFIRMED_PREFIX,
   type StalenessCaveat,
@@ -340,6 +341,100 @@ export function caveatForPreconditionVerdict(
       return _exhaustive
     }
   }
+}
+
+/**
+ * Does this verdict BLOCK the answer, or merely CAVEAT it?
+ *
+ * ⚠⚠ TWO HARMS, TWO PARAMETERS — DO NOT FOLD THIS BACK INTO
+ * `caveatForPreconditionVerdict` OR INTO A `verdict !== 'execute'` TEST.
+ * A swallowed answerable question and an uncaveated stale figure are OPPOSITE
+ * harms, and a single predicate cannot be tuned for both (CLAUDE.md traps 21 and
+ * 22b — one window guarding two doors is how four rounds got burned). The two
+ * questions are:
+ *   • THIS function: "is there anything to answer WITH?"   → block or answer
+ *   • `caveatForPreconditionVerdict`: "which claim is licensed?" → which caveat
+ * They are deliberately separate switches over the same union, and they
+ * disagree on purpose: `stale` BLOCKS=false but CAVEAT='stale'.
+ *
+ * ⭐ WHY `stale`/`unconfirmed` NO LONGER BLOCK — this is CONVERGENCE, not new
+ * licence. `canonical-analysis-state.ts` already computes
+ * `usableForProse = hasFact && !blockedUnusable && (fresh || stale || unknown)`
+ * under the comment "Prose may reference fresh / stale / (legacy) unknown
+ * analysis WITH A CAVEAT", with `usableForChips` fresh-only. The handlers were
+ * DISOBEYING a predicate the canonical state already defines; this makes the two
+ * authorities agree. The caveat that comment promises is enforced by
+ * {@link finaliseExplanationText}, not left to the model's good behaviour.
+ *
+ * `missing`/`degraded` still block, and NOT for a currency reason: there is no
+ * result to caveat at all. Caveating a fabricated analysis would not make it
+ * true — that is the opposite-direction harm, pinned by the TWIN cases in
+ * `__tests__/explanation-precondition-narrowing.test.ts`.
+ *
+ * Exhaustive with a `never` guard: a new verdict variant must decide here rather
+ * than silently inheriting "answer", which is the fail-OPEN direction.
+ */
+export function explanationVerdictBlocks(verdict: ExplanationPreconditionVerdict): boolean {
+  switch (verdict) {
+    // Nothing exists to answer with.
+    case 'missing':
+    case 'degraded':
+      return true
+    // A result EXISTS and may be referenced in prose; currency is carried by a
+    // caveat rather than by refusing to answer.
+    case 'stale':
+    case 'unconfirmed':
+    case 'execute':
+      return false
+    default: {
+      const _exhaustive: never = verdict
+      return _exhaustive
+    }
+  }
+}
+
+/**
+ * THE SINGLE ENFORCEMENT FUNNEL for an answered explanation turn.
+ *
+ * ⭐⭐ THE TEXT AND ITS FLAG COME BACK FROM ONE CALL, AND THAT IS THE POINT.
+ * Before this existed, `staleness_prefixed: false` was HAND-SET in both
+ * handlers beside a separately-computed string — a hand-maintained mirror
+ * (CLAUDE.md trap 12) that became a lie the moment a caveat was actually
+ * attached. Returning both together makes "text without its caveat, reported as
+ * caveated" UNREPRESENTABLE rather than merely discouraged. Never destructure
+ * the text and recompute the flag.
+ *
+ * ⚠ BOTH explanation handlers call THIS — `explain_results` and
+ * `what_would_flip`. Enforcing the prefix separately in each is the mirror
+ * defect this function exists to prevent, and a third handler must call it too
+ * rather than growing a second prefixer. The wording itself lives in
+ * `staleness-prefix.ts`, which imports nothing by design; this module owns only
+ * WHICH CLAIM IS LICENSED.
+ *
+ * ⚠ CALL IT ON THE FINAL ASSEMBLED STRING, not on an intermediate. The caveat
+ * must LEAD what the user reads, so anything appended by the caller (the
+ * what-would-flip counterfactual card, a validation beat) must already be in
+ * `rawText`.
+ *
+ * ⚠⚠ KNOWN AND ACCEPTED GAP, PRICED NOT SOLVED. `applyStalenessPrefix`
+ * recognises CANONICAL openers only, so a caveat the model wrote IN ITS OWN
+ * WORDS is not detected and the user reads a caveat twice. This is not an
+ * oversight and MUST NOT be fixed by widening the opener regex: "did this
+ * arbitrary prose already caveat?" is an unbounded natural-language predicate,
+ * and this estate burned four rounds proving that class unwinnable (trap 22f).
+ * The ratified asymmetry governs the choice — A MISSING CAVEAT IS A TRUST
+ * DEFECT; A DOUBLED ONE IS ONLY CLUMSY — so the gap is pinned with an
+ * append-only corpus of real model output in
+ * `__tests__/staleness-prefix.test.ts`, which REDs if that set grows OR shrinks.
+ * The real fix is a STRUCTURAL surface (a badge that cannot collide with prose),
+ * rowed as a follow-up and keyed on the VERDICT, never on the graph hash.
+ */
+export function finaliseExplanationText(
+  rawText: string,
+  verdict: ExplanationPreconditionVerdict,
+): { readonly text: string; readonly stalenessPrefixed: boolean } {
+  const result = applyStalenessPrefix(rawText, caveatForPreconditionVerdict(verdict))
+  return { text: result.text, stalenessPrefixed: result.prefixed }
 }
 
 /**
