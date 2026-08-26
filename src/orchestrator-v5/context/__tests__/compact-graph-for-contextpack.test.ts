@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { PROPOSAL_FIELD_CAPS } from '../../../cee/dual-draft/guards.js';
 import {
   CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
@@ -279,6 +280,27 @@ describe('compactGraphForContextPack', () => {
     });
   });
 
+  /**
+   * ⭐ THE CAP'S *VALUE* — pinned against the producer, not against itself.
+   *
+   * `graph-compact.ts` documents that "the character cap matches the existing
+   * producer-side proposal guard". That was true and enforced by NOTHING. Every
+   * other reference in this suite derives BOTH the input and the expectation
+   * from the constant (`'x'.repeat(MAX + 1)`, `slice(0, MAX)`,
+   * `per_entry_char_limit: MAX`), so moving the constant moves every assertion
+   * with it — a control decayed into a tautology (CLAUDE.md trap 12b). Measured:
+   * a mutant setting the cap to 121 survived 63/63 GREEN.
+   *
+   * This is the only assertion here that would notice, because it is the only
+   * one whose expected value comes from the OTHER authority. If the two caps are
+   * ever meant to diverge, change this line deliberately — do not delete it.
+   */
+  it('character cap equals the producer-side proposal guard (the docstring claim, enforced)', () => {
+    expect(CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS).toBe(
+      PROPOSAL_FIELD_CAPS.uncertainty_driver_length,
+    );
+  });
+
   it('bounds entries and characters without rewriting or silently dropping producer text', () => {
     const graph = makeStrictGraph(4, 0);
     const node = firstFactor(graph);
@@ -328,7 +350,11 @@ describe('compactGraphForContextPack', () => {
 
   it('does not promote uncertainty-shaped metadata from non-factor nodes into compact or prompt', async () => {
     const graph = makeStrictGraph(1, 0);
-    const goal = graph.nodes[0] as Record<string, unknown> & {
+    // Through `unknown`: the Zod passthrough output type does not sufficiently
+    // overlap the asserted shape, so a direct conversion is a TS2352. Widening
+    // first is the conversion the compiler names, and keeps the assertion at the
+    // one line that needs it rather than loosening `makeStrictGraph`'s return.
+    const goal = graph.nodes[0] as unknown as Record<string, unknown> & {
       observed_state: Record<string, unknown>;
     };
     const nonFactorText = 'Out-of-scope goal metadata';
