@@ -25,7 +25,8 @@ import { z } from 'zod';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -54,6 +55,43 @@ export const AdjustEdgeStrengthDirectionSchema = z.enum(['positive', 'negative']
 
 const STRENGTH_CLAMP_MIN = -1;
 const STRENGTH_CLAMP_MAX = 1;
+const EDGE_FACT_ENDPOINT_LABEL_MAX_CHARS = 80;
+
+/**
+ * Resolve one endpoint label for the durable mutation fact.
+ *
+ * The mutation-time graph is the historical authority: a later rename must
+ * not rewrite what this edit targeted. The label is nevertheless prompt-bound
+ * data, so duplicate/missing identities, raw-ID labels, residual entity-ID
+ * tokens and overlong values all fail closed. The existing user receipt keeps
+ * its current formatter/fallback; this helper governs only the new fact fields.
+ */
+function resolveSafeFactEndpointLabel(graph: GraphV3T, nodeId: string): string | null {
+  const matches = graph.nodes.filter((node) => node.id === nodeId);
+  if (matches.length !== 1) return null;
+
+  const node = matches[0]!;
+  const raw = node.label.replace(/\s+/gu, ' ').trim();
+  if (
+    raw.length === 0 ||
+    raw.length > EDGE_FACT_ENDPOINT_LABEL_MAX_CHARS ||
+    raw === node.id
+  ) {
+    return null;
+  }
+
+  // Historical identity must never be produced by replacing an ID with some
+  // other node's label. Any recognised entity token therefore rejects the
+  // label outright; only the original normalised bytes may be persisted.
+  if (
+    graph.nodes.some((candidate) => raw.includes(candidate.id)) ||
+    sanitiseUserFacingText(raw, graph).matches.length > 0 ||
+    sanitiseUserFacingText(raw, null).matches.length > 0
+  ) {
+    return null;
+  }
+  return raw;
+}
 
 /**
  * Parse `from→to` or `from->to` into `{ from, to }`. Trims whitespace
@@ -183,6 +221,14 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // Resolve labels for confirmation text.
       const fromLabel = graph.nodes.find((n) => n.id === parsed.from)?.label ?? parsed.from;
       const toLabel = graph.nodes.find((n) => n.id === parsed.to)?.label ?? parsed.to;
+      const safeFromFactLabel = resolveSafeFactEndpointLabel(graph, parsed.from);
+      const safeToFactLabel = resolveSafeFactEndpointLabel(graph, parsed.to);
+      const factEndpointLabels =
+        safeFromFactLabel !== null &&
+        safeToFactLabel !== null &&
+        safeFromFactLabel !== safeToFactLabel
+          ? { from_label: safeFromFactLabel, to_label: safeToFactLabel }
+          : {};
 
       const strengthParam = proposal.parameters.find((p) => p.name === 'strength');
       if (!strengthParam) {
@@ -234,6 +280,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       const beforeSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
+        ...factEndpointLabels,
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
       };
@@ -304,6 +351,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       const afterSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
+        ...factEndpointLabels,
         strength: { mean: newMean, std: finalStd },
         effect_direction: newDirection,
       };

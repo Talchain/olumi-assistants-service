@@ -25,8 +25,8 @@
  *   - Hash identifiers. The projection drops them entirely; do not
  *     "redact" them, leave them out.
  *   - Reach into the live graph. All fields it needs come off the
- *     fact's `before`/`after` snapshots. Edge summaries stay generic
- *     because the fact does not carry node labels.
+ *     fact's `before`/`after` snapshots. New edge facts carry sanitised
+ *     mutation-time endpoint labels; legacy/unsafe facts stay generic.
  *   - Touch the wire response. `recent_changes` is internal context
  *     only; the boundary `graph_patch` block schema is unchanged.
  */
@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { isNoopFact } from '../tools/fact-noop.js';
+import { sanitiseUserFacingText } from '../../orchestrator/shared/output-safety.js';
 import {
   formatConstraintAdded,
   formatConstraintUpdated,
@@ -60,6 +61,9 @@ export const RECENT_CHANGES_CAP = 3;
  * budget.
  */
 export const RECENT_CHANGES_SUMMARY_MAX_CHARS = 80;
+const EDGE_ENDPOINT_LABEL_MAX_CHARS = 80;
+const GENERIC_EDGE_SUMMARY = 'Adjusted a link in the decision model.';
+const GENERIC_EDGE_TARGET = 'a link in the decision model';
 
 /**
  * Permitted change-type discriminators. PRODUCT-DOMAIN VALUES — these
@@ -199,19 +203,115 @@ function summariseMutation(fact: HandlerFact): RecentMutation | null {
     return summariseSetFactorValue(fact.result);
   }
   if (fact.fact_type === 'adjust_edge_strength') {
-    // Edge facts do not carry node labels, only IDs. Without a graph
-    // lookup at projection time we keep the summary intentionally
-    // generic — Sonnet still sees that an edge change happened.
-    return {
-      action: 'link_strength_updated',
-      summary: cap('Adjusted a link in the decision model.'),
-      target_label: 'a link in the decision model',
-    };
+    return summariseAdjustEdgeStrength(fact.result);
   }
   if (fact.fact_type === 'edit_graph') {
     return summariseEditGraph(fact.result);
   }
   return null;
+}
+
+function summariseAdjustEdgeStrength(
+  result: Record<string, unknown> | undefined,
+): RecentMutation | null {
+  if (!result || typeof result !== 'object') return null;
+  if (result.status !== 'applied') return null;
+  const after = (result as { after?: unknown }).after;
+  const before = (result as { before?: unknown }).before;
+  const afterRecord = isRecord(after) ? after : null;
+  const beforeRecord = isRecord(before) ? before : null;
+  if (afterRecord === null && beforeRecord === null) return genericEdgeMutation();
+
+  const afterIdentity = readHistoricalEdgeIdentity(afterRecord);
+  const beforeIdentity = readHistoricalEdgeIdentity(beforeRecord);
+  if (
+    afterIdentity !== null &&
+    beforeIdentity !== null &&
+    (afterIdentity.from !== beforeIdentity.from || afterIdentity.to !== beforeIdentity.to)
+  ) {
+    return genericEdgeMutation();
+  }
+
+  // Read one internally coherent snapshot. Never combine labels from one
+  // snapshot with endpoint identities from the other. Falling back to a
+  // complete `before` tuple is safe only after any two identities agree.
+  const snapshot =
+    readHistoricalEdgeSnapshot(afterRecord) ??
+    readHistoricalEdgeSnapshot(beforeRecord);
+  if (snapshot === null || snapshot.fromLabel === snapshot.toLabel) {
+    return genericEdgeMutation();
+  }
+
+  const summary = `Adjusted the link from ${snapshot.fromLabel} to ${snapshot.toLabel}.`;
+  const targetLabel = `${snapshot.fromLabel} → ${snapshot.toLabel}`;
+  if (
+    summary.length > RECENT_CHANGES_SUMMARY_MAX_CHARS ||
+    targetLabel.length > RECENT_CHANGES_SUMMARY_MAX_CHARS
+  ) {
+    return genericEdgeMutation();
+  }
+
+  return {
+    action: 'link_strength_updated',
+    summary,
+    target_label: targetLabel,
+  };
+}
+
+interface HistoricalEdgeIdentity {
+  readonly from: string;
+  readonly to: string;
+}
+
+interface HistoricalEdgeSnapshot extends HistoricalEdgeIdentity {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+}
+
+function readHistoricalEdgeIdentity(
+  record: Readonly<Record<string, unknown>> | null,
+): HistoricalEdgeIdentity | null {
+  if (record === null) return null;
+  const from = readNonEmptyString(record.from);
+  const to = readNonEmptyString(record.to);
+  return from === undefined || to === undefined ? null : { from, to };
+}
+
+function readHistoricalEdgeSnapshot(
+  record: Readonly<Record<string, unknown>> | null,
+): HistoricalEdgeSnapshot | null {
+  const identity = readHistoricalEdgeIdentity(record);
+  if (identity === null || record === null) return null;
+  const endpointIds = [identity.from, identity.to];
+  const fromLabel = readSafeHistoricalEndpointLabel(record.from_label, endpointIds);
+  const toLabel = readSafeHistoricalEndpointLabel(record.to_label, endpointIds);
+  return fromLabel === null || toLabel === null
+    ? null
+    : { ...identity, fromLabel, toLabel };
+}
+
+function genericEdgeMutation(): RecentMutation {
+  return {
+    action: 'link_strength_updated',
+    summary: GENERIC_EDGE_SUMMARY,
+    target_label: GENERIC_EDGE_TARGET,
+  };
+}
+
+function readSafeHistoricalEndpointLabel(
+  value: unknown,
+  endpointIds: readonly string[],
+): string | null {
+  const raw = readNonEmptyString(value)?.replace(/\s+/gu, ' ').trim();
+  if (
+    raw === undefined ||
+    raw.length > EDGE_ENDPOINT_LABEL_MAX_CHARS ||
+    endpointIds.some((id) => raw.includes(id))
+  ) {
+    return null;
+  }
+  if (sanitiseUserFacingText(raw, null).matches.length > 0) return null;
+  return raw;
 }
 
 /**

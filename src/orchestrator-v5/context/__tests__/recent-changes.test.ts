@@ -6,7 +6,8 @@
  *   - successful add_constraint produces clean human summary
  *   - constraint update path (existing constraint mutated) produces "Updated …"
  *   - successful set_factor_value produces a "Updated <label> from … to …"
- *   - successful adjust_edge_strength produces a generic line
+ *   - successful adjust_edge_strength uses mutation-time endpoint labels,
+ *     with a generic fallback for legacy or unsafe facts
  *   - noop facts are filtered out
  *   - cap is hard at 3 entries (oldest fall off)
  *   - summary length is capped at RECENT_CHANGES_SUMMARY_MAX_CHARS
@@ -15,6 +16,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+type AdjustEdgeFact = Extract<HandlerFact, { fact_type: 'adjust_edge_strength' }>;
 
 import {
   RECENT_CHANGES_CAP,
@@ -94,7 +97,16 @@ function mkSetFactorValue(opts: {
   };
 }
 
-function mkAdjustEdge(opts: { noop?: boolean } = {}): HandlerFact {
+function mkAdjustEdge(opts: {
+  noop?: boolean;
+  fromLabel?: string;
+  toLabel?: string;
+  labelsInBeforeOnly?: boolean;
+} = {}): AdjustEdgeFact {
+  const labels =
+    opts.fromLabel !== undefined && opts.toLabel !== undefined
+      ? { from_label: opts.fromLabel, to_label: opts.toLabel }
+      : {};
   return {
     fact_type: 'adjust_edge_strength',
     fact_version: 1,
@@ -105,12 +117,14 @@ function mkAdjustEdge(opts: { noop?: boolean } = {}): HandlerFact {
       before: {
         from: 'factor_a',
         to: 'factor_b',
+        ...labels,
         strength: { mean: 0.3, std: 0.1 },
         effect_direction: 'positive',
       },
       after: {
         from: 'factor_a',
         to: 'factor_b',
+        ...(opts.labelsInBeforeOnly ? {} : labels),
         strength: { mean: 0.6, std: 0.1 },
         effect_direction: 'positive',
       },
@@ -237,10 +251,119 @@ describe('projectRecentChanges', () => {
   });
 
   describe('adjust_edge_strength summarisation', () => {
-    it('produces a generic decision-language line (no edge ids)', () => {
+    it('uses mutation-time endpoint labels without exposing edge ids', () => {
+      const result = projectRecentChanges([
+        mkAdjustEdge({ fromLabel: 'Fundraising speed', toLabel: 'Runway' }),
+      ]);
+      expect(result[0]).toEqual({
+        action: 'link_strength_updated',
+        summary: 'Adjusted the link from Fundraising speed to Runway.',
+        target_label: 'Fundraising speed → Runway',
+      });
+      expect(JSON.stringify(result[0])).not.toContain('factor_a');
+      expect(JSON.stringify(result[0])).not.toContain('factor_b');
+    });
+
+    it('can read the labels from the before snapshot for compatible persisted facts', () => {
+      const result = projectRecentChanges([
+        mkAdjustEdge({
+          fromLabel: 'Fundraising speed',
+          toLabel: 'Runway',
+          labelsInBeforeOnly: true,
+        }),
+      ]);
+      expect(result[0]!.summary).toBe(
+        'Adjusted the link from Fundraising speed to Runway.',
+      );
+    });
+
+    it('preserves the generic decision-language fallback for legacy facts', () => {
       const result = projectRecentChanges([mkAdjustEdge()]);
       expect(result[0]!.action).toBe('link_strength_updated');
       expect(result[0]!.summary).toBe('Adjusted a link in the decision model.');
+    });
+
+    it('does not trust labels on a malformed fact with no endpoint identities', () => {
+      const fact = mkAdjustEdge({ fromLabel: 'Fundraising speed', toLabel: 'Runway' });
+      const before = fact.result.before as Record<string, unknown>;
+      const after = fact.result.after as Record<string, unknown>;
+      delete before.from;
+      delete before.to;
+      delete after.from;
+      delete after.to;
+
+      expect(projectRecentChanges([fact])[0]).toEqual({
+        action: 'link_strength_updated',
+        summary: 'Adjusted a link in the decision model.',
+        target_label: 'a link in the decision model',
+      });
+    });
+
+    it('does not combine endpoint identities from after with labels from a different before snapshot', () => {
+      const fact = mkAdjustEdge({
+        fromLabel: 'Old source',
+        toLabel: 'Old target',
+        labelsInBeforeOnly: true,
+      });
+      Object.assign(fact.result.after as Record<string, unknown>, {
+        from: 'factor_new_a',
+        to: 'factor_new_b',
+      });
+
+      expect(projectRecentChanges([fact])[0]).toEqual({
+        action: 'link_strength_updated',
+        summary: 'Adjusted a link in the decision model.',
+        target_label: 'a link in the decision model',
+      });
+    });
+
+    it('requires the fact and result status to both attest an applied mutation', () => {
+      const fact = mkAdjustEdge({ fromLabel: 'Fundraising speed', toLabel: 'Runway' });
+      fact.result.status = 'noop';
+
+      expect(projectRecentChanges([fact])).toEqual([]);
+    });
+
+    it('falls back rather than truncating either endpoint identity', () => {
+      const result = projectRecentChanges([
+        mkAdjustEdge({
+          fromLabel: 'A'.repeat(40),
+          toLabel: 'B'.repeat(40),
+        }),
+      ]);
+
+      expect(result[0]).toEqual({
+        action: 'link_strength_updated',
+        summary: 'Adjusted a link in the decision model.',
+        target_label: 'a link in the decision model',
+      });
+    });
+
+    it.each([
+      ['one missing label', { fromLabel: 'Fundraising speed' }],
+      [
+        'raw endpoint id label',
+        { fromLabel: 'factor_a', toLabel: 'Runway' },
+      ],
+      [
+        'entity-id-shaped label',
+        { fromLabel: 'fac_fundraising_speed', toLabel: 'Runway' },
+      ],
+      [
+        'overlong label',
+        { fromLabel: 'F'.repeat(81), toLabel: 'Runway' },
+      ],
+      [
+        'duplicate endpoint labels',
+        { fromLabel: 'Growth', toLabel: 'Growth' },
+      ],
+    ] as const)('falls back generically for %s', (_name, labels) => {
+      const result = projectRecentChanges([mkAdjustEdge(labels)]);
+      expect(result[0]).toEqual({
+        action: 'link_strength_updated',
+        summary: 'Adjusted a link in the decision model.',
+        target_label: 'a link in the decision model',
+      });
     });
   });
 
