@@ -668,11 +668,28 @@ describe('collision_2opt — the ONE monotonicity violation the floor adds, and 
     expect(after.willProceed).toBe(false);
   });
 
-  it('KNOWN-OPEN — a FULLY-valued identical pair is still admitted (outside this PR)', () => {
-    // No third factor: both options complete, so no waiver, so the floor never
-    // runs. PLoT would still raise `IDENTICAL_OPTIONS` and 422. Pinned so the
-    // gap is visible in the suite; closing it means moving the floor out of the
-    // waiver path, which is a behaviour change beyond this PR's scope.
+  it('CLOSED (was KNOWN-OPEN) — a FULLY-valued identical pair is now REFUSED', () => {
+    // ⭐ THIS PIN HAS FLIPPED, AND THE HISTORY IS THE POINT — the KNOWN-OPEN entry
+    // it replaces did its job exactly as intended.
+    //
+    // It read: *"No third factor: both options complete, so no waiver, so the
+    // floor never runs. PLoT would still raise `IDENTICAL_OPTIONS` and 422.
+    // Pinned so the gap is visible in the suite; closing it means moving the
+    // floor out of the waiver path, which is a behaviour change beyond this PR's
+    // scope."* — and it asserted `willProceed === true`, labelled *"Documents
+    // TODAY's behaviour, not the desired one."*
+    //
+    // That prescription was correct and has now been carried out: the floor is
+    // `comparisonSurvivesDedup`, lifted to module scope and applied on the
+    // strictly-ready path too (`analysis-ready-core.ts`). Measured 2026-08-26 at
+    // CEE `d80e8133` / PLoT `3a3bee58`, BOTH SIDES RUN: CEE previously admitted
+    // this snapshot (`willProceed: true`, `waivedOptionIds: []`, status `ready`)
+    // while PLoT's real `runPreflightValidation` returned
+    // `blockers: ["IDENTICAL_OPTIONS"]` on it — with a distinct-valued contrast
+    // returning `blockers: []`, so the measurement discriminates.
+    //
+    // ⚠ A GAP PINNED IN THE SUITE IS HONEST; A GAP INVISIBLE TO IT IS HOW THESE
+    // SHIP. This entry is retained rather than deleted so the closure is legible.
     const options = [
       option('opt_a', 'Option A', { fac_velocity: 0.5 }),
       option('opt_b', 'Option B', { fac_velocity: 0.5 }),
@@ -690,7 +707,14 @@ describe('collision_2opt — the ONE monotonicity violation the floor adds, and 
     expect(
       (admission.assessment.blockingIssues ?? []).some((i) => i.code === 'MISSING_OPTION_VALUE'),
     ).toBe(false);
-    // Documents TODAY's behaviour, not the desired one.
-    expect(admission.willProceed).toBe(true);
+    // The refusal is the FLOOR's doing, not a blocker appearing: there is no
+    // outstanding waiver here (asserted above), and the two wire options really
+    // do share one fingerprint.
+    const wire = admission.assessment.analysisReady?.options ?? [];
+    expect(wire).toHaveLength(2);
+    expect(
+      new Set(wire.map((o) => JSON.stringify(Object.entries(o.interventions ?? {}).sort()))).size,
+    ).toBe(1);
+    expect(admission.willProceed).toBe(false);
   });
 });

@@ -507,6 +507,61 @@ function isWaivableByComputeDiscard(
 }
 
 /**
+ * PLoT's `IDENTICAL_OPTIONS` floor, in ONE place for BOTH admission paths.
+ *
+ * ⭐⭐ THIS IS A MODULE-LEVEL FUNCTION FOR A MEASURED REASON. It used to be a
+ * closure inside the `strict.status === 'unrecoverable'` waiver branch, which
+ * made it UNREACHABLE on the strictly-ready path — and a strictly-ready graph
+ * whose options carry the SAME intervention map was therefore admitted straight
+ * into a preflight refusal. Measured 2026-08-26, both sides run, CEE `d80e8133`
+ * / PLoT `3a3bee58`: CEE `willProceed: true`, `waivedOptionIds: []`,
+ * assessment `status: "ready"`; PLoT `runPreflightValidation` on that exact
+ * snapshot → `blockers: ["IDENTICAL_OPTIONS"]`. Contrast, same probe, distinct
+ * values → `blockers: []`.
+ *
+ * ⚠ THE CAUSE WAS NOT FINGERPRINT DRIFT — the two fingerprints AGREE (both
+ * produced `"fac_velocity:0.5"`). A guard can be correct and simply never run;
+ * "the predicate matches PLoT's" and "the predicate is reached" are different
+ * claims, and only the second one was false.
+ *
+ * Mirrors `plot-lite-service` `src/validation/identical-options.ts`
+ * (`canonicaliseInterventions` + `deduplicateOptions`) and the blocker at
+ * `src/validation/preflight-v2.ts:443-449`, staging `3a3bee58`: an option is
+ * fingerprinted as its `nodeId:value` pairs, sorted, values snapped to 1e-9;
+ * options sharing a fingerprint collapse; fewer than two survivors is the
+ * blocker.
+ *
+ * ⚠ KNOWN NARROWER THAN PLoT, DELIBERATELY. PLoT collapses every non-numeric
+ * value to `NaN`, so two options with DIFFERENT invalid values fingerprint
+ * IDENTICALLY there and distinctly here. That divergence is NOT closed, because
+ * whether a non-numeric value can reach this function is UNPROVEN —
+ * `resolveRunAdmission` takes `unknown`, but the validated contract types
+ * interventions as `number | { value: number }`. Closing it on an unproven
+ * reachability would be guessing. Settle the reachability first, then close it.
+ */
+function comparisonSurvivesDedup(
+  wireOptions: ReadonlyArray<{ interventions?: Record<string, unknown> }>,
+): boolean {
+  const fingerprint = (o: { interventions?: Record<string, unknown> }): string =>
+    Object.entries(o.interventions ?? {})
+      .map(([key, raw]) => {
+        const v =
+          raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
+            ? (raw as { value: unknown }).value
+            : raw;
+        return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
+      })
+      .sort()
+      .join('|');
+  const distinctValuedMaps = new Set<string>(
+    wireOptions
+      .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
+      .map((o) => fingerprint(o)),
+  );
+  return distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
+}
+
+/**
  * Resolve the two-term admission for a graph. Pure and total.
  */
 export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
@@ -585,6 +640,27 @@ function resolveRunAdmissionTerms(
     };
   }
   if (strict.status !== 'unrecoverable') {
+    // ⭐ THE IDENTICAL_OPTIONS FLOOR APPLIES HERE TOO. Strictly ready means "every
+    // option is individually well-formed"; it says NOTHING about whether the
+    // options DIFFER FROM EACH OTHER. PLoT's `IDENTICAL_OPTIONS` is a predicate
+    // over the option SET, so a graph can be strictly ready and still carry no
+    // comparison at all — which is exactly the state this branch used to admit.
+    //
+    // ⛔ DIRECTION, and it is the same argument the waiver branch makes: a false
+    // admission here dies as an opaque HTTP 422 a network hop away, at the wrong
+    // layer. A local refusal is immediate and explicable. This floor can only
+    // convert a false admission into a refusal, and every case it converts is one
+    // PLoT refuses anyway — so it cannot cost a run that would have succeeded.
+    if (!comparisonSurvivesDedup(assessment.analysisReady?.options ?? [])) {
+      return {
+        strict,
+        assessment,
+        plan: empty,
+        willProceed: false,
+        waivedOptionIds: [],
+        canonicalGraph: strict.canonicalGraph,
+      };
+    }
     return {
       strict,
       assessment,
@@ -647,19 +723,46 @@ function resolveRunAdmissionTerms(
     //   ~~"PLoT's `EMPTY_INTERVENTIONS` predicate is exactly this emptiness test
     //     AND NOTHING ELSE (`preflight-v2.ts:184-187`), so an option in this set
     //     is one PLoT will accept."~~
-    // **That is FALSE at PLoT's bytes.** PLoT preflight carries **18 distinct
-    // blocker codes, all live on the v2 run path** (14 via
-    // `runPreflightValidation`, 4 via `validateGoalConstraints`), and a NON-EMPTY
-    // option can trip FOUR of them — so "non-empty ⇒ PLoT will accept" does not
+    // **That is FALSE at PLoT's bytes.** A NON-EMPTY option can still trip
+    // several preflight blockers — so "non-empty ⇒ PLoT will accept" does not
     // hold. `constraint` is also NOT in `NON_CAUSAL_NODE_KINDS`. The old claim
     // was inherited from a narrower reading that PLoT has already flagged against
     // itself.
     //
-    // WHAT THE WAIVER ACTUALLY COVERS, stated as what it is: *of PLoT's 18
-    // preflight blockers, the one this waiver's population can newly trip is
-    // `IDENTICAL_OPTIONS` — and that one is closed by the distinct-map floor
-    // below.* The waiver is not a claim that PLoT accepts everything non-empty.
-    // See {@link isWaivableByComputeDiscard}.
+    // ⚠⚠ THE BLOCKER COUNTS BELOW WERE RE-DERIVED 2026-08-26 AT PLoT `3a3bee58`,
+    // AND THE PREVIOUS SENTENCE HERE WAS A HAND-MAINTAINED MIRROR — it read
+    // "18 distinct blocker codes, ALL LIVE ON THE V2 RUN PATH". The 18 is right;
+    // the "all" is what had drifted. THREE DIFFERENT LEVELS, named separately,
+    // because flattening them is how this comment went wrong in the first place:
+    //
+    //   • **24** — codes DECLARED in `BLOCKER_CODES`
+    //     (`plot-lite-service` `src/types/engine-v3.ts:813`). That array is
+    //     PLoT's own declared source of truth; derive from it, never re-type it.
+    //   • **18** — codes reachable through PREFLIGHT: 14 emitted inside
+    //     `runPreflightValidation` (`src/validation/preflight-v2.ts:861`) plus 4
+    //     blocker-severity codes from `validateGoalConstraints` (`:534`, a
+    //     SEPARATE entry point — it is NOT called by `runPreflightValidation`).
+    //     The old sentence's parenthetical "14 + 4" was correct.
+    //   • **22** — codes live on the V2 RUN PATH: the 18 above plus
+    //     `GOAL_NODE_NOT_CAUSAL` (`routes/v2/run.ts:5519`) and three categorical
+    //     codes via `validation/categorical-detector.ts`, none of which pass
+    //     through preflight at all. The remaining 2 of the 24 are elsewhere:
+    //     `IDENTIFIABILITY_ISSUE` (`trust/critique-builder.ts`) and
+    //     `ISL_CANNOT_IDENTIFY` (`routes/v1/run.ts` — the V1 path, not this one).
+    //
+    // ⭐ AND THE SHARPER FACT, which the counts alone hide: CEE's ENTIRE blocking
+    // vocabulary is THREE kinds (`canonicalise_option_interventions`,
+    // `missing_value`, `model_structure`), and **14 of PLoT's 24 codes have ZERO
+    // references anywhere in CEE `src/`** (measured with a same-sweep contrast:
+    // `IDENTICAL_OPTIONS` = 40 hits, so the sweep was not blind). The gap is not
+    // "a few violations" — it is a refusal vocabulary CEE has largely never heard
+    // of, and a floor can only be written for a code someone has read.
+    //
+    // WHAT THE WAIVER ACTUALLY COVERS, stated as what it is: *the one blocker
+    // this waiver's population can newly trip is `IDENTICAL_OPTIONS` — and that
+    // one is closed by the distinct-map floor below.* The waiver is not a claim
+    // that PLoT accepts everything non-empty.
+    // See {@link isWaivableByComputeDiscard} and {@link comparisonSurvivesDedup}.
     const valued = new Set<string>(
       wireOptions
         .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
@@ -683,23 +786,7 @@ function resolveRunAdmissionTerms(
     // ⛔ DIRECTION IS WHY THIS IS THE HONEST SIDE: a false admission here dies as
     // an opaque HTTP 422 a network hop away, at the wrong layer, on the
     // two-option minimum. A local refusal is immediate and explicable.
-    const interventionFingerprint = (o: { interventions?: Record<string, unknown> }): string =>
-      Object.entries(o.interventions ?? {})
-        .map(([key, raw]) => {
-          const v =
-            raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
-              ? (raw as { value: unknown }).value
-              : raw;
-          return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
-        })
-        .sort()
-        .join('|');
-    const distinctValuedMaps = new Set<string>(
-      wireOptions
-        .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
-        .map((o) => interventionFingerprint(o as { interventions?: Record<string, unknown> })),
-    );
-    const comparisonSurvives = distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
+    const comparisonSurvives = comparisonSurvivesDedup(wireOptions);
     const blockers = assessment.blockingIssues;
     const touched = new Set<string>(plan.scaffolded_option_ids);
 
