@@ -90,14 +90,39 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     ]);
   });
 
-  it('has no permanently reader-only kind after Train C writer declaration', () => {
+  it('declares exactly the 0.50.0 direct-edit kinds reader-only, and no writer kind', () => {
     const readerOnly = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'reader_only_refusal')
-      .map(([kind]) => kind);
+      .map(([kind]) => kind)
+      .sort();
     // Runtime activation is intentionally stricter than this declaration:
     // edge_strength_edit still executes the deployed reader refusal under CAS
     // off/shadow. Reverting Train C restores the explicit map entry as well.
-    expect(readerOnly).toEqual([]);
+    //
+    // ⚠ THIS ASSERTION WAS `toEqual([])`, AND THAT WAS A SNAPSHOT, NOT A RULE.
+    // It was written the moment Train C moved `edge_strength_edit` OUT of this
+    // set, so an empty set meant "Train C is in effect" — a control pinned to
+    // whatever was current, which decays into a constraint the first time
+    // "current" changes. It changed at the 0.50.0 pin: the contract added
+    // `structural_add`, `structural_add_edge` and `structural_rename`, CEE can
+    // parse all three and has a writer for none, and `reader_only_refusal` is
+    // the posture the contract mandates for exactly that state ("Reader-first
+    // adoption is mandatory"). An empty set is no longer the healthy reading.
+    //
+    // Kept EXACT rather than widened, so it still REDs if the set GROWS (a kind
+    // silently parked as reader-only instead of getting a writer) or SHRINKS (a
+    // writer landed and this pin was not revisited).
+    expect(readerOnly).toEqual([
+      'structural_add',
+      'structural_add_edge',
+      'structural_rename',
+    ]);
+    // The ORIGINAL intent of this case, named so it cannot be lost by a future
+    // edit to the list above: no kind that has a server-side writer may be
+    // DECLARED reader-only. Train C regressing would fail here specifically.
+    expect(readerOnly).not.toContain('edge_strength_edit');
+    expect(readerOnly).not.toContain('structural_delete');
+    expect(readerOnly).not.toContain('factor_value_edit');
   });
 
   it('client-only kinds are exactly the ones that commit nothing', () => {

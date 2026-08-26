@@ -289,6 +289,23 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // that still holds the deleted option and re-adds it. A delete that does not
   // reach `scenarios.graph` is not a delete.
   structural_delete: 'mutating',
+  // 0.50.0 — the direct-edit half of the canvas vocabulary. CEE can now PARSE
+  // these (the pin carries them) but has no writer for any of the three, so
+  // they take the contract's own mandated posture: reader-first.
+  //
+  // ⚠ WHY NOT `'ack_and_commit'`, spelled out because it is the tempting cheap
+  // answer and it is the SAME DEFECT the `structural_delete` note above
+  // records. An ack commits a turn row and writes no graph, so the user's new
+  // factor survives exactly until the next reload and then silently vanishes —
+  // a lie told by omission. `'client_only'` is equally wrong: undo/redo/
+  // selection_change are genuinely realised in the client, whereas a
+  // structural add is a request the SERVER must honour and cannot.
+  // `'reader_only_refusal'` is the only posture that leaves the user knowing
+  // what happened, and it is what the contract asks for in terms
+  // ("Reader-first adoption is mandatory", schemas enums.ts).
+  structural_add: 'reader_only_refusal',
+  structural_add_edge: 'reader_only_refusal',
+  structural_rename: 'reader_only_refusal',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -387,28 +404,73 @@ function buildAcknowledgementResponse(
 }
 
 /**
- * Reader-first response for the 0.42 `edge_strength_edit` wire member.
+ * Per-kind copy for the reader-first refusal.
+ *
+ * ⚠ PARTIAL BY DESIGN, WITH A FALLBACK THAT IS TRUE OF EVERY KIND — this is
+ * deliberately NOT a total map. A total `Record<SystemEventKindLiteral, …>`
+ * would force copy for the ten-plus kinds that never refuse, and a
+ * hand-maintained list of "kinds that might refuse" is exactly the mirror this
+ * repo pays for most often: it drifts silently and the drift reads as green.
+ * Here an unlisted kind gets the GENERIC sentence, which is accurate for any
+ * event ("I can't apply this change"), so drift degrades to less-specific copy
+ * and can never produce a FALSE sentence. Adding a kind is an improvement, not
+ * a correctness obligation.
+ */
+const READER_ONLY_REFUSAL_COPY: Partial<
+  Record<SystemEventKindLiteral, { text: string; reason: string }>
+> = {
+  edge_strength_edit: {
+    text: "I can't apply this link-strength change in this version, so I haven't changed the model.",
+    reason: 'edge_strength_edit_reader_only',
+  },
+  // 0.50.0 direct-edit vocabulary — wire members CEE can READ but has no writer
+  // for. Named individually because "I can't apply this change" would leave the
+  // user guessing which gesture was dropped.
+  structural_add: {
+    text: "I can't add a factor to the model in this version, so I haven't changed the model.",
+    reason: 'structural_add_reader_only',
+  },
+  structural_add_edge: {
+    text: "I can't add a link between factors in this version, so I haven't changed the model.",
+    reason: 'structural_add_edge_reader_only',
+  },
+  structural_rename: {
+    text: "I can't rename a factor in this version, so I haven't changed the model.",
+    reason: 'structural_rename_reader_only',
+  },
+};
+
+/**
+ * Reader-first response for a wire member this deployment can parse but not apply.
  *
  * The new discriminator must be understood before any producer emits it, but
  * understanding is not permission to mutate. This response is intentionally
  * explicit and non-retryable: the request parsed, this deployment has no
  * writer for it, and the model was not changed. The stable reason lets a
  * client distinguish this rollout floor from a malformed payload (B1/422).
+ *
+ * ⚠ WHY THIS IS NO LONGER `edge_strength_edit`-SPECIFIC. It was, and 0.50.0
+ * made that a defect: the three new structural members have no writer either,
+ * so declaring them `reader_only_refusal` would have routed a user who ADDED A
+ * FACTOR into the sentence "I can't apply this link-strength change" — a
+ * refusal that names the wrong gesture is worse than a generic one, because it
+ * tells the user something false about their own action.
  */
-function buildEdgeStrengthEditReaderRefusal(
-  payload: SystemEventTurnPayload,
-): OlumiResponse {
+function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiResponse {
+  const copy = READER_ONLY_REFUSAL_COPY[payload.event.kind] ?? {
+    text: "I can't apply this change in this version, so I haven't changed the model.",
+    reason: `${payload.event.kind}_reader_only`,
+  };
   return {
     response_version: 2,
-    assistant_text:
-      "I can't apply this link-strength change in this version, so I haven't changed the model.",
+    assistant_text: copy.text,
     blocks: [
       {
         type: 'error',
         error_code: 'FEATURE_NOT_ENABLED',
         severity: 'warn',
         details: {
-          reason: 'edge_strength_edit_reader_only',
+          reason: copy.reason,
           retryable: false,
         },
       },
@@ -438,7 +500,7 @@ export async function dispatchSystemEvent(
       : declaredHandling;
   const response =
     handling === 'reader_only_refusal'
-      ? buildEdgeStrengthEditReaderRefusal(payload)
+      ? buildReaderOnlyRefusal(payload)
       : buildAcknowledgementResponse(payload);
 
   if (CLIENT_ONLY_EVENT_KINDS.has(payload.event.kind)) {
