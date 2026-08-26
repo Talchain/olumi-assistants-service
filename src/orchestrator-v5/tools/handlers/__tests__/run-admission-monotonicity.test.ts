@@ -364,3 +364,204 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
     });
   });
 });
+
+/**
+ * ⚠⚠ KNOWN-OPEN — REPAIR IS STILL NON-MONOTONE OVER `user_stated` STRUCTURE.
+ *
+ * The fix above makes repair monotone where the gap is `offered` (0 violations
+ * over the lattice). It does NOT reach structure the USER authored, and this
+ * suite says so out loud rather than leaving the gap invisible.
+ *
+ * ## Measured, not assumed (CEE `11a990c3`, 281 lattice states per axis)
+ *
+ *   | axis          | admitted | blocked | monotonicity violations |
+ *   |---------------|----------|---------|-------------------------|
+ *   | `ai_drafted`  | 166      | 115     | **0**                   |
+ *   | `user_stated` | 20       | 261     | **17**                  |
+ *
+ * ## The mechanism, and it is UPSTREAM of the waiver
+ *
+ * `structureProvenance` (`cee/graph-readiness/obligation-provenance.ts`) says, in
+ * its own words, *"An option is user-stated when ANY of its stated effects is."*
+ * So an option with NO values has no stated effects, falls to `unattributed`,
+ * and its gaps are `offered` — waivable, and the model runs.
+ *
+ * **Supplying the FIRST value promotes the whole OPTION to `user_stated`, which
+ * promotes every REMAINING gap on it from `offered` to `required`.** The user
+ * answers one question and the other two turn into demands. That is the same
+ * V-shape, one level up, and no waiver in `analysis-ready-core.ts` can reach it:
+ * under the estate's single obligation authority those blockers really are
+ * `required`.
+ *
+ * Whether "any effect" is the right promotion rule for a gap the user has NOT
+ * touched is an architectural question about that authority, and it is not this
+ * module's to answer unilaterally.
+ *
+ * ## Why an exact SET and not a count
+ *
+ * Pinned by membership so it REDs if the set GROWS (a regression) or SHRINKS (a
+ * fix landed and this note is now stale). A count would hide a swap. Recorded
+ * per CLAUDE.md trap 22f: a gap recorded in the suite is honest; a gap invisible
+ * to it is how four rounds happen.
+ */
+const KNOWN_OPEN_USER_STATED_VIOLATIONS: readonly string[] = [
+  '1+2+3:1,0,3->1,1,3',
+  '1+2+3:1,2,0->1,2,1',
+  '1+3+2+3:0,0,2,3->0,1,2,3',
+  '1+3+2+3:0,3,0,3->0,3,1,3',
+  '1+3+2+3:0,3,2,0->0,3,2,1',
+  '1+3+2+3:1,0,0,3->1,0,1,3',
+  '1+3+2+3:1,0,0,3->1,1,0,3',
+  '1+3+2+3:1,0,2,0->1,0,2,1',
+  '1+3+2+3:1,0,2,0->1,1,2,0',
+  '1+3+2+3:1,0,2,3->1,1,2,3',
+  '1+3+2+3:1,3,0,0->1,3,0,1',
+  '1+3+2+3:1,3,0,0->1,3,1,0',
+  '1+3+2+3:1,3,0,3->1,3,1,3',
+  '1+3+2+3:1,3,2,0->1,3,2,1',
+  '3+3+3:0,3,3->1,3,3',
+  '3+3+3:3,0,3->3,1,3',
+  '3+3+3:3,3,0->3,3,1',
+];
+
+/** Same corpus, but every value carries a declared USER provenance stamp. */
+function buildUserStated(specs: readonly OptionSpec[]) {
+  const options = specs.map((spec, i) => {
+    const interventions: Record<string, unknown> = {};
+    for (let f = 0; f < spec.valued; f += 1) {
+      // `explicit` is a DECLARED member of the observed-state source vocabulary
+      // (`obligation-provenance.ts`), which maps to `user_stated`. An undeclared
+      // stamp parses as SCHEMA_INVALID — a different mechanism entirely, and the
+      // reason an earlier attempt at this fixture was reported unbuildable.
+      interventions[ALL_FACTORS[f]] = { value: 0.25 + f * 0.15 + i * 0.02, source: 'explicit' };
+    }
+    return {
+      id: `opt${i}`, kind: 'option' as const, label: `Option ${i}`, demand: spec.demand,
+      ...(spec.valued > 0 ? { interventions } : {}),
+    };
+  });
+  return {
+    version: '1',
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'Grow revenue without burning the team' },
+      { id: 'decision', kind: 'decision', label: 'Which way forward' },
+      ...ALL_FACTORS.map((f, i) => ({
+        id: f, kind: 'factor', label: `Factor ${i}`, category: 'controllable',
+        observed_state: { value: 0.4 + i * 0.1, cap: 1, source: 'explicit' },
+      })),
+      ...options.map(({ demand: _demand, ...node }) => node),
+    ],
+    edges: [
+      ...options.map((o, i) => v3Edge(`ed${i}`, 'decision', o.id)),
+      ...options.flatMap((o) => ALL_FACTORS.slice(0, o.demand).map((f) => v3Edge(`ef_${o.id}_${f}`, o.id, f))),
+      ...ALL_FACTORS.map((f, i) => v3Edge(`eg${i}`, f, 'goal')),
+    ],
+  };
+}
+
+describe('KNOWN-OPEN: monotonicity over user-authored structure', () => {
+  const SHAPES_US: readonly number[][] = [[3, 3], [3, 3, 3], [1, 2, 3], [2, 2, 2, 2], [1, 3, 2, 3]];
+
+  it('the open set is EXACTLY the recorded one — REDs if it grows OR shrinks', { timeout: 300_000 }, () => {
+    const verdict = new Map<string, boolean>();
+    const obligations = new Set<string>();
+    for (const demands of SHAPES_US) {
+      for (const state of enumerateStates(demands)) {
+        const specs = demands.map((demand, i) => ({ demand, valued: state[i] }));
+        const admission = resolveRunAdmission(buildUserStated(specs));
+        verdict.set(`${demands.join('+')}:${state.join(',')}`, admission.willProceed);
+        for (const issue of admission.assessment.blockingIssues ?? []) {
+          if (issue.code === 'MISSING_OPTION_VALUE') obligations.add(String(issue.obligation));
+        }
+      }
+    }
+    // PRECONDITION: the fixture really does produce `required` obligations, or
+    // this whole block is measuring the `offered` axis over again.
+    expect(obligations.has('required')).toBe(true);
+
+    const violations: string[] = [];
+    for (const demands of SHAPES_US) {
+      for (const state of enumerateStates(demands)) {
+        for (let i = 0; i < state.length; i += 1) {
+          if (state[i] >= demands[i]) continue;
+          const next = [...state];
+          next[i] += 1;
+          const before = verdict.get(`${demands.join('+')}:${state.join(',')}`)!;
+          const after = verdict.get(`${demands.join('+')}:${next.join(',')}`)!;
+          if (before && !after) {
+            violations.push(`${demands.join('+')}:${state.join(',')}->${next.join(',')}`);
+          }
+        }
+      }
+    }
+    expect(violations.sort()).toEqual([...KNOWN_OPEN_USER_STATED_VIOLATIONS]);
+  });
+
+  /**
+   * The mechanism itself, bound directly so it REDs if the promotion rule
+   * changes even where the lattice membership happens to stay the same.
+   */
+  it('supplying the FIRST value promotes the option\'s remaining gaps to `required`', () => {
+    const gaps = (valued: number) =>
+      (resolveRunAdmission(
+        buildUserStated([{ demand: 3, valued: 3 }, { demand: 3, valued: 3 }, { demand: 3, valued }]),
+      ).assessment.blockingIssues ?? []).filter(
+        (i) => i.code === 'MISSING_OPTION_VALUE' && i.option_id === 'opt2',
+      );
+    // No values: the option has no stated effect, so its gaps are only OFFERED.
+    expect(gaps(0).every((i) => i.obligation === 'offered')).toBe(true);
+    // One value: the SAME untouched gaps are now DEMANDED of the user.
+    expect(gaps(1).length).toBeGreaterThan(0);
+    expect(gaps(1).every((i) => i.obligation === 'required')).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐ WHAT THE LATTICE IS STRUCTURALLY BLIND TO — and the guard that covers the
+ * most dangerous part of it.
+ *
+ * The monotonicity property observes ONE BOOLEAN per state. It therefore cannot
+ * distinguish a fix from an over-admission: **monotonicity can be bought either
+ * by removing a false demand or by waiving a real one, and only the first is a
+ * fix.** The M5 mutant proved the method has this hole in the other direction —
+ * tightening the two-option floor to `>` moved 111 of 409 verdicts and the
+ * lattice stayed green, because refusing everything is perfectly monotone.
+ *
+ * So the lattice needs a companion that checks WHAT was admitted, not just that
+ * the shape of the admitted set is monotone. The load-bearing safety property is
+ * PLoT's, and it is exact: `/v2/run` declares `options.minItems: 2`
+ * (`plot-lite-service/src/routes/v2/run.ts:1455`) and preflight raises
+ * `EMPTY_INTERVENTIONS` for any option whose interventions map is empty
+ * (`validation/preflight-v2.ts:184-187`). An admitted run that cannot satisfy
+ * both is admitted straight into a refusal — the false-admission direction.
+ *
+ * ⚠ STILL BLIND, stated rather than implied: this pair says nothing about WHICH
+ * options are ranked, about the honesty of the offer copy, about value MUTATION
+ * (the lattice only ever ADDS), about non-`controllable` factors, about
+ * repair-authored edges, about options with no factor edge at all, or about
+ * topologies where options intervene on disjoint factor sets.
+ */
+describe('nothing is admitted that PLoT would refuse', () => {
+  it('every ADMITTED state carries at least two options with non-empty interventions', { timeout: 300_000 }, () => {
+    let admitted = 0;
+    let blocked = 0;
+    const unsafe: string[] = [];
+    for (const shape of SHAPES) {
+      for (const state of enumerateStates(shape.demands)) {
+        const specs = specsFor(shape.demands, state, shape.baselineIndex);
+        if (!analysable(specs)) { blocked += 1; continue; }
+        admitted += 1;
+        // The submitted set PLoT would receive: an option is submittable exactly
+        // when its interventions are non-empty, which is PLoT's own predicate.
+        const submittable = specs.filter((sp) => sp.valued > 0).length;
+        if (submittable < 2) {
+          unsafe.push(`${shape.name} [${state.join(',')}] admitted with ${submittable} submittable option(s)`);
+        }
+      }
+    }
+    // Discrimination: the corpus must contain both verdicts, or this is vacuous.
+    expect(admitted).toBeGreaterThan(0);
+    expect(blocked).toBeGreaterThan(0);
+    expect(unsafe).toEqual([]);
+  });
+});
