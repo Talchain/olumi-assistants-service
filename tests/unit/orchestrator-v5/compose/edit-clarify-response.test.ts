@@ -24,13 +24,15 @@ const MIXED_NODES: readonly EditClarifyComposerNode[] = Object.freeze([
 
 describe('composeEditClarifyResponse', () => {
   describe('assistant_text contract', () => {
-    it('includes the deterministic lead conveying no model change yet', () => {
+    it('includes the deterministic turn-scoped lead', () => {
       const r = composeEditClarifyResponse({
         reason: 'chip_simplify',
         stage: 'analyse',
         nodes: FACTOR_NODES,
       });
-      expect(r.assistant_text).toContain('The model is unchanged so far.');
+      // Turn-scoped ("from that"), never session-scoped — this module is given
+      // no session state. See edit-clarify-turn-scoped-lead.test.ts.
+      expect(r.assistant_text).toContain("I haven't changed anything from that.");
     });
 
     it('omits the freshness sentence by default', () => {

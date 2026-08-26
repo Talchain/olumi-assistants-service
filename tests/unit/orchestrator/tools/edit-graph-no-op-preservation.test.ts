@@ -43,7 +43,7 @@ import type { LLMAdapter } from '../../../../src/adapters/llm/types.js';
 // Lane 22: the declined-preservation fallback is now the richer clarify
 // copy (composeEditClarifyResponse parts, with 1–3 factor/option-label
 // chips), not the chip-less NO_OP_FALLBACK_TEXT.
-const FALLBACK_SENTINEL = 'The model is unchanged so far.';
+const FALLBACK_SENTINEL = "I haven't changed anything from that.";
 
 function makeContext(): ConversationContext {
   return {
