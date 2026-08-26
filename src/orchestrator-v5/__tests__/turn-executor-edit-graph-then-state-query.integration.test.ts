@@ -33,6 +33,9 @@
  *   5. Fresh path unchanged: run_analysis with NO subsequent edit →
  *      what_would_flip chip preserved on the explain turn (regression
  *      guard for the chip swap added in C4).
+ *   6. An edit-CONSEQUENCE question reaches the read-only reasoning model with
+ *      the canonical post-edit graph, persisted receipt and stale verdict;
+ *      degraded canonical reads fail weak and never substitute request bytes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -57,25 +60,38 @@ const mockState: {
   priorTurns: Array<Record<string, unknown>>;
   priorFacts: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
+  graphReadFails: boolean;
+  appendWrites: Array<Record<string, unknown>>;
 } = {
   priorTurns: [],
   priorFacts: [],
   persistedGraph: null,
+  graphReadFails: false,
+  appendWrites: [],
 };
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (write: Record<string, unknown>) => {
+      mockState.appendWrites.push(write);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => mockState.persistedGraph,
-    loadGraphAndBriefText: async () => ({
-      graph: mockState.persistedGraph,
-      briefText: null,
-    }),
+    loadGraph: async () => {
+      if (mockState.graphReadFails) throw new Error('simulated canonical graph read failure');
+      return mockState.persistedGraph;
+    },
+    loadGraphAndBriefText: async () => {
+      if (mockState.graphReadFails) throw new Error('simulated canonical graph read failure');
+      return {
+        graph: mockState.persistedGraph,
+        briefText: null,
+      };
+    },
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
   }),
@@ -102,7 +118,7 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'opt_hire',
       to: 'fac_hiring_cost',
-      edge_type: 'causal',
+      edge_type: 'directed',
       strength: { mean: 0.5, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'positive',
@@ -110,8 +126,8 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'fac_hiring_cost',
       to: 'goal_q3',
-      edge_type: 'causal',
-      strength: { mean: 0.4, std: 0.1 },
+      edge_type: 'directed',
+      strength: { mean: -0.4, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'negative',
     },
@@ -122,12 +138,12 @@ const PRE_EDIT_GRAPH = {
 const POST_EDIT_GRAPH = {
   ...PRE_EDIT_GRAPH,
   edges: [
+    PRE_EDIT_GRAPH.edges[0]!,
     {
-      ...PRE_EDIT_GRAPH.edges[0]!,
-      strength: { mean: 0.7, std: 0.1 },
+      ...PRE_EDIT_GRAPH.edges[1]!,
+      strength: { mean: -0.7, std: 0.1 },
       exists_probability: 0.95,
     },
-    PRE_EDIT_GRAPH.edges[1]!,
   ],
 };
 
@@ -139,7 +155,7 @@ const POST_EDIT_HASH = computeAnalysisAffectingGraphHash(POST_EDIT_GRAPH as neve
 // into assistant_text. Production fixtures rarely hit the cap because
 // the upstream sanitiser already truncates.
 const SAFE_SUMMARY =
-  'Strengthened the Hiring Cost → Budget Overrun Risk edge from 0.5 to 0.7.';
+  'Strengthened the Hiring Cost → Q3 Roadmap downside from 0.4 to 0.7.';
 
 // Accepted edit_graph fact — the shape EditGraphHandlerFactSchema produces.
 // Modelled on the rich-path builder output: status='applied', noop=false,
@@ -265,6 +281,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
     mockState.priorTurns = [];
     mockState.priorFacts = [];
     mockState.persistedGraph = null;
+    mockState.graphReadFails = false;
+    mockState.appendWrites = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 
@@ -370,6 +388,112 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt!.data.reason).toBe('graph_hash_diverged');
       expect(evt!.data.graph_hash_at_run).toBe(PRE_EDIT_HASH);
       expect(evt!.data.current_graph_hash).toBe(POST_EDIT_HASH);
+    });
+
+    it('reasons about the accepted edit from canonical post-edit state without writing the model', async () => {
+      const answer =
+        'The stronger saved cost link now puts more downside pressure on the Q3 goal. ' +
+        'The earlier analysis is out of date, so rerun it before comparing options.';
+      const adapter = callingRoutingAdapter(answer);
+      const payload = mkPayload('What did that update do?');
+      const canonicalBefore = JSON.stringify(POST_EDIT_GRAPH);
+
+      const result = await runTurnExecutor(
+        payload,
+        'req-edit-effect-canonical',
+        {
+          routingAdapter: adapter,
+          // Deliberately stale request bytes: persisted POST_EDIT_GRAPH must win.
+          graphState: PRE_EDIT_GRAPH as never,
+        },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const prompt = adapter.chatWithTools.mock.calls[0]![0].messages[0]!.content as string;
+      expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
+      expect(prompt).toContain('"recent_changes": [');
+      expect(prompt).toContain(SAFE_SUMMARY);
+      expect(prompt).toContain('"freshness": "stale"');
+      expect(prompt).toContain('"rerun_required": true');
+      expect(prompt).toMatch(
+        /"from": "fac_hiring_cost"[\s\S]{0,320}"to": "goal_q3"[\s\S]{0,320}"relationship": "strong negative link"/,
+      );
+      expect(prompt).not.toMatch(
+        /"from": "fac_hiring_cost"[\s\S]{0,320}"to": "goal_q3"[\s\S]{0,320}"relationship": "moderate negative link"/,
+      );
+
+      const guardEvent = events.find((e) => e.event === 'v5.state_query_guard');
+      expect(guardEvent?.data).toMatchObject({
+        matched: false,
+        dispatch: null,
+        recent_change_count: 1,
+      });
+      expect(result.response.assistant_text).toBe(answer);
+      expect(result.telemetry.turn_class).toBe('direct_answer');
+      expect(result.telemetry.llm_calls_used).toBe(1);
+
+      // A read-only reasoning turn still persists its conversation record, but
+      // carries no graph, handler fact or mutation/version receipt.
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-edit-effect-canonical',
+      );
+      expect(committed).toBeDefined();
+      expect(committed).toMatchObject({
+        handler_id: null,
+        turn_class: 'direct_answer',
+        handler_facts: [],
+      });
+      expect(committed).toHaveProperty('graph', undefined);
+      expect(result.response.blocks).toEqual([]);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(JSON.stringify(POST_EDIT_GRAPH)).toBe(canonicalBefore);
+    });
+
+    it('fails weak on a degraded canonical read and never promotes valid request bytes', async () => {
+      const requestCanaryGraph = {
+        ...POST_EDIT_GRAPH,
+        nodes: POST_EDIT_GRAPH.nodes.map((node) =>
+          node.id === 'fac_hiring_cost'
+            ? { ...node, label: 'REQUEST CANARY COST' }
+            : node,
+        ),
+      };
+      mockState.graphReadFails = true;
+      const adapter = callingRoutingAdapter(
+        'I cannot establish the saved model consequence from the available state.',
+      );
+      const payload = mkPayload('What did that update do?');
+
+      const result = await runTurnExecutor(
+        payload,
+        'req-edit-effect-degraded',
+        { routingAdapter: adapter, graphState: requestCanaryGraph as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const prompt = adapter.chatWithTools.mock.calls[0]![0].messages[0]!.content as string;
+      expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "unavailable"/);
+      expect(prompt).not.toContain('REQUEST CANARY COST');
+      expect(prompt).toContain(SAFE_SUMMARY);
+      expect(prompt).toContain(
+        'caller input, conversation or summaries as model truth',
+      );
+
+      const guardEvent = events.find((e) => e.event === 'v5.state_query_guard');
+      expect(guardEvent?.data).toMatchObject({ matched: false, dispatch: null });
+      // The read-only answer is retained as conversation, but valid request
+      // bytes never become a fallback graph write when canonical state is
+      // unavailable.
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-edit-effect-degraded',
+      );
+      expect(committed).toBeDefined();
+      expect(committed).toMatchObject({ handler_id: null, handler_facts: [] });
+      expect(committed).toHaveProperty('graph', undefined);
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+      expect(result.telemetry.commit_performed).toBe(true);
+      expect(result.response.blocks).toEqual([]);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
     });
   });
 

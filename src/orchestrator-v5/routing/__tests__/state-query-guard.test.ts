@@ -9,7 +9,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
-import { tryStateQueryGuard } from '../state-query-guard.js';
+import { hasMutationWarrantSignal } from '../mutation-warrant.js';
+import {
+  isStateQueryQuestionShape,
+  tryStateQueryGuard,
+} from '../state-query-guard.js';
 
 const ADD_CONSTRAINT_50K: RecentMutation = {
   action: 'constraint_added',
@@ -59,6 +63,61 @@ describe('tryStateQueryGuard', () => {
         expect(outcome.matched).toBe(true);
       });
     }
+  });
+
+  describe('accepted-edit consequence questions', () => {
+    const effectQuestions = [
+      'What did that update do?',
+      'What did the change do?',
+      'What did this edit do?',
+      'What did your adjustment do?',
+    ];
+
+    for (const message of effectQuestions) {
+      it(`protects ${JSON.stringify(message)} from mutation but declines it to grounded reasoning`, () => {
+        // Route-level edit suppression remains authoritative: these words may
+        // look edit-shaped lexically, but the user is asking a read question.
+        expect(isStateQueryQuestionShape(message)).toBe(true);
+        expect(hasMutationWarrantSignal(message)).toBe(false);
+
+        // The deterministic guard must not answer an effect question with the
+        // same receipt used for "what changed?". The downstream model already
+        // receives that receipt together with canonical graph/freshness state.
+        expect(tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+        })).toEqual({ matched: false });
+      });
+    }
+
+    it('still declines when no receipt is available instead of inventing an effect or an absence claim', () => {
+      expect(tryStateQueryGuard({
+        message: 'What did that update do?',
+        contextPack: ctxWith([]),
+      })).toEqual({ matched: false });
+    });
+
+    it('does not suppress a compound effect question followed by a real edit', () => {
+      const message = 'What did that update do? Add another option.';
+      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(hasMutationWarrantSignal(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
+    it('preserves deterministic receipt readback for the neighbouring question', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      });
+      expect(outcome).toMatchObject({
+        matched: true,
+        dispatch: 'with_recent_change',
+        recent_change: ADD_CONSTRAINT_50K,
+      });
+    });
   });
 
   describe('does NOT match edit-style messages', () => {
