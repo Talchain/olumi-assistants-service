@@ -1,0 +1,40 @@
+# Cross-user isolation drift guard.
+#
+# The browser addresses `scenarios` rows by id alone, so the database's own row
+# policies are the only authority on that path. Those policies are
+# version-controlled (supabase/migrations/20260226010000_*.sql) but nothing
+# derived their DEPLOYED state, so a policy changed outside the repo would have
+# been invisible here. This job closes that gap.
+#
+# It needs NO secrets: it uses the public publishable key the deployed bundle
+# already serves to every visitor, and mints its own throwaway accounts.
+#
+# ⚠ It proves DEPLOYED BEHAVIOUR, not that the deployed policy came from the
+#   checked-in migration. See the script header before quoting it as evidence.
+name: RLS isolation guard
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [staging]
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/ci/rls-isolation-guard.mjs'
+      - '.github/workflows/rls-isolation-guard.yml'
+
+jobs:
+  isolation:
+    name: Cross-user isolation (deployed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No install step: the guard is dependency-free by design, so a broken
+      # lockfile can never turn a real drift signal into a skipped job.
+      - name: Assert cross-user isolation on the deployed database
+        run: node scripts/ci/rls-isolation-guard.mjs
