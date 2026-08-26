@@ -250,7 +250,7 @@ describe('admission absorbs an ABSENCE, never a value it cannot read', () => {
   });
 });
 
-describe('a blocker on a SUBMITTED option is never waived', () => {
+describe('the EXCLUSION waiver never answers a blocker on a SUBMITTED option', () => {
   /**
    * ⚠ ALSO FOUND BY A SURVIVING MUTANT (drop the touched-option identity check).
    *
@@ -260,10 +260,45 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
    *
    * `opt_partial` is linked to TWO factors and valued on ONE. Its interventions
    * are non-empty, so the gate SUBMITS it — it is not touched — yet it still
-   * raises `MISSING_OPTION_VALUE` for the unvalued factor. Exclusion answers
-   * nothing about an option that is being submitted, so the refusal must stand.
-   * Without the identity conjunct this graph is admitted and the run goes out
-   * carrying an option CEE has just said is incomplete.
+   * raises `MISSING_OPTION_VALUE` for the unvalued factor.
+   *
+   * ## ⚠⚠ THIS SPEC'S VERDICT CHANGED ON 2026-08-25, AND THE REASON MATTERS
+   *
+   * It previously asserted `willProceed === false` for this graph. That was
+   * correct about the EXCLUSION — exclusion answers nothing about an option
+   * being submitted, and that conjunct is UNCHANGED and still pinned below —
+   * but it used the whole-graph verdict to bind it, and the verdict now has a
+   * SECOND legitimate cause.
+   *
+   * The founder ruling (2026-08-25): *"admission should require only inputs the
+   * compute genuinely consumes. A missing option×factor value that downstream
+   * compute discards must not block analysis. [...] Repair must be monotone:
+   * adding valid information cannot make the model less analysable."*
+   *
+   * Blocking this graph broke monotonicity outright: `opt_partial` valued on
+   * ZERO factors is excluded and waived (admitted), and valuing ONE factor
+   * blocked it. Measured on pristine `staging` 7401725f; the lattice is in
+   * `run-admission-monotonicity.test.ts`. And the obligation itself is minted
+   * from an option→factor EDGE that **PLoT strips before the engine ever sees
+   * it** (`plot-lite-service` `src/normalisation/option-filter.ts:93-97`,
+   * staging `3a3bee58`) — `option.interventions` is the only channel by which an
+   * option touches a factor, so the unvalued pair is a no-op at the compute.
+   *
+   * So the blocker on `opt_partial` is now answered by
+   * `isWaivableByComputeDiscard`, which is a DIFFERENT predicate answering a
+   * DIFFERENT question. The assertions below therefore bind the exclusion
+   * conjunct DIRECTLY — `opt_partial` must not appear in `waivedOptionIds` and
+   * must not be stamped `waived_by_exclusion` — which is what the surviving
+   * mutant would violate. Dropping the identity check still REDs this spec.
+   *
+   * ⚠ WHAT THIS DOES NOT DISCHARGE: the ruling licenses this only where
+   * "uncertainty is represented honestly". The run now goes out carrying an
+   * option CEE has said is incomplete, and there is no carrier marking it as
+   * such — `waived_by_exclusion` would be a lie here, and a truthful
+   * `waived_by_compute_discard` needs a new member on
+   * `CanonicalReadinessIssue`. The blockers do remain visible in
+   * `assessment.blockingIssues`, so the gap is in the OFFER COPY, not in
+   * whether the user can see the missing value. Tracked as a follow-up.
    */
   const PARTIAL_PLUS_EMPTY = {
     version: '1',
@@ -290,7 +325,7 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
     ],
   };
 
-  it('refuses when a waivable-CODE blocker names an option the run will SUBMIT', () => {
+  it('does not exclusion-waive a submitted option, even on an identical code', () => {
     const admission = resolveRunAdmission(PARTIAL_PLUS_EMPTY);
 
     // PRECONDITIONS PINNED IN-TEST — the fixture must genuinely present BOTH
@@ -304,8 +339,21 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
     );
     expect(blockers.map((i) => i.option_id).sort()).toEqual(['opt_empty', 'opt_partial']);
 
-    // The verdict under test: identical code, different option, refusal stands.
-    expect(admission.willProceed).toBe(false);
+    // ⭐ THE CLAIM UNDER TEST, bound DIRECTLY rather than through the verdict:
+    // identical code, different option ⇒ the EXCLUSION does not answer it.
+    // Dropping the touched-option identity conjunct makes `opt_partial` appear
+    // in both of these, so the surviving mutant still REDs here.
+    expect(admission.waivedOptionIds).toEqual(['opt_empty']);
+    const partialBlocker = (admission.assessment.blockingIssues ?? []).find(
+      (i) => i.option_id === 'opt_partial' && i.code === 'MISSING_OPTION_VALUE',
+    );
+    expect(partialBlocker).toBeDefined();
+    expect(partialBlocker?.waived_by_exclusion).toBeUndefined();
+
+    // The graph is nonetheless ADMITTED — by the compute-discard waiver, not by
+    // the exclusion. See the adjudication above: refusing it broke repair
+    // monotonicity, and the obligation is minted from an edge PLoT strips.
+    expect(admission.willProceed).toBe(true);
   });
 
   it('DISCRIMINATING TWIN — completing that option admits the run', () => {
@@ -421,5 +469,228 @@ describe('the route and the run give ONE answer', () => {
     expect(route.can_run_analysis).toBe(false);
     expect(route.scaffold_plan.will_scaffold_options).toBe(true);
     expect(route.readiness_issues.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ⭐ GATE 1 (PR #1129 review) — THE COMPARISON FLOOR COUNTS *DISTINCT* MAPS,
+ * NOT VALUED ONES.
+ *
+ * PLoT does not need two VALUED options; it needs two DISTINGUISHABLE ones.
+ * `identical-options.ts:102-119` fingerprints an option as its sorted
+ * `nodeId:value` pairs (snapped to 1e-9) and DEDUPLICATES; when fewer than two
+ * unique fingerprints remain, `preflight-v2.ts:443-449` raises the
+ * `IDENTICAL_OPTIONS` BLOCKER and the v2 run 422s.
+ *
+ * ⚠ WHY NEITHER EXISTING CORPUS COULD SEE THIS — check what a corpus EXCLUDES,
+ * not what it covers. Both builders give every option a DIFFERENT value by
+ * construction: `buildStamped` uses `0.25 + f * 0.15 + i * 0.02` and `graphWith`
+ * uses `0.3 + i * 0.2`, and in both the `i` term makes a collision unreachable.
+ * The collision class is not under-tested here, it is STRUCTURALLY ABSENT — so a
+ * fully green lattice was fully consistent with this admission being wrong.
+ *
+ * Direction, which is what makes it a defect rather than a preference: a false
+ * ADMISSION here dies as an opaque HTTP 422 one network hop away, on the
+ * two-option minimum — the commonest shape there is. A local refusal is
+ * immediate and explicable.
+ */
+/**
+ * ⚠ PARTLY valued, deliberately — and my first attempt at this fixture got it
+ * wrong in a way worth recording. Two options valued on EVERY connected factor
+ * raise no `MISSING_OPTION_VALUE` at all, so the waiver path is never entered
+ * and `comparisonSurvives` never consulted: the graph admits for a reason that
+ * has nothing to do with this floor. The floor gates the WAIVER
+ * (`comparisonSurvives && isWaivableByComputeDiscard(...)`), so the case must be
+ * one where a waiver is actually being asked for. Both options are therefore
+ * connected to TWO factors and valued on ONE.
+ */
+const identicalMapGraph = (valueA: number, valueB: number) => {
+  const options = [
+    option('opt_a', 'Option A', { fac_velocity: valueA }),
+    option('opt_b', 'Option B', { fac_velocity: valueB }),
+  ];
+  return {
+    version: '1',
+    nodes: [
+      ...baseNodes(),
+      {
+        id: 'fac_quality',
+        kind: 'factor',
+        label: 'Delivery Quality',
+        category: 'controllable',
+        observed_state: { value: 0.5, cap: 1 },
+      },
+      ...options,
+    ],
+    edges: [
+      ...options.map((o, i) => v3Edge(`ed${i}`, 'decision', o.id)),
+      ...options.map((o, i) => v3Edge(`ef${i}`, o.id, 'fac_velocity')),
+      // The SECOND connection is what makes each option partly-valued, so a
+      // waiver is genuinely being requested on both.
+      ...options.map((o, i) => v3Edge(`efq${i}`, o.id, 'fac_quality')),
+      v3Edge('eg', 'fac_velocity', 'goal'),
+      v3Edge('egq', 'fac_quality', 'goal'),
+    ],
+  };
+};
+
+describe('the comparison floor counts DISTINCT intervention maps', () => {
+  it('2opt_IDENTICAL_partly_valued — REFUSES two options whose maps coincide', () => {
+    const graph = identicalMapGraph(0.5, 0.5);
+
+    // PRECONDITION, asserted in-test so a RED is the defect and not a broken
+    // fixture: both options ARE valued (so the old `valued.size >= 2` floor is
+    // satisfied) and their maps ARE identical (so PLoT would dedupe to one).
+    const admission = resolveRunAdmission(graph);
+    const wire = admission.assessment.analysisReady?.options ?? [];
+    expect(wire).toHaveLength(2);
+    const fingerprints = new Set(
+      wire.map((o) => JSON.stringify(Object.entries(o.interventions ?? {}).sort())),
+    );
+    expect(fingerprints.size).toBe(1);
+    // ...and a waiver IS being requested, so the floor is genuinely consulted.
+    expect(
+      (admission.assessment.blockingIssues ?? []).some((i) => i.code === 'MISSING_OPTION_VALUE'),
+    ).toBe(true);
+
+    expect(admission.willProceed).toBe(false);
+  });
+
+  it('OPPOSITE-DIRECTION TWIN — two DISTINCT maps are still ADMITTED', () => {
+    const graph = identicalMapGraph(0.5, 0.7);
+
+    const admission = resolveRunAdmission(graph);
+    const wire = admission.assessment.analysisReady?.options ?? [];
+    const fingerprints = new Set(
+      wire.map((o) => JSON.stringify(Object.entries(o.interventions ?? {}).sort())),
+    );
+    // The twin's own precondition: this graph differs from the case above in
+    // EXACTLY one way — the maps are distinguishable.
+    expect(fingerprints.size).toBe(2);
+
+    expect(admission.willProceed).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐ THE BOUNDARY, PINNED — `collision_2opt`.
+ *
+ * The distinct-map floor adds EXACTLY ONE monotonicity violation, and it is
+ * CORRECT rather than a defect: a value that makes two options identical
+ * collapses them into one option, and one option cannot be compared. The scoped
+ * invariant — *"user information that keeps the option set DISTINGUISHABLE
+ * cannot make the model less analysable"* — does not cover this transition, so
+ * the case sits outside the claim rather than contradicting it.
+ *
+ * ⚠ TWO THINGS THIS FIXTURE HAD TO GET RIGHT, both found by EXECUTION after a
+ * first version passed for the wrong reason:
+ *
+ *  1. The options must be PARTLY valued, because the floor gates the WAIVER
+ *     (`comparisonSurvives && isWaivableByComputeDiscard(...)`). Two fully-valued
+ *     options raise no `MISSING_OPTION_VALUE`, so no waiver is requested and the
+ *     floor is never consulted.
+ *  2. A THIRD factor is required, and this is the subtle half. A pure ADDITION
+ *     that completes both options also REMOVES the blocker, so the waiver
+ *     disappears along with the collision and the graph admits for an unrelated
+ *     reason. The third factor keeps a value outstanding on both options AFTER
+ *     the addition, so the waiver survives and the floor actually decides.
+ *
+ * ⚠ AND THE RESIDUAL THIS EXPOSES, recorded rather than quietly fixed: because
+ * the floor lives inside the waiver path, a FULLY-VALUED identical pair is still
+ * ADMITTED and would still 422 at PLoT with `IDENTICAL_OPTIONS`. That is a real
+ * remaining gap, it is OUTSIDE this PR's adjudicated scope, and it is pinned
+ * below so it cannot be mistaken for covered.
+ */
+describe('collision_2opt — the ONE monotonicity violation the floor adds, and why it is right', () => {
+  const threeFactorGraph = (
+    aMap: Record<string, number>,
+    bMap: Record<string, number>,
+  ) => {
+    const options = [option('opt_a', 'Option A', aMap), option('opt_b', 'Option B', bMap)];
+    const extraFactor = (id: string, label: string) => ({
+      id,
+      kind: 'factor',
+      label,
+      category: 'controllable',
+      observed_state: { value: 0.5, cap: 1 },
+    });
+    return {
+      version: '1',
+      nodes: [
+        ...baseNodes(),
+        extraFactor('fac_quality', 'Delivery Quality'),
+        // The third factor NEITHER option ever values — it keeps a waiver
+        // outstanding on both, before and after the addition under test.
+        extraFactor('fac_morale', 'Team Morale'),
+        ...options,
+      ],
+      edges: [
+        ...options.map((o, i) => v3Edge(`ed${i}`, 'decision', o.id)),
+        ...options.map((o, i) => v3Edge(`ef${i}`, o.id, 'fac_velocity')),
+        ...options.map((o, i) => v3Edge(`efq${i}`, o.id, 'fac_quality')),
+        ...options.map((o, i) => v3Edge(`efm${i}`, o.id, 'fac_morale')),
+        v3Edge('eg', 'fac_velocity', 'goal'),
+        v3Edge('egq', 'fac_quality', 'goal'),
+        v3Edge('egm', 'fac_morale', 'goal'),
+      ],
+    };
+  };
+
+  const BEFORE = threeFactorGraph({ fac_velocity: 0.5, fac_quality: 0.3 }, { fac_velocity: 0.5 });
+  const AFTER = threeFactorGraph(
+    { fac_velocity: 0.5, fac_quality: 0.3 },
+    { fac_velocity: 0.5, fac_quality: 0.3 },
+  );
+
+  it('BEFORE — distinguishable maps ADMIT, with a waiver genuinely outstanding', () => {
+    const before = resolveRunAdmission(BEFORE);
+    // Precondition: a waiver IS being requested, so the floor is consulted.
+    expect(
+      (before.assessment.blockingIssues ?? []).some((i) => i.code === 'MISSING_OPTION_VALUE'),
+    ).toBe(true);
+    expect(before.willProceed).toBe(true);
+  });
+
+  it('AFTER — the user ADDS one true value, the maps coincide, and the model REFUSES', () => {
+    const after = resolveRunAdmission(AFTER);
+    // The waiver is STILL outstanding (fac_morale unvalued on both), so this
+    // refusal is the floor's doing and not the blocker simply disappearing.
+    expect(
+      (after.assessment.blockingIssues ?? []).some((i) => i.code === 'MISSING_OPTION_VALUE'),
+    ).toBe(true);
+    const wire = after.assessment.analysisReady?.options ?? [];
+    const fingerprints = new Set(
+      wire.map((o) => JSON.stringify(Object.entries(o.interventions ?? {}).sort())),
+    );
+    expect(wire).toHaveLength(2);
+    expect(fingerprints.size).toBe(1);
+
+    expect(after.willProceed).toBe(false);
+  });
+
+  it('KNOWN-OPEN — a FULLY-valued identical pair is still admitted (outside this PR)', () => {
+    // No third factor: both options complete, so no waiver, so the floor never
+    // runs. PLoT would still raise `IDENTICAL_OPTIONS` and 422. Pinned so the
+    // gap is visible in the suite; closing it means moving the floor out of the
+    // waiver path, which is a behaviour change beyond this PR's scope.
+    const options = [
+      option('opt_a', 'Option A', { fac_velocity: 0.5 }),
+      option('opt_b', 'Option B', { fac_velocity: 0.5 }),
+    ];
+    const fullyValued = {
+      version: '1',
+      nodes: [...baseNodes(), ...options],
+      edges: [
+        ...options.map((o, i) => v3Edge(`ed${i}`, 'decision', o.id)),
+        ...options.map((o, i) => v3Edge(`ef${i}`, o.id, 'fac_velocity')),
+        v3Edge('eg', 'fac_velocity', 'goal'),
+      ],
+    };
+    const admission = resolveRunAdmission(fullyValued);
+    expect(
+      (admission.assessment.blockingIssues ?? []).some((i) => i.code === 'MISSING_OPTION_VALUE'),
+    ).toBe(false);
+    // Documents TODAY's behaviour, not the desired one.
+    expect(admission.willProceed).toBe(true);
   });
 });

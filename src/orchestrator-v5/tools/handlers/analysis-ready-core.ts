@@ -46,7 +46,11 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
-import { computeScaffoldPlan, type ScaffoldPlan } from './analysable-option-gate.js';
+import {
+  computeScaffoldPlan,
+  PLOT_MIN_COMPARISON_OPTIONS,
+  type ScaffoldPlan,
+} from './analysable-option-gate.js';
 
 // ============================================================================
 // Neutral verdict vocabulary
@@ -409,6 +413,100 @@ function isWaivableByExclusion(
 }
 
 /**
+ * ⭐⭐ THE SECOND WAIVER, AND IT ANSWERS A DIFFERENT QUESTION FROM THE FIRST.
+ * The two are named apart deliberately: this estate's most expensive defect
+ * class is two authorities under one name (CLAUDE.md trap 21), and collapsing
+ * these into one predicate is exactly how that starts.
+ *
+ *   `isWaivableByExclusion`     — *"is the run about to DROP the option this
+ *                                 blocker names?"* If so nothing is analysed
+ *                                 for it, so the missing value cannot matter.
+ *   `isWaivableByComputeDiscard` — *"may this gap be DEMANDED of the user at
+ *                                 all, and does the compute consume it?"* It
+ *                                 answers the first half by CONSULTING the
+ *                                 existing `obligation` stamp rather than
+ *                                 minting a rival predicate beside it.
+ *
+ * ## Why a missing option×factor value on a VALUED option is not consumed
+ *
+ * The blocker is minted per option→factor EDGE (`cee/transforms/analysis-ready.ts`).
+ * **PLoT strips every edge incident to an `option`/`decision`/`constraint` node
+ * before the graph reaches the engine** (`plot-lite-service`
+ * `src/normalisation/option-filter.ts:93-97`, staging `3a3bee58`), so
+ * `option.interventions` is the ONLY channel by which an option touches a
+ * factor. An option→factor edge with no matching intervention key is a **no-op
+ * at the compute** — CEE was minting a mandatory obligation from an artefact
+ * the engine never receives.
+ *
+ * What the engine actually does with a factor the option does not intervene on
+ * (`Inference-Service-Layer` `src/services/robustness_analyzer_v2.py:1428-1452`,
+ * staging `28fe0c95`) is one of three things, none of them a refusal: it is
+ * SAMPLED every Monte Carlo iteration when it carries a `parameter_uncertainty`
+ * (shared across options as common random numbers, so it widens the outcome
+ * distribution without differentiating the arms); it is HELD at
+ * `observed_state.value` when it is a root; or it is RECOMPUTED from its parents
+ * by the structural equation when it is not. Uncertainty is represented, not
+ * invented.
+ *
+ * ⚠ AND THE PART THAT IS **NOT** WAIVED, STATED SO IT IS NOT LOST: PLoT's
+ * preflight refuses an option whose `interventions` map is EMPTY
+ * (`validation/preflight-v2.ts:184-187` — `Object.keys(...).length === 0`, and
+ * nothing else). That refusal is real, so this waiver requires the option to
+ * carry **at least one** real value, and requires at least
+ * {@link PLOT_MIN_COMPARISON_OPTIONS} options to carry one. A wholly-empty
+ * option is still the exclusion's business, not this one's.
+ *
+ * ⚠ SCOPE, because a waiver that grows is how a gate stops being a gate: ONLY
+ * `MISSING_OPTION_VALUE`. `OPTION_NEEDS_ENCODING` and `OPTION_NEEDS_MAPPING`
+ * are NOT here — an unencodable or unmapped value is not a value the compute
+ * silently handles, it is one CEE could not resolve. Structural, numeric,
+ * ambiguous-value and internal blockers keep the refusal exactly as before.
+ *
+ * ⚠ EVIDENCE CLASS: the PLoT/ISL facts above are STATIC READS of those repos'
+ * own bytes at the SHAs named — not execution witnesses. They are why this
+ * waiver is *correct*; they are not why it is *safe*. What makes it safe is the
+ * monotonicity invariant it restores, which IS proven by execution against this
+ * module (`__tests__/run-admission-monotonicity.test.ts`).
+ */
+function isWaivableByComputeDiscard(
+  issue: CanonicalReadinessIssue,
+  valuedOptionIds: ReadonlySet<string>,
+): boolean {
+  // (1) THE PER-(OPTION,FACTOR) AXIS ONLY. The over-demand that has been
+  //     measured is confined to this axis; every other blocker code keeps its
+  //     refusal until compute's discard is proven for it SEPARATELY.
+  if (issue.code !== 'MISSING_OPTION_VALUE') return false;
+
+  // (2) ⭐ THE EXISTING AUTHORITY — CONSULTED, NOT RE-DERIVED.
+  //     `classifyIssueObligation` (`cee/graph-readiness/obligation-provenance.ts`)
+  //     already stamps every issue with `obligation`, and its rule is one line in
+  //     one place by design: *"`user_stated` and only `user_stated` earns a
+  //     demand"* (`obligationFor`). An option→factor effect is `user_stated` only
+  //     when BOTH ends are the user's — the weakest end wins — so a gap over
+  //     structure the DRAFTER authored is `offered`, i.e. it may be put to the
+  //     user as an offer and never as a demand.
+  //
+  //     That is exactly the defect this fix exists to remove: readiness was
+  //     minting a MANDATORY per-(option,factor) obligation from an edge no user
+  //     drew. Reading the stamped field rather than writing a second predicate is
+  //     deliberate — a rival authority beside this one is the defect class this
+  //     estate pays for most often, and `obligation-provenance.ts` says so itself.
+  //
+  //     `undefined` is treated as NOT waivable: an unstamped issue means the
+  //     classifier did not run, and a missing verdict must not read as consent.
+  if (issue.obligation !== 'offered') return false;
+
+  // (3) PLoT'S REAL REFUSAL, WHICH IS NOT WAIVED. `EMPTY_INTERVENTIONS` fires on
+  //     `Object.keys(option.interventions ?? {}).length === 0` and nothing else
+  //     (`plot-lite-service` `src/validation/preflight-v2.ts:184-187`, staging
+  //     `3a3bee58`), and a blocker fails the whole preflight. So the option must
+  //     carry at least ONE real value. Without this conjunct an empty option's
+  //     blocker would be waived here and the run would be admitted straight into
+  //     a preflight refusal — F4 drift in the false-admission direction.
+  return typeof issue.option_id === 'string' && valuedOptionIds.has(issue.option_id);
+}
+
+/**
  * Resolve the two-term admission for a graph. Pure and total.
  */
 export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
@@ -525,18 +623,120 @@ function resolveRunAdmissionTerms(
       // been unconditional since 2026-07-20, O-7 wave 2).
       scaleNetEnabled: true,
     });
-    if (!plan.will_scaffold_options) {
-      return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
-    }
-    const touched = new Set<string>(plan.scaffolded_option_ids);
+    // ⭐ REPAIR MONOTONICITY (founder ruling, 2026-08-25), SCOPED — and the
+    // scope is a measured boundary, not a hedge:
+    //
+    //   "USER INFORMATION THAT KEEPS THE OPTION SET DISTINGUISHABLE cannot make
+    //    the model less analysable."
+    //
+    // ⚠ THE UNQUALIFIED FORM IS VERY SLIGHTLY TOO STRONG, and the exception is
+    // REAL rather than a defect to be fixed later. Two options whose
+    // intervention maps become IDENTICAL are, for analysis purposes, ONE option
+    // — so user information that collapses two options into one genuinely DOES
+    // reduce analysability, and refusing is the honest answer. The distinct-map
+    // floor below therefore adds EXACTLY ONE monotonicity violation
+    // (`collision_2opt`, pinned in `run-admission-monotonicity.test.ts`).
+    // Stating the invariant unqualified with a known exception is the shape that
+    // goes stale and then licenses a weakened test; a scoped claim with the
+    // boundary named survives (CLAUDE.md trap 22f).
+    //
+    // Options carrying AT LEAST ONE real value.
+    //
+    // ⚠⚠ PREMISE CORRECTED IN PLACE, 2026-08-26 (PR #1129 review, Gate 2) —
+    // OLD SENTENCE RETAINED SO THE NARROWER ORIGINAL PREMISE STAYS VISIBLE:
+    //   ~~"PLoT's `EMPTY_INTERVENTIONS` predicate is exactly this emptiness test
+    //     AND NOTHING ELSE (`preflight-v2.ts:184-187`), so an option in this set
+    //     is one PLoT will accept."~~
+    // **That is FALSE at PLoT's bytes.** PLoT preflight carries **18 distinct
+    // blocker codes, all live on the v2 run path** (14 via
+    // `runPreflightValidation`, 4 via `validateGoalConstraints`), and a NON-EMPTY
+    // option can trip FOUR of them — so "non-empty ⇒ PLoT will accept" does not
+    // hold. `constraint` is also NOT in `NON_CAUSAL_NODE_KINDS`. The old claim
+    // was inherited from a narrower reading that PLoT has already flagged against
+    // itself.
+    //
+    // WHAT THE WAIVER ACTUALLY COVERS, stated as what it is: *of PLoT's 18
+    // preflight blockers, the one this waiver's population can newly trip is
+    // `IDENTICAL_OPTIONS` — and that one is closed by the distinct-map floor
+    // below.* The waiver is not a claim that PLoT accepts everything non-empty.
+    // See {@link isWaivableByComputeDiscard}.
+    const valued = new Set<string>(
+      wireOptions
+        .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
+        .map((o) => o.option_id)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    // The two-option minimum is PLoT's `options.minItems: 2` (`routes/v2/run.ts:1455`)
+    // and `buildBandedHeadline`'s "no comparative claim without a comparison".
+    // It is LOAD-BEARING here for the same reason it is inside
+    // `computeScaffoldPlan`: admitting a run PLoT will refuse is the F4 drift in
+    // the other direction.
+    // ⭐ PLoT does not need two VALUED options — it needs two DISTINCT ones.
+    // `identical-options.ts:102-119` fingerprints an option as its sorted
+    // `nodeId:value` pairs (snapped to 1e-9) and DEDUPLICATES; when fewer than
+    // two unique remain, `preflight-v2.ts:443-449` raises the
+    // `IDENTICAL_OPTIONS` BLOCKER and the run 422s. Counting valued options
+    // rather than distinct ones admits precisely the partly-specified states
+    // where two maps most likely coincide — measured: two options each carrying
+    // only `{fac_a: 0.5}` are refused at base and ADMITTED without this.
+    //
+    // ⛔ DIRECTION IS WHY THIS IS THE HONEST SIDE: a false admission here dies as
+    // an opaque HTTP 422 a network hop away, at the wrong layer, on the
+    // two-option minimum. A local refusal is immediate and explicable.
+    const interventionFingerprint = (o: { interventions?: Record<string, unknown> }): string =>
+      Object.entries(o.interventions ?? {})
+        .map(([key, raw]) => {
+          const v =
+            raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
+              ? (raw as { value: unknown }).value
+              : raw;
+          return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
+        })
+        .sort()
+        .join('|');
+    const distinctValuedMaps = new Set<string>(
+      wireOptions
+        .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
+        .map((o) => interventionFingerprint(o as { interventions?: Record<string, unknown> })),
+    );
+    const comparisonSurvives = distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
     const blockers = assessment.blockingIssues;
-    // EVERY blocker must be answered by the exclusion. One that is not means the
-    // run would fail after admission — the drift in the other direction, which
-    // is exactly what F4 exists to prevent. An EMPTY blocker set cannot reach
-    // here (the strict verdict was `unrecoverable`, which requires ≥1), and
-    // `every` over an empty array is vacuously true, so it is rejected by name
-    // rather than left to a silent vacuous pass.
-    if (blockers.length === 0 || !blockers.every((i) => isWaivableByExclusion(i, touched))) {
+    const touched = new Set<string>(plan.scaffolded_option_ids);
+
+    // ⭐⭐ THE TWO WAIVERS COMPOSE PER BLOCKER, NOT PER ROUTE — and getting this
+    // wrong is a NON-MONOTONICITY ALL BY ITSELF, measured on the lattice
+    // (`__tests__/run-admission-monotonicity.test.ts`).
+    //
+    // A graph can carry BOTH kinds of blocker at once: a wholly-empty option the
+    // run will EXCLUDE, beside a partly-valued option the run will SUBMIT. When
+    // the routes were tried one after the other, each answered its own blockers
+    // and neither answered all of them, so the graph refused — and adding one
+    // value to the partly-valued option is precisely what creates that mixture.
+    // Nine lattice violations survived a two-route version of this fix; they are
+    // all that shape.
+    //
+    // Each waiver carries its OWN viability precondition rather than sharing
+    // one, because they are viable for different reasons: the exclusion needs
+    // the run to actually be dropping/holding options and still have two left
+    // (`plan.will_scaffold_options`), while the compute-discard needs two
+    // options carrying values for PLoT to compare. Folding those into a single
+    // condition would be the two-questions-one-name defect this fix exists to
+    // remove.
+    const answeredByExclusion = (i: CanonicalReadinessIssue): boolean =>
+      plan.will_scaffold_options && isWaivableByExclusion(i, touched);
+    const answeredByComputeDiscard = (i: CanonicalReadinessIssue): boolean =>
+      comparisonSurvives && isWaivableByComputeDiscard(i, valued);
+
+    // EVERY blocker must be answered by one of the two. One that is not means
+    // the run would fail after admission — the drift in the other direction,
+    // which is exactly what F4 exists to prevent. An EMPTY blocker set cannot
+    // reach here (the strict verdict was `unrecoverable`, which requires ≥1),
+    // and `every` over an empty array is vacuously true, so it is rejected by
+    // name rather than left to a silent vacuous pass.
+    if (
+      blockers.length === 0 ||
+      !blockers.every((i) => answeredByExclusion(i) || answeredByComputeDiscard(i))
+    ) {
       return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
     }
     // ⭐ MOVE 1 — THE UNIT OF THE FIX IS THE BLOCKER, NOT A NEW BOOLEAN.
