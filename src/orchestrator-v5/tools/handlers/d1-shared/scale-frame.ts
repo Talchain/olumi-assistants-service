@@ -52,6 +52,92 @@ export function recoverScaleFrame(before: {
 }
 
 /**
+ * The relative tolerance `checkPairCoherence` allows between a stored frame and
+ * the pair beside it.
+ *
+ * Generous against representation error by ~7 orders of magnitude (a double
+ * round-trip through JSON is exact; arithmetic error here is ~1e-16 relative)
+ * and still tight enough to bite. The corruption class this guards is
+ * order-of-magnitude — a raw magnitude written into `value` beside a draft
+ * frame reads as a relative difference near 1, not near 1e-9. A tolerance too
+ * slack to fail is the same defect one storey up, so this is pinned in both
+ * directions by a just-inside / just-outside twin.
+ */
+export const PAIR_COHERENCE_RELATIVE_EPSILON = 1e-9;
+
+/**
+ * Three answers, and the third one is load-bearing. `not_checkable` is NOT a
+ * quiet `coheres`: it is the honest verdict for a factor that has no pair to
+ * check against — which is the precise case the stored frame exists to serve.
+ */
+export type PairCoherence = "coheres" | "incoherent" | "not_checkable";
+
+/**
+ * ⭐ DOES THE STORED FRAME AGREE WITH THE PAIR BESIDE IT?
+ *
+ * `resolveScaleFrame` below has always documented that the two carriers "agree
+ * by construction — the pair IS raw/frame". That is true of the projector, and
+ * `cee/draft/records/__tests__/scale-frame-carriage.test.ts` asserts it there.
+ * It was never checked on a graph that had been through EDITS, and the stored
+ * frame was trusted without ever being compared to the pair. This closes that:
+ * the stored value is VALIDATED, NOT TRUSTED, and its own domain check
+ * (finite, `> 1`) was only ever half of validation.
+ *
+ * ── WHAT THIS DELIBERATELY DOES NOT DO ─────────────────────────────────────
+ * It does NOT bound `value`. A level above 1 is HONEST — it is the truth about
+ * an over-frame edit, and an earlier `value <= 1` precondition in this very
+ * module WAS the defect (see `recoverScaleFrame`'s header, round 3). Coherence
+ * is an assertion about whether three numbers agree, never a claim about which
+ * values a user is allowed to state. Enforcing a unit interval here would
+ * discard the user's own stated magnitude to satisfy a rule no producer
+ * honours.
+ *
+ * It also does not judge SIGN. Whether a negative magnitude is meaningful is a
+ * different question with a different owner; `-74000 / 100000 === -0.74`
+ * coheres, and it says so. The estate has shipped an asymmetric guard whose
+ * classification quietly differed from its consumer's sign-symmetric one, so
+ * the arithmetic is applied as stated and nothing is inferred from sign.
+ *
+ * ⚠ THE TWO CARRIERS ARE NOT TWINS TO MERGE — THEY ANSWER DIFFERENT QUESTIONS.
+ *   · `scale_frame` (this module)          → "what is the DIVISOR?"  — a number.
+ *   · `observed_state.declared_scale`      → "what CLASS of scale is this?"
+ *     (`unit_interval | ratio | raw_count`, declared in the SHARED contract).
+ * `transforms/schema-v3.ts` calls `declared_scale` "a second name for one
+ * concept" and asks that they be resolved. Measured at both pins: they are not
+ * one concept. Two names for two questions is CORRECT and must stay; two
+ * questions under ONE name is the defect class. Collapsing them would lose the
+ * divisor, which the class cannot carry.
+ *
+ * Pure, total, no I/O.
+ */
+export function checkPairCoherence(input: {
+  readonly storedFrame?: unknown;
+  readonly value?: unknown;
+  readonly raw_value?: unknown;
+}): PairCoherence {
+  const stored = input.storedFrame;
+  // Held to the SAME domain `resolveScaleFrame` accepts. A frame it would
+  // refuse anyway must not be reported as judged — that would be a verdict
+  // about a value nothing uses.
+  if (typeof stored !== "number" || !Number.isFinite(stored) || !(stored > 1)) {
+    return "not_checkable";
+  }
+  const value = input.value;
+  const raw = input.raw_value;
+  if (typeof value !== "number" || !Number.isFinite(value)) return "not_checkable";
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return "not_checkable";
+
+  const expected = raw / stored;
+  const magnitude = Math.max(Math.abs(expected), Math.abs(value));
+  // Both members zero: arithmetically coherent under every frame. (Whether a
+  // zero is scale-AMBIGUOUS is `recoverScaleFrame`'s question, not this one.)
+  if (magnitude === 0) return "coheres";
+
+  const relativeDifference = Math.abs(value - expected) / magnitude;
+  return relativeDifference <= PAIR_COHERENCE_RELATIVE_EPSILON ? "coheres" : "incoherent";
+}
+
+/**
  * ⭐⭐ THE ONE OWNER OF "WHAT FRAME IS THIS FACTOR ON?" — stored first, pair
  * second, nothing third.
  *
@@ -120,6 +206,33 @@ export function resolveScaleFrame(input: {
   readonly raw_value?: unknown;
 }): number | undefined {
   const stored = input.storedFrame;
-  if (typeof stored === "number" && Number.isFinite(stored) && stored > 1) return stored;
+  if (typeof stored === "number" && Number.isFinite(stored) && stored > 1) {
+    // ⭐ THE STORED VALUE IS VALIDATED, NOT TRUSTED — and its domain check was
+    // only half of validation. Where the factor HAS a pair, that pair is
+    // independent evidence about the same question, and a stored frame it
+    // contradicts is wrong under every reading.
+    //
+    // Refuse rather than substitute. Returning the pair-recovered frame here
+    // would be the measured-WORSE option: a frame derived from the baseline
+    // alone ignores the sibling interventions the real frame was derived WITH
+    // (9 of 25 framings distorted, worst 100x — `records/projector.ts`). So
+    // this degrades to today's unframed behaviour and the analysis seam's
+    // baseline gate refuses honestly and visibly. We stop guessing; the gate
+    // keeps refusing.
+    //
+    // ⚠ NOTE WHICH CASE IS UNTOUCHED, because it is the case this field was
+    // introduced for: a factor with NO pair is `not_checkable`, so the stored
+    // frame still wins. Nothing that works today is refused by this.
+    if (
+      checkPairCoherence({
+        storedFrame: stored,
+        value: input.value,
+        raw_value: input.raw_value,
+      }) === "incoherent"
+    ) {
+      return undefined;
+    }
+    return stored;
+  }
   return recoverScaleFrame({ value: input.value, raw_value: input.raw_value });
 }

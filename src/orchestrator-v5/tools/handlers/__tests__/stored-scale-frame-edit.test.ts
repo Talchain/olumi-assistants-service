@@ -278,8 +278,30 @@ describe("resolveScaleFrame — the spec of the one owner", () => {
     expect(resolveScaleFrame({ storedFrame: 500_000 })).toBe(500_000);
     // Pair still works with no stored frame — a graph drafted before the field.
     expect(resolveScaleFrame({ value: 0.5, raw_value: 50_000 })).toBe(100_000);
-    // Stored takes precedence when both are present.
-    expect(resolveScaleFrame({ storedFrame: 500_000, value: 0.5, raw_value: 50_000 })).toBe(500_000);
+    // Stored takes precedence when both are present AND THEY COHERE.
+    //
+    // ⚠ CHANGED, AND THE CHANGE IS DISCLOSED RATHER THAN ABSORBED. This
+    // assertion previously read `{storedFrame: 500_000, value: 0.5,
+    // raw_value: 50_000}` → `500_000` — a pair encoding 100_000 sitting beside
+    // a stored 500_000. The CONTRADICTION was this fixture's DISCRIMINATOR: it
+    // was chosen so the returned number tells you which source was consulted.
+    // It was never a ruling that a CONTRADICTED stored frame should be trusted
+    // — this module's header justifies stored-precedence by a different case
+    // entirely ("Stored wins for the case where they CANNOT agree: the factor
+    // with no pair"), and `records/projector.ts` writes the two carriers to
+    // agree by construction.
+    //
+    // `resolveScaleFrame` now validates the stored frame against the pair, so
+    // an incoherent fixture no longer discriminates — it is refused (pinned
+    // immediately below). Precedence is therefore pinned on a COHERENT pair,
+    // where the stored frame is returned as the authority, plus the no-pair
+    // case above, which is the case precedence exists for.
+    expect(resolveScaleFrame({ storedFrame: 100_000, value: 0.5, raw_value: 50_000 })).toBe(100_000);
+    // A stored frame the factor's own pair CONTRADICTS is refused, not trusted
+    // and not silently replaced by the pair-recovered frame (re-deriving from
+    // the baseline alone ignores the sibling interventions the real frame was
+    // derived with). It degrades to unframed and the baseline gate refuses.
+    expect(resolveScaleFrame({ storedFrame: 500_000, value: 0.5, raw_value: 50_000 })).toBeUndefined();
     // A stored value outside the producers' domain is REFUSED, not repaired —
     // it degrades to the pair, or to unframed. Held to the same domain
     // `recoverScaleFrame` proves, so the two paths cannot hand callers
