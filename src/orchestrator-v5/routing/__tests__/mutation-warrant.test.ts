@@ -264,11 +264,31 @@ describe('UNION — the derived half: the warrant predicate is a strict SUPERSET
     }
   });
 
-  it('the superset relation holds structurally over both corpora', () => {
+  /**
+   * ⭐ THE SUPERSET RELATION, AND ITS ONE SANCTIONED EXCEPTION — ASSERTED, NOT
+   * CARVED OUT IN PROSE.
+   *
+   * `hasMutationWarrantSignal` consults `hasExplicitNoModelChangeIntent` first,
+   * so a message in which the user explicitly withheld authority no longer
+   * inherits a warrant from the canonical list. That IS a fork of the relation
+   * this test exists to pin, and the honest form is to pin the exception too —
+   * editing the doc comment to admit an exception while leaving the spec
+   * unchanged is how the previous attempt at this seam shipped a fork nothing
+   * could see.
+   *
+   * So: the relation must hold for every canonical hit that is NOT an explicit
+   * veto, and any message where it does NOT hold must be one. A new fork for any
+   * other reason REDs here by name.
+   */
+  it('the superset relation holds structurally, except for an explicit veto', () => {
     for (const m of [...CONSTRAINT_POSITIVE_CORPUS, ...NEGATIVE_CORPUS]) {
-      if (hasMutationSignal(m)) {
-        expect(hasMutationWarrantSignal(m), `superset violated for: ${m}`).toBe(true);
+      if (!hasMutationSignal(m)) continue;
+      if (hasExplicitNoModelChangeIntent(m)) {
+        // Sanctioned fork: the user withheld authority and left no edit behind.
+        expect(hasMutationWarrantSignal(m), `veto should refuse a warrant: ${m}`).toBe(false);
+        continue;
       }
+      expect(hasMutationWarrantSignal(m), `superset violated for: ${m}`).toBe(true);
     }
   });
 

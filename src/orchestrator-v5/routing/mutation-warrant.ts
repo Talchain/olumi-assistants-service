@@ -192,12 +192,53 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  * a judgement that the message is not an edit. Subtracting it here would strip
  * the warrant from the most unambiguous edit requests the product accepts.
  *
- * The result is a strict superset of `hasMutationSignal`; the union assertion
- * in the spec pins that, so the canonical list can never recognise an edit this
- * predicate refuses.
+ * The result is a superset of `hasMutationSignal` EVERYWHERE EXCEPT an explicit
+ * veto — see {@link hasExplicitNoModelChangeIntent} below. The union assertion
+ * in the spec pins the relation AND pins that the veto is its only exception,
+ * so the canonical list can never recognise an edit this predicate refuses for
+ * any other reason.
+ *
+ * ⭐⭐ TERM 0 — AN EXPLICIT VETO IS CONSULTED BEFORE THE LEXICAL TERMS, AND THIS
+ * IS NOT THE HOIST THAT FAILED.
+ *
+ * `hasExplicitNoModelChangeIntent` has lived in this module since #836 and
+ * already answers exactly this question. This function never asked it. Measured
+ * on a 48-case corpus: two messages in which the user explicitly withheld
+ * authority were granted a mutation warrant —
+ *   "Do not change the current causal model."          (this repo's own fixture)
+ *   "…Do not change the graph until I confirm."        (captured, deployed)
+ * — because the words "change" and "the model" satisfy the canonical list. The
+ * user said the exact words and was overruled. That is the worst member of the
+ * false-positive class this predicate exists to prevent.
+ *
+ * ⚠ A DIFFERENT HOIST WAS TRIED HERE AND REVERTED, so the distinction matters.
+ * Hoisting `isStateQueryQuestionShape` above these terms made a QUESTION SHAPE
+ * authoritative over the lexical signals, and it stripped the warrant from
+ * genuine edits riding a question ("Where did that come from? Increase hiring
+ * cost to 0.9." went TRUE -> FALSE). That predicate answers "is this a
+ * question?", which is a different question from "did the user authorise a
+ * write?", so above these terms it over-reaches.
+ *
+ * THIS predicate answers the authorisation question directly, and it is
+ * CONSTRUCTED so it cannot strip a real edit: it fires only when NO AFFIRMATIVE
+ * EDIT REMAINS once the protective clause is removed. Its own docstring names
+ * the contrast — "Set X to 0.7 and do not change anything else" stays an
+ * authorised edit — and that case is pinned in the spec alongside the vetoes.
+ * Measured: 0 false positives across the 23 genuine-edit cases in the corpus.
+ *
+ * ⚠ SCOPE OF THAT NUMBER, stated because the corpus has already been shown to
+ * have a blind spot: 0 across the 23 edit cases held, not 0 in the world.
+ *
+ * ⛔ THIS DOES NOT SOLVE THE CLASS. 13 further false positives remain, and they
+ * turn on grammatical MOOD ("Change of plan." / "Should we change pricing?" /
+ * "What did the update to hiring cost do?"). Separating those needs an unbounded
+ * natural-language predicate, which this estate has already spent four rounds
+ * proving does not converge. Rowed, deliberately not attempted here.
  */
 export function hasMutationWarrantSignal(message: string): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
+  // Term 0 — the user explicitly withheld authority and left no edit behind.
+  if (hasExplicitNoModelChangeIntent(message)) return false;
   if (hasMutationSignal(message)) return true;
   if (hasConstraintMutationSignal(message)) return true;
   return isEditRequestShape(message);
