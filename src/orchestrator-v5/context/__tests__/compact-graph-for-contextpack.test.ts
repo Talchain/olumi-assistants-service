@@ -14,7 +14,11 @@ import { PROPOSAL_FIELD_CAPS } from '../../../cee/dual-draft/guards.js';
 import {
   CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
-import { compactGraphForContextPack } from '../compact-graph-for-contextpack.js';
+import {
+  compactGraphForContextPack,
+  compactSelectedGraphForContextPack,
+} from '../compact-graph-for-contextpack.js';
+import { selectContextGraphSnapshot } from '../context-graph-snapshot.js';
 
 // Long-ish body text representative of real scenario content — the compactor
 // drops this entirely, which is the largest single source of token savings.
@@ -112,12 +116,23 @@ function withoutPlatformDrivers(graph: GraphStateIngress): GraphStateIngress {
   return clone;
 }
 
-async function exactModelPromptFor(graph: GraphStateIngress): Promise<string> {
+async function exactModelPromptFor(
+  graph: GraphStateIngress,
+  options: { readonly canonicalSelected?: boolean } = {},
+): Promise<string> {
   const [{ assembleContextPack }, { buildUserMessage }] = await Promise.all([
     import('../context-pack-assembler.js'),
     import('../../routing/route-with-tool-use.js'),
   ]);
-  const outcome = compactGraphForContextPack(graph, { requestId: 'req-uncertainty-wire' });
+  const outcome = options.canonicalSelected
+    ? compactSelectedGraphForContextPack(
+        selectContextGraphSnapshot({
+          canonicalRead: { status: 'ok_present', graph },
+          requestGraph: null,
+        }),
+        { requestId: 'req-uncertainty-wire' },
+      )
+    : compactGraphForContextPack(graph, { requestId: 'req-uncertainty-wire' });
   expect(outcome.kind).toBe('compacted');
   if (outcome.kind !== 'compacted') throw new Error('expected compacted');
   expect(outcome.via).toBe('strict_parse');
@@ -130,6 +145,7 @@ async function exactModelPromptFor(graph: GraphStateIngress): Promise<string> {
       stage: 'frame',
     } as never,
     priorTurns: [],
+    graphContext: { status: 'canonical' },
     compactedGraph: outcome.compact,
   });
   return buildUserMessage(pack, 'What are we least sure about?');
@@ -218,8 +234,8 @@ describe('compactGraphForContextPack', () => {
     expect(uncertain.compact.edges[0]!.coefficient_confidence).toBe('uncertain');
 
     const [highPrompt, uncertainPrompt] = await Promise.all([
-      exactModelPromptFor(highGraph),
-      exactModelPromptFor(uncertainGraph),
+      exactModelPromptFor(highGraph, { canonicalSelected: true }),
+      exactModelPromptFor(uncertainGraph, { canonicalSelected: true }),
     ]);
     const highFact = '"coefficient_confidence": "high"';
     const uncertainFact = '"coefficient_confidence": "uncertain"';
