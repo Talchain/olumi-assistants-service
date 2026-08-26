@@ -134,6 +134,71 @@ function buildEgressFallback(): OlumiResponse {
   };
 }
 
+/**
+ * ⭐ B1 EGRESS IS A GATE, NOT A TRANSFORM — IT RETURNS THE OBJECT IT WAS HANDED.
+ *
+ * ⚠ `return { ok: true, value: parsed.data }` WAS A HASH/PAYLOAD FORK ON THE
+ * PRODUCTION WIRE. Zod's `safeParse` REBUILDS its input, and the rebuild applies
+ * the graph contract's own `edge_type: EdgeType.optional().default('directed')`
+ * (`@talchain/schemas` `dist/graph.js:286`, the only live `.default(` in the
+ * package) to every edge that omitted the key. `route-v2.ts:1096` ships
+ * `egress.value`, so every `model_version_receipt` left this boundary carrying
+ * an `edge_type` its own `full_hash` was NOT computed over.
+ *
+ * MEASURED, not inferred:
+ *   - Whole `model_versions` table (601 rows, 11,955 edges): `edge_type` present
+ *     on ZERO. Contrast control in the same sweep: `origin` on 11,724.
+ *   - Golden-journey capture `20260826T212322Z-fresh-extended-507050`, three
+ *     independent receipts (T1_DRAFT 15/15 edges, T4_EDIT 15/15, T5C_CONFIRM
+ *     19/19): every one shipped `edge_type: 'directed'` on every edge, while the
+ *     cold read of the same scenario (T7_RELOAD) carried it on ZERO. Removing
+ *     `edge_type` — and NOTHING ELSE — reproduced each shipped `full_hash`
+ *     EXACTLY. So a client that recomputes `H(receipt.graph)` and compares
+ *     concludes the server lied, on every turn.
+ *   - Full-object diff of `parsed.data` against its input over five real
+ *     captured payloads: the `edge_type` injection is the ONLY difference —
+ *     zero drops, zero coercions, zero other additions; the receipt-free
+ *     `T3_ANALYSE` body came back byte-identical (0 differences), which is the
+ *     negative control showing the rebuild is otherwise faithful.
+ *
+ * `edge_type` is a genuine canonical field — it is in the published contract's
+ * `CANONICAL_GRAPH_HASH_NESTED_PROJECTION.edge.fields`, and `'bidirected'`
+ * changes reachability and counterfactual construction. But `'directed'` is the
+ * value CEE's own readers already IMPLY from absence (`graph/reachability.ts:91`,
+ * `schemas/graph.ts:501-504`: "Absent edge_type is treated as 'directed'"), so
+ * injecting it adds no information to any consumer and only moves the hash. This
+ * is the schemas package's own ratified doctrine applied to the field next door:
+ * "NEVER `.default()` this field — absent means the producer did not state
+ * provenance" / "Substituting … for a build that sent nothing would manufacture a
+ * provenance claim PLoT never received" (`dist/boundary/enrichment.js:138-142`).
+ *
+ * ⚠ DO NOT "IMPROVE" THIS BACK TO `parsed.data`. The parse still does ALL the
+ * validation work — this branch is only reached when it SUCCEEDED. The cast
+ * narrows the type and performs no runtime work, exactly as `GraphVerbatim`'s
+ * `.transform((v) => v as CanonicalReceiptGraph)` does on the receipt path and as
+ * `commit.ts` does on the persist path ("so the carrier's hashes describe the
+ * persisted bytes by construction rather than by coincidence"). This is the same
+ * pattern's THIRD seam, and this module's own header already describes its job as
+ * fail-closed VALIDATION — never normalisation.
+ *
+ * ⭐ THE CAST LOSES EXACTLY ONE BEHAVIOUR, AND LOSING IT CLOSES TWO MORE FORKS
+ * OF THE SAME CLASS. A schema-tree walk over the 622 paths reachable from
+ * `OlumiResponseSchema` (independent review) finds exactly ONE default path,
+ * ZERO transforms/catches/pipelines, and exactly TWO strip points — matching a
+ * direct census of `dist/graph.js`: 8 `z.object({` sites against 7
+ * `.passthrough()` calls.
+ *   1. `StrengthSchema` (graph.js:274-277), a bare `z.object({mean, std})`
+ *   2. `nodes[].state_space.range` (graph.js:180-183), an inner anonymous
+ *      `z.object({min, max})` — `StateSpaceSchema` itself IS passthrough,
+ *      which is exactly why this one hides
+ * Both silently DELETED additive keys from the wire while `full_hash` describes
+ * the persisted bytes: the same hash/payload fork as the default, in the other
+ * direction. Both were latent (11,902 persisted `strength` objects, zero
+ * additive keys), and returning the caller's object closes BOTH.
+ *
+ * WHICH AUTHORITY SURVIVES: the persisted graph. The egress-invented alternative
+ * disappears entirely; there is no compatibility branch to delete later.
+ */
 export function validateEgress(response: unknown, request_id: string): EgressResult {
   const parsed = OlumiResponseSchema.safeParse(response);
   if (parsed.success) {
@@ -145,7 +210,7 @@ export function validateEgress(response: unknown, request_id: string): EgressRes
       pass: true,
       request_id,
     });
-    return { ok: true, value: parsed.data };
+    return { ok: true, value: response as OlumiResponse };
   }
 
   const issues = trimIssues(parsed.error.issues);
