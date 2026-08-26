@@ -37,6 +37,7 @@ import type {
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGoalTarget } from './goal-target-record.js';
+import type { ContextPackFactorValues } from './factor-value-record.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -475,6 +476,15 @@ export interface ContextPack {
    */
   readonly goal_target?: ContextPackGoalTarget;
   /**
+   * The factor value-state record — which factors still have no value, and
+   * whose value is on the ones that do. See {@link ContextPackFactorValues}.
+   *
+   * ⚠ ABSENT (key missing, never `factor_values: null`) when no graph was read
+   * this turn: absence means UNKNOWN, never "nothing is missing". A graph that
+   * WAS read and is fully valued is PRESENT with `without_value_count: 0`.
+   */
+  readonly factor_values?: ContextPackFactorValues;
+  /**
    * LLM-facing graph projection. Edges carry decision-language `relationship`
    * phrases ("moderate positive link") instead of raw `strength` floats; raw
    * `exists` probabilities and `plain_interpretation` strings are stripped;
@@ -697,6 +707,23 @@ export interface AssembleContextPackInput {
    * compact path. Passthrough only — assembler does not introspect.
    */
   readonly compactedConstraints?: readonly unknown[] | null;
+  /**
+   * THE FACTOR VALUE-STATE RECORD, built by `projectFactorValueRecord`
+   * (context/factor-value-record.ts) from the PERSISTED graph, through two
+   * EXISTING authorities — `factorHasExtractedValue` for value presence and
+   * `structureProvenance` → `classifyValueSource` for authorship. Neither
+   * question is re-decided here or in the assembler.
+   *
+   * PRE-PROJECTED UPSTREAM ON PURPOSE — the same discipline as `goalTarget`,
+   * `readiness` and `coachingContext`.
+   *
+   * ⚠ WHICH GRAPH IS LOAD-BEARING, AND IS THE CALLER'S RESPONSIBILITY. Pass the
+   * record read from `context.persistedGraph ?? options.graphState`, NOT
+   * `graphStateForTurn` (request-first, turn-executor.ts:2004). This is a claim
+   * about what is SAVED; a stale or forged client graph would otherwise report
+   * a factor as valued when the saved model has nothing.
+   */
+  readonly factorValues?: ContextPackFactorValues;
   /**
    * THE SUCCESS-TARGET RECORD, built by `projectGoalTargetRecord`
    * (context/goal-target-record.ts) from the PERSISTED graph through the single
@@ -1553,6 +1580,17 @@ export function assembleContextPackWithSummary(
     // absence-of-evidence and evidence-of-absence were the same token and the
     // model resolved the question from the transcript instead.
     ...(input.goalTarget !== undefined ? { goal_target: input.goalTarget } : {}),
+    // FACTOR VALUE STATE — placed with the hard structured state for the same
+    // reason as `goal_target`: it is a claim about the saved model, not
+    // conversational colour.
+    //
+    // Conditional spread on the same contract: the key is ABSENT when no graph
+    // was read, never `factor_values: null`. ⚠ And unlike the `*_omitted`
+    // markers, the ZERO case is PRESENT and positive — `without_value_count: 0`
+    // says the graph was read and every factor carries a value. Encoding that
+    // as absence is exactly the collapse that let the model tell a user it
+    // could not see which factors were unset while the Model tab named them.
+    ...(input.factorValues !== undefined ? { factor_values: input.factorValues } : {}),
     // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
     // above `conversation`, so the model reads the user's focus as part of the
     // model rather than as conversational colour. ⚠ In the SERIALISED prompt
