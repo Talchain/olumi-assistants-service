@@ -195,9 +195,121 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  * The result is a strict superset of `hasMutationSignal`; the union assertion
  * in the spec pins that, so the canonical list can never recognise an edit this
  * predicate refuses.
+ *
+ * ⭐⭐ THAT SENTENCE IS UNCONDITIONAL AGAIN, AND DELIBERATELY SO. An earlier
+ * revision of this comment weakened it to "a superset EVERYWHERE EXCEPT an
+ * explicit veto", to admit a fork introduced by Term 0 below. Term 0 as it now
+ * stands cannot fork the relation: it requires `!hasMutationSignal(message)` to
+ * refuse, and the statement immediately after it returns TRUE on that same
+ * predicate, so a canonical hit can never reach the refusal. That is a proof,
+ * not a sample — and it was checked by measurement too: over 1,093,500 generated
+ * canonical-hit messages the fork count is 0 here and was 850,500 with the
+ * unguarded Term 0. Do not re-weaken this sentence without re-running that probe.
+ *
+ * ⭐⭐ TERM 0 — AN EXPLICIT VETO IS CONSULTED BEFORE THE LEXICAL TERMS, AND THIS
+ * IS NOT THE HOIST THAT FAILED.
+ *
+ * `hasExplicitNoModelChangeIntent` has lived in this module since #836 and
+ * already answers exactly this question. This function never asked it. Measured
+ * on a 48-case corpus: two messages in which the user explicitly withheld
+ * authority were granted a mutation warrant —
+ *   "Do not change the current causal model."          (this repo's own fixture)
+ *   "…Do not change the graph until I confirm."        (captured, deployed)
+ * The user said the exact words and was overruled. That is the worst member of
+ * the false-positive class this predicate exists to prevent.
+ *
+ * ⚠ WHICH TERM ACTUALLY GRANTED THOSE TWO — CORRECTED, because the first version
+ * of this comment named the wrong one and the wrong name is what hid the dead
+ * spec branch. It said the words "change" and "the model" satisfied THE CANONICAL
+ * LIST. They do not. Measured at the bytes on both strings:
+ *   hasMutationSignal          = FALSE
+ *   hasConstraintMutationSignal = FALSE
+ *   isEditRequestShape          = TRUE
+ * The granting term was TERM 3, `isEditRequestShape`. This matters beyond
+ * pedantry: neither fixed row is a canonical hit, so neither ever exhibited the
+ * `warrant ⊇ hasMutationSignal` fork that was offered as the reason to weaken the
+ * superset invariant above.
+ *
+ * ⚠ A DIFFERENT HOIST WAS TRIED HERE AND REVERTED, so the distinction matters.
+ * Hoisting `isStateQueryQuestionShape` above these terms made a QUESTION SHAPE
+ * authoritative over the lexical signals, and it stripped the warrant from
+ * genuine edits riding a question ("Where did that come from? Increase hiring
+ * cost to 0.9." went TRUE -> FALSE). That predicate answers "is this a
+ * question?", which is a different question from "did the user authorise a
+ * write?", so above these terms it over-reaches.
+ *
+ * THIS predicate answers the authorisation question directly. ⚠⚠ BUT IT IS **NOT**
+ * SAFE TO CONSULT ALONE, AND AN EARLIER REVISION OF THIS COMMENT CLAIMED IT WAS.
+ * The withdrawn claim was: "it is CONSTRUCTED so it cannot strip a real edit —
+ * it fires only when NO AFFIRMATIVE EDIT REMAINS once the protective clause is
+ * removed", supported by "0 false positives across the 23 genuine-edit cases in
+ * the corpus". Both halves were false in the way that matters:
+ *
+ *   · The affirmative-edit check it named is NEVER REACHED for an UNBOUNDED
+ *     prohibition. `hasExplicitNoModelChangeIntent` returns its veto at the
+ *     `!candidate.scopedTail && !candidate.entityScoped` early return, before
+ *     `hasAffirmativeMutationOutsideCandidates` is ever consulted. The escape
+ *     hatch beside it, `entityScoped`, is dead from HERE because Term 0 passes
+ *     no `modelEntityLabels`.
+ *   · The "0 across 23 edit cases" number held only because ALL 23 OF THOSE
+ *     CASES WERE FREE OF PROHIBITION WORDING. The corpus was structurally
+ *     incapable of observing the class. (CLAUDE.md trap 22 — a corpus that
+ *     shares the code's blind spot cannot see the code's defect.)
+ *
+ * Measured on a 9-edit-core x 9-fence-phrasing matrix, unguarded Term 0 stripped
+ * the warrant from 81 of 81 ordinary scoped edits ("Set Churn to 0.5 and do not
+ * change the model."), while the same 9 cores WITHOUT a fence lost 0 of 9. On a
+ * wider 9x20 corpus: 151 of 177. The product's own reply on such a turn is
+ * "Nothing has been changed. You did not ask me to edit the model, so I have
+ * not." — refusing an explicit instruction AND misdescribing what the user said.
+ *
+ * THAT is why Term 0 carries the two negated conjuncts. They are load-bearing,
+ * not defensive: with them the same matrix loses 9 of 81 and the wide corpus 17
+ * of 180. The contrast the veto predicate's own docstring names — "Set X to 0.7
+ * and do not change anything else" stays an authorised edit — is pinned in the
+ * spec alongside the vetoes, and the regressed fenced-edit class is now pinned
+ * there too, as EDIT rows, so this cell can never again go unobserved.
+ *
+ * ⛔ WHAT REMAINS OPEN, PINNED IN THE SPEC RATHER THAN PAPERED OVER:
+ *   · 13 false positives turning on grammatical MOOD ("Change of plan." /
+ *     "Should we change pricing?" / "What did the update to hiring cost do?").
+ *   · A GAP — an edit that rides `isEditRequestShape` ALONE (no canonical and no
+ *     constraint signal, e.g. "Edit hiring cost to 0.9") still loses its warrant
+ *     when fenced, because the conjuncts above cannot see it. Two such rows are
+ *     pinned as KNOWN_OPEN_GAPS.
+ *   · A LIE — a RETRACTION ("Set Churn to 0.5 - actually no, do not change the
+ *     model.") KEEPS its warrant here, where unguarded Term 0 correctly refused
+ *     it. Pinned as KNOWN_OPEN_LIES.
+ *
+ * ⛔⛔ DO NOT WRITE A PREDICATE TO TELL A RETRACTION FROM A SCOPE FENCE. "…and do
+ * not change anything else" (a fence, must warrant) versus "…actually no, do not
+ * change the model" (a retraction, must veto) is a natural-language
+ * discrimination over trailing clauses. This estate burned FOUR consecutive
+ * rounds on exactly that shape on exactly this module, each closing one
+ * direction and reopening the other under a fully green suite, and closed
+ * PR #1107 after five variants across two independent corpora. The standing
+ * ruling is that no further punctuation-only or lexical rule will settle it.
+ * If you find yourself writing that predicate, STOP and report.
  */
 export function hasMutationWarrantSignal(message: string): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
+  // Term 0 — the user explicitly withheld authority AND no canonical mutation
+  // signal survives the prohibition. The two negated conjuncts are not decoration:
+  // `hasExplicitNoModelChangeIntent` returns its veto IMMEDIATELY for an UNBOUNDED
+  // prohibition (see the early return at the `!scopedTail && !entityScoped` line
+  // below) WITHOUT ever consulting its own affirmative-edit check, so on its own it
+  // strips the warrant from "Set Churn to 0.5 and do not change the model." —
+  // measured over a 9-core x 9-fence matrix, 81/81. Requiring the canonical lists
+  // to be silent too restores those edits using only authorities this module
+  // already had. What this does NOT fix is pinned as KNOWN_OPEN_GAPS /
+  // KNOWN_OPEN_LIES in `__tests__/mutation-warrant-explicit-veto.test.ts`.
+  if (
+    hasExplicitNoModelChangeIntent(message) &&
+    !hasMutationSignal(message) &&
+    !hasConstraintMutationSignal(message)
+  ) {
+    return false;
+  }
   if (hasMutationSignal(message)) return true;
   if (hasConstraintMutationSignal(message)) return true;
   return isEditRequestShape(message);
