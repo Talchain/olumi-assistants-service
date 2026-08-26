@@ -80,6 +80,45 @@ export const UNCONFIRMED_PREFIX =
   "The last analysis may be out of date because I can't confirm it still matches the current model.";
 
 /**
+ * THE WAY OUT — the recovery offer a caveated turn owes the user.
+ *
+ * ⚠⚠ THESE ARE HERE BECAUSE A NARROWING SILENTLY DELETED THE RECOVERY PATH, AND
+ * ONLY A CONTRACT TEST NOTICED. The stale/unconfirmed TEMPLATES always carried
+ * both halves — the caveat AND the offer — as one hard-coded string. When the
+ * precondition was narrowed so a stale turn ANSWERS instead of returning the
+ * template, the caveat survived (it is prepended in code) and the offer
+ * VANISHED, because nothing owned it. `requiresRerun` is true on exactly these
+ * states, so the offer is owed. Caught by
+ * `tests/contract/v5-golden-path-acceptance.test.ts` asserting
+ * `/re-run analysis/i`; the six specs the lane had chosen were all green
+ * (CLAUDE.md trap 23 — the symptom's metric said success while a DIFFERENT
+ * user-facing guarantee died, and the rerun CHIP still fired, so every
+ * component-level witness agreed).
+ *
+ * ⭐ EXTRACTED RATHER THAN RE-TYPED. The answered path needs the same sentence
+ * the template uses. Appending a hand-copied duplicate is precisely the
+ * two-copies defect this module was rebuilt to abolish — and the existing
+ * SINGLE_COPY guard would NOT have caught it, because it only pinned the two
+ * PREFIX sentences. The guard is extended to cover these too, and an
+ * M3IDENT-style character-identical re-inline of either one REDs it.
+ *
+ * Composed, never inlined: `buildAnalysisStaleTemplate` /
+ * `buildAnalysisUnconfirmedTemplate` build from `<PREFIX> <OFFER>` and are
+ * byte-identical to the shipped strings.
+ */
+export const STALE_RECOVERY_OFFER =
+  'Would you like to re-run analysis to see how your changes affect the results?';
+
+/**
+ * The `unconfirmed` twin of {@link STALE_RECOVERY_OFFER}. Deliberately a
+ * DIFFERENT sentence, for the same reason the prefixes differ: the stale copy
+ * offers to show how YOUR CHANGES affected the result, which presumes we know
+ * the model changed. Here we do not, so it offers only to show the CURRENT
+ * result. Collapsing the two would smuggle the stronger claim back in.
+ */
+export const UNCONFIRMED_RECOVERY_OFFER = 'Re-run analysis to see the current result.';
+
+/**
  * The two currency verdicts that carry a caveat.
  *
  * Deliberately NARROW — not the full `ExplanationPreconditionVerdict` union.
@@ -175,20 +214,23 @@ export interface StalenessPrefixResult {
  * It now takes the verdict the precondition already computes, which is live on
  * every explanation turn.
  *
- * ⚠⚠ RUNG: CODE EXISTS. THE CHANNEL IS TYPE-CONNECTED, NOT YET WIRED. Re-derived
- * at `d7499dc9` over non-comment `src/` excluding tests: this function still has
- * ZERO LIVE CALLERS, and so does `caveatForPreconditionVerdict`. The only
- * importers of this module are its unit test, the contract test, and
- * `no-op-helpers.ts` — which imports the two CONSTANTS and the type, not this
- * function. What changed here is that the parameter now names a verdict the
- * product actually computes; the accompany-don't-replace behaviour arrives when
- * a follow-up calls it.
+ * ⚠⚠ RUNG UPDATED — THIS IS NOW WIRED, AND THE PREVIOUS NOTE HERE IS SUPERSEDED.
+ * It read "RUNG: CODE EXISTS. THE CHANNEL IS TYPE-CONNECTED, NOT YET WIRED …
+ * this function still has ZERO LIVE CALLERS", which was true and correctly
+ * scoped when written. It is now false: `finaliseExplanationText`
+ * (`no-op-helpers.ts`) calls this on every answered explanation turn, for both
+ * `explain_results` and `what_would_flip`. A rung claim is a dated measurement,
+ * not a standing fact — leaving the old one here would be the false-label defect
+ * one door down from the one this module already carries a scar from.
  *
- * ⚠ AND THE CONSEQUENCE FOR THE SAFETY ARGUMENT, because it expires: "no
- * user-visible bytes move" is currently underwritten by the fact that this
- * function is UNREACHABLE. That is correct today and STOPS BEING A SAFETY
- * ARGUMENT the moment the follow-up wires it — at which point the doubling gap
- * pinned in the tests becomes user-visible and must be re-priced, not inherited.
+ * ⚠⚠ AND THE SAFETY ARGUMENT HAS NOW EXPIRED, EXACTLY AS PREDICTED. "No
+ * user-visible bytes move" was underwritten by this function being UNREACHABLE.
+ * It is reachable. The doubling gap pinned in the tests IS user-visible from
+ * here on and has been re-priced rather than inherited: a model-authored caveat
+ * in its own words is not detected, so the user can read a caveat twice, and the
+ * same is true of the recovery offer. Accepted under the ratified asymmetry — a
+ * missing caveat or a missing way out is a trust defect; a doubled one is
+ * clumsy — and the exit is a structural badge, not a wider regex.
  */
 export function applyStalenessPrefix(
   text: string,
@@ -204,4 +246,21 @@ export function applyStalenessPrefix(
   }
   const prefix = caveat === 'stale' ? STALENESS_PREFIX : UNCONFIRMED_PREFIX;
   return { text: `${prefix} ${text}`, prefixed: true };
+}
+
+/**
+ * The recovery offer for a caveat — "the way out" that closes a caveated turn.
+ *
+ * ⭐ SELECTED HERE FOR THE SAME REASON THE PREFIX IS. `applyStalenessPrefix`
+ * already picks `stale` vs `unconfirmed` wording one line above; putting the
+ * offer's selection anywhere else would split one question — "which words does
+ * this caveat use?" — across two modules, which is how the sentence this file
+ * owns ended up with two copies in the first place. This module owns the WORDS;
+ * `no-op-helpers.ts` owns WHICH CLAIM IS LICENSED.
+ *
+ * Total over `StalenessCaveat` by construction: the type has exactly two
+ * members and both are named, so there is no default to fall through.
+ */
+export function recoveryOfferForCaveat(caveat: StalenessCaveat): string {
+  return caveat === 'stale' ? STALE_RECOVERY_OFFER : UNCONFIRMED_RECOVERY_OFFER;
 }

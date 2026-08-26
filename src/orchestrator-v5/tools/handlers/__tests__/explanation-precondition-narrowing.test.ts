@@ -42,7 +42,12 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import { createExplainResultsHandler } from '../explain-results.js';
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
-import { STALENESS_PREFIX, UNCONFIRMED_PREFIX } from '../staleness-prefix.js';
+import {
+  STALENESS_PREFIX,
+  STALE_RECOVERY_OFFER,
+  UNCONFIRMED_PREFIX,
+  UNCONFIRMED_RECOVERY_OFFER,
+} from '../staleness-prefix.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 
@@ -187,6 +192,16 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
     expect(outcome.suppress_orientation).toBe(true);
 
+    // ⭐⭐ THE WAY OUT. The blocking template always carried a recovery offer;
+    // the first cut of this narrowing dropped it and only a contract test
+    // noticed, while the rerun CHIP kept firing so every component witness
+    // agreed (CLAUDE.md trap 23). `requiresRerun` is true here, so it is owed.
+    expect(outcome.assistant_text).toContain(STALE_RECOVERY_OFFER);
+    // ORDER IS THE GUARANTEE: caveat → answer → way out.
+    expect(outcome.assistant_text.indexOf(MODEL_ANSWER_SENTINEL)).toBeLessThan(
+      outcome.assistant_text.indexOf(STALE_RECOVERY_OFFER),
+    );
+
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
     expect(fact.result.precondition_unmet).toBe(false);
@@ -205,6 +220,11 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     // confirm it. The stronger claim must be absent, not merely non-leading.
     expect(outcome.assistant_text).not.toContain(STALENESS_PREFIX);
     expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    // The way out, in the UNCONFIRMED wording — and the stale wording must NOT
+    // appear: it offers to show how "your changes" affected the result, which
+    // presumes the change we cannot confirm.
+    expect(outcome.assistant_text).toContain(UNCONFIRMED_RECOVERY_OFFER);
+    expect(outcome.assistant_text).not.toContain(STALE_RECOVERY_OFFER);
 
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
@@ -217,6 +237,9 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
 
     expect(outcome.assistant_text.startsWith(STALENESS_PREFIX)).toBe(true);
     expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    // The way out is owed on BOTH handlers — it rides the shared funnel, so a
+    // handler that skipped the funnel would lose it here too.
+    expect(outcome.assistant_text).toContain(STALE_RECOVERY_OFFER);
 
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'what_would_flip') throw new Error('wrong fact type');
@@ -281,6 +304,9 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
     expect(outcome.assistant_text).not.toContain(STALENESS_PREFIX);
     expect(outcome.assistant_text).not.toContain(UNCONFIRMED_PREFIX);
+    // A CURRENT result owes no way out — appending one would invent a doubt.
+    expect(outcome.assistant_text).not.toContain(STALE_RECOVERY_OFFER);
+    expect(outcome.assistant_text).not.toContain(UNCONFIRMED_RECOVERY_OFFER);
 
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');

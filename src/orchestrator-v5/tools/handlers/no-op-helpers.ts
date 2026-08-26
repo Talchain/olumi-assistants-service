@@ -15,8 +15,11 @@ import type { HandlerInvocation } from '../registry.js';
 // nothing, so this edge cannot form a cycle.
 import {
   applyStalenessPrefix,
+  recoveryOfferForCaveat,
   STALENESS_PREFIX,
+  STALE_RECOVERY_OFFER,
   UNCONFIRMED_PREFIX,
+  UNCONFIRMED_RECOVERY_OFFER,
   type StalenessCaveat,
 } from './staleness-prefix.js';
 import {
@@ -457,8 +460,20 @@ export function finaliseExplanationText(
   rawText: string,
   verdict: ExplanationPreconditionVerdict,
 ): { readonly text: string; readonly stalenessPrefixed: boolean } {
-  const result = applyStalenessPrefix(rawText, caveatForPreconditionVerdict(verdict))
-  return { text: result.text, stalenessPrefixed: result.prefixed }
+  const caveat = caveatForPreconditionVerdict(verdict)
+  const result = applyStalenessPrefix(rawText, caveat)
+  if (caveat === null) {
+    return { text: result.text, stalenessPrefixed: result.prefixed }
+  }
+  // ⭐ CAVEAT → ANSWER → THE WAY OUT. The recovery offer is appended for exactly
+  // the verdicts where `requiresRerun` is true, restoring a guarantee the
+  // blocking templates always carried and the first cut of this narrowing
+  // silently dropped. It is composed from the same constant the template uses,
+  // never re-typed (SINGLE_COPY pins that).
+  return {
+    text: `${result.text}\n\n${recoveryOfferForCaveat(caveat)}`,
+    stalenessPrefixed: result.prefixed,
+  }
 }
 
 /**
@@ -526,10 +541,10 @@ export function buildAnalysisStaleTemplate(): string {
   // move user-facing copy. Only the first can see an identical re-type; a
   // runtime value check never can, and the label here previously claimed
   // otherwise.
-  return (
-    `${STALENESS_PREFIX} Would you like to re-run analysis to see ` +
-    `how your changes affect the results?`
-  );
+  // Both halves composed: the caveat AND the recovery offer. The offer used to
+  // be inlined here, which is why narrowing the precondition silently deleted
+  // the user's way out — the answered path had no sentence to reuse.
+  return `${STALENESS_PREFIX} ${STALE_RECOVERY_OFFER}`;
 }
 
 /**
@@ -550,8 +565,9 @@ export function buildAnalysisStaleTemplate(): string {
  * internal terms (no graph hash, fact_type, analysis_status).
  */
 export function buildAnalysisUnconfirmedTemplate(): string {
-  // Composed from the constant for the same reason as its stale twin above.
-  return `${UNCONFIRMED_PREFIX} Re-run analysis to see the current result.`;
+  // Composed from the constants for the same reason as its stale twin above —
+  // both halves, so the answered path can reuse the offer instead of re-typing.
+  return `${UNCONFIRMED_PREFIX} ${UNCONFIRMED_RECOVERY_OFFER}`;
 }
 
 /**
