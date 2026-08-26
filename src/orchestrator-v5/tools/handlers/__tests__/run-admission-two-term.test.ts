@@ -250,7 +250,7 @@ describe('admission absorbs an ABSENCE, never a value it cannot read', () => {
   });
 });
 
-describe('a blocker on a SUBMITTED option is never waived', () => {
+describe('the EXCLUSION waiver never answers a blocker on a SUBMITTED option', () => {
   /**
    * ⚠ ALSO FOUND BY A SURVIVING MUTANT (drop the touched-option identity check).
    *
@@ -260,10 +260,45 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
    *
    * `opt_partial` is linked to TWO factors and valued on ONE. Its interventions
    * are non-empty, so the gate SUBMITS it — it is not touched — yet it still
-   * raises `MISSING_OPTION_VALUE` for the unvalued factor. Exclusion answers
-   * nothing about an option that is being submitted, so the refusal must stand.
-   * Without the identity conjunct this graph is admitted and the run goes out
-   * carrying an option CEE has just said is incomplete.
+   * raises `MISSING_OPTION_VALUE` for the unvalued factor.
+   *
+   * ## ⚠⚠ THIS SPEC'S VERDICT CHANGED ON 2026-08-25, AND THE REASON MATTERS
+   *
+   * It previously asserted `willProceed === false` for this graph. That was
+   * correct about the EXCLUSION — exclusion answers nothing about an option
+   * being submitted, and that conjunct is UNCHANGED and still pinned below —
+   * but it used the whole-graph verdict to bind it, and the verdict now has a
+   * SECOND legitimate cause.
+   *
+   * The founder ruling (2026-08-25): *"admission should require only inputs the
+   * compute genuinely consumes. A missing option×factor value that downstream
+   * compute discards must not block analysis. [...] Repair must be monotone:
+   * adding valid information cannot make the model less analysable."*
+   *
+   * Blocking this graph broke monotonicity outright: `opt_partial` valued on
+   * ZERO factors is excluded and waived (admitted), and valuing ONE factor
+   * blocked it. Measured on pristine `staging` 7401725f; the lattice is in
+   * `run-admission-monotonicity.test.ts`. And the obligation itself is minted
+   * from an option→factor EDGE that **PLoT strips before the engine ever sees
+   * it** (`plot-lite-service` `src/normalisation/option-filter.ts:93-97`,
+   * staging `3a3bee58`) — `option.interventions` is the only channel by which an
+   * option touches a factor, so the unvalued pair is a no-op at the compute.
+   *
+   * So the blocker on `opt_partial` is now answered by
+   * `isWaivableByComputeDiscard`, which is a DIFFERENT predicate answering a
+   * DIFFERENT question. The assertions below therefore bind the exclusion
+   * conjunct DIRECTLY — `opt_partial` must not appear in `waivedOptionIds` and
+   * must not be stamped `waived_by_exclusion` — which is what the surviving
+   * mutant would violate. Dropping the identity check still REDs this spec.
+   *
+   * ⚠ WHAT THIS DOES NOT DISCHARGE: the ruling licenses this only where
+   * "uncertainty is represented honestly". The run now goes out carrying an
+   * option CEE has said is incomplete, and there is no carrier marking it as
+   * such — `waived_by_exclusion` would be a lie here, and a truthful
+   * `waived_by_compute_discard` needs a new member on
+   * `CanonicalReadinessIssue`. The blockers do remain visible in
+   * `assessment.blockingIssues`, so the gap is in the OFFER COPY, not in
+   * whether the user can see the missing value. Tracked as a follow-up.
    */
   const PARTIAL_PLUS_EMPTY = {
     version: '1',
@@ -290,7 +325,7 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
     ],
   };
 
-  it('refuses when a waivable-CODE blocker names an option the run will SUBMIT', () => {
+  it('does not exclusion-waive a submitted option, even on an identical code', () => {
     const admission = resolveRunAdmission(PARTIAL_PLUS_EMPTY);
 
     // PRECONDITIONS PINNED IN-TEST — the fixture must genuinely present BOTH
@@ -304,8 +339,21 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
     );
     expect(blockers.map((i) => i.option_id).sort()).toEqual(['opt_empty', 'opt_partial']);
 
-    // The verdict under test: identical code, different option, refusal stands.
-    expect(admission.willProceed).toBe(false);
+    // ⭐ THE CLAIM UNDER TEST, bound DIRECTLY rather than through the verdict:
+    // identical code, different option ⇒ the EXCLUSION does not answer it.
+    // Dropping the touched-option identity conjunct makes `opt_partial` appear
+    // in both of these, so the surviving mutant still REDs here.
+    expect(admission.waivedOptionIds).toEqual(['opt_empty']);
+    const partialBlocker = (admission.assessment.blockingIssues ?? []).find(
+      (i) => i.option_id === 'opt_partial' && i.code === 'MISSING_OPTION_VALUE',
+    );
+    expect(partialBlocker).toBeDefined();
+    expect(partialBlocker?.waived_by_exclusion).toBeUndefined();
+
+    // The graph is nonetheless ADMITTED — by the compute-discard waiver, not by
+    // the exclusion. See the adjudication above: refusing it broke repair
+    // monotonicity, and the obligation is minted from an edge PLoT strips.
+    expect(admission.willProceed).toBe(true);
   });
 
   it('DISCRIMINATING TWIN — completing that option admits the run', () => {
