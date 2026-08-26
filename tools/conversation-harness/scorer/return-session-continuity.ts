@@ -37,7 +37,11 @@ import {
   canonicalStateFromFreshness,
   summariseCoachingStatePack,
 } from '../../../src/orchestrator-v5/context/canonical-analysis-state.js';
-import { compactGraphForContextPack } from '../../../src/orchestrator-v5/context/compact-graph-for-contextpack.js';
+import {
+  compactGraphForContextPack,
+  compactSelectedGraphForContextPack,
+} from '../../../src/orchestrator-v5/context/compact-graph-for-contextpack.js';
+import { selectContextGraphSnapshot } from '../../../src/orchestrator-v5/context/context-graph-snapshot.js';
 import {
   assembleContextPackWithSummary,
   CONTEXT_PACK_RECENT_TURNS_CAP,
@@ -788,9 +792,17 @@ export async function runFreshFacadeReturnSession(
     : authoritativeGraph;
   const brief = context.scenarioBriefText;
   const facts = mutant === 'drop_facts' ? [] : context.prior_facts;
-  const compact = compactGraphForContextPack(graphForProjection, {
-    requestId: `return-${runtimeId}`,
+  const selected = selectContextGraphSnapshot({
+    canonicalRead:
+      authoritativeGraph === null
+        ? { status: 'ok_absent' }
+        : { status: 'ok_present', graph: authoritativeGraph },
+    requestGraph: null,
   });
+  const compact =
+    mutant === 'drop_causal_edge'
+      ? compactGraphForContextPack(graphForProjection, { requestId: `return-${runtimeId}` })
+      : compactSelectedGraphForContextPack(selected, { requestId: `return-${runtimeId}` });
   const compactedGraph = compact.kind === 'compacted' ? compact.compact : null;
   const compactedConstraints = graphForProjection?.goal_constraints ?? null;
   const analysis = buildAnalysisFromPriorFacts(

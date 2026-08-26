@@ -57,6 +57,7 @@ import { isRecommendableTypedOption } from '../tools/handlers/recommendable-opti
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import type { ContextPackGraphContext } from './context-graph-snapshot.js';
+import { isCanonicalStrictContextGraphCompaction } from './compact-graph-for-contextpack.js';
 // Selection-aware answering (hop 4). TYPE-ONLY on purpose: the resolved
 // selection is produced by `buildTurnContext` and this module only PLACES it,
 // so there is no runtime edge from the assembler back to the context builder.
@@ -1460,6 +1461,24 @@ export function assembleContextPackWithSummary(
 ): AssembleContextPackResult {
   const compound = detectCompound(input.payload.message);
   const extraction = runExtraction(input.payload.message);
+  // Absence never means permission. Production always supplies this field,
+  // but direct/legacy assembler callers fail weak to `unavailable` rather than
+  // silently granting their graph canonical authority.
+  const graphContext: ContextPackGraphContext = input.graphContext ?? {
+    status: 'unavailable',
+  };
+  // A categorical coefficient-confidence claim is licensed only by the JOIN
+  // of two existing authorities: the selector chose persisted canonical state,
+  // and that exact snapshot passed strict GraphV3 parsing. Provisional request
+  // bytes, structural fallback defaults, and legacy/direct omission all fail
+  // weak. Sanitise before budgeting so unlicensed bytes cannot even affect a
+  // trim decision, then apply the same guard to the raw fallback projection.
+  const coefficientConfidenceLicensed =
+    graphContext.status === 'canonical' &&
+    isCanonicalStrictContextGraphCompaction(input.compactedGraph);
+  const compactedGraphForBudget = coefficientConfidenceLicensed
+    ? input.compactedGraph ?? null
+    : stripCoefficientConfidence(input.compactedGraph ?? null);
   // O-3 — context-size budget (graceful degradation). Applied BEFORE
   // projection so both the handler-facing slots and the LLM-facing
   // display projections are built from the budgeted objects. Under
@@ -1471,7 +1490,7 @@ export function assembleContextPackWithSummary(
   // the budget module's compact-shape domain and passes through
   // unbudgeted, as before.
   const budgeted = applyContextBudgetToAssemblyInputs({
-    compactedGraph: input.compactedGraph ?? null,
+    compactedGraph: compactedGraphForBudget,
     analysis: input.analysis ?? null,
     scenarioId: input.payload.scenario_id ?? null,
   });
@@ -1484,9 +1503,12 @@ export function assembleContextPackWithSummary(
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
   );
-  const projectedGraph: ContextPackGraph = budgeted.compactedGraph
+  const projectedGraphBeforeAuthority: ContextPackGraph = budgeted.compactedGraph
     ? projectCompactGraph(budgeted.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
+  const projectedGraph = coefficientConfidenceLicensed
+    ? projectedGraphBeforeAuthority
+    : stripCoefficientConfidence(projectedGraphBeforeAuthority);
   const analysisStateSummary = deriveContextPackAnalysisState(input);
   // Lane 28 — the persisted decision brief (size-bounded, disclosed
   // truncation). Projected once; when no brief exists the key is OMITTED
@@ -1549,13 +1571,6 @@ export function assembleContextPackWithSummary(
     // from a stale prior run merely because its id/label still exists.
     input.coachingContext?.usable_for_chips === true,
   );
-
-  // Absence never means permission. Production always supplies this field,
-  // but direct/legacy assembler callers fail weak to `unavailable` rather than
-  // silently granting their graph canonical authority.
-  const graphContext: ContextPackGraphContext = input.graphContext ?? {
-    status: 'unavailable',
-  };
 
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
@@ -1721,6 +1736,35 @@ export function assembleContextPackWithSummary(
     }
   }
   return { contextPack, cqeSummary: extraction.summary };
+}
+
+/**
+ * Remove an unlicensed model-facing confidence category without disturbing
+ * graph identity, structure, ordering, or any other projection. Reference
+ * identity is preserved when no edge carries the field.
+ */
+function stripCoefficientConfidence<T extends { readonly edges: readonly unknown[] }>(
+  graph: T | null,
+): T | null {
+  if (graph === null) return null;
+  let changed = false;
+  const edges = graph.edges.map((edge) => {
+    if (
+      typeof edge !== 'object' ||
+      edge === null ||
+      !Object.prototype.hasOwnProperty.call(edge, 'coefficient_confidence')
+    ) {
+      return edge;
+    }
+    const { coefficient_confidence: _unlicensed, ...rest } = edge as Record<
+      string,
+      unknown
+    >;
+    void _unlicensed;
+    changed = true;
+    return rest;
+  });
+  return changed ? ({ ...graph, edges } as T) : graph;
 }
 
 /**

@@ -31,6 +31,10 @@ import {
 } from '../../orchestrator/context/graph-compact.js';
 
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import {
+  isSelectedContextGraphSnapshot,
+  type ContextGraphSelection,
+} from './context-graph-snapshot.js';
 
 export interface CompactGraphForContextPackOptions {
   readonly requestId: string;
@@ -110,6 +114,58 @@ export function compactGraphForContextPack(
     );
     return { kind: 'absent' };
   }
+}
+
+// Runtime attestation for the exact immutable compact object produced from the
+// selector's canonical arm. Identity rejects clones; recursively freezing the
+// object before membership is minted rejects post-compaction mutation and
+// `toJSON`-based fingerprint bypasses. The key remains weak and is collected at
+// end of turn.
+const CANONICAL_STRICT_COMPACTIONS = new WeakSet<object>();
+
+function deepFreezeContextCompaction<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== 'object') return value;
+  const object = value as object;
+  if (seen.has(object)) return value;
+  seen.add(object);
+  for (const nested of Object.values(value as Record<string, unknown>)) {
+    deepFreezeContextCompaction(nested, seen);
+  }
+  return Object.freeze(value);
+}
+
+/**
+ * Compact the selector's single reasoning snapshot and attest only the exact
+ * canonical + strict result. This is the production ContextPack entrypoint;
+ * the generic compactor remains useful for non-authoritative projections and
+ * tests, but its result alone never licenses a confidence claim.
+ */
+export function compactSelectedGraphForContextPack(
+  selection: ContextGraphSelection,
+  options: CompactGraphForContextPackOptions,
+): CompactGraphOutcome {
+  const outcome = compactGraphForContextPack(selection.graph, options);
+  if (
+    isSelectedContextGraphSnapshot(selection) &&
+    selection.status === 'canonical' &&
+    outcome.kind === 'compacted' &&
+    outcome.via === 'strict_parse'
+  ) {
+    deepFreezeContextCompaction(outcome.compact);
+    CANONICAL_STRICT_COMPACTIONS.add(outcome.compact);
+  }
+  return outcome;
+}
+
+/** True only for the exact compact object attested by the selector-aware path. */
+export function isCanonicalStrictContextGraphCompaction(
+  graph: GraphV3Compact | null | undefined,
+): boolean {
+  return (
+    graph != null &&
+    Object.isFrozen(graph) &&
+    CANONICAL_STRICT_COMPACTIONS.has(graph)
+  );
 }
 
 /**
