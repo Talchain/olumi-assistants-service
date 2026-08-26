@@ -3770,6 +3770,58 @@ export async function dispatchEditGraph(
     const admissionNow = resolveRunAdmission(
       optionInterventionWriteWithheld ? parsedGraph : (editResult.appliedGraph ?? parsedGraph),
     );
+    // ⭐⭐ NO GESTURE HERE — AND THAT IS THE FINDING, NOT AN OMISSION (S7).
+    //
+    // This row shipped `blocks: []` and the witnessed capture (UI `326970a7` ·
+    // CEE `5f2e3fd`) showed why that mattered: a chip labelled "Set effect on
+    // Cash runway consumed" opened nothing and handed back a sentence to retype.
+    // The obvious repair is a `ui_directive`. TWO destinations were built for it
+    // and BOTH were refuted by live drives, so the reasoning is recorded rather
+    // than the attempts quietly deleted (trap 14).
+    //
+    //   1. `open_inspector` @ the OPTION node. The canvas panel renders the
+    //      intervention row and `+ Add a change` — both reporting
+    //      `disabled: false` ON THEMSELVES — inside a `<fieldset disabled>` six
+    //      ancestors up. A forced native write produced ZERO wire calls. Its own
+    //      notice: "This inspector is read-only because these changes cannot yet
+    //      be saved to the shared model." Read-only BY POLICY.
+    //
+    //   2. `open_section` @ {model_section, 'options'} — the surface the SHIPPED
+    //      `option_needs_encoding` remedy already points at. Refuted by a matched
+    //      pair in one session: the option row's `-value` testid resolves to an
+    //      EMPTY `<span>` of height 0, no role, no tabindex, no onclick, and a
+    //      real click is REFUSED; the FACTOR row's control in the same table is a
+    //      37×42 `<button>` whose click SUCCEEDS and yields an input. Not policy
+    //      this time (`anyDisabledFieldsetOnPage: 0`) — the option row simply has
+    //      NO value control. The rows even carry
+    //      `-attention-missing-intervention` markers: the section DISPLAYS the
+    //      blocker it cannot fix.
+    //
+    // ⚠⚠ TWO INSTRUMENT LESSONS, both of which nearly shipped a wrong gesture:
+    // A PER-ELEMENT `disabled` CHECK IS NOT AN ENABLED CHECK (only actionability
+    // sees an ancestor disabled fieldset), and A TESTID THAT RESOLVES IS NOT A
+    // CONTROL THAT EXISTS (an empty zero-height span answers `querySelector`
+    // exactly as a button does).
+    //
+    // ⛔ SO THERE IS NO WORKING DIRECT-MANIPULATION SURFACE FOR THIS ENTITY, and
+    // the rule this lane adopted decides the rest: hand the user to a
+    // direct-manipulation surface WHERE ONE EXISTS AND WORKS; hand them to chat
+    // where one does not. **The user is already in chat when they click this
+    // chip**, so the honest gesture is none — a directive here would point at a
+    // place they are already standing, or at a surface that cannot help.
+    //
+    // ⭐ AND THE LOOP GENUINELY CLOSES WITHOUT ONE, which is why this is a
+    // completed fix and not a shortfall. The reply below asks for the number;
+    // a bare `0.6` binds to this exact slot via `deriveOnScreenEffectAsk` →
+    // `matchBareRepairValue` → `resolveRepairValueBinding`. That binding is
+    // derived from READINESS STATE (`status === 'needs_user_input'`), never from
+    // the assistant's prose, so rewording the ask cannot break it.
+    //
+    // ⚠ ROWED, NOT FIXED HERE: the product's own `option_needs_encoding` remedy
+    // (`REMEDY_SECTION_BY_OPEN_ITEM_KIND` → `turn-executor.ts`) points at that
+    // same options section, so it ships a gesture at a surface that cannot
+    // resolve the blocker class it names. That is a defect in SHIPPED code, not
+    // in this row, and it is reported rather than absorbed.
     response = {
       ...response,
       assistant_text: composeConfigureOptionClarifyResponse({

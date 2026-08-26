@@ -997,6 +997,26 @@ export function buildFocusInspectorDirective(
       // add_constraint (UI drops the patch — fail-open avoided), compare_options
       // (no V5 producer — unreachable), explain_result (deprecated literal,
       // historic rows only), edit_graph: no directive class.
+      //
+      // ⚠ `edit_graph` STAYS UNMAPPED HERE ON PURPOSE, and the reason is not the
+      // one it looks like. The configure-option repair chip exits on
+      // `exit_path: edit_graph` with NO directive, and the obvious repair is to
+      // give `edit_graph` a row in this switch. It would be DEAD CODE: that turn
+      // commits `handler_facts: []` (`edit-graph-dispatch.ts` builds a fact only
+      // when a mutation applied), so this switch never receives an `edit_graph`
+      // fact on the path that needs the gesture. The code would be live and the
+      // DATA could never reach it — CLAUDE.md trap 16-inverse.
+      //
+      // ⭐ AND NO GESTURE IS EMITTED ELSEWHERE FOR IT EITHER — the seam ships
+      // NONE, by decision. Two destinations were built and both were refuted by
+      // live drives: the canvas option inspector is read-only by policy (its
+      // controls sit in a `<fieldset disabled>`; a forced write produced zero
+      // wire calls), and the Model tab's `options` section has no value control
+      // on option rows at all (that row's `-value` testid resolves to an empty
+      // zero-height `<span>` where a FACTOR row gets a real `<button>`). With no
+      // surface that can accept the value, the honest answer is to ask for it in
+      // chat — where the user already is when the chip is clicked, and where a
+      // bare figure binds via `routing/repair-value-binding.ts`.
       return null;
   }
 }
