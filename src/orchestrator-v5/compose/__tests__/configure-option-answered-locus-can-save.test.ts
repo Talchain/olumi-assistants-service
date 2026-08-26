@@ -35,7 +35,17 @@
  * literal would pass forever while someone reintroduced "the canvas" in a
  * reworded sentence — it would be a tautology restating the diff (CLAUDE.md
  * trap 19 at copy grain). Each `it` below names the PROPERTY that makes the
- * reply true, and each would RED on a reworded false sentence.
+ * reply true.
+ *
+ * ⚠⚠ THIS HEADER PREVIOUSLY CLAIMED "each would RED on a reworded false
+ * sentence". THAT WAS MEASURED FALSE and is withdrawn (review gate G1, PR
+ * #1125): a reworded false sentence naming the INSPECTOR PANEL scored 9/9 GREEN
+ * against the corpus as it then stood. The corpus was short, and a claim of
+ * completeness on top of a short list is worse than the short list — it is what
+ * teaches the next reader to stop looking (trap 14). The honest claim is the
+ * narrow one: **each `it` REDs on a reworded sentence that names a surface THIS
+ * CORPUS ENUMERATES.** A surface it does not name is not certified by it, and
+ * cannot be — see the epistemics below.
  *
  * ⚠ `UNSAVEABLE_SURFACES` is a HAND-WRITTEN corpus and is declared as one. It
  * cannot be derived: the authority that would make it derivable
@@ -113,6 +123,49 @@ const UNSAVEABLE_SURFACES: ReadonlyArray<readonly [string, RegExp]> = [
   // The witnessed 2026-08-19 dead end: `EdgePanel`'s intervention branch renders
   // two `<p>` tags and no controls.
   ['the option→factor link panel', /\benter the value on\b/i],
+  // ⭐⭐ ADDED to close review gate G1 on PR #1125. The corpus covered `canvas`,
+  // `model tab`, `options section` and `enter the value on` — and therefore could
+  // NOT see the surface under the name the codebase itself uses. Reproduced at
+  // execution before writing these two rows: the sentence
+  //
+  //   "Open that option's inspector panel and add the factor there — or send me
+  //    the number, 0.6 say, and I'll set it on that link."
+  //
+  // satisfied EVERY other property pinned below (commits to doing the write,
+  // decimal exemplar, label named once, contrast intact) and scored 9/9 GREEN
+  // against the pre-G1 corpus, while still sending the user to a disabled
+  // fieldset. This sentence has now gone false TWICE by naming a surface; these
+  // rows cover the class most likely to recur third.
+  //
+  // MEASUREMENT — DERIVED AT UI SOURCE, `Talchain/DecisionGuideAI` staging
+  // `02233d83` (2026-08-26T10:22:47Z), not inherited from this PR's prose:
+  //   * `InspectorRouter.tsx:63`  — `NODE_PANELS['option'] = OptionPanel`
+  //   * `InspectorRouter.tsx:292` — `PanelComponent = NODE_PANELS[panelType]`
+  //   * `InspectorRouter.tsx:340` — `<PanelComponent/>` renders INSIDE
+  //     `<fieldset disabled data-authority="disabled">` (`:334-341`). The
+  //     `disabled` attribute is a BARE LITERAL: no expression, no authority
+  //     table read, nothing a user action can flip.
+  //   * EXACTLY TWO fieldset sites exist in that file (`:221`, `:334`) and BOTH
+  //     are bare-disabled; the other wraps `EdgePanel`. So every inspector panel
+  //     is inert, which is why `/\bpanel\b/i` is deliberately broad rather than
+  //     scoped to the option panel alone.
+  //   * `useInspectorMutations.ts:152-153` — the panel's OWN notice says so:
+  //     "This inspector is read-only because these changes cannot yet be saved
+  //     to the shared model." (It redirects to the Model tab, which is row 2
+  //     above — dead for OPTIONS specifically.)
+  //
+  // ⚠ RUNG, STATED EXACTLY: DERIVED AT UI SOURCE AND AT THE SERVED BUNDLE —
+  // NOT DOM-WITNESSED. No lane has observed a real `:disabled` computed state in
+  // a browser. Refute these two rows by driving the panel, not by rereading it.
+  //
+  // ⚠ BREADTH IS THE POINT, AND IT HAS A COST (trap 22b — one predicate, two
+  // opposite harms). `/\bpanel\b/i` would also RED a merely DESCRIPTIVE future
+  // sentence ("you'll see it in the panel"). That is accepted deliberately while
+  // the fieldset is inert: pointing a user at a read-only surface is misleading
+  // whether the verb is imperative or not. Narrow these rows only when the
+  // measurement above stops holding — not to make a reword pass.
+  ['the inspector', /\binspector\b/i],
+  ['any panel', /\bpanel\b/i],
 ];
 
 describe('2.1269 — the answered reply sends the user somewhere that can save', () => {
