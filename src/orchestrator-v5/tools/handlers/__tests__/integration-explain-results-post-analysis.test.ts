@@ -308,7 +308,15 @@ describe('integration: run → mutate → explain → rerun single-verdict journ
     expect(outcome.assistant_text).not.toMatch(/No analysis has been run/);
     const fact = outcome.handler_facts[0];
     if (fact.fact_type === 'explain_results') {
-      expect(fact.result.precondition_unmet).toBe(true);
+      // ⚠ FLIPPED BY THE S8b NARROWING: a stale turn now ANSWERS with the caveat
+      // leading, so its precondition is MET. The prose assertions above are
+      // unchanged — the user still reads "may be out of date" first, and still
+      // never reads "no analysis has been run".
+      expect(fact.result.precondition_unmet).toBe(false);
+      // ⭐ And the caveat is recorded as ATTACHED, derived from the same call
+      // that produced the text rather than hand-set — so telemetry cannot claim
+      // an uncaveated stale answer.
+      expect(fact.result.staleness_prefixed).toBe(true);
     }
 
     // Chips: exactly one chip, the executable rerun — no fresh-result action.

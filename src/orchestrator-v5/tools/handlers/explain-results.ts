@@ -68,6 +68,8 @@ import {
   buildPreconditionAssistantText,
   resolveBlockedOptionLabels,
   decideExplanationPrecondition,
+  explanationVerdictBlocks,
+  finaliseExplanationText,
   resolveOptionCount,
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
@@ -112,7 +114,12 @@ export function createExplainResultsHandler(): HandlerFn {
     const optionCount = resolveOptionCount(invocation);
     const verdict = decideExplanationPrecondition(invocation);
 
-    if (verdict !== 'execute') {
+    // ⚠ NOT `verdict !== 'execute'`. `stale`/`unconfirmed` mean a result EXISTS
+    // and may be referenced in prose with a caveat (the `usableForProse`
+    // predicate the canonical analysis state already defines) — they are
+    // ANSWERED and caveated below, not swallowed. Only `missing`/`degraded`
+    // block, because there is nothing to answer with.
+    if (explanationVerdictBlocks(verdict)) {
       const assistantText = buildPreconditionAssistantText(
         verdict,
         optionCount,
@@ -202,18 +209,26 @@ export function createExplainResultsHandler(): HandlerFn {
       );
     }
 
-    // V5 stale-aware explain recovery: the staleness signal travels via
-    // the precondition branch above — `decideExplanationPrecondition`
-    // returns `'stale'` when `invocation.analysisFreshness?.freshness ===
-    // 'stale'` and that branch emits `buildAnalysisStaleTemplate` whose
-    // leading sentence is the brief's required wording ("These results
-    // may be out of date because the model has changed since the last
-    // analysis."). When we reach THIS branch — verdict === 'execute' —
-    // freshness is `'fresh'` (or 'unknown' / 'none' with usable legacy
-    // data), so no caveat prefix is appropriate. The applyStalenessPrefix
-    // helper remains for legacy call sites; `staleness_prefixed` stays on
-    // the fact as `false` for backwards compat with telemetry consumers.
-    const assistantText = rawText;
+    // ⚠⚠ THIS COMMENT PREVIOUSLY ASSERTED THE OPPOSITE, AND THE NARROWING
+    // FALSIFIED ITS PREMISE. It read: "When we reach THIS branch — verdict ===
+    // 'execute' — freshness is 'fresh' … so no caveat prefix is appropriate. The
+    // applyStalenessPrefix helper remains for legacy call sites;
+    // `staleness_prefixed` stays on the fact as `false`". Every clause of that
+    // is now wrong: `stale` and `unconfirmed` REACH this branch by design,
+    // `applyStalenessPrefix` is the live enforcement path rather than a legacy
+    // remnant, and a hard-coded `false` flag would be a fabrication. Left
+    // standing it would be the exact false-label defect that teaches the next
+    // lane to stop looking (CLAUDE.md trap 14).
+    //
+    // ⭐ ONE CALL RETURNS BOTH THE TEXT AND ITS FLAG. Never destructure the text
+    // and recompute the flag — that reintroduces the hand-maintained mirror this
+    // replaces. `finaliseExplanationText` is shared with `what_would_flip`; a
+    // second prefixer here would be the mirror defect one level up.
+    //
+    // Called on the FINAL assembled string so the caveat LEADS what the user
+    // reads, after the Sonnet/fallback branch and any appended validation beat.
+    const finalised = finaliseExplanationText(rawText, verdict);
+    const assistantText = finalised.text;
 
     const fact: ExplainResultsHandlerFact = {
       fact_type: 'explain_results',
@@ -227,7 +242,26 @@ export function createExplainResultsHandler(): HandlerFn {
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
-        staleness_prefixed: false,
+        // DERIVED from the same call that produced the text, never hand-set.
+        //
+        // ⚠⚠ THIS CARRIES `caveated`, NOT `stalenessPrefixed`, AND THE CHOICE IS
+        // DELIBERATE. `ui-directive.ts` now GATES the results-panel directive on
+        // this field, so it must answer "does this answer carry a currency
+        // caveat?" — a question `stalenessPrefixed` gets wrong whenever the
+        // model wrote an approved opening itself (the priced idempotence gap):
+        // we do not prepend, the flag reads false, and the panel would open on
+        // stale numbers for exactly those turns. Deriving from the verdict makes
+        // the gate total.
+        //
+        // ⚠ THE CONTRACT NAME NOW LAGS THE SEMANTICS. The field is
+        // `staleness_prefixed` in `@talchain/schemas` 0.48.0 and is OPTIONAL and
+        // UNDOCUMENTED there; measured at `e9cc8258`, it had ZERO behavioural
+        // readers in `src/` (writers and comments only, against a contrast
+        // control of 34 non-test `precondition_unmet` hits in the same sweep),
+        // so sharpening what it carries breaks no consumer. Renaming it to
+        // `staleness_caveated` is a cross-repo schema change and is ROWED, not
+        // smuggled in here.
+        staleness_prefixed: finalised.caveated,
       },
     };
     const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);

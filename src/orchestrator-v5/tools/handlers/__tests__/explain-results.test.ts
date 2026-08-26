@@ -512,7 +512,7 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
   });
 
-  it('stale: successful fact + freshness=stale → stale template, never the projection answer', async () => {
+  it('stale: successful fact + freshness=stale → caveat LEADS, and the answer is KEPT (S8b narrowing)', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
@@ -533,7 +533,17 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     expect(outcome.assistant_text).toMatch(
       /^These results may be out of date because the model has changed since the last analysis\./,
     );
-    expect(outcome.assistant_text).not.toContain('Hire Senior Engineer');
+    // ⚠ EXPECTATION DELIBERATELY FLIPPED BY THE S8b NARROWING — this asserted
+    // `.not.toContain('Hire Senior Engineer')`, i.e. that a stale turn must
+    // DELETE the model's answer. That behaviour was the defect: two of the
+    // founder's own questions were swallowed while two of the same kind were
+    // answered richly in the same state, and the routing schema had already
+    // required the model to write the answer we then discarded unread.
+    // The caveat now ACCOMPANIES the answer instead of REPLACING it — which is
+    // what `usableForProse` ("may be referenced in prose WITH A CAVEAT") always
+    // specified. The leading-sentence pin above is UNCHANGED: the guarantee is
+    // strictly stronger, not weaker.
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
     expect(outcome.suppress_orientation).toBe(true);
   });
 

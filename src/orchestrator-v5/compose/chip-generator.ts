@@ -387,31 +387,47 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   // EXECUTABLE what_would_flip chip — byte-identical to the post-run_analysis
   // rule's chip — so the click resolves via `dispatchDeterministicChipClick`.
   //
-  // Precondition parity (red-team guard): the what_would_flip handler only
-  // returns 'execute' when, ALSO, an analysis projection is buildable from the
-  // facts AND freshness !== 'stale' (see `decideExplanationPrecondition`).
-  // `buildAnalysisProjectionSummary` returns null only for a null input, and
-  // on the chip-click path that input is non-null iff
-  // `buildAnalysisFromPriorFacts` is non-null — so projection-buildability is
-  // the faithful 'execute' predicate. Freshness is already non-stale here
-  // (Priority 1 diverted the rerun-required case to the re-run prompt), but we
-  // assert it defensively. When the precondition would NOT be met, we keep the
-  // conversational promptChip (status quo) so a click never lands the user on
-  // a "no analysis run yet" handler template.
+  // ⚠⚠ THIS WAS A HAND-MIRROR OF THE HANDLER PRECONDITION AND THE S8b NARROWING
+  // DESYNCHRONISED IT (CLAUDE.md trap 12). It read: "the what_would_flip handler
+  // only returns 'execute' when, ALSO, an analysis projection is buildable from
+  // the facts AND freshness !== 'stale' (see `decideExplanationPrecondition`)".
+  // THE SECOND CONJUNCT IS NO LONGER TRUE OF THAT HANDLER: `stale` and
+  // `unconfirmed` now ANSWER, with the currency caveat attached by
+  // `finaliseExplanationText`. A comment restating another module's predicate is
+  // exactly the mirror that drifts silently and reads green while doing it.
+  //
+  // ⭐ THE BEHAVIOUR HERE IS UNCHANGED AND STILL CORRECT — but for a DIFFERENT
+  // REASON than the one written above, and the two questions must be named apart
+  // (trap 21). This gate asks "should we OFFER RESULT EXPLORATION?", which the
+  // canonical state answers with `usableForChips` — FRESH ONLY, deliberately
+  // narrower than `usableForProse` (fresh|stale|unknown, "may be referenced in
+  // prose WITH A CAVEAT"). Stale analysis earns a rerun affordance
+  // (`requiresRerun`), not an exploration chip. So the freshness conjunct stays,
+  // now anchored to the predicate that actually governs CHIPS rather than to a
+  // handler precondition that has moved beneath it.
+  //
+  // `buildAnalysisProjectionSummary` returns null only for a null input, and on
+  // the chip-click path that input is non-null iff `buildAnalysisFromPriorFacts`
+  // is non-null. Priority 1 already diverts the rerun-required case, so the
+  // freshness test is defensive. When this does not hold we keep the
+  // conversational promptChip (status quo) so a click never lands the user on a
+  // "no analysis run yet" handler template.
   if (canExploreAnalysis) {
     const combinedFacts: readonly HandlerFact[] = [
       ...(input.handlerFacts ?? []),
       ...(input.priorFacts ?? []),
     ];
     const projectionBuildable = buildAnalysisFromPriorFacts(combinedFacts, undefined) !== null;
-    const preconditionWouldExecute = projectionBuildable && freshness !== 'stale';
+    // Deliberately NOT named for the handler precondition any more — it no
+    // longer mirrors it, and the old name would re-teach the false parity.
+    const chipSafeToOffer = projectionBuildable && freshness !== 'stale';
     emit(TelemetryEvents.V5ChipsFloorApplied, {
       reason: 'post_analysis_no_obvious_next',
       stage,
       analysis_ready_status: readyStatusLabel,
       has_run_analysis_fact: true,
     });
-    if (preconditionWouldExecute) {
+    if (chipSafeToOffer) {
       // Executable — identical shape to the post-run_analysis rule's chip so a
       // click bypasses the LLM and dispatches the what_would_flip handler.
       return [

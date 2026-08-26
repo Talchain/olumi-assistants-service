@@ -190,6 +190,20 @@ type UiDirectiveSuppressReason =
   | 'lens_subject_unresolved'
   | 'precondition_unmet'
   /**
+   * The explanation was ANSWERED but carries a currency caveat (`stale` /
+   * `unconfirmed`), so the surface it would open is not trustworthy on its own.
+   *
+   * ⭐ WHY THIS IS ITS OWN TAG AND NOT FOLDED INTO `precondition_unmet`. The two
+   * answer different questions: `precondition_unmet` means the handler returned
+   * the deterministic template INSTEAD of an answer (the contract's own words);
+   * this one means the handler DID answer, and caveated it. Reusing the older
+   * tag would make the telemetry claim the turn produced no answer, and this
+   * estate has already paid for one tag whose meaning quietly changed under it
+   * (`no_flip_factor`, retired above). A dashboard should be able to tell
+   * "there was nothing to open" from "there was something, and we withheld it".
+   */
+  | 'staleness_caveated'
+  /**
    * §2.1 row 4: the flip turn emitted no `set_factor_value` proposal, so there
    * is no factor the product offered to change and nothing honest to point at.
    *
@@ -516,6 +530,25 @@ function buildExplainResultsPanelDirective(
   if (fact.result.precondition_unmet === true) {
     return suppressDirective('explain_results', 'precondition_unmet');
   }
+  // ⚠⚠ THE SECOND GATE, ADDED WITH THE EXPLANATION-PRECONDITION NARROWING.
+  // Before that change, `stale`/`unconfirmed` took the blocking branch and so
+  // arrived here as `precondition_unmet: true` — the single gate above was
+  // total. The narrowing lets those verdicts REACH the answered branch, which
+  // flips the flag to false, and without this term the row would begin opening
+  // a panel of numbers the sentence above them has just called possibly-wrong.
+  //
+  // ⭐ THE PRINCIPLE, because it is what makes this a gate and not a
+  // preference: the caveat is carried IN WORDS; the panel is not. Opening an
+  // unmarked surface beside honest prose is the split this estate keeps paying
+  // for. The narrowing's own licence is explicitly for PROSE — `usableForProse`
+  // admits stale WITH a caveat, `usableForChips` is fresh-only — and a panel is
+  // nearer a chip than a sentence.
+  //
+  // Whether the results panel should ever open on stale state WITH ITS OWN
+  // MARKER is a real product question. It is rowed, not answered here.
+  if (fact.result.staleness_prefixed === true) {
+    return suppressDirective('explain_results', 'staleness_caveated');
+  }
   const block = directiveFromUiTarget('open_panel', { kind: 'tab', id: 'results' });
   if (block === null) return suppressDirective('explain_results', 'target_unresolved');
   return emitDirective('explain_results', block);
@@ -774,6 +807,23 @@ function buildFlipFocusDirective(
 ): UiDirectiveBlock | null {
   if (fact.result.precondition_unmet) {
     return suppressDirective('what_would_flip', 'precondition_unmet');
+  }
+  // The SAME caveated-answer gate as row 5 — see the note there. The narrowing
+  // applies to BOTH explanation handlers, so this row flips identically; gating
+  // only its twin would point the user at a factor derived from an analysis the
+  // answer above just called possibly-wrong.
+  //
+  // ⚠ ORDERING, RECORDED RATHER THAN CHANGED: this gate sits BEFORE the
+  // `no_flip_proposal` check, so a caveated turn that ALSO had no proposal now
+  // reports `staleness_caveated` rather than `no_flip_proposal`. Both are true
+  // of such a turn and the emitted directive is identical (none) either way, so
+  // this is a telemetry-attribution nuance, not a behaviour difference. It is
+  // noted because it is the kind of silent re-attribution that later reads as a
+  // capability going quiet in a dashboard (cf. the retired `no_flip_factor`
+  // tag). Currency is checked first deliberately: it is a claim about whether
+  // the turn may point at ANYTHING, which outranks which thing it would point at.
+  if (fact.result.staleness_prefixed === true) {
+    return suppressDirective('what_would_flip', 'staleness_caveated');
   }
   if (typeof flipFocusFactorId !== 'string' || flipFocusFactorId.length === 0) {
     return suppressDirective('what_would_flip', 'no_flip_proposal');

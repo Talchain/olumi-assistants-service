@@ -13,10 +13,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import * as stalenessModule from '../staleness-prefix.js';
 import {
   applyStalenessPrefix,
   STALENESS_PREFIX,
+  STALE_RECOVERY_OFFER,
   UNCONFIRMED_PREFIX,
+  UNCONFIRMED_RECOVERY_OFFER,
 } from '../staleness-prefix.js';
 import {
   buildAnalysisStaleTemplate,
@@ -401,6 +404,18 @@ const SCAN_TIMEOUT_MS = 60_000;
  */
 const CONTRAST_NEEDLE = 'buildAnalysisStaleTemplate';
 
+/**
+ * Every canonical user-facing sentence this module owns, paired with its export
+ * name for the failure message. Kept honest by TABLE_IS_COMPLETE below, which
+ * derives the expected membership from the module rather than from this list.
+ */
+const CANONICAL_SENTENCES: ReadonlyArray<readonly [string, string]> = [
+  ['STALENESS_PREFIX', STALENESS_PREFIX],
+  ['UNCONFIRMED_PREFIX', UNCONFIRMED_PREFIX],
+  ['STALE_RECOVERY_OFFER', STALE_RECOVERY_OFFER],
+  ['UNCONFIRMED_RECOVERY_OFFER', UNCONFIRMED_RECOVERY_OFFER],
+];
+
 interface SourceScan {
   /** Every non-test .ts file under src/, repo-relative, posix separators. */
   readonly files: readonly string[];
@@ -525,33 +540,46 @@ describe('SINGLE_COPY — the canonical sentences occur exactly once in src/', (
 
   /* ---------------- PART B — the claim itself ---------------- */
 
-  it(
-    'the STALENESS_PREFIX sentence occurs EXACTLY ONCE in src/ (non-test)',
-    () => {
-      const scan = scanSrc();
-      const carriers = scan.filesContaining(STALENESS_PREFIX);
-      expect(
-        scan.count(STALENESS_PREFIX),
-        `Expected exactly one occurrence (the definition in staleness-prefix.ts). Found ` +
-          `${scan.count(STALENESS_PREFIX)}, in: ${carriers.join(', ') || '(nowhere)'}. ` +
-          `A second occurrence means the sentence has been RE-INLINED — compose it from ` +
-          `STALENESS_PREFIX instead. This REDs on a character-identical copy, which is the ` +
-          `case the runtime BYTES test structurally cannot see.`,
-      ).toBe(1);
-      expect(carriers).toEqual(['src/orchestrator-v5/tools/handlers/staleness-prefix.ts']);
-    },
-    SCAN_TIMEOUT_MS,
-  );
+  /**
+   * ⭐⭐ THE TABLE'S COMPLETENESS IS DERIVED FROM THE MODULE, NOT HAND-KEPT.
+   *
+   * CLAUDE.md trap 12d: deriving a guard from a list MOVES the risk to the list.
+   * A hand-written table of sentences would pass forever while a FIFTH canonical
+   * sentence was added and left unguarded — which is exactly how this lane
+   * nearly shipped the recovery offer: the previous SINGLE_COPY covered only the
+   * two PREFIXES, so appending a re-typed offer would have been invisible to it.
+   *
+   * So the table is checked against the module's OWN exported string constants.
+   * Add a user-facing sentence to `staleness-prefix.ts` and this REDs until it
+   * is covered — a completeness check that is not derived from the table it
+   * checks.
+   */
+  it('TABLE_IS_COMPLETE — every exported sentence in the module is guarded', () => {
+    const exportedStringConstants = Object.entries(stalenessModule)
+      .filter(([, value]) => typeof value === 'string')
+      .map(([name]) => name)
+      .sort();
+    expect(
+      exportedStringConstants,
+      `The module exports string constants that CANONICAL_SENTENCES does not cover. An ` +
+        `unguarded user-facing sentence can be re-inlined character-for-character with no ` +
+        `test noticing — the precise gap that let the recovery offer be dropped and then ` +
+        `nearly re-typed. Add it to the table.`,
+    ).toEqual(CANONICAL_SENTENCES.map(([name]) => name).sort());
+  });
 
-  it(
-    'the UNCONFIRMED_PREFIX sentence occurs EXACTLY ONCE in src/ (non-test)',
-    () => {
+  it.each(CANONICAL_SENTENCES)(
+    '%s occurs EXACTLY ONCE in src/ (non-test)',
+    (name, sentence) => {
       const scan = scanSrc();
-      const carriers = scan.filesContaining(UNCONFIRMED_PREFIX);
+      const carriers = scan.filesContaining(sentence);
       expect(
-        scan.count(UNCONFIRMED_PREFIX),
-        `Expected exactly one occurrence (the definition in staleness-prefix.ts). Found ` +
-          `${scan.count(UNCONFIRMED_PREFIX)}, in: ${carriers.join(', ') || '(nowhere)'}.`,
+        scan.count(sentence),
+        `Expected exactly one occurrence of ${name} (its definition in staleness-prefix.ts). ` +
+          `Found ${scan.count(sentence)}, in: ${carriers.join(', ') || '(nowhere)'}. ` +
+          `A second occurrence means the sentence has been RE-INLINED — compose it from ` +
+          `${name} instead. This REDs on a CHARACTER-IDENTICAL copy, which is the case the ` +
+          `runtime BYTES test structurally cannot see.`,
       ).toBe(1);
       expect(carriers).toEqual(['src/orchestrator-v5/tools/handlers/staleness-prefix.ts']);
     },
