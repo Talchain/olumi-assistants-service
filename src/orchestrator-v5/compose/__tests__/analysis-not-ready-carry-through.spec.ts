@@ -68,15 +68,69 @@ function build(
 }
 
 /**
+ * ⭐⭐ A DATED RECORD OF WHAT THE PRODUCT EMITTED — NOT A LIVE EXPECTATION.
+ *
  * The SIX questions from the witnessed zero-configured arm, verbatim from
- * `assessCanonicalAnalysisReadiness(...).repairProposal.unresolved_inputs[].prompt`.
- * Bound by IDENTITY (option label + factor label), never by shape: a different
- * object could satisfy "contains a question mark" or "mentions an option".
+ * `assessCanonicalAnalysisReadiness(...).repairProposal.unresolved_inputs[].prompt`
+ * **as emitted at UI `2b6ec553` / CEE `19a60fd`, 2026-08-20T00:00Z**.
+ *
+ * ⛔ APPEND-ONLY. THESE STRINGS ARE EVIDENCE AND MUST NEVER BE EDITED IN PLACE.
+ * They record sentences the product ACTUALLY PUT TO A USER on a dated build.
+ * Rewriting them to match new behaviour would falsify that record, and a suite
+ * green against a rewritten history is a suite agreeing with a history that
+ * never happened (CLAUDE.md trap 14b). If the wording moves, ADD a new list —
+ * which is exactly what {@link QUESTIONS_NOW} is.
+ *
+ * ⚠ THREE OF THESE SIX ARE NO LONGER WHAT THE PRODUCT SAYS. See
+ * {@link QUESTIONS_NOW} for the current wording and the reasoning. This list is
+ * retained deliberately, and the divergence is asserted below rather than
+ * quietly erased.
+ *
+ * Still load-bearing as a TEST INPUT: the carry-through tests feed this list to
+ * the composer to prove it names every question it is handed. That property is
+ * wording-agnostic, so historic strings are the right input for it — and using
+ * them proves the composer is not coupled to today's phrasing.
  */
-const WITNESSED_QUESTIONS: readonly string[] = [
+const QUESTIONS_AS_EMITTED_2026_08_20: readonly string[] = [
   'Choose the missing effect value for "subcontracting inner-city deliveries to a green courier" on "Subcontractor cost as share of affected-route revenue".',
   'Choose the missing effect value for "paying the daily charges and passing costs to customers" on "Annual clean-air charge burden".',
   'Choose the missing effect value for "replacing a third of the diesel fleet with electric vans now" on "Net EV capex after grants and resale of displaced diesels".',
+  'Choose which factor "Electrify one-third of fleet (EV capex route)" changes and by how much.',
+  'Choose which factor "Subcontract inner-city runs to green courier" changes and by how much.',
+  'Choose which factor "Pay daily clean-air charges and pass through to customers" changes and by how much.',
+];
+
+/**
+ * ⭐⭐ WHAT THE PRODUCT SAYS NOW (2026-08-26) — and the confession of what moved.
+ *
+ * THREE OF THE SIX CHANGED, and they are exactly the three `MISSING_OPTION_VALUE`
+ * questions. The three `OPTION_NEEDS_MAPPING` questions are BYTE-IDENTICAL to
+ * the 20 Aug record, which is the discriminating half of the change: a blanket
+ * rewrite would have moved all six.
+ *
+ * WHY THEY MOVED. `blockerIssue` was DISCARDING the producer's own sentence and
+ * synthesising a substitute, which the shared contract explicitly forbids
+ * ("rendered VERBATIM … a consumer must not … SYNTHESISE A SUBSTITUTE WHEN IT
+ * DISLIKES THE WORDING"). For the pair-scoped `missing_value` class the
+ * producer's sentence is strictly more useful: it names both scopes AND the
+ * factor's current value AND asks the question the user must answer, where the
+ * substitute named the scopes and nothing else.
+ *
+ * The current value now reads "Moderate (0.5)" rather than the internal level
+ * `0.5`, which is the other half of the same train — the producer was quoting a
+ * normalised level while the node's own display form sat in the same payload.
+ *
+ * ⚠ WHY ONLY THIS CLASS. The other three blocker classes keep their composed
+ * remedies, because their producer messages were never written to be shown to a
+ * user: `ambiguous_value` emits "…analysis-scale source binding is unresolved",
+ * the factor-only `missing_value` emits a diagnosis with no remedy, and
+ * `constraint_dropped` leaks an internal id. A blanket rule would have traded
+ * one truthfulness defect for three.
+ */
+const QUESTIONS_NOW: readonly string[] = [
+  'Factor "Subcontractor cost as share of affected-route revenue" is currently Moderate (0.5). What should option "subcontracting inner-city deliveries to a green courier" set it to?',
+  'Factor "Annual clean-air charge burden" is currently Moderate (0.5). What should option "paying the daily charges and passing costs to customers" set it to?',
+  'Factor "Net EV capex after grants and resale of displaced diesels" is currently Moderate (0.5). What should option "replacing a third of the diesel fleet with electric vans now" set it to?',
   'Choose which factor "Electrify one-third of fleet (EV capex route)" changes and by how much.',
   'Choose which factor "Subcontract inner-city runs to green courier" changes and by how much.',
   'Choose which factor "Pay daily clean-air charges and pass through to customers" changes and by how much.',
@@ -88,7 +142,7 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
   it('names EVERY outstanding question, bound by option+factor identity', () => {
     const { response } = composeHandlerFailure(
       build({ reason_code: 'MISSING_OPTION_VALUE', next_step: WITNESSED_NEXT_STEP,
-        readiness_questions: [...WITNESSED_QUESTIONS] }),
+        readiness_questions: [...QUESTIONS_AS_EMITTED_2026_08_20] }),
       CTX,
       'frame',
     );
@@ -96,7 +150,7 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
     expect(response.assistant_text).toContain(WITNESSED_NEXT_STEP);
     // ⭐ Each question by IDENTITY. A value predicate ("mentions an option")
     // could be satisfied by a different question; these cannot.
-    for (const q of WITNESSED_QUESTIONS) {
+    for (const q of QUESTIONS_AS_EMITTED_2026_08_20) {
       expect(response.assistant_text).toContain(q);
     }
   });
@@ -143,7 +197,7 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
   it('⭐ the recovery chip is TYPED, so it cannot be demoted by the election gate', () => {
     const { response, chip_type } = composeHandlerFailure(
       build({ reason_code: 'MISSING_OPTION_VALUE', next_step: WITNESSED_NEXT_STEP,
-        readiness_questions: [...WITNESSED_QUESTIONS] }),
+        readiness_questions: [...QUESTIONS_AS_EMITTED_2026_08_20] }),
       CTX,
       'frame',
     );
@@ -158,7 +212,7 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
   it('⭐ P8 — the chip replays a message the product already honours deterministically', () => {
     const { response } = composeHandlerFailure(
       build({ reason_code: 'MISSING_OPTION_VALUE', next_step: WITNESSED_NEXT_STEP,
-        readiness_questions: [...WITNESSED_QUESTIONS] }),
+        readiness_questions: [...QUESTIONS_AS_EMITTED_2026_08_20] }),
       CTX,
       'frame',
     );
@@ -181,13 +235,20 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
 /**
  * ⭐ THE CORPUS IS THE PRODUCER'S, NOT MINE.
  *
- * `WITNESSED_QUESTIONS` above is a literal list, and a literal list written by
+ * {@link QUESTIONS_NOW} above is a literal list, and a literal list written by
  * the author is not evidence about the producer (trap 16-inverse: a fixture you
  * wrote yourself encodes your model of the producer rather than the producer).
  * This block derives the same six strings by RUNNING the authority, and asserts
  * the two agree exactly. If the producer's wording, ordering or count ever
- * moves, this REDs and the literal list above is corrected from the producer,
- * never the other way round.
+ * moves, this REDs and `QUESTIONS_NOW` is corrected from the producer, never the
+ * other way round.
+ *
+ * ⛔ AND THE CORRECTION TARGET IS `QUESTIONS_NOW`, NEVER
+ * {@link QUESTIONS_AS_EMITTED_2026_08_20}. The two lists answer different
+ * questions — one is a dated record of what the product SAID, the other an
+ * expectation about what it says NOW — and only the second one tracks. Editing
+ * the record to silence a RED would falsify evidence (trap 14b); the delta
+ * between them is asserted explicitly instead.
  *
  * The input is a real dated capture with its option effect values removed in
  * memory — the zero-configured arm a fresh draft lands in. The capture itself is
@@ -250,9 +311,38 @@ describe('the questions are the producer\'s, derived not authored', () => {
     expect(admission.strict.nextStep).toBe(WITNESSED_NEXT_STEP);
   });
 
-  it('⭐ readinessQuestions() returns EXACTLY the six literals asserted above', () => {
+  it('⭐ readinessQuestions() returns EXACTLY the six current literals', () => {
     const derived = readinessQuestions(assessAnalysisReadiness(zeroConfiguredArm()));
-    expect([...derived]).toEqual([...WITNESSED_QUESTIONS]);
+    expect([...derived]).toEqual([...QUESTIONS_NOW]);
+  });
+
+  /**
+   * ⭐⭐ THE DELTA IS ASSERTED, NOT ERASED.
+   *
+   * The 20 Aug record and today's output are DIFFERENT OBJECTS: one is evidence
+   * about THEN, the other an expectation about NOW. Keeping both and pinning the
+   * difference is what stops a future reader mistaking a wording change for a
+   * wording that never changed — and it REDs if the delta ever grows or shrinks,
+   * so a later blanket rewrite of the other three classes cannot slip through.
+   */
+  it('⭐ EXACTLY THREE of the six moved — the MISSING_OPTION_VALUE ones, and no others', () => {
+    const changed = QUESTIONS_AS_EMITTED_2026_08_20
+      .map((was, i) => ({ was, now: QUESTIONS_NOW[i], i }))
+      .filter((row) => row.was !== row.now);
+
+    expect(changed.map((row) => row.i)).toEqual([0, 1, 2]);
+
+    // The three that moved are the pair-scoped value questions: they gained the
+    // factor's current value and the direct question.
+    for (const row of changed) {
+      expect(row.was).toContain('Choose the missing effect value for');
+      expect(row.now).toContain('is currently');
+      expect(row.now).toContain('set it to?');
+    }
+
+    // ⛔ AND THE MAPPING QUESTIONS ARE UNTOUCHED — byte-identical to the record.
+    // This is the discriminating half: a blanket change would move these too.
+    expect(QUESTIONS_NOW.slice(3)).toEqual(QUESTIONS_AS_EMITTED_2026_08_20.slice(3));
   });
 
   it('OPPOSITE DIRECTION — a verdict with no enumerable inputs yields no questions', () => {
