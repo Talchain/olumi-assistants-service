@@ -60,9 +60,15 @@
  * field-presence test on the payload, not a predicate over natural language, so
  * it cannot oscillate the way a prose classifier would.
  *
- * BINDING IS BY IDENTITY (trap 19): every assertion names the blocker it reads.
- * `fac_untested` carries a full producer message and is deliberately NEVER
- * asserted, so a mutation scoped to it must leave this suite GREEN.
+ * BINDING IS BY IDENTITY (trap 19): every assertion names the blocker class and
+ * the scopes it reads, and each case pins its own discriminator in-test
+ * (`option_id` present or absent) so a green result cannot come from a fixture
+ * that never exercised the branch.
+ *
+ * PROVEN BY A DISCRIMINATING MUTANT PAIR, both run additively against the real
+ * gate: loosening it for ALL classes REDs (the gate is load-bearing), while
+ * loosening it ADDITIONALLY for a factor id this suite never names stays GREEN
+ * (the sensitivity is scoped, not global). Neither alone shows binding.
  */
 
 import { describe, it, expect } from 'vitest';
