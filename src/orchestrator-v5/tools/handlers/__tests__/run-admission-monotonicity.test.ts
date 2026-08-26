@@ -335,6 +335,24 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
      * does not provide.
      */
 
+    /**
+     * ⭐ THE BOUNDARY IS INCLUSIVE, AND IT WAS AN UNCOVERED BRANCH. A mutant
+     * changing `valued.size >= PLOT_MIN_COMPARISON_OPTIONS` to `>` moved 111 of
+     * 409 lattice verdicts and the suite stayed GREEN — the lattice checks
+     * MONOTONICITY, and `>` is monotone, just wrong. A property can be true of
+     * an implementation that refuses far too much.
+     *
+     * TWO partly-valued options are exactly what PLoT's `options.minItems: 2`
+     * admits (`plot-lite-service` `src/routes/v2/run.ts:1455`), so this is the
+     * smallest graph that must run.
+     */
+    it('the two-option minimum is INCLUSIVE: exactly two partly-valued options admit', () => {
+      expect(analysable([{ demand: 3, valued: 1 }, { demand: 3, valued: 1 }])).toBe(true);
+      // Its opposite-direction twin: drop to ONE option carrying a value and the
+      // comparison no longer exists, so the refusal returns.
+      expect(analysable([{ demand: 3, valued: 1 }, { demand: 3, valued: 0 }])).toBe(false);
+    });
+
     it('no option specified at all stays blocked', () => {
       expect(
         analysable([
