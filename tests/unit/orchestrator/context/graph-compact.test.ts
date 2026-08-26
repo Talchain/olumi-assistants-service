@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { compactGraph } from "../../../../src/orchestrator/context/graph-compact.js";
+import {
+  compactGraph,
+  NODE_DESCRIPTION_CONTEXT_MAX_CHARS,
+} from "../../../../src/orchestrator/context/graph-compact.js";
 import type { GraphV3T } from "../../../../src/orchestrator/types.js";
 
 // ============================================================================
@@ -45,7 +48,7 @@ describe("compactGraph", () => {
     });
   });
 
-  it("keeps only id, kind, label per node (drops heavy fields)", () => {
+  it("keeps bounded saved description while dropping non-contract heavy fields", () => {
     const node = makeNode("node_a", {
       description: "long description",
       body: "should be dropped",
@@ -58,10 +61,38 @@ describe("compactGraph", () => {
     expect(n.id).toBe("node_a");
     expect(n.kind).toBe("factor");
     expect(n.label).toBe("Label node_a");
-    expect(n).not.toHaveProperty("description");
+    expect(n.description).toBe("long description");
     expect(n).not.toHaveProperty("body");
     expect(n).not.toHaveProperty("state_space");
     expect(n).not.toHaveProperty("goal_threshold");
+  });
+
+  it("bounds saved descriptions with a visible ellipsis", () => {
+    const description = "D".repeat(NODE_DESCRIPTION_CONTEXT_MAX_CHARS + 20);
+    const result = compactGraph(makeGraph([makeNode("node_a", { description })], []));
+
+    expect(result.nodes[0]!.description).toHaveLength(NODE_DESCRIPTION_CONTEXT_MAX_CHARS);
+    expect(result.nodes[0]!.description).toBe(
+      `${description.slice(0, NODE_DESCRIPTION_CONTEXT_MAX_CHARS - 1)}…`,
+    );
+  });
+
+  it("never splits a Unicode code point at the description bound", () => {
+    const description = `${"A".repeat(NODE_DESCRIPTION_CONTEXT_MAX_CHARS - 2)}😀BC`;
+    const result = compactGraph(makeGraph([makeNode("node_a", { description })], []));
+    const bounded = result.nodes[0]!.description!;
+
+    expect(Array.from(bounded)).toHaveLength(NODE_DESCRIPTION_CONTEXT_MAX_CHARS);
+    expect(bounded).toBe(`${"A".repeat(NODE_DESCRIPTION_CONTEXT_MAX_CHARS - 2)}😀…`);
+    expect(Array.from(bounded).at(-2)).toBe('😀');
+  });
+
+  it("does not coerce malformed legacy description values", () => {
+    const result = compactGraph(
+      makeGraph([makeNode("node_a", { description: { text: "not licensed" } })], []),
+    );
+
+    expect(result.nodes[0]).not.toHaveProperty("description");
   });
 
   it("keeps only from, to, strength (mean), exists per edge (drops std, effect_direction, label)", () => {

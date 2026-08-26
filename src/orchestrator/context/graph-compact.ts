@@ -74,6 +74,8 @@ export interface CompactNode {
   id: string;
   kind: string;
   label: string;
+  /** Saved Living Model detail, bounded before it reaches prompt context. */
+  description?: string;
   type?: string;
   category?: string;
   value?: number;  // from observed_state.value
@@ -124,6 +126,22 @@ export interface GraphV3Compact {
   edges: CompactEdge[];
   _node_count: number;  // convenience for template/logging
   _edge_count: number;
+}
+
+/** Shared prompt-context bound for saved node descriptions. */
+export const NODE_DESCRIPTION_CONTEXT_MAX_CHARS = 160;
+
+/**
+ * Preserve producer-authored description bytes while bounding prompt cost.
+ * The visible ellipsis makes truncation explicit; non-string legacy input is
+ * omitted rather than coerced into invented text.
+ */
+export function boundNodeDescriptionForContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const characters = Array.from(value);
+  return characters.length <= NODE_DESCRIPTION_CONTEXT_MAX_CHARS
+    ? value
+    : `${characters.slice(0, NODE_DESCRIPTION_CONTEXT_MAX_CHARS - 1).join('')}…`;
 }
 
 // Re-export so existing importers of this module don't break
@@ -422,7 +440,7 @@ function buildPlainInterpretation(
 /**
  * Compact a V3 graph for LLM context.
  *
- * Kept per node: id, kind, label, type (if present), category (if present),
+ * Kept per node: id, kind, label, bounded description (if present), type (if present), category (if present),
  * observed_state.value, raw_value, unit, cap (if present),
  * source (legacy CompactNodeSource — derived from extractionType),
  * provenance (display-safe CompactProvenance — also derived from extractionType),
@@ -457,6 +475,11 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         kind: node.kind,
         label: node.label ?? node.id,
       };
+
+      const description = boundNodeDescriptionForContext(node.description);
+      if (description !== undefined) {
+        n.description = description;
+      }
 
       // type — not in canonical NodeV3T schema but may be present via passthrough
       const anyNode = node as Record<string, unknown>;
