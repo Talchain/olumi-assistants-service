@@ -43,6 +43,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 
 import { dispatchSystemEvent } from '../dispatch.js';
 import { validateEgress } from '../../../validators/b1.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 import {
   ModelVersionMutationReceiptV1LocalSchema,
@@ -110,6 +111,26 @@ const RECEIPT = ModelVersionMutationReceiptV1LocalSchema.parse({
   },
   undo_version_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
   event_id: `model_version_created_mutation_${MUTATION_ID}`,
+});
+
+/**
+ * The REAL identity of `MUTATED_GRAPH`, computed by the same function
+ * `commit.ts` uses to stamp `graph_identity_hash` on the persisted row.
+ *
+ * `RECEIPT.full_hash` is a placeholder (`'a'.repeat(64)`), which is fine for
+ * the shape assertions above but CANNOT express the receipt's actual promise.
+ * The promise is `H(receipt.graph) === receipt.full_hash`, and a placeholder
+ * hash makes that unaskable.
+ */
+const MUTATED_GRAPH_IDENTITY = computeGraphIdentityHash(
+  MUTATED_GRAPH as never,
+)?.value;
+
+/** A receipt whose `full_hash` is the TRUE hash of the graph it carries. */
+const SELF_CONSISTENT_RECEIPT = ModelVersionMutationReceiptV1LocalSchema.parse({
+  ...RECEIPT,
+  graph: MUTATED_GRAPH,
+  full_hash: MUTATED_GRAPH_IDENTITY,
 });
 
 /** A minimal response the egress contract accepts, independent of this slice. */
@@ -233,71 +254,132 @@ describe('system-event atomic model-version receipt egress', () => {
       expect(egress.ok).toBe(true);
     });
 
-    it('carries every receipt field through validation unchanged EXCEPT one known rewrite', () => {
-      // ⚠⚠ A KNOWN, MEASURED GAP, PINNED RATHER THAN HIDDEN — read this before
-      // "simplifying" the assertion below.
+    it('rewrites NOTHING: the wire object is the object egress was handed', () => {
+      // ⭐ THE KNOWN-REWRITE SET IS NOW EMPTY, AND THIS PIN STILL BITES IN BOTH
+      // DIRECTIONS. It previously asserted an EXACT set of one — the graph
+      // contract's `edge_type: EdgeType.optional().default('directed')` injected
+      // by Zod's rebuild — and was written to RED if that set GREW or SHRANK.
+      // It SHRANK, deliberately: `validateEgress` now returns the caller's
+      // object instead of `parsed.data`, so B1 is a gate rather than a
+      // transform. This RED was the instrument working exactly as its author
+      // intended, and the note is updated rather than deleted so the next lane
+      // inherits the reason.
       //
-      // Egress does not return the object it was handed: `route-v2.ts:1096`
-      // sends `egress.value`, which is Zod's REBUILT object. Measured at this
-      // pin, that rebuild applies the graph contract's own default —
-      // `edge_type: EdgeType.optional().default('directed')`
-      // (schemas `src/graph.ts:318`) — to every edge that omitted the key. So a
-      // receipt whose `graph` had no `edge_type` ships with one injected.
+      // ⚠ THE ASSERTIONS ARE DELIBERATELY TWO, AND THEY ARE NOT REDUNDANT.
+      //   (1) `toEqual` REDs if egress adds, drops or changes ANY value — the
+      //       rewrite set growing again.
+      //   (2) `toBe` REDs if egress REBUILDS AT ALL, even into a value-identical
+      //       object. That is the structural guarantee, and it is the one that
+      //       matters: the fork this fix closes was invisible for two schema
+      //       releases precisely because a rebuild was value-identical until a
+      //       `.default()` landed inside it. Value equality today is not
+      //       evidence that a rebuild is safe tomorrow.
+      const response = { ...MINIMAL_RESPONSE, model_version_receipt: RECEIPT };
+
+      // PIN THE PRECONDITION IN-TEST. If the fixture's edges ever carried
+      // `edge_type` themselves, an egress that re-injected it would be
+      // indistinguishable from one that did not, and this test would pass
+      // vacuously — a guard agreeing with itself.
+      for (const edge of MUTATED_GRAPH.edges) {
+        expect(edge).not.toHaveProperty('edge_type');
+      }
+
+      const egress = validateEgress(response, 'req-egress-passthrough');
+
+      expect(egress.ok).toBe(true);
+      if (!egress.ok) return;
+
+      expect(egress.value).toEqual(response);
+      expect(egress.value).toBe(response);
+    });
+
+    it('ships a receipt a client can VERIFY: H(wire.graph) === wire.full_hash', () => {
+      // ⭐ THE INVARIANT THE WHOLE RECEIPT EXISTS FOR, ASSERTED ON THE EGRESS
+      // OUTPUT — the bytes a user's client actually receives.
       //
-      // THAT MOVES THE HASH. Measured with CEE's own `computeGraphIdentityHash`
-      // and a discriminating contrast control: the same graph hashes
-      // 26a8d97d… without `edge_type` and b833e888… with `edge_type:
-      // 'directed'` (and a third value for 'undirected', so the probe is
-      // genuinely discriminating, not blind). `full_hash` is computed over the
-      // PERSISTED bytes — `commit.ts` deliberately stopped substituting
-      // `parsed.data` "so the carrier's hashes describe the persisted bytes by
-      // construction rather than by coincidence" — so a client that recomputes
-      // `H(receipt.graph)` and compares gets a MISMATCH. That is the C8-A
-      // hash/payload fork reappearing one seam downstream, at egress.
+      // ⚠ WHY THIS PIN AND NOT THE EXISTING ONE. CI was structurally blind to
+      // this. `atomic-model-version-commit.test.ts` asserts the same invariant,
+      // but it takes its "wire" from CEE's LOCAL `GraphVerbatim` carrier
+      // (`mutation-receipt.ts`), which is an identity function by construction —
+      // so it can only ever confirm that an identity function is an identity
+      // function. Production ships `egress.value` from `validateEgress`
+      // (`route-v2.ts:1096`), and NOTHING computed this hash over THAT object.
+      // Right invariant, wrong schema: the two questions have similar names and
+      // opposite answers.
       //
-      // WHY IT IS PINNED HERE AND NOT FIXED HERE. It is LATENT, not live: swept
-      // at UI `323b195a` with firing contrast controls (`analysis_ready` 881,
-      // `draft_graph` 227), `model_version_receipt` has ZERO readers and
-      // `full_hash` has ZERO readers, so nothing verifies the hash today and the
-      // blast radius is zero by construction. It also predates this change —
-      // schemas `src/graph.ts` is BYTE-IDENTICAL between 0.48.0 and 0.50.0, so
-      // the default is not introduced by the pin bump; the bump merely makes a
-      // previously unreachable payload reachable. Fixing it means changing what
-      // egress is allowed to rewrite, which is a design decision with an owner,
-      // not a quick edit inside a P0.
-      //
-      // The assertion is written as an EXACT known-rewrite set so the suite
-      // stays green for the RIGHT reason and REDs if the set GROWS (egress
-      // starts rewriting something else) or SHRINKS (someone fixes the fork and
-      // must then delete this note).
+      // MEASURED at the wire before this pin existed (golden-journey capture
+      // `20260826T212322Z-fresh-extended-507050`, three independent receipts —
+      // T1_DRAFT 15/15 edges, T4_EDIT 15/15, T5C_CONFIRM 19/19): every receipt
+      // shipped `edge_type: 'directed'` on every edge while the cold read of
+      // the same scenario carried it on ZERO, and removing `edge_type` — and
+      // nothing else — reproduced each shipped `full_hash` EXACTLY. A client
+      // recomputing the hash concluded the server lied, on every turn.
       const egress = validateEgress(
-        { ...MINIMAL_RESPONSE, model_version_receipt: RECEIPT },
-        'req-egress-passthrough',
+        { ...MINIMAL_RESPONSE, model_version_receipt: SELF_CONSISTENT_RECEIPT },
+        'req-egress-verifiable',
       );
 
       expect(egress.ok).toBe(true);
       if (!egress.ok) return;
-      const out = (egress.value as { model_version_receipt?: Record<string, unknown> })
-        .model_version_receipt;
+      const wireReceipt = (
+        egress.value as { model_version_receipt?: { graph?: unknown; full_hash?: string } }
+      ).model_version_receipt;
 
-      // Every field other than `graph` survives byte-for-byte.
-      const { graph: _outGraph, ...outRest } = out ?? {};
-      const { graph: _inGraph, ...inRest } = RECEIPT as Record<string, unknown>;
-      expect(outRest).toEqual(inRest);
+      // ⛔ THE WIRE MUST ACTUALLY CARRY A RECEIPT, OR THIS TEST VERIFIES NOTHING.
+      //
+      // ⚠ FOUND BY INDEPENDENT REVIEW, IN THE PIN THIS FILE OFFERS AS CLOSING A
+      // STRUCTURAL CI BLIND SPOT. Both sides of the hash comparison below are
+      // optional-chained: `computeGraphIdentityHash(undefined)` returns `null`,
+      // so `?.value` is `undefined`; `wireReceipt?.full_hash` is `undefined`;
+      // and `expect(undefined).toBe(undefined)` PASSES. So a receipt-free
+      // egress would take this test GREEN while shipping nothing to verify —
+      // and a receipt-free response is a legitimate reachable state, pinned by
+      // a sibling case in this very file.
+      //
+      // REPRODUCED before this line was added: removing `model_version_receipt`
+      // from the egress input left the suite at 10/10 PASSED. With this line,
+      // that same mutation REDs on `expected undefined to be defined`.
+      //
+      // The two precondition pins below guard the FIXTURE. This one guards the
+      // WIRE. They are not interchangeable.
+      expect(wireReceipt).toBeDefined();
 
-      // `graph` differs ONLY by the contract's own `edge_type` default.
-      const outGraph = out?.graph as { nodes: unknown[]; edges: Array<Record<string, unknown>> };
-      expect(outGraph.nodes).toEqual(MUTATED_GRAPH.nodes);
-      expect(outGraph.edges).toEqual(
-        MUTATED_GRAPH.edges.map((e) => ({ ...e, edge_type: 'directed' })),
+      // PIN THE PRECONDITION IN-TEST: this assertion is only meaningful if the
+      // fixture's declared hash really is the hash of the fixture's graph.
+      // Without this, a fixture that silently stopped being self-consistent
+      // would make the test below pass or fail for reasons unrelated to egress.
+      expect(MUTATED_GRAPH_IDENTITY).toBeDefined();
+      expect(computeGraphIdentityHash(MUTATED_GRAPH as never)?.value).toBe(
+        SELF_CONSISTENT_RECEIPT.full_hash,
+      );
+
+      expect(computeGraphIdentityHash(wireReceipt?.graph as never)?.value).toBe(
+        wireReceipt?.full_hash,
       );
     });
 
     it('preserves ADDITIVE nested graph fields (they are not stripped)', () => {
       // The passthrough half of the story, pinned separately from the default
-      // half above: an additive field on a nested node SURVIVES egress. This is
-      // what stops the fork being worse than measured — the rebuild adds a
-      // default, it does not also delete unknown keys.
+      // half above: an additive field on a nested node SURVIVES egress.
+      //
+      // ⚠ CORRECTED. This comment used to end "the rebuild adds a default, it
+      // does not also delete unknown keys" — **that was not universally true**,
+      // and it understated the case for the fix rather than overstating it.
+      // Derived at the 0.50.0 bytes (`dist/graph.js`): 8 `z.object({` sites, 7
+      // `.passthrough()` calls, so there are EXACTLY TWO strip points, and an
+      // independent reviewer's schema-tree walk over 622 paths found the same
+      // two:
+      //   1. `StrengthSchema` (graph.js:274-277) — a bare `z.object({mean, std})`,
+      //      so additive keys inside `edge.strength` were deleted;
+      //   2. `nodes[].state_space.range` (graph.js:180-183) — an inner anonymous
+      //      `z.object({min, max})`. `StateSpaceSchema` itself IS passthrough,
+      //      which is exactly why this one hides.
+      // Both were LATENT forks of the same hash/payload class as the default:
+      // silent deletion from the wire while `full_hash` describes the persisted
+      // bytes. Returning the caller's object CLOSES BOTH — a strictly better
+      // result than "the rebuild only added a default".
+      // Latency, measured: 11,902 persisted `strength` objects carry ZERO
+      // additive keys today, so neither had a live instance.
       const richGraph = {
         ...MUTATED_GRAPH,
         nodes: [
