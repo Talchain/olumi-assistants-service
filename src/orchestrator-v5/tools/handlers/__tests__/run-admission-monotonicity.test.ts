@@ -313,26 +313,20 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
     });
 
     /**
-     * ⚠⚠ KNOWN GAP, RECORDED RATHER THAN PAPERED OVER — the waiver's
-     * `obligation === 'offered'` conjunct is PRESENT BUT NOT COVERED HERE.
+     * ⭐ THE `obligation === 'offered'` CONJUNCT IS NOW COVERED IN THIS FILE.
      *
-     * Every fixture in this file produces `offered` obligations (pinned by the
-     * PRECONDITION spec above), so a mutant that deletes that conjunct does NOT
-     * bite this corpus. Covering it needs an option→factor effect whose BOTH
-     * ends are `user_stated`, and the shapes tried for that — an
-     * `observed_state.source` on the factor, and rich
-     * `{ value, source }` intervention entries on the option — both make the
-     * graph parse as **`SCHEMA_INVALID`**. That refusal is a different
-     * mechanism, so a twin built on those shapes would have gone green while
-     * testing nothing; it was the in-test precondition that caught it, not
-     * inspection.
+     * It used to be uncovered, and the note here recorded that as a FIXTURE
+     * limitation — that user-stated structure could not be built because every
+     * attempt parsed `SCHEMA_INVALID`. **That was wrong**, and the reason is
+     * worth keeping: the stamps tried (`user_specified`, `observed`) belong to
+     * the INTERVENTION and EXTRACTION vocabularies, not to the OBSERVED-STATE
+     * one, so they are invalid *at the factor position* specifically. Six
+     * declared observed-state stamps build the state cleanly — see
+     * {@link buildStamped}.
      *
-     * The gap is therefore in the FIXTURE VOCABULARY, not in the rule: building
-     * it needs the real `@talchain/schemas` V3 shape for user-stated
-     * provenance. Until that exists here, the conjunct's coverage rests on
-     * `obligation-provenance.ts`'s own suite, not on this one. Stated so the
-     * suite is green for the RIGHT reason and this does not read as coverage it
-     * does not provide.
+     * Coverage now lives in `KNOWN-OPEN: monotonicity over user-authored
+     * structure` (the `required` axis, where deleting the conjunct REDs the pin)
+     * and in `the ai_drafted axis` (the `offered` axis it must not over-reach).
      */
 
     /**
@@ -372,12 +366,20 @@ describe('repair monotonicity — adding a valid value never reduces analysabili
  * over the lattice). It does NOT reach structure the USER authored, and this
  * suite says so out loud rather than leaving the gap invisible.
  *
- * ## Measured, not assumed (CEE `11a990c3`, 281 lattice states per axis)
+ * ## Measured, not assumed (CEE `e6c620bc`, 505 lattice states per axis)
  *
- *   | axis          | admitted | blocked | monotonicity violations |
- *   |---------------|----------|---------|-------------------------|
- *   | `ai_drafted`  | 166      | 115     | **0**                   |
- *   | `user_stated` | 20       | 261     | **17**                  |
+ *   | axis            | admitted | blocked | monotonicity violations |
+ *   |-----------------|----------|---------|-------------------------|
+ *   | `unattributed`  | 360      | 145     | **0**                   |
+ *   | `ai_drafted`    | 360      | 145     | **0**                   |
+ *   | `user_stated`   | 39       | 466     | **35**                  |
+ *
+ * ⚠ THIS TABLE PREVIOUSLY LABELLED ITS CLEAN ROW `ai_drafted` AND HAD MEASURED
+ * `unattributed` — the bare-number corpus produces no stamp at all. The
+ * measurement was honest; the NAME was wrong, and a class stays uncovered while
+ * a table says it is covered. Both are now measured separately and both are 0.
+ * (Earlier figures at `11a990c3` — 166/115/0 and 20/261/17 — were taken over a
+ * narrower 281-state corpus and are superseded, not contradicted.)
  *
  * ## The mechanism, and it is UPSTREAM of the waiver
  *
@@ -422,21 +424,68 @@ const KNOWN_OPEN_USER_STATED_VIOLATIONS: readonly string[] = [
   '3+3+3:0,3,3->1,3,3',
   '3+3+3:3,0,3->3,1,3',
   '3+3+3:3,3,0->3,3,1',
+  // The three BASELINE shapes the `offered` corpus runs. They add no new
+  // violation CLASS — each reproduces its non-baseline twin's pattern exactly,
+  // so the defect is baseline-invariant — but they are the ground the sibling
+  // axis covers, and an axis validated over less of it is not the same evidence.
+  'B:1+3+2+3@1:0,0,2,3->0,1,2,3',
+  'B:1+3+2+3@1:0,3,0,3->0,3,1,3',
+  'B:1+3+2+3@1:0,3,2,0->0,3,2,1',
+  'B:1+3+2+3@1:1,0,0,3->1,0,1,3',
+  'B:1+3+2+3@1:1,0,0,3->1,1,0,3',
+  'B:1+3+2+3@1:1,0,2,0->1,0,2,1',
+  'B:1+3+2+3@1:1,0,2,0->1,1,2,0',
+  'B:1+3+2+3@1:1,0,2,3->1,1,2,3',
+  'B:1+3+2+3@1:1,3,0,0->1,3,0,1',
+  'B:1+3+2+3@1:1,3,0,0->1,3,1,0',
+  'B:1+3+2+3@1:1,3,0,3->1,3,1,3',
+  'B:1+3+2+3@1:1,3,2,0->1,3,2,1',
+  'B:3+3+3@0:0,3,3->1,3,3',
+  'B:3+3+3@0:3,0,3->3,1,3',
+  'B:3+3+3@0:3,3,0->3,3,1',
+  'B:3+3+3@2:0,3,3->1,3,3',
+  'B:3+3+3@2:3,0,3->3,1,3',
+  'B:3+3+3@2:3,3,0->3,3,1',
 ];
 
-/** Same corpus, but every value carries a declared USER provenance stamp. */
-function buildUserStated(specs: readonly OptionSpec[]) {
+/**
+ * ⭐ ONE STAMPED BUILDER, TWO AXES — deliberately NOT two hand-maintained twins.
+ *
+ * `buildUserStated` and `buildAiDrafted` differ ONLY in their provenance stamp
+ * pair. Writing them as separate functions would be the hand-maintained mirror
+ * (CLAUDE.md trap 12): the two would drift, and a difference in the GRAPH would
+ * then read as a difference in the RULE — which is precisely the confound that
+ * had to be ruled out before the `user_stated` violations could be believed at
+ * all (measured: the two corpora produce identical `MISSING_OPTION_VALUE`
+ * blocker sets, differing only in `provenance`/`obligation`).
+ *
+ * ⚠ THE STAMP MUST BE DECLARED AT THE POSITION IT IS WRITTEN TO, and this is
+ * the error an earlier attempt at this fixture actually made. There are THREE
+ * separate vocabularies — `OBSERVED_STATE_SOURCE`, `INTERVENTION_SOURCE` and
+ * `EXTRACTION_TYPE` — and `classifyValueSource` folds all three through one
+ * function, so they LOOK interchangeable at the classifier while the wire
+ * schema treats them as distinct. `user_specified` (an INTERVENTION stamp) and
+ * `observed` (an EXTRACTION stamp) are NOT members of the observed-state
+ * vocabulary: putting either on a FACTOR's `observed_state.source` makes the
+ * graph parse `SCHEMA_INVALID`. That is a fixture-vocabulary error, not
+ * evidence that user-stated structure is unbuildable — six declared stamps
+ * (`explicit`, `user`, `user_override`, `user_confirmed`, `brief_extraction`,
+ * `panel_elicited`) build it, and all six reproduce this axis identically.
+ */
+function buildStamped(specs: readonly OptionSpec[], optStamp: string, facStamp: string) {
   const options = specs.map((spec, i) => {
     const interventions: Record<string, unknown> = {};
     for (let f = 0; f < spec.valued; f += 1) {
-      // `explicit` is a DECLARED member of the observed-state source vocabulary
-      // (`obligation-provenance.ts`), which maps to `user_stated`. An undeclared
-      // stamp parses as SCHEMA_INVALID — a different mechanism entirely, and the
-      // reason an earlier attempt at this fixture was reported unbuildable.
-      interventions[ALL_FACTORS[f]] = { value: 0.25 + f * 0.15 + i * 0.02, source: 'explicit' };
+      interventions[ALL_FACTORS[f]] = { value: 0.25 + f * 0.15 + i * 0.02, source: optStamp };
     }
     return {
       id: `opt${i}`, kind: 'option' as const, label: `Option ${i}`, demand: spec.demand,
+      // ⭐ `is_baseline` is carried here for the same reason `buildGraph` carries
+      // it: without it this builder could not express the three baseline shapes
+      // the `offered` corpus runs, and the two axes would be validated over
+      // DIFFERENT corpora — a divergence between two otherwise line-for-line
+      // twin builders that nothing pinned.
+      ...(spec.isBaseline ? { is_baseline: true } : {}),
       ...(spec.valued > 0 ? { interventions } : {}),
     };
   });
@@ -447,7 +496,7 @@ function buildUserStated(specs: readonly OptionSpec[]) {
       { id: 'decision', kind: 'decision', label: 'Which way forward' },
       ...ALL_FACTORS.map((f, i) => ({
         id: f, kind: 'factor', label: `Factor ${i}`, category: 'controllable',
-        observed_state: { value: 0.4 + i * 0.1, cap: 1, source: 'explicit' },
+        observed_state: { value: 0.4 + i * 0.1, cap: 1, source: facStamp },
       })),
       ...options.map(({ demand: _demand, ...node }) => node),
     ],
@@ -459,42 +508,123 @@ function buildUserStated(specs: readonly OptionSpec[]) {
   };
 }
 
-describe('KNOWN-OPEN: monotonicity over user-authored structure', () => {
-  const SHAPES_US: readonly number[][] = [[3, 3], [3, 3, 3], [1, 2, 3], [2, 2, 2, 2], [1, 3, 2, 3]];
+/** Both ends the user's — the axis this file records as KNOWN-OPEN. */
+const buildUserStated = (specs: readonly OptionSpec[]) => buildStamped(specs, 'explicit', 'explicit');
 
-  it('the open set is EXACTLY the recorded one — REDs if it grows OR shrinks', { timeout: 300_000 }, () => {
+/**
+ * Both ends the DRAFTER's — what a fresh Olumi draft carries. A distinct
+ * provenance class from `unattributed`, and the one no fixture in this file
+ * previously produced.
+ */
+const buildAiDrafted = (specs: readonly OptionSpec[]) => buildStamped(specs, 'cee_hypothesis', 'cee_inference');
+
+/**
+ * ⭐ THE STAMPED CORPUS IS THE `offered` CORPUS'S SHAPE LIST, plus the
+ * non-baseline `1+3+2+3` this axis already ran.
+ *
+ * The `offered` lattice runs SEVEN shapes / 409 states including three
+ * `is_baseline` variants; this axis previously ran FIVE / 281 with none. A
+ * future fix to the promotion rule would then have been validated over
+ * two-thirds of the corpus that validated the `offered` fix. Union of the two
+ * lists: EIGHT shapes / 505 states.
+ *
+ * ⚠ The baseline flag turns out to change NOTHING about the violation pattern —
+ * the defect is baseline-invariant — which is exactly why the narrower pin
+ * looked complete while covering less ground. Recorded rather than dropped: a
+ * shape that adds no new class is still a shape the sibling axis runs.
+ */
+const STAMPED_SHAPES: ReadonlyArray<{ name: string; demands: number[]; baselineIndex?: number }> = [
+  { name: '3+3', demands: [3, 3] },
+  { name: '3+3+3', demands: [3, 3, 3] },
+  { name: 'B:3+3+3@0', demands: [3, 3, 3], baselineIndex: 0 },
+  { name: 'B:3+3+3@2', demands: [3, 3, 3], baselineIndex: 2 },
+  { name: '1+2+3', demands: [1, 2, 3] },
+  { name: '2+2+2+2', demands: [2, 2, 2, 2] },
+  { name: '1+3+2+3', demands: [1, 3, 2, 3] },
+  { name: 'B:1+3+2+3@1', demands: [1, 3, 2, 3], baselineIndex: 1 },
+];
+
+interface StampedSweep {
+  readonly violations: readonly string[];
+  readonly admitted: number;
+  readonly blocked: number;
+  /** Admitted states PLoT would refuse — see the false-admission companions. */
+  readonly unsafe: readonly string[];
+  readonly provenances: readonly string[];
+  readonly obligations: readonly string[];
+}
+
+/**
+ * One sweep, consumed by BOTH stamped axes and by both their false-admission
+ * companions. A second copy of this loop per axis is how the two would drift.
+ */
+function sweepStamped(build: (specs: readonly OptionSpec[]) => unknown): StampedSweep {
+  const violations: string[] = [];
+  const unsafe: string[] = [];
+  const provenances = new Set<string>();
+  const obligations = new Set<string>();
+  let admitted = 0;
+  let blocked = 0;
+
+  for (const shape of STAMPED_SHAPES) {
     const verdict = new Map<string, boolean>();
-    const obligations = new Set<string>();
-    for (const demands of SHAPES_US) {
-      for (const state of enumerateStates(demands)) {
-        const specs = demands.map((demand, i) => ({ demand, valued: state[i] }));
-        const admission = resolveRunAdmission(buildUserStated(specs));
-        verdict.set(`${demands.join('+')}:${state.join(',')}`, admission.willProceed);
-        for (const issue of admission.assessment.blockingIssues ?? []) {
-          if (issue.code === 'MISSING_OPTION_VALUE') obligations.add(String(issue.obligation));
+    for (const state of enumerateStates(shape.demands)) {
+      const specs = shape.demands.map((demand, i) => ({
+        demand,
+        valued: state[i],
+        ...(shape.baselineIndex === i ? { isBaseline: true } : {}),
+      }));
+      const admission = resolveRunAdmission(build(specs));
+      verdict.set(state.join(','), admission.willProceed);
+      if (admission.willProceed) {
+        admitted += 1;
+        // An option is submittable to PLoT exactly when its interventions are
+        // non-empty — PLoT's own `EMPTY_INTERVENTIONS` predicate.
+        const submittable = specs.filter((sp) => sp.valued > 0).length;
+        if (submittable < 2) {
+          unsafe.push(`${shape.name} [${state.join(',')}] admitted with ${submittable} submittable option(s)`);
+        }
+      } else blocked += 1;
+      for (const issue of admission.assessment.blockingIssues ?? []) {
+        if (issue.code !== 'MISSING_OPTION_VALUE') continue;
+        provenances.add(String(issue.provenance));
+        obligations.add(String(issue.obligation));
+      }
+    }
+    for (const state of enumerateStates(shape.demands)) {
+      for (let i = 0; i < state.length; i += 1) {
+        if (state[i] >= shape.demands[i]) continue;
+        const next = [...state];
+        next[i] += 1;
+        if (verdict.get(state.join(','))! && !verdict.get(next.join(','))!) {
+          violations.push(`${shape.name}:${state.join(',')}->${next.join(',')}`);
         }
       }
     }
-    // PRECONDITION: the fixture really does produce `required` obligations, or
-    // this whole block is measuring the `offered` axis over again.
-    expect(obligations.has('required')).toBe(true);
+  }
+  return {
+    violations: violations.sort(),
+    admitted,
+    blocked,
+    unsafe,
+    provenances: [...provenances].sort(),
+    obligations: [...obligations].sort(),
+  };
+}
 
-    const violations: string[] = [];
-    for (const demands of SHAPES_US) {
-      for (const state of enumerateStates(demands)) {
-        for (let i = 0; i < state.length; i += 1) {
-          if (state[i] >= demands[i]) continue;
-          const next = [...state];
-          next[i] += 1;
-          const before = verdict.get(`${demands.join('+')}:${state.join(',')}`)!;
-          const after = verdict.get(`${demands.join('+')}:${next.join(',')}`)!;
-          if (before && !after) {
-            violations.push(`${demands.join('+')}:${state.join(',')}->${next.join(',')}`);
-          }
-        }
-      }
-    }
-    expect(violations.sort()).toEqual([...KNOWN_OPEN_USER_STATED_VIOLATIONS]);
+describe('KNOWN-OPEN: monotonicity over user-authored structure', () => {
+  it('the open set is EXACTLY the recorded one — REDs if it grows OR shrinks', { timeout: 300_000 }, () => {
+    const swept = sweepStamped(buildUserStated);
+    // PRECONDITION: the fixture really does produce `user_stated`/`required`, or
+    // this whole block is measuring the `offered` axis over again.
+    expect(swept.provenances).toContain('user_stated');
+    expect(swept.obligations).toContain('required');
+    // Discrimination: a corpus that never admitted anything would make the
+    // monotonicity question vacuous.
+    expect(swept.admitted).toBeGreaterThan(0);
+    expect(swept.blocked).toBeGreaterThan(0);
+
+    expect([...swept.violations]).toEqual([...KNOWN_OPEN_USER_STATED_VIOLATIONS]);
   });
 
   /**
@@ -513,6 +643,75 @@ describe('KNOWN-OPEN: monotonicity over user-authored structure', () => {
     // One value: the SAME untouched gaps are now DEMANDED of the user.
     expect(gaps(1).length).toBeGreaterThan(0);
     expect(gaps(1).every((i) => i.obligation === 'required')).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐ THE THIRD AXIS — `ai_drafted`, which NO fixture in this file produced until
+ * now, and whose absence a mutant proved rather than inspection.
+ *
+ * ## How the hole was found
+ *
+ * Mutating `obligationFor` (`cee/graph-readiness/obligation-provenance.ts`) so
+ * that `ai_drafted` ALSO earns a demand — `provenance !== 'unattributed'` in
+ * place of `provenance === 'user_stated'` — left this file **11/11 GREEN**. A
+ * whole third of the obligation vocabulary was uncovered, and every existing
+ * guard agreed with every other one because none of them could see the class.
+ *
+ * ## Why the label mattered
+ *
+ * This file's own header recorded a clean `ai_drafted` row. It was measured on
+ * the bare-number corpus, which produces **`unattributed`** — a DIFFERENT member
+ * of `StructureProvenance`. The measurement was honest and the conclusion holds
+ * (both axes are 0 violations, measured); the NAME was wrong, which is how a
+ * class stays uncovered while a table says it is covered.
+ *
+ * ## Why it is not exotic
+ *
+ * `ai_drafted` is what a FRESH OLUMI DRAFT carries — `cee_hypothesis` on an
+ * option's intervention, `cee_inference` on a factor's `observed_state`. It is
+ * the single most common real posture, and it is the posture whose gaps MUST
+ * stay `offered`: INV-P6's whole point is that structure the system authored may
+ * prompt an offer and never a demand.
+ *
+ * ⭐ PROOF OBLIGATION: the `ai_drafted` mutant above MUST RED this block. The
+ * precondition below is what makes that true — without it the sweep would
+ * silently re-measure `unattributed` and pass by testing nothing.
+ */
+describe('the ai_drafted axis — a drafted model must stay analysable', () => {
+  it('a fully drafted corpus is monotone AND never demands', { timeout: 300_000 }, () => {
+    const swept = sweepStamped(buildAiDrafted);
+
+    // ⭐ PRECONDITION, PINNED IN-TEST AND BOUND BY IDENTITY. The corpus must
+    // really carry `ai_drafted` and must NOT have collapsed onto either
+    // neighbour — `unattributed` (what the bare corpus yields) or `user_stated`
+    // (the KNOWN-OPEN axis). Asserting only "some provenance was seen" would be
+    // a control that fires without discriminating.
+    expect(swept.provenances).toContain('ai_drafted');
+    expect(swept.provenances).not.toContain('user_stated');
+
+    // The rule itself: system-authored structure may be OFFERED, never DEMANDED.
+    // This is the assertion the `obligationFor` mutant has to break.
+    expect(swept.obligations).toEqual(['offered']);
+
+    // Discrimination: both verdicts must occur, or monotonicity is vacuous.
+    expect(swept.admitted).toBeGreaterThan(0);
+    expect(swept.blocked).toBeGreaterThan(0);
+
+    // And the property: a drafted model never becomes less analysable.
+    expect([...swept.violations]).toEqual([]);
+  });
+
+  /**
+   * The false-admission twin for this axis. Monotonicity can be bought by
+   * waiving everything, and a zero-violation axis is exactly where that would
+   * hide.
+   */
+  it('nothing on the drafted axis is admitted that PLoT would refuse', { timeout: 300_000 }, () => {
+    const swept = sweepStamped(buildAiDrafted);
+    expect(swept.admitted).toBeGreaterThan(0);
+    expect(swept.blocked).toBeGreaterThan(0);
+    expect([...swept.unsafe]).toEqual([]);
   });
 });
 
@@ -539,9 +738,37 @@ describe('KNOWN-OPEN: monotonicity over user-authored structure', () => {
  * options are ranked, about the honesty of the offer copy, about value MUTATION
  * (the lattice only ever ADDS), about non-`controllable` factors, about
  * repair-authored edges, about options with no factor edge at all, or about
- * topologies where options intervene on disjoint factor sets.
+ * topologies where options intervene on disjoint factor sets. Nor is any of it
+ * a wire or journey witness — every number in this file is in-process against
+ * `resolveRunAdmission`.
  */
 describe('nothing is admitted that PLoT would refuse', () => {
+  /**
+   * ⭐ THE USER-STATED AXIS HAD NO SUCH COMPANION AT ALL — its admitted states
+   * were entirely unchecked.
+   *
+   * That matters most precisely where a fix is coming. The KNOWN-OPEN set above
+   * can be driven to empty two ways: by removing a false demand (the fix) or by
+   * waiving a real one (the harm). The violation set alone cannot tell them
+   * apart — it observes ONE BOOLEAN per state — so without this guard the
+   * cheapest way to make the pin go green is also the wrong one.
+   *
+   * ⛔ PLoT's two-arm floor is REAL and is NOT relaxed by anything in this file:
+   * `options.minItems: 2` (`routes/v2/run.ts:1455`) and `EMPTY_INTERVENTIONS`
+   * (`validation/preflight-v2.ts:184-187`). A one-arm "comparison" has nothing
+   * to compare.
+   */
+  it('the user-stated axis admits nothing PLoT would refuse either', { timeout: 300_000 }, () => {
+    const swept = sweepStamped(buildUserStated);
+    // PRECONDITION: this really is the user-stated axis, not a re-run of a
+    // waivable one — otherwise the guard passes on the wrong corpus.
+    expect(swept.obligations).toContain('required');
+    // Discrimination: both verdicts occur.
+    expect(swept.admitted).toBeGreaterThan(0);
+    expect(swept.blocked).toBeGreaterThan(0);
+    expect([...swept.unsafe]).toEqual([]);
+  });
+
   it('every ADMITTED state carries at least two options with non-empty interventions', { timeout: 300_000 }, () => {
     let admitted = 0;
     let blocked = 0;
