@@ -822,6 +822,118 @@ describe('dispatchDraftGraph', () => {
   });
 });
 
+// ── Receipt attach must DEGRADE, never throw ─────────────────────────────────
+//
+// The dispatch response carries INTERNAL debug decorations under an underscore
+// prefix (`_timings`, and its siblings `_diagnostic_trace`, `_context_summary`,
+// `_reasoning`, `_answer_shape`). They are deliberate internal channels: the
+// route strips them BEFORE the strict boundary validation and re-attaches them
+// after (`src/orchestrator/debug-fields.ts`).
+//
+// `attachModelVersionMutationReceipt` is a SECOND strict-parse seam that was
+// never taught that discipline, so an internally-decorated response made the
+// attach throw. The throw happens AFTER the durable write, inside the dispatch
+// try/catch, so the route answered 500 for a turn that had fully persisted —
+// the persisted-state invariant inverted. `commit.ts` already guards the exact
+// same call for the exact same reason; this is that precedent applied to the
+// one remaining unguarded site.
+//
+// Two harms, deliberately given two separate assertions below, because they
+// cannot share one window: (a) throwing on an extra key, and (b) silently
+// never attaching a genuine receipt.
+
+const DRAFT_TIMINGS_DECORATION = {
+  total_ms: 4200,
+  parse_ms: 3800,
+  parse_llm_ms: 3500,
+  repair_ms: 0,
+  validation_pipeline_ms: 100,
+};
+
+describe('dispatchDraftGraph — model-version receipt attach across the strict-parse seam', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  });
+
+  it('commits a turn whose response carries the internal `_timings` decoration alongside a receipt', async () => {
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+      .mockResolvedValue({
+        ...makeDraftResult(),
+        draftGraphTimings: DRAFT_TIMINGS_DECORATION,
+      } as unknown as Awaited<ReturnType<typeof handleDraftGraph>>);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true, {
+        model_version_receipt: MODEL_VERSION_RECEIPT,
+      }) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-timings-decorated-receipt',
+      request: STUB_REQUEST,
+    });
+
+    // PRECONDITION, pinned in-test: the decoration really is on the response.
+    // Without this the assertions below could pass on an undecorated response
+    // and prove nothing about the seam under test.
+    expect((result.response as Record<string, unknown>)._timings)
+      .toEqual({ draft_graph: DRAFT_TIMINGS_DECORATION });
+
+    // The defect: the route returned 500 INTERNAL_ERROR for a durably
+    // committed turn.
+    expect(result.commitPerformed).toBe(true);
+
+    // And the receipt still rides — degrading must not become "never attach".
+    expect((result.response as Record<string, unknown>).model_version_receipt)
+      .toEqual(MODEL_VERSION_RECEIPT);
+  });
+
+  it('still attaches a genuine receipt on an undecorated response (the opposite-direction twin)', async () => {
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+      .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true, {
+        model_version_receipt: MODEL_VERSION_RECEIPT,
+      }) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-undecorated-receipt',
+      request: STUB_REQUEST,
+    });
+
+    // PRECONDITION: no decoration on this response, so a pass here is about
+    // the attach and not about the strip.
+    expect((result.response as Record<string, unknown>)._timings).toBeUndefined();
+    expect(result.commitPerformed).toBe(true);
+    expect((result.response as Record<string, unknown>).model_version_receipt)
+      .toEqual(MODEL_VERSION_RECEIPT);
+  });
+
+  it('commits without a receipt when the commit produced none, decoration present', async () => {
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+      .mockResolvedValue({
+        ...makeDraftResult(),
+        draftGraphTimings: DRAFT_TIMINGS_DECORATION,
+      } as unknown as Awaited<ReturnType<typeof handleDraftGraph>>);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-timings-no-receipt',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.commitPerformed).toBe(true);
+    expect((result.response as Record<string, unknown>).model_version_receipt)
+      .toBeUndefined();
+    expect((result.response as Record<string, unknown>)._timings)
+      .toEqual({ draft_graph: DRAFT_TIMINGS_DECORATION });
+  });
+});
+
 // ── B1 egress: OlumiResponseSchema parse ─────────────────────────────────────
 //
 // Verifies the vendor tarball schema (the B1 egress validator) accepts a full

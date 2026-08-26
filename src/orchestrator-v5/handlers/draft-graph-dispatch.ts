@@ -908,11 +908,76 @@ export async function dispatchDraftGraph(
     const persistenceMs = Date.now() - commitStartedAt;
 
     let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId, effectiveBrief);
-    const committedVersionReceipt = modelVersionMutationReceiptFromResponse(
-      commitResult.response,
-    );
-    if (committedVersionReceipt !== null) {
-      response = attachModelVersionMutationReceipt(response, committedVersionReceipt);
+    // ⚠⚠ DEGRADE, NEVER THROW — THE WRITE IS ALREADY DURABLE HERE.
+    //
+    // This is `commit.ts`'s guard (see the twin block there, and its reasoning)
+    // applied to the one remaining unguarded call of the same pair. Both calls
+    // below can throw: the construction runs
+    // `ModelVersionMutationReceiptV1LocalSchema.parse`, and the attach runs a
+    // `.strict()` parse that rejects ANY unknown top-level key. They run AFTER
+    // `commitDirectAnswer` has durably committed, but INSIDE this function's
+    // try/catch — so a throw made the route answer 500 INTERNAL_ERROR for a
+    // turn that had fully persisted (graph written, options reconciled, fence
+    // evaluated, coaching state persisted with a real turn row id). Telling a
+    // user their draft failed while it sits in their canvas is worse than
+    // losing it: it is the persisted-state invariant inverted.
+    //
+    // `commit.ts` recorded this hazard as LATENT because that review could not
+    // produce a live supplier of an unknown top-level key. This path HAS one,
+    // and it is not exotic — see the strip below.
+    //
+    // The receipt is a REPORT about the write, never part of it, so omitting it
+    // cannot corrupt anything.
+    try {
+      const committedVersionReceipt = modelVersionMutationReceiptFromResponse(
+        commitResult.response,
+      );
+      if (committedVersionReceipt !== null) {
+        // ⭐ THE SUPPLIER: internal debug decorations.
+        //
+        // `draftResultToOlumiResponse` attaches `_timings` whenever the
+        // unified pipeline captured draft substage timings. That capture is
+        // gated `timingDebugEnabled || diagnosticTraceEnabled` — an OR, so
+        // clearing `V5_TIMING_DEBUG` alone does not stop it.
+        //
+        // `_timings` is CORRECT on this object: it is a deliberate internal
+        // channel, and the boundary `OlumiResponse` being `.strict()` is
+        // exactly why `src/orchestrator/debug-fields.ts` established the
+        // discipline of stripping debug surfaces BEFORE a strict validation
+        // and re-attaching them after. Route-v2 already does this for all six
+        // (`_timings`, `_diagnostic_trace`, `_context_summary`, `_reasoning`,
+        // `_answer_shape`, synthesised shape). The receipt attach is a SECOND
+        // strict seam that was never taught the same discipline.
+        //
+        // So strip by the established underscore convention rather than by
+        // naming today's key — a future debug surface must not re-open this.
+        // The decorations are restored verbatim onto the attached response, so
+        // the diagnostic-trace and replay surfaces are unaffected.
+        const productResponse: Record<string, unknown> = {};
+        const internalDecorations: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(response as Record<string, unknown>)) {
+          if (key.startsWith('_')) internalDecorations[key] = value;
+          else productResponse[key] = value;
+        }
+        const attached = attachModelVersionMutationReceipt(
+          productResponse as OlumiResponse,
+          committedVersionReceipt,
+        );
+        // Single assignment, and only on success: any throw above leaves
+        // `response` exactly as it was, receipt-less but complete.
+        response = { ...attached, ...internalDecorations } as OlumiResponse;
+      }
+    } catch (receiptErr) {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err: receiptErr instanceof Error ? receiptErr.message : String(receiptErr),
+        },
+        'ModelManagement — model-version receipt could not be built or attached to the ' +
+          'draft dispatch response; the turn is COMMITTED and is returned without a receipt ' +
+          '(report only, never part of the write)',
+      );
     }
     // HOLD-WIPE fix — the committed provisional response carried the lapse
     // notice (and the commit seam may have appended its own turn-TTL lapse
