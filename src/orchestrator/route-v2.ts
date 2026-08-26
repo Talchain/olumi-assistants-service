@@ -1524,6 +1524,25 @@ async function sendFinalised200(
     // ordinary use of the shared vocabulary. `null` here disarms the gate for
     // this turn and is REPORTED, not silent — see the opts docstring.
     graph: ctx.graph,
+    // ⭐ THE ROSTER FALLBACK, AND IT IS THE MAJORITY PATH — NOT A CORNER.
+    // `graph: null` disarmed this gate on 17 of the 23 `sendFinalised200` exits
+    // (measured at `0d070df0` with the balanced-paren scan in
+    // `__tests__/route-egress-analysis-state-freshness.drift.test.ts`; a FLOOR,
+    // because the other six pass nullable expressions — `turnGraph` is
+    // `GraphV3T | null`). On every one of those a withheld leader claim shipped
+    // intact while the record correctly said `permitted:false`.
+    //
+    // Same read as the graph: WHICH OPTIONS EXIST, never which one leads. The
+    // verdict above (`mayNameLeadingOption`) is untouched and still owns that
+    // question — this only gives the gate the names it needs to act on the
+    // answer it already has.
+    //
+    // Threaded HERE, at the one call site every exit funnels through, so a new
+    // dispatch family inherits it by construction rather than by anyone
+    // remembering to add it. The population assertions in
+    // `compose/__tests__/leader-roster-fallback.test.ts` RED if that stops
+    // being true.
+    analysisReady: ctx.analysisReady,
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =
