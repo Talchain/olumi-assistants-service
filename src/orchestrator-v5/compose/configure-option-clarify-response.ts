@@ -267,7 +267,18 @@ export function composeConfigureOptionClarifyResponse(
   const assistant_text = identificationComplete
     ? [
         `"${optionLabel}" has no effect value on ${primaryFactor} yet.`,
-        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
+        // ⚠ THE EXEMPLAR IS LOAD-BEARING, NOT DECORATION — it steers off a value
+        // the bare-answer path REFUSES BY DESIGN. `matchBareRepairValue` declines
+        // a bare INTEGER as "an ordinal in disguise" (a naked `1` measured
+        // binding as an effect value of 1.0 while the user meant "the first
+        // one"), so the one token this gloss most invites — `1` — is exactly the
+        // one that will not bind. `0.6` is the estate's existing exemplar
+        // (`CONFIGURE_OPTION_EXAMPLE_VALUE`) and is wire-proven to route.
+        //
+        // This branch asks for a BARE number where the old copy advised a whole
+        // sentence, so it raises the odds of that collision rather than
+        // inheriting it — the exemplar is how this change pays for that.
+        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully) — ${CONFIGURE_OPTION_EXAMPLE_VALUE}, say.`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
       ].join(' ')
     : qualitativeText !== null

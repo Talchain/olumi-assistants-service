@@ -415,7 +415,7 @@ describe('2.1266 — the wrong-entity write is withheld (J4 t5 wire replay)', ()
  * right fixture here: it proves the gesture is bound to the OUTCOME, since this
  * message never reaches the identification-complete copy branch at all.
  */
-describe('S7 — a not_honoured turn hands the user to the surface that writes', () => {
+describe('S7 — a not_honoured turn ships no gesture, because none can help', () => {
   const directivesOf = (blocks: readonly { type: string }[]) =>
     blocks.filter((b) => b.type === 'ui_directive') as unknown as Array<{
       verb: string;
@@ -425,60 +425,69 @@ describe('S7 — a not_honoured turn hands the user to the surface that writes',
     }>;
 
   it('PRECONDITION — the wire fixture carries a value, so it is NOT the copy branch', () => {
-    // Pins the premise the trap-21 note above rests on. Without this the
-    // gesture assertion could pass for the wrong reason and nobody would see it.
+    // Pins the premise the assertions below rest on: this message reaches the
+    // `not_honoured` dispatch branch WITHOUT reaching the identification-complete
+    // copy branch, so gesture and copy are observed independently (trap 21).
     expect(WITNESS.wire.t4_chip_message).toMatch(/\d/);
   });
 
-  it('ships exactly ONE ui_directive — open_section at the Model tab’s options', async () => {
+  /**
+   * ⛔ NO GESTURE — and that is the assertion, not the absence of one.
+   *
+   * TWO destinations were built for this row and BOTH were refuted by live
+   * drives, so this emptiness is a measured conclusion rather than an oversight:
+   *
+   *   1. `open_inspector` @ the OPTION node — the canvas panel renders the
+   *      intervention row and `+ Add a change` (each reporting `disabled: false`
+   *      ON ITSELF) inside a `<fieldset disabled>` six ancestors up; a forced
+   *      native write produced ZERO wire calls. Read-only BY POLICY.
+   *   2. `open_section` @ {model_section,'options'} — matched pair in one
+   *      session: the OPTION row's `-value` testid resolves to an EMPTY
+   *      zero-height `<span>` with no role/tabindex/onclick and a REFUSED real
+   *      click, while the FACTOR row's control in the same table is a 37×42
+   *      `<button>` whose click SUCCEEDS. Not policy — no control exists.
+   *
+   * There is no working direct-manipulation surface for this entity, and the
+   * user is already in chat when they click the chip. The loop closes there: the
+   * reply asks for the number and a bare `0.6` binds via `deriveOnScreenEffectAsk`
+   * → `resolveRepairValueBinding`, a READINESS-STATE derivation that no wording
+   * change can break.
+   */
+  it('ships NO ui_directive — there is no surface that can help', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       factorBaselineAppliedResult(),
     );
-    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-gesture');
-
-    const directives = directivesOf(out.response.blocks);
-    // N=1: the compose ladder's invariant holds on this path too.
-    expect(directives).toHaveLength(1);
-    expect(directives[0]!.verb).toBe('open_section');
-    expect(directives[0]!.ui_target).toEqual({ kind: 'model_section', id: 'options' });
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-no-gesture');
+    expect(directivesOf(out.response.blocks)).toEqual([]);
   });
 
   /**
-   * ⛔ THE REFUTED DESTINATION MUST NOT COME BACK.
+   * ⛔ NEITHER REFUTED DESTINATION MAY COME BACK.
    *
-   * The first cut of this row shipped `open_inspector` at the option node. A
-   * live drive proved that panel read-only BY POLICY — it renders the
-   * intervention row inside a `<fieldset disabled>` and a forced write produced
-   * zero wire calls. This is a REGRESSION PIN, not a restatement of the test
-   * above: it fails if anyone re-points at the canvas, however that is spelled.
+   * Named individually rather than folded into the emptiness assertion above,
+   * because the machinery for both is still available and a future lane will
+   * reasonably believe one of them is the fix. This pin fails loudly if either
+   * is re-pointed at, however it is spelled.
    */
-  it('does NOT point at the canvas option panel, which cannot save', async () => {
+  it('points at NEITHER the canvas panel NOR the options section', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       factorBaselineAppliedResult(),
     );
-    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-not-canvas');
+    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-neither');
 
     const directives = directivesOf(out.response.blocks);
     expect(directives.map((d) => d.verb)).not.toContain('open_inspector');
-    // And no entity target of any kind — a panel verb's target is the section.
+    expect(directives.map((d) => d.ui_target?.id)).not.toContain('options');
     expect(directives.flatMap((d) => d.targets)).toEqual([]);
   });
 
-  it('stamps the gesture `gate` — no handler fact backs it', async () => {
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      factorBaselineAppliedResult(),
-    );
-    const out = await dispatch(WITNESS.wire.t4_chip_message, 'req-s7-source');
-    expect(directivesOf(out.response.blocks)[0]!.source).toBe('gate');
-  });
-
   /**
-   * ⭐ THE OPPOSITE-DIRECTION TWIN (trap 22b). A gesture that fired when the
-   * write DID land would point at a panel to fix something already fixed — the
-   * "chip offered for a pair the user had already set" defect, re-minted as a
-   * navigation. It must stay silent on the honoured path.
+   * ⭐ DISCRIMINATING CONTROL. The emptiness above must be a property of THIS
+   * branch, not of the whole dispatch — otherwise a turn that stopped emitting
+   * directives entirely would satisfy it. An honoured write takes a different
+   * path and is asserted separately so the two cannot be confused.
    */
-  it('DISCRIMINATING TWIN — an honoured write ships NO repair gesture', async () => {
+  it('DISCRIMINATING TWIN — an honoured write also ships no repair gesture', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       optionEffectAppliedResult(),
     );
