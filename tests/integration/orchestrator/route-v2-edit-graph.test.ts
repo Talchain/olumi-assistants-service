@@ -213,6 +213,30 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     expect(body.assistant_text).toContain('Applied edit');
   });
 
+  it('threads published canvas selection to edit dispatch as identities only', async () => {
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Increase the uncertainty of this factor',
+        selected_elements: [
+          { id: 'fac-1', kind: 'factor', label: 'UNTRUSTED CLIENT LABEL' },
+          { id: 'dec_launch->goal_revenue', kind: 'edge', label: 'UNTRUSTED EDGE' },
+        ],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const [params] = dispatchEditGraphMock.mock.calls[0]!;
+    expect(params.selectedElements).toEqual({
+      node_ids: ['fac-1'],
+      edge_ids: ['dec_launch->goal_revenue'],
+    });
+    expect(JSON.stringify(params.selectedElements)).not.toContain('UNTRUSTED');
+  });
+
   // The VARIABLE under test here is the STAGE (`decide`), not the message —
   // cf. the sibling test above, which is the same assertion at `analyse`
   // stage. The message is only a carrier for "some positive edit keyword".

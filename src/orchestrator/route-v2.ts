@@ -5616,6 +5616,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           request: req,
           graphState: effectiveGraphState!,
           analysisState: extensions.analysisState ?? null,
+          // System B edit continuity: carry identities only. The dispatcher
+          // resolves them against this exact edit graph and admits prompt focus
+          // only after a strict GraphV3 parse; client labels never cross.
+          selectedElements: extensions.selectedElements,
           // ⭐ ROADMAP 2.1261 — the BIND path's instruction. The edit LLM
           // receives the advised-format sentence (probe P1 verbatim) carrying
           // the user's value bound to the sole missing option×factor pair;

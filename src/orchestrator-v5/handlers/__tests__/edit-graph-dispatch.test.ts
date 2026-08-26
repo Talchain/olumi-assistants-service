@@ -86,6 +86,7 @@ import type {
 } from '../../../orchestrator/types.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { ModelVersionMutationReceiptV1LocalSchema } from '../../model-management/mutation-receipt.js';
+import { serialiseEditContextForLLM } from '../../../orchestrator/context/serialise.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -901,6 +902,71 @@ describe('dispatchEditGraph', () => {
       const [context] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
       expect(context.analysis_response).not.toBeNull();
       expect((context.analysis_response as { analysis_status: string }).analysis_status).toBe('complete');
+    });
+  });
+
+  describe('edit-scoped selected-element focus', () => {
+    const STRICT_SELECTION_GRAPH: GraphStateIngress = {
+      nodes: [
+        { id: 'fac_hiring_cost', kind: 'factor', label: 'Hiring cost' },
+        { id: 'fac_runway', kind: 'factor', label: 'Runway' },
+      ],
+      edges: [],
+    };
+
+    async function dispatchWithSelection(
+      graphState: GraphStateIngress,
+      selectedElements?: { readonly node_ids: readonly string[]; readonly edge_ids: readonly string[] },
+    ) {
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchEditGraph({
+        payload: makePayload({ message: 'Make this more uncertain' }),
+        requestId: 'req-edit-selection-focus',
+        request: STUB_REQUEST,
+        graphState,
+        analysisState: null,
+        ...(selectedElements === undefined ? {} : { selectedElements }),
+      });
+
+      expect(handleEditGraph).toHaveBeenCalledTimes(1);
+      return (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]![0];
+    }
+
+    it('renders the selected current-model node into the existing FOCUS prompt', async () => {
+      const context = await dispatchWithSelection(STRICT_SELECTION_GRAPH, {
+        node_ids: ['fac_hiring_cost'],
+        edge_ids: [],
+      });
+
+      expect(context.selected_elements).toEqual([
+        '{"id":"fac_hiring_cost","kind":"factor","label":"Hiring cost"}',
+      ]);
+      const prompt = serialiseEditContextForLLM(context);
+      expect(prompt).toContain('## FOCUS');
+      expect(prompt).toContain(
+        '- {"id":"fac_hiring_cost","kind":"factor","label":"Hiring cost"}',
+      );
+    });
+
+    it('preserves the pre-existing prompt shape when the turn has no selection', async () => {
+      const context = await dispatchWithSelection(STRICT_SELECTION_GRAPH);
+
+      expect(context).not.toHaveProperty('selected_elements');
+      expect(serialiseEditContextForLLM(context)).not.toContain('## FOCUS');
+    });
+
+    it('fails weak on a structural-fallback graph instead of promoting its labels', async () => {
+      const context = await dispatchWithSelection(INGRESS_GRAPH, {
+        node_ids: ['dec_launch'],
+        edge_ids: [],
+      });
+
+      expect(context).not.toHaveProperty('selected_elements');
+      expect(serialiseEditContextForLLM(context)).not.toContain('## FOCUS');
     });
   });
 

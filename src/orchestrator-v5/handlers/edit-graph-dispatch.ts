@@ -91,7 +91,11 @@ import type {
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
+import type {
+  AnalysisStateIngress,
+  GraphStateIngress,
+  SelectedElementsIngress,
+} from '../boundary/request-extensions.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
@@ -119,6 +123,7 @@ import {
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { projectEditSelectionFocus } from './edit-selection-focus.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   classifyAnalyticalIntent,
@@ -1166,6 +1171,12 @@ export interface DispatchEditGraphParams {
   /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
   readonly analysisState: AnalysisStateIngress | null;
   /**
+   * Canvas selection at send time, normalised to identities by the boundary.
+   * The dispatcher resolves node IDs against the same strict graph snapshot it
+   * hands to edit_graph; client labels and edge inference never enter context.
+   */
+  readonly selectedElements?: SelectedElementsIngress | null;
+  /**
    * ROADMAP 2.684 — wall-clock baseline of the HTTP request (`routeStartedAt`),
    * against which the structural-edit composer's remaining budget is derived.
    * Same thread and same rationale as `dispatchDraftGraph`'s `requestStartMs`:
@@ -1911,6 +1922,11 @@ export async function dispatchEditGraph(
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId);
+  const editSelectionFocus = projectEditSelectionFocus(
+    params.selectedElements,
+    parsedGraph,
+    graphStrictlyCanonical,
+  );
   // ROADMAP 1.33: feed the same 5-turn conversation slice the
   // coaching/draft LLM path already builds into the edit-LLM request, so a
   // user who clarified details over several turns then asks for an edit
@@ -1946,6 +1962,7 @@ export async function dispatchEditGraph(
     messages: conversationSliceToMessages(recentConversationSlice),
     scenario_id: payload.scenario_id,
     ...(editBriefSlice ? { brief: editBriefSlice } : {}),
+    ...(editSelectionFocus.length > 0 ? { selected_elements: editSelectionFocus } : {}),
   };
 
   const adapter = getAdapter('edit_graph');
