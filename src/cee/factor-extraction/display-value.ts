@@ -43,10 +43,36 @@ export interface DisplayValueInput {
 /**
  * Input to `synthesiseRangeDisplayValue`.
  */
+/**
+ * ⚠ CORRECTED: these bounds are NOT "pre-normalisation raw values".
+ *
+ * That is what this interface claimed, and it is false for BOTH live
+ * producers — a false interface doc is what licensed the per-bound magnitude
+ * sniff below, so it is corrected here rather than left as a comment nobody
+ * reconciled. Derived at the bytes, CEE staging, 2026-08-26:
+ *
+ *   1. THE MODEL, via the draft prompt. External factors are instructed to
+ *      emit `prior: {distribution, range_min, range_max}` on a NORMALISED
+ *      0–1 anchoring scale — `Prompts/canonical/draft_graph.txt:473-476`
+ *      ("low, limited" -> 0.0–0.4; "moderate, normal" -> 0.3–0.7), with the
+ *      canonical example `{range_min: 0.0, range_max: 1.0}`.
+ *
+ *   2. `synthesisePriorFromBaseline` (repair stage,
+ *      `unified-pipeline/stages/repair/unreachable-factors.ts:690`), which
+ *      derives the range from the factor's own `observed_state.value` and
+ *      therefore emits ON THAT VALUE'S SCALE — model units for a framed
+ *      factor, and the RAW magnitude for an unframed one, because
+ *      `normalise-factor-value.ts` writes `{raw_value: x, value: x}` for
+ *      counts, ratios and unbounded scales.
+ *
+ * So the honest statement is: THE BOUNDS ARE ON WHATEVER SCALE THEIR PRODUCER
+ * USED, and this type cannot promise which. That is the ambiguity the percent
+ * limb below now declines to guess at instead of sniffing per bound.
+ */
 export interface RangeDisplayValueInput {
-  /** Lower bound of the prior distribution (pre-normalisation raw value) */
+  /** Lower bound of the prior distribution, on its producer's scale (see above) */
   range_min?: number;
-  /** Upper bound of the prior distribution (pre-normalisation raw value) */
+  /** Upper bound of the prior distribution, on its producer's scale (see above) */
   range_max?: number;
   /** Distribution type (unused for formatting, present for future use) */
   distribution?: string;
@@ -345,6 +371,57 @@ export function synthesiseRangeDisplayValue(
     if (withinNormalisedDomain) return undefined;
   }
 
+  // ⭐⭐ THE PERCENT SCALE IS ONE DECISION FOR THE PAIR, NOT ONE PER BOUND —
+  // AND WHERE THE PAIR CANNOT DECIDE, IT IS DECLINED.
+  //
+  // `formatBound` below used to sniff the scale PER BOUND
+  // (`n >= 0 && n <= 1 ? n * 100 : n`). The two bounds of one range come from
+  // ONE producer on ONE scale, so a pair that spans the boundary was rendered
+  // under TWO DIFFERENT CONVENTIONS: `[0.56, 1.68]` became "56% to 1.68%" —
+  // the first bound multiplied, the second not.
+  // `unified-pipeline/stages/repair/unreachable-factors.ts:549-552` records
+  // that exact output and calls it "replacing a silent omission with a
+  // confidently wrong number". `[1, 25]` was worse still: "100% to 25%", a
+  // range whose lower bound reads HIGHER than its upper.
+  //
+  // That output is wrong under EVERY reading. Under the multiplier convention
+  // the pair is 56%–168%; under percentage-points it is 0.56%–1.68%. It is
+  // never "56% to 1.68%".
+  //
+  // ── WHY DECLINE RATHER THAN PICK A CONVENTION ────────────────────────────
+  // Which convention a straddling pair is on is NOT derivable here. The draft
+  // prompt's SCALE_DISCIPLINE asks the model "can this metric meaningfully
+  // exceed 100%?" and the answer survives only implicitly, in how it scaled
+  // `value`, then is discarded; the shared contract's own ruling (ROADMAP
+  // 2.193 / the #766 review) is that no classifier can be built from the value
+  // alone — a `0` or a `1` is a legal raw count AND a legal proportion.
+  //
+  // So this follows the precedent THIS FUNCTION ALREADY SHIPS one block up:
+  // row 2.1207's currency limb declines inside the normalised domain rather
+  // than guess. The caller omits `display_value` and the node reads "no value
+  // set yet" — the honest state. Rendering it is a LIE about a number the user
+  // never wrote; declining it is a DEGRADATION the receipt already discloses.
+  //
+  // ⚠ MAGNITUDE, NOT SIGN — same reasoning as the currency limb above. A
+  // predicate written `<= 1` passes `-0.4` straight through, the sign
+  // asymmetry that cost CEE #891 a 100,000x suppression.
+  //
+  // ⚠ SCOPED TO THE PERCENT LIMB. Currency keeps its own ratified rule; time
+  // and unitless ranges are authored on the real scale and have no competing
+  // convention, so a 0.5-to-8 span there is a genuine quantity, not a straddle.
+  let percentMultiplier = 1;
+  if (unit === "%") {
+    const magnitudes: number[] = [];
+    if (hasMin) magnitudes.push(Math.abs(rangeMin!));
+    if (hasMax) magnitudes.push(Math.abs(rangeMax!));
+    const allWithinUnitInterval = magnitudes.every((m) => m <= 1);
+    const allOutsideUnitInterval = magnitudes.every((m) => m > 1);
+    // A single bound can never straddle: it is trivially all-within or
+    // all-outside, so the one-bound forms keep rendering exactly as before.
+    if (!allWithinUnitInterval && !allOutsideUnitInterval) return undefined;
+    percentMultiplier = allWithinUnitInterval ? 100 : 1;
+  }
+
   /**
    * Format a single bound using the same logic as synthesiseDisplayValue
    * (currency prefix, % multiply, time unit, plain number).
@@ -353,9 +430,9 @@ export function synthesiseRangeDisplayValue(
     const prefix = unit ? currencyPrefix(unit) : undefined;
     if (prefix) return `${prefix}${formatCurrencyAmount(n)}`;
     if (unit === "%") {
-      // range_min/range_max are normalised (0–1) values; multiply by 100 for display.
-      // For values outside 0–1 (e.g. already-display percentages like 25), use as-is.
-      const pct = n >= 0 && n <= 1 ? parseFloat((n * 100).toFixed(2)) : parseFloat(n.toFixed(2));
+      // Scale decided ONCE for the pair above — never re-sniffed here, because
+      // a per-bound decision is what produced "56% to 1.68%".
+      const pct = parseFloat((n * percentMultiplier).toFixed(2));
       return `${pct}%`;
     }
     if (unit && /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i.test(unit)) {
