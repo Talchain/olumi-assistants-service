@@ -148,7 +148,7 @@ function getMaxTokens(): number {
  *
  * Trim order (low-value first, user-visible state preserved as long as possible):
  *   Pass 1: plain_interpretation on edges (convenience text, raw numbers still exist)
- *   Pass 1b: uncertainty_drivers, extractionType, factor_type  (no-op on CompactNode — dropped at compaction)
+ *   Pass 1b: bounded description prose, uncertainty_drivers, extractionType, factor_type
  *   Pass 2: type, category, intervention_summary
  *   Pass 2b: raw_value, cap on external-factor nodes (prior-range representation)
  *   Pass 3: source provenance
@@ -171,8 +171,11 @@ function trimCompactEdgePlainInterpretation(edge: GraphV3Compact['edges'][number
 
 function trimCompactNodeTier1(node: GraphV3Compact['nodes'][number]): GraphV3Compact['nodes'][number] {
   const n = { ...node } as unknown as Record<string, unknown>;
-  // These fields were already dropped during compaction; kept explicit for forward-compat.
+  // Description is useful saved-model prose but expendable under pathological
+  // graph pressure; structural identity and values survive every trim tier.
+  delete n['description'];
   delete n['uncertainty_drivers'];
+  // These fields are already dropped during compaction; kept for forward-compat.
   delete n['extractionType'];
   delete n['factor_type'];
   return n as unknown as GraphV3Compact['nodes'][number];
@@ -229,7 +232,7 @@ function trimCompactEdgeExists(edge: GraphV3Compact['edges'][number]): GraphV3Co
  *
  * Trimming behaviour (graph — preserves user-visible state as long as possible):
  * - Pass 1: drop plain_interpretation from edges (convenience text, raw numbers remain)
- * - Pass 1b: drop uncertainty_drivers, extractionType, factor_type (no-op on compact nodes)
+ * - Pass 1b: drop bounded description prose, uncertainty_drivers, extractionType, factor_type
  * - Pass 2: drop type, category, intervention_summary from nodes
  * - Pass 2b: drop raw_value, cap from external-factor nodes (prior ranges)
  * - Pass 3: drop source provenance from nodes
@@ -277,11 +280,11 @@ export function enforceContextBudget<T extends BudgetEnforcementContext>(
           _edge_count: result.graph_compact._edge_count,
         };
 
-        // Pass 1b: drop low-value metadata fields (no-op on current CompactNode shape)
+        // Pass 1b: drop bounded prose expansion and low-value metadata.
         if (estimateTokensForValue(trimmedGraph) > budget.graph) {
           log.warn(
             { graphBudget: budget.graph },
-            'enforceContextBudget: graph still over budget — pass 1b trim (low-value metadata)',
+            'enforceContextBudget: graph still over budget — pass 1b trim (description and low-value metadata)',
           );
           trimmedGraph = {
             ...trimmedGraph,

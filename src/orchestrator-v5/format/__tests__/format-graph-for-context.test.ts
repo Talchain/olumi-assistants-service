@@ -30,6 +30,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+  NODE_DESCRIPTION_CONTEXT_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
 import {
@@ -271,6 +272,26 @@ describe('formatGraphForContext — node transformation', () => {
     );
     expect(out.nodes).toHaveLength(1);
     expect(out.nodes[0]!.id).toBe('fac_a');
+  });
+
+  it('carries only bounded saved node descriptions on compact and raw graph paths', () => {
+    const longDescription = 'D'.repeat(NODE_DESCRIPTION_CONTEXT_MAX_CHARS + 20);
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', description: 'Saved rationale' },
+          { id: 'fac_b', kind: 'factor', label: 'B', description: longDescription },
+          { id: 'fac_c', kind: 'factor', label: 'C', description: { text: 'not licensed' } },
+        ],
+      }),
+    );
+
+    expect(out.nodes[0]!.description).toBe('Saved rationale');
+    expect(out.nodes[1]!.description).toBe(
+      `${longDescription.slice(0, NODE_DESCRIPTION_CONTEXT_MAX_CHARS - 1)}…`,
+    );
+    expect(out.nodes[1]!.description).toHaveLength(NODE_DESCRIPTION_CONTEXT_MAX_CHARS);
+    expect(out.nodes[2]).not.toHaveProperty('description');
   });
 
   it('A3.1: canonical observed_state.value is also stripped from the display projection', () => {

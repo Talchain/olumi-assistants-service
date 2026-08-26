@@ -35,6 +35,7 @@
 
 import { synthesiseDisplayValue } from '../../cee/factor-extraction/display-value.js';
 import {
+  boundNodeDescriptionForContext,
   projectUncertaintyDriversForContext,
   type CompactCoefficientConfidence,
   type CompactProvenance,
@@ -47,6 +48,8 @@ export interface DisplaySafeNode {
   readonly id: string;
   readonly label: string;
   readonly kind: string;
+  /** Saved Living Model detail, bounded without local interpretation. */
+  readonly description?: string;
   readonly category?: string;
   readonly unit?: string;
   readonly intervention_summary?: string;
@@ -117,7 +120,7 @@ export interface DisplaySafeGraph {
 
 /**
  * Shape of a raw input node consulted by `projectNode`. The
- * projection emits `id`, `label`, `kind`, `category`, `unit`,
+ * projection emits `id`, `label`, `kind`, bounded saved `description`, `category`, `unit`,
  * `intervention_summary`, and `display_value` (A2.2). Numeric
  * fields (`value`, `raw_value`, `cap`) are READ here so
  * `synthesiseDisplayValue` can format them when an existing
@@ -133,6 +136,7 @@ interface RawNodeShape {
   readonly id?: unknown;
   readonly label?: unknown;
   readonly kind?: unknown;
+  readonly description?: unknown;
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
@@ -336,6 +340,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     id: string;
     label: string;
     kind: string;
+    description?: string;
     category?: string;
     unit?: string;
     intervention_summary?: string;
@@ -343,6 +348,8 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
   } = { id, label, kind };
+  const description = boundNodeDescriptionForContext(raw.description);
+  if (description !== undefined) node.description = description;
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
   const unit = extractNodeUnit(raw);

@@ -239,6 +239,36 @@ describe("enforceContextBudget (pathological-input safety valve — graph/analys
     expect(result.graph_compact?.nodes[0].intervention_summary).toBe("sets X=1");
   });
 
+  it("pass 1b drops bounded description prose while preserving model identity", async () => {
+    const enforceContextBudget = await getEnforceContextBudget();
+    const graph: GraphV3Compact = {
+      nodes: Array.from({ length: 3 }, (_, i) => ({
+        id: `n${i}`,
+        kind: "factor",
+        label: `Factor ${i}`,
+        description: `${i}: ${"saved rationale ".repeat(10)}`,
+        value: i,
+      })),
+      edges: [{ from: "n0", to: "n1", strength: 0.5, exists: 0.9 }],
+      _node_count: 3,
+      _edge_count: 1,
+    };
+
+    const result = enforceContextBudget(
+      makeContext({ graph_compact: graph, analysis_response: null }),
+      400,
+    );
+
+    expect(result.graph_compact).not.toBe(graph);
+    for (const [index, node] of (result.graph_compact?.nodes ?? []).entries()) {
+      expect(node).not.toHaveProperty("description");
+      expect(node.id).toBe(`n${index}`);
+      expect(node.label).toBe(`Factor ${index}`);
+      expect(node.value).toBe(index);
+    }
+    expect(result.graph_compact?.edges[0]!.exists).toBe(0.9);
+  });
+
   it("pass 2 removes intervention_summary along with type/category (isolated)", async () => {
     const enforceContextBudget = await getEnforceContextBudget();
     // Build a graph with no plain_interpretation on edges (already stripped or absent).

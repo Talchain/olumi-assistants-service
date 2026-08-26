@@ -182,13 +182,37 @@ describe('buildUserMessage — a turn with no selection is BYTE-IDENTICAL to pre
     // Restoring the raw array by reference reproduces the pre-change bytes
     // exactly, by construction — no JSON text surgery (see the golden's
     // docblock on why that route failed twice).
-    const displayGraph = pack.display_graph as unknown as { goals: readonly unknown[] };
+    const displayGraph = pack.display_graph as unknown as {
+      nodes: Array<Record<string, unknown>>;
+      goals: readonly unknown[];
+    };
     expect(
       displayGraph.goals,
       'precondition: the goals projection must be content-neutral on this fixture — ' +
         'a difference here is a REAL delta and must not be subtracted away',
     ).toEqual(pack.graph.goals);
     displayGraph.goals = pack.graph.goals;
+
+    // THIRD SUBTRACTION. Saved node descriptions are now deliberately carried
+    // into the display-safe graph so later reasoning can use the Living Model's
+    // durable rationale. This fixture has exactly one such description. Assert
+    // that exact licensed delta before removing it, preserving this test's
+    // historical purpose: isolate whether a no-selection turn changed because
+    // of hop 4, without blessing an arbitrary new prompt hash.
+    const describedNodes = displayGraph.nodes.filter(
+      (node) => Object.hasOwn(node, 'description'),
+    );
+    expect(
+      describedNodes,
+      'precondition: node-description continuity must be the sole new graph-node field ' +
+        'subtracted from this historical no-focus golden',
+    ).toEqual([
+      expect.objectContaining({
+        id: FACTOR_ID,
+        description: 'What a senior engineer costs in this market.',
+      }),
+    ]);
+    delete describedNodes[0]!.description;
 
     const msg = buildUserMessage(pack, USER_MESSAGE);
     expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
