@@ -1344,10 +1344,28 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
       // Arm 2 — the base was READ and found absent, then a concurrent writer
       // set it. `freshScenario(true)` is the "someone already wrote" state, so
       // expected = NULL is now a KNOWN-STALE expectation.
+      //
+      // ⚠⚠ `incoming` IS LOAD-BEARING, AND THIS FIXTURE WAS MISCALIBRATED
+      // (settled in raw SQL against a real Postgres, 2026-08-26). The guard is a
+      // function of THREE values, not two — it also requires
+      // `p_incoming_graph_identity_hash IS DISTINCT FROM v_current_hash`, which
+      // is v4's idempotent-replay exemption, preserved deliberately so
+      // re-sending the SAME graph is a replay rather than a conflict.
+      //
+      // `freshScenario(true)` writes GRAPH_V1, so `v_current_hash` IS
+      // `hashOf(GRAPH_V1)`. This arm previously sent `incoming:
+      // hashOf(GRAPH_V1)` — incoming EQUAL to current — so it landed in the
+      // REPLAY-EXEMPTION cell and was correctly accepted. The assertion below
+      // then read that as the lost update being missed, and the oracle failed
+      // against a migration that is right.
+      //
+      // GRAPH_V2 puts it in the cell the assertion is actually about: a
+      // known-absent base that has since been filled in by someone else, with a
+      // genuinely different graph arriving.
       const known = await freshScenario(true);
       const v5Known = await callV5(known.id, {
         expected: null,
-        incoming: hashOf(GRAPH_V1),
+        incoming: hashOf(GRAPH_V2),
         enforce: true,
         baseKnown: true,
       });

@@ -275,17 +275,33 @@ function createEnvEnforcedMode(
  * (lowercased + trimmed).
  *
  * Policy:
- * - Invalid or empty values fall back to the code default ('off') with a
+ * - Invalid or empty values fall back to THE CALLER'S `defaultValue` with a
  *   console warning — NEVER a boot failure (a typo must not take the service
  *   down, and must not accidentally cut over to a migration that may not be
  *   live yet).
  * - NO prod auto-downgrade (deliberately unlike `createEnvEnforcedMode`): v3's
  *   compare is in-transaction under FOR UPDATE, so 'enforce' is a genuine
- *   atomicity guarantee rather than the app-side best-effort A3 check. It is
- *   still default-off and Paul-gated, and requires migration 20260717120000 to
- *   be live before it is set to any non-'off' value.
+ *   atomicity guarantee rather than the app-side best-effort A3 check.
+ *   'enforce' remains Paul-gated and requires the backing migration to be live
+ *   before it is set.
  *
- * @param defaultValue - Code default ('off').
+ * ⚠ DOC CORRECTED 2026-08-26 (C8-A review, found unasked). Three claims in this
+ * block said the fallback and the default were `'off'`. They are not, and the
+ * disagreement is with the code directly beneath: the transform returns
+ * `defaultValue`, and the only call site passes **`"shadow"`**
+ * (`graphCasRpc: createGraphCasRpcMode("shadow", "CEE_V5_GRAPH_CAS_RPC")`). So
+ * a typo'd or empty `CEE_V5_GRAPH_CAS_RPC` resolves to **shadow**, not off, and
+ * the feature is **default-shadow**, not default-off.
+ *
+ * This matters beyond tidiness: shadow SENDS `p_cas_enforce = false`, so a
+ * reader trusting "falls back to off" would expect the RPC not to be reached at
+ * all, when in fact it is reached with enforcement disabled — a different state
+ * with different failure modes. The safe direction is unchanged (no accidental
+ * enforcement), which is why this survived: the sentence was wrong in a way
+ * that never bit.
+ *
+ * @param defaultValue - The caller's code default. Callers pass their own; this
+ *                       function has no opinion and no built-in 'off'.
  * @param settingName  - Env var name for logging.
  */
 function createGraphCasRpcMode(

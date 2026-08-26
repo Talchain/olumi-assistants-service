@@ -6,10 +6,21 @@ only by regex-over-file static guards, and **a regex cannot observe a
 transaction boundary**. A TypeScript-only version would prove things about
 TypeScript and nothing about atomicity.
 
-**Carrier under test:** `restore_model_version_atomic_v1`, from
-`supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql` on
-CEE `codex/c8-a-integration`. That migration is **not on this branch** — this
-branch carries fixtures only. Fetch it to run them.
+**Carriers under test:** `restore_model_version_atomic_v1` and
+`append_turn_atomic_v5`, from
+`supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql`.
+
+> ⚠ **CORRECTED 2026-08-26.** This said the migration was *"not on this branch —
+> this branch carries fixtures only. Fetch it to run them."* **It is on this
+> branch**, and has been since the C8-A integration; there is nothing to fetch,
+> and §3's `git show origin/codex/c8-a-integration:…` step below is redundant —
+> apply the file from your own checkout. Stale on the one point a reader opens
+> this file to settle, which is how someone ends up running the suite against a
+> database missing the very functions it asserts.
+>
+> The migration is **founder-gated and NOT applied to staging**. Applying it to
+> a throwaway local container, which is all this recipe does, is unrelated to
+> that gate.
 
 > ⚠ **Local container only. Never staging.** The suite installs and drops
 > failure-injection triggers and a control table, which is a schema mutation.
@@ -63,7 +74,13 @@ GRANT ALL ON public.scenarios TO service_role;
 top of it are the repo's real files; the table underneath is inferred. If the
 fixtures ever disagree with staging, suspect this first.
 
-## 3. Apply the migrations, then Codex's
+## 3. Apply the migrations
+
+`20260824200000` is IN this loop — it is an ordinary tracked migration on this
+branch. The separate `git show origin/codex/c8-a-integration:…` fetch this
+section used to carry has been removed; it fetched a copy of a file already in
+your checkout, and following it against a moved branch would apply a DIFFERENT
+version of the migration than the one the suite asserts.
 
 ```bash
 docker cp supabase/migrations c4pg:/tmp/migrations
@@ -71,17 +88,16 @@ for f in $(ls supabase/migrations/*.sql | sort); do
   docker exec c4pg psql -U postgres -d cee -v ON_ERROR_STOP=1 -q \
     -f "/tmp/migrations/$(basename "$f")" || echo "FAILED $(basename "$f")"
 done
-
-git fetch origin codex/c8-a-integration
-git show origin/codex/c8-a-integration:supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql \
-  > /tmp/codex_mig.sql
-docker cp /tmp/codex_mig.sql c4pg:/tmp/codex_mig.sql
-docker exec c4pg psql -U postgres -d cee -v ON_ERROR_STOP=1 -q -f /tmp/codex_mig.sql
 ```
 
-**25 of the tracked migrations apply.** Two fail on tables that, like
-`scenarios`, predate this directory — `shared_briefs` (`20260226010000`) and
-`turn_observations` (`20260610120000`). Neither is on the canonical-state path.
+**26 of the 28 tracked migrations apply** (measured on Postgres 15.18). Two fail
+on tables that, like `scenarios`, predate this directory — `shared_briefs`
+(`20260226010000`) and `turn_observations` (`20260610120000`). Neither is on the
+canonical-state path, and both failures are expected here.
+
+The suite's first test asserts `restore_model_version_atomic_v1` is PRESENT and
+**fails loud rather than skipping** — so if the loop above silently missed the
+migration you get a named failure, not a vacuous pass.
 
 ### ⚠ Migration collision hazard — verify the column type, do not assume it
 

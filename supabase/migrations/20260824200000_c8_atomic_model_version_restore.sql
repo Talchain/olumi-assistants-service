@@ -619,19 +619,38 @@ BEGIN
   -- bricking every unstamped scenario on its next turn — the exact "Cut 1"
   -- failure `validators/numeric-bounds.ts` records paying for once already.
   --
-  -- So this guard adds EXACTLY ONE enforcement over v4 — `expected IS NULL AND
-  -- current IS NOT NULL` — which is precisely the lost update and nothing else:
+  -- So this guard adds EXACTLY ONE enforcement over v4 — a known-absent base
+  -- that has since been filled in — which is precisely the lost update.
   --
-  --   expected NULL,  current NULL   -> match      (first writer proceeds)
-  --   expected NULL,  current SET    -> CONFLICT   <- the lost update, caught
-  --   expected SET,   current NULL   -> exempt     (unstamped legacy row)
-  --   expected h1,    current h2     -> CONFLICT   (v4 catches this too)
-  --   expected h,     current h      -> match
+  -- ⚠⚠ THE TABLE BELOW WAS WRITTEN AS A FUNCTION OF TWO VARIABLES AND THE CODE
+  -- IS A FUNCTION OF THREE (corrected 2026-08-26, after the C4 oracle was run
+  -- against a real Postgres for the first time). It previously read
+  -- `expected NULL, current SET -> CONFLICT` UNCONDITIONALLY, omitting the
+  -- `incoming` conjunct entirely. That reached the right verdict for an
+  -- incomplete reason — and a fixture written from it sent `incoming = current`,
+  -- landed in the replay-exemption cell, was correctly ACCEPTED, and read as a
+  -- migration defect. An incomplete model that happens to agree on the case in
+  -- hand is exactly how the next reader is misled.
+  --
+  -- `incoming` matters because v4's IDEMPOTENT-REPLAY exemption is preserved
+  -- here: re-sending the SAME graph is a retry, not a conflict.
+  --
+  --   expected  current  incoming    outcome
+  --   --------  -------  ---------   -----------------------------------------
+  --   NULL      NULL     any      -> match      (first writer proceeds)
+  --   NULL      SET      ≠current -> CONFLICT   <- the lost update, caught
+  --   NULL      SET      =current -> match      (idempotent replay, exempt)
+  --   SET       NULL     any      -> exempt     (unstamped legacy row)
+  --   h1        h2       ≠current -> CONFLICT   (v4 catches this too)
+  --   h1        h2       =current -> match      (idempotent replay, exempt)
+  --   h         h        any      -> match
   --
   -- Two concurrent writers on an unstamped scenario both read expected = NULL.
   -- They serialise on the FOR UPDATE above: the first sees current NULL and
   -- commits, stamping the hash; the second then sees current SET against its
-  -- NULL expectation and is refused. That is the race closed.
+  -- NULL expectation, with a DIFFERENT graph in hand, and is refused. That is
+  -- the race closed — and the "different graph" clause is why the row above it
+  -- exists rather than being a hole.
   IF p_cas_enforce
      AND p_expected_base_known
      AND v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
