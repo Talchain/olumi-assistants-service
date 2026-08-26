@@ -7,6 +7,65 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
+### `talchain-schemas-0.50.0.tgz`
+
+> **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE.**
+>
+> Packed from a fresh blobless clone of `olumi-schemas` with `HEAD` asserted
+> equal to `git rev-list -n1 v0.50.0` =
+> **`6f2551ea407d1352f8fc55a5ea29fab4794985bf`** *before any read* — fetching a
+> ref is not checking it out — and `package.json.version == 0.50.0` asserted,
+> then `npm ci && npm run build && npm pack`
+> (node 20.19.5, the toolchain every entry below records).
+>
+> sha256 `e42c7c89ed879ad1f92879292feb09773d07c365fe6276fd26b4c343af8784c8`
+> — 488,421 bytes. A second independent `npm pack` produced **byte-identical**
+> output.
+>
+> ⚠ **REGISTRY CONTENT-IDENTITY NOT VERIFIED FOR THIS ENTRY**, for the same
+> reason as 0.48.0: the comparison needs a registry credential this lane did not
+> have. What is proven is that these bytes are reproducibly derived from the
+> tagged, merged source, and that the resolved install reports `0.50.0`
+> (`pnpm check:schemas-resolution` green) with all sixteen `SystemEventKind`
+> members present at the installed bytes.
+
+**Why 0.50.0 (P0 — CEE was rejecting its own valid output).** CEE emitted
+`model_version_receipt` on every committed turn while pinned to 0.48.0, which
+predates the field. `OlumiResponseSchema` is `.strict()`, so CEE's own egress
+validator rejected it — `Unrecognized key(s) in object: 'model_version_receipt'`
+— and `route-v2.ts` replaced the whole response, including a committed
+12-node/16-edge graph, with the `EGRESS_CONTRACT_VIOLATION` envelope. The user's
+draft never reached them. Reproduced 2/2 on a signed-in journey and confirmed
+live in the deployed `cee-staging` logs.
+
+**The delta is ADDITIONS-ONLY, derived rather than assumed.** There is no
+0.49.0, so 0.48.0 → 0.50.0 is exactly ONE commit. Across `src/`: 18 files,
+2,853 insertions, and only **six** removed lines — all enumerated:
+
+| Removed line | Classification |
+|---|---|
+| `import { GraphV3Schema } from '../graph.js';` | **WIDENED**, not removed (`EffectDirection, GraphV3Schema, NodeKind, NodeV3Schema`) |
+| `base_graph_hash: z.string().min(1).describe(` | **Refactor, not a tightening** — replaced by `CanonicalBaseGraphHashSchema`, which is *defined* as `z.string().min(1)` (`turn-payload.ts:734`) |
+| `SCHEMA_SHA`, `CONTRACT_MANIFEST_SHA`, `SCHEMA_PACKAGE_VERSION` | Generated constants, mechanical version bump |
+| one `.describe()` doc string | Prose only |
+
+`git diff --name-status -M` reports **zero** renames and **zero** file
+deletions, and `src/graph.ts` is **byte-identical** between the two tags — so
+graph validation cannot have changed. The completeness argument is the
+six-line count itself: an existing validator cannot be removed or tightened
+without producing a `-` line, and every `-` line is accounted for above.
+
+**What it adds:** `src/boundary/model-versions.ts` (new), the optional
+`OlumiResponse.model_version_receipt`, and three `SystemEventKind` members
+(`structural_add`, `structural_add_edge`, `structural_rename`).
+
+⚠ **"Additions-only" is a statement about the WIRE CONTRACT, not about
+zero code changes.** CEE keys a **total** `Record<SystemEventKindLiteral, …>`
+map on that enum, so three additive members compiled as a hard error until each
+was classified. They are declared `reader_only_refusal` — CEE can parse all
+three and has a writer for none — which is the posture the contract itself
+mandates ("Reader-first adoption is mandatory").
+
 ### `talchain-schemas-0.48.0.tgz`
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE.**

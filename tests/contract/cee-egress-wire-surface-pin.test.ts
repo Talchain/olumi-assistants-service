@@ -115,6 +115,19 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // never-vendored 0.45.0 line; CEE does NOT emit it and does not read it —
       // this entry is consumer-parity only.
       'model_building_notices',
+      // 0.50.0-new: atomic receipt for the model version committed by THIS turn
+      // (`ModelVersionMutationReceiptV1Schema`, optional).
+      //
+      // ⚠ UNLIKE MOST ENTRIES HERE, CEE WAS ALREADY EMITTING THIS BEFORE THE
+      // CONTRACT DECLARED IT, AND THAT WAS THE P0. The pin sat at 0.48.0, which
+      // predates the field, while `attachModelVersionMutationReceipt` attached
+      // it to every committed system-event and draft turn. `OlumiResponseSchema`
+      // is `.strict()`, so CEE's own egress validator rejected CEE's own valid
+      // output — `Unrecognized key(s) in object: 'model_version_receipt'` — and
+      // `route-v2.ts` replaced a committed 12-node graph with the
+      // EGRESS_CONTRACT_VIOLATION envelope. Declaring it here is the fix, not a
+      // consumer-parity entry: this key is EMITTED.
+      'model_version_receipt',
       // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
       'reasoning',

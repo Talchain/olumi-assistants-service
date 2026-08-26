@@ -101,7 +101,18 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // The comparator carries the same positive control: `package.json` DOES
     // differ between the two tarballs, so `cmp` is demonstrably able to see a
     // difference and these verdicts are not a comparator that cannot fail.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.48.0');
+    // 0.50.0 re-vendor (P0 — model_version_receipt egress skew). The delta from
+    // 0.48.0 is ONE commit (there is no 0.49.0) and is additions-only across
+    // `src/`: 18 files changed, 2853 insertions, and only SIX removed lines,
+    // every one of which was enumerated — an import WIDENED (`GraphV3Schema` →
+    // `EffectDirection, GraphV3Schema, NodeKind, NodeV3Schema`), the three
+    // generated constants asserted just below, one `.describe()` doc string, and
+    // `base_graph_hash: z.string().min(1)` → `CanonicalBaseGraphHashSchema`,
+    // which is DEFINED as `z.string().min(1)` (turn-payload.ts:734) — a named
+    // constant, byte-identical validation, not a tightening. Nothing removed,
+    // nothing renamed (`git diff --name-status -M` reports zero R entries).
+    // `src/graph.ts` is byte-identical between the two tags.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.50.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -251,10 +262,17 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
     // and 0.48.0 and proving the enum literal is the former with the new member
     // appended. Asserting the prefix separately from the tail keeps the 0.41
     // guarantee legible instead of burying it in one long literal.
+    // 0.50.0 appends the three direct-edit members the same way, and the PREFIX
+    // assertion below is the load-bearing half: it passing unchanged is
+    // independent evidence that the 0.48.0 → 0.50.0 bump removed and renamed
+    // NOTHING in this vocabulary — the additions genuinely arrive at the end.
     expect(SystemEventKind.options.slice(0, PRE_042_KINDS.length)).toEqual([...PRE_042_KINDS]);
     expect(SystemEventKind.options.slice(PRE_042_KINDS.length)).toEqual([
       'edge_strength_edit',
       'structural_delete',
+      'structural_add',
+      'structural_add_edge',
+      'structural_rename',
     ]);
   });
 

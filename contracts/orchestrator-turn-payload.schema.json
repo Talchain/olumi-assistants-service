@@ -847,6 +847,138 @@
                     "base_graph_hash"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "structural_add"
+                    },
+                    "node_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100,
+                      "pattern": "^[a-z0-9_:-]+$",
+                      "description": "The id for the NEW node, minted client-side so the gesture is idempotent under retry and the client can correlate the committed node with the shape it drew. Validated against NodeV3Schema.shape.id because CEE must be able to persist it. CEE MUST refuse an id that already exists in the persisted graph rather than overwriting that node: the base_graph_hash gate cannot catch a collision, because a colliding id is already present in the very graph the user was looking at."
+                    },
+                    "node_kind": {
+                      "type": "string",
+                      "enum": [
+                        "goal",
+                        "factor",
+                        "outcome",
+                        "risk",
+                        "action",
+                        "decision",
+                        "option",
+                        "constraint"
+                      ],
+                      "description": "The node kind, from the graph contract's own NodeKind vocabulary. Named `node_kind` rather than `kind` because `kind` is the union discriminator on this member."
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "The user-authored label for the new node. Bounds are inherited from NodeV3Schema.shape.label."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical graph hash the client last read. An optimistic-concurrency assertion, never a requested value. Absent, null and empty are all forbidden: the stale gate is non-optional. CEE MUST refuse on divergence rather than applying a best-effort add."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "node_id",
+                    "node_kind",
+                    "label",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "structural_add_edge"
+                    },
+                    "from": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical source node id of the new edge (edge identity, half 1). Must already exist."
+                    },
+                    "to": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical target node id of the new edge (edge identity, half 2). Must already exist."
+                    },
+                    "magnitude": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "Absolute strength in [0, 1] for the new edge. Direction is carried separately so an edge cannot be created with an accidentally inverted sign."
+                    },
+                    "effect_direction": {
+                      "type": "string",
+                      "enum": [
+                        "positive",
+                        "negative"
+                      ],
+                      "description": "The causal direction of the new edge. `unknown` is excluded: this member states a magnitude, and magnitude without direction is an edge whose sign cannot be recovered."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical graph hash the client last read. An optimistic-concurrency assertion, never a requested value. Absent, null and empty are all forbidden: the stale gate is non-optional. CEE MUST refuse on divergence, and MUST refuse an endpoint that does not resolve in its persisted graph rather than creating a dangling edge."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "from",
+                    "to",
+                    "magnitude",
+                    "effect_direction",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "structural_rename"
+                    },
+                    "node_id": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical id of the EXISTING node being renamed. Open-string, per the canonical id rule: CEE's persisted node ids are the authority."
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "The new label. Bounds are inherited from NodeV3Schema.shape.label."
+                    },
+                    "expected_label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "The exact label last read from the canonical persisted node. An optimistic-concurrency assertion, never a requested value, and NOT redundant with base_graph_hash: the analysis-affecting hash does not cover `label`, so a concurrent rename moves no hash and would otherwise be silently clobbered. CEE MUST refuse on mismatch."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical graph hash the client last read. Guards every analysis-affecting change to the graph around this node; `expected_label` guards the label itself, which the hash does not cover. Absent, null and empty are all forbidden."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "node_id",
+                    "label",
+                    "expected_label",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }

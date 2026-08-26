@@ -55,6 +55,16 @@ const Lineage = z.discriminatedUnion("kind", [
  * (`validators/numeric-bounds.ts`) — and it is the only form that can keep
  * `full_hash === H(graph)` true.
  */
+/**
+ * The graph type the PUBLISHED contract now gives this field.
+ *
+ * Derived from `OlumiResponse` itself rather than restated, so it cannot drift
+ * from the pin: once `@talchain/schemas` ≥ 0.50.0 declares
+ * `OlumiResponse.model_version_receipt`, its `graph` is a typed `GraphV3` and
+ * the local carrier must be assignable to it.
+ */
+type CanonicalReceiptGraph = NonNullable<OlumiResponse['model_version_receipt']>['graph'];
+
 const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
   // The ADMISSIBILITY question must be the same one the version carrier asked,
   // or a version it legitimately created cannot be receipted — and the commit
@@ -76,7 +86,27 @@ const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
   for (const issue of parsed.error.issues) {
     ctx.addIssue(issue);
   }
-});
+})
+  // ⚠ A TYPE-ONLY BRIDGE. THIS MUST STAY AN IDENTITY FUNCTION — do not
+  // "improve" it into `GraphV3.parse(v)`.
+  //
+  // `z.unknown()` infers `unknown` (and makes the key OPTIONAL), which stopped
+  // being assignable the moment the pin started typing
+  // `model_version_receipt.graph` as a real `GraphV3`. The temptation is to
+  // swap the carrier for `GraphV3Schema` and let Zod produce the right type.
+  // That would REBUILD the graph and re-open the exact hash/payload fork this
+  // carrier exists to prevent (see the header above): a rebuild applies
+  // `edge_type`'s `.default('directed')`, which is NOT hash-neutral — measured
+  // with CEE's own `computeGraphIdentityHash`, the same graph hashes
+  // 26a8d97d… without the key and b833e888… with it. `full_hash` is computed
+  // over the PERSISTED bytes, so a rebuilt graph would leave the receipt
+  // asserting an identity its own payload cannot reproduce.
+  //
+  // `.transform` returning `v` UNCHANGED preserves the reference exactly —
+  // runtime behaviour is byte-identical to before this line existed — and only
+  // narrows the static type. The cast is doing no validation work: the
+  // `superRefine` above is what enforces the shape.
+  .transform((v) => v as CanonicalReceiptGraph);
 
 /**
  * Temporary exact mirror of schemas commit 91e610dc. Remove only after the
