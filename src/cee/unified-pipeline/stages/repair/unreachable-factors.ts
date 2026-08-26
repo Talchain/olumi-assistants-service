@@ -323,7 +323,46 @@ function declaredScaleOf(
   if (!Number.isFinite(value)) return undefined;
   // A percentage-style metric carrying a value above 1 is the ratio case the
   // draft prompt mandates ("can this metric meaningfully exceed 100%?").
-  if (unit === "%" && value > 1) return "ratio";
+  //
+  // ⚠⚠ BUT `value > 1` ALONE CANNOT TELL `1.15` ON RATIO SCALE FROM `115` ON
+  // RAW SCALE — both are `> 1`, and stamping `ratio` on the raw one licenses a
+  // consumer to multiply it by 100. MEASURED before this guard, through the
+  // real repair stage and the real V3 transform, on a factor carrying a string
+  // `data.operator` (which keeps `data` alive past `:612`, so `data.unit`
+  // survives to feed the display even though the node-level unit is withheld):
+  //
+  //   value=115, raw_value=115, unit='%'  ->  "5750% to 17250%"
+  //
+  // A 100x OVER-statement. The `declared_scale` read this repair stage feeds
+  // was added to stop a 100x UNDER-statement, and ⭐ THE TWO HARMS CANNOT SHARE
+  // ONE WINDOW — a single `value > 1` test tries to serve both and serves the
+  // wrong one on non-compliant input.
+  //
+  // ── THE SIGNAL IS ALREADY HERE, ON THE OTHER ARM ─────────────────────────
+  // `normalise-factor-value.ts:14-18` states the carrier: "When `cap` is
+  // defined, value = raw_value / cap ... When `cap` is absent, value =
+  // raw_value." So `rawValue === value` MEANS NOT NORMALISED. The
+  // `unit_interval` arm below ALREADY reads exactly this
+  // (`rawValue !== value` => normalised); this is the same carrier read
+  // symmetrically, not a new signal.
+  //
+  // ── AND IT COSTS THE COMPLIANT CASE NOTHING ──────────────────────────────
+  // The draft prompt MANDATES the ratio encoding verbatim — "Ratio that can
+  // exceed 100% | raw ratio | percentage points | NRR 110% -> 1.10, raw 110"
+  // (`Prompts/canonical/draft_graph.txt:320`, `src/prompts/defaults-v187.ts:300`).
+  // On that encoding `value` (1.10) and `raw_value` (110) DIFFER BY
+  // CONSTRUCTION, so this can never fire on a compliant factor. It fires only
+  // on a violation — exactly the input that was rendering a lie.
+  //
+  // Falling through (rather than returning a different member) is deliberate:
+  // `value > 1` fails `inUnitInterval` below and yields `undefined` =
+  // UNDECLARED, which the contract requires a consumer to treat as "no
+  // declaration" rather than as a guess. The display then sniffs and renders
+  // "57.5% to 172.5%" — the honest reading of a raw-scale pair.
+  if (unit === "%" && value > 1) {
+    const unNormalised = rawValue !== undefined && rawValue === value;
+    if (!unNormalised) return "ratio";
+  }
   const inUnitInterval = value >= 0 && value <= 1;
   if (!inUnitInterval) return undefined;
   // NORMALISATION EVIDENCE, not a guess about the value. The enricher mints
