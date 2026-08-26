@@ -68,6 +68,9 @@ describe('canonical precedence journey — transport is real and conflicting', (
     const assembled = assembleCanonicalPrecedenceCase(conflict);
     const prompt = assembled.userMessage;
 
+    expect(assembled.contextPack.graph_context).toEqual({ status: 'canonical' });
+    expect(prompt).toContain('"graph_context"');
+    expect(prompt).toContain('"status": "canonical"');
     expect(assembled.contextPack.conversation.window).toMatchObject({
       shown: 8,
       available: 28,

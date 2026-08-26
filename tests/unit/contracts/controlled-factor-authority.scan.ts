@@ -2,12 +2,11 @@
  * Persisted-first contract guard — pure scan machinery (component 1).
  *
  * Data-authority doctrine: the controlled-factor set (which factors an option
- * already pins) must be derived from the SAVED model, never request-first from
- * the browser's copy. #309/#314/#316 each fixed one request-first call site of
- * `collectInterventionControlledFactorIds`; this guard closes the CLASS: every
- * production call site's argument must match a reviewed ALLOWLIST of
- * persisted-first / persisted-only / persisted-derived forms, and any NEW call
- * site fails by construction until the allowlist is consciously extended.
+ * already pins) must follow the reviewed reasoning snapshot, never a separate
+ * request-first browser copy. Persisted-first remains required on mutation and
+ * post-analysis paths; the ContextPack projection alone may consume the pure
+ * four-state selector's coherent canonical/provisional snapshot. Every
+ * production argument must match this reviewed allowlist.
  *
  * Allowlist beats denylist: an alias (`graphStateForTurn`), an intermediate
  * rebinding (`const g = options.graphState ?? …`), or a brand-new call site is
@@ -105,7 +104,13 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     // so the pill's degrade-honestly answer suppresses option-pinned levers
     // identically. No request-graph leg.
     count: 5,
-    allowedArgs: ['context.persistedGraph ?? options.graphState'],
+    allowedArgs: [
+      'context.persistedGraph ?? options.graphState',
+      // ContextPack-only projection: a single selector-controlled snapshot.
+      // canonical wins whenever present; provisional is licensed only after
+      // an explicit successful absence read and validated first-touch input.
+      'contextGraphForReasoning',
+    ],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
     // The run_analysis chip path threads the controlled set into

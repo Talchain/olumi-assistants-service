@@ -277,6 +277,7 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
     );
 
     for (const section of [
+      'graph_context',
       'graph',
       'display_graph',
       'display_analysis',
@@ -306,6 +307,120 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
     expect(pack.graph.edges).toBe(graph.edges);
     // And the per-turn projections of the SURVIVING turns are untouched.
     expect(pack.conversation.recent_turns[0]).toStrictEqual(control.conversation.recent_turns[0]);
+  });
+
+  it('retains graph authority in a dense pack beside brief, summary, values, uncertainty, analysis and constraints', () => {
+    const graphContext = { status: 'canonical' as const };
+    const constraint = {
+      id: 'constraint_dense_budget',
+      target_node_id: 'n2',
+      operator: '<=',
+      value: 250000,
+      unit: 'GBP',
+      source_quote: 'Keep the programme within the £250k budget.',
+    };
+    const constraints = [constraint] as const;
+    const factorValues = {
+      factors: [
+        { label: 'Delivery capacity', has_value: false, provenance: 'user_stated' as const },
+        { label: 'Implementation cost', has_value: true, provenance: 'ai_drafted' as const },
+      ],
+      without_value_count: 1,
+    };
+    const conversationSummary = {
+      text: 'FRAME: EU expansion. OPEN: delivery capacity and the £250k ceiling.',
+      current_to_turn_id: 't-prev-3',
+      lag_turns: 1,
+      stale: false,
+    };
+    const analysis = analysisSummaryFixture();
+    const baseGraph = bulkyCompactGraph(OVERFLOW.graphNodes, OVERFLOW.labelChars);
+    const graph: GraphV3Compact = {
+      ...baseGraph,
+      nodes: baseGraph.nodes.map((node, index) =>
+        index === 2
+          ? {
+              ...node,
+              uncertainty_drivers: [
+                'Supplier lead-time evidence is incomplete.',
+                'Demand response is based on a short pilot.',
+              ],
+            }
+          : node,
+      ),
+    };
+    const common = {
+      payload: BASE_PAYLOAD,
+      priorTurnsTotal: 40,
+      priorFacts: [],
+      brief: 'Should we expand into the EU next year, while staying within £250k?',
+      graphContext,
+      compactedGraph: graph,
+      compactedConstraints: constraints,
+      factorValues,
+      analysis,
+      conversationSummary,
+      summarisedTurns: 12,
+    };
+
+    const trimmed = assembleContextPack({
+      ...common,
+      priorTurns: fatTurns(CONTEXT_PACK_RECENT_TURNS_CAP),
+    });
+    const control = assembleContextPack({
+      ...common,
+      priorTurns: fatTurns(CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS),
+    });
+
+    // Positive controls: the dense arm really overflowed and the comparator did
+    // not. Otherwise the preservation assertions below could compare two no-ops
+    // or two independently trimmed packs.
+    expect(trimmed.conversation.recent_turns.length).toBeLessThan(
+      CONTEXT_PACK_RECENT_TURNS_CAP,
+    );
+    expect(trimmed.conversation.recent_turns.length).toBeGreaterThan(
+      CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+    );
+    expect(control.conversation.recent_turns).toHaveLength(
+      CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+    );
+    expect(
+      JSON.stringify(control).length,
+      'precondition: the floor-sized dense comparator must be under the ceiling',
+    ).toBeLessThanOrEqual(TOTAL_BUDGET!);
+
+    // The ceiling owns only the conversation window. Bind every neighbouring
+    // slice by exact bytes, then bind the new authority marker and the two
+    // easiest-to-silently-drop graph facts by identity.
+    for (const section of [
+      'graph_context',
+      'brief',
+      'conversation_summary',
+      'factor_values',
+      'analysis',
+      'display_analysis',
+      'graph',
+      'display_graph',
+    ] as const) {
+      expect(JSON.stringify(trimmed[section]), `${section} changed during the conversation cut`).toBe(
+        JSON.stringify(control[section]),
+      );
+    }
+
+    expect(trimmed.graph_context).toBe(graphContext);
+    expect(trimmed.graph_context).toEqual({ status: 'canonical' });
+    expect(trimmed.conversation_summary).toBe(conversationSummary);
+    expect(trimmed.factor_values).toBe(factorValues);
+    expect(trimmed.graph.constraints).toBe(constraints);
+    expect(trimmed.graph.constraints).toContain(constraint);
+    expect(
+      (trimmed.graph.nodes as readonly CompactNode[]).find((node) => node.id === 'n2')
+        ?.uncertainty_drivers,
+    ).toEqual([
+      'Supplier lead-time evidence is incomplete.',
+      'Demand response is based on a short pilot.',
+    ]);
+    expect(trimmed.analysis?.top_drivers).toHaveLength(5);
   });
 
   it('leaves conversation_summary and older_relevant_facts untouched by a trim', () => {

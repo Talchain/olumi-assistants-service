@@ -1596,10 +1596,18 @@ async function fetchPersistedScenarioState(
   readonly briefText: string | null;
   readonly read: CanonicalGraphReadState;
 }> {
-  // No store: nothing is (or can be) persisted for this scenario, and the
-  // commit path cannot run without a store, so this is a genuine ABSENT read
-  // for adopt purposes — never a degraded read that could mask a server model.
-  if (!store) return { graph: null, briefText: null, read: { status: 'ok_absent' } };
+  // No store here means the store factory/configuration failed upstream. It is
+  // NOT evidence that this scenario has no persisted graph: an authenticated
+  // scenario may still exist in storage even though this process cannot reach
+  // it. Mark the canonical read degraded so the ContextPack selector fails
+  // weak and never upgrades caller bytes to provisional authority.
+  if (!store) {
+    return {
+      graph: null,
+      briefText: null,
+      read: { status: 'degraded', errorCode: 'session_store_unavailable' },
+    };
+  }
   try {
     const result = await store.loadGraphAndBriefText(scenarioId);
     // ok_present only when a graph is actually stored; a null graph (row

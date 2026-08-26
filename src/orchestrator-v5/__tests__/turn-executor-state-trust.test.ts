@@ -46,6 +46,7 @@ const BASE_PAYLOAD = makeMessagePayload({
 
 // In-memory store handle the test mutates per scenario.
 let mockedPriorFacts: HandlerFact[] = [];
+let mockedPersistedGraph: GraphStateIngress;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -84,6 +85,8 @@ vi.mock('../session/index.js', () => ({
         turn_id: 'mock-prior-handler-row',
         fact_created_at: '2026-04-17T11:00:00.000Z',
       })),
+    loadGraph: async () => mockedPersistedGraph,
+    loadGraphAndBriefText: async () => ({ graph: mockedPersistedGraph, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
@@ -184,6 +187,7 @@ function stubRegistry(handlerId: string, factsForCurrentTurn: HandlerFact[]): Ha
 beforeEach(() => {
   setTestSink(() => {});
   mockedPriorFacts = [];
+  mockedPersistedGraph = baseGraph;
 });
 
 afterEach(() => {
@@ -299,8 +303,10 @@ describe('TurnExecutor — V5 state-trust freshness threading', () => {
   it('explain turn against a value-edited graph (no current-turn run_analysis) → freshness=stale', async () => {
     const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
 
-    // Prior fact recorded against the BASE graph; current turn ships
-    // an EDITED graph (value-only change) — hashes diverge → stale.
+    // Prior fact recorded against the BASE graph; the persisted canonical
+    // graph is now EDITED (value-only change) — hashes diverge → stale. The
+    // caller deliberately still ships the old base graph so this fixture also
+    // proves stale request bytes cannot overrule durable canonical state.
     const baseHash = computeAnalysisAffectingGraphHash(baseGraph)!;
     const editedGraph: GraphStateIngress = {
       ...baseGraph,
@@ -314,6 +320,7 @@ describe('TurnExecutor — V5 state-trust freshness threading', () => {
     } as GraphStateIngress;
     const editedHash = computeAnalysisAffectingGraphHash(editedGraph)!;
     expect(editedHash).not.toBe(baseHash);
+    mockedPersistedGraph = editedGraph;
 
     mockedPriorFacts = [
       {
@@ -349,7 +356,7 @@ describe('TurnExecutor — V5 state-trust freshness threading', () => {
 
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-state-trust-stale', {
       routingAdapter: adapter,
-      graphState: editedGraph,
+      graphState: baseGraph,
       handlerRegistry: stubRegistry('explain_results', [explainFact]),
     });
 

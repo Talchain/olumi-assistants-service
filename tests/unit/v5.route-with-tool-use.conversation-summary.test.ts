@@ -4,10 +4,8 @@
  *
  * Pins:
  *  1. BYTE-IDENTITY (maintain): with no `conversation_summary` on the pack,
- *     buildUserMessage output is byte-identical to a pinned sha256 golden.
- *     The golden was re-captured when context disclosure became
- *     unconditional (the pack conversation now always carries `window`);
- *     the rolling-summary section is still absent on this path.
+ *     structurally remove the independently pinned graph-authority delta and
+ *     require the remaining bytes to match the historical pre-S4 golden.
  *  2. Inject-mode adds EXACTLY the block: the serialised prompt is the
  *     baseline prompt with (a) the `conversation_summary` section appended
  *     BELOW the ground-truth `analysis`/`graph` sections in the llmFacing
@@ -24,6 +22,7 @@ import { createHash } from 'node:crypto';
 import {
   BRIEF_INSTRUCTION,
   buildUserMessage,
+  GRAPH_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
 } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
@@ -89,16 +88,33 @@ function baselinePack(): ContextPack {
     ],
     priorFacts: [],
     brief: 'Choose a supplier for the new product line.',
+    graphContext: { status: 'unavailable' },
   });
 }
 
-/** sha256 of buildUserMessage(baselinePack(), PAYLOAD.message). Re-captured
- *  when the existing `brief` field gained its conditional, code-owned
- *  historical-context instruction. The rolling-summary block is still absent;
- *  this baseline deliberately contains a brief, so that independent additive
- *  instruction is now part of the exact bytes. */
+/** Historical pre-S4 sha256. The mandatory graph-authority delta is removed
+ * structurally before this is asserted, preserving the original evidence. */
 const PRE_CHANGE_SHA256 =
   '0b7ddf441acc5c9367ed845a7525b1bbe65f87087544e9324ff6764c282a6348';
+
+function subtractGraphAuthorityDelta(
+  message: string,
+  expectedStatus: 'canonical' | 'provisional' | 'absent' | 'unavailable',
+): string {
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+  const jsonStart = message.indexOf('{');
+  const jsonEnd = message.indexOf(marker);
+  expect(jsonStart).toBeGreaterThan(-1);
+  expect(jsonEnd).toBeGreaterThan(jsonStart);
+  const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
+  expect(parsed.graph_context).toEqual({ status: expectedStatus });
+  delete parsed.graph_context;
+  return (
+    message.slice(0, jsonStart) +
+    JSON.stringify(parsed, null, 2) +
+    message.slice(jsonEnd + marker.length)
+  );
+}
 
 const SECTION: ContextPackConversationSummary = {
   text: [
@@ -119,11 +135,17 @@ function withSummary(pack: ContextPack): ContextPack {
 describe('buildUserMessage — conversation_summary (S4-inject)', () => {
   it('no section on the pack → byte-identical to the pre-change baseline (off + maintain)', () => {
     const out = buildUserMessage(baselinePack(), PAYLOAD.message);
-    expect(out.length).toBe(2535);
-    expect(createHash('sha256').update(out).digest('hex')).toBe(PRE_CHANGE_SHA256);
     expect(out).not.toContain('conversation_summary');
     expect(out).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
+    expect(out).toContain('"graph_context": {');
+    expect(out).toContain('"status": "unavailable"');
+    expect(out.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
     expect(out.split(BRIEF_INSTRUCTION)).toHaveLength(2);
+    const beforeGraphAuthority = subtractGraphAuthorityDelta(out, 'unavailable');
+    expect(beforeGraphAuthority.length).toBe(2535);
+    expect(createHash('sha256').update(beforeGraphAuthority).digest('hex')).toBe(
+      PRE_CHANGE_SHA256,
+    );
   });
 
   it('section present → adds EXACTLY the block + instruction, below ground-truth state', () => {
@@ -150,7 +172,7 @@ describe('buildUserMessage — conversation_summary (S4-inject)', () => {
     // its final key, and insert the instruction before '## User turn'.
     const baseJson = base.slice(
       base.indexOf('{'),
-      base.lastIndexOf(`\n\n${BRIEF_INSTRUCTION}`),
+      base.indexOf(`\n\n${GRAPH_CONTEXT_INSTRUCTION}`),
     );
     const parsed = JSON.parse(baseJson) as Record<string, unknown>;
     const expectedJson = JSON.stringify(
@@ -164,8 +186,9 @@ describe('buildUserMessage — conversation_summary (S4-inject)', () => {
     expect(out).toBe(expected);
   });
 
-  it('the instruction carries the 04 §3.1 precedence sentence and stamp hygiene', () => {
-    expect(SUMMARY_PRECEDENCE_INSTRUCTION).toContain('the structured state is correct');
+  it('the instruction defers to graph_context and preserves stamp hygiene', () => {
+    expect(SUMMARY_PRECEDENCE_INSTRUCTION).toContain('follow `graph_context`');
+    expect(SUMMARY_PRECEDENCE_INSTRUCTION).toContain('canonical structured state wins');
     expect(SUMMARY_PRECEDENCE_INSTRUCTION).toContain('working notes');
     // Never echo provenance stamps / turn identifiers into user-facing text.
     expect(SUMMARY_PRECEDENCE_INSTRUCTION.toLowerCase()).toContain('never');

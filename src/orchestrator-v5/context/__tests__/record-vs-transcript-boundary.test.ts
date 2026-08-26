@@ -150,6 +150,7 @@ function renderTurn(args: {
     payload: makeMessagePayload({ message: args.question }),
     priorTurns: priorTurnsMentioning(args.priorTurnUserMessage),
     priorTurnsTotal: 1,
+    graphContext: { status: 'canonical' },
     compactedGraph,
     // The RECORD is projected from the persisted graph, separately from the
     // compaction — see goal-target-record.ts. These unit tests pass the same

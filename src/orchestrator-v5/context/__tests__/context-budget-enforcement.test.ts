@@ -94,6 +94,16 @@ function subtractGoalsProjectionDelta(pack: {
   displayGraph.goals = pack.graph.goals;
 }
 
+/**
+ * Preserve the pre-binding budget golden while separately pinning the one
+ * mandatory additive pack field. Deleting anything else would hide a real
+ * budget-path byte change.
+ */
+function subtractGraphContextDelta(pack: { graph_context?: unknown }): void {
+  expect(pack.graph_context).toEqual({ status: 'unavailable' });
+  delete pack.graph_context;
+}
+
 function assembleUnderBudgetPack() {
   return assembleContextPack({
     payload: BASE_PAYLOAD,
@@ -130,6 +140,8 @@ describe('context budget enforcement at assembly (O-3)', () => {
       compactedConstraints: null,
       analysis: analysisSummaryFixture(),
     });
+
+    expect(pack.graph_context).toEqual({ status: 'unavailable' });
 
     // Structure preserved: the module NEVER deletes nodes or edges.
     expect(pack.graph.counts.nodes).toBe(bigGraph.nodes.length);
@@ -258,6 +270,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     ).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
     subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
+    subtractGraphContextDelta(withoutFreshnessDisclosure);
 
     expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
       UNDER_BUDGET_GOLDEN_SHA256,
@@ -351,6 +364,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(displayAnalysis?.analysis_not_current_note).toBeTypeOf('string');
     delete displayAnalysis?.analysis_not_current_note;
     subtractGoalsProjectionDelta(pack);
+    subtractGraphContextDelta(pack);
     expect(sha256(JSON.stringify(pack))).toBe(UNDER_BUDGET_GOLDEN_SHA256);
 
     const ceilingCuts = emitSpy.mock.calls.filter(

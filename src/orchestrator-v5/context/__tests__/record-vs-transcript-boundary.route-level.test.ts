@@ -319,19 +319,21 @@ describe('route-level — the record is read from the PERSISTED graph, never the
       pack.goal_target,
       'the record followed the CLIENT graph — a stale or forged graph_state is being reported to the model as saved state',
     ).toEqual({ status: 'unset' });
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
   });
 
-  it('POSITIVE CONTROL — the same client graph DOES reach the model as the graph it reasons over', async () => {
-    // Without this the test above would pass just as happily if `graphState`
-    // were being ignored entirely, proving nothing about authority ORDER.
+  it('POSITIVE CONTROL — the whole prompt graph follows canonical state, not only the saved-record slice', async () => {
     const prompt = await runTurn(THE_QUESTION, forgedClientGraph());
     const pack = observeSerialisedPack(prompt);
     const graph = pack.graph as { nodes?: Array<{ id?: string }> } | undefined;
 
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
     expect(graph?.nodes?.some((n) => n.id === GOAL_ID)).toBe(true);
-    // And the client graph is genuinely the one in play: it carries only two
-    // nodes, where the persisted fixture carries four.
-    expect(graph?.nodes?.length).toBe(2);
+    // The persisted-only factor proves the complete graph projection followed
+    // the same authority as `goal_target`; matching goal/option ids alone could
+    // not distinguish the two fixtures.
+    expect(graph?.nodes?.some((n) => n.id === 'f_load')).toBe(true);
+    expect(graph?.nodes?.length).toBe(4);
   });
 
   it('when the persisted graph DOES carry a target, the record says set (authority order, not blanket distrust)', async () => {
@@ -343,6 +345,21 @@ describe('route-level — the record is read from the PERSISTED graph, never the
     const pack = observeSerialisedPack(prompt);
 
     expect(pack.goal_target).toEqual({ status: 'set', value: 250000 });
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+  });
+
+  it('explicit ok_absent keeps request structure provisional and omits canonical-only records', async () => {
+    SUPPRESS_PERSISTED_GRAPH = true;
+
+    const prompt = await runTurn(THE_QUESTION, forgedClientGraph());
+    const pack = observeSerialisedPack(prompt);
+    const graph = pack.graph as { nodes?: Array<{ id?: string }> } | undefined;
+
+    expect(pack.graph_context).toEqual({ status: 'provisional' });
+    expect(graph?.nodes?.length).toBe(2);
+    expect(graph?.nodes?.some((node) => node.id === GOAL_ID)).toBe(true);
+    expect(pack).not.toHaveProperty('goal_target');
+    expect(pack).not.toHaveProperty('factor_values');
   });
 });
 
@@ -399,6 +416,7 @@ describe('route-level — record and transcript disagree', () => {
     const prompt = await runTurn(THE_QUESTION);
     const pack = observeSerialisedPack(prompt);
 
+    expect(pack.graph_context).toEqual({ status: 'absent' });
     expect(pack).not.toHaveProperty('goal_target');
     // Positive control: the turn really did run and the transcript really is
     // present, so the absence above is a decision and not an empty prompt.

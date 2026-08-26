@@ -308,6 +308,7 @@ import {
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { selectContextGraphSnapshot } from './context/context-graph-snapshot.js';
 import { projectGoalTargetRecord } from './context/goal-target-record.js';
 import { projectFactorValueRecord } from './context/factor-value-record.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
@@ -640,12 +641,10 @@ export interface TurnExecutorRunResult {
    */
   frame?: CanonicalContextFrame;
   /**
-   * V5 Conversation Context Reliability: the authoritative graph this turn
-   * reasoned over (request graphState parsed, or the persisted-graph fallback).
-   * route-v2 passes this to `sendFinalised200`'s egress sanitiser so the WIRE
-   * resolves entity-id labels against the SAME graph the durable-text scrub
-   * used at commit — stored text and wire text cannot diverge. Null when the
-   * turn had no graph (egress + storage both run graph-free, consistently).
+   * V5 egress/commit carrier: the strict GraphV3 used for entity-label
+   * sanitisation and durable assistant text. It is deliberately separate from
+   * the four-state ContextPack reasoning selector below; route-v2 consumes it
+   * only for response finalisation. Null when no strict egress graph exists.
    */
   effectiveGraph?: GraphV3T | null;
   /**
@@ -880,8 +879,8 @@ function deriveCanonicalReadiness(
   requestGraph: GraphStateIngress | null,
   requestReadiness: NonNullable<GraphPatchBlockData['analysis_ready']> | undefined,
 ): NonNullable<GraphPatchBlockData['analysis_ready']> | undefined {
-  if (canonicalReadinessGraph === requestGraph) return requestReadiness;
   if (canonicalReadinessGraph == null) return undefined;
+  if (canonicalReadinessGraph === requestGraph) return requestReadiness;
   return buildCanonicalAnalysisReadyFromGraph(canonicalReadinessGraph);
 }
 
@@ -1458,15 +1457,9 @@ export async function runTurnExecutor(
           // decision-brief shape gate (undefined on non-qualifying turns —
           // the RPC then leaves brief_text untouched).
           briefText: meta.briefText ?? briefSeedForTurn,
-          // V5 Conversation Context Reliability: scrub the durable assistant text
-          // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
-          // and the SAME graph surfaced to the route egress sanitiser (below) —
-          // so the stored copy resolves entity-id labels (e.g. `goal_revenue` →
-          // "Revenue") identically to the wire copy and the two cannot diverge,
-          // even when the request graphState is stale relative to, or absent
-          // alongside, the persisted graph. (Earlier this used
-          // `context.persistedGraph`, which could differ from the request graph
-          // the wire egress used.)
+          // Existing durable/wire label-resolution carrier. This remains the
+          // strict egress graph and deliberately does not claim to be the
+          // ContextPack reasoning authority selected later in ORIENT.
           contentGraph: effectiveTurnGraph,
         },
         store,
@@ -2012,13 +2005,11 @@ export async function runTurnExecutor(
   let analysisReadyForTurn:
     | NonNullable<GraphPatchBlockData['analysis_ready']>
     | undefined;
-  // V5 Conversation Context Reliability: the single authoritative graph this
-  // turn reasoned over (`graphStateForTurn` parsed = the request graphState, or
-  // the persisted-graph fallback when the request omitted it). Used for BOTH
-  // the durable assistant-text scrub (commitTurn → contentGraph) AND the wire
-  // egress sanitiser (surfaced on the run result → route-v2), so stored text
-  // and wire text resolve entity-id labels against the SAME graph and cannot
-  // diverge. Null until the graph is parsed below / when the turn has no graph.
+  // Existing strict-GraphV3 egress/commit carrier. This is used for durable
+  // assistant-text and wire entity-label sanitisation, but is NOT the AI
+  // reasoning authority: `contextGraphForReasoning` below owns that read-only
+  // concern. Keeping the two explicit avoids expanding this binding into
+  // route, output-safety, persistence, or canonical-mutation ownership.
   let effectiveTurnGraph: GraphV3T | null = null;
   // ROADMAP 1.42 — VERBATIM reasoning captured from the real LLM routing
   // call, hoisted to outer scope (same reason as the fields above) so
@@ -2218,6 +2209,17 @@ export async function runTurnExecutor(
       return finalizeRun();
     }
 
+    // System B canonical ContextPack binding: select ONE graph authority for
+    // AI reasoning. This does not replace request-first `graphStateForTurn`,
+    // which remains the validation/mutation/commit carrier. Only an explicit
+    // successful empty canonical read may license a validated non-empty
+    // request graph as provisional; degraded/malformed/missing reads fail weak.
+    const contextGraphSelection = selectContextGraphSnapshot({
+      canonicalRead: context.persistedGraphRead,
+      requestGraph: options.graphState,
+    });
+    const contextGraphForReasoning = contextGraphSelection.graph;
+
     // ==================================================================
     // STEP 1 — ORIENT
     // ==================================================================
@@ -2282,78 +2284,30 @@ export async function runTurnExecutor(
     // `re-derive freshness post-dispatch` block) so a just-produced
     // run_analysis fact is selected on the same turn.
     //
-    // V5 stale-aware explain recovery (H3 fix): the hash MUST come from
-    // the canonical persisted graph (scenarios.graph, loaded into
-    // context.persistedGraph by buildTurnContext) — NOT the
-    // request-supplied `graphStateForTurn`. The two diverge when the
-    // client lags behind a persisted edit: a follow-up explain turn
-    // that re-sends the pre-edit graph would otherwise hash to the
-    // same value as the prior run_analysis fact's `graph_hash_at_run`,
-    // produce a false-fresh verdict, and skip the stale recovery
-    // template + Rerun-analysis chip. Mirrors the canonical-hash logic
-    // already used by chip-click-dispatch.ts (which hashes
-    // cachedSnapshot.rawPersistedGraph for the same reason).
-    //
-    // Two non-canonical paths are handled differently per the V5
-    // stale-aware explain recovery brief (Codex round-3 P1):
-    //   - persistedGraph is null/undefined (cold-start / first-draft):
-    //     no canonical state exists yet; fall back to hashing the
-    //     request graph. That's the only signal available.
-    //   - persistedGraph exists but fails ingress parse (corrupt
-    //     write, legacy shape, schema-version drift): canonical state
-    //     is genuinely unknown. Do NOT fall back to the request graph
-    //     here — if the client is also lagging behind a persisted
-    //     edit, the request graph could match the prior
-    //     `graph_hash_at_run` and silently produce a false-fresh
-    //     verdict. Instead return null, route the derivation to
-    //     `'unknown' / current_graph_hash_unavailable`, and emit the
-    //     `v5.persisted_graph.parse_failed` log signal.
-    currentAnalysisGraphHashForTurn = ((): string | null => {
-      const persistedGraph = context.persistedGraph;
-      if (persistedGraph === undefined || persistedGraph === null) {
-        // Cold-start / first-draft path: no canonical state has been
-        // persisted yet, so the request graph is the only signal
-        // available. Hashing it is correct here.
-        canonicalReadinessGraphForRun = graphStateForTurn ?? null; // M5 readiness authority
-        return computeAnalysisAffectingGraphHash(graphStateForTurn);
-      }
-      // Freshness is graph identity, not Run permission. Canonicalise carrier
-      // shape unconditionally so a repaired Run and its follow-up hash the same
-      // bytes, while leaving whole-status admission to the strict Run reader.
-      // A current prior result and a currently non-ready model can therefore be
-      // represented together without one verdict overwriting the other.
-      const graphForHash: unknown = canonicaliseForAnalysis(persistedGraph);
-      const parsed = GraphStateIngressSchema.safeParse(graphForHash);
-      if (parsed.success) {
-        // M5 readiness authority: derive canonical readiness from the SAME
-        // persisted/canonical graph this hash is computed from (not the
-        // request graph), so the diagnostic cannot pair this hash with a
-        // stale request-derived readiness under client lag.
-        canonicalReadinessGraphForRun = graphForHash;
-        return computeAnalysisAffectingGraphHash(parsed.data);
-      }
-      // V5 stale-aware explain recovery (Codex round-3 P1): persisted
-      // graph exists but failed ingress parse. Do NOT fall back to
-      // `graphStateForTurn` here — if the client is ALSO lagging
-      // behind a persisted edit, the request graph could match the
-      // prior `graph_hash_at_run` and produce a false-fresh verdict
-      // (silently corrupt freshness instead of admitting we don't
-      // know the canonical state). Returning null routes the
-      // derivation to `'unknown' / current_graph_hash_unavailable`
-      // which honestly signals the situation to the wire envelope,
-      // telemetry, and downstream chip rules.
-      log.warn(
-        {
-          event: 'v5.persisted_graph.parse_failed',
-          request_id: requestId,
-          scenario_id: context.session_id,
-          issue_count: parsed.error.issues.length,
-          first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
-        },
-        'V5 TurnExecutor persisted graph failed ingress parse; freshness will resolve as unknown to avoid a false-fresh verdict',
-      );
-      return null;
-    })();
+    // Freshness/readiness use the SAME selected graph authority as every other
+    // graph-derived ContextPack slice. Canonical graphs retain the existing
+    // analysis canonicalisation step so repaired runs and follow-up hashes use
+    // the same representation. Provisional graphs are already validated at the
+    // request boundary. Absent/unavailable selections yield no hash/readiness;
+    // they never reconstruct authority from request or transcript state.
+    const selectedGraphForFreshness: unknown =
+      contextGraphSelection.status === 'canonical' && contextGraphForReasoning !== null
+        ? canonicaliseForAnalysis(contextGraphForReasoning)
+        : contextGraphForReasoning;
+    const selectedGraphForFreshnessParsed =
+      selectedGraphForFreshness === null
+        ? null
+        : GraphStateIngressSchema.safeParse(selectedGraphForFreshness);
+    canonicalReadinessGraphForRun =
+      selectedGraphForFreshnessParsed !== null && selectedGraphForFreshnessParsed.success
+        ? selectedGraphForFreshnessParsed.data
+        : null;
+    currentAnalysisGraphHashForTurn =
+      canonicalReadinessGraphForRun === null
+        ? null
+        : computeAnalysisAffectingGraphHash(
+            canonicalReadinessGraphForRun as GraphStateIngress,
+          );
     // Persisted bytes are the model authority when they exist. Re-project the
     // served readiness now that the same graph authority used by freshness is
     // known; on cold start `deriveCanonicalReadiness` reuses the identical
@@ -2361,7 +2315,7 @@ export async function runTurnExecutor(
     // undefined, so a stale request can never reopen Run admission.
     analysisReadyForTurn = deriveCanonicalReadiness(
       canonicalReadinessGraphForRun,
-      graphStateForTurn,
+      contextGraphForReasoning,
       analysisReadyForTurn,
     );
     // Option-identity guard inputs (CEE_OPTION_IDENTITY_FRESHNESS_GUARD). Read
@@ -2371,7 +2325,7 @@ export async function runTurnExecutor(
     // flag is off → byte-identical pre-guard behaviour.
     const currentGraphOptionIdsForTurn: readonly string[] | null | undefined =
       config.cee.optionIdentityFreshnessGuard
-        ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
+        ? extractGraphOptionIds(contextGraphForReasoning)
         : undefined;
     routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,
@@ -2440,7 +2394,7 @@ export async function runTurnExecutor(
       // Resolve option labels from the current graph so the fallback doesn't
       // leak raw option_ids into Sonnet's user-facing prose. Filter to
       // option nodes only; the fallback builder uses id → label lookups.
-      const optionLabelSource = (graphStateForTurn?.nodes ?? [])
+      const optionLabelSource = (contextGraphForReasoning?.nodes ?? [])
         .filter((n) => (n as { kind?: unknown }).kind === 'option')
         .map((n) => {
           const node = n as { id: string; label?: unknown };
@@ -2509,7 +2463,7 @@ export async function runTurnExecutor(
       // ContextPack uses the compact projection. `absent` falls through to the
       // assembler's empty-graph branch — Sonnet sees ContextPack.graph empty,
       // same as when the turn genuinely has no graph.
-      const compactOutcome = compactGraphForContextPack(graphStateForTurn, {
+      const compactOutcome = compactGraphForContextPack(contextGraphForReasoning, {
         requestId,
       });
       const compactedGraph =
@@ -2517,7 +2471,7 @@ export async function runTurnExecutor(
       // V5 review: carry raw goal_constraints alongside the compact graph so
       // Sonnet does not lose decision constraints in the compact path.
       const compactedConstraints = compactedGraph
-        ? (graphStateForTurn?.goal_constraints ?? null)
+        ? (contextGraphForReasoning?.goal_constraints ?? null)
         : null;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
@@ -2689,8 +2643,17 @@ export async function runTurnExecutor(
         // suite, but a defended pure function with a dark call site is this
         // estate's chronic failure #1 — neutering this line is a mutant that
         // MUST turn the route-level test red (selection-focus-route-level.test.ts).
-        selection: context.selection,
-        graph: compactedGraph ? undefined : graphStateForTurn,
+        // Focus asserts persisted node identity/value facts, so it is
+        // canonical-only. A whole-graph-invalid read can still yield a
+        // node-by-node selection projection upstream; do not let those partial
+        // bytes leak into a pack whose graph authority is `unavailable`.
+        // Provisional first-touch structure is likewise not a saved selection.
+        selection:
+          contextGraphSelection.status === 'canonical'
+            ? context.selection
+            : undefined,
+        graphContext: { status: contextGraphSelection.status },
+        graph: compactedGraph ? undefined : contextGraphForReasoning,
         compactedGraph,
         // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
         // the same reason. `compactGraph` produces a `GraphV3Compact`
@@ -2709,11 +2672,10 @@ export async function runTurnExecutor(
         // `projectGraph` reads `goal_constraints` off the raw graph and the
         // constraints would arrive with this line cut.
         //
-        // ⚠ Its authority order is REQUEST-FIRST and that is correct — the
-        // opposite of `goalTarget` below, deliberately. Constraints describe
-        // the graph being REASONED OVER; `goal_target` is a claim about what is
-        // SAVED. Do not "tidy" the two into agreement; the route-level suite
-        // above REDs if you do.
+        // Authority comes from `contextGraphSelection`, the same single
+        // snapshot that supplies nodes, edges, labels, readiness and driver
+        // suppression. A stale or apparently-newer request graph cannot replace
+        // canonical persisted constraints before a successful commit.
         compactedConstraints,
         // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
         // the same reason. The projection is defended by its own unit suite,
@@ -2724,36 +2686,19 @@ export async function runTurnExecutor(
         // and answers "is it set?" from the conversation transcript, which is
         // the witnessed fabrication this field exists to close.
         //
-        // ⚠⚠ AND THE ARGUMENT IS THE OTHER HALF OF THE FIX. This reads
-        // `context.persistedGraph ?? options.graphState` — the SAME
-        // persisted-FIRST order as `interventionControlledFactorIds` twenty
-        // lines below, and for the same reason its comment records (P0b-2).
-        // It must NEVER be `graphStateForTurn`: that is request-first
-        // (`:2004`), so a stale or forged client `graph_state` carrying
-        // `goal_threshold_raw` would be reported to the model as RECORDED
-        // state — the witnessed defect's own class, with the client payload
-        // instead of the transcript as the contaminating source. The compact
-        // GRAPH beside it legitimately stays request-first; the RECORD cannot.
-        //
-        // ⚠ CORRECTED 2026-08-25. This comment previously read: "The sibling
-        // `compactedConstraints` above is NOT pinned this way — deleting it
-        // drops every decision constraint from the prompt with the whole suite
-        // green. Reported and rowed, deliberately not fixed here." That was
-        // true when written and is now FALSE: `compactedConstraints` has its
-        // own route-level pin (decision-constraints-wire.route-level.test.ts),
-        // and its call site carries the same ⚠ marker above. A stale sentence
-        // telling the next reader a line is unpinned is how a pin gets deleted.
-        goalTarget: projectGoalTargetRecord(
-          context.persistedGraph ?? options.graphState,
-        ),
-        // ⚠ PERSISTED-FIRST, for the SAME reason as `goalTarget` directly above
-        // — this is a claim about the SAVED model ("which factors do I still
-        // need to supply values for?"), so a stale or forged client
-        // `graph_state` must never be able to report a factor as valued when
-        // the saved model has nothing. Same authority order, deliberately.
-        factorValues: projectFactorValueRecord(
-          context.persistedGraph ?? options.graphState,
-        ),
+        // This is a SAVED-model claim, so it is emitted only for the canonical
+        // selector arm. Provisional first-touch structure remains useful in the
+        // graph while truthfully carrying no recorded-target assertion.
+        goalTarget:
+          contextGraphSelection.status === 'canonical'
+            ? projectGoalTargetRecord(contextGraphForReasoning)
+            : undefined,
+        // Same canonical-only rule as `goalTarget`: provisional/absent/
+        // unavailable state cannot assert which values are saved.
+        factorValues:
+          contextGraphSelection.status === 'canonical'
+            ? projectFactorValueRecord(contextGraphForReasoning)
+            : undefined,
         analysis: analysisSummary,
         analysisStalenessReason,
         // Spine A backstop: option-controlled levers must not be surfaced as
@@ -2763,18 +2708,15 @@ export async function runTurnExecutor(
         // dropping `node.data.interventions` / top-level `options[]`). Empty
         // set ⇒ no suppression (fail-safe).
         //
-        // Authority = `context.persistedGraph ?? options.graphState` (CANONICAL-
-        // first; request graph only as a cold-start fallback). This projection's
+        // Authority = the same selected snapshot as ContextPack.graph. This projection's
         // `top_drivers` feed the routed what_would_flip deterministic fallback
         // prose ("Movement on X would shift this result the most"), so it must
-        // follow the same canonical graph freshness trusts under client lag —
-        // `currentAnalysisGraphHashForTurn` derives from `context.persistedGraph`,
-        // "NOT the request-supplied graphStateForTurn". A request-FIRST authority
+        // follow the same canonical graph freshness trusts under client lag. A request-FIRST authority
         // let a stale request graph (intervention not yet echoed) read an empty
         // controlled set and leak an option-pinned lever into that sentence while
         // the analysis stayed anchored to the canonical persisted graph (P0b-2).
         interventionControlledFactorIds: collectInterventionControlledFactorIds(
-          context.persistedGraph ?? options.graphState,
+          contextGraphForReasoning,
         ),
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
@@ -2930,6 +2872,9 @@ export async function runTurnExecutor(
           graph_compacted: compactOutcome.kind === 'compacted',
           graph_compact_via:
             compactOutcome.kind === 'compacted' ? compactOutcome.via : null,
+          graph_context_status: contextGraphSelection.status,
+          // Operator-only structural reason. The prompt receives status only.
+          graph_context_reason: contextGraphSelection.reason,
           analysis_state_source: analysisStateSource,
           analysis_staleness_reason: analysisStalenessReason,
           analysis_freshness: freshness.freshness,
@@ -7747,10 +7692,9 @@ export async function runTurnExecutor(
           // absent on follow-up turns — the hash helper returns null for
           // a missing graph and the pending action then carries no
           // graph_hash, making hash-divergence invalidation inert. Use
-          // `graphStateForTurn` instead: the same authoritative graph
-          // this turn reasoned over (request graphState when present,
-          // else the persisted-graph fallback loaded by
-          // buildTurnContext).
+          // `graphStateForTurn` instead: this is the request-first mutation /
+          // continuation carrier (request graphState when present, else the
+          // persisted fallback), not the read-only ContextPack authority.
           const adviceGraphHash = (() => {
             try {
               return (
@@ -8193,6 +8137,10 @@ export async function runTurnExecutor(
             older_relevant_facts: packJsonChars(contextPack.older_relevant_facts),
             brief: packJsonChars(contextPack.brief),
             display_analysis: packJsonChars(contextPack.display_analysis),
+            // Always emitted by production assembly. Keeping it in the same
+            // realised decomposition as the policy row makes a dark authority
+            // marker observable rather than producing a false under-emit alarm.
+            graph_context: packJsonChars(contextPack.graph_context),
             display_graph: packJsonChars(contextPack.display_graph),
           };
           // Exact embedded prompt length (ground truth for budgeting).
@@ -11815,9 +11763,9 @@ export async function runTurnExecutor(
         let persistedBase: unknown;
         if (!hasServerModel && incoming !== null) {
           // ROW B — adopt-then-edit: an edit ON a first-touch graph. The handler
-          // reasoned over `context.persistedGraph ?? graphStateForTurn`, so the
-          // mutation already carries the adopted base. Merge onto `incoming`
-          // (NOT the empty persisted read) so incoming's top-level fields
+          // applied the mutation against `context.persistedGraph ??
+          // graphStateForTurn`, so the mutation already carries the adopted
+          // base. Merge onto `incoming` (NOT the empty persisted read) so incoming's top-level fields
           // (options[], goal_node_id, goal_constraints) survive the merge.
           persistedBase = incoming;
         } else if (degradedRereadGraph !== undefined) {
@@ -11955,8 +11903,11 @@ export async function runTurnExecutor(
           suggested_actions: recoveryChips,
         });
       }
-      // Proposal-capture hash — the graph this turn reasoned over
-      // (mutated graph when present, else the resolved turn graph).
+      // Proposal-capture hash — the mutation/continuation carrier
+      // (mutated graph when present, else the request-first resolved turn
+      // graph). This deliberately remains separate from the read-only
+      // ContextPack selector: it is a persisted resume precondition, not an AI
+      // reasoning-context claim.
       // Lane 22 (live 2026-07-07): the fallback was previously the RAW
       // request `options.graphState`, which is absent on follow-up turns —
       // both live proposal captures persisted with EMPTY preconditions

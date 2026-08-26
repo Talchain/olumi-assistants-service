@@ -54,6 +54,7 @@ function assemble(args: {
     priorFacts: [],
     priorFactsReadOk: true,
     brief: 'Plan the programme without breaching its signed licence.',
+    graphContext: { status: 'canonical' },
     compactedGraph: {
       nodes: [
         { id: 'goal_launch', kind: 'goal', label: 'Launch safely' },

@@ -23,13 +23,12 @@
  *      production files. The first drill found a real hole (alias laundering),
  *      which is why the reference-discipline rules exist.
  *
- * Rule 2 (narrow, boot-snapshot precedent): the current-model hash derivation
- * (`currentAnalysisGraphHashForTurn`) anchors to `context.persistedGraph`; the
- * request graph (`graphStateForTurn`) may appear ONLY inside the documented
- * cold-start branch (no saved model exists yet, so the request graph is the
- * only signal — hashing it there is correct, not a violation). Block capture
- * runs on the tokenised structural view, so braces inside strings cannot
- * mis-scope it.
+ * Rule 2 (single-snapshot binding): graph-derived ContextPack slices consume
+ * the pure four-state selector's coherent snapshot. Exactly one controlled-
+ * factor projection may use that selector, and it must be inside the
+ * `assembleContextPackWithSummary` call. Every other executor projection stays
+ * persisted-first. Block capture runs on the tokenised structural view, so
+ * braces inside strings cannot mis-scope it.
  */
 
 import { readFileSync } from 'node:fs';
@@ -305,45 +304,115 @@ describe('repository scan (the gate)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Rule 2 — the current-model hash derivation anchors to the saved model.
+// 3. Rule 2 — graph-derived reasoning consumes one selector snapshot.
 // ---------------------------------------------------------------------------
 
-describe('hash-anchor rule (currentAnalysisGraphHashForTurn)', () => {
+describe('single-snapshot authority rule', () => {
   const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
 
-  it('anchors to context.persistedGraph; the request graph appears only in the cold-start branch', () => {
-    // Structural view: comments AND string contents blanked (newline- and
-    // length-preserving), so neither prose mentions nor braces inside strings
-    // can perturb the block capture.
+  function selectorBackedSites(candidate: string) {
+    return extractAuthorityCallSites(
+      candidate,
+      'orchestrator-v5/turn-executor.ts',
+    ).filter((site) => site.argText === 'contextGraphForReasoning');
+  }
+
+  it('binds the selector once and derives freshness/readiness from its graph', () => {
     const { structural } = tokenise(source);
+    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
+    expect(selectorIdx, 'selector binding not found').toBeGreaterThan(-1);
+    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
+    expect(selectorCall, 'selector call did not balance').not.toBeNull();
+    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
+    expect(selectorText).toMatch(
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+    );
+    expect(
+      selectorText,
+      'a missing canonical read must reach the selector as unavailable; absence must never be inferred',
+    ).not.toContain('??');
 
-    const assignIdx = structural.indexOf('currentAnalysisGraphHashForTurn = ((');
-    expect(assignIdx, 'hash derivation assignment not found — re-anchor this rule').toBeGreaterThan(-1);
-    const derivation = captureBalanced(structural, assignIdx, '{', '}');
-    expect(derivation, 'derivation block did not balance').not.toBeNull();
-    const derivationText = structural.slice(derivation!.start, derivation!.end + 1);
+    const binding = 'const contextGraphForReasoning = contextGraphSelection.graph';
+    expect(structural).toContain(binding);
 
-    // The persisted anchor exists.
-    expect(derivationText).toContain('context.persistedGraph');
+    const hashIdx = structural.indexOf('currentAnalysisGraphHashForTurn =', selectorCall!.end);
+    expect(hashIdx, 'hash derivation after selector not found').toBeGreaterThan(selectorCall!.end);
+    const hashEnd = structural.indexOf(';', hashIdx);
+    const hashText = structural.slice(hashIdx, hashEnd + 1);
+    expect(hashText).toContain('canonicalReadinessGraphForRun');
+    expect(hashText).not.toContain('graphStateForTurn');
+    expect(hashText).not.toContain('options.graphState');
 
-    // The ONLY permitted request-graph use is the documented cold-start branch
-    // (no saved model yet). Capture that branch and require every structural
-    // occurrence of `graphStateForTurn` in the derivation to sit inside it.
-    const guardIdx = derivationText.indexOf('persistedGraph === undefined || persistedGraph === null');
-    expect(guardIdx, 'cold-start guard not found — re-anchor this rule').toBeGreaterThan(-1);
-    const coldStart = captureBalanced(derivationText, guardIdx, '{', '}');
-    expect(coldStart, 'cold-start block did not balance').not.toBeNull();
+    const executorSites = extractAuthorityCallSites(
+      source,
+      'orchestrator-v5/turn-executor.ts',
+    );
+    const selectorSites = selectorBackedSites(source);
+    expect(
+      selectorSites,
+      'exactly one controlled-factor projection may use the selected snapshot',
+    ).toHaveLength(1);
+    expect(
+      executorSites
+        .filter((site) => site.argText !== 'contextGraphForReasoning')
+        .every((site) => site.argText === 'context.persistedGraph ?? options.graphState'),
+      'all non-ContextPack projections must remain persisted-first',
+    ).toBe(true);
 
-    const occurrences = [...derivationText.matchAll(/graphStateForTurn/g)].map((m) => m.index!);
-    expect(occurrences.length, 'expected the cold-start fallback to reference the request graph').toBeGreaterThan(0);
-    for (const idx of occurrences) {
-      expect(
-        idx >= coldStart!.start && idx <= coldStart!.end,
-        `graphStateForTurn used OUTSIDE the cold-start branch of the hash derivation (offset ${idx}) — ` +
-          `the current-model hash must never fall back to the request graph when a saved model exists ` +
-          `(false-fresh risk under client lag)`,
-      ).toBe(true);
-    }
+    const assemblyIdx = structural.indexOf(
+      'assembleContextPackWithSummary(',
+      selectorCall!.end,
+    );
+    expect(assemblyIdx, 'ContextPack assembly after selector not found').toBeGreaterThan(
+      selectorCall!.end,
+    );
+    const assemblyCall = captureBalanced(structural, assemblyIdx, '(', ')');
+    expect(assemblyCall, 'ContextPack assembly call did not balance').not.toBeNull();
+    const assemblySource = source.slice(assemblyIdx, assemblyCall!.end + 1);
+    const assemblySites = extractAuthorityCallSites(
+      assemblySource,
+      'orchestrator-v5/turn-executor.ts#context-pack',
+    );
+    expect(
+      assemblySites.map((site) => site.argText),
+      'ContextPack suppression must be the sole selector-backed authority call',
+    ).toEqual(['contextGraphForReasoning']);
+  });
+
+  it('turns red if a missing canonical read is laundered into proven absence', () => {
+    const { structural } = tokenise(source);
+    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
+    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
+    expect(selectorCall, 'selector call did not balance').not.toBeNull();
+    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
+    const forbiddenFallback = selectorText.replace(
+      'context.persistedGraphRead',
+      'context.persistedGraphRead ?? ({ status: ok_absent } as const)',
+    );
+
+    expect(forbiddenFallback).toContain('??');
+    expect(forbiddenFallback).not.toMatch(
+      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*options\.graphState\s*,?\s*\}\s*\)$/,
+    );
+  });
+
+  it('turns red when an unrelated executor projection is switched to selector authority', () => {
+    const persistedFirstCall = `collectInterventionControlledFactorIds(
+            context.persistedGraph ?? options.graphState,
+          )`;
+    const selectorCall = `collectInterventionControlledFactorIds(
+            contextGraphForReasoning,
+          )`;
+    expect(source, 'discriminating-control anchor must exist exactly as reviewed').toContain(
+      persistedFirstCall,
+    );
+    const mutant = source.replace(persistedFirstCall, selectorCall);
+
+    expect(selectorBackedSites(source)).toHaveLength(1);
+    expect(
+      selectorBackedSites(mutant),
+      'the file-wide two-form allowlist alone would miss this authority expansion',
+    ).toHaveLength(2);
   });
 
   it('normaliseArg is stable for the allowlisted forms (self-check)', () => {

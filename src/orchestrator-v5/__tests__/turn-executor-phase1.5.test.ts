@@ -30,6 +30,9 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    // Phase 1.5's request fixtures model a first-touch graph. Explicit absence
+    // is what licences that validated request graph as provisional context.
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     invalidateScoped: async () => ({ scope: {}, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),

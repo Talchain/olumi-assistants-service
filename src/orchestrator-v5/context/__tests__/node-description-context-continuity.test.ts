@@ -33,6 +33,7 @@ function promptForDescription(description: string): string {
     priorFacts: [],
     graph,
     compactedGraph: outcome.compact,
+    graphContext: { status: 'canonical' },
   });
   return buildUserMessage(pack, 'What should we explore next?');
 }

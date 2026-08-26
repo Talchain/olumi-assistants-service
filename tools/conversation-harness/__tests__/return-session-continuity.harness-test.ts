@@ -72,6 +72,8 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
     expect(first.summary_store_instance_id).not.toBe(afterReload.summary_store_instance_id);
     expect(first.routedUserMessage).toBe(afterReload.routedUserMessage);
     expect(first.contextPack).toEqual(afterReload.contextPack);
+    expect(afterReload.contextPack.graph_context).toEqual({ status: 'canonical' });
+    expect(afterReload.routedUserMessage).toContain('"status": "canonical"');
     expect(first.graph_compaction_via).toBe('strict_parse');
     expect(afterReload.graph_compaction_via).toBe('strict_parse');
     expect(JSON.stringify(afterReload.context.prior_facts)).not.toContain(

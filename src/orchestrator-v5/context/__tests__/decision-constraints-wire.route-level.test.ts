@@ -74,6 +74,10 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../../adapters/l
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
+const { storeDraftGraphMock } = vi.hoisted(() => ({
+  storeDraftGraphMock: vi.fn(async () => undefined),
+}));
+
 const SCENARIO_ID = randomUUID();
 
 /** Constraint identities. Every assertion binds to THESE, never to a substring. */
@@ -128,6 +132,9 @@ const PERSISTED_GRAPH: {
   edges: [{ from: 'f_ticket_volume', to: 'goal_margin', strength: { mean: -0.3, std: 0.1 } }],
 };
 
+/** Drives the explicit `ok_absent` canonical-read arm. Reset in `beforeEach`. */
+let SUPPRESS_PERSISTED_GRAPH = false;
+
 /** The prior turn. Its text mentions the SUBJECTS but never the recorded quotes. */
 const PRIOR_TURN_USER_MESSAGE = 'We are weighing bringing support in-house.';
 const PRIOR_TURN: Record<string, unknown> & { user_message: string | null } = {
@@ -165,10 +172,10 @@ vi.mock('../../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
-    loadGraph: async () => PERSISTED_GRAPH,
+    storeDraftGraph: storeDraftGraphMock,
+    loadGraph: async () => (SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH),
     loadGraphAndBriefText: async () => ({
-      graph: PERSISTED_GRAPH,
+      graph: SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH,
       briefText: 'Should we bring customer support in-house?',
     }),
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -220,6 +227,8 @@ interface TurnObservation {
   readonly prompt: string;
   /** Telemetry captured for the duration of the turn. */
   readonly events: ReadonlyArray<{ name: string; data: Record<string, unknown> }>;
+  /** Product blocks returned by the turn, used to rule out a mutation receipt. */
+  readonly responseBlocks: ReadonlyArray<{ readonly type: string }>;
 }
 
 async function runTurn(
@@ -231,8 +240,9 @@ async function runTurn(
     events.push({ name, data });
   });
   const { adapter, calls } = textOnlyAdapter();
+  let responseBlocks: ReadonlyArray<{ readonly type: string }> = [];
   try {
-    await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+    const result = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
       routingAdapter: adapter,
       // The CLIENT-supplied `graph_state` wire field, distinct from the
       // persisted graph the store returns. Omitted on the persisted arms.
@@ -240,6 +250,7 @@ async function runTurn(
         ? {}
         : { graphState: clientGraphState as never }),
     });
+    responseBlocks = result.response.blocks;
   } finally {
     setTestSink(() => undefined);
   }
@@ -250,6 +261,7 @@ async function runTurn(
   return {
     prompt: typeof user!.content === 'string' ? user!.content : JSON.stringify(user!.content),
     events,
+    responseBlocks,
   };
 }
 
@@ -299,6 +311,8 @@ function constraintById(
 beforeEach(() => {
   // Reset to the state the wire is meant to carry: both constraints recorded.
   PERSISTED_GRAPH.goal_constraints = [budgetConstraint(), headcountConstraint()];
+  SUPPRESS_PERSISTED_GRAPH = false;
+  storeDraftGraphMock.mockClear();
   setTestSink(() => undefined);
 });
 afterEach(() => {
@@ -403,17 +417,15 @@ describe('route-level — decision constraints reach the routing prompt', () => 
 });
 
 /**
- * AUTHORITY ORDER, DOCUMENTED DELIBERATELY.
+ * CANONICAL GRAPH-SOURCE BINDING, DOCUMENTED DELIBERATELY.
  *
- * `compactedConstraints` reads `graphStateForTurn`, which is REQUEST-FIRST
- * (`turn-executor.ts:2004`) — and that is CORRECT here, unlike its neighbour
- * `goalTarget`: constraints describe the graph the model is REASONING OVER,
- * whereas `goal_target` is a claim about what is SAVED. The two sit three lines
- * apart with deliberately opposite authority orders, which is exactly the shape
- * that gets "tidied" into agreement by a later reader. This arm makes that
- * tidying RED.
+ * When a persisted graph exists, nodes, edges and constraints must all come from
+ * that one canonical snapshot. A stale or apparently-newer client graph cannot
+ * replace only part of the model context. When the canonical read explicitly
+ * reports `ok_absent`, the same validated request graph may be used provisionally
+ * so first-touch reasoning remains useful without pretending it is saved.
  */
-describe('route-level — the constraints follow the graph being reasoned over', () => {
+describe('route-level — constraints follow the single selected graph authority', () => {
   function clientGraph(): Record<string, unknown> {
     return {
       nodes: [
@@ -427,23 +439,39 @@ describe('route-level — the constraints follow the graph being reasoned over',
     };
   }
 
-  it('a client-supplied graph_state carries ITS constraints, because it is the graph in play', async () => {
+  it('persisted canonical nodes and constraints win over a divergent client graph', async () => {
     const obs = await runTurn(THE_QUESTION, clientGraph());
     assertCompactPathTaken(obs);
 
     const pack = observeSerialisedPack(obs.prompt);
 
-    // Bound by identity to the client constraint's id.
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(graphOf(pack).nodes).toHaveLength(4);
+    expect((graphOf(pack).nodes ?? []).map((node) => node.id)).toContain('f_ticket_volume');
+    expect(constraintById(pack, BUDGET_ID)?.source_quote).toBe(BUDGET_QUOTE);
+    expect(constraintById(pack, HEADCOUNT_ID)?.source_quote).toBe(HEADCOUNT_QUOTE);
+    expect(constraintById(pack, 'c_client_only')).toBeUndefined();
+    expect(
+      storeDraftGraphMock,
+      'selecting canonical reasoning context must not turn a conflicting request graph into a write',
+    ).not.toHaveBeenCalled();
+    expect(obs.responseBlocks.some((block) => block.type === 'graph_patch')).toBe(false);
+  });
+
+  it('explicit ok_absent plus a valid request graph produces provisional graph and constraints', async () => {
+    SUPPRESS_PERSISTED_GRAPH = true;
+
+    const obs = await runTurn(THE_QUESTION, clientGraph());
+    assertCompactPathTaken(obs);
+
+    const pack = observeSerialisedPack(obs.prompt);
+
+    expect(pack.graph_context).toEqual({ status: 'provisional' });
+    expect(graphOf(pack).nodes).toHaveLength(2);
+    expect((graphOf(pack).nodes ?? []).map((node) => node.id)).toContain('opt_outsource');
     expect(constraintById(pack, 'c_client_only')?.source_quote).toBe(
       'The vendor has to be UK-based.',
     );
-    // POSITIVE CONTROL that the client graph really is the one in play: it
-    // carries two nodes where the persisted fixture carries four. Without this,
-    // the assertion above could not distinguish "request-first" from "the
-    // persisted graph happened to be replaced".
-    expect(graphOf(pack).nodes).toHaveLength(2);
-    // And the persisted graph's constraints are correspondingly NOT present —
-    // the two arms are genuinely reading different graphs.
     expect(constraintById(pack, BUDGET_ID)).toBeUndefined();
   });
 });
