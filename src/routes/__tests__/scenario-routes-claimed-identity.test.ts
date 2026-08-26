@@ -50,20 +50,39 @@ const scenarioExists = vi.fn();
 const loadGraphAndBriefText = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
+/** The WRITE route's first read after the ownership gate — see the register pairs. */
+const loadGraph = vi.fn();
+const append = vi.fn();
 const store = {
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
   getScenarioOwner,
+  loadGraph,
+  append,
 };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
 
 const scenarioGraphRoute = (await import("../assist.v1.scenario-graph.js")).default;
+const scenarioRegisterRoute = (await import("../assist.v1.scenario-graph-register.js")).default;
 
 const GRAPH = {
   nodes: [{ id: "n1", label: "Take the job", category: "option" }],
+  edges: [],
+  options: [{ id: "n1", label: "Take the job" }],
+};
+
+/**
+ * The WRITE route parses against the graph contract BEFORE the ownership gate,
+ * and that contract requires each node to declare a `kind`. Derived from the
+ * route's own refusal (`GRAPH_NODE_KIND_MISSING`) rather than assumed — a
+ * fixture that cannot reach the gate would make every register case below pass
+ * for the wrong reason.
+ */
+const REGISTERABLE_GRAPH = {
+  nodes: [{ id: "n1", label: "Take the job", kind: "option", category: "option" }],
   edges: [],
   options: [{ id: "n1", label: "Take the job" }],
 };
@@ -91,6 +110,8 @@ beforeEach(() => {
   // discriminating: an unowned scenario would admit everyone.
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
   getScenarioOwner.mockResolvedValue(OWNER);
+  loadGraph.mockResolvedValue(GRAPH);
+  append.mockResolvedValue({ ok: true });
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
@@ -160,6 +181,70 @@ describe("every unverified mode behaves identically — no mode is a side door",
       await app.close();
     });
   }
+});
+
+/**
+ * THE WRITE ROUTE. Its own pair, on its own route.
+ *
+ * Bound to the OUTCOME rather than to a status code: `loadGraph` is the first
+ * server read AFTER the ownership gate, so "was it called" answers "did this
+ * caller get past the gate" without depending on how a refusal is shaped.
+ *
+ * These also make the mutant pair DISCRIMINATING PER ROUTE: reverting the read
+ * route's call site must leave these GREEN, and reverting this route's call
+ * site must leave the read route's GREEN. A single biting mutant would only
+ * show the suite is sensitive to something.
+ */
+describe("registering a model is not authorised on a caller's say-so", () => {
+  async function buildRegisterApp(): Promise<FastifyInstance> {
+    const app = Fastify();
+    await scenarioRegisterRoute(app);
+    await app.ready();
+    return app;
+  }
+
+  async function register(app: FastifyInstance, body: Record<string, unknown> = {}) {
+    return await app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}/graph/register`,
+      payload: { graph: REGISTERABLE_GRAPH, ...body },
+    });
+  }
+
+  it("REFUSES an unverified caller who supplies the owner's identifier", async () => {
+    resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
+
+    const app = await buildRegisterApp();
+    await register(app, { user_id: OWNER });
+
+    // Nothing was written, and nothing was even read to write against.
+    expect(loadGraph).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("ADMITS the VERIFIED owner past the gate — the only variable that changed", async () => {
+    // ⚠ THE DISCRIMINATOR. Without it the refusal above would pass on a route
+    // that refuses everything — including one broken by this change.
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+    const app = await buildRegisterApp();
+    await register(app, {});
+
+    expect(loadGraph).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("REFUSES a verified caller who is not the owner", async () => {
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
+
+    const app = await buildRegisterApp();
+    await register(app, { user_id: OWNER });
+
+    expect(loadGraph).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
 });
 
 describe("what this change does NOT do — guest access is untouched", () => {
