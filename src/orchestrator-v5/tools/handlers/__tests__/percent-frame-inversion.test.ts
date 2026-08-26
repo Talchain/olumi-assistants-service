@@ -226,4 +226,110 @@ describe('reconcileObservedValuePair resolves the percent divisor from the facto
     expect(observed.value).toBe(600_000 / 500_000);
     expect(observed.raw_value).toBe(600_000);
   });
+
+  /**
+   * ⚠⚠ THE UNIT GATE READS THE PAYLOAD; THE FRAME READS THE NODE.
+   *
+   * On an edit that changes `unit`, those are DIFFERENT OBJECTS. The first
+   * version of this fix offered the node's frame whenever the PAYLOAD's unit
+   * was a percentage, so a magnitude-framed factor re-labelled as a percentage
+   * took its magnitude frame as a percent divisor. `unit` is an editable
+   * observed subkey and the canonicaliser produces the carry-forward shape
+   * itself, so the state is reachable by the same route the fix relies on.
+   *
+   * The frame is now offered only when the NODE's own unit is `'%'` — the same
+   * question, asked of both objects, in the same spelling the consumer gates on.
+   */
+  describe('the frame is a property of the NODE, not of the payload', () => {
+    it('a magnitude-framed factor re-labelled as a percentage does NOT take its magnitude frame', () => {
+      const graph = nrrGraph(500_000, '£', { value: 1, raw_value: 500_000 });
+      const ops = [carryForwardOp('%', { value: 0.9, raw_value: 500_000 }) as never];
+      const observed = observedFor(reconcileObservedValuePair(ops, graph as never)[0]);
+      // The percentage convention, i.e. base behaviour — never 0.9 × 500,000.
+      expect(observed.raw_value).toBe(90);
+    });
+
+    it('a count-framed factor re-labelled as a percentage does NOT take its count frame', () => {
+      const graph = nrrGraph(100_000, 'users', { value: 1, raw_value: 100_000 });
+      const ops = [carryForwardOp('%', { value: 0.9, raw_value: 100_000 }) as never];
+      const observed = observedFor(reconcileObservedValuePair(ops, graph as never)[0]);
+      expect(observed.raw_value).toBe(90);
+    });
+
+    it('⭐ OPPOSITE-DIRECTION TWIN — the target class still resolves on its frame', () => {
+      // The node IS a percentage here, so the frame is its own and applies.
+      const graph = nrrGraph(200, '%', { value: 0.575, raw_value: 115 });
+      const ops = [carryForwardOp('%', { value: 0.9, raw_value: 115 }) as never];
+      expect(observedFor(reconcileObservedValuePair(ops, graph as never)[0]).raw_value).toBe(180);
+    });
+
+    it('⭐ OPPOSITE-DIRECTION TWIN — an ordinary percent node is still 100', () => {
+      const graph = nrrGraph(100, '%', { value: 0.03, raw_value: 3 });
+      const ops = [carryForwardOp('%', { value: 0.9, raw_value: 3 }) as never];
+      expect(observedFor(reconcileObservedValuePair(ops, graph as never)[0]).raw_value).toBe(90);
+    });
+  });
+
+  /**
+   * ⭐⭐ A RECOVERED FRAME IS A QUOTIENT, AND 10 OF THE 100 INTEGER PERCENTS DO
+   * NOT RECOVER EXACTLY 100.
+   *
+   * `raw_value / value` for `{0.07, 7}` is 99.99999999999999, so the divisor is
+   * a few ulps low and `raw_value` lands on 89.99999999999999 instead of 90.
+   * The relative error is ~1.4e-16 — seven orders INSIDE the coherence epsilon,
+   * so #1127 reads the pair as coherent and the value is silently wrong.
+   *
+   * ⚠ This suite's own earlier twin used `{0.03, 3}`, which is one of the 90%
+   * that happens to be exact — a corpus sharing the code's blind spot. The
+   * inexact members are enumerated here rather than sampled.
+   */
+  describe('a pair-recovered percent frame snaps to the convention', () => {
+    /**
+     * Enumerated, not sampled: every integer percent whose quotient is not
+     * exactly 100. ⚠ Note 57 and 69 recover 100.00000000000001 — ABOVE the
+     * convention, not below. The drift is SIGN-SYMMETRIC, so a snap written
+     * only for the low side would silently miss two of the ten; the guard uses
+     * an absolute relative difference for exactly that reason.
+     */
+    const INEXACT_PERCENTS = [7, 14, 17, 28, 34, 55, 56, 57, 68, 69];
+
+    it('the inexact set is exactly these ten — the enumeration is pinned, not assumed', () => {
+      const found: number[] = [];
+      for (let p = 1; p <= 100; p += 1) {
+        if (p / (p / 100) !== 100) found.push(p);
+      }
+      expect(found).toEqual(INEXACT_PERCENTS);
+    });
+
+    it('the drift runs in BOTH directions — not a one-sided rounding', () => {
+      expect(57 / (57 / 100)).toBeGreaterThan(100);
+      expect(7 / (7 / 100)).toBeLessThan(100);
+    });
+
+    it.each(INEXACT_PERCENTS)(
+      'a pair recovered from %i percent still writes an exact raw_value',
+      (percent) => {
+        const graph = {
+          nodes: [
+            {
+              id: 'nrr',
+              kind: 'factor',
+              label: 'Net Revenue Retention',
+              observed_state: { unit: '%', value: percent / 100, raw_value: percent },
+            },
+          ],
+          edges: [],
+        };
+        const ops = [carryForwardOp('%', { value: 0.9, raw_value: percent }) as never];
+        expect(observedFor(reconcileObservedValuePair(ops, graph as never)[0]).raw_value).toBe(90);
+      },
+    );
+
+    it('⭐ OPPOSITE-DIRECTION TWIN — a genuine ladder frame is far outside the window and survives', () => {
+      // 200 is 1e14 epsilons away from 100; the snap must not reach it.
+      const graph = nrrGraph(200, '%', { value: 0.575, raw_value: 115 });
+      const ops = [carryForwardOp('%', { value: 0.9, raw_value: 115 }) as never];
+      expect(observedFor(reconcileObservedValuePair(ops, graph as never)[0]).raw_value).toBe(180);
+    });
+  });
 });

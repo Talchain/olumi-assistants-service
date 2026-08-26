@@ -80,7 +80,10 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { resolveScaleFrame } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
+import {
+  PAIR_COHERENCE_RELATIVE_EPSILON,
+  resolveScaleFrame,
+} from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 
 /**
  * R2-1 — a bare sub-1 value against a FRAME-RECOVERABLE factor is genuinely
@@ -564,6 +567,46 @@ export function findAmbiguousScaleValueOps(
   return out;
 }
 
+/**
+ * The divisor the percentage convention has always used: `value` is the 0–1
+ * level and `raw_value` the percentage, so the frame IS 100.
+ */
+const PERCENT_CONVENTION_FRAME = 100;
+
+/**
+ * ⭐ A RECOVERED FRAME IS A QUOTIENT, AND A QUOTIENT OF TWO EXACTLY-STORED
+ * NUMBERS IS NOT ALWAYS THE EXACT DIVISOR.
+ *
+ * `recoverScaleFrame` derives the frame as `raw_value / value`. For an ordinary
+ * percentage pair that quotient is 100 — usually. Enumerated over the integer
+ * percents 1…100, **10 of them recover 99.99999999999999** rather than 100
+ * (7, 14, 17, 28, 34, 55 among them), because `p/100` is not representable in
+ * binary floating point and the division does not undo the rounding.
+ *
+ * Left alone, those ten factors take a divisor a few ulps below 100 and write a
+ * `raw_value` a few ulps below the truth — 89.99999999999999 instead of 90.
+ *
+ * ⚠ AND #1127 CANNOT CATCH IT. The relative error is ~1.4e-16, seven orders of
+ * magnitude INSIDE `PAIR_COHERENCE_RELATIVE_EPSILON` (1e-9), so the pair reads
+ * `coheres` and the value is simply wrong and silent. A guard whose tolerance
+ * is wider than the error it would need to see cannot be the thing that sees it.
+ *
+ * So the same epsilon that decides two carriers agree also decides a recovered
+ * frame IS the percentage convention: within it, snap to exactly 100. That
+ * deliberately reuses the module's own constant rather than minting a second
+ * tolerance — two tolerances for one question is the defect class this file
+ * keeps paying for. A frame genuinely on the ladder (200, 500) is many orders
+ * outside the window and is returned untouched.
+ */
+function snapToPercentConvention(frame: number | undefined): number | undefined {
+  if (frame === undefined) return undefined;
+  const relativeDifference =
+    Math.abs(frame - PERCENT_CONVENTION_FRAME) / PERCENT_CONVENTION_FRAME;
+  return relativeDifference <= PAIR_COHERENCE_RELATIVE_EPSILON
+    ? PERCENT_CONVENTION_FRAME
+    : frame;
+}
+
 export function reconcileObservedValuePair(
   operations: readonly PatchOperation[],
   currentGraph: unknown,
@@ -751,19 +794,41 @@ export function reconcileObservedValuePair(
     // on a corruption written right here.
     //
     // Resolved through the shared owner, so this seam holds no private opinion
-    // about the frame (trap 12). Three consequences worth naming:
-    //   · an INCOHERENT stored frame resolves to `undefined` (#1127) and the
-    //     divisor degrades to 100 — today's behaviour, fail-safe;
-    //   · a frame of exactly 100 is arithmetically identical to today, which
-    //     is every ordinary 0–100 percentage;
-    //   · non-percent factors never read it — `resolveExistingRawValue` gates
-    //     the parameter behind `unit === '%'`, and capless framed non-% ops
-    //     returned from the frame branch above long before reaching here.
-    const percentDivisorFrame = resolveScaleFrame({
-      storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
-      value: nodeObserved.value,
-      raw_value: nodeObserved.raw_value,
-    });
+    // about the frame (trap 12). An INCOHERENT stored frame resolves to
+    // `undefined` (#1127) and the divisor degrades to 100 — fail-safe.
+    //
+    // ⚠⚠ TWO OBJECTS, ONE QUESTION — the first version of this block asked it
+    // of the wrong one, and review measured the cost.
+    //
+    // `resolveExistingRawValue` gates the percent branch on the PAYLOAD's
+    // unit; the frame is a property of the NODE. On a unit-changing edit those
+    // are DIFFERENT OBJECTS, and an op that sets `unit` to a percentage on a
+    // magnitude-framed factor made the payload gate say "percent" while the
+    // frame still said 500,000. Measured through the shipped chain: a £ factor
+    // framed at 500,000 wrote `raw_value` 450000 where base wrote 90, and a
+    // count factor framed at 100,000 wrote 90000. `unit` is an editable
+    // observed subkey and this function produces the carry-forward shape
+    // itself, so the state is reachable by the same route the fix relies on.
+    //
+    // The earlier comment here said "non-percent factors never read it". That
+    // was TRUE OF THE PAYLOAD AND FALSE OF THE FACTOR — which is the same
+    // two-questions-under-one-name shape as the defect this block fixes, one
+    // level up. The remedy is to ask the SAME question of BOTH objects, in the
+    // same spelling the consumer uses: the frame is offered only when the
+    // NODE's own unit is `'%'`. A factor that is not itself a percentage
+    // degrades to the pre-existing divisor, which is exactly base behaviour.
+    const nodeUnitForFrame =
+      typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
+    const percentDivisorFrame =
+      nodeUnitForFrame === '%'
+        ? snapToPercentConvention(
+            resolveScaleFrame({
+              storedFrame: (currentNode as { scale_frame?: unknown } | null)?.scale_frame,
+              value: nodeObserved.value,
+              raw_value: nodeObserved.raw_value,
+            }),
+          )
+        : undefined;
 
     // `raw_value` deliberately OMITTED: we are asking what the NEW value
     // denotes, not echoing the old answer back (which is the defect).
