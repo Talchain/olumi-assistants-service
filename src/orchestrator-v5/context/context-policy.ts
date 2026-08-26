@@ -401,6 +401,13 @@ const COACH_CONVERSE: ContextPolicy = {
     // statement in either direction and answered from the transcript.
     { name: 'goal_target', source: 'graph', projection: 'projectGoalTargetRecord → extractPersistedGoalTarget (single authority, shared with the receipt guard; reads the PERSISTED graph, never the request-first graphStateForTurn; key ABSENT when no graph was read — absence means UNKNOWN, never "unset")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'readiness', source: 'readiness', projection: 'projectContextPackReadiness → summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Factor value state — the ONLY section answering "which factors still have
+    // no value?". `readiness` cannot: it answers CAN THE ANALYSIS RUN, and on a
+    // ready payload it projects nothing at all, which is how the model came to
+    // tell a user it could not see unset factors while the Model tab named them.
+    // Two axes kept separate on purpose (a factor can be valueless AND stamped
+    // as an AI estimate); both come from existing authorities, never re-derived.
+    { name: 'factor_values', source: 'graph', projection: 'projectFactorValueRecord → factorHasExtractedValue (value presence) + structureProvenance → classifyValueSource (authorship); reads the PERSISTED graph, never the request-first graphStateForTurn; key ABSENT when no graph was read — absence means UNKNOWN, never "nothing missing"; a fully-valued graph is PRESENT with without_value_count: 0; truncation disclosed via factors_omitted', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },

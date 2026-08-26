@@ -357,6 +357,21 @@ function assembleMaximalPack(
     // record-vs-transcript-boundary.test.ts, which is where the defect this
     // field closes actually lives.
     goalTarget: { status: 'set', value: 15, unit: '%' } as never,
+    // FIXTURE_COMPLETENESS: `factor_values` is a schema-declared key, so the
+    // maximal fixture must populate it. MAXIMAL means every optional key AND a
+    // mixed population — a valued factor, a valueless one, and the witnessed
+    // shape (valueless YET stamped as an AI estimate), so the two axes cannot
+    // silently collapse into one here either. The zero case
+    // (`without_value_count: 0`) is exercised in factor-value-record.test.ts.
+    factorValues: {
+      factors: [
+        { label: 'Churn rate', has_value: true, provenance: 'user_stated' },
+        { label: 'Onboarding time', has_value: false, provenance: 'ai_drafted' },
+        { label: 'Support load', has_value: false, provenance: 'unattributed' },
+      ],
+      without_value_count: 2,
+      factors_omitted: 1,
+    } as never,
     // A LARGE COMPACT graph — production supplies `compactedGraph`, and it is
     // the input the context-budget module actually trims, so this is what makes
     // the pack carry the `context_budget` disclosure key (FIXTURE_COMPLETENESS).

@@ -309,6 +309,7 @@ import {
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { projectGoalTargetRecord } from './context/goal-target-record.js';
+import { projectFactorValueRecord } from './context/factor-value-record.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
 import {
   getDecisionRecordStore,
@@ -2743,6 +2744,14 @@ export async function runTurnExecutor(
         // and its call site carries the same ⚠ marker above. A stale sentence
         // telling the next reader a line is unpinned is how a pin gets deleted.
         goalTarget: projectGoalTargetRecord(
+          context.persistedGraph ?? options.graphState,
+        ),
+        // ⚠ PERSISTED-FIRST, for the SAME reason as `goalTarget` directly above
+        // — this is a claim about the SAVED model ("which factors do I still
+        // need to supply values for?"), so a stale or forged client
+        // `graph_state` must never be able to report a factor as valued when
+        // the saved model has nothing. Same authority order, deliberately.
+        factorValues: projectFactorValueRecord(
           context.persistedGraph ?? options.graphState,
         ),
         analysis: analysisSummary,
