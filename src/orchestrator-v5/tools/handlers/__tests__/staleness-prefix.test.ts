@@ -370,6 +370,17 @@ describe('S8 — the caveat channel is driven by a LIVE verdict, with ONE author
  * and pass while blind to a copy elsewhere. PART A closes that: it proves the
  * walk spans the codebase and that the counter can COUNT ABOVE ONE, with a
  * CONTRAST CONTROL, before PART B trusts a single number.
+ *
+ * ⚠ THE SCOPE OF THIS GUARD'S OWN CLAIM — state it, because the label it
+ * replaces went wrong by being read wider than it was measured (trap 20: the
+ * overclaim happens in the RECORDING). What this proves is "ONE occurrence in
+ * THIS REPO's `src/`, excluding tests, AT THIS COMMIT, for `.ts` files the walk
+ * reaches". It is NOT "this sentence has exactly one home". It says nothing
+ * about: `tests/` (deliberately — fixtures and byte-pins legitimately spell the
+ * sentence out, and this file does so itself), `.d.ts` files, the `generated/`
+ * tree, prompt bytes shipped as data, or the SAME COPY living in the UI, PLoT
+ * or the shared schemas package. A cross-service duplicate is a real risk this
+ * guard cannot see, and a future lane must not read a green run as covering it.
  * ======================================================================== */
 
 const SRC_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
