@@ -38,6 +38,39 @@ import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../../adapters/llm/types.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { observeSerialisedPack } from './observe-serialised-pack.js';
+
+interface FactorValuesSlice {
+  readonly factors: ReadonlyArray<{
+    readonly label: string;
+    readonly has_value: boolean;
+    readonly provenance: string;
+  }>;
+  readonly without_value_count: number;
+}
+
+/**
+ * ⚠⚠ READ THE SLICE, NEVER THE RAW PROMPT — and this is not fussiness, it is the
+ * defect this file exists to prevent, caught in this file's own first draft.
+ *
+ * The earlier assertions here were `expect(prompt).toContain(UNVALUED_LABEL)`.
+ * That PASSES with the `factorValues:` wiring DELETED, because the `graph` slice
+ * carries the same label:
+ *
+ *     "graph": { "nodes": [ { "id": "f_support_quality",
+ *                            "label": "Support quality risk", "kind": "factor" }, … ] }
+ *
+ * So the assertion bound by exact label — and was satisfied by A DIFFERENT
+ * OBJECT (CLAUDE.md trap 19). A label is not an identity when two slices carry
+ * it. That is precisely the shape of the defect this slice closes: the live
+ * model could name a factor only because it arrived via ANOTHER slice.
+ * Scoping every claim to `pack.factor_values` is what makes these tests
+ * discriminate.
+ */
+function factorValuesSliceOf(prompt: string): FactorValuesSlice | undefined {
+  const pack = observeSerialisedPack(prompt);
+  return pack.factor_values as FactorValuesSlice | undefined;
+}
 
 const SCENARIO_ID = randomUUID();
 
@@ -204,11 +237,19 @@ describe('route-level — factor value state reaches the routing prompt', () => 
     expect(prompt).toContain('without_value_count');
   });
 
-  it('THE WIRE: a persisted valueless factor arrives in the prompt, bound by its exact label', async () => {
+  it('THE WIRE: a persisted valueless factor arrives IN THE SLICE, with its value-state', async () => {
     PERSISTED_GRAPH.nodes = [...baseNodes(), unvaluedFactorNode()];
-    const prompt = await promptFor(THE_QUESTION);
-    expect(prompt).toContain(UNVALUED_LABEL);
-    expect(prompt).toContain(VALUED_LABEL);
+    const slice = factorValuesSliceOf(await promptFor(THE_QUESTION));
+    expect(slice, 'factor_values is absent from the serialised pack').toBeDefined();
+    const byLabel = new Map(slice!.factors.map((f) => [f.label, f]));
+    // The fact the user asked for: this factor, and that it has NO value.
+    expect(byLabel.get(UNVALUED_LABEL)).toEqual({
+      label: UNVALUED_LABEL,
+      has_value: false,
+      provenance: 'ai_drafted',
+    });
+    expect(byLabel.get(VALUED_LABEL)?.has_value).toBe(true);
+    expect(slice!.without_value_count).toBe(1);
   });
 
   /**
@@ -217,15 +258,20 @@ describe('route-level — factor value state reaches the routing prompt', () => 
    * prompts. A slice that renders identically either way is carrying nothing,
    * however present its key is.
    */
-  it('THE DISCRIMINATOR: valued-only vs valueless graphs produce DIFFERENT prompts', async () => {
+  it('THE DISCRIMINATOR: valued-only vs valueless graphs produce DIFFERENT SLICES', async () => {
     PERSISTED_GRAPH.nodes = baseNodes();
-    const withoutUnvalued = await promptFor(THE_QUESTION);
+    const without = factorValuesSliceOf(await promptFor(THE_QUESTION));
     PERSISTED_GRAPH.nodes = [...baseNodes(), unvaluedFactorNode()];
-    const withUnvalued = await promptFor(THE_QUESTION);
+    const with_ = factorValuesSliceOf(await promptFor(THE_QUESTION));
 
-    expect(withoutUnvalued).not.toContain(UNVALUED_LABEL);
-    expect(withUnvalued).toContain(UNVALUED_LABEL);
-    expect(withUnvalued).not.toBe(withoutUnvalued);
+    expect(without, 'factor_values absent on the valued-only arm').toBeDefined();
+    expect(with_, 'factor_values absent on the valueless arm').toBeDefined();
+    // ⚠ Compared INSIDE the slice. Comparing whole prompts passes with the
+    // wiring cut, because the `graph` slice differs between the two arms too.
+    expect(without!.without_value_count).toBe(0);
+    expect(with_!.without_value_count).toBe(1);
+    expect(without!.factors.map((f) => f.label)).not.toContain(UNVALUED_LABEL);
+    expect(with_!.factors.map((f) => f.label)).toContain(UNVALUED_LABEL);
   });
 
   /**
