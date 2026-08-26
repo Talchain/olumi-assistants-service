@@ -297,10 +297,22 @@ describe('the loader refusal carries the identity the admission assessor already
     const carrier = buildAnalysisRefusalReadiness('MISSING_OPTION_VALUE', err.structuralReadiness);
     expect(carrier.status).toBe('blocked');
     expect(carrier.blocked_reason).toBe('MISSING_OPTION_VALUE');
-    // Identity carried, everything else this turn declined to produce dropped.
+    // Identity and the producer's own repair rows are carried; everything this
+    // turn declined to PRODUCE is dropped. ⚠ `blockers` joined this set
+    // deliberately — it is the reason the turn refused, not work it declined —
+    // so the forbidden set is asserted BY NAME rather than inferred from a
+    // key count that would silently accept the next additive field.
     expect(Object.keys(carrier).sort()).toEqual(
-      ['blocked_reason', 'goal_node_id', 'options', 'status'],
+      ['blocked_reason', 'blockers', 'goal_node_id', 'options', 'status'],
     );
+    for (const forbidden of [
+      'bias_findings',
+      'model_adjustments',
+      'readiness_issues',
+      'repair_proposal',
+    ]) {
+      expect(forbidden in carrier).toBe(false);
+    }
 
     // …and the same on the wire-facing chip arm, not just at the unit.
     useGraph(FRESH_DRAFT_GRAPH);
