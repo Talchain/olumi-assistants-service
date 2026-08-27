@@ -105,14 +105,16 @@ function runAnalysisFact(graphHashAtRun: string): HandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
-    turn_id: 't1',
     noop: false,
     result: {
+      scenario_id: BASE.scenario_id,
+      leading_option_id: 'opt_a',
+      summary: 'Analysis completed.',
       graph_hash_at_run: graphHashAtRun,
       computed_at: '2026-08-16T09:00:00.000Z',
       enrichment: { analysis_status: 'computed' },
     },
-  } as unknown as HandlerFact;
+  };
 }
 
 /** A prior handler turn, so the facts read has a row id to work with. */
@@ -161,6 +163,11 @@ describe('buildTurnContext — a degraded prior_turns read may not claim never_r
       ...createNoopSessionStore({ loadGraphResult: PERSISTED_GRAPH }),
       readRecent: async () => {
         throw new SessionReadError('DB offline', { code: '57P03' });
+      },
+      readScenarioRunAnalysisFactsFor: async () => {
+        throw new SessionReadError('DB offline', {
+          code: 'analysis_fact_query_failed',
+        });
       },
     };
     const ctx = await buildTurnContext(BASE, 'req-turns-degraded', {
@@ -238,24 +245,17 @@ describe('buildTurnContext — a degraded prior_turns read may not claim never_r
     expect(runState.kind).toBe('complete_current');
   });
 
-  it('ARM 4 (twin): NO session store at all is genuine emptiness, not a failed read', async () => {
-    // The third empty, and the one `fetchPriorTurns` answers for separately.
-    // Added because a mutant flipping the `!store` early return to
-    // `readOk: false` SURVIVED the first battery — and a survivor is a claim
-    // either way, so it was adjudicated rather than assumed (trap 13c): the
-    // no-store path is reachable with no injected store and observably reports
-    // `true` / `'none'`, so the mutant was NOT equivalent, merely unpinned.
-    //
-    // The distinction it protects: "there is no store to read" is a fact about
-    // this deployment, not an unreadable store. Reporting it as
-    // `store_unreadable` would make every store-less turn claim an
-    // infrastructure failure, and it deliberately mirrors what `fetchPriorFacts`
-    // reports for its own `!store` early return — one answer for one idea.
+  it('ARM 4: NO scenario analysis store is unavailable, never authoritative emptiness', async () => {
+    // The generic turn/fact window still reports its own successful empty
+    // early return. Analysis authority is deliberately stricter: omission of
+    // the scenario-wide exact-count port cannot establish that no analysis has
+    // ever run, so the analysis-specific derivation fails weak.
     const ctx = await buildTurnContext(BASE, 'req-no-store', {});
 
     expect(ctx.prior_turns).toEqual([]);
     expect(ctx.prior_facts).toEqual([]);
     expect(ctx.prior_facts_read_ok).toBe(true);
-    expect(ctx.persisted_analysis_freshness.reason).not.toBe('derivation_failed');
+    expect(ctx.persisted_analysis_freshness.freshness).toBe('unknown');
+    expect(ctx.persisted_analysis_freshness.reason).toBe('derivation_failed');
   });
 });

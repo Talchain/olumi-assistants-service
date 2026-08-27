@@ -49,6 +49,13 @@ export interface NoopSessionStoreOptions {
   // still assignable (content fields are optional).
   readonly priorTurns?: readonly SessionTurnWithContent[];
   readonly facts?: readonly HandlerFact[];
+  /**
+   * Scenario-wide non-noop run-analysis facts. Defaults to the eligible
+   * `facts` entries so legacy fixtures keep modelling one coherent store read.
+   */
+  readonly scenarioAnalysisFacts?: readonly HandlerFact[];
+  readonly scenarioAnalysisFactTotal?: number;
+  readonly throwOnScenarioAnalysisFactRead?: Error;
   readonly loadGraphResult?: unknown | null;
   /**
    * V5 Phase 1 brief persistence: scenarios.brief_text returned by
@@ -113,6 +120,22 @@ export function createNoopSessionStore(
       _handlerId?: V5ActionType,
     ): Promise<readonly HandlerFact[]> {
       return opts.facts ?? [];
+    },
+    async readScenarioRunAnalysisFactsFor(
+      _scenarioId: string,
+      _limit: number,
+    ): Promise<{ readonly facts: readonly HandlerFact[]; readonly total_count: number }> {
+      const readError = opts.throwOnScenarioAnalysisFactRead ?? opts.throwOnRead;
+      if (readError) throw readError;
+      const facts =
+        opts.scenarioAnalysisFacts ??
+        (opts.facts ?? []).filter(
+          (fact) => fact.fact_type === 'run_analysis' && !fact.noop,
+        );
+      return {
+        facts,
+        total_count: opts.scenarioAnalysisFactTotal ?? facts.length,
+      };
     },
     async invalidateScoped(
       _scenarioId: string,

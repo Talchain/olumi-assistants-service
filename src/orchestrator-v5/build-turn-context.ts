@@ -70,6 +70,12 @@ import {
   type DurableRecentMutationFactRead,
   type HandlerFactsWithRecentMutationHistory,
 } from './context/reconcile-recent-mutation-facts.js';
+import {
+  SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  reconcileScenarioAnalysisFacts,
+  type DurableScenarioAnalysisFactRead,
+  type ScenarioAnalysisFactSet,
+} from './context/reconcile-scenario-analysis-facts.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, GraphStaleWriteError, type SessionStore } from './session/store.js';
@@ -193,6 +199,19 @@ export interface EnrichedTurnContext extends TurnContext {
    * second vocabulary for the same idea.
    */
   readonly prior_facts_read_ok?: boolean;
+  /**
+   * Scenario-wide fact authority for analysis-specific reasoning.
+   *
+   * This is deliberately distinct from `prior_facts`: that ordinary bounded
+   * array also carries the non-enumerable recent-mutation-history binding and
+   * remains the source for non-analysis ContextPack slices. Only `complete`
+   * exposes facts. `capped`/`degraded` expose an empty array and must become an
+   * unknown analysis state, never a fallback to request or hot-window facts.
+   *
+   * Optional only for legacy/direct test contexts; production always sets it
+   * and consumers interpret omission weakly.
+   */
+  readonly scenario_analysis_fact_set?: ScenarioAnalysisFactSet;
   /**
    * THE PERSISTED-GRAPH ANALYSIS-FRESHNESS DERIVATION FOR THIS TURN — one
    * derivation, now with two consumers.
@@ -642,18 +661,24 @@ export async function buildTurnContext(
   // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
   // 20-turn window. The fourth read is the scenario-wide applied-mutation
   // lookahead: one extra row beyond the sole recent-changes cap proves whether
-  // the visible history is complete or capped after a cold return. Concurrent
-  // ⇒ these reads cost the batch's max latency, not their sum.
+  // the visible history is complete or capped after a cold return. The fifth
+  // read is the exact-count scenario run-analysis set. It is intentionally
+  // distinct from both the bounded generic facts and the newest entitlement
+  // fact: it supplies complete reasoning history to the existing selectors
+  // without repurposing the claim-safety carrier. Concurrent ⇒ these reads cost
+  // the batch's max latency, not their sum.
   const [
     priorTurnsRead,
     priorTurnsTotal,
     newestAnalysisFactRead,
     durableMutationFactRead,
+    durableScenarioAnalysisFactRead,
   ] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
     fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
+    fetchScenarioAnalysisFacts(payload.scenario_id, requestId, store),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
@@ -735,6 +760,32 @@ export async function buildTurnContext(
     priorFacts,
     reconciledRecentMutationFacts,
   );
+  const scenarioAnalysisFactSet = reconcileScenarioAnalysisFacts({
+    scenarioId: payload.scenario_id,
+    hotWindowFacts: priorFacts,
+    durableRead: durableScenarioAnalysisFactRead,
+  });
+  const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;
+  const scenarioAnalysisFactsReadOk = scenarioAnalysisFactSet.status === 'complete';
+  if (scenarioAnalysisFactSet.status !== 'complete') {
+    log.warn(
+      {
+        event: 'v5.scenario_analysis_fact_set_unavailable',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        status: scenarioAnalysisFactSet.status,
+        reason:
+          scenarioAnalysisFactSet.status === 'degraded'
+            ? scenarioAnalysisFactSet.reason
+            : 'scenario_fact_cap_exceeded',
+        total_count: scenarioAnalysisFactSet.total_count ?? null,
+        hot_run_analysis_count: priorFacts.filter(
+          (fact) => fact.fact_type === 'run_analysis',
+        ).length,
+      },
+      'V5 buildTurnContext: scenario analysis fact set cannot author reasoning state',
+    );
+  }
   // V5 Phase 1 brief persistence: load the persisted brief_text alongside
   // the graph so callers can read both from canonical state. Failure to
   // read scenarios.* is non-fatal (graceful degradation); the field
@@ -796,7 +847,7 @@ export async function buildTurnContext(
   // as freshness telemetry (turn-executor owns that), so there is no second freshness
   // signal. Pure + total, internal-only — never reaches the wire or the LLM prompt.
   const coachingFreshness = deriveAnalysisFreshness(
-    priorFacts,
+    scenarioAnalysisFacts,
     persistedGraphHash,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // internal coaching freshness consistent with the wire verdict so there is
@@ -816,7 +867,7 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
@@ -857,7 +908,7 @@ export async function buildTurnContext(
   const coachingState = deriveCoachingState({
     decisionContext,
     freshness: coachingFreshness,
-    priorFacts,
+    priorFacts: scenarioAnalysisFacts,
     graphHash: persistedGraphHash,
     persistedGraph: scenarioState.graph,
   });
@@ -888,7 +939,7 @@ export async function buildTurnContext(
   try {
     const coachingEvaluability = deriveCoachingEvaluability({
       freshness: coachingFreshness,
-      priorFacts,
+      priorFacts: scenarioAnalysisFacts,
       persistedGraph: scenarioState.graph,
     });
     coachingLifecycle = deriveCoachingLifecycle({
@@ -1006,6 +1057,7 @@ export async function buildTurnContext(
     newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFactsWithRecentMutationHistory,
     prior_facts_read_ok: priorFactsReadOk,
+    scenario_analysis_fact_set: scenarioAnalysisFactSet,
     // ONE derivation, two consumers — `deriveCoachingState` above and the
     // graph-less exits' `analysis_state` via `turn-claim-safety.ts`. Exposed
     // rather than recomputed downstream; see the member's docstring.
@@ -1808,6 +1860,67 @@ async function fetchPriorTurnsTotal(
       severity: 'warning',
     });
     return null;
+  }
+}
+
+/**
+ * Load the bounded scenario-wide analysis fact set used by reasoning-specific
+ * selectors. Missing legacy port and database failures are unavailable;
+ * malformed reader contracts are permanently invalid for this turn and may
+ * not fall back to the generic hot window.
+ */
+async function fetchScenarioAnalysisFacts(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<DurableScenarioAnalysisFactRead> {
+  if (!store?.readScenarioRunAnalysisFactsFor) {
+    return { status: 'degraded', reason: 'unavailable' };
+  }
+
+  try {
+    const page = await store.readScenarioRunAnalysisFactsFor(
+      scenarioId,
+      SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+    );
+    return {
+      status: 'ok',
+      scenario_id: scenarioId,
+      query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+      total_count: page.total_count,
+      facts: page.facts,
+    };
+  } catch (error) {
+    const rawCode = error instanceof SessionReadError ? error.code : undefined;
+    const contractInvalid =
+      rawCode === 'analysis_fact_limit_invalid' ||
+      rawCode === 'analysis_fact_contract_invalid' ||
+      rawCode === 'analysis_fact_corrupt';
+    const errorCode = contractInvalid
+      ? rawCode
+      : rawCode === 'analysis_fact_query_failed'
+        ? rawCode
+        : 'analysis_fact_read_failed';
+    log.warn(
+      {
+        event: 'v5.scenario_analysis_fact_read_degraded',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        error_code: errorCode,
+        outcome: contractInvalid ? 'contract_invalid' : 'unavailable',
+      },
+      'V5 buildTurnContext: scenario analysis-fact read failed',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode,
+      severity: 'warning',
+    });
+    return {
+      status: 'degraded',
+      reason: contractInvalid ? 'contract_invalid' : 'unavailable',
+    };
   }
 }
 

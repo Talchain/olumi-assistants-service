@@ -142,17 +142,59 @@ function multisetIncludes(
   if (subset.length > superset.length) return false;
   const remaining = new Map<string, number>();
   for (const fact of superset) {
-    const key = stableStringify(fact);
+    const key = stableFactKey(fact);
+    if (key === null) return false;
     remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
   for (const fact of subset) {
-    const key = stableStringify(fact);
+    const key = stableFactKey(fact);
+    if (key === null) return false;
     const count = remaining.get(key) ?? 0;
     if (count === 0) return false;
     if (count === 1) remaining.delete(key);
     else remaining.set(key, count - 1);
   }
   return true;
+}
+
+function stableFactKey(fact: HandlerFact): string | null {
+  try {
+    if (!isJsonSafe(fact, new Set<object>())) return null;
+    const encoded = stableStringify(fact);
+    return typeof encoded === 'string' ? encoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/** JSONB-backed facts can contain only finite, acyclic JSON values. */
+function isJsonSafe(value: unknown, ancestors: Set<object>): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object') return false;
+
+  const object = value as object;
+  if (ancestors.has(object)) return false;
+  const prototype = Object.getPrototypeOf(object);
+  if (
+    !Array.isArray(value) &&
+    prototype !== Object.prototype &&
+    prototype !== null
+  ) {
+    return false;
+  }
+  if (Object.getOwnPropertySymbols(object).length > 0) return false;
+
+  ancestors.add(object);
+  const valid = Array.isArray(value)
+    ? value.every((entry) => isJsonSafe(entry, ancestors))
+    : Object.keys(value as Record<string, unknown>).every((key) =>
+        isJsonSafe((value as Record<string, unknown>)[key], ancestors),
+      );
+  ancestors.delete(object);
+  return valid;
 }
 
 function validateDurableContract(
@@ -248,6 +290,7 @@ function parseEligibleRunAnalysisFact(
   ) {
     return null;
   }
+  if (!isJsonSafe(fact, new Set<object>())) return null;
   return fact;
 }
 

@@ -259,6 +259,46 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
+  it('matches logically identical nested JSON regardless of object key order', () => {
+    const durableFact = analysisFact('ordered') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    const hotFact = analysisFact('ordered') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    durableFact.result.enrichment = {
+      analysis_status: 'computed',
+      nested: { alpha: 1, beta: 2 },
+    };
+    hotFact.result.enrichment = {
+      nested: { beta: 2, alpha: 1 },
+      analysis_status: 'computed',
+    };
+
+    expect(
+      reconcile({
+        hotWindowFacts: [hotFact],
+        durableRead: durable([durableFact]),
+      }),
+    ).toMatchObject({ status: 'complete', source: 'scenario' });
+  });
+
+  it.each(['bigint', 'cycle'])('fails weak on non-JSON %s evidence', (kind) => {
+    const fact = analysisFact(`non-json-${kind}`) as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    const impossible: Record<string, unknown> = {};
+    if (kind === 'bigint') impossible.value = BigInt(1);
+    else impossible.self = impossible;
+    fact.result.enrichment = impossible;
+
+    expect(reconcile({ durableRead: durable([fact]) })).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'durable_contract_invalid',
+    });
+  });
+
   it('never promotes a hot window when the durable read is unavailable', () => {
     expect(
       reconcile({
