@@ -397,6 +397,110 @@ export interface InterventionDetail {
 }
 
 /**
+ * CEE-6 echo rule, stated ONCE.
+ *
+ * A display string must not simply repeat the factor's label (e.g. "Marketing
+ * Expertise" as the display for the "Marketing Expertise" factor). Strip only
+ * when the candidate IS the label or fully CONTAINS it — never when the label
+ * contains the candidate, which would discard valid qualitative band output
+ * ("High (0.7)" for a factor labelled "High Risk").
+ *
+ * Guard against an empty label: `String.includes("")` is always true, which
+ * would strip every supplied display value for unlabelled nodes.
+ *
+ * ⚠ This predicate had FOUR call sites and was hand-copied at three of them.
+ * A rule a human must remember to keep in step across copies is the
+ * hand-maintained mirror this estate keeps paying for (CLAUDE.md trap 12), so
+ * it is derived from one definition here rather than restated per site.
+ */
+function isLabelEcho(factorLabelLower: string, candidate: string): boolean {
+  if (factorLabelLower === "") return false;
+  const lowered = candidate.toLowerCase().trim();
+  return lowered === factorLabelLower || lowered.includes(factorLabelLower);
+}
+
+/**
+ * Render a factor's CURRENT level for the blocker sentence
+ * `Factor "X" is currently …`.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE WITNESSED DEFECT (deployed CEE, 2026-08-26, two independent golden-journey
+ * runs, envelopes clean 20/20 — no `EGRESS_CONTRACT_VIOLATION`, no `degraded`)
+ *
+ *   message : 'Factor "CRM Annual Licence Cost" is currently 0.5. …'
+ *   node    : { observed_state: { value: 0.5, raw_value: 50000 },
+ *               scale_frame: 100000, display_value: "50,000" }   ← SAME PAYLOAD
+ *
+ * The sentence quoted the INTERNAL NORMALISED LEVEL while the node's own
+ * human-readable form sat in the same response body. The first instance is at
+ * `T1_DRAFT` with no edit involved, so it is not an edit-path artefact. The
+ * message whose entire job is to tell the user what to fix was showing them a
+ * number they never typed and cannot recognise.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHICH AUTHORITY SURVIVES
+ *
+ * The FACTOR'S OWN DISPLAY AUTHORITY is canonical for this sentence: the
+ * enricher's `display_value`, else the shared `synthesiseDisplayValue` ladder
+ * this file already uses for intervention receipts. The normalised level is
+ * unreachable from the sentence EXCEPT as the terminal honest fallback, which
+ * is reached only when the record settles nothing better. There is no
+ * compatibility branch — the old rendering is not selectable.
+ *
+ * Honest at the bottom rung is SAID, not encoded as an absence: `currentLevel`
+ * is a number by the caller's own guard and `synthesiseDisplayValue`'s priority
+ * 7 always renders one, so this function cannot return an empty string.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ WHY THIS IS NOT THE F3 BORROWING DEFECT ONE LEVEL DOWN
+ *
+ * F3 banned an OPTION's receipt from borrowing the FACTOR's display string,
+ * because the factor's status quo is not that option's proposal. This sentence
+ * is different in kind: `is currently …` describes the FACTOR'S OWN OBSERVED
+ * STATE by construction, so the factor-scoped string is the truthful one — this
+ * is exactly the `sitsAtObservedState` condition `buildInterventionDetail`
+ * already requires before it will use `factorNode.display_value`.
+ *
+ * `levelCameFromObservedState` is what keeps the two apart. When the quoted
+ * level came instead from the V1 `data.value` passthrough, `observed_state`'s
+ * `raw_value`/`unit` describe a DIFFERENT number on an unsettled scale, and
+ * rendering through them would be borrowing with a citation. That branch keeps
+ * the bare level.
+ */
+function renderFactorCurrentLevel(
+  factorNode: NodeV3T,
+  currentLevel: number,
+  levelCameFromObservedState: boolean,
+): string {
+  const bareLevel = String(parseFloat(currentLevel.toFixed(2)));
+
+  // The level is not the observed state's — nothing on `observed_state`
+  // describes it, so nothing on `observed_state` may render it.
+  if (!levelCameFromObservedState) return bareLevel;
+
+  const os = factorNode.observed_state;
+  const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
+
+  // Rung 1: the enricher/LLM's own string for this factor's current state.
+  if (factorNode.display_value && !isLabelEcho(factorLabel, factorNode.display_value)) {
+    return factorNode.display_value;
+  }
+
+  // Rung 2: the shared display authority, over the SAME record the level came
+  // from. Never a second derivation.
+  const synthesised = synthesiseDisplayValue({
+    value: currentLevel,
+    raw_value: os?.raw_value,
+    unit: os?.unit,
+    factor_type: factorNode.factor_type ?? os?.factor_type,
+  });
+  if (synthesised && !isLabelEcho(factorLabel, synthesised)) return synthesised;
+
+  // Rung 3, terminal: say the level plainly.
+  return bareLevel;
+}
+
+/**
  * Build `intervention_details` for a single option using factor node metadata.
  *
  * For each intervention the caller provides `normalisedValue` (from
@@ -487,11 +591,7 @@ function buildInterventionDetail(
   // per-intervention, so it is the option's own and is kept verbatim.
   if (interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
     const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
-    const candidate = interventionDisplayValue.toLowerCase().trim();
-    const isEcho =
-      factorLabel !== "" &&
-      (candidate === factorLabel || candidate.includes(factorLabel));
-    if (!isEcho) {
+    if (!isLabelEcho(factorLabel, interventionDisplayValue)) {
       return {
         display_value: interventionDisplayValue,
         ...ownFields,
@@ -504,16 +604,7 @@ function buildInterventionDetail(
   // other lever it is the status quo wearing the option's name.
   if (factorNode?.display_value && sitsAtObservedState) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
-    const candidate = factorNode.display_value.toLowerCase().trim();
-    // CEE-6: strip echo — display_value must not be identical to or fully contain the
-    // label (e.g. "Marketing Expertise" as display for the "Marketing Expertise" factor).
-    // Guard against empty label: String.includes("") is always true, which would
-    // incorrectly strip every LLM-provided display_value for unlabelled nodes.
-    const isEcho =
-      factorLabel !== "" &&
-      (candidate === factorLabel || candidate.includes(factorLabel));
-
-    if (!isEcho) {
+    if (!isLabelEcho(factorLabel, factorNode.display_value)) {
       return {
         display_value: factorNode.display_value,
         ...ownFields,
@@ -534,17 +625,9 @@ function buildInterventionDetail(
 
   const displayValue = synthesised ?? String(parseFloat(normalisedValue.toFixed(2)));
 
-  // CEE-6 echo check on synthesised value: only strip when display is identical to
-  // or fully contains the label. Do NOT strip when the label contains the display
-  // value as a substring — that would incorrectly discard valid qualitative band
-  // output (e.g. "High (0.7)" for a factor labelled "High Risk").
+  // CEE-6 echo check on the synthesised value — same single rule.
   const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
-  const displayLower = displayValue.toLowerCase().trim();
-  const isEcho =
-    factorLabel !== "" &&
-    (displayLower === factorLabel || displayLower.includes(factorLabel));
-
-  const finalDisplay = isEcho
+  const finalDisplay = isLabelEcho(factorLabel, displayValue)
     ? String(parseFloat(normalisedValue.toFixed(2)))
     : displayValue;
 
@@ -735,9 +818,17 @@ export function buildAnalysisReadyPayload(
         // Knowing the current level is genuinely useful to the user — it just
         // is not an answer. Say both things rather than substituting one for
         // the other.
+        // ⭐ THE LEVEL IS INTERNAL; THE USER READS A DISPLAY VALUE.
+        // Quoting `currentLevel` here put "is currently 0.5" in front of a user
+        // whose factor reads "50,000" everywhere else in the same payload — see
+        // `renderFactorCurrentLevel` for the witness and the authority order.
         message:
           currentLevel !== undefined
-            ? `Factor "${factorLabel}" is currently ${currentLevel}. What should option "${analysisOpt.label}" set it to?`
+            ? `Factor "${factorLabel}" is currently ${renderFactorCurrentLevel(
+                factorNode,
+                currentLevel,
+                typeof observedValue === "number",
+              )}. What should option "${analysisOpt.label}" set it to?`
             : `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
         suggested_action: "add_value",
       });

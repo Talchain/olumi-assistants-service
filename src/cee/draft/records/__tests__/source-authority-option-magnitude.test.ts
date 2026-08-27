@@ -512,15 +512,44 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
 
     const readiness = buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph);
     expect(readiness.status).toBe("needs_user_input");
-    expect(readiness.blockers).toContainEqual(
-      expect.objectContaining({
-        option_id: statusQuo.id,
-        factor_id: factor.id,
-        blocker_type: "missing_value",
-        message: `Factor "${COST}" is currently 0.5. What should option "${STATUS_QUO}" set it to?`,
-        suggested_action: "add_value",
-      }),
+
+    // ⚠ THIS EXPECTATION CHANGED, AND THE OLD ONE WAS PINNING A DEFECT.
+    //
+    // It asserted `is currently 0.5` — the INTERNAL NORMALISED LEVEL — on a
+    // factor this very test calls "the mounted factor-carried £25k shape", and
+    // whose own record in this fixture reads:
+    //
+    //   display_value : "25,000"
+    //   observed_state: { value: 0.5, raw_value: 25000 }   ← note: no `unit`
+    //   scale_frame   : 50000
+    //
+    // So the blocker was telling the user "0.5" about a factor the rest of the
+    // payload calls "25,000". The message now renders the factor's OWN display
+    // authority, which is what a user can recognise.
+    //
+    // ⚠ WHY "25,000" AND NOT "£25k": the currency lives on the OPTION's
+    // intervention binding (asserted above as `unit: "£"`), NOT on the factor's
+    // `observed_state`, and the enricher's `display_value` carries no symbol.
+    // Rendering "£" here would mean borrowing a unit from a different record —
+    // the F3 defect one level down. The sentence says exactly what the factor
+    // says, and no more. Enriching the factor's own unit is upstream work.
+    const statusQuoBlocker = (readiness.blockers ?? []).find(
+      (b) => b.option_id === statusQuo.id && b.factor_id === factor.id,
     );
+    expect(statusQuoBlocker).toBeDefined();
+    expect(statusQuoBlocker).toMatchObject({
+      blocker_type: "missing_value",
+      message: `Factor "${COST}" is currently 25,000. What should option "${STATUS_QUO}" set it to?`,
+      suggested_action: "add_value",
+    });
+
+    // ⭐ STRONGER THAN THE LITERAL IT REPLACES: bind the rendered value to the
+    // factor's own `display_value` BY IDENTITY, so this cannot silently drift
+    // back to a normalised level even if the fixture's magnitude changes.
+    const factorDisplay = (factor as { display_value?: string }).display_value;
+    expect(factorDisplay).toBe("25,000");
+    expect(statusQuoBlocker!.message).toContain(`is currently ${factorDisplay}`);
+    expect(statusQuoBlocker!.message).not.toContain("is currently 0.5");
   });
 
   it.each([

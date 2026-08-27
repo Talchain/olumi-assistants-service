@@ -691,6 +691,18 @@ export function blockerIssue(
   const optionLabel = readNonEmptyString(blocker.option_label) ?? undefined;
   const factorId = readNonEmptyString(blocker.factor_id) ?? undefined;
   const factorLabel = readNonEmptyString(blocker.factor_label) ?? undefined;
+  /**
+   * ⭐ THE PRODUCER'S OWN USER-FACING SENTENCE — CARRIED, NOT REPLACED.
+   *
+   * The shared contract is explicit that this string is "the producer-authored,
+   * user-facing sentence for this blocker, rendered VERBATIM. CEE owns all
+   * user-facing language; a consumer must not rewrite, summarise, truncate for
+   * meaning, or SYNTHESISE A SUBSTITUTE WHEN IT DISLIKES THE WORDING." This
+   * mapper was doing exactly that — discarding it and composing its own.
+   *
+   * ⚠ USED FOR ONE CLASS ONLY. See {@link blockerIssue}'s pair-scoped branch.
+   */
+  const producerMessage = readNonEmptyString(blocker.message) ?? undefined;
   const suffix = optionLabel && factorLabel
     ? ` for "${optionLabel}" on "${factorLabel}"`
     : optionLabel
@@ -720,7 +732,37 @@ export function blockerIssue(
         ...common,
         code: 'MISSING_OPTION_VALUE',
         category: 'option_values',
-        message: `Choose the missing effect value${suffix}.`,
+        // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS
+        // PROSE FIT FOR A USER — so it is the one class that keeps it.
+        //
+        // `analysis-ready.ts:817` emits, for an option×factor pair:
+        //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
+        //    option "Switch to HubSpot" set it to?`
+        // It names both scopes, gives the factor's CURRENT VALUE in the
+        // factor's own display units, and asks the question the user must
+        // answer. The substitute below names the scopes and nothing else.
+        //
+        // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS
+        // A MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one
+        // truthfulness defect for three:
+        //   · `ambiguous_value` emits "…its analysis-scale source binding is
+        //     unresolved" — internal jargon;
+        //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
+        //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
+        //     remedy, where the composed sentence gives one;
+        //   · `constraint_dropped` emits an internal constraint id and reason.
+        // (A)'s messages were never written to be the live user-facing
+        // sentence; only this one is. The canned copy is at least written for
+        // a human, so replacing it with jargon would be worse than the defect.
+        //
+        // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
+        // `missing_value` producers are told apart by whether the blocker names
+        // an OPTION — `:817` always does, `:1124` never does. A field-presence
+        // test cannot oscillate the way a natural-language classifier would.
+        message:
+          optionId && factorId && producerMessage
+            ? producerMessage
+            : `Choose the missing effect value${suffix}.`,
       };
     case 'ambiguous_value':
       return {
