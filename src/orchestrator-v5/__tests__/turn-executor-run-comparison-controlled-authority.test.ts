@@ -58,6 +58,12 @@ vi.mock('../session/index.js', () => ({
     ...createNoopSessionStore(),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts, total_count: facts.length };
+    },
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
   }),

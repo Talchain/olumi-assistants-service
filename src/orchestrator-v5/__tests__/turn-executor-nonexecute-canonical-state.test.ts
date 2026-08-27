@@ -36,6 +36,18 @@ vi.mock('../session/index.js', () => ({
       for (const id of ids) out.push(...(map.get(id) ?? []));
       return out;
     },
+    readScenarioRunAnalysisFactsFor: async () => {
+      const map = ((global as G).__test_facts_by_row ?? new Map()) as Map<
+        string,
+        HandlerFact[]
+      >;
+      const facts = [...map.values()]
+        .flat()
+        .filter(
+          (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+        );
+      return { facts, total_count: facts.length };
+    },
     readFactsWithTurnFor: async (ids: readonly string[]) => {
       const map = ((global as G).__test_facts_by_row ?? new Map()) as Map<string, HandlerFact[]>;
       const out: Array<{ fact: HandlerFact; turn_id: string; fact_created_at: string }> = [];

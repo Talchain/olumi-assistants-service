@@ -70,6 +70,12 @@ vi.mock('../session/index.js', () => ({
       },
     ],
     readFactsFor: async () => mockedPriorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockedPriorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts, total_count: facts.length };
+    },
     loadGraphAndBriefText: async () => ({ graph: persistedGraphForTest, briefText: null }),
     // Production parity: `SupabaseSessionStore.readFactsFor` delegates to
     // `readFactsWithTurnFor` (single source of truth). When this mock

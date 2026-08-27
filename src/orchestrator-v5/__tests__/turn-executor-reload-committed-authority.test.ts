@@ -67,6 +67,16 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => (global as Record<string, unknown>).__test_prior_turns ?? [],
     readFactsFor: async () => (global as Record<string, unknown>).__test_prior_facts ?? [],
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = (
+        ((global as Record<string, unknown>).__test_prior_facts ?? []) as Array<
+          Record<string, unknown>
+        >
+      ).filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts, total_count: facts.length };
+    },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

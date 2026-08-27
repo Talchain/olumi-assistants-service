@@ -37,6 +37,10 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [],
+      total_count: 0,
+    }),
     invalidateScoped: async (_s: string, scope: unknown) => ({
       scope,
       entries_invalidated: [],
