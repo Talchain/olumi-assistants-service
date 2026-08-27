@@ -17,6 +17,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
+import { ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE } from '../../../src/orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
+
 const configHolder = {
   cee: {
     timingDebugEnabled: false,
@@ -36,6 +38,7 @@ vi.mock('../../../src/config/index.js', () => ({
 }));
 
 const runTurnExecutorMock = vi.fn();
+let draftLossStands = false;
 vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
   runTurnExecutor: runTurnExecutorMock,
 }));
@@ -45,6 +48,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    scenarioDraftLossStands: async () => draftLossStands,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
@@ -53,7 +57,9 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   SessionReadError: class SessionReadError extends Error {},
 }));
 
-const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { ceeOrchestratorRouteV2, DRAFT_LOSS_NOTICE } = await import(
+  '../../../src/orchestrator/route-v2.js'
+);
 
 const SCENARIO_ID = '99999999-9999-4999-8999-999999999999';
 const REASONING_TEXT =
@@ -115,6 +121,7 @@ describe('route-v2 — flag-gated `_reasoning` (ROADMAP 1.42)', () => {
   beforeEach(() => {
     runTurnExecutorMock.mockReset();
     configHolder.features.reasoningCaptureEnabled = false;
+    draftLossStands = false;
   });
 
   it('flag OFF (default) → no `_reasoning` on the wire, even when run.reasoning is present', async () => {
@@ -181,5 +188,101 @@ describe('route-v2 — flag-gated `_reasoning` (ROADMAP 1.42)', () => {
     expect(JSON.stringify(body)).not.toContain(REASONING_TEXT);
     // Fallback envelope still satisfies the schema (response_version: 2).
     expect(body.response_version).toBe(2);
+  });
+
+  it('unavailable canonical analysis suppresses stale reasoning and grounding and ships the fail-weak wire state', async () => {
+    configHolder.features.reasoningCaptureEnabled = true;
+    runTurnExecutorMock.mockResolvedValue({
+      ...mkRunResult({ withReasoning: true }),
+      answerKind: 'substantive' as const,
+      mayNameLeadingOption: false,
+      mayNameLeadingOptionProvenance: 'fail_closed_unavailable' as const,
+      groundedSelection: {
+        element_ids: ['factor_salary'],
+        unresolved: 'none' as const,
+      },
+      freshness: {
+        freshness: 'none' as const,
+        reason: 'no_successful_run_analysis_fact' as const,
+        selected_fact_index: null,
+        graph_hash_at_run: null,
+        current_graph_hash: null,
+        computed_at: null,
+      },
+    });
+
+    const { status, body } = await postTurn(
+      app,
+      'aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaa05',
+    );
+
+    expect(status).toBe(200);
+    expect(body.assistant_text).toBe(ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE);
+    expect(body).not.toHaveProperty('_reasoning');
+    expect(body).not.toHaveProperty('_grounded_selection');
+    expect(body).not.toHaveProperty('_answer_shape');
+    expect(body.analysis_ready?.freshness).toBe('unknown');
+    expect(body.analysis_ready?.freshness_reason).toBe('derivation_failed');
+    expect(body.analysis_state?.run_state).toEqual({
+      kind: 'unknown_degraded',
+      cause: 'store_unreadable',
+    });
+    expect(JSON.stringify(body)).not.toContain(REASONING_TEXT);
+    expect(JSON.stringify(body)).not.toContain('never_run');
+    expect(JSON.stringify(body)).not.toContain(
+      'no_successful_run_analysis_fact',
+    );
+  });
+
+  it('preserves a standing draft-loss disclosure through unavailable typed fallback', async () => {
+    configHolder.features.reasoningCaptureEnabled = true;
+    draftLossStands = true;
+    const malformedCanary = 'MALFORMED_STALE_ANALYSIS_CANARY';
+    runTurnExecutorMock.mockResolvedValue({
+      ...mkRunResult({ withReasoning: true }),
+      response: {
+        response_version: 'NOT_TWO' as unknown as 2,
+        assistant_text: malformedCanary,
+        blocks: [],
+        suggested_actions: [],
+        insights: [],
+        stage_indicator: 'analyse' as const,
+      },
+      answerKind: 'substantive' as const,
+      mayNameLeadingOption: false,
+      mayNameLeadingOptionProvenance: 'fail_closed_unavailable' as const,
+      freshness: {
+        freshness: 'none' as const,
+        reason: 'no_successful_run_analysis_fact' as const,
+        selected_fact_index: null,
+        graph_hash_at_run: null,
+        current_graph_hash: null,
+        computed_at: null,
+      },
+    });
+
+    const { status, body } = await postTurn(
+      app,
+      'aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaa06',
+    );
+
+    expect(status).toBe(200);
+    expect(body.assistant_text).toBe(
+      `${DRAFT_LOSS_NOTICE}\n\nThe server produced a response that failed validation.\n\n${ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE}`,
+    );
+    expect(body.blocks).toEqual([
+      {
+        type: 'error',
+        error_code: 'EGRESS_CONTRACT_VIOLATION',
+        severity: 'error',
+      },
+    ]);
+    expect(body).not.toHaveProperty('_reasoning');
+    expect(JSON.stringify(body)).not.toContain(malformedCanary);
+    expect(JSON.stringify(body)).not.toContain(REASONING_TEXT);
+    expect(body.analysis_state?.run_state).toEqual({
+      kind: 'unknown_degraded',
+      cause: 'store_unreadable',
+    });
   });
 });

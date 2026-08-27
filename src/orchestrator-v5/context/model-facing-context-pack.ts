@@ -18,9 +18,10 @@ export function projectModelFacingContextPack(
     graph: _rawGraph,
     display_graph: displayGraph,
     graph_context: graphContext,
+    analysis_context: analysisContext,
     analysis_state: _analysisState,
     conversation_summary: conversationSummary,
-    ...rest
+    ...restWithCoaching
   } = contextPack;
   void _rawAnalysis;
   void _rawGraph;
@@ -34,9 +35,19 @@ export function projectModelFacingContextPack(
     contextPack.recent_changes_status === 'degraded'
       ? contextPack.recent_changes_status
       : 'degraded';
+  const { coaching_context: _coachingContext, ...restWithoutCoaching } =
+    restWithCoaching;
+  const rest =
+    analysisContext?.status === 'unavailable'
+      ? restWithoutCoaching
+      : restWithCoaching;
+  void _coachingContext;
 
   return {
     ...rest,
+    ...(analysisContext !== undefined
+      ? { analysis_context: analysisContext }
+      : {}),
     analysis: displayAnalysis,
     graph_context: resolvedGraphContext,
     graph: displayGraph,

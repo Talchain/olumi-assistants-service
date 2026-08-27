@@ -2846,6 +2846,7 @@ export async function runTurnExecutor(
           : {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,
+              provenance: mayNameLeadingOptionVerdictForRun.provenance,
             },
         // Spine A backstop: option-controlled levers must not be surfaced as
         // tunable sensitivity drivers. Computed from the RAW, unparsed graph —
@@ -8289,6 +8290,13 @@ export async function runTurnExecutor(
             // (enforced), so the divergence tripwire stays silent on healthy turns.
             older_relevant_facts: packJsonChars(contextPack.older_relevant_facts),
             brief: packJsonChars(contextPack.brief),
+            ...(contextPack.analysis_context !== undefined
+              ? {
+                  analysis_context: packJsonChars(
+                    contextPack.analysis_context,
+                  ),
+                }
+              : {}),
             display_analysis: packJsonChars(contextPack.display_analysis),
             // Always emitted by production assembly. Keeping it in the same
             // realised decomposition as the policy row makes a dark authority

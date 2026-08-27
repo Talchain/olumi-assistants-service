@@ -361,6 +361,28 @@ export function projectFocusForWithheldClaim(
 }
 
 /**
+ * Preserve canonical selection identity while refusing every analysis claim
+ * when persisted analysis history could not be established. This is stronger
+ * than ordinary claim withholding: even `no_analysis` would assert absence,
+ * so every selected element receives the distinct fail-weak state and every
+ * attached analysis field is removed.
+ */
+export function projectFocusForUnavailableAnalysis(
+  focus: ContextPackFocus | undefined,
+): ContextPackFocus | undefined {
+  if (focus === undefined) return undefined;
+  const elements = focus.elements.map((element): ContextPackFocusElement => {
+    const { analysis: _analysis, ...identity } = element;
+    void _analysis;
+    return {
+      ...identity,
+      analysis_link: 'analysis_unavailable',
+    };
+  });
+  return { ...focus, elements };
+}
+
+/**
  * Remove the open producer Decision Review payload on a withheld turn.
  *
  * Decision Review is intentionally not field-projected here: its producer
@@ -375,6 +397,28 @@ export function projectCoachingForWithheldClaim(
   return coaching.decision_review === null
     ? coaching
     : { ...coaching, decision_review: null };
+}
+
+/**
+ * Preserve draft coaching while refusing every analysis-derived coaching
+ * claim when persisted analysis history could not be established.
+ *
+ * A typed signal such as `FIRST_ANALYSIS_COMPLETE` still asserts that a
+ * saved analysis exists. That is safe under ordinary leader withholding but
+ * contradictory under `fail_closed_unavailable`, where even existence is
+ * unknown. Decision Review is analysis-derived too, so both fields fail weak.
+ */
+export function projectCoachingForUnavailableAnalysis(
+  coaching: CoachingCache,
+): CoachingCache {
+  return coaching.decision_review === null &&
+    coaching.last_coaching_signal === null
+    ? coaching
+    : {
+        ...coaching,
+        decision_review: null,
+        last_coaching_signal: null,
+      };
 }
 
 /**

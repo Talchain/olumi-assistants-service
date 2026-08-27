@@ -17,9 +17,11 @@ import {
   WITHHELD_LEADER_INPUT_NOTE,
   WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE,
   projectContextPackAnalysisForWithheldClaim,
+  projectCoachingForUnavailableAnalysis,
   projectCoachingForWithheldClaim,
   projectDisplayAnalysisForWithheldClaim,
   projectFocusForWithheldClaim,
+  projectFocusForUnavailableAnalysis,
   withheldLeaderInputNoteForState,
 } from '../withheld-leader-projection.js';
 import {
@@ -246,6 +248,57 @@ describe('projectFocusForWithheldClaim — selected-option claim safety', () => 
   });
 });
 
+describe('projectFocusForUnavailableAnalysis — absence is not permission', () => {
+  const focus: ContextPackFocus = {
+    elements: [
+      {
+        id: 'opt_a',
+        kind: 'option',
+        label: 'Option A',
+        analysis_link: 'linked',
+        analysis: { win_probability: '83%' },
+      },
+      {
+        id: 'factor_a',
+        kind: 'factor',
+        label: 'Factor A',
+        analysis_link: 'no_analysis',
+      },
+    ],
+    unresolved: 'none',
+    requested_count: 2,
+    unresolved_count: 0,
+  };
+
+  it('preserves every canonical identity while removing figures and absence claims', () => {
+    const out = projectFocusForUnavailableAnalysis(focus)!;
+
+    expect(out.elements).toEqual([
+      {
+        id: 'opt_a',
+        kind: 'option',
+        label: 'Option A',
+        analysis_link: 'analysis_unavailable',
+      },
+      {
+        id: 'factor_a',
+        kind: 'factor',
+        label: 'Factor A',
+        analysis_link: 'analysis_unavailable',
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain('83%');
+    expect(JSON.stringify(out)).not.toContain('no_analysis');
+  });
+
+  it('does not mutate input and preserves absence', () => {
+    const before = JSON.stringify(focus);
+    projectFocusForUnavailableAnalysis(focus);
+    expect(JSON.stringify(focus)).toBe(before);
+    expect(projectFocusForUnavailableAnalysis(undefined)).toBeUndefined();
+  });
+});
+
 describe('projectCoachingForWithheldClaim — open Decision Review payload', () => {
   it('withholds the whole review while retaining independent coaching state', () => {
     const coaching = {
@@ -266,6 +319,48 @@ describe('projectCoachingForWithheldClaim — open Decision Review payload', () 
       last_coaching_signal: coaching.last_coaching_signal,
     });
     expect(coaching.decision_review.narrative_summary).toContain('83%');
+  });
+});
+
+describe('projectCoachingForUnavailableAnalysis — absence is not permission', () => {
+  it('preserves draft coaching while removing analysis review and existence signal', () => {
+    const coaching = {
+      draft_coaching: {
+        scenario_id: 'scenario-1',
+        produced_at: '2026-08-27T08:00:00.000Z',
+        summary: 'Strengthen the evidence for the pricing assumption.',
+        strengthen_items: [],
+        widening_log: null,
+        bias_signals: null,
+      },
+      decision_review: {
+        produced_at: '2026-08-27T09:00:00.000Z',
+        narrative_summary: 'Secret leader wins at 83%',
+      },
+      last_coaching_signal: {
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'turn-1',
+        produced_at: '2026-08-27T09:00:00.000Z',
+      },
+    } as const;
+
+    expect(projectCoachingForUnavailableAnalysis(coaching)).toEqual({
+      draft_coaching: coaching.draft_coaching,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(coaching.last_coaching_signal.signal_id).toBe(
+      'FIRST_ANALYSIS_COMPLETE',
+    );
+  });
+
+  it('preserves an already fail-weak cache by reference', () => {
+    const coaching = {
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    } as const;
+    expect(projectCoachingForUnavailableAnalysis(coaching)).toBe(coaching);
   });
 });
 
