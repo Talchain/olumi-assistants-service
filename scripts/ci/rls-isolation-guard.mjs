@@ -290,14 +290,16 @@ async function rest(method, path, user, body, extraHeaders = {}) {
  * A probe may only be judged on a response the server actually answered with
  * data. Anything else — a gateway's HTML 502, a 401 because this run's own
  * token was refused, a 429, a 404, an empty body — is the server declining to
- * answer, and `die()`ing on it is what keeps exit 1 meaning what line 61 says
- * it means. Called BEFORE `check()`, so a declined response never increments
- * `probesRun`, never lands in `fails`, and can neither fake a pass nor fake an
- * isolation failure.
+ * answer, and `die()`ing on it is what keeps exit 1 meaning what the EXIT-CODE
+ * CONTRACT above says it means. Called BEFORE `check()`, so a declined response
+ * never increments `probesRun`, never lands in `fails`, and can neither fake a
+ * pass nor fake an isolation failure.
  *
- * Without this, `count` was `null` on every such response and the four
- * `count === 0` probes read `null === 0` as FALSE — announcing a cross-user
- * read that never happened, on the exit code reserved for a security klaxon.
+ * Without this, `count` was `null` on every such response, and SIX probes could
+ * read a network event as a verdict: the four negatives test `count === 0` and
+ * the three positive controls test `count === 1`, and `null` fails both — so a
+ * 502 announced a cross-user read that never happened, on the exit code
+ * reserved for a security klaxon.
  */
 function data(r, what) {
   if (!r.dataResponse) {
