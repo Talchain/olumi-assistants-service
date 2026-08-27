@@ -1,6 +1,6 @@
 -- ============================================================
 -- C8-A — atomic model-version restore/adopt carrier
--- Target: Staging Supabase (NOT EXECUTED by this change)
+-- Target: Staging Supabase — APPLIED 2026-08-27 (see STATUS CORRECTION below)
 -- Date authored: 2026-08-24
 --
 -- Replaces the application-level restore sequence:
@@ -20,7 +20,40 @@
 --     the same source version returns the original receipt without writes;
 --   * model_versions stays append-only.
 --
--- Execution is Paul-gated. This file has not been run against staging.
+-- ⚠⚠ STATUS CORRECTED 2026-08-27 — THIS HEADER ASSERTED THE OPPOSITE, TWICE.
+--   What this file used to say:
+--     line 3   "Target: Staging Supabase (NOT EXECUTED by this change)"
+--     here     "Execution is Paul-gated. This file has not been run against staging."
+--   Both were MEASURED FALSE on 2026-08-27 against the live staging database
+--   (project ref etmmuzwxtcjipwphdola — the ref carried by .env.staging.local's
+--   SUPABASE_URL and by run-sql-migration.ts's pooler fallback), read inside a
+--   server-enforced READ ONLY transaction:
+--     * restore_model_version_atomic_v1 EXISTS (19 args, SECURITY DEFINER)
+--     * append_turn_atomic_v5 EXISTS (30 args); v2/v3/v4 all exist, unredefined
+--     * all 12 columns present, including scenarios.analysis_invalidated_at
+--     * both partial unique indexes present, with their exact WHERE clauses
+--     * four CHECK constraints — not three
+--     * BOTH FUNCTION BODIES COMPARED BYTE-FOR-BYTE: pg_proc.prosrc against this
+--       file's bodies between the $$ delimiters — md5-identical, 12,325 and
+--       16,299 bytes
+--     * supabase_migrations.schema_migrations carries
+--       20260824200000 / c8_atomic_model_version_restore, and that ledger
+--       DISCRIMINATES: collab_elicitation and collab_evidence are in this repo
+--       and absent from it
+--     * controls fired — fabricated append_turn_atomic_v99,
+--       restore_model_version_atomic_v99, fabricated_column_zz99 and
+--       fabricated_table_zz99 all returned empty IN THE SAME QUERIES that
+--       returned the real objects
+--   ⚠ SCOPE OF THAT EVIDENCE — what it does NOT cover: GRANT/REVOKE posture and
+--   RLS policies were NOT verified against this file. The supportable claim is
+--   "the objects exist and both function bodies match", NOT "the migration is
+--   fully verified".
+--   ⭐ WHY THE FALSE RECORD SURVIVED, because that is the reusable lesson: the
+--   local working tree at /Users/paulslee/Documents/GitHub/olumi-assistants-service
+--   sits on branch docs/claude-md-restructure and is MISSING 15 MIGRATIONS,
+--   INCLUDING THIS ONE — so any source sweep run there returns a false zero and
+--   reads as confirmation. That is verification trap 1: never verify against the
+--   local working tree.
 -- ============================================================
 
 -- Additive receipt/lineage columns. Legacy rows remain valid and explicitly

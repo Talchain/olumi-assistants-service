@@ -18,9 +18,18 @@ TypeScript and nothing about atomicity.
 > this file to settle, which is how someone ends up running the suite against a
 > database missing the very functions it asserts.
 >
-> The migration is **founder-gated and NOT applied to staging**. Applying it to
-> a throwaway local container, which is all this recipe does, is unrelated to
-> that gate.
+> ⚠ **CORRECTED 2026-08-27.** This paragraph used to read: *“The migration is
+> **founder-gated and NOT applied to staging**.”* That was MEASURED FALSE on
+> 2026-08-27 against the live staging database — the C8 objects exist and both
+> function bodies are md5-identical to this repo’s migration file (full
+> measurement, its controls, and what it does **not** cover — GRANT/REVOKE and
+> RLS — are in the STATUS CORRECTION block of
+> `supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql`).
+>
+> **The instruction it was attached to is unchanged and still binding:** this
+> recipe applies the migration to a throwaway local container, and you must
+> still never point it at staging. What changed is only the reason — staging is
+> not a database awaiting this migration, it is one that already has it.
 
 > ⚠ **Local container only. Never staging.** The suite installs and drops
 > failure-injection triggers and a control table, which is a schema mutation.
