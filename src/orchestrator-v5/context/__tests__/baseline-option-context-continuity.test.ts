@@ -6,7 +6,11 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { buildUserMessage } from '../../routing/route-with-tool-use.js';
 import { projectContextPackReadiness } from '../../routing/readiness-summary.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
-import { compactGraphForContextPack } from '../compact-graph-for-contextpack.js';
+import type { ContextGraphSelection } from '../context-graph-snapshot.js';
+import {
+  compactGraphForContextPack,
+  compactSelectedGraphForContextPack,
+} from '../compact-graph-for-contextpack.js';
 import { assembleContextPack } from '../context-pack-assembler.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
@@ -199,6 +203,46 @@ describe('canonical baseline-option continuity', () => {
       } as GraphStateIngress,
       { requestId: 'req-baseline-structural-fallback' },
     );
+    expect(outcome.kind).toBe('compacted');
+    if (outcome.kind !== 'compacted') throw new Error('expected compacted graph');
+    expect(outcome.via).toBe('structural_fallback');
+    expect(outcome.compact.nodes.find((node) => node.id === 'opt_current')).not.toHaveProperty(
+      'is_baseline',
+    );
+  });
+
+  // The pin above calls the inner compactor directly. Post-#1147 the production
+  // ContextPack entrypoint is the selector-aware wrapper, which owns the freeze
+  // and attestation, so a change that re-derives or bypasses the inner fallback
+  // at that boundary would leave the pin above green. Fixture carries a literal
+  // top-level `is_baseline: true` on an option node so the strip genuinely fires
+  // rather than passing vacuously.
+  it('keeps the production ContextPack entrypoint baseline-neutral on the structural fallback', () => {
+    const graph = {
+      nodes: [
+        {
+          id: 'opt_current',
+          kind: 'option',
+          label: 'Current arrangement',
+          is_baseline: true,
+        },
+        { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+      ],
+      // Missing strict GraphV3 edge fields deliberately selects the legacy
+      // structural fallback through the wrapper as well.
+      edges: [{ from: 'opt_current', to: 'goal_growth' }],
+    } as unknown as GraphStateIngress;
+
+    const selection: ContextGraphSelection = {
+      status: 'canonical',
+      graph,
+      reason: 'persisted_valid',
+    };
+
+    const outcome = compactSelectedGraphForContextPack(selection, {
+      requestId: 'req-baseline-structural-fallback-entrypoint',
+    });
+
     expect(outcome.kind).toBe('compacted');
     if (outcome.kind !== 'compacted') throw new Error('expected compacted graph');
     expect(outcome.via).toBe('structural_fallback');
