@@ -1309,12 +1309,38 @@ export async function commitDirectAnswer(
   // violation this path refuses fail-closed, and the sentence asserting
   // otherwise is itself the hand-maintained mirror it invoked trap #12 against.
   //
-  // It is true NOW, and true by construction rather than by assertion, because
-  // both writers go through `appendCheckedGraphWrite`. Any THIRD writer must
-  // too — `store.append` is not the authority, the floor is. Derive the caller
-  // set (`appendCheckedGraphWrite` vs `store.append(`) rather than trusting
-  // this sentence; an untruncated sweep, because a truncated one and a complete
-  // one produce indistinguishable output.
+  // ⚠ AND THE REPLACEMENT MUST NOT BE A FRESH ABSOLUTE. An earlier draft of
+  // this paragraph said the claim was "true NOW, and true by construction ...
+  // Any THIRD writer must too". That is the SAME defect at one remove: a third
+  // writer already exists and does NOT go through the floor. The honest form is
+  // a MANIFEST with its scope, measured at 87cb9f4f over every `.ts` file under
+  // `src/` plus all 34 `.sql` files:
+  //
+  //   · `commit.ts` (here)                        → `appendCheckedGraphWrite` ✅
+  //   · `routes/assist.v1.scenario-graph-register.ts`
+  //                                               → `appendCheckedGraphWrite` ✅
+  //   · `routes/assist.v1.scenario-versions.ts` (the RESTORE tier)
+  //       → `service.restoreVersionAtomic` → `restore_model_version_atomic_v1`
+  //       → `UPDATE public.scenarios SET graph = p_graph`         ❌ NOT COVERED
+  //   · `store_draft_graph` — no production caller (guarded by
+  //     `context/__tests__/graph-identity-guards.test.ts`)             n/a
+  //
+  // The third writer is LIVE, not dark: registered unconditionally at
+  // `server.ts:1214` (`POST /assist/v1/scenarios/:scenario_id/versions/restore`)
+  // and `CEE_MODEL_VERSIONS_ENABLED` defaults ON (`config/index.ts:1372`).
+  // Restoring an older version that carries a duplicate node id into a
+  // currently-clean scenario is, by this floor's own delta definition, an
+  // INTRODUCED violation — refused here, silently written there. Routing it
+  // through the floor is deliberately OUT OF SCOPE for C3 and materially larger
+  // (the RPC owns graph + undo + version + head + event in one statement).
+  //
+  // So: two of three writers go through `appendCheckedGraphWrite`. DERIVE the
+  // caller set (`appendCheckedGraphWrite` vs `store.append(` vs a `.sql` sweep
+  // for `SET graph = p_graph`) rather than trusting this comment — an
+  // UNTRUNCATED sweep, because a truncated one and a complete one produce
+  // indistinguishable output. ⚠ Scope both halves: a `UPDATE public.scenarios`
+  // sweep MISSES the unqualified `UPDATE scenarios SET graph = p_graph` form,
+  // which is how most of the `append_turn_atomic` family is written.
   //
   // FAIL-CLOSED, NEVER A SILENT REPAIR — enforced in the floor. Repairing there
   // would put a mutation AFTER the hash was computed and recreate the exact

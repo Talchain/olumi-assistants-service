@@ -597,4 +597,95 @@ describe("register — the terminal persisted-graph invariant (C3 shared floor)"
     expect(append).toHaveBeenCalledTimes(1);
     await app.close();
   });
+
+  /**
+   * ── THE FRESH-SCENARIO CASE: ABSOLUTE, AND STATED (C3 gate 2) ─────────────
+   *
+   * Every other case in this block mocks a NON-NULL `loadGraph`, so none of
+   * them can see what the route does on a scenario that has no stored graph —
+   * which is the DOMINANT import journey. The behaviour was demonstrated
+   * non-equivalent and invisible: mutating the floor's base to
+   * `baseGraphForInvariants ?? undefined` turns this 422 into a 200 that WRITES,
+   * and all 30 merged cases stay GREEN.
+   *
+   * The mechanism, so the next reader does not have to re-derive it:
+   * `store.loadGraph` returns `null` — never `undefined` — for an absent
+   * scenario row and for a NULL `graph` column (`supabase-store.ts:1960`,
+   * `:1971`). The floor's observe-only degrade keys on a STRICT
+   * `options.baseGraph === undefined` (`persisted-graph-invariants.ts:222`), so
+   * `null` takes the DELTA branch against an EMPTY baseline and EVERY violation
+   * counts as introduced.
+   *
+   * DECIDED, not emergent: a graph carrying a duplicate node id is structurally
+   * invalid, the turn path has always refused it, and the ingress contract
+   * enforces neither node-id uniqueness nor edge referential integrity — so such
+   * an import previously received a silent 200. Prefer visible failure over
+   * confident wrongness.
+   *
+   * THE TWO CASES BELOW ARE A DISCRIMINATING PAIR, not one assertion twice.
+   * They differ ONLY in how the base read resolves — `null` vs THROWS — and they
+   * must give OPPOSITE answers. A mutant that collapses `null` into `undefined`
+   * REDs the first and leaves the second GREEN; a mutant that removes the
+   * degrade entirely does the reverse. Either alone would prove sensitivity to
+   * something; only the pair proves the route discriminates on THIS distinction.
+   */
+  it("POSITIVE CONTROL: a null base really does behave differently from an absent one, at the checker — so the pair below is not vacuous", () => {
+    // Trap 13, at the exact seam the pair depends on. If these two agreed, both
+    // cases below could pass for reasons unrelated to the null/undefined split.
+    const onNullBase = checkPersistedGraphInvariants(DUPLICATE_INTRODUCED, {
+      baseGraph: null,
+    });
+    expect(onNullBase.status).toBe("violated");
+    expect(onNullBase.violations.map((v) => v.code)).toContain("DUPLICATE_NODE_ID");
+
+    const onAbsentBase = checkPersistedGraphInvariants(DUPLICATE_INTRODUCED, {
+      baseGraph: undefined,
+    });
+    expect(onAbsentBase.status).toBe("ok");
+    expect(onAbsentBase.violations).toHaveLength(0);
+    expect(onAbsentBase.inheritedViolations.map((v) => v.code)).toContain("DUPLICATE_NODE_ID");
+  });
+
+  it("a FRESH scenario (loadGraph → null) is ABSOLUTE, not delta-scoped: the first import of a duplicate node id is REFUSED and NOTHING is written", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: DUPLICATE_INTRODUCED });
+
+    // Bound to the base the route actually read, by identity — not inferred
+    // from the status code. Without this the case could go green on a null
+    // base the route never consulted.
+    expect(loadGraph).toHaveBeenCalledWith(SCENARIO);
+    await expect(loadGraph.mock.results[0]!.value).resolves.toBeNull();
+
+    // The load-bearing assertion is the ABSENCE OF A WRITE.
+    expect(append).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(422);
+    // By its SPECIFIC code and its SPECIFIC entity id — never merely "not 200",
+    // which an unrelated earlier refusal would also satisfy.
+    expect(res.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(res.json().details.violations).toEqual([
+      { code: "DUPLICATE_NODE_ID", count: 1, entity_ids: [DUPLICATED_ID] },
+    ]);
+    await app.close();
+  });
+
+  it("DISCRIMINATING TWIN: when the base read THROWS, the SAME graph is written — the degrade keys on an ABSENT base, never on a null one", async () => {
+    // Identical payload to the case above; the only difference is that the base
+    // is unreadable, so `baseGraphForInvariants` stays at its declared
+    // `undefined` and the check is observe-only. A blip must not lock a user
+    // out — but a fresh scenario is not a blip, and the pair pins that they are
+    // handled differently.
+    loadGraph.mockRejectedValueOnce(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: DUPLICATE_INTRODUCED });
+
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    // The write really did carry the violating graph — otherwise this case
+    // would agree with its twin for the wrong reason.
+    expect(append.mock.calls[0]![0].graph.nodes.filter(
+      (n: { id: string }) => n.id === DUPLICATED_ID,
+    )).toHaveLength(2);
+    await app.close();
+  });
 });

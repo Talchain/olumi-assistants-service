@@ -3,11 +3,41 @@
  * two callers for WHAT is being persisted.
  *
  * ── WHY THIS MODULE EXISTS (C3 closure) ────────────────────────────────────
- * `scenarios.graph` has TWO production writers, not one:
+ * `scenarios.graph` has THREE production writers. TWO of them go through this
+ * floor; the third does not, and saying so is the point — an earlier draft of
+ * this header said "TWO production writers, not one", which is the same
+ * false-absolute defect this module exists to refute, one remove down.
+ *
+ * MANIFEST, measured at 87cb9f4f over every `.ts` file under `src/` plus all
+ * 34 `.sql` files (written without a glob on purpose: the obvious spelling of
+ * that glob contains the sequence that closes a block comment):
  *   · `commit.ts` → `commitDirectAnswer` — a TURN commit: a composed
- *     `OlumiResponse` plus its graph, under BI-01 exactly-one-response.
+ *     `OlumiResponse` plus its graph, under BI-01 exactly-one-response.  ✅ here
  *   · `routes/assist.v1.scenario-graph-register.ts` — a REGISTRATION: no LLM,
- *     no composed response, no referee, `response_emitted: false`.
+ *     no composed response, no referee, `response_emitted: false`.      ✅ here
+ *   · `routes/assist.v1.scenario-versions.ts` — the RESTORE tier:
+ *     `service.restoreVersionAtomic` → `restore_model_version_atomic_v1`
+ *     → `UPDATE public.scenarios SET graph = p_graph`.       ❌ NOT ON THIS FLOOR
+ *   · `store_draft_graph` — zero production callers; the absence is guarded by
+ *     `context/__tests__/graph-identity-guards.test.ts`.                    n/a
+ *
+ * The third writer is LIVE and client-reachable, not dark: registered
+ * unconditionally at `server.ts:1214` (`POST /assist/v1/scenarios/
+ * :scenario_id/versions/restore`), `CEE_MODEL_VERSIONS_ENABLED` default ON
+ * (`config/index.ts:1372`), and the RPC's only content guard is emptiness.
+ * Restoring an older version carrying a duplicate node id into a currently-clean
+ * scenario is an INTRODUCED violation by this floor's own delta definition —
+ * refused on the two paths below, silently written on that one. Routing it here
+ * is OUT OF SCOPE for C3 and materially larger: that RPC owns graph + undo +
+ * version + head + event in a single statement.
+ *
+ * ⚠ HOW TO RE-DERIVE THIS LIST (do not trust the list — trust the sweep):
+ * `appendCheckedGraphWrite` and `store.append(` over `src/`, AND a `.sql` sweep
+ * for `SET graph = p_graph`. Scope the SQL half carefully: a
+ * `UPDATE public.scenarios` sweep MISSES the unqualified `UPDATE scenarios`
+ * form, which is how most of the `append_turn_atomic` family is written.
+ * `append_turn_atomic_v5` does not write `scenarios.graph` itself — it delegates
+ * to `_v4` — so the whole v2..v5 family reaches the column through this floor.
  *
  * Those answer DIFFERENT QUESTIONS, so they are not merged: `commitDirectAnswer`
  * requires an `OlumiResponse` and hardcodes `response_emitted: true`, and
@@ -83,8 +113,38 @@ export interface CheckedGraphAppendParams {
   /**
    * The graph as it stood BEFORE this write. Violations already present in it
    * are ABSORBED, never refused — only what this write INTRODUCES can fail it.
-   * Omitting it makes the check observe-only (no baseline ⟹ no delta ⟹ no
-   * refusal), which is what keeps a legacy-corrupt scenario editable.
+   *
+   * ⚠ THREE STATES, NOT TWO — and `null` is NOT the observe-only one. The
+   * degrade key in `checkPersistedGraphInvariants` is a STRICT
+   * `options.baseGraph === undefined` (`persisted-graph-invariants.ts:222`):
+   *
+   *   · `undefined` — NO BASELINE. Every violation is booked as inherited, so
+   *     the check is OBSERVE-ONLY and can never refuse. This is the DEGRADE,
+   *     reached when a caller cannot read the base at all (the register route's
+   *     base-read catch leaves its variable at the declared `undefined`).
+   *   · a stored graph — DELTA-SCOPED. Inherited violations absorbed by count,
+   *     only the surplus refuses. This keeps a legacy-corrupt scenario editable.
+   *   · `null` — ABSOLUTE, NOT delta-scoped. `null !== undefined`, so it takes
+   *     the delta branch, and `rawViolations(null)` is `[]`, so the baseline is
+   *     EMPTY and EVERY violation counts as introduced.
+   *
+   * The third state is not an edge case: `SupabaseSessionStore.loadGraph`
+   * returns `null` — never `undefined` — both for an absent scenario row and
+   * for a row whose `graph` column is NULL (`supabase-store.ts:1960`, `:1971`).
+   * A FIRST IMPORT INTO AN EMPTY SCENARIO IS THEREFORE FULLY FAIL-CLOSED, and
+   * that is the dominant import journey.
+   *
+   * THIS IS A DECISION, NOT AN ACCIDENT (C3 closure). A graph carrying a
+   * duplicate node id is structurally invalid; persisting it creates corruption
+   * every downstream reader must then tolerate, and the turn path has always
+   * refused exactly this. Prefer visible failure over confident wrongness. It is
+   * recorded here because it previously rested on an undocumented
+   * `null`/`undefined` distinction that no test could see — a `?? undefined` at
+   * either call site would silently convert the dominant import journey from
+   * fail-closed to write-anything, and the merged suite stayed green under it.
+   * Pinned by identity in
+   * `routes/__tests__/assist.v1.scenario-graph-register.test.ts`
+   * ("a FRESH scenario ... is ABSOLUTE" + its degrade twin).
    */
   readonly baseGraphForInvariants?: unknown;
   /** Free-form origin label for logs (`handler_id`, or a route name). */

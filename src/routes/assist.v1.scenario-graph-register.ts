@@ -437,6 +437,22 @@ export default async function route(app: FastifyInstance) {
           writesGraph: true,
           // Only what THIS registration introduces can refuse it — a scenario
           // whose stored graph is already invalid stays registrable.
+          //
+          // ⚠ EXCEPT ON A FRESH SCENARIO, WHERE THIS IS ABSOLUTE — a stated
+          // decision, not a side effect. `store.loadGraph` returns `null` (never
+          // `undefined`) for an absent scenario or a NULL `graph` column, and the
+          // floor's observe-only degrade keys on a STRICT `=== undefined`. So a
+          // `null` base takes the DELTA branch against an EMPTY baseline and
+          // every violation counts as introduced: A FIRST IMPORT INTO AN EMPTY
+          // SCENARIO IS FULLY FAIL-CLOSED (422), which is the dominant import
+          // journey. That is deliberate — `GraphStateIngressSchema` enforces
+          // neither node-id uniqueness nor edge referential integrity, so such
+          // imports previously received a silent 200 and stored a graph the turn
+          // path would refuse. The observe-only degrade is reached only by the
+          // base-READ-FAILURE catch above, which leaves this variable at its
+          // declared `undefined`. See the JSDoc on `baseGraphForInvariants` in
+          // `persist-graph-write.ts`; both branches are pinned by identity in
+          // this route's suite.
           baseGraphForInvariants,
           source: "graph_registration",
           write: {
