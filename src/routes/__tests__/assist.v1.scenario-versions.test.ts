@@ -81,8 +81,12 @@ vi.mock("../../config/index.js", async (importOriginal) => {
   return { ...actual, config: mockConfig.value };
 });
 
+// `warn` is HOISTED so the return-leg tests can assert the DISCLOSURE, not just
+// the status code: "admitted knowingly" is the whole of the widening, and an
+// unlogged admission is a silent one.
+const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
 vi.mock("../../utils/telemetry.js", () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  log: { info: vi.fn(), warn: logWarn, error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
@@ -140,6 +144,11 @@ const saveVersion = vi.fn();
 const restoreVersion = vi.fn();
 const restoreVersionAtomic = vi.fn();
 const getCurrentVersionPointer = vi.fn();
+// The HEAD record reader — the restore path's return-leg input. Distinct from
+// `getCurrentVersionPointer`, which ships the id only; this one ships the whole
+// record because the return-leg binding needs its provenance, undo pointer and
+// identity envelope.
+const getCurrentVersion = vi.fn();
 const compareVersions = vi.fn();
 
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
@@ -154,12 +163,17 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       restoreVersion,
       restoreVersionAtomic,
       getCurrentVersionPointer,
+      getCurrentVersion,
       compareVersions,
     }),
   };
 });
 
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
+// The REAL identity authority — the return-leg fixtures build the head's
+// envelope with the same function the route compares against, so the fixture
+// cannot drift away from the production hash. Not mocked anywhere in this file.
+import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 
 /** A stored version graph — distinct labels so identity-bound assertions can
  *  tell it apart from anything a client smuggles. */
@@ -264,6 +278,10 @@ beforeEach(() => {
     value: [summary({ id: VERSION_B, version_number: 2, graph_identity_hash: HASH_B }), summary()],
   });
   getCurrentVersionPointer.mockResolvedValue({ status: "ok", value: VERSION_B });
+  // DEFAULT: no head record. `isReturnLegRestore` returns false, so every test
+  // that does not deliberately construct a return leg exercises the unchanged
+  // fail-closed path.
+  getCurrentVersion.mockResolvedValue({ status: "ok", value: null });
   compareVersions.mockResolvedValue({
     status: "ok",
     value: {
@@ -333,7 +351,17 @@ beforeEach(() => {
       restored_from_version_id: VERSION_A,
     },
   });
-  restoreVersionAtomic.mockResolvedValue({
+  restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
+});
+
+/**
+ * A well-formed atomic-restore receipt. Extracted so the return-leg tests,
+ * which DO reach the RPC, cannot stub it with a shape the route's egress
+ * validation rejects — a `{}` there produces a 500 that looks exactly like a
+ * refusal and would have hidden the admission it was meant to prove.
+ */
+function atomicRestoreOk() {
+  return {
     status: "ok",
     value: {
       mutation_id: MUTATION_ID,
@@ -360,8 +388,8 @@ beforeEach(() => {
       analysis_invalidated_at: "2026-08-24T10:05:00.000Z",
       event_id: `model_version_restored_mutation_${MUTATION_ID}`,
     },
-  });
-});
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST
@@ -1287,27 +1315,95 @@ describe("POST /versions/restore — C8 persisted-graph invariants", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
-  // GATE 2 — THE RETURN LEG. The opposite-direction twin of the absorption
-  // test, whose absence is why the suite could not see a false guarantee.
+  // GATE 2 — THE RETURN LEG.
   //
-  // The RPC stores the pre-restore working graph as an undo version VERBATIM
-  // AND UNCHECKED (`20260824200000:363-376`), and there is NO separate undo
-  // route — undo IS an ordinary restore. So the two legs are asymmetric, and
-  // this pins the asymmetry rather than pretending it away.
+  // ⚠ THIS GATE USED TO PIN THE OPPOSITE OUTCOME, and the rewrite is
+  // deliberate rather than a deletion. The superseded test was named
+  // "ONE-WAY DOOR — escaping a corrupt scenario succeeds, and UNDOING that
+  // escape is REFUSED", and it said: *"If this ever returns 200, either the
+  // undo capture became checked or the baseline semantics changed; both are
+  // decisions that must be made deliberately."*
+  //
+  // ⭐ WHICH ONE HAPPENED: THE SECOND — the baseline semantics changed. The
+  // first (check the undo capture at write, and refuse the whole outward
+  // restore when the pre-restore graph would be unreturnable) was considered
+  // and REJECTED: it does not remove the trap, it inverts it, leaving the user
+  // trapped INSIDE the corruption with no escape at all, and it reverses this
+  // estate's own rationale that an absolute refusal on an already-invalid base
+  // "would make the scenario permanently uneditable" (`edit-graph.ts:2750-2755`).
+  //
+  // WHY THE SEMANTICS WERE WRONG: `introduced(target, current)` answers "does
+  // the target carry violations the current graph doesn't?" — the same question
+  // as "would this make the scenario worse" ONLY when the target is a NEW
+  // state. A target the scenario ALREADY HELD cannot make it worse. The delta
+  // check simply had no concept for the return leg.
+  //
+  // The four tests below are OPPOSITE-DIRECTION TWINS by construction: one
+  // admits, three refuse, and each refusal removes exactly one conjunct of the
+  // binding. A mutant that drops a conjunct REDs its own twin and nothing else.
   // ───────────────────────────────────────────────────────────────────────
 
-  it("ONE-WAY DOOR — escaping a corrupt scenario succeeds, and UNDOING that escape is REFUSED", async () => {
-    const CORRUPT = {
-      nodes: [
-        { id: "n1", label: "Take the job", kind: "option" },
-        { id: "n2", label: "Commute time", kind: "factor" },
-        { id: "n2", label: "Commute time (again)", kind: "factor" },
-      ],
-      edges: [],
-    };
+  /** A graph carrying a terminal structural violation (duplicate node id). */
+  const CORRUPT_GRAPH = {
+    nodes: [
+      { id: "n1", label: "Take the job", kind: "option" },
+      { id: "n2", label: "Commute time", kind: "factor" },
+      { id: "n2", label: "Commute time (again)", kind: "factor" },
+    ],
+    edges: [],
+  };
 
+  /**
+   * The head record for a scenario whose LAST canonical mutation was a restore
+   * of `undoVersionId`, leaving `heldGraph` as the working graph.
+   *
+   * The identity envelope is computed with the REAL authority the route uses,
+   * never hardcoded: the binding compares value + algorithm + all three
+   * versions, so a hand-written hash would make this fixture assert nothing the
+   * day any of them moves. The DISCRIMINATION lives in the twins below, which
+   * break exactly one conjunct each — not in the fixture.
+   */
+  function restoreHead(
+    undoVersionId: string,
+    heldGraph: unknown,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const identity = computeGraphIdentityHash(heldGraph as never);
+    if (identity === null) throw new Error("fixture: heldGraph has no identity");
+    return {
+      ...summary({
+        id: RESTORED_VERSION,
+        version_number: 3,
+        provenance: "restore",
+        creation_kind: "restore",
+        parent_version_id: undoVersionId,
+        restored_from_version_id: VERSION_B,
+        graph_identity_hash: identity.value,
+        hash_algorithm: identity.algorithm,
+        identity_projection_version: identity.projection_version,
+        identity_normaliser_version: identity.normaliser_version,
+        graph_schema_version: identity.graph_schema_version,
+        ...overrides,
+      }),
+      graph: heldGraph,
+    };
+  }
+
+  /** The undo row the RPC captured: the corrupt pre-restore working graph. */
+  function undoVersionIs() {
+    getVersion.mockResolvedValue({
+      status: "ok",
+      // 'Before restore' / provenance 'pre_restore' — the undo row's own shape.
+      value: {
+        ...summary({ label: "Before restore", provenance: "pre_restore" }),
+        graph: CORRUPT_GRAPH,
+      },
+    });
+  }
+
+  it("RETURN LEG — the door opens BOTH ways, and the SAME bytes are still refused when it is not a return leg", async () => {
     // ── OUTWARD LEG: corrupt working graph, restore a CLEAN version ──
-    loadGraph.mockResolvedValue(CORRUPT);
+    loadGraph.mockResolvedValue(CORRUPT_GRAPH);
     getVersion.mockResolvedValue({
       status: "ok",
       value: { ...summary(), graph: STORED_VERSION_GRAPH },
@@ -1318,26 +1414,188 @@ describe("POST /versions/restore — C8 persisted-graph invariants", () => {
     expect(outward.statusCode).toBe(200);
     expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
 
-    // ── RETURN LEG: the working graph is now clean, and the undo version the
-    // RPC just captured is the CORRUPT pre-restore graph. Undo = restore it.
+    // ⭐ PRECONDITION CONTROL, IN-TEST. Before asserting the admission, prove
+    // these exact return-leg bytes ARE refusable: with no head, the undo row is
+    // an ordinary restore target and the floor refuses it 422. Without this the
+    // 200 below could be a fixture that simply carries no violation, and the
+    // test would pass while asserting nothing (this estate's documented decay
+    // pattern — a discriminator whose precondition nothing pins).
     vi.clearAllMocks();
-    restoreVersionAtomic.mockResolvedValue({ status: "ok", value: {} });
+    restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
+    getCurrentVersion.mockResolvedValue({ status: "ok", value: null });
     loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
-    getVersion.mockResolvedValue({
+    undoVersionIs();
+    const notReturnLeg = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+    expect(notReturnLeg.statusCode).toBe(422);
+    expect(notReturnLeg.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+
+    // ── RETURN LEG: identical bytes, ONE variable changed — the head is now
+    // the restore whose undo pointer names this exact version.
+    vi.clearAllMocks();
+    restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
       status: "ok",
-      // 'Before restore' / provenance 'pre_restore' — the undo row's own shape.
-      value: { ...summary(), label: "Before restore", graph: CORRUPT },
+      value: restoreHead(VERSION_A, STORED_VERSION_GRAPH),
     });
     const undo = await post(await buildApp(), "/versions/restore", {
       version_id: VERSION_A,
     });
 
-    // ⭐ THE ASYMMETRY, PINNED. Not a bug report — a stated limit. If this ever
-    // returns 200, either the undo capture became checked or the baseline
-    // semantics changed; both are decisions that must be made deliberately.
-    expect(undo.statusCode).toBe(422);
-    expect(undo.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(undo.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+    // The undo goes through the SAME atomic RPC as any other restore — that is
+    // the founder's constraint (same version/hash/receipt truth), and it is why
+    // there is no undo route to assert against instead.
+    expect(restoreVersionAtomic.mock.calls[0][0].version_id).toBe(VERSION_A);
+
+    // ⭐ ADMITTED KNOWINGLY, NOT SILENTLY. The widening is real, so it must be
+    // disclosed by name with the violations it let through.
+    const admission = logWarn.mock.calls.find(
+      (c: unknown[]) =>
+        (c[0] as { event?: string } | undefined)?.event ===
+        "v5.scenario_versions.return_leg_admitted",
+    );
+    expect(admission).toBeDefined();
+    expect((admission![0] as { admitted: { code: string }[] }).admitted).toEqual([
+      expect.objectContaining({ code: "DUPLICATE_NODE_ID", entity_ids: ["n2"] }),
+    ]);
+    expect((admission![0] as { head_version_id: string }).head_version_id).toBe(
+      RESTORED_VERSION,
+    );
+  });
+
+  it("NOT the return leg — a `pre_restore` version the head does NOT name is still REFUSED", async () => {
+    // The binding is by IDENTITY, never by provenance: "a pre_restore row may be
+    // restored" would be a value predicate every legacy corrupt row satisfies,
+    // and would re-open the floor for the whole history (trap 19).
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "ok",
+      // The head IS a restore, and its working graph IS current — but its undo
+      // pointer names a DIFFERENT version than the one being restored.
+      value: restoreHead(VERSION_B, STORED_VERSION_GRAPH),
+    });
+
+    const res = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
     expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("HEAD HAS MOVED ON — a turn since the restore makes the undo NOT a return to a held state", async () => {
+    // The undo pointer matches, but the working graph is no longer the head's.
+    // Restoring the old snapshot now would introduce old corruption into a graph
+    // that has since changed — which is exactly what the floor exists to refuse.
+    loadGraph.mockResolvedValue(CURRENT_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "ok",
+      value: restoreHead(VERSION_A, STORED_VERSION_GRAPH),
+    });
+
+    const res = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  // ⭐ ENVELOPE DRIFT. Without these four cases, deleting ALL FOUR envelope
+  // conjuncts from the binding leaves the whole suite GREEN — every other
+  // return-leg fixture varies only the hash VALUE, so the envelope comparison
+  // is exercised but never DISCRIMINATES. That is precisely the defect class
+  // this PR exists to close (an admission branch whose guard nothing pins),
+  // sitting inside the fix for it.
+  //
+  // The precondition is what makes each case bite: the head's `graph_identity_hash`
+  // still MATCHES the working graph, so conjuncts 1-3 and the hash value all
+  // hold, and the drifted envelope field is the ONLY reason to refuse. A stale
+  // envelope means the head's hash was computed under a different projection /
+  // normaliser / schema / algorithm, so its equality with a freshly computed
+  // value is not evidence the graphs are the same — fail closed.
+  it.each([
+    ["hash_algorithm", "sha512"],
+    ["identity_projection_version", "identity.v0"],
+    ["identity_normaliser_version", "normaliser.v0"],
+    ["graph_schema_version", "graph.v0"],
+  ])("ENVELOPE DRIFT — a head whose %s no longer matches is NOT a return leg", async (field, stale) => {
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "ok",
+      value: restoreHead(VERSION_A, STORED_VERSION_GRAPH, { [field]: stale }),
+    });
+
+    const res = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("HEAD IS NOT A RESTORE — a `user_save` head with a parent pointer is not something to return FROM", async () => {
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "ok",
+      value: restoreHead(VERSION_A, STORED_VERSION_GRAPH, {
+        provenance: "user_save",
+      }),
+    });
+
+    const res = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("A HEAD-READ FAILURE FAILS CLOSED — it can only ever GRANT the widening, never refuse a restore", async () => {
+    // Two halves, because "fails closed" is two claims. (a) the return leg is
+    // refused when the head cannot be read; (b) an ORDINARY restore is
+    // unaffected by the same failure — this read must never be able to break a
+    // restore that would otherwise succeed.
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "error",
+      error: { code: "store_error", recoverable: true, message: "unreadable" },
+    });
+    const refused = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
+    loadGraph.mockResolvedValue(CURRENT_GRAPH);
+    getVersion.mockResolvedValue({
+      status: "ok",
+      value: { ...summary(), graph: STORED_VERSION_GRAPH },
+    });
+    getCurrentVersion.mockResolvedValue({
+      status: "error",
+      error: { code: "store_error", recoverable: true, message: "unreadable" },
+    });
+    const ordinary = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+    expect(ordinary.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
   });
 
   it("CONTROL — the clean default version still restores, and the check ran on the PROJECTED bytes", async () => {
