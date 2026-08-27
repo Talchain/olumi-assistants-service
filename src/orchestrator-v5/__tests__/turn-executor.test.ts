@@ -55,6 +55,36 @@ vi.mock('../session/index.js', () => ({
       (global as any).__test_readFactsFor_calls.push([...rowIds]);
       return (global as any).__test_prior_facts ?? [];
     },
+    readFactsWithTurnFor: async (rowIds: readonly string[]) => {
+      (global as any).__test_readFactsWithTurnFor_calls =
+        (global as any).__test_readFactsWithTurnFor_calls || [];
+      (global as any).__test_readFactsWithTurnFor_calls.push([...rowIds]);
+      return ((global as any).__test_prior_facts ?? []).map(
+        (fact: unknown, index: number) => ({
+          fact,
+          turn_id: rowIds[index] ?? rowIds[0] ?? `mock-turn-row-${index}`,
+          fact_row_id: `mock-fact-row-${index}`,
+          fact_created_at: '2026-04-23T10:00:00.000Z',
+        }),
+      );
+    },
+    readScenarioRunAnalysisFactsFor: async (
+      _scenarioId: string,
+      limit: number,
+    ) => {
+      const facts = ((global as any).__test_prior_facts ?? []).filter(
+        (fact: { fact_type?: unknown; noop?: unknown }) =>
+          fact.fact_type === 'run_analysis' && fact.noop === false,
+      );
+      return {
+        facts: facts.slice(0, limit).map((fact: unknown, index: number) => ({
+          fact,
+          fact_row_id: `mock-fact-row-${index}`,
+          fact_created_at: '2026-04-23T10:00:00.000Z',
+        })),
+        total_count: facts.length,
+      };
+    },
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async (_scenarioId: string, graph: unknown) => {
@@ -97,6 +127,7 @@ vi.mock('../session/index.js', () => ({
     delete (global as any).__test_prior_turns;
     delete (global as any).__test_prior_facts;
     delete (global as any).__test_readFactsFor_calls;
+    delete (global as any).__test_readFactsWithTurnFor_calls;
   },
 }));
 
@@ -1245,6 +1276,14 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
     const PRIOR_TURN_ID_CLIENT = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
     beforeEach(() => {
+      (global as any).__test_persisted_graph = {
+        nodes: [
+          { id: 'goal-main', kind: 'goal', label: 'Choose well' },
+          { id: 'opt-a', kind: 'option', label: 'Option A' },
+          { id: 'opt-b', kind: 'option', label: 'Option B' },
+        ],
+        edges: [],
+      };
       (global as any).__test_prior_turns = [
         {
           id: PRIOR_ROW_ID,
@@ -1275,14 +1314,14 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       ];
     });
 
-    it('calls readFactsFor with the DB row id (not the client turn_id)', async () => {
+    it('calls readFactsWithTurnFor with the DB row id (not the client turn_id)', async () => {
       const routingAdapter = mockRoutingAdapter(async () => mkTextResult('ok'));
       await runTurnExecutor(
         { ...BASE_PAYLOAD, stage: 'analyse', message: 'what do the results mean?' },
         'req-fallback-id',
         { routingAdapter },
       );
-      const calls = (global as any).__test_readFactsFor_calls as string[][];
+      const calls = (global as any).__test_readFactsWithTurnFor_calls as string[][];
       expect(calls).toBeDefined();
       expect(calls).toHaveLength(1);
       expect(calls[0]).toEqual([PRIOR_ROW_ID]);

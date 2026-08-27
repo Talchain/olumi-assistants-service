@@ -117,7 +117,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // for exactly the lane-34 reason above (same seam, plural form).
     // Deliberate, reviewed; migrate with the frame-consumer audit, do not
     // add more.
-    'src/orchestrator-v5/turn-executor.ts': 5, // approved assembly seam (frozen file)
+    // System B durable analysis authority: +1 call (import + five calls). The
+    // added derivation stays inside the approved TurnExecutor assembly seam and
+    // applies the existing freshness rule to the complete scenario-scoped fact
+    // snapshot used only by ContextPack/model reasoning. Reusing the hot-window
+    // policy result would lose >20-turn return continuity; replacing it would
+    // change deterministic policy outside System B ownership.
+    'src/orchestrator-v5/turn-executor.ts': 6,
     // 2026-07-22 dead-noop deletion: 3 → 2 — the deterministic no-op explanation
     // chip-click dispatch (`buildProjectionInputs`, removed as dead code
     // post-#619) held one of the three references (its own ad-hoc freshness
@@ -208,7 +214,14 @@ const EXPECTED: Record<string, Record<string, number>> = {
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
-    'src/orchestrator-v5/turn-executor.ts': 3, // approved assembly seam (frozen file)
+    // System B durable analysis authority: +1 call (import + three calls).
+    // The new call remains inside the already-approved TurnExecutor assembly
+    // seam and selects from the complete scenario-scoped fact snapshot solely
+    // for ContextPack/model reasoning. It cannot reuse the existing hot-window
+    // policy state without either losing >20-turn return continuity or changing
+    // chips/recovery/finalisation policy owned by System A. No new caller file
+    // or selector implementation is introduced.
+    'src/orchestrator-v5/turn-executor.ts': 4,
   },
   projectRecentChanges: {
     'src/orchestrator-v5/context/recent-changes.ts': 1, // authority (definition)

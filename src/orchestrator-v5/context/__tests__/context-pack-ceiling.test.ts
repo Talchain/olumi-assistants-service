@@ -52,6 +52,8 @@ import {
 import { analysisSummaryFixture, priorTurnsFixture } from './context-budget-fixtures.js';
 import type { CompactEdge, CompactNode, GraphV3Compact } from '../../../orchestrator/context/graph-compact.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
+import { measureModelFacingContextPackChars } from '../model-facing-context-pack.js';
+import { buildUserMessage } from '../../routing/route-with-tool-use.js';
 
 const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
@@ -150,7 +152,7 @@ describe('whole-pack context ceiling — overflow determinism (defect 3)', () =>
     // somewhere to land.
     const small = assemblePack({ ...OVERFLOW, turns: CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS });
     expect(
-      JSON.stringify(small).length,
+      measureModelFacingContextPackChars(small),
       'precondition: the floor-sized window must fit, else this fixture tests the floor, not the trim',
     ).toBeLessThanOrEqual(TOTAL_BUDGET!);
 
@@ -166,7 +168,7 @@ describe('whole-pack context ceiling — overflow determinism (defect 3)', () =>
     ).toBeGreaterThan(TOTAL_BUDGET!);
 
     // 1. The pack fits.
-    expect(JSON.stringify(pack).length).toBeLessThanOrEqual(TOTAL_BUDGET!);
+    expect(measureModelFacingContextPackChars(pack)).toBeLessThanOrEqual(TOTAL_BUDGET!);
     // 2. Something was actually cut (never a vacuous pass).
     expect(shown).toBeLessThan(CONTEXT_PACK_RECENT_TURNS_CAP);
     expect(shown).toBeGreaterThanOrEqual(CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS);
@@ -215,7 +217,7 @@ describe('whole-pack context ceiling — overflow determinism (defect 3)', () =>
     // The whole-pack accounting that made the cut fire.
     expect(event.pack_total_budget).toBe(TOTAL_BUDGET);
     expect(event.pack_total_chars_before as number).toBeGreaterThan(TOTAL_BUDGET!);
-    expect(event.pack_total_chars_after).toBe(JSON.stringify(pack).length);
+    expect(event.pack_total_chars_after).toBe(measureModelFacingContextPackChars(pack));
     // The trim reached the target, so it did not stop at its floor.
     expect(event.floor_reached).toBeUndefined();
   });
@@ -229,7 +231,7 @@ describe('whole-pack context ceiling — the retention floor', () => {
     // trim path and proves nothing about the floor.
     const atFloor = assemblePack({ ...PATHOLOGICAL, turns: CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS });
     expect(
-      JSON.stringify(atFloor).length,
+      measureModelFacingContextPackChars(atFloor),
       'precondition: this fixture must be un-fittable even at the floor',
     ).toBeGreaterThan(TOTAL_BUDGET!);
 
@@ -238,7 +240,7 @@ describe('whole-pack context ceiling — the retention floor', () => {
     // Exactly the floor — never fewer, even though the pack is still over.
     expect(pack.conversation.recent_turns).toHaveLength(CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS);
     expect(pack.conversation.recent_turns.map((t) => t.turn_id)).toEqual(['t-prev-0', 't-prev-1']);
-    expect(JSON.stringify(pack).length).toBeGreaterThan(TOTAL_BUDGET!);
+    expect(measureModelFacingContextPackChars(pack)).toBeGreaterThan(TOTAL_BUDGET!);
 
     // Telemetry is honest about BOTH facts: a cut happened, and it did not fit.
     const events = ceilingEvents();
@@ -387,7 +389,7 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
       CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
     );
     expect(
-      JSON.stringify(control).length,
+      measureModelFacingContextPackChars(control),
       'precondition: the floor-sized dense comparator must be under the ceiling',
     ).toBeLessThanOrEqual(TOTAL_BUDGET!);
 
@@ -468,6 +470,130 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
     );
     // `summarised` rides the window object the trim rewrites — it must survive.
     expect(trimmed.conversation.window?.summarised).toBe(12);
+  });
+});
+
+describe('whole-pack context ceiling — authorised model bytes only', () => {
+  it('withholds a huge Decision Review before budgeting so it cannot evict conversation', () => {
+    const coaching = {
+      draft_coaching: {
+        scenario_id: BASE_PAYLOAD.scenario_id,
+        produced_at: '2026-04-29T00:00:00.000Z',
+        summary: 'DRAFT_COACHING_MUST_SURVIVE',
+        strengthen_items: [],
+        widening_log: null,
+        bias_signals: null,
+      },
+      decision_review: {
+        produced_at: '2026-04-30T00:00:00.000Z',
+        narrative_summary: `WITHHELD_DECISION_REVIEW_CANARY_${'x'.repeat(100_000)}`,
+        nested: {
+          conclusion: 'WITHHELD_NESTED_REVIEW_CANARY',
+        },
+      },
+      last_coaching_signal: {
+        signal_id: 'FIRST_ANALYSIS_COMPLETE' as const,
+        turn_id: 'turn-signal-kept',
+        produced_at: '2026-04-30T00:00:01.000Z',
+      },
+    } as const;
+    const common = {
+      payload: BASE_PAYLOAD,
+      priorTurns: fatTurns(CONTEXT_PACK_RECENT_TURNS_CAP),
+      priorTurnsTotal: CONTEXT_PACK_RECENT_TURNS_CAP,
+      priorFacts: [],
+      graphContext: { status: 'canonical' as const },
+      compactedGraph: bulkyCompactGraph(3, 20),
+      compactedConstraints: null,
+      analysis: analysisSummaryFixture(),
+      displayAnalysisSource: analysisSummaryFixture(),
+      coaching,
+    };
+
+    const withheld = assembleContextPack({
+      ...common,
+      modelFacingClaimSafety: {
+        status: 'withheld',
+        constraintVerdictState: 'unevaluated',
+      },
+    });
+
+    expect(withheld.coaching.decision_review).toBeNull();
+    expect(withheld.conversation.recent_turns).toHaveLength(
+      CONTEXT_PACK_RECENT_TURNS_CAP,
+    );
+    expect(measureModelFacingContextPackChars(withheld)).toBeLessThanOrEqual(
+      TOTAL_BUDGET!,
+    );
+    expect(JSON.stringify(withheld)).not.toContain(
+      'WITHHELD_DECISION_REVIEW_CANARY',
+    );
+    const withheldPrompt = buildUserMessage(withheld, 'same current message');
+    expect(withheldPrompt).not.toContain('WITHHELD_DECISION_REVIEW_CANARY');
+    expect(withheldPrompt).not.toContain('WITHHELD_NESTED_REVIEW_CANARY');
+    expect(withheldPrompt).toContain('DRAFT_COACHING_MUST_SURVIVE');
+    expect(withheldPrompt).toContain('turn-signal-kept');
+    expect(ceilingEvents()).toHaveLength(0);
+
+    const permitted = assembleContextPack({
+      ...common,
+      modelFacingClaimSafety: { status: 'permitted' },
+    });
+    const [permittedCut] = ceilingEvents();
+    expect(permitted.coaching.decision_review).toBe(coaching.decision_review);
+    expect(permitted.conversation.recent_turns).toHaveLength(
+      CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+    );
+    expect(permittedCut?.floor_reached).toBe(true);
+    expect(permittedCut?.pack_total_chars_after as number).toBeGreaterThan(
+      TOTAL_BUDGET!,
+    );
+  });
+
+  it('does not let a huge hidden raw analysis evict model-facing conversation', () => {
+    const displayAnalysis = analysisSummaryFixture();
+    const smallRaw = analysisSummaryFixture();
+    const hugeRaw = {
+      ...smallRaw,
+      constraint_infeasible_note: `RAW_HOT_ANALYSIS_CANARY_${'z'.repeat(1_900_000)}`,
+    };
+    const common = {
+      payload: BASE_PAYLOAD,
+      priorTurns: fatTurns(CONTEXT_PACK_RECENT_TURNS_CAP),
+      priorTurnsTotal: CONTEXT_PACK_RECENT_TURNS_CAP,
+      priorFacts: [],
+      graphContext: { status: 'canonical' as const },
+      compactedGraph: bulkyCompactGraph(3, 20),
+      compactedConstraints: null,
+      displayAnalysisSource: displayAnalysis,
+      modelFacingClaimSafety: { status: 'permitted' as const },
+    };
+    const control = assembleContextPack({
+      ...common,
+      analysis: smallRaw,
+    });
+    const pack = assembleContextPack({
+      ...common,
+      analysis: hugeRaw,
+    });
+
+    expect(JSON.stringify(pack.analysis)).toContain('RAW_HOT_ANALYSIS_CANARY');
+    expect(pack.conversation.recent_turns).toHaveLength(
+      CONTEXT_PACK_RECENT_TURNS_CAP,
+    );
+    expect(control.conversation.recent_turns).toHaveLength(
+      CONTEXT_PACK_RECENT_TURNS_CAP,
+    );
+    expect(buildUserMessage(pack, 'same current message')).toBe(
+      buildUserMessage(control, 'same current message'),
+    );
+    expect(buildUserMessage(pack, 'same current message')).not.toContain(
+      'RAW_HOT_ANALYSIS_CANARY',
+    );
+    expect(pack.display_analysis).toEqual(control.display_analysis);
+    expect(pack.focus).toEqual(control.focus);
+    expect(pack.context_budget).toEqual(control.context_budget);
+    expect(ceilingEvents()).toHaveLength(0);
   });
 });
 

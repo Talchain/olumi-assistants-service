@@ -121,6 +121,7 @@ function baseRunAnalysisFact(): Record<string, unknown> {
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
       graph_hash_at_run: READY_GRAPH_HASH,
@@ -235,17 +236,39 @@ function makeStore(): Record<string, unknown> {
       turnRowIds.flatMap((id) => factsByTurnRowId[id] ?? []),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.flatMap((id) =>
-        (factsByTurnRowId[id] ?? []).map((fact) => ({
+        (factsByTurnRowId[id] ?? []).map((fact, index) => ({
           fact,
           turn_id: id,
-          fact_created_at: new Date(Date.now() - 9_000_000).toISOString(),
+          fact_row_id: `${id}-analysis-fact-${index}`,
+          fact_created_at: '2026-08-27T10:00:00.000Z',
         })),
       ),
-    // SCENARIO-SCOPED: newest non-noop run_analysis fact across ALL turns.
+    // Retired carrier canary: one-source convergence must not call this.
     readNewestAnalysisFactFor: async () => {
+      throw new Error('retired newest-analysis query was called');
+    },
+    // ONE exact-count scenario snapshot supplies both claim-safety and
+    // reasoning consumers. The payload object and persisted identity match the
+    // hot-window view when that parent turn is loaded.
+    readScenarioRunAnalysisFactsFor: async (
+      _scenarioId: string,
+      limit: number,
+    ) => {
       if (allReadsFail || scenarioReadFails) throw new Error("degraded");
-      const all = Object.values(factsByTurnRowId).flat();
-      return all.find((f) => f.fact_type === 'run_analysis' && f.noop === false) ?? null;
+      const facts = Object.entries(factsByTurnRowId).flatMap(
+        ([turnRowId, candidates]) =>
+          candidates
+            .filter(
+              (fact) =>
+                fact.fact_type === 'run_analysis' && fact.noop === false,
+            )
+            .map((fact, index) => ({
+              fact,
+              fact_row_id: `${turnRowId}-analysis-fact-${index}`,
+              fact_created_at: '2026-08-27T10:00:00.000Z',
+            })),
+      );
+      return { facts: facts.slice(0, limit), total_count: facts.length };
     },
     loadGraph: async () => persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: persistedGraph, briefText: null }),
@@ -587,25 +610,12 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(provenanceOnTheWire(body)).toBe('scenario_fact');
     });
 
-    it('KNOWN GAP, PINNED: a FULLY degraded store still fails OPEN', async () => {
-      // ⚠ THIS IS A RECORDED DEFECT, NOT A BLESSING — and it is pinned rather
-      // than quietly left undiscovered, so it fails loud in BOTH directions:
-      // closing it turns this test red and forces a deliberate edit here.
-      //
+    it('a FULLY degraded short store fails closed without inventing analysis existence', async () => {
       // With the window read, the COUNT read and the scenario read all failing,
-      // `readMayNameLeadingOptionVerdict` cannot arm its fail-closed guard —
-      // that guard requires `windowTruncated`, which requires a
-      // `prior_turns_total` that a degraded `countTurns` cannot supply — so it
-      // reaches the "honest true" branch on a scenario that DOES have a
-      // withheld analysis.
-      //
-      // NOT INTRODUCED BY THE HOIST, and not fixable at this seam. It lives in
-      // the canonical derivation, and the EXECUTE path has the identical
-      // exposure because it calls the same function with the same scope.
-      // Patching it here would fork the derivation — the exact
-      // second-derivation defect (CLAUDE.md trap #12) the resolver exists to
-      // avoid. It needs its own change, in `claim-safety-read.ts`, with the
-      // over-suppression controls that a shared-path change requires.
+      // the canonical reader cannot prove whether an analysis exists. The
+      // scenario is short, but non-truncation is not evidence of emptiness
+      // when the fact page itself is unreadable. The one shared derivation now
+      // withholds and records that distinct reason.
       // BOTH flags: the gap needs the WINDOW read to fail as well. With only
       // the count and scenario reads down, the window still carries the
       // withheld fact and the permission is correctly `false` — which is why
@@ -613,12 +623,8 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       turnReadFails = true;
       allReadsFail = true;
       const { body } = await postTurn(app, 'Make the model better');
-      expect(
-        permissionOnTheWire(body),
-        'if this is now `false`, the residual fail-open has been CLOSED — good. Update this pin ' +
-          'and the note in turn-claim-safety.ts rather than deleting the test.',
-      ).toBe(true);
-      expect(provenanceOnTheWire(body)).toBe('no_analysis_exists');
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(provenanceOnTheWire(body)).toBe('fail_closed_unavailable');
     });
 
     it('a SYSTEM EVENT withholds — the one family that cannot build a turn context', async () => {

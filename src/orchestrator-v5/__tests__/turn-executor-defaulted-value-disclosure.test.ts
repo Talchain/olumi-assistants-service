@@ -110,7 +110,31 @@ function enrichmentWithoutDefaults(): Record<string, unknown> {
  * Which enrichment the mocked store hands back on this test. A module-scoped
  * switch because `vi.mock` is hoisted and cannot close over per-test state.
  */
-let enrichmentForTurn: Record<string, unknown> = REAL_ENRICHMENT;
+let priorAnalysisFactForTurn: HandlerFact;
+
+function setEnrichmentForTurn(enrichment: Record<string, unknown>): void {
+  priorAnalysisFactForTurn = {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_hubspot',
+      summary: 'Prior analysis.',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
+      graph_hash_at_run: READY_GRAPH_HASH,
+      computed_at: '2026-08-13T19:29:00.000Z',
+      win_probabilities: { opt_hubspot: 0.96, opt_hold: 0.02 },
+      // VERBATIM producer envelope — nothing is constructed here.
+      enrichment,
+    },
+  } as unknown as HandlerFact;
+}
+
+setEnrichmentForTurn(REAL_ENRICHMENT);
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -130,27 +154,25 @@ vi.mock('../session/index.js', () => ({
         created_at: '2026-08-13T19:30:00.000Z',
       },
     ],
-    readFactsFor: async () => [
+    readFactsFor: async () => [priorAnalysisFactForTurn],
+    readFactsWithTurnFor: async () => [
       {
-        fact_type: 'run_analysis' as const,
-        fact_version: 1,
-        noop: false,
-        result: {
-          scenario_id: SCENARIO_ID,
-          leading_option_id: 'opt_hubspot',
-          summary: 'Prior analysis.',
-          constraint_verdict: {
-            may_name_leading_option: true,
-            constraint_verdict_state: 'evaluated_feasible' as const,
-          },
-          graph_hash_at_run: READY_GRAPH_HASH,
-          computed_at: new Date(Date.now() - 60_000).toISOString(),
-          win_probabilities: { opt_hubspot: 0.96, opt_hold: 0.02 },
-          // VERBATIM producer envelope — nothing is constructed here.
-          enrichment: enrichmentForTurn,
-        },
+        fact: priorAnalysisFactForTurn,
+        turn_id: 'turn-prev',
+        fact_row_id: 'fact-prev',
+        fact_created_at: '2026-08-13T19:29:00.000Z',
       },
     ],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [
+        {
+          fact: priorAnalysisFactForTurn,
+          fact_row_id: 'fact-prev',
+          fact_created_at: '2026-08-13T19:29:00.000Z',
+        },
+      ],
+      total_count: 1,
+    }),
     invalidateScoped: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -204,7 +226,7 @@ let events: Event[] = [];
 
 beforeEach(() => {
   events = [];
-  enrichmentForTurn = REAL_ENRICHMENT;
+  setEnrichmentForTurn(REAL_ENRICHMENT);
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 afterEach(() => {
@@ -277,7 +299,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
    * pass all three assertions above.
    */
   it('adds NOTHING when the same run defaulted nothing', async () => {
-    enrichmentForTurn = enrichmentWithoutDefaults();
+    setEnrichmentForTurn(enrichmentWithoutDefaults());
 
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'how solid is this?' },
@@ -408,7 +430,7 @@ describe('turn-executor F6 — the fact basis and the same-run guard', () => {
   it('discloses THIS turn’s defaults, not the previous run’s', async () => {
     // prior_facts: same capture, defaults REMOVED — so any disclosure that
     // appears can only have come from this turn's own fact.
-    enrichmentForTurn = enrichmentWithoutDefaults();
+    setEnrichmentForTurn(enrichmentWithoutDefaults());
 
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'run the analysis', turn_class: 'decide', stage: 'analyse' },
@@ -428,28 +450,26 @@ describe('turn-executor F6 — the fact basis and the same-run guard', () => {
   });
 
   /**
-   * ⭐ THE SAME-RUN GUARD. When the request body carries `analysis_state`, the
-   * numbers on screen describe the REQUEST run while any fact-sourced signal
-   * describes a PRIOR one. Pairing them would let the disclosure qualify a
-   * different run than the numbers beside it — or invent a caveat about a run
-   * that defaulted nothing. The four existing selector call sites all carry
-   * this condition; so must this one.
+   * Request analysis_state remains accepted for wire compatibility but cannot
+   * replace the canonical persisted run or suppress its caveat. Otherwise a
+   * caller could make canonical defaulted inputs disappear from the answer by
+   * attaching unrelated analysis bytes.
    */
-  it('stands down when the analysis came from the request body', async () => {
-    enrichmentForTurn = REAL_ENRICHMENT; // prior facts DO carry defaults
+  it('request analysis_state cannot suppress the canonical run disclosure', async () => {
+    setEnrichmentForTurn(REAL_ENRICHMENT); // canonical fact carries defaults
 
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'how solid is this?' },
       'req-f6-same-run-guard',
       {
         routingAdapter: mockRoutingAdapter(STABILITY_LEAK),
-        // Request-sourced analysis ⇒ analysisStateSource === 'request'.
+        // Caller-only analysis is telemetry-compatible, not reasoning authority.
         analysisState: { analysis_status: 'completed' } as never,
       },
     );
 
     const text = response.assistant_text ?? '';
-    expect(text).not.toContain(DEFAULTED_DISCLOSURE_TAIL);
-    expect(egressEvent()).toBeUndefined();
+    expect(occurrences(text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
+    expect(egressEvent()).toBeDefined();
   });
 });

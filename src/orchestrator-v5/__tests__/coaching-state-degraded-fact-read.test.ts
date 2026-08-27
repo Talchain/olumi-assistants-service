@@ -79,6 +79,9 @@ function runAnalysisFact(graphHash: string): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: BASE.scenario_id,
+      leading_option_id: 'opt-example',
+      summary: 'Prior analysis',
       graph_hash_at_run: graphHash,
       computed_at: '2026-08-15T00:00:00.000Z',
     },
@@ -91,7 +94,12 @@ const analysisSignals = (ctx: Awaited<ReturnType<typeof buildTurnContext>>) =>
 describe('buildTurnContext coaching_state — a degraded fact read is not "analysis_missing"', () => {
   it('DEGRADED read: no active analysis_missing signal is derived (or persisted)', async () => {
     const store = {
-      ...createNoopSessionStore({ priorTurns: [handlerTurn() as never] }),
+      ...createNoopSessionStore({
+        priorTurns: [handlerTurn() as never],
+        throwOnScenarioAnalysisFactRead: new SessionReadError('DB offline', {
+          code: '57P03',
+        }),
+      }),
       readFactsFor: async () => {
         throw new SessionReadError('DB offline', { code: '57P03' });
       },
@@ -105,6 +113,7 @@ describe('buildTurnContext coaching_state — a degraded fact read is not "analy
     // nothing about the degraded path at all.
     expect(ctx.prior_facts).toEqual([]);
     expect(ctx.prior_facts_read_ok).toBe(false);
+    expect(ctx.scenario_analysis_fact_set.status).toBe('degraded');
 
     // The defect, stated as the product harm: this is the signal that would be
     // committed into the `coaching_state` column and replayed forward.
@@ -154,10 +163,11 @@ describe('buildTurnContext coaching_state — a degraded fact read is not "analy
     // comparison rather than from the degraded branch — which is what
     // distinguishes this arm from the degraded one by IDENTITY (a different
     // reason code), not merely by the absence of a signal.
-    const store = {
-      ...createNoopSessionStore({ priorTurns: [handlerTurn() as never] }),
-      readFactsFor: async () => [runAnalysisFact('abc123')],
-    };
+    const fact = runAnalysisFact('abc123');
+    const store = createNoopSessionStore({
+      priorTurns: [handlerTurn() as never],
+      facts: [fact],
+    });
     const ctx = await buildTurnContext(BASE, 'req-coaching-fact', {
       sessionStore: store,
     });

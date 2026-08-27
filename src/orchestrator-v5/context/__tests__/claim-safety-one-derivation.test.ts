@@ -153,12 +153,26 @@ describe('the permission and the state come from ONE selection (B2)', () => {
     });
   });
 
-  it('both no-selection branches report a NULL state — nothing is invented', () => {
-    // No analysis anywhere: the honest `true`, and no cause to name.
+  it('all no-selection branches report a NULL state — nothing is invented', () => {
+    // A successful scenario read proved no analysis exists: the honest `true`,
+    // and no cause to name.
     expect(readMayNameLeadingOptionVerdict([], scopeWith(null, false))).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: null,
       provenance: 'no_analysis_exists',
+    });
+    // A failed read on a short scenario does NOT prove emptiness. A malformed
+    // sibling row can make the whole page unreadable while an analysis exists.
+    expect(
+      readMayNameLeadingOptionVerdict([], {
+        newestAnalysisFact: null,
+        readOk: false,
+        windowTruncated: false,
+      }),
+    ).toEqual({
+      may_name_leading_option: false,
+      constraint_verdict_state: null,
+      provenance: 'fail_closed_unavailable',
     });
     // The degraded fail-closed branch: we withhold precisely BECAUSE we could
     // not look, so a named cause here would be a fabricated one.

@@ -529,6 +529,7 @@ const ContextPackFocusElementSchema = z
       'not_in_analysis',
       'ambiguous_label',
       'analysis_not_current',
+      'analysis_withheld',
       'no_analysis',
     ]),
     analysis: ContextPackFocusAnalysisSchema.optional(),

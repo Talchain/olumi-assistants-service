@@ -75,9 +75,8 @@
  * alter a wire byte; a spurious `true` disarms the alarm on a real leak. The
  * asymmetry is not close, so this module never answers `true` on its own.
  *
- * ⚠ BUT DO NOT READ THAT AS "A DEGRADED STORE WITHHOLDS" — IT DOES NOT, AND
- * THE SENTENCE THAT USED TO SIT HERE CLAIMED IT DID. Measured, not assumed
- * (the claim was written first and the test refuted it):
+ * ⭐ A DEGRADED STORE NOW WITHHOLDS IN THE ONE CANONICAL DERIVATION. Measured,
+ * not assumed:
  *
  *   - `buildTurnContext` NEVER THROWS on a read failure. Every fetch inside it
  *     is individually guarded and degrades to an empty/null value. So the
@@ -87,20 +86,15 @@
  *   - A degraded WINDOW read is safe for a different reason than fail-closing:
  *     the scenario-scoped read still supplies the fact, so the verdict is a
  *     real `scenario_fact`. Pinned.
- *   - ⚠ A FULLY degraded store (window AND count AND scenario read all
- *     failing) yields `true` / `no_analysis_exists`. This is a REAL residual
- *     fail-open. It is PRE-EXISTING, it lives in the canonical derivation
- *     (`readMayNameLeadingOptionVerdict`'s fail-closed guard needs
- *     `windowTruncated`, which needs a `prior_turns_total` that a degraded
- *     `countTurns` cannot supply), and the EXECUTE path has exactly the same
- *     exposure because it calls the same function with the same scope.
+ *   - A FULLY degraded store (window AND count AND scenario read all failing)
+ *     yields `false` / `fail_closed_unavailable`, even on a short scenario.
+ *     Non-truncation cannot turn unread facts into authoritative emptiness: an
+ *     older malformed row can invalidate the page while a valid withheld
+ *     analysis exists. The change lives in `readMayNameLeadingOptionVerdict`,
+ *     so execute and non-execute exits share the same conservative answer.
  *
- * It is deliberately NOT fixed here. Forking the derivation to patch it at this
- * seam is precisely the second-derivation defect (CLAUDE.md trap #12) this
- * module exists to avoid, and changing it in `claim-safety-read.ts` moves the
- * execute path too — a wider blast radius that needs its own over-suppression
- * controls and its own change. It is pinned by a test so it FAILS LOUD in both
- * directions: closing it turns that test red and forces a deliberate edit.
+ * This module still does not patch locally. It consumes the one canonical
+ * derivation, avoiding the second-derivation defect it exists to prevent.
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';

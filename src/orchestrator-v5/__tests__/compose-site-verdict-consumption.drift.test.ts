@@ -949,6 +949,10 @@ function enumerateComposeSites(source: string): string[] {
 
 describe('LAYER 2 drift — every compose site declares a verdict stance', () => {
   const source = readFileSync(TURN_EXECUTOR, 'utf8');
+  const assemblerSource = readFileSync(
+    resolve(HERE, '../context/context-pack-assembler.ts'),
+    'utf8',
+  );
   const sources: Record<string, string> = Object.fromEntries(
     Object.entries(SCANNED_FILES).map(([label, path]) => [label, readFileSync(path, 'utf8')]),
   );
@@ -1432,6 +1436,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       qualify('turn-executor.ts', 'coachGuarded.assistant_text'),
       qualify('turn-executor.ts', 'converseGuarded.assistant_text'),
     ]);
+    expect(source).toContain(
+      'modelFacingClaimSafety: mayNameLeadingOptionForRun',
+    );
     // Non-vacuity, same rationale as the gated check above. `gated_by_input`
     // asserts something about the PACK, so the evidence is the projection call
     // at the assembly seam — not the compose site, which by definition has no
@@ -1441,42 +1448,40 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // a register still claiming an input gate the pack no longer has — the
     // honest-label-overwritten-by-a-false-one failure (trap #14). The second
     // entry is the 2026-07-27 conversation-history gate.
-    expect(source).toContain('projectDisplayAnalysisForWithheldClaim(');
+    expect(assemblerSource).toContain('projectDisplayAnalysisForWithheldClaim(');
     expect(
-      source,
-      'the conversation-history input gate is gone from turn-executor.ts. Prior-turn ' +
+      assemblerSource,
+      'the conversation-history input gate is gone from the ContextPack assembler. Prior-turn ' +
         'assistant prose would again reach the model verbatim on a withheld turn — the ' +
         'channel WALK-HISTORIC-PREP-2026-07-27.md §10 measured leaking 2/5 AFTER #721 and ' +
         '#723, and the one that self-reinforces.',
-    ).toContain('conversation: projectConversationForWithheldClaim(');
+    ).toContain('projectConversationForWithheldClaim(conversation)');
     // The THIRD gate at that chokepoint (2026-07-27): the rolling summary.
     expect(
-      source,
-      'the rolling-summary input gate is gone from turn-executor.ts. The stored four-slot ' +
+      assemblerSource,
+      'the rolling-summary input gate is gone from the ContextPack assembler. The stored four-slot ' +
         'summary would again reach the model verbatim on a withheld turn — scenario ' +
         'f63ccb45 holds "…Double Down on SMB leading 52% vs Enterprise 35%…" in its RESOLVED ' +
         'slot, three sentences above that same summary\'s own "No ranking can be put forward".',
-    ).toContain('conversation_summary: projectConversationSummaryForWithheldClaim(');
+    ).toContain('projectConversationSummaryForWithheldClaim(input.conversationSummary)');
   });
 
   it('POSITIVE CONTROL: the rolling-summary gate evidence check can FAIL', () => {
     // Rule 2, for the pin just added — prove the `toContain` discriminates
     // rather than passing against any source it is handed.
-    const gate = 'conversation_summary: projectConversationSummaryForWithheldClaim(';
-    expect(source).toContain(gate);
+    const gate = 'projectConversationSummaryForWithheldClaim(input.conversationSummary)';
+    expect(assemblerSource).toContain(gate);
     expect(
-      source.replace(gate, 'conversation_summary: assembledContextPack.conversation_summary, // ('),
+      assemblerSource.replace(gate, 'input.conversationSummary'),
     ).not.toContain(gate);
   });
 
   it('POSITIVE CONTROL: the conversation-gate evidence check can FAIL', () => {
     // Rule 2, for the pin just added. Prove the `toContain` discriminates
     // rather than passing against any source it is handed.
-    const gate = 'conversation: projectConversationForWithheldClaim(';
-    expect(source).toContain(gate);
-    expect(source.replace(gate, 'conversation: assembledContextPack.conversation, // (')).not.toContain(
-      gate,
-    );
+    const gate = 'projectConversationForWithheldClaim(conversation)';
+    expect(assemblerSource).toContain(gate);
+    expect(assemblerSource.replace(gate, 'conversation')).not.toContain(gate);
   });
 
   it('POSITIVE CONTROL: the per-site gate evidence check can FAIL', () => {

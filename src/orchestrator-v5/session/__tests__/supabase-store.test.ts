@@ -1179,7 +1179,10 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     const filters = selectCalls[0]!.filters as Record<string, unknown>;
     expect(filters['eq:scenario_id']).toBe(SCENARIO);
     expect(filters['eq:handler_id']).toBe('run_analysis');
-    expect(filters['eq:action_type']).toBe('run_analysis');
+    // Count the whole canonical handler/noop population. `action_type` is
+    // validated on every returned row below; filtering it in SQL would turn a
+    // corrupt wrong/null action into a false authoritative empty history.
+    expect(filters).not.toHaveProperty('eq:action_type');
     expect(filters['eq:noop']).toBe(false);
     expect(filters['order:created_at']).toEqual({ ascending: false });
     expect(filters['order:id']).toEqual({ ascending: false });
@@ -1254,6 +1257,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     ['malformed timestamp', { created_at: 'not-a-time' }],
     ['wrong handler', { handler_id: 'explain_results' }],
     ['wrong action type', { action_type: 'explain_results' }],
+    ['null action type', { action_type: null }],
     ['noop row', { noop: true }],
   ])('rejects %s metadata', async (_name, override) => {
     const { client } = makeClient({

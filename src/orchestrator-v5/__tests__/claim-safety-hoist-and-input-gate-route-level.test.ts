@@ -257,11 +257,58 @@ const PRIOR_RUN_ANALYSIS_TURN = {
 let priorTurns: Array<Record<string, unknown>> = [];
 let priorFacts: Array<Record<string, unknown>> = [];
 
+/**
+ * Give the hot-window read and the scenario-wide exact-count read the same
+ * persisted occurrence. Payload resemblance is deliberately insufficient at
+ * the reconciler boundary: row identity and database time prove these are two
+ * views of one fact rather than two byte-identical analysis runs.
+ */
+function identifiedPriorRunAnalysisFacts(): Array<{
+  fact: Record<string, unknown>;
+  fact_row_id: string;
+  fact_created_at: string;
+}> {
+  return priorFacts
+    .filter(
+      (fact) => fact.fact_type === 'run_analysis' && fact.noop === false,
+    )
+    .map((fact, index) => ({
+      fact,
+      fact_row_id: `${PRIOR_RUN_ANALYSIS_TURN.id}-analysis-fact-${index}`,
+      fact_created_at: PRIOR_RUN_ANALYSIS_TURN.created_at,
+    }));
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
-    readFactsFor: async () => priorFacts,
+    readFactsFor: async (turnRowIds: readonly string[]) =>
+      turnRowIds.includes(PRIOR_RUN_ANALYSIS_TURN.id) ? priorFacts : [],
+    readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
+      turnRowIds.includes(PRIOR_RUN_ANALYSIS_TURN.id)
+        ? identifiedPriorRunAnalysisFacts().map((entry) => ({
+            ...entry,
+            turn_id: PRIOR_RUN_ANALYSIS_TURN.id,
+          }))
+        : [],
+    // Retired carrier canary: one-source convergence must not issue a second,
+    // independently timed newest-analysis query.
+    readNewestAnalysisFactFor: async () => {
+      throw new Error('retired newest-analysis query was called');
+    },
+    // The same identified exact-count page now supplies both the existing
+    // claim-safety projection and the complete reasoning fact set.
+    readScenarioRunAnalysisFactsFor: async (
+      scenarioId: string,
+      limit: number,
+    ) => {
+      if (scenarioId !== SCENARIO_ID) {
+        throw new Error('unexpected scenario analysis-fact read');
+      }
+      const facts = identifiedPriorRunAnalysisFacts();
+      return { facts: facts.slice(0, limit), total_count: facts.length };
+    },
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),

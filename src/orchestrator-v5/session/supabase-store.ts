@@ -1950,7 +1950,10 @@ export class SupabaseSessionStore implements SessionStore {
       )
       .eq('scenario_id', scenarioId)
       .eq('handler_id', 'run_analysis')
-      .eq('action_type', 'run_analysis')
+      // Do not filter `action_type` here. The exact count must cover the whole
+      // canonical handler/noop population; every returned action type is then
+      // checked below so corrupt wrong/null values fail weak instead of being
+      // filtered into a false authoritative empty history.
       .eq('noop', false)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
@@ -2047,37 +2050,12 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
-   * The scenario's newest non-noop `run_analysis` fact — see
-   * {@link SessionStore.readNewestAnalysisFactFor} for WHY this is scoped to
-   * the scenario and not to the read window.
+   * Legacy standalone newest-analysis query.
    *
-   * SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between this
-   * service-role read and every other scenario's facts — the client bypasses
-   * RLS. Same stance as `countTurns`.
-   *
-   * INDEX: `(scenario_id, handler_id, created_at DESC)`
-   * (`v5_handler_facts_scenario_handler_idx`, migration 20260417160000). The
-   * two `.eq()`s are the leading columns and `created_at DESC` is the third,
-   * so the `ORDER BY … LIMIT 1` is a single index descent with no sort.
-   * Live `EXPLAIN (ANALYZE)` on staging: `Index Scan using
-   * v5_handler_facts_scenario_handler_idx … rows=1`, cost 0.28..2.50.
-   *
-   * `handler_id`, not `payload->>'fact_type'`: the JSONB path is not indexed
-   * and would force a scenario-wide heap scan. They are the same value on
-   * every row — the write path fills both from the same fact (`mapFactsForRpc`
-   * → the RPC's `v_fact->>'handler_id'`), verified across all 1,600+ live rows
-   * (`run_analysis` 697, `explain_results` 380, …). `noop` is a real column
-   * for exactly this kind of SQL-level filtering.
-   *
-   * ⚠ DELIBERATELY NOT CACHED. `readRecent` consults `this.cache` first; this
-   * read must not, because the session LRU is process-local, has no TTL, and
-   * is invalidated only on the instance that performed the append
-   * (`invalidateAll` is a local `Map` operation). A cached permission could
-   * therefore be stale across instances — which is the SECOND independent
-   * route to the same guarantee-decay this method exists to close, and a route
-   * that can move the answer in BOTH directions. One indexed read per turn,
-   * derived from the source of truth every time; a cached copy of it would be
-   * the hand-maintained mirror (CLAUDE.md trap 12) all over again.
+   * @deprecated Turn construction now obtains this projection from
+   * `readScenarioRunAnalysisFactsFor`, so claim safety and reasoning share one
+   * validated exact-count snapshot. Retained temporarily for compatibility
+   * with out-of-tree callers; no production turn path should call it.
    */
   async readNewestAnalysisFactFor(scenarioId: string): Promise<HandlerFact | null> {
     const { data, error } = await this.client

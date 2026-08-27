@@ -55,6 +55,14 @@ import {
 } from '../context/withheld-history-redaction.js';
 
 const SCENARIO_ID = randomUUID();
+const CANONICAL_GRAPH = {
+  nodes: [
+    { id: 'goal_growth', kind: 'goal', label: 'Choose a growth path' },
+    { id: 'opt_smb', kind: 'option', label: 'Double Down on SMB' },
+    { id: 'opt_enterprise', kind: 'option', label: 'Enterprise' },
+  ],
+  edges: [],
+};
 
 /**
  * ⭐ THE LIVE BYTES. Transcribed verbatim from the `RESOLVED` slot of
@@ -198,6 +206,8 @@ let loadSummaryImpl: () => Promise<RollingSummary | null> = async () =>
   storedSummary(RESOLVED_SLOT_TEXT);
 let readRecentTurns: MockTurn[] = BEYOND_WINDOW_TURNS;
 let priorFacts: Array<Record<string, unknown>> = [];
+const ANALYSIS_FACT_ROW_ID = 'analysis-fact-row-rolling-summary';
+const ANALYSIS_FACT_CREATED_AT = '2026-07-10T10:01:00.000Z';
 
 vi.mock('../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
@@ -216,12 +226,26 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => readRecentTurns,
     readFactsFor: async () => priorFacts,
-    readFactsWithTurnFor: async () => [],
+    readFactsWithTurnFor: async (rowIds: readonly string[]) =>
+      priorFacts.map((fact, index) => ({
+        fact,
+        turn_id: rowIds[index] ?? rowIds[0] ?? `turn-row-${index}`,
+        fact_row_id: ANALYSIS_FACT_ROW_ID,
+        fact_created_at: ANALYSIS_FACT_CREATED_AT,
+      })),
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: priorFacts.map((fact) => ({
+        fact,
+        fact_row_id: ANALYSIS_FACT_ROW_ID,
+        fact_created_at: ANALYSIS_FACT_CREATED_AT,
+      })),
+      total_count: priorFacts.length,
+    }),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraph: async () => CANONICAL_GRAPH,
+    loadGraphAndBriefText: async () => ({ graph: CANONICAL_GRAPH, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
   }),

@@ -224,7 +224,7 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
  * stamped from values route-v2 already holds for the egress guard.
  *
  * BOUNDED BY CONSTRUCTION (this is the cardinality contract): one boolean and
- * one four-valued nullable enum. No ids, no labels, no free text, nothing that
+ * one closed nullable enum. No ids, no labels, no free text, nothing that
  * could carry the very claim it reports on.
  */
 export interface V5ClaimSafety {
@@ -254,13 +254,16 @@ export interface V5ClaimSafety {
    *   - `fail_closed_truncated` — the scenario-scoped read degraded AND the
    *                               window was provably truncated, so "no
    *                               analysis" was unproven and the turn withheld.
+   *   - `fail_closed_unavailable` — the scenario-scoped read degraded on a
+   *                               non-truncated window. The unread population
+   *                               still cannot author "no analysis exists".
    *
    * ADDITIVE. `_diagnostic_trace` is stripped before the response schema
    * validates and re-attached afterwards (route-v2), so a new key breaks no
    * contract and older consumers drop it silently.
    *
-   * `fail_closed_truncated` appearing at any volume is an ALARM, not noise: it
-   * means the scenario-scoped fact read is failing in production.
+   * Either unavailable provenance appearing at any volume is an ALARM, not
+   * noise: it means the scenario-scoped fact read is failing in production.
    */
   // ⚠ DERIVED, NOT RE-LISTED (2026-07-27). This union used to be a hand-typed
   // copy of `MayNameLeadingOptionProvenance`, and route-v2.ts carried a THIRD

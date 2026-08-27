@@ -161,13 +161,13 @@ export const WITHHELD_EXPLANATION_OPENING =
  * permission reads `true`, so this code is unreachable)"*.
  *
  * That implication does not hold. `context/claim-safety-read.ts` withholds on
- * THREE branches that cannot establish what exists — `fail_closed_truncated`
- * returns `false` with **no fact selected at all** (its own comment: *"a
- * scenario that genuinely never ran an analysis but has >20 turns withholds
- * while the store is degraded"*), and `fail_closed_no_turn_context` says *"an
- * analysis may very well exist … we simply could not see it."* `readOk === false`
+ * FOUR branches that cannot establish what exists — `fail_closed_truncated`
+ * and `fail_closed_unavailable` return `false` with **no fact selected at
+ * all**, and `fail_closed_no_turn_context` says *"an analysis may very well
+ * exist … we simply could not see it."* `readOk === false`
  * is a live path: `build-turn-context.ts` catches `SessionReadError` from
- * `readNewestAnalysisFactFor`. On those populations this sentence asserts the
+ * `fetchScenarioAnalysisFacts` → `readScenarioRunAnalysisFactsFor`. On those
+ * populations this sentence asserts the
  * existence of something that may not exist.
  *
  * SO IT IS NOW GATED. `analysisExistenceProven` is derived by the ONE predicate
@@ -207,9 +207,9 @@ export const WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN =
  *
  * "this result" is a DEIXIS: it points at a result and thereby presupposes one
  * exists. That is true on the populations this copy was written for and FALSE on
- * the three provenance branches that withhold precisely BECAUSE they could not
- * establish existence — `fail_closed_truncated`, `fail_closed_uninterpretable`
- * and `fail_closed_no_turn_context` (see
+ * the four provenance branches that withhold precisely BECAUSE they could not
+ * establish existence — `fail_closed_truncated`, `fail_closed_unavailable`,
+ * `fail_closed_uninterpretable` and `fail_closed_no_turn_context` (see
  * {@link WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN}'s docstring, where the
  * same defect was fixed one layer up by gating the OPENINGS on
  * `provenanceProvesAnalysisExists`). The openings were gated; this tail — which

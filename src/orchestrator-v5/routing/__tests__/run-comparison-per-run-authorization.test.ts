@@ -277,7 +277,8 @@ describe('run-comparison: per-run authority is one-directional', () => {
     // substituted for it. A permitted run inside a withheld turn must not
     // become nameable — that would be the `false -> true` move #726's
     // one-directionality argument forbids, and it would also strand the
-    // `fail_closed_truncated` provenance, which no per-fact read can see.
+    // `fail_closed_truncated` and `fail_closed_unavailable` provenance, which
+    // no per-fact read can see.
     for (const prior of ['permitted', 'withheld', 'unstamped'] as const) {
       for (const current of ['permitted', 'withheld', 'unstamped'] as const) {
         const text = textOf(ask(prior, current, /* turn */ false));

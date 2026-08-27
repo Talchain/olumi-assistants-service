@@ -49,6 +49,41 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => (global as Record<string, unknown>).__test_prior_turns ?? [],
     readFactsFor: async () =>
       (global as Record<string, unknown>).__test_prior_facts ?? [],
+    readFactsWithTurnFor: async () => {
+      const facts = ((global as Record<string, unknown>).__test_prior_facts ?? []) as Array<
+        Record<string, unknown>
+      >;
+      const turns = ((global as Record<string, unknown>).__test_prior_turns ?? []) as Array<
+        Record<string, unknown>
+      >;
+      return facts.map((fact, index) => ({
+        fact,
+        fact_row_id: `freshness-fact-row-${index}`,
+        turn_id: (turns[index]?.id as string | undefined) ?? `turn-row-${index}`,
+        fact_created_at:
+          ((fact.result as Record<string, unknown> | undefined)
+            ?.computed_at as string | undefined) ??
+          '2026-05-10T10:00:00.000Z',
+      }));
+    },
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const facts = (((global as Record<string, unknown>).__test_prior_facts ?? []) as Array<
+        Record<string, unknown>
+      >).filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return {
+        facts: facts.slice(0, limit).map((fact, index) => ({
+          fact,
+          fact_row_id: `freshness-fact-row-${index}`,
+          fact_created_at:
+            ((fact.result as Record<string, unknown> | undefined)
+              ?.computed_at as string | undefined) ??
+            '2026-05-10T10:00:00.000Z',
+        })),
+        total_count: facts.length,
+      };
+    },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
