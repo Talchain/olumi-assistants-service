@@ -96,8 +96,10 @@ vi.mock('../session/index.js', () => ({
       return { id: 'mock-row-id' };
     },
     readRecent: async () => [],
+    countTurns: async () => 0,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    readRecentAppliedMutationFactsFor: async () => [],
     readMostRecentPendingActions: async () => pendingActionsForRead,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

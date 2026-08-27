@@ -1889,16 +1889,29 @@ async function fetchRecentAppliedMutationFacts(
       facts,
     };
   } catch (error) {
-    const errorCode = error instanceof SessionReadError ? error.code : undefined;
-    const message = error instanceof Error ? error.message : String(error);
+    const errorClass =
+      error instanceof SessionReadError ? 'session_read_error' : 'unexpected_error';
+    const errorCode =
+      error instanceof SessionReadError
+        ? error.code === 'mutation_fact_corrupt' ||
+          error.code === 'mutation_fact_limit_invalid'
+          ? error.code
+          : 'store_read_failed'
+        : 'unknown';
     log.warn(
-      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        error_code: errorCode,
+        error_class: errorClass,
+        outcome: 'degraded',
+      },
       'V5 buildTurnContext: scenario mutation-receipt read failed — recent changes are degraded',
     );
     emit(TelemetryEvents.SessionReadDegraded, {
       request_id: requestId,
       scenario_id: scenarioId,
-      error_code: errorCode ?? 'unknown',
+      error_code: errorCode,
       severity: 'warning',
     });
     return { status: 'degraded' };

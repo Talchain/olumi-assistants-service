@@ -28,6 +28,7 @@ import {
   routeWithToolUse,
   COACHING_CONTEXT_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  RECENT_CHANGES_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
@@ -134,7 +135,7 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
     expect(msg).toContain('## User turn');
   });
 
-  it('coaching omission adds no bytes beyond mandatory graph authority', async () => {
+  it('coaching omission adds no bytes beyond mandatory graph and edit-history authority', async () => {
     const msg = await userMessageFor(undefined);
     const pack = packWith(undefined);
     // Reconstruct the exact pre-lane serialisation: ## ContextPack / <json> /
@@ -166,6 +167,8 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
       JSON.stringify(llmFacing, null, 2),
       '',
       GRAPH_CONTEXT_INSTRUCTION,
+      '',
+      RECENT_CHANGES_INSTRUCTION,
       '',
       '## User turn',
       'hi',

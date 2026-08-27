@@ -5,6 +5,8 @@ import { buildTurnContext } from '../build-turn-context.js';
 import { assembleContextPackWithSummary } from '../context/context-pack-assembler.js';
 import { RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT } from '../context/reconcile-recent-mutation-facts.js';
 import { makeMessagePayload } from './fixtures.js';
+import { SessionReadError } from '../session/store.js';
+import { log, setTestSink } from '../../utils/telemetry.js';
 import {
   createMockSessionStore,
   makeSessionTurnRow,
@@ -116,6 +118,87 @@ describe('buildTurnContext durable recent-mutation binding', () => {
       recent_changes: [],
       recent_changes_status: 'degraded',
     });
+  });
+
+  it('never logs or emits malformed eligible-row content when the durable read degrades', async () => {
+    const secretKey = 'SECRET_PERSISTED_KEY_DO_NOT_LOG';
+    const secretLabel = 'SECRET_STRATEGY_LABEL_DO_NOT_LOG';
+    const secretId = 'secret-node-id-do-not-log';
+    const secretSummary = 'SECRET_MUTATION_SUMMARY_DO_NOT_LOG';
+    const malformedRowDiagnostic = JSON.stringify({
+      id: secretId,
+      handler_id: 'add_constraint',
+      noop: false,
+      payload: {
+        fact_type: 'add_constraint',
+        fact_version: 1,
+        result: {
+          status: 'applied',
+          target_id: secretId,
+          label: secretLabel,
+          summary: secretSummary,
+          [secretKey]: 'secret-content',
+        },
+      },
+    });
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    setTestSink((name, data) => events.push({ name, data }));
+
+    try {
+      const context = await buildTurnContext(payload, 'req-malformed-receipt-canary', {
+        sessionStore: createMockSessionStore({
+          readRecent: async () => hotTurns(20),
+          countTurns: async () => 41,
+          readFactsWithTurnFor: async () => [],
+          readRecentAppliedMutationFactsFor: async () => {
+            throw new SessionReadError(
+              `readRecentAppliedMutationFactsFor(${SCENARIO}): payload failed HandlerFactSchema — ${malformedRowDiagnostic}`,
+              {
+                code: 'mutation_fact_corrupt',
+                cause: new Error(malformedRowDiagnostic),
+              },
+            );
+          },
+        }),
+      });
+
+      expect(context.prior_facts.recent_changes_status).toBe('degraded');
+      const logBytes = JSON.stringify(warnSpy.mock.calls);
+      const eventBytes = JSON.stringify(events);
+      for (const canary of [
+        secretKey,
+        secretLabel,
+        secretId,
+        secretSummary,
+        'secret-content',
+      ]) {
+        expect(logBytes).not.toContain(canary);
+        expect(eventBytes).not.toContain(canary);
+      }
+      const warning = warnSpy.mock.calls.find((call) =>
+        String(call[1]).includes('mutation-receipt read failed'),
+      );
+      expect(warning?.[0]).toEqual({
+        request_id: 'req-malformed-receipt-canary',
+        scenario_id: SCENARIO,
+        error_code: 'mutation_fact_corrupt',
+        error_class: 'session_read_error',
+        outcome: 'degraded',
+      });
+      expect(events).toContainEqual({
+        name: 'session.read_degraded',
+        data: {
+          request_id: 'req-malformed-receipt-canary',
+          scenario_id: SCENARIO,
+          error_code: 'mutation_fact_corrupt',
+          severity: 'warning',
+        },
+      });
+    } finally {
+      setTestSink(null);
+      warnSpy.mockRestore();
+    }
   });
 
   it('recovers complete history from a healthy hot window when every turn is loaded', async () => {
