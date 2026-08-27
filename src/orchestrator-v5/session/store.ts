@@ -19,7 +19,10 @@ import type {
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
-import type { HandlerFactWithTurn } from '../types/handler-fact.js';
+import type {
+  HandlerFactWithTurn,
+  IdentifiedHandlerFact,
+} from '../types/handler-fact.js';
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
@@ -36,7 +39,7 @@ import type { TurnFenceHandle, TurnStopOutcome } from './turn-fence.js';
  * `routing/proposed-change-synthesis.ts`) can import it without
  * crossing the state-write-invariant boundary.
  */
-export type { HandlerFactWithTurn };
+export type { HandlerFactWithTurn, IdentifiedHandlerFact };
 
 /**
  * Pending-action row validation posture.
@@ -395,7 +398,7 @@ export interface SessionStore {
   readRecentAppliedMutationFactsFor?(
     scenarioId: string,
     limit: number,
-  ): Promise<readonly HandlerFact[]>;
+  ): Promise<readonly IdentifiedHandlerFact[]>;
   /**
    * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
    *

@@ -81,7 +81,10 @@ import {
 type TurnFencePlan =
   | { readonly path: 'atomic'; readonly generation: number }
   | { readonly path: 'checked' };
-import type { HandlerFactWithTurn } from '../types/handler-fact.js';
+import type {
+  HandlerFactWithTurn,
+  IdentifiedHandlerFact,
+} from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import {
   parseConversationContent,
@@ -1742,9 +1745,10 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
+      .select('id, payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
 
     if (handlerId) {
       query = query.eq('handler_id', handlerId);
@@ -1773,6 +1777,7 @@ export class SupabaseSessionStore implements SessionStore {
     // `false` so a missing column on legacy rows still parses.
     const out: HandlerFactWithTurn[] = [];
     for (const row of (data ?? []) as Array<{
+      id?: unknown;
       payload: unknown;
       noop?: unknown;
       v5_conversation_turn_id?: unknown;
@@ -1799,9 +1804,11 @@ export class SupabaseSessionStore implements SessionStore {
       const turnId = typeof row.v5_conversation_turn_id === 'string'
         ? row.v5_conversation_turn_id
         : '';
+      const factRowId = typeof row.id === 'string' ? row.id : '';
       const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
       out.push({
         fact: parsed.data,
+        fact_row_id: factRowId,
         turn_id: turnId,
         fact_created_at: createdAt,
       });
@@ -1824,7 +1831,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readRecentAppliedMutationFactsFor(
     scenarioId: string,
     limit: number,
-  ): Promise<readonly HandlerFact[]> {
+  ): Promise<readonly IdentifiedHandlerFact[]> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
         `readRecentAppliedMutationFactsFor(${scenarioId}): limit must be a positive safe integer`,
@@ -1857,7 +1864,7 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    const out: HandlerFact[] = [];
+    const out: IdentifiedHandlerFact[] = [];
     for (const row of data as Array<{
       id?: unknown;
       payload?: unknown;
@@ -1906,7 +1913,11 @@ export class SupabaseSessionStore implements SessionStore {
           { code: 'mutation_fact_corrupt' },
         );
       }
-      out.push(parsed.data);
+      out.push({
+        fact: parsed.data,
+        fact_row_id: row.id,
+        fact_created_at: row.created_at,
+      });
     }
     return out;
   }

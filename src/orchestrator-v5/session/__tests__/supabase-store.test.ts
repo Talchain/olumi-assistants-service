@@ -857,8 +857,9 @@ describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
   // FK ownership link. These tests pin the production read path's
   // return shape and column projection.
 
-  it('exists on the production store and returns wrapped { fact, turn_id, fact_created_at }', async () => {
+  it('returns the fact with its persisted row identity, parent turn, and exact chronology', async () => {
     const stagingRow = {
+      id: 'fact-row-uuid-1',
       noop: false,
       handler_id: 'add_constraint',
       action_type: 'add_constraint',
@@ -891,19 +892,27 @@ describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
     const entry = wrapped[0]!;
     expect(entry.fact.fact_type).toBe('add_constraint');
     expect(entry.fact.noop).toBe(false);
+    expect(entry.fact_row_id).toBe('fact-row-uuid-1');
     expect(entry.turn_id).toBe('turn-row-uuid-1');
     expect(entry.fact_created_at).toBe('2026-05-08T12:00:30.000Z');
   });
 
-  it('SELECT includes v5_conversation_turn_id and created_at columns', async () => {
+  it('SELECT includes row identity and pins created_at DESC, id DESC order', async () => {
     const { client, selectCalls } = makeClient();
     const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
     const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
     await store.readFactsWithTurnFor(['turn-row-uuid-1']);
     expect(selectCalls).toHaveLength(1);
     const selected = selectCalls[0]!;
+    expect(selected.cols).toContain('id');
     expect(selected.cols).toContain('v5_conversation_turn_id');
     expect(selected.cols).toContain('created_at');
+    expect((selected.filters as Record<string, unknown>)['order:created_at']).toEqual({
+      ascending: false,
+    });
+    expect((selected.filters as Record<string, unknown>)['order:id']).toEqual({
+      ascending: false,
+    });
   });
 
   it('short-circuits on empty turn-id list without hitting DB', async () => {
@@ -989,9 +998,13 @@ describe('SupabaseSessionStore.readRecentAppliedMutationFactsFor', () => {
 
     expect(facts).toHaveLength(1);
     expect(facts[0]).toMatchObject({
-      fact_type: 'add_constraint',
-      noop: false,
-      result: { status: 'applied' },
+      fact_row_id: appliedConstraintRow.id,
+      fact_created_at: appliedConstraintRow.created_at,
+      fact: {
+        fact_type: 'add_constraint',
+        noop: false,
+        result: { status: 'applied' },
+      },
     });
     expect(selectCalls).toHaveLength(1);
     expect(selectCalls[0]!.table).toBe('v5_handler_facts');

@@ -79,6 +79,26 @@ const mockState: {
   pendingActions: [],
 };
 
+function identifiedMockFact(
+  fact: Record<string, unknown>,
+  index: number,
+  source: 'window' | 'durable',
+) {
+  const turn = mockState.priorTurns[index] ?? mockState.priorTurns[0];
+  return {
+    fact,
+    fact_row_id: `fact-${source}-${String(index + 1).padStart(3, '0')}`,
+    turn_id:
+      typeof turn?.id === 'string'
+        ? turn.id
+        : `turn-${source}-${String(index + 1).padStart(3, '0')}`,
+    fact_created_at:
+      typeof turn?.created_at === 'string'
+        ? turn.created_at
+        : new Date(Date.UTC(2026, 7, 27, 12, 0, -index)).toISOString(),
+  };
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
@@ -88,12 +108,18 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => mockState.priorTurns,
     countTurns: async () => mockState.priorTurnsTotal ?? mockState.priorTurns.length,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) =>
+        identifiedMockFact(fact, index, 'window'),
+      ),
     readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) => {
       if (mockState.durableMutationReadFails) {
         throw new Error('simulated durable mutation receipt read failure');
       }
       if (mockState.durableMutationFacts !== null) {
-        return mockState.durableMutationFacts.slice(0, limit);
+        return mockState.durableMutationFacts
+          .slice(0, limit)
+          .map((fact, index) => identifiedMockFact(fact, index, 'durable'));
       }
       return mockState.priorFacts
         .filter((fact) => {
@@ -110,7 +136,8 @@ vi.mock('../session/index.js', () => ({
             (result as { status?: unknown }).status === 'applied'
           );
         })
-        .slice(0, limit);
+        .slice(0, limit)
+        .map((fact, index) => identifiedMockFact(fact, index, 'window'));
     },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),

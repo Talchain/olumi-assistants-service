@@ -42,6 +42,18 @@ function acceptedChange(): HandlerFact {
   };
 }
 
+function identified(
+  fact: HandlerFact,
+  factRowId = '40000000-0000-4000-8000-000000000001',
+  factCreatedAt = '2026-08-27T10:00:00.000Z',
+) {
+  return {
+    fact,
+    fact_row_id: factRowId,
+    fact_created_at: factCreatedAt,
+  } as const;
+}
+
 function hotTurns(count: number) {
   return Array.from({ length: count }, (_, index) =>
     makeSessionTurnRow({
@@ -70,7 +82,7 @@ function packFromContext(
 describe('buildTurnContext durable recent-mutation binding', () => {
   it('calls the scenario reader with the exact cap+1 lookahead and reaches ContextPack', async () => {
     const receipt = acceptedChange();
-    const readDurable = vi.fn(async () => [receipt]);
+    const readDurable = vi.fn(async () => [identified(receipt)]);
     const context = await buildTurnContext(payload, 'req-durable-41', {
       sessionStore: createMockSessionStore({
         readRecent: async () => hotTurns(20),
@@ -215,6 +227,7 @@ describe('buildTurnContext durable recent-mutation binding', () => {
         countTurns: async () => 1,
         readFactsWithTurnFor: async () => [{
           fact: receipt,
+          fact_row_id: '40000000-0000-4000-8000-000000000002',
           turn_id: turn.id,
           fact_created_at: turn.created_at,
         }],
@@ -242,6 +255,7 @@ describe('buildTurnContext durable recent-mutation binding', () => {
         countTurns: async () => 1,
         readFactsWithTurnFor: async () => [{
           fact: receipt,
+          fact_row_id: '40000000-0000-4000-8000-000000000003',
           turn_id: turn.id,
           fact_created_at: turn.created_at,
         }],
