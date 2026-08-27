@@ -1663,10 +1663,21 @@ export const FOCUS_INSTRUCTION = [
  *    already had to fix a surface claiming a user's own value as its invention;
  *    claiming the model's extraction as the user's word is that defect with the
  *    sign flipped.
- *  · HONEST AT ZERO. `without_value_count: 0` is a POSITIVE claim — the graph
- *    was read and every factor has a value — and must be SAYABLE. Encoding
- *    "none missing" as an absence is exactly how the witnessed defect existed,
- *    so an absent block is UNKNOWN and never "nothing is missing".
+ *  · HONEST AT ZERO, BUT ONLY WHERE ZERO MEANS IT. `without_value_count: 0` is a
+ *    POSITIVE claim and must be SAYABLE — encoding "none missing" as an absence
+ *    is exactly how the witnessed defect existed, so an absent block is UNKNOWN
+ *    and never "nothing is missing". ⚠ TWO ARMS MAKE THE BARE COUNT A LIE, both
+ *    measured on the projector, and both are THIS defect family with the sign
+ *    flipped — under-reporting, which is the harm the slice exists to close:
+ *      · a graph with NO factor nodes projects `{"factors":[],
+ *        "without_value_count":0}` — SHAPE-IDENTICAL to "every factor valued";
+ *      · 45 valueless factors project `without_value_count: 40` with
+ *        `factors_omitted: 5`, because the count describes only the ENUMERATED
+ *        list (cap 40). An unscoped "never disagree with this count" would
+ *        licence reporting 40 when 45 lack values.
+ *    So the count clauses below are scoped to the factors SHOWN, the empty list
+ *    is called out as not-that-finding, and truncation forbids the count being
+ *    given as a total.
  *
  * Paul's standing rule is why the fourth bullet offers a route rather than
  * stopping at a list: never leave the user an honest dead end.
@@ -1692,9 +1703,10 @@ export const FACTOR_VALUES_INSTRUCTION = [
   'The `factor_values` block above is the system’s verified answer to "which factors carry a value, and which do not?", read from the saved model itself. When the user asks what still needs a value, answer from this block — not from anything said earlier in this conversation.',
   '- `has_value` and `provenance` are SEPARATE facts and must never be merged. `has_value` says whether a value is set at all; `provenance` says who authored the value that is there. A factor can carry NO value and still be marked as the model’s own estimate — such a factor still needs a value, and an estimate must never be described as one.',
   '- `provenance` records a value’s stated authorship, not a receipt that the user typed it. Report it as where the value came from; never say the user entered, confirmed or approved a particular figure on the strength of this field alone.',
-  '- When `without_value_count` is 0, every factor listed here HAS a value — say so plainly. That is a positive finding, not a gap in what you can see, and must never be reported as being unable to tell.',
-  '- When it is above 0, name the factors whose `has_value` is false, using their labels as given, and offer to set them. Never give a number of unset factors that disagrees with this count, and never name a factor this block does not list.',
-  '- If `factors_omitted` is present, more factors exist than are listed: do not describe the list as complete, and do not answer a "how many" question by counting the entries you can see.',
+  '- When `without_value_count` is 0 AND factors are listed, every factor listed HAS a value — say so plainly. That is a positive finding, not a gap in what you can see, and must never be reported as being unable to tell.',
+  '- An EMPTY `factors` list is NOT that finding. No factors were enumerated at all, so a count of 0 says nothing about values: say the model carries no factors you can see, and never report it as every factor being valued.',
+  '- When the count is above 0, name the factors whose `has_value` is false, using their labels as given, and offer to set them. Never name a factor this block does not list.',
+  '- The count and the list describe ONLY the factors shown here. If `factors_omitted` is present, more factors exist than are listed and some of those may also lack values: do not describe the list as complete, do not give this count as the total number lacking a value, and do not answer a "how many" question from what you can see — say that more factors exist than you can see.',
   '- If this block is absent, you do not know the value state — say what you can see and offer to check. Never read its absence as "nothing is missing".',
   '- Never repeat the field names or the provenance tokens into user-facing text; state the substance in plain language.',
 ].join('\n');

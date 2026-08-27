@@ -238,7 +238,7 @@ describe('factor-value sanction — the instruction reaches the rendered prompt'
   it('BINDING: the sanctioned sentences appear in NO sibling instruction block', () => {
     const claims = [
       '`has_value` and `provenance` are SEPARATE facts and must never be merged.',
-      'When `without_value_count` is 0, every factor listed here HAS a value',
+      'When `without_value_count` is 0 AND factors are listed, every factor listed HAS a value',
     ];
     for (const claim of claims) {
       expect(FACTOR_VALUES_INSTRUCTION, 'claim is not in the block under test').toContain(claim);
@@ -300,9 +300,89 @@ describe('factor-value sanction — the instruction reaches the rendered prompt'
     expect(slice.without_value_count).toBe(0);
     expect(prompt).toContain(FACTOR_VALUES_INSTRUCTION);
     expect(FACTOR_VALUES_INSTRUCTION).toContain(
-      'When `without_value_count` is 0, every factor listed here HAS a value — say so plainly.',
+      'When `without_value_count` is 0 AND factors are listed, every factor listed HAS a value — say so plainly.',
     );
     expect(FACTOR_VALUES_INSTRUCTION).toContain('That is a positive finding');
+  });
+
+  /**
+   * ⭐⭐ ARM 1 OF THE COUNT'S LIMITS: A FACTOR-LESS GRAPH IS COUNT-IDENTICAL TO A
+   * FULLY-VALUED ONE. Measured on the projector: no factor nodes projects
+   * `{"factors":[],"without_value_count":0}` — the SAME count as "every factor
+   * has a value". An unscoped "0 means every factor is valued" would report a
+   * fully-valued model over a model with no factors at all. That is
+   * under-reporting, which is the exact harm this slice exists to close.
+   */
+  it('EMPTY FACTORS: a factor-less graph is count-identical to fully-valued, and the sanction separates them', async () => {
+    PERSISTED_GRAPH = {
+      nodes: [
+        { id: 'goal_margin', kind: 'goal', label: 'Protect operating margin' },
+        { id: 'opt_status_quo', kind: 'option', label: 'Status quo' },
+      ],
+      edges: [],
+    };
+    const prompt = await promptFor(THE_QUESTION);
+    const slice = observeSerialisedPack(prompt).factor_values as {
+      factors: readonly unknown[];
+      without_value_count: number;
+    };
+    // PRECONDITION: the ambiguity is real in this payload, not hypothetical.
+    expect(slice, 'factor_values absent on the factor-less arm').toBeDefined();
+    expect(slice.factors).toEqual([]);
+    expect(slice.without_value_count).toBe(0);
+
+    expect(prompt).toContain(FACTOR_VALUES_INSTRUCTION);
+    expect(FACTOR_VALUES_INSTRUCTION).toContain(
+      'An EMPTY `factors` list is NOT that finding.',
+    );
+    expect(FACTOR_VALUES_INSTRUCTION).toContain(
+      'never report it as every factor being valued',
+    );
+    // ⛔ And the zero-clause must be SCOPED, or it licenses the conflation the
+    // clause above forbids — the two must not contradict each other.
+    expect(FACTOR_VALUES_INSTRUCTION).toContain('is 0 AND factors are listed');
+  });
+
+  /**
+   * ⭐⭐ ARM 2: TRUNCATION MAKES THE COUNT A FLOOR, NOT A TOTAL. Measured on the
+   * projector: 45 valueless factors project `without_value_count: 40` with
+   * `factors_omitted: 5`, because the count describes only the ENUMERATED list
+   * (cap 40). An unscoped "never give a number that disagrees with this count"
+   * would licence reporting 40 when 45 lack values — under-reporting again.
+   */
+  it('TRUNCATION: the count is a floor, not a total, and the sanction forbids giving it as the total', async () => {
+    PERSISTED_GRAPH = {
+      nodes: Array.from({ length: 45 }, (_, i) => ({
+        id: `f_${i}`,
+        kind: 'factor',
+        label: `Unvalued factor number ${i}`,
+      })),
+      edges: [],
+    };
+    const prompt = await promptFor(THE_QUESTION);
+    const slice = observeSerialisedPack(prompt).factor_values as {
+      factors: readonly unknown[];
+      without_value_count: number;
+      factors_omitted?: number;
+    };
+    // PRECONDITION: this payload really does under-report, by 5.
+    expect(slice, 'factor_values absent on the truncated arm').toBeDefined();
+    expect(slice.factors).toHaveLength(40);
+    expect(slice.without_value_count).toBe(40);
+    expect(slice.factors_omitted).toBe(5);
+
+    expect(prompt).toContain(FACTOR_VALUES_INSTRUCTION);
+    expect(FACTOR_VALUES_INSTRUCTION).toContain(
+      'The count and the list describe ONLY the factors shown here.',
+    );
+    expect(FACTOR_VALUES_INSTRUCTION).toContain(
+      'do not give this count as the total number lacking a value',
+    );
+    // ⛔ The instruction must carry NO unconditional "never disagree with this
+    // count" clause — that is what licensed the under-report.
+    expect(FACTOR_VALUES_INSTRUCTION).not.toContain(
+      'Never give a number of unset factors that disagrees with this count',
+    );
   });
 
   /**
@@ -318,7 +398,12 @@ describe('factor-value sanction — the instruction reaches the rendered prompt'
       'the slice was emitted on a graphless turn — this arm is not testing absence',
     ).toBeUndefined();
     expect(prompt).not.toContain(FACTOR_VALUES_INSTRUCTION);
-    // The absent case is still handled — by the block, when it IS present.
+    // ⚠ The block's own "if this block is absent" bullet is INERT IN THIS ARM —
+    // when the section is off the pack the whole block is off the prompt, so
+    // nothing here instructs the model. It governs the case where the model
+    // holds the block on one turn and not another; asserting it as though it
+    // covered THIS turn would over-read it. Asserted only as text, not as a
+    // property of this prompt.
     expect(FACTOR_VALUES_INSTRUCTION).toContain(
       'Never read its absence as "nothing is missing"',
     );
