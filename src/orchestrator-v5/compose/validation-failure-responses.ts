@@ -31,7 +31,13 @@ import {
   sanitiseForUser,
   type EntityLike,
 } from './helpers.js';
-import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-phrasing.js';
+import {
+  buildQualitativeValueRefusalText,
+  phrasingForParameter,
+  renderParameterPhrasing,
+} from './parameter-user-phrasing.js';
+import { readMissingValueAnswer } from '../routing/missing-value-answer.js';
+import { isLabelEcho } from '../../cee/transforms/label-echo.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
@@ -788,6 +794,108 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
   // number is the ROUTING MODEL's proposal, not something the user typed, so
   // "You gave 30." attributes to them a value they never gave, on a scale they
   // have never been shown. See `echo_actual` in parameter-user-phrasing.ts.
+  // ═════════════════════════════════════════════════════════════════════════
+  // ROADMAP 2.384 — THE BAND-VOCABULARY REFUSAL (System D).
+  //
+  // WITNESSED: "Set the … factor to high." → "I couldn't use that as the
+  // value. Tell me the number you want and I'll set it.", while the product's
+  // own read surface showed "Moderate (0.5)" and its readiness blocker asked
+  // the question IN BANDS. The refusal is correct and fails closed; what was
+  // missing is that it never acknowledged the vocabulary the product taught.
+  //
+  // ⭐⭐ THE READING IS TAKEN FROM THE USER'S MESSAGE, NOT FROM THE PROPOSAL,
+  // AND THAT CHOICE IS LOAD-BEARING — DO NOT "SIMPLIFY" IT.
+  //
+  // The tempting version reads `details.actual_value` and asks "is it a
+  // string?". It would have been WRONG on the witnessed turn, and the witness
+  // is what proves it: `value` declares `echo_actual: true`, and
+  // `isGenuineScalar` admits a non-empty string, so had the proposal carried
+  // the bare word the reply would have read "You gave high." IT DID NOT — so
+  // whatever the router put in that slot was NOT a bare scalar string (the
+  // structured `{ value: … }` shape failing `.strict()` fits the evidence).
+  // ⚠ I could not establish at the wire which shape it was, and this branch
+  // deliberately does not need to know: the user's own sentence is the same on
+  // every reading, and it is the only artefact that records what they MEANT.
+  // A proposal-shaped guard would re-open the defect the first time the router
+  // wrapped the word differently.
+  //
+  // Absent `userMessage` (system-event paths) ⇒ no reading ⇒ today's copy,
+  // unchanged. Fail-open by construction, as `messageEvidencesUnit` above.
+  if (readString(details.parameter) === 'value' && typeof ctx.userMessage === 'string') {
+    const answer = readMissingValueAnswer(ctx.userMessage);
+    if (answer !== null && answer.kind === 'qualitative') {
+      // ⛔ THE ANCHOR IS RESOLVED BY IDENTITY OR NOT AT ALL (trap 19). It is
+      // read for the ONE id this refusal is about — never "the sole factor" or
+      // "the first factor with a value", either of which would quote a
+      // different node's state at the user with full confidence.
+      const targetId = readString(details.target_id);
+      const entity = targetId !== undefined ? (ctx.graph?.findEntityById(targetId) ?? null) : null;
+      const snapshot =
+        targetId !== undefined ? (ctx.graph?.findFactorObservedState?.(targetId) ?? null) : null;
+      // `safeLabel` degrades to "that item"/"that factor" when there is no real
+      // label. That phrasing cannot carry the anchor sentence ("that item is
+      // Moderate (0.5) just now" names nothing the user can check), so a
+      // missing label drops the anchor rather than filling it.
+      const rawLabel = typeof entity?.label === 'string' ? entity.label.trim() : '';
+      const factorLabel = rawLabel.length > 0 ? safeLabel(entity) : null;
+      // ⛔⛔ TWO DECLINING CONJUNCTS, DERIVED FROM THE BLOCKER'S OWN PREDICATE.
+      //
+      // ⚠ THE CLAIM THIS PR WAS APPROVED ON — "the reply quotes the same field
+      // the blocker quotes, so the two cannot diverge" — WAS REFUTED IN REVIEW,
+      // and it was refuted because the field is only the FIRST of three things
+      // the blocker's rung 1 requires. `analysis-ready.ts:485` reads
+      // `factorNode.display_value` only when it is NOT a label echo, and it is
+      // reached at all only when the quoted level genuinely came from
+      // `observed_state` (`:829` passes `typeof observedValue === "number"`).
+      // Reading the same FIELD past both conditions is not the same READ.
+      //
+      // Measured on the first version of this branch:
+      //   · `"CRM Annual Licence Cost" is CRM Annual Licence Cost just now.`
+      //     — the label echoed back as its own value, which is the precise harm
+      //     `isLabelEcho` exists to stop, in a sentence about honesty.
+      //   · a factor with `{raw_value, display_value}` and NO observed value
+      //     quoted "50,000" while the blocker returns the bare level — the two
+      //     surfaces disagreeing, which is what this branch promised not to do.
+      //
+      // ⭐ `isLabelEcho` is IMPORTED, not restated. Its own header records that
+      // it once had four call sites hand-copied at three; a fifth copy here
+      // would be that defect committed inside the fix for it. It now lives in
+      // `cee/transforms/label-echo.ts` so both layers read one definition.
+      const levelCameFromObservedState = typeof snapshot?.value === 'number';
+      const rawDisplay =
+        typeof snapshot?.display_value === 'string' ? snapshot.display_value.trim() : '';
+      const currentDisplay =
+        rawDisplay.length > 0 &&
+        levelCameFromObservedState &&
+        !isLabelEcho(rawLabel.toLowerCase(), rawDisplay)
+          ? sanitiseForUser(rawDisplay)
+          : null;
+      const phrasing = phrasingForParameter('value');
+      return {
+        body: {
+          assistant_text: buildQualitativeValueRefusalText({
+            term: sanitiseForUser(answer.term),
+            factorLabel,
+            currentDisplay,
+          }),
+          // The SAME retry chip the generic branch offers. A chip carrying a
+          // number is banned here for the reason the whole branch exists:
+          // choosing one would be the fabrication (see
+          // `routing/readiness-answer-chips.ts`, THE FABRICATION BOUNDARY).
+          suggested_actions: [
+            {
+              id: chipId('prompt', 'param-retry'),
+              label: 'Try a different value',
+              message: phrasing.chip_message,
+            },
+          ],
+        },
+        template_id: 'parameter_invalid_qualitative_value',
+        chip_type: 'text_prompt',
+      };
+    }
+  }
+
   const actual = sanitiseForUser(details.actual_value);
   // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
   // `sanitiseForUser` maps undefined/null/empty inputs to the internal

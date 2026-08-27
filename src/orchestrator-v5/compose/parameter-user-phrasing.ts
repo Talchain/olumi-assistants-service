@@ -69,6 +69,96 @@ export function renderParameterPhrasing(
 }
 
 /**
+ * ROADMAP 2.384 — THE BAND-VOCABULARY REFUSAL.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE WITNESSED DEFECT (deployed build, 2026-08-26)
+ *
+ *   user      : "Set the UK inside-sales headcount expansion factor to high."
+ *   product   : "I couldn't use that as the value. Tell me the number you want
+ *                and I'll set it."                         (nothing changed)
+ *   SAME SCREEN, the product's own read surface:  "Moderate (0.5)"
+ *   SAME PAYLOAD, the readiness blocker:  'Factor "…" is currently Moderate
+ *                (0.5). What should option X set it to?'
+ *
+ * ⭐ The write surface refuses the vocabulary the read surface uses, and the
+ * read surface is where the user learned it. The product shows a band, asks a
+ * question phrased in bands, and then rejects a band.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THE WORD IS NOT MAPPED TO A NUMBER
+ *
+ * Because the inverse is not a function, and the estate has already ruled
+ * against inventing one — in three places, pinned by a test
+ * (`routing/readiness-answer-chips.ts`, "THE FABRICATION BOUNDARY":
+ * *a chip may carry a value the USER has stated; a chip may never carry a
+ * value the PRODUCT chose*).
+ *
+ * Measured at this tip, "high" resolves to THREE different numbers:
+ *   CEE  `qualitativeBand`      High = (0.5, 0.75]  → 0.625
+ *   UI   `qualitativeTierLabel` High = (0.6, 0.8]   → 0.7
+ *   UI   `FactorExternalPanel`  high = 0.6–1.0      → 0.8
+ * and 0.5 itself reads "Moderate" in CEE and "Medium" in the UI. Picking one
+ * would stamp a PRODUCT-CHOSEN number as the user's own: the accepted write
+ * path re-stamps both the value's provenance and its source to the user, which
+ * is exactly right for a number they typed and a fabrication for one we picked.
+ * ⚠ The provenance LITERALS are deliberately not spelled here. This module is
+ * copy, it stamps nothing, and `no-brief-derived-user-override.writers.test.ts`
+ * derives its reviewed-writer manifest from those literals appearing in `src/`
+ * — so naming them in prose would have put a copy module into the set of files
+ * allowed to claim a value is the user's own. The guard caught exactly that on
+ * this change, which is the guard working: the fix is to stop saying the word,
+ * never to widen the manifest.
+ *
+ * So the policy is the one `routing/missing-value-answer.ts` already states
+ * for the option-effect path, adopted here verbatim rather than re-invented:
+ * **QUALITATIVE → recognised, NEVER interpreted.** The ask CHANGES instead of
+ * repeating: the user's word is quoted back, the factor is named, what it
+ * holds now is stated in the product's OWN display string, and the one thing
+ * genuinely outstanding is asked for.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⛔ THE ANCHOR IS QUOTED, NEVER COMPUTED
+ *
+ * `currentDisplay` is the factor's persisted `display_value` — the same field
+ * `analysis-ready.ts`'s `renderFactorCurrentLevel` takes at its FIRST rung and
+ * the same string the blocker quotes. This module derives no band and imports
+ * no ladder, so it cannot become the seventh. When the caller cannot supply
+ * it, the sentence is DROPPED, never synthesised: better to lose the anchor
+ * than to invent one.
+ *
+ * ⚠ Inputs must be sanitised BY THE CALLER, exactly as `renderParameterPhrasing`
+ * already requires of `actual` — this module stays dependency-free so
+ * `compose` may import it without a cycle.
+ *
+ * Style contract (asserted by `assertStyle`): at most three sentences, no
+ * em/en dashes.
+ */
+export function buildQualitativeValueRefusalText(input: {
+  /** The user's own word, verbatim and already sanitised. */
+  readonly term: string;
+  /** The factor's label, already passed through `safeLabel`, or null. */
+  readonly factorLabel: string | null;
+  /** The factor's persisted `display_value`, already sanitised, or null. */
+  readonly currentDisplay: string | null;
+}): string {
+  const { term, factorLabel, currentDisplay } = input;
+  const problem = `I can't use "${term}" as the value, because it has to be a number.`;
+  // ⭐ BOTH HALVES OR NEITHER. Naming the factor without its value states
+  // nothing the user did not just type; quoting a value without naming whose
+  // it is invites them to answer about a different factor than the router
+  // resolved. Naming both is also what lets a user CATCH a mis-resolved
+  // target, which is why the label is here rather than a bare "It".
+  const anchor =
+    factorLabel !== null && currentDisplay !== null
+      ? ` "${factorLabel}" is ${currentDisplay} just now.`
+      : '';
+  // The closing sentence is the EXISTING sanctioned `value` guidance, quoted
+  // rather than re-worded, so the two paths cannot drift apart.
+  return `${problem}${anchor} ${PARAMETER_USER_PHRASING.value?.guidance ?? ''}`.trim();
+}
+
+/**
  * Keyed by the parameter name as declared in `HANDLER_VALIDATION_REGISTRY`'s
  * `parameter_schemas`. Shared names (`value` is declared by both
  * `set_factor_value` and `add_constraint`) deliberately carry copy that reads

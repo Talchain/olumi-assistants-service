@@ -85,6 +85,25 @@ export interface FactorObservedStateSnapshot {
   readonly raw_value?: number;
   readonly unit?: string;
   readonly cap?: number;
+  /**
+   * ROADMAP 2.384 (band-vocabulary refusal) — the factor's OWN persisted
+   * display string, exactly as the enricher/handler wrote it and exactly as
+   * the readiness blocker quotes it.
+   *
+   * ⭐⭐ IT IS CARRIED, NEVER SYNTHESISED HERE, AND THAT IS THE WHOLE POINT.
+   * `Moderate (0.5)` is produced by `synthesiseDisplayValue`'s qualitative
+   * band (`cee/factor-extraction/display-value.ts`), and the estate already
+   * holds SIX disagreeing band ladders — `qualitativeBand` and
+   * `bandFromMagnitude` inside CEE alone both emit the word "moderate" for
+   * DIFFERENT ranges ((0.25,0.5] vs [0.3,0.7)), and the UI renders 0.5 as
+   * "Medium" where CEE renders "Moderate". A consumer that re-derived a band
+   * from `value` would mint the SEVENTH. Quoting the string the product
+   * already showed cannot diverge from the product, whatever the ladders do.
+   *
+   * ⚠ Deliberately NOT `factor_type`. Handing the band's INPUT to a consumer
+   * invites exactly the re-derivation this field exists to prevent.
+   */
+  readonly display_value?: string;
 }
 
 export interface GraphLookup {
@@ -494,6 +513,15 @@ export function validateToolCall(
               issue: parsed.error.issues[0]?.message,
               actual_value: p.value,
               constraint_description: describeSchema(schema),
+              // ROADMAP 2.384 — WITHOUT THIS THE RECOVERY COPY IS BLIND.
+              // Measured at this tip: these four fields were the WHOLE
+              // payload, so the composer downstream had no way to name the
+              // entity the user was editing or to quote what it holds now. A
+              // refusal that cannot say "it is Moderate (0.5) just now" hands
+              // the user a demand with no anchor to answer it from, which is
+              // the witnessed defect. `proposal.entity.id` is already resolved
+              // above (`resolvedEntity`) and costs nothing to carry.
+              target_id: proposal.entity.id,
             },
           },
         };
