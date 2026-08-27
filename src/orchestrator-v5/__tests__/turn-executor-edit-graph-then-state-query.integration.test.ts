@@ -49,6 +49,7 @@ import {
   findForbiddenPhraseHit,
 } from '../compose/forbidden-user-facing-phrases.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
+import { extractProposedConcept } from '../coaching/proposal-continuation.js';
 import type { PendingAction } from '../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
@@ -474,14 +475,22 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(committed).toBeDefined();
       expect(committed).toHaveProperty('graph', undefined);
       expect(committed?.handler_id).toBe('explain_from_structure');
-      expect(
-        (committed?.handler_facts as Array<{ fact_type?: string }> | undefined) ?? [],
-      ).not.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ fact_type: 'edit_graph' }),
-          expect.objectContaining({ fact_type: 'add_constraint' }),
-          expect.objectContaining({ fact_type: 'set_factor_value' }),
-        ]),
+      // #1149 review gate 2 — `not.toEqual(arrayContaining([a, b, c]))` asks
+      // whether ALL THREE are present, so the negation was satisfied by an
+      // array containing exactly ONE of them: it passed while
+      // `handler_facts` genuinely carried `{ fact_type: 'edit_graph' }`, i.e.
+      // it could not observe the harm it names. Three membership assertions,
+      // one per forbidden fact type, each of which can fail on its own.
+      const committedFactTypes =
+        (committed?.handler_facts as Array<{ fact_type?: string }> | undefined) ?? [];
+      expect(committedFactTypes).not.toContainEqual(
+        expect.objectContaining({ fact_type: 'edit_graph' }),
+      );
+      expect(committedFactTypes).not.toContainEqual(
+        expect.objectContaining({ fact_type: 'add_constraint' }),
+      );
+      expect(committedFactTypes).not.toContainEqual(
+        expect.objectContaining({ fact_type: 'set_factor_value' }),
       );
       expect(committed?.pending_actions).toEqual([
         expect.objectContaining({ id: existingPending.id, chip_id: existingPending.chip_id }),
@@ -576,6 +585,133 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt).toBeDefined();
       expect(evt!.data.freshness).toBe('fresh');
       expect(evt!.data.reason).toBe('graph_hash_match');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Layer A.6 — #1149 review gate 1: the consequence turn's two SUPPRESSION
+  // arms, pinned.
+  //
+  // `explainAcceptedEditConsequenceForRun` drives five effects. Three were
+  // already pinned by the acceptance test above (state-query bypass, forced
+  // `explain_from_structure`, bounded-analytical chips). The remaining two —
+  // the graph-write suppression and the proposal-capture suppression — read
+  // GREEN under mutation on that fixture, because that fixture cannot reach
+  // either arm: it has a populated canonical graph (so the graph write is
+  // already `undefined` via ROW E) and a proposal-free answer (so the capture
+  // already returns `undefined`). An arm that changes nothing observable is
+  // the worst of both worlds — a later lane deletes it as dead or leans on it
+  // as a guarantee, and neither is checkable. These two tests supply fixtures
+  // that DO reach each arm, so removing either clause turns one RED.
+  // -------------------------------------------------------------------------
+  describe('the consequence turn creates no authority it was not asked to create', () => {
+    it('does NOT adopt the request graph as the canonical model (ROW-A first-touch adopt suppressed)', async () => {
+      // Canonical state carries NO server model while an accepted mutation
+      // fact is still in the projection. `graphForCommit`'s ROW A then
+      // ADOPTS the client's `graph_state` verbatim on any non-mutating turn
+      // — proven by the contrast test below, which is the same fixture with
+      // the consequence question replaced. On THIS question the adopt must
+      // not happen: the turn answers from canonical state and must not
+      // promote a client graph into canonical authority on the way past.
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
+      mockState.persistedGraph = null;
+
+      const adapter = consequenceRoutingAdapter(
+        'In the saved model, the cost relationship now carries more downside weight.',
+      );
+      await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-consequence-no-adopt',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-consequence-no-adopt',
+      );
+      expect(committed).toBeDefined();
+      // Precondition pins — without these the assertion below could pass
+      // because nothing was adoptable rather than because the clause fired.
+      expect(PRE_EDIT_GRAPH.nodes.length).toBeGreaterThan(0); // request graph IS adoptable
+      expect(mockState.persistedGraph).toBeNull(); // canonical has NO server model
+      expect(committed?.handler_id).toBe('explain_from_structure'); // the flagged path ran
+      // The pin.
+      expect(committed).toHaveProperty('graph', undefined);
+    });
+
+    it('CONTRAST — the same canonical state DOES adopt on an ordinary explanation turn', async () => {
+      // Guards the test above from decaying into a tautology (a pin whose
+      // precondition silently stops holding passes for the wrong reason).
+      // If ROW A's adopt ever becomes unreachable here, THIS test REDs and
+      // says so, rather than the pin quietly asserting nothing.
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
+      mockState.persistedGraph = null;
+
+      const adapter = consequenceRoutingAdapter('Here is what the model says.');
+      await runTurnExecutor(
+        mkPayload('Explain the current results please.'),
+        'req-contrast-adopt',
+        {
+          routingAdapter: adapter,
+          graphState: PRE_EDIT_GRAPH as never,
+          chipClickForcedIntent: 'explain_results',
+        },
+      );
+
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-contrast-adopt',
+      );
+      expect(committed).toBeDefined();
+      expect(committed?.handler_id).toBe('explain_results'); // NOT the flagged path
+      expect(committed?.graph).toMatchObject({
+        nodes: expect.arrayContaining([
+          expect.objectContaining({ id: 'fac_hiring_cost' }),
+        ]),
+      });
+    });
+
+    it('does NOT capture a proposed concept from its own answer (no pending the user never accepted)', async () => {
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+
+      const answerWithProposal =
+        'In the saved model, the cost relationship now carries more downside weight. Would you like me to add supplier concentration as a risk?';
+      // Precondition pin — the answer under test genuinely IS proposal-bearing.
+      // If the extractor's breadth ever moves off this phrasing the test REDs
+      // here instead of passing because nothing was there to capture.
+      expect(extractProposedConcept(answerWithProposal)).not.toBeNull();
+
+      const adapter = consequenceRoutingAdapter(answerWithProposal);
+      await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-consequence-no-proposal-capture',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-consequence-no-proposal-capture',
+      );
+      expect(committed).toBeDefined();
+      expect(committed?.handler_id).toBe('explain_from_structure'); // the flagged path ran
+      // The pin: a read-only consequence answer must not leave behind a
+      // resumable `proposed_concept` pending — the next turn's "yes" would
+      // turn it into a graph mutation the user never asked this turn for.
+      const committedPendings =
+        (committed?.pending_actions as
+          | Array<{ action?: { kind?: string } }>
+          | undefined) ?? [];
+      expect(committedPendings).not.toContainEqual(
+        expect.objectContaining({
+          action: expect.objectContaining({ kind: 'proposed_concept' }),
+        }),
+      );
+      expect(
+        events.some(
+          (event) => event.event === 'v5.proposal_continuation.captured',
+        ),
+      ).toBe(false);
     });
   });
 });
