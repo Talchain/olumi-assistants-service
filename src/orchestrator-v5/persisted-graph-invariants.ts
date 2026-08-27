@@ -9,11 +9,27 @@
  * validation of ANY kind — not structural, not schema. Everything that
  * validated, validated something other than what we stored.
  *
- * This module is the sole terminal authority. It is called from
- * `commitDirectAnswer` immediately before `store.append` — the SINGLE
- * `scenarios.graph` writer in `src/` — so it covers EVERY lane (edit, draft,
- * chip-click, clarify, system-event, route-v2 add-option) by construction
- * rather than by a hand-listed set of call sites that could drift (trap #12).
+ * ⚠ CORRECTED (C3 closure). This paragraph used to say the module is called
+ * from `commitDirectAnswer` immediately before `store.append` — "the SINGLE
+ * `scenarios.graph` writer in `src/`" — and therefore covers EVERY lane "by
+ * construction rather than by a hand-listed set of call sites that could drift
+ * (trap #12)". IT WAS WRONG TWICE OVER, and it was itself the hand-maintained
+ * mirror it invoked trap #12 against.
+ *
+ * (a) The CALL SITE moved. This module is now invoked from
+ *     `appendCheckedGraphWrite` (`persist-graph-write.ts`) — the shared
+ *     persistence floor — not from `commitDirectAnswer` directly.
+ * (b) `store.append` was never the SINGLE `scenarios.graph` writer. Measured at
+ *     87cb9f4f there are THREE production writers; two reach the column through
+ *     this check, and `routes/assist.v1.scenario-versions.ts` (the restore tier,
+ *     via `restore_model_version_atomic_v1`) does NOT. That path is LIVE and
+ *     client-reachable, and is deliberately out of C3's scope.
+ *
+ * WHAT IS TRUE: this module is the sole terminal authority FOR THE WRITERS THAT
+ * CALL IT, and every lane that commits a turn (edit, draft, chip-click, clarify,
+ * system-event, route-v2 add-option) plus graph registration reaches it through
+ * the floor. That is a caller-set claim, not a column-level one — see
+ * `persist-graph-write.ts` for the manifest and for how to re-derive it.
  *
  * DERIVED, NEVER MIRRORED. The analysis hash is not re-implemented and no list
  * of hash-projected fields is copied here: `computeAnalysisAffectingGraphHash`

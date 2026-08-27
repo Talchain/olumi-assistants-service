@@ -44,11 +44,8 @@ import type {
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
-import {
-  checkPersistedGraphInvariants,
-  PersistedGraphInvariantError,
-  formatViolations,
-} from './persisted-graph-invariants.js';
+import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
+import { appendCheckedGraphWrite } from './persist-graph-write.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -835,8 +832,11 @@ function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkip
  * The carrier's outcome. Deliberately THREE cases, not two.
  *
  * ⚠ THE SKIP IS NO LONGER REPORTED FROM HERE (Codex C8-A review, 2026-08-25).
- * It used to `emit()` inline, and this function runs at `commit.ts:992` — 345
- * lines and one `await` BEFORE `store.append()` at `:1337`. So a turn whose
+ * It used to `emit()` inline, and this function runs far upstream of — and one
+ * `await` before — the durable write, which now happens inside
+ * `appendCheckedGraphWrite` (`persist-graph-write.ts`). (Line numbers removed
+ * deliberately: the two this sentence carried had already drifted, and a line
+ * number in prose is a hand-maintained mirror like any other.) So a turn whose
  * append then threw (`GraphStaleWriteError` on a CAS conflict,
  * `StateCommitFailedError` on PGRST202, a fence refusal) had ALREADY published
  * `v5.model_versions.version_created{status:'skipped'}` — a claim about the
@@ -1294,121 +1294,96 @@ export async function commitDirectAnswer(
   //   normaliseOptionInterventionContract — V5 edit_graph P0 option contract
   //   reconcileTopLevelOptionsFromNodes   — Lane C3 / decision ③ options mirror
   //
-  // What runs HERE is the check, and it runs LAST: nothing mutates the graph
-  // between this line and `store.append`, so this validates the ACTUAL
-  // PERSISTED BYTES. Because `store.append` below is the single
-  // `scenarios.graph` writer in the service, this covers EVERY lane — edit,
-  // draft, chip-click, clarify, system-event, route-v2 add-option — by
-  // construction rather than by a hand-listed set of call sites (trap #12).
+  // The check itself now lives in `persist-graph-write.ts` and runs LAST,
+  // immediately before the append, so it validates the ACTUAL PERSISTED BYTES.
   //
-  // FAIL-CLOSED, NEVER A SILENT REPAIR. Repairing here would put a mutation
-  // AFTER the hash was computed and recreate the exact defect this closes, so
-  // a violation refuses the commit and names what was wrong. The refusal is a
-  // throw: the caller's existing commit-failure catch ladder already maps it
-  // to a typed failure and, on the edit lane, reports the graph as NOT
-  // persisted — which is now true, rather than a graph silently stored corrupt.
-  if (persistedInvariants.status === 'violated') {
-    log.error(
-      {
-        event: 'v5.graph_persist.invariant_violation',
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        turn_class: metadata.turn_class,
-        source: metadata.handler_id ?? undefined,
-        introduced: persistedInvariants.violations.map((v) => ({
-          code: v.code,
-          count: v.count,
-          entity_ids: v.entity_ids,
-        })),
-        inherited_count: persistedInvariants.inheritedViolations.length,
-      },
-      '[commit] REFUSING the write — this turn INTRODUCED a structural violation into the graph',
-    );
-    throw new PersistedGraphInvariantError(persistedInvariants.violations);
-  }
-  // Inherited corruption is absorbed, NOT refused (a legacy/migration-era graph
-  // must stay editable — `edit-graph.ts:2750-2755`), but it is still surfaced:
-  // a violation nobody can see is one nobody will ever fix.
-  if (writesGraph && persistedInvariants.inheritedViolations.length > 0) {
-    log.warn(
-      {
-        event: 'v5.graph_persist.invariant_inherited',
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        turn_class: metadata.turn_class,
-        source: metadata.handler_id ?? undefined,
-        had_baseline: metadata.baseGraphForInvariants !== undefined,
-        inherited: persistedInvariants.inheritedViolations.map((v) => ({
-          code: v.code,
-          count: v.count,
-          entity_ids: v.entity_ids,
-        })),
-      },
-      '[commit] pre-existing structural violation carried through this write (absorbed, not refused) — ' +
-        formatViolations(persistedInvariants.inheritedViolations),
-    );
-  }
-  // Non-fatal findings are surfaced rather than swallowed. These are the
-  // invariants NOT yet demonstrated to hold on real traffic, so they are
-  // reported and the commit proceeds — an honest "we saw this and did not
-  // enforce it", never a silent pass.
-  if (writesGraph && persistedInvariants.observations.length > 0) {
-    log.warn(
-      {
-        event: 'v5.graph_persist.invariant_observation',
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        turn_class: metadata.turn_class,
-        source: metadata.handler_id ?? undefined,
-        observations: persistedInvariants.observations.map((v) => ({
-          code: v.code,
-          count: v.count,
-          entity_ids: v.entity_ids,
-        })),
-      },
-      '[commit] persisted-graph invariant OBSERVED but not enforced — ' +
-        formatViolations(persistedInvariants.observations),
-    );
-  }
-  // A graph whose top-level shape the structural invariants are undefined for
-  // is recorded as UNCHECKED rather than counted as a pass — an absence claim
-  // about this check must not be read wider than the graphs it can evaluate.
-  if (writesGraph && persistedInvariants.status === 'unshaped') {
-    log.warn(
-      {
-        event: 'v5.graph_persist.invariant_unchecked',
-        scenario_id: metadata.scenario_id,
-        turn_id: metadata.turn_id,
-        turn_class: metadata.turn_class,
-        source: metadata.handler_id ?? undefined,
-      },
-      '[commit] persisted-graph invariants NOT evaluated — the graph has no nodes/edges arrays',
-    );
-  }
-
-  const appendOutcome = await store.append({
-    scenario_id: metadata.scenario_id,
-    turn_id: metadata.turn_id,
-    turn_class: metadata.turn_class,
-    handler_id: metadata.handler_id,
-    request_hash: metadata.request_hash,
-    response_emitted: true,
-    llm_calls_used: metadata.llm_calls_used,
-    duration_ms: metadata.duration_ms,
-    handler_facts: metadata.handler_facts,
-    graph: graphForStore,
-    briefText: metadata.briefText,
-    pending_actions: finalPendings,
-    coaching_state: metadata.coaching_state,
-    userMessage,
-    assistantMessage,
-    // A3 graph CAS: verbatim pass-through of the caller's server-read
-    // expected-base hashes (undefined when the path is not instrumented).
-    expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
-    expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
-    ...(atomicVersionPlan.kind === 'plan'
-      ? { modelVersion: atomicVersionPlan.write }
-      : {}),
+  // ⚠ CORRECTED (C3 closure). This paragraph used to say the check "covers
+  // EVERY lane ... by construction rather than by a hand-listed set of call
+  // sites (trap #12)", justified by `store.append` being "the single
+  // `scenarios.graph` writer in the service". THAT JUSTIFICATION WAS FALSE and
+  // the claim it supported was false with it. Measured at 75029f4f: TWO
+  // production `store.append` call sites — this one and
+  // `routes/assist.v1.scenario-graph-register.ts` — and
+  // `checkPersistedGraphInvariants` had exactly ONE production caller (here),
+  // with ZERO in that route. So a REGISTRATION could persist a structural
+  // violation this path refuses fail-closed, and the sentence asserting
+  // otherwise is itself the hand-maintained mirror it invoked trap #12 against.
+  //
+  // ⚠ AND THE REPLACEMENT MUST NOT BE A FRESH ABSOLUTE. An earlier draft of
+  // this paragraph said the claim was "true NOW, and true by construction ...
+  // Any THIRD writer must too". That is the SAME defect at one remove: a third
+  // writer already exists and does NOT go through the floor. The honest form is
+  // a MANIFEST with its scope, measured at 87cb9f4f over every `.ts` file under
+  // `src/` plus all 34 `.sql` files:
+  //
+  //   · `commit.ts` (here)                        → `appendCheckedGraphWrite` ✅
+  //   · `routes/assist.v1.scenario-graph-register.ts`
+  //                                               → `appendCheckedGraphWrite` ✅
+  //   · `routes/assist.v1.scenario-versions.ts` (the RESTORE tier)
+  //       → `service.restoreVersionAtomic` → `restore_model_version_atomic_v1`
+  //       → `UPDATE public.scenarios SET graph = p_graph`         ❌ NOT COVERED
+  //   · `store_draft_graph` — no production caller (guarded by
+  //     `context/__tests__/graph-identity-guards.test.ts`)             n/a
+  //
+  // The third writer is LIVE, not dark: registered unconditionally at
+  // `server.ts:1214` (`POST /assist/v1/scenarios/:scenario_id/versions/restore`)
+  // and `CEE_MODEL_VERSIONS_ENABLED` defaults ON (`config/index.ts:1372`).
+  // Restoring an older version that carries a duplicate node id into a
+  // currently-clean scenario is, by this floor's own delta definition, an
+  // INTRODUCED violation — refused here, silently written there. Routing it
+  // through the floor is deliberately OUT OF SCOPE for C3 and materially larger
+  // (the RPC owns graph + undo + version + head + event in one statement).
+  //
+  // So: two of three writers go through `appendCheckedGraphWrite`. DERIVE the
+  // caller set (`appendCheckedGraphWrite` vs `store.append(` vs a `.sql` sweep
+  // for `SET graph = p_graph`) rather than trusting this comment — an
+  // UNTRUNCATED sweep, because a truncated one and a complete one produce
+  // indistinguishable output. ⚠ Scope both halves: a `UPDATE public.scenarios`
+  // sweep MISSES the unqualified `UPDATE scenarios SET graph = p_graph` form,
+  // which is how most of the `append_turn_atomic` family is written.
+  //
+  // FAIL-CLOSED, NEVER A SILENT REPAIR — enforced in the floor. Repairing there
+  // would put a mutation AFTER the hash was computed and recreate the exact
+  // defect this closes, so a violation refuses the commit and names what was
+  // wrong. The refusal is a throw: the caller's existing commit-failure catch
+  // ladder already maps it to a typed failure and, on the edit lane, reports the
+  // graph as NOT persisted — which is true, rather than a graph stored corrupt.
+  // THE SINGLE CALL-GRAPH AUTHORITY for a `scenarios.graph` write. The
+  // terminal invariant enforcement that used to be inlined here moved into
+  // `appendCheckedGraphWrite` VERBATIM so the register route enforces the same
+  // floor on the same bytes — see that module for why the report is recomputed
+  // there from `write.graph` rather than passed in from this function's earlier
+  // `persistedInvariants` (which serves the advertised analysis hash, a
+  // different question, and must not be reused as this one).
+  const appendOutcome = await appendCheckedGraphWrite({
+    store,
+    writesGraph,
+    baseGraphForInvariants: metadata.baseGraphForInvariants,
+    source: metadata.handler_id ?? undefined,
+    write: {
+      scenario_id: metadata.scenario_id,
+      turn_id: metadata.turn_id,
+      turn_class: metadata.turn_class,
+      handler_id: metadata.handler_id,
+      request_hash: metadata.request_hash,
+      response_emitted: true,
+      llm_calls_used: metadata.llm_calls_used,
+      duration_ms: metadata.duration_ms,
+      handler_facts: metadata.handler_facts,
+      graph: graphForStore,
+      briefText: metadata.briefText,
+      pending_actions: finalPendings,
+      coaching_state: metadata.coaching_state,
+      userMessage,
+      assistantMessage,
+      // A3 graph CAS: verbatim pass-through of the caller's server-read
+      // expected-base hashes (undefined when the path is not instrumented).
+      expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
+      expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
+      ...(atomicVersionPlan.kind === 'plan'
+        ? { modelVersion: atomicVersionPlan.write }
+        : {}),
+    },
   });
   const persistedRowId = appendOutcome.id;
 
