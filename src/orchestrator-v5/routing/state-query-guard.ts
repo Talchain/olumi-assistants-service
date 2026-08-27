@@ -136,23 +136,23 @@ export type StateQueryGuardOutcome =
  * reaches the existing grounded reasoning path instead of being answered with
  * the same one-line receipt as "what changed?".
  */
-const STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
-  // Whole-turn anchored: only the standalone question reaches model reasoning.
-  /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\s*[?!.]*\s*$/i,
-];
-
 const EDIT_EFFECT_QUESTION_LEAD =
   /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
 
 /**
- * Detect a second conversational clause after a leading effect question.
+ * Split a leading accepted-edit consequence question from the remainder of
+ * the turn.
  *
- * This split only prevents the one-line receipt guard from swallowing a
- * compound turn. It is deliberately private and MUST NOT be consumed as a
- * mutation classifier or warrant: the normal routing and action layers retain
- * sole authority over whether the trailing words request a change.
+ * The leading question is always read-only. A trailing clause is returned as
+ * data, not classified here: route-v2 protects the whole turn from direct
+ * edit dispatch, while the action-layer mutation warrant independently asks
+ * whether this exact trailing clause carries an existing concrete mutation
+ * authority. This prevents lexical material in either clause from lending
+ * authority to the other.
  */
-function editEffectTrailingClause(message: string): string | null {
+export function splitLeadingEditEffectQuestion(
+  message: string,
+): { readonly trailingClause: string | null } | null {
   const match = EDIT_EFFECT_QUESTION_LEAD.exec(message);
   if (match === null) return null;
   const trailing = message
@@ -160,7 +160,7 @@ function editEffectTrailingClause(message: string): string | null {
     .replace(/^[\s?!.,;:—-]+/, '')
     .replace(/^(?:and|then)\b[\s,;:—-]*/i, '')
     .trim();
-  return trailing.length > 0 ? trailing : null;
+  return { trailingClause: trailing.length > 0 ? trailing : null };
 }
 
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
@@ -365,6 +365,13 @@ export function isStateQueryQuestionShape(message: string): boolean {
   // from?"* — did not, and nothing else was denying them a warrant. Classifying
   // them here is strictly protective: the caller either answers from provenance
   // or falls through to the reasoning layer, and neither path mutates.
+  // A leading edit-effect question remains a protected read at the route even
+  // when more conversation follows. The tail may still carry an independently
+  // authorised edit, but that is decided at the action boundary from the tail
+  // alone. Direct edit routing must never reinterpret a trailing observation
+  // ("The increase in cost is worrying") as authority to mutate.
+  if (splitLeadingEditEffectQuestion(message) !== null) return true;
+
   const briefAudit = isBriefAuditQuestion(message);
   const originQuestion = isStructureOriginQuestion(message);
   if (!briefAudit && !originQuestion) {
@@ -570,7 +577,8 @@ export function tryStateQueryGuard(
   // `isStateQueryQuestionShape` still recognises this exact class, so it cannot
   // be diverted into edit_graph; declining here only enables a read-only model
   // call. No new classifier, handler, or mutation permission is introduced.
-  if (STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
+  const leadingEditEffect = splitLeadingEditEffectQuestion(input.message);
+  if (leadingEditEffect?.trailingClause === null) {
     if (recent.length === 0) {
       return {
         matched: true,
@@ -584,7 +592,7 @@ export function tryStateQueryGuard(
   // says nothing about mutation authority: a trailing statement, question,
   // veto or genuine edit request is evaluated later by the existing route and
   // action warrant gates. In particular, position alone never grants a write.
-  if (editEffectTrailingClause(input.message) !== null) return { matched: false };
+  if (leadingEditEffect !== null) return { matched: false };
 
   // Negative gate — cheapest of the session-edit arms. A message with an
   // imperative edit verb is almost always a fresh edit request, not a

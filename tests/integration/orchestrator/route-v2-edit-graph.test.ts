@@ -503,6 +503,21 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         expectDispatch: false,
       },
       {
+        label: 'suppressed: consequence question + cost observation',
+        message: 'What did that update do? The increase in cost is worrying.',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: consequence question + desired-state observation',
+        message: 'What did that update do? Lower risk would be better.',
+        expectDispatch: false,
+      },
+      {
+        label: 'protected from direct edit dispatch: consequence question + concrete edit',
+        message: 'What did that update do? Add another option.',
+        expectDispatch: false,
+      },
+      {
         label: 'suppressed: consequence question + negated rename imperative',
         message: 'What did that update do? Rename nothing.',
         expectDispatch: false,
@@ -803,5 +818,24 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         expect([200, 500]).toContain(res.statusCode);
       });
     }
+
+    it.each([
+      'What did that update do? The increase in cost is worrying.',
+      'What did that update do? Lower risk would be better.',
+      'What did that update do? Add another option.',
+    ])('a leading consequence question always reaches the protected TurnExecutor path: %s', async (message) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          turn_id: '11111111-1111-4111-8111-11111eee1199',
+          message,
+        }),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      expect(turnExecutorMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

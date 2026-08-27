@@ -70,7 +70,10 @@
 
 import { hasMutationSignal } from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
-import { isStateQueryQuestionShape } from './state-query-guard.js';
+import {
+  isStateQueryQuestionShape,
+  splitLeadingEditEffectQuestion,
+} from './state-query-guard.js';
 import {
   EDIT_GRAPH_POSITIVE_REGEX,
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -293,6 +296,22 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  */
 export function hasMutationWarrantSignal(message: string): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
+  // A leading consequence question is read-only and cannot lend its edit noun
+  // to a trailing observation. Conversely, a trailing clause cannot turn the
+  // question into a write merely because it contains a broad edit-route verb.
+  // Require the tail, in isolation, to satisfy one of the two established
+  // concrete mutation authorities before applying the ordinary warrant rules
+  // (including veto handling) to that tail. This is clause authority, not a
+  // new noun/mood classifier.
+  const leadingEditEffect = splitLeadingEditEffectQuestion(message);
+  if (leadingEditEffect !== null) {
+    const trailing = leadingEditEffect.trailingClause;
+    if (trailing === null) return false;
+    if (!hasMutationSignal(trailing) && !hasConstraintMutationSignal(trailing)) {
+      return false;
+    }
+    return hasMutationWarrantSignal(trailing);
+  }
   // Term 0 — the user explicitly withheld authority AND no canonical mutation
   // signal survives the prohibition. The two negated conjuncts are not decoration:
   // `hasExplicitNoModelChangeIntent` returns its veto IMMEDIATELY for an UNBOUNDED

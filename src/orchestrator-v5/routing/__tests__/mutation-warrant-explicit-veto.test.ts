@@ -255,6 +255,18 @@ const KNOWN_OPEN_GAPS: readonly string[] = [
   "Reduce churn to 0.02 and do not change the model.",];
 
 /**
+ * A genuine trailing edit that now requires confirmation rather than receiving
+ * an immediate write warrant. Before clause authority, this row was granted
+ * only because the word "update" in the LEADING READ QUESTION satisfied the
+ * broad edit door; the trailing "Replace …" clause independently satisfies
+ * neither canonical concrete-mutation list. That cross-clause grant was not a
+ * legitimate authority to preserve. The model may still offer the edit through
+ * the existing propose-confirm path.
+ */
+const LEADING_EFFECT_CONFIRMATION_ONLY: readonly string[] = [
+  "What did that update do? Replace the pricing factor with margin.",];
+
+/**
  * ⛔⛔ KNOWN-OPEN **LIE** — a retraction that still gets a warrant. THE PRICE OF
  * THE FENCE FIX, PAID KNOWINGLY AND WRITTEN DOWN.
  *
@@ -300,7 +312,11 @@ describe('mutation warrant consults the explicit veto', () => {
     expect(fencedEdits.length, 'the fenced-edit class vanished from the corpus').toBe(10);
     // Every known-open row must actually be IN the corpus, or these sets pin nothing.
     const messages = new Set(CORPUS.map((c) => c.message));
-    for (const m of [...KNOWN_OPEN_GAPS, ...KNOWN_OPEN_LIES]) {
+    for (const m of [
+      ...KNOWN_OPEN_GAPS,
+      ...LEADING_EFFECT_CONFIRMATION_ONLY,
+      ...KNOWN_OPEN_LIES,
+    ]) {
       expect(messages.has(m), `known-open row missing from CORPUS: ${m}`).toBe(true);
     }
   });
@@ -377,15 +393,23 @@ describe('mutation warrant consults the explicit veto', () => {
     // because it breaks them, which is why they are named here rather than
     // absorbed into a looser assertion. Anything else moving voids the claim
     // that this change touches only what it says it touches.
-    expect([...moved].sort()).toEqual([...EXPLICIT_VETOES, ...KNOWN_OPEN_GAPS].sort());
+    expect([...moved].sort()).toEqual([
+      ...EXPLICIT_VETOES,
+      ...KNOWN_OPEN_GAPS,
+      ...LEADING_EFFECT_CONFIRMATION_ONLY,
+    ].sort());
   });
 
   it('GAPS — the only edits without a warrant are the base gaps plus the recorded known-open set', () => {
     const gaps = EDITS.filter((c) => !hasMutationWarrantSignal(c.message)).map((c) => c.message);
     const baseGaps = EDITS.filter((c) => !c.baseWarrant).map((c) => c.message);
     expect(baseGaps.length, 'base gap count drifted').toBe(2);
-    expect([...gaps].sort()).toEqual([...baseGaps, ...KNOWN_OPEN_GAPS].sort());
-    expect(gaps.length).toBe(4);
+    expect([...gaps].sort()).toEqual([
+      ...baseGaps,
+      ...KNOWN_OPEN_GAPS,
+      ...LEADING_EFFECT_CONFIRMATION_ONLY,
+    ].sort());
+    expect(gaps.length).toBe(5);
   });
 
   /**

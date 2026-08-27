@@ -106,9 +106,9 @@ describe('tryStateQueryGuard', () => {
       );
     });
 
-    it('does not suppress a compound effect question followed by a real edit', () => {
+    it('protects a compound effect question at the route while preserving an independent trailing warrant', () => {
       const message = 'What did that update do? Add another option.';
-      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(isStateQueryQuestionShape(message)).toBe(true);
       expect(hasMutationWarrantSignal(message)).toBe(true);
       expect(tryStateQueryGuard({
         message,
@@ -131,6 +131,8 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? Renames are risky.',
       'What did that update do? Changes are expected.',
       'What did that update do? Deletes are irreversible.',
+      'What did that update do? The increase in cost is worrying.',
+      'What did that update do? Lower risk would be better.',
       'What did that update do? Rename nothing.',
       'What did that update do? Configure how?',
       'What did that update do? Rename it back? No, leave it.',
