@@ -123,6 +123,14 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async (rowIds: readonly string[]) => asPriorFacts(rowIds),
     readFactsWithTurnFor: async (rowIds: readonly string[]) =>
       asPriorFactsWithTurn(rowIds),
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = persistence.turns
+        .flatMap((turn) => turn.handler_facts)
+        .filter(
+          (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+        );
+      return { facts, total_count: facts.length };
+    },
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

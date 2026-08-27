@@ -85,6 +85,14 @@ export function createMockSessionStore(
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readRecentAppliedMutationFactsFor: async () => [],
+    // Production always exposes the uncached exact-count analysis-fact page.
+    // A shared "complete" test store must therefore prove an empty durable
+    // scenario, not omit the optional legacy port and accidentally exercise
+    // the degraded authority branch in every consumer test.
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [],
+      total_count: 0,
+    }),
     // Consistent with the empty fact reads above: this scenario has no
     // analysis. The read SUCCEEDS and reports none — which is the honest
     // default and NOT the same as the read failing. A default that threw would

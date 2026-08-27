@@ -99,7 +99,7 @@ const LEADER_DECISION_REVIEW = {
   // that named it would be dropped for the WRONG REASON and every absence
   // assertion below would pass vacuously (TESTING-DISCIPLINE rule 1).
   narrative_summary:
-    'Hire Marketing Manager leads by a margin of about 52 percentage points, but this result relies on assumptions.',
+    'Hire Marketing Manager leads under current modelling, but this result relies on assumptions.',
   /**
    * A DICT keyed by option id — the shape the decision-review prompt's own
    * OUTPUT_SCHEMA mandates (`story_headlines (Record<option_id, string>)`,
@@ -422,10 +422,21 @@ function plotEnvelope(opts: {
  */
 let activeGraph: Record<string, unknown> = READY_GRAPH;
 let activeRatifiedConstraints: Array<Record<string, unknown>> = [RATIFIED_CONSTRAINT];
+const invokeDecisionReviewMock = vi.hoisted(() => vi.fn());
 
 beforeEach(() => {
   activeGraph = READY_GRAPH;
   activeRatifiedConstraints = [RATIFIED_CONSTRAINT];
+  invokeDecisionReviewMock.mockReset().mockResolvedValue({
+    output: structuredClone(LEADER_DECISION_REVIEW),
+    raw: JSON.stringify(LEADER_DECISION_REVIEW),
+    model: 'constraint-disclosure-test',
+    provider: 'anthropic',
+    llm_latency_ms: 1,
+    input_tokens: 1,
+    output_tokens: 1,
+    prompt_version: 'test',
+  });
 });
 
 /** Swapped per test, before the inject. */
@@ -488,8 +499,17 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts, total_count: facts.length };
+    },
     loadGraph: async () => activeGraph,
-    loadGraphAndBriefText: async () => ({ graph: activeGraph, briefText: null }),
+    loadGraphAndBriefText: async () => ({
+      graph: activeGraph,
+      briefText: 'Compare the modelled options against the ratified constraint.',
+    }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
     storeDraftGraph: async () => undefined,
@@ -499,6 +519,30 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
   SessionReadError: class SessionReadError extends Error {},
 }));
+
+vi.mock('../../config/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../config/index.js')>();
+  return {
+    ...original,
+    config: {
+      ...original.config,
+      cee: {
+        ...original.config.cee,
+        runAnalysisAwaitDecisionReview: true,
+      },
+    },
+  };
+});
+
+vi.mock('../../cee/decision-review/invoke.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../cee/decision-review/invoke.js')>();
+  return {
+    ...original,
+    invokeDecisionReview: (...args: unknown[]) =>
+      invokeDecisionReviewMock(...args),
+  };
+});
 
 const routeWithToolUseMock = vi.fn();
 vi.mock('../routing/route-with-tool-use.js', async () => {
@@ -996,7 +1040,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
       expect(kinds).toContain('narrative');
       expect(kinds).toContain('robustness');
       // …and the copy itself is on the serialised bytes, verbatim.
-      expect(turn.raw).toContain('leads by a margin of about 52 percentage points');
+      expect(turn.raw).toContain('leads under current modelling');
       expect(turn.raw).toContain('the lead depends on assumptions');
     });
 
@@ -1029,7 +1073,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
           blocksOf(turn.raw).map(({ enrichment, ...rest }) => { void enrichment; return rest; }),
         );
         // blocks[1] — narrative. The exact live sentence class.
-        expect(prose).not.toContain('leads by a margin of about 52 percentage points');
+        expect(prose).not.toContain('leads under current modelling');
         // blocks[2] — robustness.
         expect(prose).not.toContain('the lead depends on assumptions');
         // blocks[13] — the deterministic lens copy bank. Five of the eight
@@ -1238,7 +1282,9 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
 
       expect(block.leading_option_id).toBe('opt_hire');
       expect(block.enrichment.decision_review).toBeDefined();
-      expect(block.enrichment.decision_review.narrative_summary).toContain('leads by a margin');
+      expect(block.enrichment.decision_review.narrative_summary).toContain(
+        'leads under current modelling',
+      );
       expect(block.enrichment.decision_brief.headline).toContain('currently leads');
       expect(block.enrichment.decision_brief.headline_banded.leader_option_id).toBe('opt_hire');
       expect(block.enrichment.decision_brief.headline_banded.band).toBe('slightly_ahead');
@@ -1495,7 +1541,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         plotResponse = withBlobs();
         const turn = await runAnalysisTurn(app);
         expect(analysisBlockOf(turn.raw).enrichment?.decision_review).toBeUndefined();
-        expect(turn.raw).not.toContain('leads by a margin of about 52 percentage points');
+        expect(turn.raw).not.toContain('leads under current modelling');
         expect(turn.raw).not.toContain('overtakes');
       });
 

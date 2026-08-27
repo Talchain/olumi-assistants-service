@@ -41,11 +41,13 @@ import { tryRunComparisonGate } from '../../../src/orchestrator-v5/routing/run-c
 import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
 import { generateChips } from '../../../src/orchestrator-v5/compose/chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../src/orchestrator-v5/routing/validation-registry.js';
+import { completeScenarioAnalysisFactSet } from '../../../src/orchestrator-v5/__tests__/support/scenario-analysis-fact-set.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphPatchBlockData, V2RunResponseEnvelope } from '../../../src/orchestrator/types.js';
 import type { TurnOutcome } from '../../../src/orchestrator-v5/turn-outcome.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+const ANALYSIS_SCENARIO_ID = 'a7f0c421-41cb-49b1-a566-04c4f4f3fe77';
 
 // ── shared fixture builders (mirrors run-comparison-gate.test.ts / ─────────
 // chip-generator-post-mutation.test.ts — view-building only, no logic) ──────
@@ -79,6 +81,7 @@ function runFact(env: V2RunResponseEnvelope, opts: { computedAt?: string; hash?:
     fact_type: 'run_analysis',
     noop: false,
     result: {
+      scenario_id: ANALYSIS_SCENARIO_ID,
       enrichment: env,
       computed_at: opts.computedAt ?? '2026-06-06T00:00:00.000Z',
       graph_hash_at_run: opts.hash === undefined ? 'a1b2c3d4e5f6a1b2' : opts.hash,
@@ -296,10 +299,28 @@ describe('honest distinct states carry no success claims and no forbidden phrase
 
 describe('rerun is offered clearly after a model-relevant edit', () => {
   it('mutation turn + prior analysis + stale → the pinned after-mutation rerun chip', () => {
+    const priorAnalysis = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: ANALYSIS_SCENARIO_ID,
+        leading_option_id: 'a',
+        summary: 'Offshore currently leads.',
+        graph_hash_at_run: 'a1b2c3d4e5f6a1b2',
+        computed_at: '2026-06-06T00:00:00.000Z',
+        win_probabilities: { a: 0.62 },
+        enrichment: { analysis_status: 'completed' },
+      },
+    } as HandlerFact;
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [setFactorValueFact()],
-      priorFacts: [runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }]))],
+      priorFacts: [priorAnalysis],
+      analysisFactSet: completeScenarioAnalysisFactSet(
+        ANALYSIS_SCENARIO_ID,
+        [priorAnalysis],
+      ),
       analysis: null,
       analysisReady: READY,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
