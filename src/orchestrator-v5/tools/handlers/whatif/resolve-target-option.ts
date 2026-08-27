@@ -199,10 +199,12 @@ function hasCrossKindIdentityCollision(graph: unknown): boolean {
  */
 const OPTION_DEICTIC_REFERENCE =
   '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
+const TERMINAL_OUTCOME_BOUNDARY =
+  '(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?!]|\\.(?=\\s|$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))';
 const TERMINAL_WIN_CUE =
-  'win(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?.!,]|$|(?:if|when|under|given|with|without|against|over)\\b))';
+  `win${TERMINAL_OUTCOME_BOUNDARY}`;
 const TERMINAL_OPTION_RANK_CUE =
-  '(?:the\\s+)?(?:leader|leading|preferred|best|top)(?=\\s*(?:[?.!,]|$|(?:if|when|under|given|with|without|against|over)\\b))';
+  `(?:the\\s+)?(?:leader|leading|preferred|best|top)${TERMINAL_OUTCOME_BOUNDARY}`;
 const NAMED_OPTION_RANK_CUE =
   '(?:the\\s+)?(?:leading|preferred|best|top)\\s+(?:option|alternative|choice)';
 const OPTION_OUTCOME_CUE =
@@ -299,12 +301,27 @@ export function resolveTargetOptionFromMessage(
     readonly label: string;
     readonly entities: readonly LabeledGraphEntity[];
   }> = [];
+  const lexical = /[\p{L}\p{N}\p{M}_]/u;
+  const hasPhraseBoundaries = (start: number, end: number, label: string): boolean => {
+    const labelCodePoints = Array.from(label);
+    const labelStartsLexical = lexical.test(labelCodePoints[0] ?? '');
+    const labelEndsLexical = lexical.test(labelCodePoints.at(-1) ?? '');
+    const previous = Array.from(haystack.slice(0, start)).at(-1) ?? '';
+    const next = Array.from(haystack.slice(end))[0] ?? '';
+    return (
+      (!labelStartsLexical || !lexical.test(previous)) &&
+      (!labelEndsLexical || !lexical.test(next))
+    );
+  };
   for (const [label, entities] of entitiesByLabel) {
     let from = 0;
     while (from <= haystack.length - label.length) {
       const start = haystack.indexOf(label, from);
       if (start < 0) break;
-      candidates.push({ start, end: start + label.length, label, entities });
+      const end = start + label.length;
+      if (hasPhraseBoundaries(start, end, label)) {
+        candidates.push({ start, end, label, entities });
+      }
       from = start + Math.max(label.length, 1);
     }
   }

@@ -168,6 +168,36 @@ describe('resolveTargetOptionFromMessage — the user names ONE option', () => {
     ).toEqual({ kind: 'none', reason: 'label_collision' });
   });
 
+  it('requires Unicode lexical boundaries instead of resolving short labels inside words', () => {
+    const short = { nodes: [{ id: 'o1', kind: 'option', label: 'US' }] };
+    for (const message of [
+      'What would change for the business?',
+      'How much trust would change the result?',
+    ]) {
+      expect(resolveTargetOptionFromMessage(message, short), message).toEqual({
+        kind: 'none',
+        reason: 'no_option_named',
+      });
+    }
+    expect(resolveTargetOptionFromMessage('What would make (us) win?', short)).toEqual({
+      kind: 'resolved',
+      option: { id: 'o1', label: 'US' },
+    });
+
+    const unicode = {
+      nodes: [{ id: 'o2', kind: 'option', label: 'Åland (EU)' }],
+    };
+    expect(
+      resolveTargetOptionFromMessage('What would make åLAND (eu) win?', unicode),
+    ).toEqual({
+      kind: 'resolved',
+      option: { id: 'o2', label: 'Åland (EU)' },
+    });
+    expect(
+      resolveTargetOptionFromMessage('What would make Måland (EU) win?', unicode),
+    ).toEqual({ kind: 'none', reason: 'no_option_named' });
+  });
+
   it('TWO distinct options named ⇒ a comparison, not a target', () => {
     expect(
       resolveTargetOptionFromMessage(
@@ -283,6 +313,10 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
       'What would change if it increased?',
       'Would it lead to lower acquisition cost?',
       'Could it win support from customers?',
+      'Could it win over customers?',
+      'Could it win, over customers?',
+      'What would make it win with enterprise buyers?',
+      'What would make it win, with enterprise buyers?',
       'What would make it become the top factor?',
     ]) {
       expect(
@@ -299,6 +333,7 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
   it.each([
     'What would make it win?',
     'What would make it win if demand improved?',
+    'What would make it win, given current demand?',
     'What would make it the leading option?',
     'What would make it become top?',
     'What would need to change for this option to come out ahead?',

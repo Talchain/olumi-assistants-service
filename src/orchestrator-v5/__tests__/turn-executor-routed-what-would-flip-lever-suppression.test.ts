@@ -115,6 +115,13 @@ const SUBSTRING_LABEL_GRAPH = {
   }),
 };
 
+const SHORT_OPTION_LABEL_GRAPH = {
+  ...READY_GRAPH,
+  nodes: READY_GRAPH.nodes.map((node) =>
+    node.id === 'opt_hire' ? { ...node, label: 'US' } : node,
+  ),
+};
+
 /** A graph with NO option interventions → controlled set is empty (no-op case). */
 const UNPINNED_GRAPH = {
   nodes: [
@@ -812,5 +819,109 @@ describe('System B — selected canonical option referent continuity', () => {
       expect(fact.result?.fallback_reason).toBeNull();
     }
     expect(JSON.stringify(deictic.response)).not.toContain('model_version_receipt');
+  });
+
+  it('does not turn word substrings or market-success language into option authority', async () => {
+    const genericAnswer =
+      'Market demand and the recorded cost assumptions are the main factors that could change the result, while the present analysis still leaves meaningful uncertainty around the alternatives.';
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(genericAnswer),
+    );
+    mockState.persistedGraph = SHORT_OPTION_LABEL_GRAPH;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(SHORT_OPTION_LABEL_GRAPH)];
+
+    for (const [message, requestId, withSelection] of [
+      ['What would change the result?', 'req-referent-boundary-control', false],
+      ['What would change for the business?', 'req-referent-business', true],
+      ['How much trust would change the result?', 'req-referent-trust', true],
+      ['Could it win over customers?', 'req-referent-win-over', true],
+      [
+        'What would make it win with enterprise buyers?',
+        'req-referent-win-with',
+        true,
+      ],
+    ] as const) {
+      const result = await runTurnExecutor(mkPayload(message), requestId, {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SHORT_OPTION_LABEL_GRAPH as never,
+        ...(withSelection
+          ? { selectedElements: { node_ids: ['opt_hire'], edge_ids: [] } }
+          : {}),
+      });
+      expect(result.response.assistant_text, message).toBe(genericAnswer);
+      expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
+    }
+
+    const writes = appendCalls.map(([write]) => write as {
+      graph?: unknown;
+      handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+    });
+    for (const write of writes) expect(write.graph).toBeUndefined();
+    const flipFacts = writes
+      .flatMap((write) => write.handler_facts ?? [])
+      .filter((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFacts).toHaveLength(5);
+    const controlFactBytes = JSON.stringify(flipFacts[0]!.result);
+    for (const fact of flipFacts) {
+      expect(fact.result?.answer_source).toBe('sonnet');
+      expect(fact.result?.fallback_reason).toBeNull();
+      expect(JSON.stringify(fact.result)).toBe(controlFactBytes);
+    }
+  });
+
+  it('retains bounded explicit, terminal-win and option-rank positives', async () => {
+    mockState.persistedGraph = SHORT_OPTION_LABEL_GRAPH;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(SHORT_OPTION_LABEL_GRAPH)];
+
+    const explicit = await runTurnExecutor(
+      mkPayload('What would make US win?'),
+      'req-referent-us-explicit',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SHORT_OPTION_LABEL_GRAPH as never,
+      },
+    );
+    const terminalWin = await runTurnExecutor(
+      mkPayload('What would make it win?'),
+      'req-referent-terminal-win',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SHORT_OPTION_LABEL_GRAPH as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      },
+    );
+    const optionRank = await runTurnExecutor(
+      mkPayload('What would make it the leading option?'),
+      'req-referent-option-rank',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SHORT_OPTION_LABEL_GRAPH as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      },
+    );
+
+    expect(terminalWin.response.assistant_text).toBe(explicit.response.assistant_text);
+    expect(optionRank.response.assistant_text).toBe(explicit.response.assistant_text);
+    expect(explicit.response.assistant_text).toContain('US would lead instead');
+    const flipFacts = appendCalls
+      .flatMap(([write]) => {
+        const record = write as {
+          graph?: unknown;
+          handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+        };
+        expect(record.graph).toBeUndefined();
+        return record.handler_facts ?? [];
+      })
+      .filter((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFacts).toHaveLength(3);
+    for (const fact of flipFacts) {
+      expect(fact.result?.answer_source).toBe('deterministic_fallback');
+      expect(fact.result?.fallback_reason).toBeNull();
+    }
+    expect(JSON.stringify(optionRank.response)).not.toContain('model_version_receipt');
   });
 });
