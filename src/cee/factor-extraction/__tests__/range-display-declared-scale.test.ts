@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { DeclaredScale } from "@talchain/schemas";
 import { synthesiseRangeDisplayValue } from "../display-value.js";
-import { isPercentScaledUnit } from "../../draft/records/projector.js";
+import { classifyUnitScaleClass, isPercentScaledUnit } from "../../draft/records/projector.js";
 import { transformNodeToV3 } from "../../transforms/schema-v3.js";
 import { handleUnreachableFactors } from "../../unified-pipeline/stages/repair/unreachable-factors.js";
 
@@ -261,12 +261,38 @@ describe("G3 — percent-scaled spellings that this function does NOT treat as p
     },
   );
 
-  it("every sampled spelling IS accepted by the twin predicate — the sample is DERIVED, not invented", () => {
-    // Binds the sample to `isPercentScaledUnit` itself. Without this the list
-    // could drift into units the predicate never accepted, and the "twin
-    // predicate" framing would quietly stop being true of its own corpus.
+  it("every sampled spelling DIVERGES AT THE RENDERED OUTPUT — the sample is DERIVED, not invented", () => {
+    /**
+     * ⚠ RE-POINTED (C4 1B lane) — INTENT PRESERVED, BINDING CORRECTED.
+     *
+     * This assertion previously read `expect(isPercentScaledUnit(unit)).toBe(true)`
+     * for every member. Its PURPOSE — stated by its original author and kept
+     * verbatim below — is to stop this sample drifting into units that are not
+     * actually divergent, so the corpus cannot quietly become invented. That
+     * purpose is right and is unchanged.
+     *
+     * What was wrong was the BINDING. It bound to a PREDICATE'S BOOLEAN, which is
+     * an implementation detail, rather than to the USER-VISIBLE VALUE this file
+     * exists to protect. So it fired on a change that moves no value: when
+     * `isPercentScaledUnit` was narrowed to an exact-match classifier
+     * (`classifyUnitScaleClass`, projector.ts), this test RED'd while
+     * `synthesiseRangeDisplayValue` returned BYTE-IDENTICAL output for all twelve
+     * sampled spellings — measured, before and after.
+     *
+     * It is now bound to the divergence ITSELF, at the output: every sampled
+     * spelling renders UN-MULTIPLIED while the canonical `'%'` renders MULTIPLIED.
+     * That is the property the sample is selected on, it is what a user sees, and
+     * it survives the next legitimate predicate change too.
+     */
+    // Original author's rationale, carried forward: "Without this the list could
+    // drift into units the predicate never accepted, and the 'twin predicate'
+    // framing would quietly stop being true of its own corpus."
+    const canonical = synthesiseRangeDisplayValue({ range_min: 0.2, range_max: 0.8 }, "%");
+    expect(canonical).toBe("20% to 80%"); // DISCRIMINATING CONTRAST: the exact gate DOES multiply.
     for (const unit of SAMPLED_DIVERGENT_PERCENT_SPELLINGS) {
-      expect(isPercentScaledUnit(unit)).toBe(true);
+      const rendered = synthesiseRangeDisplayValue({ range_min: 0.2, range_max: 0.8 }, unit);
+      expect(rendered, `${unit} must render un-multiplied`).toBe(`0.2 to 0.8 ${unit}`);
+      expect(rendered, `${unit} must differ from the canonical '%' rendering`).not.toBe(canonical);
     }
   });
 
@@ -301,8 +327,24 @@ describe("G3 — percent-scaled spellings that this function does NOT treat as p
    * too — exactly the `declared_scale` read this file's G1 block installs for
    * `'%'` — not a wider unit-string match.
    */
-  it("⛔ `percentage points` is percent-scaled BUT must never be multiplied — pinned so a widening cannot silently ship a 100x lie", () => {
-    expect(isPercentScaledUnit("percentage points")).toBe(true);
+  it("⛔ `percentage points` must never be multiplied — pinned so a widening cannot silently ship a 100x lie", () => {
+    /**
+     * ⚠ RE-POINTED (C4 1B lane) — AND THE TRAP ABOVE IS STRENGTHENED, NOT REMOVED.
+     *
+     * This previously also asserted `isPercentScaledUnit("percentage points") ===
+     * true`. The docstring above calls that behaviour "the CORRECT number reached
+     * by the WRONG route", and says the real fix "needs the PRODUCER'S DECLARATION
+     * ... not a wider unit-string match". `percentage points` is now its OWN scale
+     * class (`classifyUnitScaleClass` -> "percentage_points", multiplier x1), so
+     * the wrong route is gone and the correct number is reached by the right one.
+     * The predicate assertion was a pin on a shape its own author called wrong.
+     *
+     * The x100-lie guard it protects is UNCHANGED and is what the assertion below
+     * enforces: if a future change ever renders this "20% to 80%", that is a
+     * regression even though it looks like the fix.
+     */
+    expect(classifyUnitScaleClass("percentage points")).toBe("percentage_points");
+    expect(isPercentScaledUnit("percentage points")).toBe(false); // no longer routed as percent
     // Today it renders un-multiplied, which for THIS spelling is the CORRECT
     // number reached by the wrong route. If a future widening changes this to
     // "20% to 80%", that is a regression even though it looks like the fix.

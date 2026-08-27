@@ -1013,10 +1013,78 @@ function isOptionControlledFactor(
  * corpus ("per cent" — this is a British-English estate — and "pct"). Trap 22:
  * the corpus-only version silently read "3 per cent" as a derived-frame 0.6.
  */
-export function isPercentScaledUnit(unit: string | undefined): boolean {
-  if (typeof unit !== "string") return false;
+/**
+ * THE UNIT'S SCALE CLASS. One authority, four classes, EXACT match — replacing two
+ * overlapping `startsWith` predicates whose contract could not describe the domain.
+ *
+ * ⚠ FOUR CLASSES, NAMED FROM MEASUREMENT (every spelling, both directions, derived
+ * at CEE 3ab35d34 and PLoT 12d4389 — see `__tests__/unit-scale-class.test.ts`):
+ *
+ *     percent            x100      '%' 'percent' 'per cent' 'pct' 'percentage'
+ *     percentage_points  x1        'pp' 'ppt' 'pps' 'percentage point(s)'
+ *     basis_points       x0.0001   'bps' 'basis point(s)'
+ *     unknown            NO CLAIM  everything else
+ *
+ * ⚠ WHY EXACT AND NOT `startsWith`. The prefix form INVENTED conversions:
+ * 'percentage points' is a x1 class and was being claimed as percent (a 100x lie),
+ * and '% NRR' / '%-of-ARR' — labelled ratios — silently acquired percent framing.
+ * A conversion rule must never be inferred from a similar-LOOKING unit string.
+ *
+ * ⚠ WHY 'unknown' IS A CLASS AND NOT A DEFAULT. An unsupported unit has to be
+ * visible as unsupported. Callers must decide what to do with it rather than
+ * receive a guessed multiplier; `deriveFactorScaleFrame` declines to pin a scale
+ * and falls through to the honestly-derived ladder.
+ *
+ * ⚠ BARE 'bp' IS DELIBERATELY UNKNOWN. Inherited from the original
+ * `isBasisPointsUnit`, which argued it explicitly: "a bare 'bp' is left to the
+ * derived frame rather than guessed." Suppress-rather-than-guess. Do not add it
+ * without refuting that argument.
+ *
+ * ⚠⚠ THE UNIT ALONE IS NEVER SUFFICIENT — DO NOT RE-ADD A BARE `unit === '%'`.
+ * The producer's convention is MAGNITUDE-DEPENDENT. CEE's extractor emits "4%" as
+ * `{ value: 0.04, unit: '%' }` — a FRACTION under a '%' label — while a '%' value
+ * `>= 1` IS percentage points. PLoT documents both halves at
+ * `intervention-normaliser.ts:1153-1180`, citing CEE's own
+ * `compound-goal/extractor.ts:925-934`, and CEE's relabel runs only on the
+ * regex-extracted branch, so a fractional value under a raw '%' label reaches PLoT
+ * on the primary draft path. Any caller converting a magnitude MUST read the VALUE
+ * as well as the unit. This classifier answers "which scale family is this token?"
+ * and NOTHING about which convention a given number is already in.
+ */
+export type UnitScaleClass = "percent" | "percentage_points" | "basis_points" | "unknown";
+
+/** Exact tokens per class. Single source for the classifier and its tests. */
+const UNIT_SCALE_CLASS_TOKENS: ReadonlyArray<readonly [UnitScaleClass, readonly string[]]> = [
+  ["percent", ["%", "percent", "per cent", "pct", "percentage"]],
+  ["percentage_points", ["pp", "ppt", "pps", "percentage point", "percentage points", "percentage-point", "percentage-points"]],
+  ["basis_points", ["bps", "basis point", "basis points"]],
+];
+
+const UNIT_SCALE_CLASS_BY_TOKEN: ReadonlyMap<string, UnitScaleClass> = (() => {
+  const m = new Map<string, UnitScaleClass>();
+  for (const [cls, tokens] of UNIT_SCALE_CLASS_TOKENS) for (const t of tokens) m.set(t, cls);
+  return m;
+})();
+
+export function classifyUnitScaleClass(unit: string | undefined): UnitScaleClass {
+  if (typeof unit !== "string") return "unknown";
   const t = unit.trim().toLowerCase();
-  return t.startsWith("%") || t.startsWith("percent") || t.startsWith("per cent") || t.startsWith("pct");
+  if (t.length === 0) return "unknown";
+  return UNIT_SCALE_CLASS_BY_TOKEN.get(t) ?? "unknown";
+}
+
+/**
+ * Percent spellings. RETAINED as a named question ("is this the percent family?")
+ * and now DERIVED from `classifyUnitScaleClass` rather than carrying its own
+ * token list — two copies of this vocabulary is the hand-maintained mirror that
+ * lets a token be added to one and not the other.
+ *
+ * ⚠ ITS ANSWER CHANGED, deliberately: 'percentage points' and '% NRR' used to
+ * return true under the old `startsWith` form. They are a different class and an
+ * unknown respectively, and claiming them was the defect.
+ */
+export function isPercentScaledUnit(unit: string | undefined): boolean {
+  return classifyUnitScaleClass(unit) === "percent";
 }
 
 /**
@@ -1026,9 +1094,7 @@ export function isPercentScaledUnit(unit: string | undefined): boolean {
  * the derived frame rather than guessed.
  */
 export function isBasisPointsUnit(unit: string | undefined): boolean {
-  if (typeof unit !== "string") return false;
-  const t = unit.trim().toLowerCase();
-  return t.startsWith("bps") || t.startsWith("basis point");
+  return classifyUnitScaleClass(unit) === "basis_points";
 }
 
 /**
@@ -1178,8 +1244,11 @@ export function deriveFactorScaleFrame(
   if (magnitudes.some((m) => m < 0)) return undefined;
   const max = Math.max(...magnitudes);
   if (max <= 1) return undefined;
-  if (isPercentScaledUnit(unit) && max <= 100) return 100;
-  if (isBasisPointsUnit(unit) && max <= 10000) return 10000;
+  // percentage_points (x1) and unknown deliberately pin NOTHING and fall through
+  // to the derived ladder below — an honest frame beats a guessed multiplier.
+  const scaleClass = classifyUnitScaleClass(unit);
+  if (scaleClass === "percent" && max <= 100) return 100;
+  if (scaleClass === "basis_points" && max <= 10000) return 10000;
   const frame = nextNiceNumberAbove(max);
   // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
   // infinite frame would ship a fabricated level 0 under a green guard
