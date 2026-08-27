@@ -349,6 +349,20 @@ function createGraphCasRpcMode(
  *     `validateConfig()` at startup, never on lazy config access): rejects the
  *     foot-gun combo `RPC=enforce` + `MODE=off`. Staging runs `MODE=observe` +
  *     `RPC=enforce`, which PASSES.
+ *
+ * ⚠ THAT LAST SENTENCE IS PROSE, NOT EVIDENCE, AND IT IS CONTRADICTED. The
+ *   header of `routes/assist.v1.scenario-graph-register.ts` describes "the
+ *   deployed `CEE_V5_GRAPH_CAS_RPC=shadow` posture". One of the two is stale
+ *   and nothing here can tell you which: the deployed posture is set in the
+ *   Render dashboard, is not derivable from this file, and is currently
+ *   UNOBSERVABLE FROM ANY CLIENT by construction. Both sentences are kept, each
+ *   pointing at the other, so the next reader does not pick one at random —
+ *   which is what a lone confident sentence invites. Do not derive posture from
+ *   either (CLAUDE.md trap 18: env posture never comes from prose or YAML);
+ *   derive it from the deployment, and treat any behaviour that depends on it
+ *   as needing to be correct under BOTH. Exposing the resolved capability on
+ *   `/healthz` is rowed separately — a protection nobody outside can witness is
+ *   one nobody can rely on.
  */
 export interface GraphCasCapability {
   readonly appMode: "off" | "observe" | "enforce";

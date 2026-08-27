@@ -1329,9 +1329,29 @@ export async function runTurnExecutor(
     // read whose strict reread re-proved the base).
     //
     // FINAL-SWEEP (pre-handover) — CLOSE THE HELD-APPLY CLOBBER AT THE FLOOR.
-    // The GM held-execute / consent-apply writers (:2119, :2342) return via
-    // `finalizeRun()` BEFORE the graph-write chokepoint (:8239), so on those
-    // paths `resolvedCanonicalGraphForCommit` is unset. On a HEALTHY read the
+    //
+    // ⚠ REWRITTEN TO POINT AT SYMBOLS (C3 closure). This paragraph used to name
+    // three LINE NUMBERS — the GM writers at `:2119`/`:2342` and a "graph-write
+    // chokepoint" at `:8239`. All three had drifted by roughly 1,400 lines and
+    // pointed at unrelated code (persisted-graph ingress, freshness defaults,
+    // and routing telemetry respectively). They cost this closure a scope
+    // definition: read literally they imply the GM writers BYPASS the write
+    // authority, and two non-existent items were scoped on that reading. They
+    // do not bypass it — `commitGmHeldResume` / `commitGmHeldResumeAll` both go
+    // through `commitTurn` → `commitDirectAnswer` → `store.append`, like every
+    // other commit site in this function. A line number in prose is a
+    // hand-maintained mirror (trap 12); these are symbols instead.
+    //
+    // THE ACTUAL PROPERTY, stated precisely: the GM held-execute /
+    // consent-apply resume writers return via `finalizeRun()` before
+    // `resolvedCanonicalGraphForCommit` is ever assigned (its SINGLE assignment
+    // site sits on the main path, downstream of the canonical read), so on
+    // those paths it is unset. That is NOT peculiar to them — it holds for the
+    // large majority of this function's `commitTurn` call sites, which is why
+    // the protection below is written for EVERY unresolved graph commit rather
+    // than for a hand-listed pair. Derive the two sets if you need them
+    // (`await commitTurn(` vs `resolvedCanonicalGraphForCommit = {`); do not
+    // trust a count written here. On a HEALTHY read the
     // fallback below is `context.persistedGraph` (the real server-read base) —
     // correct, unchanged. But on a DEGRADED canonical read `context.persistedGraph`
     // is NULL, so the fallback would derive `{null,null}` → CAS category

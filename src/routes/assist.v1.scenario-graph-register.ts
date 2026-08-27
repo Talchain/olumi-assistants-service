@@ -65,8 +65,17 @@
  * `p_incoming_graph_identity_hash` from the single normaliser authority. The
  * lighter `store_draft_graph` RPC does NOT write the identity hash, so using it
  * would leave the column describing a graph we no longer store — silently
- * poisoning every later CAS compare, which reads that column as its base. There
- * is exactly one correct writer here and it is `store.append`.
+ * poisoning every later CAS compare, which reads that column as its base.
+ *
+ * ⚠ UPDATED (C3 closure) — this used to end "there is exactly one correct
+ * writer here and it is `store.append`". The atomicity argument above is
+ * unchanged and still the reason, but the call is now
+ * `appendCheckedGraphWrite` (`orchestrator-v5/persist-graph-write.ts`), which
+ * enforces the terminal structural invariants and then performs that same
+ * `store.append`. The correction matters rather than being cosmetic: while this
+ * route called `store.append` directly it was the ONLY `scenarios.graph` writer
+ * that skipped those invariants, so a registration could persist a violation
+ * the turn path refuses fail-closed.
  *
  * The write is expressed as a `direct_answer` turn with `handler_id: null` —
  * the DL-7 precedent the system-event dispatcher already uses for
@@ -89,9 +98,18 @@
  * ⚠ THE CAS BASE IS READ FROM THE SERVER, NEVER FROM THE REQUEST. The trusted
  *   base rule (`SessionTurnWrite.expectedGraphIdentityHash`) exists because a
  *   CAS that validates a write against the very graph being written always
- *   "matches". Under the deployed `CEE_V5_GRAPH_CAS_RPC=shadow` posture this is
- *   telemetry; under `enforce` it becomes a real guard, and this route is
- *   written so that promotion needs no change here.
+ *   "matches". Under a `shadow` RPC posture this is telemetry; under `enforce`
+ *   it becomes a real guard, and this route is written so that promotion needs
+ *   no change here.
+ *
+ *   ⚠ THE POSTURE NAMED HERE IS PROSE AND IS CONTRADICTED. This sentence used
+ *   to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow` posture"; the
+ *   `resolveGraphCasCapability` doc in `config/index.ts` asserts staging runs
+ *   `MODE=observe` + `RPC=enforce`. One is stale and neither is evidence — the
+ *   deployed value lives in the Render dashboard and is unobservable from any
+ *   client today. The claim is left as a conditional above rather than a
+ *   statement of fact, and both sites now point at each other. Behaviour here
+ *   must be correct under BOTH postures.
  *
  * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
  * · It does not run an LLM, compose a response, or touch the referee.
@@ -122,6 +140,8 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -364,8 +384,16 @@ export default async function route(app: FastifyInstance) {
       // the user permanently unable to register a new one.
       let expectedGraphIdentityHash: string | null | undefined;
       let expectedGraphAnalysisHash: string | null | undefined;
+      // The SAME server-read bytes serve two different questions: the trusted
+      // CAS base (hashes, below) and the invariant BASELINE handed to the
+      // persistence floor. Hoisted out of the try so the floor can see it —
+      // `undefined` after a failed read, which the floor treats as "no
+      // baseline", i.e. observe-only. That is the correct degrade: a read
+      // failure must not start refusing registrations it cannot adjudicate.
+      let baseGraphForInvariants: unknown;
       try {
         const base = await store.loadGraph(scenarioId);
+        baseGraphForInvariants = base;
         const hashes = computeExpectedGraphCasHashes(base);
         expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
         expectedGraphAnalysisHash = hashes.expectedGraphAnalysisHash;
@@ -396,25 +424,70 @@ export default async function route(app: FastifyInstance) {
 
       const turnId = registrationTurnId();
       try {
-        await store.append({
-          scenario_id: scenarioId,
-          turn_id: turnId,
-          // DL-7 PR B precedent (system-events/dispatch.ts): a server-initiated
-          // commit that composes no assistant prose is a `direct_answer` with a
-          // null handler_id. The DB CHECK enforces
-          // `(turn_class = 'handler') = (handler_id IS NOT NULL)`.
-          turn_class: "direct_answer",
-          handler_id: null,
-          request_hash: turnId,
-          response_emitted: false,
-          llm_calls_used: 0,
-          duration_ms: Date.now() - startedAt,
-          handler_facts: [],
-          graph: graphForStore,
-          expectedGraphIdentityHash,
-          expectedGraphAnalysisHash,
+        // C3 — THE SHARED PERSISTENCE FLOOR, not `store.append` directly. This
+        // route and `commitDirectAnswer` are the only two `scenarios.graph`
+        // writers, and until this change only the turn path enforced the
+        // terminal structural invariants: a registration could persist a
+        // violation the turn path refuses fail-closed. They answer different
+        // questions (a TURN vs a REGISTRATION — no LLM, no composed response,
+        // `response_emitted: false`), so they are not merged; what they share
+        // is HOW a graph persists, and that now has one owner.
+        await appendCheckedGraphWrite({
+          store,
+          writesGraph: true,
+          // Only what THIS registration introduces can refuse it — a scenario
+          // whose stored graph is already invalid stays registrable.
+          baseGraphForInvariants,
+          source: "graph_registration",
+          write: {
+            scenario_id: scenarioId,
+            turn_id: turnId,
+            // DL-7 PR B precedent (system-events/dispatch.ts): a server-initiated
+            // commit that composes no assistant prose is a `direct_answer` with a
+            // null handler_id. The DB CHECK enforces
+            // `(turn_class = 'handler') = (handler_id IS NOT NULL)`.
+            turn_class: "direct_answer",
+            handler_id: null,
+            request_hash: turnId,
+            response_emitted: false,
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            graph: graphForStore,
+            expectedGraphIdentityHash,
+            expectedGraphAnalysisHash,
+          },
         });
       } catch (err) {
+        if (err instanceof PersistedGraphInvariantError) {
+          // The caller supplied these bytes, so name what is wrong with them —
+          // the `invalid()` doctrine. A 503 would be actively misleading: it
+          // invites a retry of a payload that can never succeed.
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.invariant_violation",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              introduced: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+            "Graph registration — refused: this graph introduces a structural violation; nothing written",
+          );
+          return invalid(
+            "GRAPH_INVARIANT_VIOLATION",
+            "This model has a structural problem and was not imported.",
+            {
+              violations: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+          );
+        }
         if (err instanceof GraphStaleWriteError) {
           // Atomic in-transaction CAS refused: the whole turn rolled back and
           // nothing was clobbered. This is a 409, never a silent overwrite and
