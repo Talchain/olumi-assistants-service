@@ -9,9 +9,9 @@
  * `routing/` legitimately needs this shape for its idempotency
  * lookback, so the type is re-homed here at leaf level.
  *
- * No behaviour change. The shape is identical to the original
- * definition. `session/store.ts` re-exports this symbol so its
- * public surface is preserved for in-session callers.
+ * `session/store.ts` re-exports this symbol so its public surface is
+ * preserved for in-session callers. The fact-row identity is carried here so
+ * independent reads can compare occurrences rather than payload lookalikes.
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -35,11 +35,28 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
  */
 export interface HandlerFactWithTurn {
   readonly fact: HandlerFact;
+  /**
+   * Stable persisted identity of the handler-fact row. Production reads
+   * always supply it; legacy/direct test stores may omit it and therefore
+   * cannot establish cross-snapshot receipt identity.
+   */
+  readonly fact_row_id?: string;
   readonly turn_id: string;
   /**
    * The fact row's own `created_at` (DB-stamped). Equivalent to the
    * parent turn's `created_at` due to atomic-write coupling — see
    * the type docstring above.
    */
+  readonly fact_created_at: string;
+}
+
+/**
+ * A handler fact with the two database-authored fields needed to compare
+ * occurrences across independent reads. Payload equality is insufficient:
+ * two legitimate mutations can produce byte-identical receipts.
+ */
+export interface IdentifiedHandlerFact {
+  readonly fact: HandlerFact;
+  readonly fact_row_id: string;
   readonly fact_created_at: string;
 }

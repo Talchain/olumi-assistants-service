@@ -412,6 +412,22 @@ describe('projectRecentChanges', () => {
       expect(result[0]!.summary).toMatch(/…$/);
     });
 
+    it('caps every structured target label at the same single text limit', () => {
+      const longLabel = 'L'.repeat(60_000);
+      const result = projectRecentChanges([
+        mkAddConstraint({ label: longLabel }),
+        mkSetFactorValue({ label: longLabel }),
+      ]);
+
+      expect(result).toHaveLength(2);
+      for (const entry of result) {
+        expect(entry.target_label).toHaveLength(
+          RECENT_CHANGES_SUMMARY_MAX_CHARS,
+        );
+        expect(entry.target_label).toMatch(/…$/);
+      }
+    });
+
     it('keeps short summaries unchanged (no spurious truncation)', () => {
       const result = projectRecentChanges([
         mkAddConstraint({ label: 'Cost', value: 50000, unit: '£' }),
@@ -583,6 +599,35 @@ describe('recent_changes — assembler-level budget proof', () => {
     const tinyWindowBudget = calculateTokenBudget(32_000);
     expect(estimateTokens(fullJson)).toBeLessThanOrEqual(
       tinyWindowBudget.conversation,
+    );
+  });
+
+  it('a persisted 60k target label cannot bypass the pack or rendered-prompt ceiling', async () => {
+    const { assembleContextPack } = await import('../context-pack-assembler.js');
+    const { CONTEXT_POLICY } = await import('../context-policy.js');
+    const { buildUserMessage } = await import('../../routing/route-with-tool-use.js');
+
+    const contextPack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        source: 'composer',
+        scenario_id: '00000000-0000-4000-8000-000000000000',
+        turn_id: 't-budget-long-target',
+        stage: 'analyse',
+        turn_class: 'frame',
+        message: 'What changed?',
+      },
+      priorTurns: [],
+      priorFacts: [mkAddConstraint({ label: 'L'.repeat(60_000) })],
+    });
+
+    const budget = CONTEXT_POLICY.coach_converse.total_char_budget!;
+    expect(contextPack.recent_changes[0]!.target_label).toHaveLength(
+      RECENT_CHANGES_SUMMARY_MAX_CHARS,
+    );
+    expect(JSON.stringify(contextPack).length).toBeLessThanOrEqual(budget);
+    expect(buildUserMessage(contextPack, 'What changed?').length).toBeLessThanOrEqual(
+      budget,
     );
   });
 });

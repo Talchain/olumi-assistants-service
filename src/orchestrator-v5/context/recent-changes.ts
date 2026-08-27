@@ -15,9 +15,11 @@
  *     `provenance` markers. The summary is what a user would say.
  *   - **Cap is hard.** Maximum {@link RECENT_CHANGES_CAP} entries; each
  *     summary is truncated to {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}
- *     characters (with an ellipsis marker if truncated). The cap protects
+ *     characters (with an ellipsis marker if truncated), and each structured
+ *     target label is bounded by the same single text limit. The cap protects
  *     the routing prompt token budget — `recent_changes` cannot grow
- *     unbounded as the conversation extends.
+ *     unbounded as the conversation extends or through one pathological
+ *     persisted label.
  *   - **Successful mutations only.** Noop facts (no actual change)
  *     and non-mutation fact types are filtered out.
  *
@@ -115,7 +117,9 @@ export interface RecentMutation {
    *
    * Empty string when the fact lacks a clean label (defensive — production
    * mutation facts always carry one). Edge mutations have no single
-   * target label so this falls back to a generic descriptor.
+   * target label so this falls back to a generic descriptor. Bounded by
+   * {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}; an ellipsis makes any shortening
+   * explicit rather than silently claiming the complete canonical label.
    */
   readonly target_label: string;
 }
@@ -347,7 +351,7 @@ function summariseEditGraph(
   return {
     action: 'graph_edited',
     summary: cap(safeSummary),
-    target_label: firstLabel,
+    target_label: cap(firstLabel),
   };
 }
 
@@ -384,7 +388,7 @@ function summariseAddConstraint(
   return {
     action: 'constraint_added',
     summary: cap(summary),
-    target_label: label,
+    target_label: cap(label),
   };
 }
 
@@ -425,7 +429,7 @@ function summariseSetFactorValue(
   return {
     action: 'factor_value_updated',
     summary: cap(summary),
-    target_label: label,
+    target_label: cap(label),
   };
 }
 

@@ -90,6 +90,19 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => mockState.priorTurns,
     countTurns: async () => mockState.priorTurns.length,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `fact-window-${index}`,
+        turn_id:
+          typeof mockState.priorTurns[index]?.id === 'string'
+            ? mockState.priorTurns[index]!.id
+            : PRIOR_TURN_ROW_ID,
+        fact_created_at:
+          typeof mockState.priorTurns[index]?.created_at === 'string'
+            ? mockState.priorTurns[index]!.created_at
+            : PRIOR_HANDLER_TURN.created_at,
+      })),
     readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) =>
       mockState.priorFacts
         .filter((fact) => {
@@ -106,7 +119,15 @@ vi.mock('../session/index.js', () => ({
             (result as { status?: unknown }).status === 'applied'
           );
         })
-        .slice(0, limit),
+        .slice(0, limit)
+        .map((fact, index) => ({
+          fact,
+          fact_row_id: `fact-window-${index}`,
+          fact_created_at:
+            typeof mockState.priorTurns[index]?.created_at === 'string'
+              ? mockState.priorTurns[index]!.created_at
+              : PRIOR_HANDLER_TURN.created_at,
+        })),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

@@ -722,6 +722,7 @@ export async function buildTurnContext(
   const reconciledRecentMutationFacts = reconcileRecentMutationFacts({
     scenarioId: payload.scenario_id,
     hotWindowFacts: priorFacts,
+    hotWindowFactsWithIdentity: priorFactsWithTurn,
     hotWindowReadOk: priorFactsReadOk,
     loadedTurnCount: priorTurns.length,
     priorTurnsTotal,

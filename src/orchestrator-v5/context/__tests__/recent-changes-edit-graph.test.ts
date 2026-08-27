@@ -15,7 +15,10 @@
 import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { projectRecentChanges } from '../recent-changes.js';
+import {
+  RECENT_CHANGES_SUMMARY_MAX_CHARS,
+  projectRecentChanges,
+} from '../recent-changes.js';
 
 function makeEditGraphFact(overrides: {
   noop?: boolean;
@@ -105,6 +108,19 @@ describe('projectRecentChanges — edit_graph branch', () => {
     ];
     const out = projectRecentChanges(facts);
     expect(out[0].target_label).toBe('First');
+  });
+
+  it('R5b bounds a pathological producer-attested target label visibly', () => {
+    const out = projectRecentChanges([
+      makeEditGraphFact({
+        affected_entities: [{ kind: 'factor', label: 'L'.repeat(60_000) }],
+      }),
+    ]);
+
+    expect(out[0].target_label).toHaveLength(
+      RECENT_CHANGES_SUMMARY_MAX_CHARS,
+    );
+    expect(out[0].target_label).toMatch(/…$/);
   });
 
   it('R6 multiple edit_graph facts in newest-first order populate the cap', () => {
