@@ -53,6 +53,14 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 const appendCalls: Array<unknown> = [];
 const priorTurnRows: Array<unknown> = [];
 const priorFactRows: Array<HandlerFact> = [];
+/**
+ * The persisted graph. Null by default — a MISSING method and a method that
+ * returns null are different states, and only the second is a store that
+ * simply has no graph. Left null for the analysis/converse arms (they need no
+ * graph); set for the mutation arm, whose commit path fails CLOSED on a
+ * degraded graph read and would otherwise fall back to `direct_answer`.
+ */
+const graphHolder: { persisted: unknown } = { persisted: null };
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: unknown) => {
@@ -66,6 +74,11 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
+    loadGraph: async () => graphHolder.persisted,
+    loadGraphAndBriefText: async () => ({ graph: graphHolder.persisted, briefText: null }),
+    storeDraftGraph: async () => undefined,
+    ensureScenarioExists: async () => ({ user_id: null }),
+    readMostRecentPendingActions: async () => [],
   }),
   resetSessionStoreForTests: () => {},
 }));
@@ -80,6 +93,7 @@ const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 // The PRODUCER's own pair selector — called, never re-implemented, so this test
 // asks exactly the question `build-run-delta.ts` asks.
 const { selectTwoNewestRunAnalysisFacts } = await import('../coaching/compare-runs.js');
+const { buildD1Fixture } = await import('../tools/handlers/d1-shared/__tests__/fixtures.js');
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
@@ -121,6 +135,35 @@ function mkToolUseResult(input: unknown): ChatWithToolsResult {
 
 /** A CONVERSE turn: routing dispatches no handler, so the turn completes no run. */
 const CONVERSE_TOOL_CALL_INPUT = { intent_class: 'converse' };
+
+/**
+ * A MUTATION turn: an EXECUTE turn that dispatches a handler which is not
+ * `run_analysis`. Distinct from the converse case in the way that matters here —
+ * it reaches the post-dispatch assembly, so the fact window EXISTS at the exit
+ * and only the completed-run gate stands between it and a `run_delta`.
+ */
+const MUTATION_PAYLOAD = makeMessagePayload({
+  turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  scenario_id: TEST_SCENARIO_ID,
+  // Wording and the absence of an analyse stage are BOTH deliberate, copied
+  // from `set-factor-value.integration.test.ts`: a bare "set X to N" phrasing
+  // hits the deterministic value-update pre-route, and an "analyse"-staged
+  // "run the analysis" message steers routing to an explicit analysis request.
+  // Either would make this a different turn than the one under test.
+  message: 'update the customer churn factor',
+});
+
+const SET_FACTOR_VALUE_TOOL_CALL_INPUT = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'set_factor_value',
+    entity: { id: 'f-churn', kind: 'node', resolution_status: 'resolved', resolution_method: 'id_match' },
+    parameters: [
+      { name: 'value', value: { value: 5, unit: '%', cap: 100 }, operator: 'set', source: 'user_explicit', unit: '%' },
+    ],
+    cited_context_fields: ['graph.nodes'],
+  },
+};
 
 function makeGoldenResponse(): V2RunResponseEnvelope {
   return {
@@ -212,6 +255,7 @@ beforeEach(() => {
   appendCalls.length = 0;
   priorTurnRows.length = 0;
   priorFactRows.length = 0;
+  graphHolder.persisted = null;
   setTestSink(() => {});
 });
 
@@ -286,6 +330,42 @@ describe('finalizeRun → TurnExecutorRunResult.priorFacts (the run_delta basis)
 
     // ⭐ THE G2 ASSERTION. Absent, so the finaliser stamps nothing and the user
     // is not shown a run-over-run consequence for a turn that ran no run.
+    expect(result.priorFacts).toBeUndefined();
+  });
+
+
+  it('MUTATION turn (graph edit, no run) → NO basis, even though the post-dispatch window EXISTS', async () => {
+    // ⭐ THE CASE THE COMPLETED-RUN GATE UNIQUELY COVERS, and the reason it is
+    // not redundant with the null check. A converse turn finalises BEFORE the
+    // post-dispatch assembly, so its window is null and absence is
+    // over-determined. A graph edit is an EXECUTE turn: it reaches the
+    // assembly, the window is populated with a comparable pair, and the ONLY
+    // thing stopping the user being shown a run-over-run consequence for a turn
+    // that merely edited a factor is `handlerFactsForCommit.some(...)`.
+    // Removing that conjunct was run as a mutant; without this arm it survived.
+    seedPriorTurn('row-prior-1', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '2026-07-15T00:00:00.000Z');
+    seedPriorTurn('row-prior-2', 'ffffffff-ffff-4fff-8fff-ffffffffffff', '2026-07-16T00:00:00.000Z');
+    priorFactRows.push(priorRunFact('hash-older', '2026-07-15T00:00:00.000Z'));
+    priorFactRows.push(priorRunFact('hash-newer', '2026-07-16T00:00:00.000Z'));
+
+    // PRECONDITION PIN: the window genuinely yields a pair, so a delta is
+    // fully constructible and the absence below is the gate's doing.
+    expect(selectTwoNewestRunAnalysisFacts(priorFactRows)).not.toBeNull();
+
+    const result = await runTurnExecutor(MUTATION_PAYLOAD, 'req-rd-mutation', {
+      routingAdapter: mockRoutingAdapter(SET_FACTOR_VALUE_TOOL_CALL_INPUT),
+      graphState: buildD1Fixture(),
+    });
+
+    // PRECONDITION PINS: this really was an EXECUTE turn that dispatched a
+    // handler, and that handler was NOT run_analysis. Both matter — the arm is
+    // worthless if the turn quietly fell back to direct_answer.
+    expect(result.telemetry.turn_class).toBe('handler');
+    expect(result.telemetry.intent_class).toBe('execute');
+    const write = appendCalls[0] as { handler_facts: HandlerFact[] } | undefined;
+    expect(write?.handler_facts.some((f) => f.fact_type === 'run_analysis')).toBe(false);
+
+    // ⭐ THE ASSERTION. No run completed ⇒ no basis ⇒ no delta card.
     expect(result.priorFacts).toBeUndefined();
   });
 
