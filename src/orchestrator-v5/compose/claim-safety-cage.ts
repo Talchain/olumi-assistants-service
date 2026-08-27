@@ -277,6 +277,41 @@ export function isTier3LeakBlocked(field: string): boolean {
  * (tests/contract/reduced-samples-disclosure-single-site.guard.test.ts) —
  * a second consumer requires a fresh claim-safety review, not a new import.
  */
+/**
+ * The `run_delta` block's WITHHELD flip-threshold slot.
+ *
+ * ⭐ WHY A CONSTANT, AND WHY IT LIVES HERE. `flip_thresholds` is a ratified
+ * Tier-3 deny key. `RunDeltaObjectSchema` makes it REQUIRED (a plain
+ * `z.array(...)` — proven by execution: omitting it fails to parse with
+ * `invalid_type: Required`, while the sibling `edit_list` is `.optional()` and
+ * omits cleanly), so the `run_delta` producer has no choice but to emit the
+ * key. Same construction as {@link hasReducedSamplesDisclosure} above and for
+ * the same reason: **the cage stays the sole owner of the deny-key literal**,
+ * so the producer carries none, the static scan in
+ * `tests/contract/tier3-leak-guard.static.guard.test.ts` stays MAXIMALLY
+ * STRICT, and no allow-list entry, exemption or weakening is required.
+ *
+ * ⚠⚠ AND THE HARD PART, WHICH IS WHY THE NAME SAYS `NOT_COMPUTED` RATHER THAN
+ * `EMPTY`. The contract annotates this field "may be empty (no flip rows on
+ * either side)" and Brief 4 §5 rules, for this exact field, **"Absence: not
+ * 'no tipping point.'"** An empty array is therefore NOT a neutral placeholder:
+ * read naively it asserts *there are no flip thresholds*, which is a claim.
+ * The producer emits it because the flip-threshold join is DEFERRED and it
+ * NEVER LOOKED — a different fact, and the honest one. The sibling field
+ * `edit_list` avoids the trap structurally (`.min(1).optional()` makes an empty
+ * list unrepresentable, so absence is the only way to say "underivable"); this
+ * field has no such protection, so the discipline has to live in the name and
+ * in the single call site.
+ *
+ * Consumption is pinned to exactly ONE call site by
+ * `tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts`. A
+ * second consumer requires a fresh claim-safety review, not a new import — and
+ * POPULATING this slot is a claim-safety change, not a wiring change.
+ */
+export const RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED = Object.freeze({
+  flip_thresholds: Object.freeze([] as readonly never[]),
+});
+
 export function hasReducedSamplesDisclosure(
   response: Record<string, unknown>,
 ): boolean {

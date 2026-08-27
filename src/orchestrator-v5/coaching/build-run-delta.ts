@@ -60,6 +60,7 @@ import {
   isUsableWinProbability,
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
+import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
 import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
@@ -283,6 +284,44 @@ function deriveBuildsEquality(
  *      the same answer for every item is reporting on the instrument, not on
  *      the world (CLAUDE.md trap 20).
  *
+ * ═══ ⛔ DECLARED DEPARTURE FROM THE DESIGN OF RECORD — READ BEFORE "RESTORING" C3 ═══
+ *
+ * THE DESIGN SAYS C3. `@talchain/schemas` `boundary/run-delta.ts` states it
+ * verbatim — *"'unknown' with any other divergence classifies C3 per the
+ * table"* — RUN-DELTA-DESIGN §b's table assigns it, and acceptance criterion 8
+ * makes it a MUST. **This function does not do that.** On `builds_equal:
+ * 'unknown'` it returns C2 or C4 where an OBSERVED divergence exists, and
+ * `null` where none does. That is a deliberate departure, recorded here rather
+ * than left for someone to find.
+ *
+ * WHY, ON THE MERITS. `C3_engine_drift` is not a neutral bucket; its copy
+ * asserts the engine moved between the two runs. Under `unknown` we have not
+ * observed that the engine moved — we have observed that PLoT did not send the
+ * echo that would let us check. Naming C3 there is a POSITIVE FALSEHOOD about
+ * the pipeline, and it is the same class of claim this whole block refuses
+ * everywhere else. It is also non-discriminating: `_meta.builds` rides only
+ * under `UI_CANONICAL_META`, which is off in staging, so under the design's
+ * rule EVERY delta would classify C3 and the field would carry no information
+ * at all.
+ *
+ * ⚠⚠ AND THE FACT THAT MAKES THIS DECLARATION NECESSARY RATHER THAN OPTIONAL:
+ * **THE CONTRACT CANNOT CATCH A MISLABEL HERE.** Measured against the vendored
+ * 0.50.0 on the live provenance `{seed≠, hash≠, builds unknown, n=}`:
+ *
+ *     C0_identical    REFUSED      C2_unpaired      PARSES
+ *     C1_attributable REFUSED      C3_engine_drift  PARSES
+ *                                  C4_budget_drift  PARSES
+ *
+ * (Contrast controls: C0 on all-equal PARSES, C1 on `{seed=, hash≠, builds=}`
+ * PARSES — so those refusals are about the preconditions, not about the probe.)
+ * `refineRunDelta` polices only C0 and C1. **Nothing but this comment and the
+ * suite stands between the classifier and a silent divergence** — which is why
+ * a reasoned departure must be written down, and why "restoring" C3 to match
+ * the design would pass every gate in the repo while making the product lie.
+ * If the departure is judged wrong, change it deliberately and re-run the
+ * classifier tests; do not restore it because a table said so.
+ * ═════════════════════════════════════════════════════════════════════════════
+ *
  * ⚠ WHAT THIS MEANS TODAY, AND WHY IT IS NOT A DEFECT. With `builds_equal`
  * 'unknown', `C0_identical` and `C1_attributable` are both UNREACHABLE — the
  * schema's own `refineRunDelta` requires `builds_equal === 'equal'` for each and
@@ -290,15 +329,29 @@ function deriveBuildsEquality(
  * That is the correct outcome and it is enforced by the type system rather than
  * by anyone's discipline.
  *
- * ⚠⚠ AND THE REASON IS NOT THE ONE THIS CODEBASE RECORDS. `intervening-change.ts`
- * says *"the seed is not pinned on the live path"*, which reads as though PLoT
- * generates a RANDOM seed. It does not. `plot-lite-service/src/routes/v2/run.ts`
- * `resolveSeed` (:1301, docstring :1281-1296) derives the seed DETERMINISTICALLY
- * from the graph when the caller omits one — from node `id`/`kind`/
- * `observed_state.value` and edge `from`/`to`/`strength.mean`, and it
- * EXPLICITLY EXCLUDES `exists_probability` and `strength.std`. The canonical
- * analysis hash covers a strict SUPERSET of those fields
- * (`graph-hash-contract.ts` CANONICAL_GRAPH_HASH_NESTED_PROJECTION). Therefore:
+ * ⚠⚠ THE RECORDED REASON IS IMPRECISE — AND THIS IS NOT A NEW FINDING.
+ * `intervening-change.ts` says *"the seed is not pinned on the live path"*,
+ * which reads as though PLoT generates a RANDOM seed. It does not, and the
+ * RUN-DELTA design of record already said so on 8 Aug 2026 — this restates a
+ * known result because the shorter phrasing keeps misleading readers, NOT
+ * because anyone discovered it here.
+ *
+ * `plot-lite-service/src/routes/v2/run.ts` `resolveSeed` (:1301, docstring
+ * :1281-1296) derives the seed DETERMINISTICALLY from the graph when the caller
+ * omits one — from node `id`/`kind`/`observed_state.value` and edge
+ * `from`/`to`/`strength.mean` — and EXPLICITLY EXCLUDES `exists_probability`
+ * and `strength.std`.
+ *
+ * ⚠ CITE THE IMPLEMENTATION, NOT THE VOCABULARY. The authority on what the
+ * canonical analysis hash actually covers is CEE's own
+ * `context/graph-hash.ts` `computeAnalysisAffectingGraphHash` — it keeps edge
+ * `exists_probability` (:274) and BOTH `strength.mean` and `strength.std`
+ * (:280-281). `@talchain/schemas` `boundary/graph-hash-contract.ts` is a field
+ * VOCABULARY manifest, and `graph-hash.ts` does not import it (zero
+ * `CANONICAL_GRAPH_HASH` references, zero `@talchain/schemas` imports) — two
+ * hand-maintained lists that agree today by discipline, so a claim about the
+ * hash must be read off the implementation. Against the implementation, the
+ * hash covers a strict SUPERSET of the seed's inputs. Therefore:
  *   - a FACTOR-VALUE edit moves `observed_state.value`, which is in BOTH, so the
  *     seed moves with it → `seed_equal` false → C2. Right answer, opposite
  *     reason to the recorded one: not sampling randomness, but that the seed is
@@ -307,10 +360,23 @@ function deriveBuildsEquality(
  *     threshold, an intercept or an option field moves the HASH and NOT the
  *     SEED → `seed_equal && !hash_equal`, which is exactly C1's seed/hash
  *     precondition, ALREADY SATISFIED.
- * So the only thing standing between this product and a licensed causal clause
- * is the `_meta.builds` echo — a WIRING gap (PLoT emits it; CEE has never read
- * it until this file), not a science gap. A lane sent to "pin the seed" would
- * be solving a problem that is already solved.
+ *
+ * ⚠⚠ BUT THE GAP IS NOT CEE THREADING ALONE — IT IS THREADING **PLUS A PLoT
+ * FLAG**, and this clause is load-bearing for anyone estimating the work.
+ * `_meta.builds` rides only under PLoT's `UI_CANONICAL_META`, and PLoT's own
+ * comment says that flag **stays off in staging** (`routes/v2/run.ts:4433-4436`,
+ * verbatim: "deliberately NOT gated behind UI_CANONICAL_META, which stays off in
+ * staging"). With it off, `builds_equal` is permanently 'unknown', C0 and C1 are
+ * BOTH unreachable, and the uncertainty-only-edit case above emits NOTHING at
+ * all — the classifier withholds rather than inventing a case. So "a wiring gap,
+ * not a science gap" is true and incomplete: it is a CEE wiring gap AND a PLoT
+ * flag dependency, and the flag is the half nobody owns.
+ *
+ * ⚠ PARTIAL CONSOLATION, worth knowing before anyone reaches for the flag:
+ * PLoT emits `_meta.evidence` (carrying deployed builds) UNCONDITIONALLY, and
+ * `plot_build` has ZERO production readers in CEE (1 occurrence, a test
+ * fixture). So build DRIFT is observable today, flag-off; build EQUALITY —
+ * which is what C1 needs — is not.
  */
 function classifyAttribution(provenance: {
   readonly seed_equal: boolean;
@@ -531,14 +597,23 @@ export function buildRunDelta(input: {
     pair_provenance: pairProvenance,
     leader,
     win_probabilities: winProbabilities,
-    // Both deferred to slice two, and both contract-legal as emitted here.
-    // `flip_thresholds` needs ISL's per-FACTOR stability band joined across the
-    // pair to produce an honest `band_verdict`; an empty array is the declared
-    // "no flip rows on either side" state. `edit_list` is OMITTED rather than
-    // empty: the contract makes absence mean *"the list is underivable"*, and
-    // `.min(1)` makes an empty list unrepresentable precisely so a producer
-    // cannot signal "nothing changed" with an empty array on an unequal hash.
-    flip_thresholds: [],
+    // ⭐ THE WITHHELD FLIP-THRESHOLD SLOT, TAKEN FROM THE CAGE — NEVER WRITTEN
+    // HERE. `flip_thresholds` is a ratified Tier-3 deny key and
+    // `claim-safety-cage.ts` is its sole owner, so this producer carries no
+    // deny-key literal and the static Tier-3 scan stays maximally strict with
+    // no allow-list entry and no exemption.
+    //
+    // ⚠ AND THE NAME IS THE POINT: `NOT_COMPUTED`, not `EMPTY`. Brief 4 §5 rules
+    // for this field "Absence: not 'no tipping point.'" — so an empty array read
+    // naively ASSERTS there are no flip thresholds, which is a claim we have not
+    // earned. We emit it because the join is deferred and we never looked.
+    // Populating it is a claim-safety change, not a wiring change.
+    //
+    // `edit_list` is OMITTED rather than emptied, and that asymmetry is
+    // deliberate: `.min(1).optional()` makes an empty list unrepresentable, so
+    // absence is the ONLY way that field can say "underivable". This field has
+    // no such protection, which is exactly why the discipline lives in the cage.
+    ...RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED,
   };
 
   // ⭐ THE CONTRACT CHECKS THIS PRODUCER, NOT THE OTHER WAY ROUND.

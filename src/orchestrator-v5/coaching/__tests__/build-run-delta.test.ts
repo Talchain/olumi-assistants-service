@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
 
+import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../../compose/claim-safety-cage.js';
 import { buildRunDelta } from '../build-run-delta.js';
 
 interface OptionSpec {
@@ -425,33 +426,38 @@ describe('buildRunDelta — the contract polices the producer', () => {
     expect(built.kind).toBe('ok');
     if (built.kind !== 'ok') return;
     expect(built.delta.edit_list).toBeUndefined();
-    expect(built.delta.flip_thresholds).toEqual([]);
+    expect(built.delta.flip_thresholds).toEqual(
+      RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED.flip_thresholds,
+    );
   });
 
   /**
-   * ⭐ THE PIN THAT KEEPS THE TRANSPORT-ONLY CLAIM TRUE.
+   * ⭐ THE TRIPWIRE ON THE WITHHELD FLIP-THRESHOLD SLOT.
    *
-   * `flip_thresholds` is a RATIFIED TIER-3 CLAIM-DENIED key
-   * (`compose/claim-safety-cage.ts` TIER3_LEAK_BLOCK_FIELDS). It is also
-   * transport-clean and REQUIRED by `RunDeltaObjectSchema` — a plain
-   * `z.array(...)`, verified by execution: omitting it fails to parse with
-   * `invalid_type: Required`, while the optional `edit_list` omits cleanly. So
-   * this producer MUST emit the key, and its whole claim-safety posture rests
-   * on one sentence: it transports the key and says nothing through it.
+   * ⚠⚠ AND AN EARLIER VERSION OF THIS COMMENT HAD THE CLAIM EXACTLY BACKWARDS,
+   * which is worth leaving on the record. It argued that "emptiness is the
+   * property that makes the claim posture true". **It is the property that
+   * makes it false.** The contract annotates this field "may be empty (no flip
+   * rows on either side)" and Brief 4 §5 rules, for this exact field,
+   * **"Absence: not 'no tipping point.'"** So an empty array read naively
+   * ASSERTS there are no flip thresholds. This producer emits it because the
+   * per-factor stability-band join is DEFERRED and it NEVER LOOKED — a
+   * different fact, and the only honest one.
    *
-   * That sentence was true by inspection and pinned by nothing. It is pinned
-   * here, across EVERY delta this suite can construct rather than on one
-   * fixture, so slice two cannot populate the array without turning this red
-   * and returning through claim-safety review (Brief 4 §9). An allow-list
-   * entry granted over an unpinned promise is a promise; over this it is a
-   * contract.
+   * The sibling `edit_list` avoids the trap structurally: `.min(1).optional()`
+   * makes an empty list unrepresentable, so absence is the ONLY way it can say
+   * "underivable". That asymmetry was diagnosed one field to the left and then
+   * walked into here.
    *
-   * ⚠ THE ASSERTION IS `[]`, NOT "no forbidden strings in it". A content check
-   * would be a guard shaped like the leak it fears and would pass the moment
-   * someone added a row it did not think to look for. Emptiness is the
-   * property that actually makes the claim posture true.
+   * SO WHAT THIS TEST IS FOR, PRECISELY: not to bless the emptiness, but to
+   * make the slot IMMOVABLE without review. The value must remain exactly what
+   * the cage's `RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED` supplies, across every
+   * delta the producer can build, so slice two cannot start populating it — a
+   * claim-safety change, not a wiring change — without turning this red.
+   * `tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts` pins
+   * the other half: that the producer never carries the deny-key literal at all.
    */
-  it('INVARIANT: flip_thresholds is EMPTY on every delta this suite can build', () => {
+  it('TRIPWIRE: the flip-threshold slot is the cage-supplied withheld value, on every delta', () => {
     const builds = { ui: null, cee: null, plot: 'plot-1', isl: 'isl-1' };
     const everyConstructibleDelta = [
       // C2_unpaired (the factor-value-edit class), entitled and withheld.
@@ -496,7 +502,14 @@ describe('buildRunDelta — the contract polices the producer', () => {
     ]);
 
     for (const delta of deltas) {
-      expect(delta.flip_thresholds).toEqual([]);
+      // Value equality, not identity: `RunDeltaSchema.safeParse` clones arrays,
+      // so the parsed field cannot be reference-equal to the frozen cage
+      // constant. The identity half — that the producer takes its value from
+      // the cage and carries no literal of its own — is pinned statically by
+      // the single-site guard, which is the assertion that can actually see it.
+      expect(delta.flip_thresholds).toEqual(
+        RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED.flip_thresholds,
+      );
     }
   });
 });
