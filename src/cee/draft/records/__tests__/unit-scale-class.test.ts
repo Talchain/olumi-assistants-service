@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -175,15 +175,19 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
 function deriveInlinePercentEqualitySites(): Record<string, number> {
   const re = /=== *['"]%['"]/g;
   const out: Record<string, number> = {};
+  // `withFileTypes` deliberately: reading the kind off the Dirent the directory
+  // listing ALREADY returned removes the separate `statSync` and with it the
+  // check-then-use pattern CodeQL correctly flagged here (js/file-system-race).
+  // One syscall per entry instead of two, and nothing to race against.
   const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      const full = join(dir, entry);
-      if (statSync(full).isDirectory()) {
-        if (entry === "__tests__" || entry === "node_modules") continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "__tests__" || entry.name === "node_modules") continue;
         walk(full);
         continue;
       }
-      if (!entry.endsWith(".ts") || entry.endsWith(".test.ts")) continue;
+      if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) continue;
       // CODE SITES ONLY. Comment lines are excluded: prose that MENTIONS the
       // pattern (including this module's own "do not re-add a bare equality" note)
       // is not a site, and counting it would make the pin drift on documentation edits.
