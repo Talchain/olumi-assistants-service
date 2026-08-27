@@ -51,6 +51,7 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findForbiddenPhraseHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
 
 // ---------------------------------------------------------------------------
 // Session store mock — replayable across two synthetic turns
@@ -268,6 +269,58 @@ function callingRoutingAdapter(text: string) {
   };
 }
 
+/**
+ * Hostile control for the compound-consequence boundary: the model proposes a
+ * real graph mutation even though the turn contains a read-only question. The
+ * executor must pin the effective call to the explanation carrier and must not
+ * let the proposal survive as either a write or a persisted pending action.
+ */
+function hostileMutatingRoutingAdapter(answer: string) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(async () => ({
+        content: [
+          {
+            type: 'tool_use' as const,
+            id: 'toolu-hostile-compound',
+            name: OLUMI_ACTION_TOOL_NAME,
+            input: {
+              intent_class: 'execute',
+              action: {
+                handler_id: 'add_constraint',
+                entity: {
+                  id: 'fac_hiring_cost',
+                  kind: 'node',
+                  label: 'Incremental Hiring Cost',
+                  resolution_status: 'resolved',
+                  resolution_method: 'label_match',
+                },
+                parameters: [
+                  { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+                  { name: 'value', value: 3, source: 'user_explicit' },
+                  { name: 'unit', value: '%', source: 'user_explicit' },
+                ],
+                cited_context_fields: ['recent_changes', 'graph'],
+                explanation: { answer_text: answer },
+              },
+            },
+          },
+        ],
+        stop_reason: 'tool_use' as const,
+        usage: { input_tokens: 5, output_tokens: 5 },
+        model: 'mock',
+        latencyMs: 0,
+      })),
+  };
+}
+
+function committedPendingActions(): unknown[] {
+  return mockState.appendWrites.flatMap((write) =>
+    Array.isArray(write.pending_actions) ? write.pending_actions : [],
+  );
+}
+
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
@@ -447,6 +500,132 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(result.response.blocks).toEqual([]);
       expect(result.response).not.toHaveProperty('model_version_receipt');
       expect(JSON.stringify(POST_EDIT_GRAPH)).toBe(canonicalBefore);
+    });
+
+    it.each([
+      {
+        message: 'What did that update do? It may set hiring cost to 5%.',
+        discloseTail: true,
+      },
+      {
+        message:
+          'What did that update do? It may link Incremental Hiring Cost to Q3 Roadmap Commitments.',
+        discloseTail: true,
+      },
+      {
+        message: 'What did that update do? Delete operations are irreversible.',
+        discloseTail: false,
+      },
+      {
+        message: '"What did that update do?" Add another option.',
+        discloseTail: true,
+      },
+    ])(
+      'forces one grounded read-only call and cannot mint a pending action: $message',
+      async ({ message, discloseTail }) => {
+        const answer =
+          'The accepted update strengthened the saved Hiring Cost to Q3 Roadmap downside, so the current model records more pressure on the goal.';
+        const adapter = hostileMutatingRoutingAdapter(answer);
+        const requestId = `req-edit-effect-compound-${randomUUID()}`;
+
+        const result = await runTurnExecutor(
+          mkPayload(message),
+          requestId,
+          {
+            routingAdapter: adapter,
+            // A stale request graph must not retarget the accepted consequence.
+            graphState: PRE_EDIT_GRAPH as never,
+          },
+        );
+
+        expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+        const call = adapter.chatWithTools.mock.calls[0]![0];
+        const prompt = String(call.messages[0]!.content);
+        expect(call.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
+        expect(prompt).toContain('accepted update did');
+        expect(prompt).toContain('carrier-looking trailing clause is handled separately');
+        expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
+        expect(prompt).toContain(SAFE_SUMMARY);
+
+        expect(result.response.assistant_text).toContain(answer);
+        if (discloseTail) {
+          expect(result.response.assistant_text).toContain(
+            'I did not apply the carrier-looking clause',
+          );
+        } else {
+          expect(result.response.assistant_text).not.toContain(
+            'I did not apply the carrier-looking clause',
+          );
+        }
+        expect(result.response.suggested_actions ?? []).toHaveLength(0);
+        expect(result.response).not.toHaveProperty('model_version_receipt');
+        expect(committedPendingActions()).toHaveLength(0);
+
+        const committed = mockState.appendWrites.find(
+          (write) => write.turn_id === requestId,
+        );
+        expect(committed).toBeDefined();
+        expect(committed).toMatchObject({ handler_id: null, handler_facts: [] });
+        expect(committed).toHaveProperty('graph', undefined);
+      },
+    );
+
+    it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
+      'carries graph_context=%s into the effective compound-consequence call without request promotion',
+      async (status) => {
+        mockState.persistedGraph = status === 'canonical' ? POST_EDIT_GRAPH : null;
+        mockState.graphReadFails = status === 'unavailable';
+        const requestGraph =
+          status === 'canonical'
+            ? PRE_EDIT_GRAPH
+            : status === 'provisional' || status === 'unavailable'
+              ? POST_EDIT_GRAPH
+              : undefined;
+        const adapter = hostileMutatingRoutingAdapter(
+          'I can explain the accepted record only to the extent supported by the available saved-model authority.',
+        );
+
+        const result = await runTurnExecutor(
+          mkPayload('What did that update do? It may set hiring cost to 5%.'),
+          `req-edit-effect-status-${status}`,
+          {
+            routingAdapter: adapter,
+            ...(requestGraph === undefined ? {} : { graphState: requestGraph as never }),
+          },
+        );
+
+        expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+        const call = adapter.chatWithTools.mock.calls[0]![0];
+        const prompt = String(call.messages[0]!.content);
+        expect(call.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
+        expect(prompt).toContain('accepted update did');
+        expect(prompt).toMatch(
+          new RegExp(`"graph_context":\\s*\\{\\s*"status": "${status}"`),
+        );
+        expect(result.response.suggested_actions ?? []).toHaveLength(0);
+        expect(result.response).not.toHaveProperty('model_version_receipt');
+        expect(committedPendingActions()).toHaveLength(0);
+      },
+    );
+
+    it('suppresses pending mutation authority for an unanchored consequence occurrence', async () => {
+      const adapter = hostileMutatingRoutingAdapter(
+        'The accepted record strengthened the saved downside relationship; no new model change is warranted by this explanation.',
+      );
+
+      const result = await runTurnExecutor(
+        mkPayload('Note: What did that update do? Add another option.'),
+        'req-edit-effect-unanchored',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      expect(result.response.suggested_actions ?? []).toHaveLength(0);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(committedPendingActions()).toHaveLength(0);
+      expect(
+        mockState.appendWrites.some((write) => write.graph !== undefined),
+      ).toBe(false);
     });
 
     it('fails weak on a degraded canonical read and never promotes valid request bytes', async () => {
