@@ -96,6 +96,15 @@ export interface SessionAppendOutcome {
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
 }
 
+/**
+ * One exact-count, scenario-scoped page of durable non-noop run-analysis
+ * facts. `total_count` is the pre-limit database count, never an estimate.
+ */
+export interface ScenarioRunAnalysisFactPage {
+  readonly facts: readonly HandlerFact[];
+  readonly total_count: number;
+}
+
 export interface SessionTurnWrite {
   readonly scenario_id: string;
   readonly turn_id: string;
@@ -399,6 +408,25 @@ export interface SessionStore {
     scenarioId: string,
     limit: number,
   ): Promise<readonly IdentifiedHandlerFact[]>;
+  /**
+   * Load the bounded, scenario-wide `run_analysis` fact set used by the
+   * existing freshness/analysis selectors.
+   *
+   * Unlike {@link readFactsFor}, this read is not constrained to the recent
+   * turn window. Production implementations must make one uncached query with
+   * an exact pre-limit count, stable `created_at DESC, id DESC` ordering and
+   * the caller-supplied lookahead limit. They must validate row identity,
+   * parent identity, timestamps, handler/action type, noop and strict payload
+   * shape before returning. A missing/inexact count or malformed row throws;
+   * it never becomes an authoritative empty set.
+   *
+   * Optional only for legacy test doubles. Production always implements it;
+   * callers interpret omission as unavailable, never no analysis.
+   */
+  readScenarioRunAnalysisFactsFor?(
+    scenarioId: string,
+    limit: number,
+  ): Promise<ScenarioRunAnalysisFactPage>;
   /**
    * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
    *
