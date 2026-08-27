@@ -175,7 +175,7 @@ export function scaffoldingProvenance(quote: string): RecordProvenance {
  * decision and is taken from the PRODUCER's declared semantics rather than from
  * this lane's reading of what the field ought to mean (trap 13c):
  *   · `"hypothesis"` — named in `StructuredProvenance`'s own comment ("File name,
- *     metric name, or 'hypothesis'"), a member of `ProvenanceSource`
+ *     metric name, or 'hypothesis'"), a member of `GraphEvidenceSource`
  *     (graph.ts:29), and what CEE's enricher already stamps on machine-asserted
  *     edges (`factor-extraction/enricher.ts:452,1140`).
  *   · `"synthetic"` — what CEE already stamps on machine-scaffolded connectivity

@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
+import { GraphEvidenceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 import { LLM_STRENGTH_STD_FLOOR } from "../../cee/constants.js";
 import { refineFiniteNumbers } from "../../validators/numeric-bounds.js";
@@ -116,7 +116,7 @@ export const LLMEdge = z.object({
   weight: z.number().optional(),
   belief: z.number().min(0).max(1).optional(),
   provenance: StructuredProvenance.optional(),
-  provenance_source: ProvenanceSource.optional(),
+  provenance_source: GraphEvidenceSource.optional(),
 }).passthrough();
 
 export type LLMEdgeT = z.infer<typeof LLMEdge>;
