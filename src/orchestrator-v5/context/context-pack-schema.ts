@@ -43,6 +43,8 @@
 
 import { z } from 'zod';
 
+import { RECENT_CHANGES_SUMMARY_MAX_CHARS } from './recent-changes.js';
+
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
 import { GRAPH_CONTEXT_STATUSES } from './context-graph-snapshot.js';
 
@@ -322,8 +324,8 @@ export const RecentMutationSchema = z
       // projection emits. Internal schema only; not on the wire.
       'graph_edited',
     ]),
-    summary: z.string(),
-    target_label: z.string(),
+    summary: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
+    target_label: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
   })
   .strict();
 
