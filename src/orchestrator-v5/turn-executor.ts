@@ -336,6 +336,13 @@ import { extractGraphOptionIds } from './context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  // "Did THIS turn complete a run?" — CALLED, never re-implemented. It is the
+  // identical predicate `orderSuccessfulRunAnalysisFactsNewestFirst` filters
+  // the comparison pair by (freshness.ts, at the `requireSuccessfulStatus`
+  // branch), so the run_delta emission gate and the pair selector cannot answer
+  // differently. An inline status test here is the mirror that let the pair
+  // selector drift once already (CLAUDE.md trap #12).
+  isSuccessfulRunAnalysisFact,
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
@@ -725,7 +732,7 @@ export interface TurnExecutorRunResult {
    */
   answerKind?: AnswerKind;
   /**
-   * THE TURN'S LOADED `prior_facts`, surfaced so route-v2 can thread them into
+   * THE COMPLETED RERUN'S FACT WINDOW, surfaced so route-v2 can thread it into
    * `finaliseV5Response` for the run-over-run consequence block
    * (`coaching/build-run-delta.ts` → `OlumiResponseSchema.run_delta`).
    *
@@ -735,15 +742,25 @@ export interface TurnExecutorRunResult {
    * "built but not plugged in" failure, in the seam built to fix it. This is
    * the field that closes it.
    *
-   * READ, NEVER RE-DERIVED: this is the same array the turn's freshness verdict
-   * and claim-safety reads were taken from, so the delta cannot describe a run
-   * the rest of the response never saw (CLAUDE.md trap #12 — two derivations
-   * over different inputs are how one response contradicts itself).
+   * ⚠⚠ IT IS THE POST-DISPATCH UNIFIED ARRAY, NOT `context.prior_facts`, AND
+   * THE DIFFERENCE IS THE WHOLE POINT. The first version of this field carried
+   * the turn-ENTRY window, which this file never reassigns — so on a rerun the
+   * `run_analysis` fact the turn had just produced was ABSENT from it, and the
+   * emitted pair was (A′, A): the run that just completed did not appear in its
+   * own consequence block. The value assigned at the exit is
+   * `[...handlerFactsForCommit, ...context.prior_facts]`, this file's canonical
+   * post-dispatch basis and the SAME array `freshness` was derived over — which
+   * is what makes `compare-runs.ts`'s stated invariant hold, that `pair.current`
+   * IS the fact the turn's freshness verdict was derived from.
+   *
+   * ⚠ PRESENT ONLY ON A TURN THAT COMPLETED A RUN. The contract emits ONE
+   * `run_delta` per COMPLETED RERUN. See the emission point for the gate and
+   * for the measurement that earned it.
    *
    * OPTIONAL, deliberately, and NOT the latent-forgetting-point the two fields
    * above condemn: absence here is a MEANINGFUL state the contract models —
-   * "this exit had no facts in scope", which is different from "there were
-   * none". The finaliser's fail-closed path stamps nothing on absence, and
+   * "this turn completed no run", which is different from "there were no runs".
+   * The finaliser's fail-closed path stamps nothing on absence, and
    * `run_delta` is `.optional()` precisely so a consumer renders no delta card.
    * Making it required would force every non-analysis exit to assert something
    * about facts it never loaded.
@@ -13601,10 +13618,41 @@ export async function runTurnExecutor(
       // Always surfaced when a response was composed; route synthesises a shape
       // only for 'substantive'.
       answerKind,
-      // Threaded for the run-over-run consequence block; see
-      // TurnExecutorRunResult.priorFacts. This exit genuinely has the facts in
-      // scope, so it says so — no `?? []`, which would assert "there were none".
-      priorFacts: context.prior_facts,
+      // ⭐ THE RUN-OVER-RUN CONSEQUENCE'S BASIS — ONE CONDITIONAL CARRYING TWO
+      // PROPERTIES, because they are one question: "did THIS turn complete a
+      // run, and what is the window that CONTAINS it?"
+      //
+      // ⚠ THE WINDOW. `context.prior_facts` is the turn-ENTRY window and is
+      // never reassigned in this file, so a `run_analysis` fact this turn just
+      // produced lives ONLY in `handlerFactsForCommit`. Threading the entry
+      // window on a rerun emits the pair (A′, A) — the run that just completed
+      // is absent from its own consequence block, and the delta describes a
+      // comparison the user did not just ask for. The canonical post-dispatch
+      // basis is `[...handlerFactsForCommit, ...context.prior_facts]`: the same
+      // array `freshness` was derived over above, which is precisely what makes
+      // `compare-runs.ts`'s invariant hold — `pair.current` IS the fact the
+      // turn's freshness verdict was derived from. Same array, one derivation
+      // (CLAUDE.md trap #12).
+      //
+      // ⚠ THE GATE. The contract emits ONE `run_delta` per COMPLETED RERUN.
+      // Unconditional threading stamped the block on turns that ran no analysis
+      // at all — MEASURED on this branch before the fix: a coach-shaped turn
+      // with `analysis_ready: null` shipped `run_delta` with
+      // `leader.changed: true`. `isSuccessfulRunAnalysisFact` is the imported
+      // predicate the pair selector itself filters by, so the gate and the
+      // selector cannot disagree about what counts as a run.
+      //
+      // A FIRST run passes this gate and is refused downstream by
+      // `selectTwoNewestRunAnalysisFacts` (`insufficient_runs`) — the gate
+      // answers "did a run complete", never "is there a pair", which is the
+      // producer's question and stays there.
+      //
+      // Absence is the fail-closed default and is fully supported: no
+      // successful run this turn ⇒ the key is omitted ⇒ the finaliser stamps
+      // nothing. Never `?? []`, which would assert "there were no prior runs".
+      ...(handlerFactsForCommit.some(isSuccessfulRunAnalysisFact)
+        ? { priorFacts: [...handlerFactsForCommit, ...context.prior_facts] }
+        : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

@@ -716,16 +716,26 @@ async function sendFinalised200(
      *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
-     * The turn's loaded `prior_facts`, threaded into `finaliseV5Response` so it
-     * can stamp the run-over-run consequence block (`run_delta`). Supplied by
-     * the exits that genuinely have facts in scope — today the turn_executor
-     * exit, via `TurnExecutorRunResult.priorFacts`.
+     * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
+     * it can stamp the run-over-run consequence block (`run_delta`). Supplied
+     * by the turn_executor exit via `TurnExecutorRunResult.priorFacts`, which
+     * sets it ONLY on a turn that completed a run and sets it to the canonical
+     * post-dispatch window `[...handlerFactsForCommit, ...context.prior_facts]`
+     * — see that field's docblock for why the turn-ENTRY window was the wrong
+     * array (it omits the run the turn just produced).
      *
-     * ⚠ ABSENCE IS THE FAIL-CLOSED PATH AND IS FULLY SUPPORTED: an exit that
-     * omits it stamps no `run_delta`, which is exactly what the contract models
-     * ("absent on every non-rerun turn ... a consumer renders NO delta card").
-     * Never default it — `?? []` would assert "there were no prior runs", which
-     * is a different and false claim from "this exit did not load them".
+     * ⚠ THIS HOP IS A PASSTHROUGH AND MUST STAY ONE. The two questions —
+     * "did a run complete?" and "is there an honest pair?" — are answered
+     * upstream (the executor's gate) and downstream (the producer's refusals)
+     * respectively. Re-deciding either here would be a third authority over one
+     * answer (CLAUDE.md trap #12).
+     *
+     * ⚠ ABSENCE IS THE FAIL-CLOSED PATH AND IS FULLY SUPPORTED: a run result
+     * that omits it stamps no `run_delta`, which is exactly what the contract
+     * models ("absent on every non-rerun turn ... a consumer renders NO delta
+     * card"). Never default it — `?? []` would assert "there were no prior
+     * runs", which is a different and false claim from "this turn completed no
+     * run". Pinned by `route-v2-run-delta-threading.test.ts`.
      */
     readonly priorFacts?: readonly import('@talchain/schemas/orchestrator').HandlerFact[];
     /**
