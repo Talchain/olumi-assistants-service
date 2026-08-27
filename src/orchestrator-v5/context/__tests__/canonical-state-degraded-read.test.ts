@@ -174,6 +174,46 @@ describe('selectCanonicalAnalysisState — degraded prior-fact read', () => {
     expect(state.usableForChips).toBe(true);
   });
 
+  it('orders a persisted degradation by represented instant, not timestamp spelling', () => {
+    const success = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2026-04-30T00:30:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as never;
+    const chronologicallyOlderPartial = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        // Lexically greater than the success timestamp, but 90 minutes older.
+        computed_at: '2026-04-30T01:00:00+02:00',
+        enrichment: { analysis_status: 'partial' },
+      },
+    } as never;
+
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [chronologicallyOlderPartial, success],
+      currentGraphHash: HASH,
+      priorFactsReadOk: true,
+    });
+
+    expect(state.freshness).toBe('fresh');
+    expect(state.computed_at).toBe('2026-04-30T00:30:00.000Z');
+    expect(state.degraded_fact_status).toBeNull();
+    expect(state.contradictions).not.toContain(
+      'fact_status_success_but_degraded_newer',
+    );
+    expect(state.usableForChips).toBe(true);
+    expect(state.requiresRerun).toBe(false);
+  });
+
   it.each(['partial', 'refused']) (
     'treats a current %s run as newer than a future-skewed durable success',
     (status) => {
