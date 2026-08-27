@@ -1011,6 +1011,30 @@ function isOptionControlledFactor(
  * THE UNIT'S SCALE CLASS. ONE AUTHORITY — replacing two overlapping `startsWith`
  * predicates whose contract could not describe the domain.
  *
+ * ⛔⛔ THERE IS A THIRD `isPercentScaled`, AND IT IS DELIBERATELY NOT CONVERGED
+ * HERE. `src/cee/compound-goal/constraint-frame-evidence.ts:69` carries
+ * `unit === "fraction" || unit.startsWith("%")`. It is named in this docstring so
+ * that a future "one authority" sweep, arriving by symbol, finds the reason
+ * BEFORE it finds the similarity — an unnamed twin is what gets converged by a
+ * grep. The two answer DIFFERENT QUESTIONS (trap 21):
+ *
+ *   this file  — "which SCALE FAMILY is this unit token in, for choosing a
+ *                 display FRAME?" Trims, lower-cases, prefix-matched.
+ *   that file  — "is THIS PRODUCER's stored `value` already divided by 100, so a
+ *                 x100 reading must be allowed when comparing two producers'
+ *                 numbers?" A question about `parseValue`'s storage convention,
+ *                 not about vocabulary.
+ *
+ * ⚠ AND THEY DISAGREE IN BOTH DIRECTIONS — measured, 13 probes, with the copied
+ * body pinned byte-identical to the committed source: 6 spellings are percent
+ * HERE and not there (`percent`, `per cent`, `pct`, `percentage`, `PCT`,
+ * `'  percent  '` — that file is case-sensitive and does not trim), and 1 is
+ * percent THERE and not here (`"fraction"`, the label
+ * `normaliseConstraintUnits` applies to a sub-unit value; this classifier calls
+ * it `unknown` and is right to). Each is CORRECT for its own question.
+ * Converging them would be the two-`generateGraphHash`-twins defect run in
+ * reverse: not two names for one concept, but one name over two.
+ *
  * ⭐⭐ THIS CHANGE IS A CONVERGENCE, NOT A SEMANTICS CHANGE. Every spelling
  * classifies exactly as the two predicates it replaces classified it, and
  * `deriveFactorScaleFrame` therefore returns a byte-identical frame for every
@@ -1102,12 +1126,59 @@ function isOptionControlledFactor(
 export type UnitScaleClass = "percent" | "percentage_points" | "basis_points" | "unknown";
 
 /**
- * Exact tokens per class, consulted FIRST. Single source for the classifier and
- * its tests. ⚠ A token here must resolve to the SAME class its prefix would —
- * `unit-scale-class.test.ts` asserts that, because a disagreement between the two
- * layers is a silent behaviour change wearing a lookup-table's clothes.
+ * Exact tokens per class, consulted FIRST.
+ *
+ * ⭐ EXPORTED SO ITS GUARD CAN BE DERIVED FROM IT. It was previously private and
+ * this docstring claimed to be the "single source for the classifier and its
+ * tests"; that sentence was FALSE AS WRITTEN, and the correction is left here in
+ * place rather than deleted because the reason matters more than the tidiness.
+ * `unit-scale-class.test.ts` iterated an ELEVEN-TOKEN LITERAL DECLARED INSIDE THE
+ * TEST — a second copy of this vocabulary, i.e. exactly the hand-maintained
+ * mirror the classifier was built to abolish, one level up in the test. Measured:
+ * adding the single token `"percentile"` to the `basis_points` row below moved
+ * `deriveFactorScaleFrame([45], "percentile")` from **100 to 10000** — level 0.45
+ * to 0.0045, a 100x understatement — with **26/26 GREEN** in that spec at
+ * `8111337c`, the commit before this one. The literal did not
+ * list the token, and the generated corpus (1785 spellings) does not contain it
+ * either, so BOTH layers of cover missed it. Neither guard was weak; both were
+ * pointed at tokens somebody had already thought of.
+ *
+ * ⚠ WHAT THE GUARD NOW PROVES: for EVERY token in this array — including one
+ * added after this sentence was written — the exact layer and the prefix layer
+ * return the SAME class. The test iterates THIS EXPORT, so a new token is covered
+ * the moment it is added and nobody has to remember a second list.
+ *
+ * ⚠⚠ AND WHAT IT STILL CANNOT SEE, stated because a guard that bounds its own
+ * claim is worth more than one that reads as total:
+ *   1. It CANNOT see a token that OUGHT to be here and is absent. Derivation
+ *      proves AGREEMENT between two copies; it is structurally blind to a short
+ *      list. The hand-written `MUST_CONTAIN` subset beside it is the other half,
+ *      and it only catches the removal of the eleven tokens it names.
+ *   2. It CANNOT tell you the class is the RIGHT one. It judges the two layers
+ *      against each other, never against the vocabulary. `"percentile" ->
+ *      percent` would pass silently — both layers agree — even though admitting
+ *      it is a product decision about what the percent family means.
+ *   3. It says NOTHING about `UNIT_SCALE_CLASS_PREFIXES` below. A prefix added
+ *      there is judged only by the generated differential corpus in
+ *      `unit-scale-class.test.ts`, which is a sample, not a proof.
+ *
+ * ⚠ THIS WHOLE LAYER IS INERT TODAY, AND ITS TESTS ARE NOT BEHAVIOURAL COVERAGE.
+ * Every token here resolves to the same class by prefix, so DELETING the exact
+ * lookup limb in `classifyUnitScaleClass` is an EQUIVALENT MUTANT — DEMONSTRATED,
+ * not asserted, because a survivor is a claim either way. With the limb removed:
+ * both spec files stay green (80/80) and 0 of 1785 generated corpus spellings
+ * change class, a comparator whose contrast control reports 1 when one row is
+ * deliberately altered. And that sample only corroborates a COMPLETE argument:
+ * the deleted limb is reachable ONLY by a string that IS an exact token, and the
+ * guard below asserts every exact token's prefix answer equals its exact answer —
+ * so equivalence holds over the whole input domain, not over 1785 samples.
+ * That redundancy is WHY this change is byte-for-byte, and the layer is kept
+ * because it is the mechanism the rowed one-way door will need. A reader must not
+ * mistake the tests below for evidence that this table does anything yet: they
+ * pin a MECHANISM, not a behaviour, and deleting it today would cost nothing
+ * measurable.
  */
-const UNIT_SCALE_CLASS_TOKENS: ReadonlyArray<readonly [UnitScaleClass, readonly string[]]> = [
+export const UNIT_SCALE_CLASS_TOKENS: ReadonlyArray<readonly [UnitScaleClass, readonly string[]]> = [
   ["percent", ["%", "percent", "per cent", "pct", "percentage"]],
   ["percentage_points", ["pp", "ppt", "pps"]],
   ["basis_points", ["bps", "basis point", "basis points"]],

@@ -7,6 +7,8 @@ import {
   isPercentScaledUnit,
   isBasisPointsUnit,
   deriveFactorScaleFrame,
+  UNIT_SCALE_CLASS_TOKENS,
+  type UnitScaleClass,
 } from "../projector.js";
 
 /**
@@ -340,26 +342,85 @@ describe("classifyUnitScaleClass — one authority, exact-then-prefix", () => {
     expect(answers.size).toBe(4);
   });
 
-  it("⚠ THE TWO LAYERS AGREE — no exact token contradicts what its prefix would say", () => {
+  it("⚠ THE TWO LAYERS AGREE — DERIVED from the production table, not from a list in this file", () => {
     /**
      * A lookup table that overrides the prefix layer is how a silent behaviour
      * change gets to wear a data structure's clothes. Today the exact layer is
      * REDUNDANT — every one of its tokens resolves the same way by prefix — and
      * that redundancy is WHY this change is byte-for-byte. It is kept because it
-     * is the mechanism the rowed decision will need. This test REDs the moment a
-     * token is added that the prefixes disagree with, which is the moment
-     * somebody is changing semantics whether or not they meant to.
+     * is the mechanism the rowed decision will need.
+     *
+     * ⭐⭐ THIS TEST USED TO ITERATE AN ELEVEN-TOKEN LITERAL DECLARED RIGHT HERE,
+     * AND THAT IS WHY IT DID NOT BITE. A second copy of the production
+     * vocabulary is the hand-maintained mirror this whole module exists to
+     * abolish — reintroduced, of all places, in the guard against it. Measured
+     * at `8111337c`: adding the single token `"percentile"` to the production
+     * table's `basis_points` row moved `deriveFactorScaleFrame([45],
+     * "percentile")` from 100 to 10000 — level 0.45 to 0.0045, a 100x
+     * understatement — with **26/26 GREEN**. The literal did not name the token,
+     * and the generated corpus (1785 spellings) does not contain it either, so
+     * BOTH layers of cover missed it for the same reason: each was a set of
+     * tokens somebody had already thought of.
+     *
+     * It now iterates `UNIT_SCALE_CLASS_TOKENS` itself, so a token added to the
+     * production table is judged the moment it is added.
+     *
+     * ⚠ WHAT THIS CANNOT SEE — trap 12d, and it is why the sibling test exists.
+     * Deriving a guard from a list proves the two LAYERS agree; it is
+     * structurally blind to a list that is SHORT, and it cannot tell you a
+     * token's class is the RIGHT class. `"percentile" -> percent` would pass
+     * here — both layers agree on it — and admitting it is a product decision.
      */
-    const EXACT_TOKENS: ReadonlyArray<readonly [string, string]> = [
-      ["%", "percent"], ["percent", "percent"], ["per cent", "percent"],
-      ["pct", "percent"], ["percentage", "percent"],
-      ["pp", "percentage_points"], ["ppt", "percentage_points"], ["pps", "percentage_points"],
-      ["bps", "basis_points"], ["basis point", "basis_points"], ["basis points", "basis_points"],
-    ];
-    for (const [token, cls] of EXACT_TOKENS) {
+    const rows: ReadonlyArray<readonly [UnitScaleClass, string]> = UNIT_SCALE_CLASS_TOKENS.flatMap(
+      ([cls, tokens]) => tokens.map((t) => [cls, t] as const),
+    );
+
+    // POSITIVE CONTROL. An emptied or gutted table would make the loop below
+    // iterate nothing and pass by asserting nothing — the vacuity this file
+    // spends its whole length hunting. Pinned so the guard cannot go quiet.
+    expect(rows.length, "the exact table must be non-empty, or the loop below proves nothing").toBeGreaterThan(0);
+    expect(
+      new Set(rows.map(([cls]) => cls)),
+      "every class the exact layer claims to serve must actually appear in it",
+    ).toEqual(new Set<UnitScaleClass>(["percent", "percentage_points", "basis_points"]));
+
+    for (const [cls, token] of rows) {
       expect(classifyUnitScaleClass(token), token).toBe(cls);
-      // …and the same answer when reached with a tail, i.e. through the prefix layer.
+      // …and the same answer when reached with a tail, i.e. through the prefix
+      // layer. THIS is the half that bites: an exact token can always satisfy
+      // its own lookup, so only the tailed form can expose a contradiction.
       expect(classifyUnitScaleClass(`${token} of revenue`), `${token} of revenue`).toBe(cls);
+    }
+  });
+
+  it("…and the exact table has NOT SILENTLY SHRUNK — the completeness half a derived guard cannot supply", () => {
+    /**
+     * ⭐ TRAP 12d, THE SECOND FACE. Deriving the test above from the production
+     * table removed one mirror and MOVED the risk rather than removing it: a
+     * derived guard proves the copies AGREE and can never prove the list is
+     * COMPLETE. The only thing that catches a short list is a hand-written
+     * corpus — i.e. exactly the mirror derivation was introduced to abolish.
+     * Both guards ship; neither supersedes the other.
+     *
+     * ⚠ DELIBERATELY A SUBSET ASSERTION, NOT AN EQUALITY. Adding a token is
+     * judged by the derived test above, so requiring equality here would make
+     * every legitimate addition a false alarm and train the next lane to edit
+     * this list without reading it. Removing one is what this REDs on — and a
+     * removal is a semantics change, because these eleven have been pinned to
+     * frame 100 / 10000 by every build to date.
+     *
+     * ⚠ ITS SCOPE IS THESE ELEVEN AND NOTHING ELSE. It cannot notice a token
+     * that ought to exist and never did.
+     */
+    const rows = UNIT_SCALE_CLASS_TOKENS.flatMap(([cls, tokens]) => tokens.map((t) => [cls, t] as const));
+    const MUST_CONTAIN: ReadonlyArray<readonly [UnitScaleClass, string]> = [
+      ["percent", "%"], ["percent", "percent"], ["percent", "per cent"],
+      ["percent", "pct"], ["percent", "percentage"],
+      ["percentage_points", "pp"], ["percentage_points", "ppt"], ["percentage_points", "pps"],
+      ["basis_points", "bps"], ["basis_points", "basis point"], ["basis_points", "basis points"],
+    ];
+    for (const [cls, token] of MUST_CONTAIN) {
+      expect(rows, `"${token}" must still be an exact \`${cls}\` token`).toContainEqual([cls, token]);
     }
   });
 });
