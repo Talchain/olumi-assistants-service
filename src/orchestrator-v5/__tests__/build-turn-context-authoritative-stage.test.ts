@@ -93,9 +93,11 @@ function makeRunAnalysisFact(graphHashAtRun: string): HandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
-    turn_id: 't1',
     noop: false,
     result: {
+      scenario_id: BASE.scenario_id,
+      leading_option_id: 'opt_hire',
+      summary: 'Prior analysis',
       graph_hash_at_run: graphHashAtRun,
       computed_at: '2026-05-01T00:00:00.000Z',
       enrichment: { analysis_status: 'computed' },

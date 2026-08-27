@@ -55,6 +55,74 @@ export type ScenarioAnalysisFactSet =
       readonly total_count?: number;
     };
 
+// Context carriers are process-local and ephemeral. Nominally attest the exact
+// object returned by this authority boundary so a legacy/direct caller cannot
+// manufacture `status: 'complete'` and turn omitted validation into permission.
+interface ReconciledScenarioAnalysisFactSetAttestation {
+  readonly scenarioId: string;
+  /**
+   * Existing claim-safety transport, derived from the same validated persisted
+   * page as the reasoning carrier. This is not reasoning authority: a capped
+   * page may carry its database-newest fact here while exposing no facts in the
+   * public `ScenarioAnalysisFactSet`.
+   */
+  readonly newestAnalysisFact: HandlerFact | null;
+  readonly newestAnalysisFactReadOk: boolean;
+}
+
+const RECONCILED_SCENARIO_ANALYSIS_FACT_SETS = new WeakMap<
+  object,
+  ReconciledScenarioAnalysisFactSetAttestation
+>();
+
+export function isReconciledScenarioAnalysisFactSet(
+  value: unknown,
+  expectedScenarioId?: string,
+): value is ScenarioAnalysisFactSet {
+  if (value === null || typeof value !== 'object') return false;
+  const attestation = RECONCILED_SCENARIO_ANALYSIS_FACT_SETS.get(value);
+  return (
+    attestation !== undefined &&
+    (expectedScenarioId === undefined ||
+      attestation.scenarioId === expectedScenarioId)
+  );
+}
+
+export interface ScenarioAnalysisClaimSafetyRead {
+  readonly fact: HandlerFact | null;
+  readonly readOk: boolean;
+}
+
+/**
+ * Project the existing scenario-wide claim-safety input from the one validated
+ * exact-count snapshot.
+ *
+ * `complete` and a successfully validated `capped` page prove the database's
+ * newest row (or authoritative emptiness). Degraded reads, malformed
+ * contracts and split-snapshot conflicts prove neither. The result is
+ * intentionally obtainable only from a nominally attested reconciler output,
+ * so a direct caller cannot manufacture `readOk: true`.
+ */
+export function readScenarioAnalysisClaimSafetyFact(
+  value: unknown,
+  expectedScenarioId: string,
+): ScenarioAnalysisClaimSafetyRead {
+  if (value === null || typeof value !== 'object') {
+    return { fact: null, readOk: false };
+  }
+  const attestation = RECONCILED_SCENARIO_ANALYSIS_FACT_SETS.get(value);
+  if (
+    attestation === undefined ||
+    attestation.scenarioId !== expectedScenarioId
+  ) {
+    return { fact: null, readOk: false };
+  }
+  return {
+    fact: attestation.newestAnalysisFact,
+    readOk: attestation.newestAnalysisFactReadOk,
+  };
+}
+
 /**
  * Result of the uncached exact-count database read. The store validates row
  * metadata and strict payloads before returning `ok`; this pure layer repeats
@@ -116,11 +184,7 @@ export function reconcileScenarioAnalysisFacts(
   if (durable?.status === 'ok') {
     const durableContract = validateDurableContract(durable, input.scenarioId);
     if (durableContract === null) {
-      return degraded('durable_contract_invalid');
-    }
-
-    if (durable.total_count > SCENARIO_ANALYSIS_FACT_CAP) {
-      return freezeCapped(durable.total_count);
+      return degraded('durable_contract_invalid', input.scenarioId);
     }
 
     // These reads are not one database snapshot. A persisted hot identity that
@@ -128,24 +192,42 @@ export function reconcileScenarioAnalysisFacts(
     // stale by the time the window arrived. Payload equality is deliberately
     // irrelevant: two legitimate analysis runs can have byte-identical facts.
     if (hot.invalid) {
-      return degraded('hot_window_contract_invalid', durable.total_count);
+      return degraded(
+        'hot_window_contract_invalid',
+        input.scenarioId,
+        durable.total_count,
+      );
     }
     if (!identifiedSnapshotIncludes(durableContract, hot.identified)) {
-      return degraded('snapshot_conflict', durable.total_count);
+      return degraded('snapshot_conflict', input.scenarioId, durable.total_count);
+    }
+
+    // A capped page is not reasoning authority, but its first row is still the
+    // validated database-newest fact used by the pre-existing claim-safety
+    // entitlement. Validate the hot-window contradiction evidence first: a
+    // split snapshot supplies neither authority, regardless of page size.
+    if (durable.total_count > SCENARIO_ANALYSIS_FACT_CAP) {
+      return freezeCapped(
+        durable.total_count,
+        input.scenarioId,
+        // Contract validation proves a capped page has exactly LOOKAHEAD rows.
+        durableContract[0]!.fact,
+      );
     }
 
     return freezeComplete(
       durableContract.map((entry) => entry.fact),
       'scenario',
       durable.total_count,
+      input.scenarioId,
     );
   }
 
   if (durable?.status === 'degraded' && durable.reason === 'contract_invalid') {
-    return degraded('durable_contract_invalid');
+    return degraded('durable_contract_invalid', input.scenarioId);
   }
 
-  return degraded('durable_unavailable');
+  return degraded('durable_unavailable', input.scenarioId);
 }
 
 function stableFactKey(fact: HandlerFact): string | null {
@@ -334,7 +416,7 @@ function parseIdentifiedRunAnalysisFact(
     typeof factRowId !== 'string' ||
     factRowId.length === 0 ||
     typeof factCreatedAt !== 'string' ||
-    persistedInstantOrderKey(factCreatedAt) === null
+    isoInstantOrderKey(factCreatedAt) === null
   ) {
     return null;
   }
@@ -358,8 +440,8 @@ function identifiedSnapshotIncludes(
     const durableEntry = durableById.get(hotEntry.fact_row_id);
     if (!durableEntry) return false;
     if (
-      persistedInstantOrderKey(durableEntry.fact_created_at) !==
-        persistedInstantOrderKey(hotEntry.fact_created_at) ||
+      isoInstantOrderKey(durableEntry.fact_created_at) !==
+        isoInstantOrderKey(hotEntry.fact_created_at) ||
       stableFactKey(durableEntry.fact) !== stableFactKey(hotEntry.fact)
     ) {
       return false;
@@ -372,8 +454,8 @@ function comparePersistedFactsNewestFirst(
   left: IdentifiedHandlerFact,
   right: IdentifiedHandlerFact,
 ): number {
-  const leftTime = persistedInstantOrderKey(left.fact_created_at)!;
-  const rightTime = persistedInstantOrderKey(right.fact_created_at)!;
+  const leftTime = isoInstantOrderKey(left.fact_created_at)!;
+  const rightTime = isoInstantOrderKey(right.fact_created_at)!;
   if (leftTime !== rightTime) return leftTime < rightTime ? 1 : -1;
   if (left.fact_row_id === right.fact_row_id) return 0;
   return left.fact_row_id < right.fact_row_id ? 1 : -1;
@@ -383,7 +465,7 @@ function comparePersistedFactsNewestFirst(
  * Lossless ordering key for Postgres timestamptz values. Date.parse truncates
  * sub-millisecond precision, so retain the remaining nanoseconds as well.
  */
-function persistedInstantOrderKey(value: string): bigint | null {
+export function isoInstantOrderKey(value: string): bigint | null {
   const match =
     /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
@@ -452,31 +534,85 @@ function freezeComplete(
   facts: readonly HandlerFact[],
   source: 'scenario',
   totalCount: number,
+  scenarioId: string,
 ): ScenarioAnalysisFactSet {
-  return Object.freeze({
-    status: 'complete',
-    source,
-    facts: Object.freeze([...facts]),
-    total_count: totalCount,
-  });
+  const immutableFacts = Object.freeze(
+    facts.map((fact) => cloneAndFreezeJson(fact)),
+  );
+  return attestReconciled(
+    Object.freeze({
+      status: 'complete',
+      source,
+      facts: immutableFacts,
+      total_count: totalCount,
+    }),
+    scenarioId,
+    immutableFacts[0] ?? null,
+    true,
+  );
 }
 
-function freezeCapped(totalCount: number): ScenarioAnalysisFactSet {
-  return Object.freeze({
-    status: 'capped',
-    facts: Object.freeze([]) as readonly [],
-    total_count: totalCount,
-  });
+function freezeCapped(
+  totalCount: number,
+  scenarioId: string,
+  newestAnalysisFact: HandlerFact,
+): ScenarioAnalysisFactSet {
+  return attestReconciled(
+    Object.freeze({
+      status: 'capped',
+      facts: Object.freeze([]) as readonly [],
+      total_count: totalCount,
+    }),
+    scenarioId,
+    cloneAndFreezeJson(newestAnalysisFact),
+    true,
+  );
 }
 
 function degraded(
   reason: ScenarioAnalysisFactSetDegradedReason,
+  scenarioId: string,
   totalCount?: number,
 ): ScenarioAnalysisFactSet {
-  return Object.freeze({
-    status: 'degraded',
-    facts: Object.freeze([]) as readonly [],
-    reason,
-    ...(totalCount !== undefined ? { total_count: totalCount } : {}),
-  });
+  return attestReconciled(
+    Object.freeze({
+      status: 'degraded',
+      facts: Object.freeze([]) as readonly [],
+      reason,
+      ...(totalCount !== undefined ? { total_count: totalCount } : {}),
+    }),
+    scenarioId,
+    null,
+    false,
+  );
+}
+
+function attestReconciled<T extends ScenarioAnalysisFactSet>(
+  value: T,
+  scenarioId: string,
+  newestAnalysisFact: HandlerFact | null,
+  newestAnalysisFactReadOk: boolean,
+): T {
+  RECONCILED_SCENARIO_ANALYSIS_FACT_SETS.set(
+    value,
+    Object.freeze({
+      scenarioId,
+      newestAnalysisFact,
+      newestAnalysisFactReadOk,
+    }),
+  );
+  return value;
+}
+
+/** Clone before recursively freezing so the reconciler never freezes caller input. */
+function cloneAndFreezeJson<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((entry) => cloneAndFreezeJson(entry))) as T;
+  }
+  const clone: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    clone[key] = cloneAndFreezeJson(entry);
+  }
+  return Object.freeze(clone) as T;
 }

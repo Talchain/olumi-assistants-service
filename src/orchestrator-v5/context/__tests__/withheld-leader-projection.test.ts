@@ -17,7 +17,9 @@ import {
   WITHHELD_LEADER_INPUT_NOTE,
   WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE,
   projectContextPackAnalysisForWithheldClaim,
+  projectCoachingForWithheldClaim,
   projectDisplayAnalysisForWithheldClaim,
+  projectFocusForWithheldClaim,
   withheldLeaderInputNoteForState,
 } from '../withheld-leader-projection.js';
 import {
@@ -26,6 +28,7 @@ import {
 } from '../claim-safety-read.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import type { ContextPackAnalysis } from '../context-pack-assembler.js';
+import type { ContextPackFocus } from '../context-pack-assembler.js';
 import type { DisplaySafeAnalysis } from '../../format/format-analysis-for-context.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -145,6 +148,124 @@ describe('projectDisplayAnalysisForWithheldClaim — the MODEL-facing gate (1.23
     expect(
       findLeaderClaims({ assistant_text: WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE } as never),
     ).toHaveLength(0);
+  });
+});
+
+describe('projectFocusForWithheldClaim — selected-option claim safety', () => {
+  const focus: ContextPackFocus = {
+    elements: [
+      {
+        id: 'opt_leader',
+        kind: 'option',
+        label: 'Secret leader',
+        analysis_link: 'linked',
+        analysis: { win_probability: '83%', target_fit: '91%' },
+      },
+      {
+        id: 'factor_driver',
+        kind: 'factor',
+        label: 'Retention',
+        analysis_link: 'linked',
+        analysis: { influence: 'strong positive influence' },
+      },
+    ],
+    unresolved: 'none',
+    requested_count: 2,
+    unresolved_count: 0,
+  };
+
+  it('keeps canonical option identity but removes every joined comparative figure', () => {
+    const out = projectFocusForWithheldClaim(focus)!;
+    expect(out.elements[0]).toEqual({
+      id: 'opt_leader',
+      kind: 'option',
+      label: 'Secret leader',
+      analysis_link: 'analysis_withheld',
+    });
+    expect(JSON.stringify(out.elements[0])).not.toContain('83%');
+    expect(JSON.stringify(out.elements[0])).not.toContain('91%');
+  });
+
+  it('leaves non-option reasoning context byte-identical', () => {
+    const out = projectFocusForWithheldClaim(focus)!;
+    expect(out.elements[1]).toBe(focus.elements[1]);
+  });
+
+  it('does not mutate input and preserves omission', () => {
+    const before = JSON.stringify(focus);
+    projectFocusForWithheldClaim(focus);
+    expect(JSON.stringify(focus)).toBe(before);
+    expect(projectFocusForWithheldClaim(undefined)).toBeUndefined();
+  });
+
+  it.each([
+    'analysis_not_current',
+    'not_in_analysis',
+    'ambiguous_label',
+    'no_analysis',
+  ] as const)('preserves the pre-existing %s truth byte-identically', (link) => {
+    const alreadyUnavailable: ContextPackFocus = {
+      elements: [
+        {
+          id: 'opt_a',
+          kind: 'option',
+          label: 'Option A',
+          analysis_link: link,
+        },
+      ],
+      unresolved: 'none',
+      requested_count: 1,
+      unresolved_count: 0,
+    };
+    expect(projectFocusForWithheldClaim(alreadyUnavailable)).toBe(
+      alreadyUnavailable,
+    );
+  });
+
+  it('fails closed on an inconsistent option that carries figures under a non-linked state', () => {
+    const inconsistent: ContextPackFocus = {
+      elements: [
+        {
+          id: 'opt_a',
+          kind: 'option',
+          label: 'Option A',
+          analysis_link: 'analysis_not_current',
+          analysis: { win_probability: '83%' },
+        },
+      ],
+      unresolved: 'none',
+      requested_count: 1,
+      unresolved_count: 0,
+    };
+    expect(projectFocusForWithheldClaim(inconsistent)!.elements[0]).toEqual({
+      id: 'opt_a',
+      kind: 'option',
+      label: 'Option A',
+      analysis_link: 'analysis_withheld',
+    });
+  });
+});
+
+describe('projectCoachingForWithheldClaim — open Decision Review payload', () => {
+  it('withholds the whole review while retaining independent coaching state', () => {
+    const coaching = {
+      draft_coaching: null,
+      decision_review: {
+        produced_at: '2026-08-27T09:00:00.000Z',
+        narrative_summary: 'Secret leader wins at 83%',
+      },
+      last_coaching_signal: {
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'turn-1',
+        produced_at: '2026-08-27T09:00:00.000Z',
+      },
+    } as const;
+    expect(projectCoachingForWithheldClaim(coaching)).toEqual({
+      draft_coaching: coaching.draft_coaching,
+      decision_review: null,
+      last_coaching_signal: coaching.last_coaching_signal,
+    });
+    expect(coaching.decision_review.narrative_summary).toContain('83%');
   });
 });
 

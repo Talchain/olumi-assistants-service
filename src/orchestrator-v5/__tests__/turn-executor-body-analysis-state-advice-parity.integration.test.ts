@@ -40,11 +40,44 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { observeSerialisedPack } from '../context/__tests__/observe-serialised-pack.js';
+import {
+  PERSISTED_MESSAGE_CAP,
+} from '../context/context-pack-assembler.js';
+import {
+  CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+  CONTEXT_POLICY,
+} from '../context/context-policy.js';
 import { pickLatestFactorEvppiPriorityGuidance } from '../coaching/select-factor-evppi.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
 } from '../../adapters/llm/types.js';
+
+// This suite proves the scenario-wide analysis carrier. Repository-local JSONL
+// sidecars are a separate source and must not leak state from an earlier test
+// process into these fixtures (the default path is shared by the whole repo).
+// Keep reads empty and writes inert so every coaching assertion is attributable
+// to the fact snapshot constructed below.
+vi.mock('../coaching/draft-coaching-log.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../coaching/draft-coaching-log.js')
+  >('../coaching/draft-coaching-log.js');
+  return {
+    ...actual,
+    readLatestDraftCoaching: vi.fn(async () => null),
+  };
+});
+
+vi.mock('../coaching/last-coaching-signal-log.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../coaching/last-coaching-signal-log.js')
+  >('../coaching/last-coaching-signal-log.js');
+  return {
+    ...actual,
+    readLatestLastCoachingSignal: vi.fn(async () => null),
+    appendLastCoachingSignal: vi.fn(async () => undefined),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Session-store mock — replayable per-test
@@ -56,6 +89,8 @@ const mockState: {
   priorTurnsTotal: number;
   newestAnalysisFact: Record<string, unknown> | null;
   newestAnalysisFactReadError: Error | null;
+  scenarioAnalysisFactsOverride: Array<Record<string, unknown>> | null;
+  scenarioAnalysisTotalCountOverride: number | null;
   persistedGraph: unknown | null;
   persistedGraphReadError: Error | null;
   appendWrites: Array<Record<string, unknown>>;
@@ -67,6 +102,8 @@ const mockState: {
   priorTurnsTotal: 0,
   newestAnalysisFact: null,
   newestAnalysisFactReadError: null,
+  scenarioAnalysisFactsOverride: null,
+  scenarioAnalysisTotalCountOverride: null,
   persistedGraph: null,
   persistedGraphReadError: null,
   appendWrites: [],
@@ -83,6 +120,50 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => mockState.priorTurns,
     countTurns: async () => mockState.priorTurnsTotal,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `hot-fact-row-${index}`,
+        turn_id:
+          (mockState.priorTurns[index]?.id as string | undefined) ??
+          PRIOR_RA_ROW_ID,
+        fact_created_at:
+          ((fact.result as Record<string, unknown> | undefined)
+            ?.computed_at as string | undefined) ??
+          '2026-08-27T09:00:00.000Z',
+      })),
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      if (mockState.newestAnalysisFactReadError) {
+        throw mockState.newestAnalysisFactReadError;
+      }
+      const facts =
+        mockState.scenarioAnalysisFactsOverride ??
+        (mockState.newestAnalysisFact
+          ? [mockState.newestAnalysisFact]
+          : mockState.priorFacts.filter(
+              (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+            ));
+      return {
+        facts: facts.slice(0, limit).map((fact, index) => {
+          const hotIndex = mockState.priorFacts.indexOf(fact);
+          return {
+            fact,
+            fact_row_id:
+              hotIndex >= 0
+                ? `hot-fact-row-${hotIndex}`
+                : `durable-analysis-fact-row-${index}`,
+            fact_created_at:
+              ((fact.result as Record<string, unknown> | undefined)
+                ?.computed_at as string | undefined) ??
+              '2026-08-27T09:00:00.000Z',
+          };
+        }),
+        total_count:
+          mockState.scenarioAnalysisTotalCountOverride ?? facts.length,
+      };
+    },
+    // Separate claim-safety entitlement carrier remains unchanged by this
+    // prompt-authority convergence.
     readNewestAnalysisFactFor: async () => {
       if (mockState.newestAnalysisFactReadError) {
         throw mockState.newestAnalysisFactReadError;
@@ -433,6 +514,28 @@ function makeCanonicalAuthorityRunAnalysisFact(
   };
 }
 
+const DURABLE_DECISION_REVIEW_CANARY =
+  'DURABLE_DECISION_REVIEW_OUTSIDE_HOT_WINDOW';
+const DURABLE_COACHING_TURN_CANARY = 'turn-durable-coaching-outside-window';
+
+function makeCanonicalAuthorityFactWithPromptCanaries(
+  graphHash = CANONICAL_AUTHORITY_GRAPH_HASH,
+): Record<string, unknown> {
+  const fact = makeCanonicalAuthorityRunAnalysisFact(graphHash);
+  const result = fact.result as Record<string, unknown>;
+  result.enrichment = {
+    ...canonicalStoredAnalysisEnrichment(),
+    decision_review: {
+      produced_at: '2026-08-27T09:00:00.000Z',
+      narrative_summary: DURABLE_DECISION_REVIEW_CANARY,
+    },
+    coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+    coaching_signal_turn_id: DURABLE_COACHING_TURN_CANARY,
+    coaching_signal_produced_at: '2026-08-27T09:00:00.000Z',
+  };
+  return fact;
+}
+
 const PRIOR_RUN_ANALYSIS_TURN = {
   id: PRIOR_RA_ROW_ID,
   scenario_id: SCENARIO_ID,
@@ -477,12 +580,14 @@ function throwingRoutingAdapter() {
  * ROADMAP 2.229 — for the data-absent case, which no longer short-circuits.
  * Records the call and answers with plain text rather than throwing.
  */
-function recordingRoutingAdapter() {
+function recordingRoutingAdapter(
+  responseText = 'Routed coaching answer.',
+) {
   return {
     chatWithTools: vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
       .mockImplementation(async () => ({
-        content: [{ type: 'text', text: 'Routed coaching answer.' }],
+        content: [{ type: 'text', text: responseText }],
         stop_reason: 'end_turn' as const,
         usage: { input_tokens: 5, output_tokens: 5 },
         model: 'mock-routing',
@@ -534,6 +639,21 @@ function recentNonAnalysisTurns(count: number): Array<Record<string, unknown>> {
   }));
 }
 
+function fatRecentNonAnalysisTurns(count: number): Array<Record<string, unknown>> {
+  return recentNonAnalysisTurns(count).map((turn, index) => {
+    const userPrefix = `U${index} `;
+    const assistantPrefix = `A${index} `;
+    return {
+      ...turn,
+      user_message:
+        userPrefix + 'u'.repeat(PERSISTED_MESSAGE_CAP - userPrefix.length),
+      assistant_message:
+        assistantPrefix +
+        'a'.repeat(PERSISTED_MESSAGE_CAP - assistantPrefix.length),
+    };
+  });
+}
+
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
@@ -549,6 +669,8 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     mockState.priorTurnsTotal = 1;
     mockState.newestAnalysisFact = mockState.priorFacts[0]!;
     mockState.newestAnalysisFactReadError = null;
+    mockState.scenarioAnalysisFactsOverride = null;
+    mockState.scenarioAnalysisTotalCountOverride = null;
     mockState.persistedGraph = READY_GRAPH;
     mockState.persistedGraphReadError = null;
     mockState.appendWrites = [];
@@ -853,12 +975,15 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       graphReadError: new Error('canonical graph read unavailable'),
     },
   ] as const)(
-    '$label graph authority never promotes request-only analysis_state',
+    '$label graph authority never promotes request analysis or orphaned durable analysis',
     async ({ expectedStatus, requestGraph, graphReadError }) => {
       mockState.priorTurns = [];
       mockState.priorFacts = [];
       mockState.priorTurnsTotal = 0;
-      mockState.newestAnalysisFact = null;
+      // Deliberately orphan one durable fact. On the provisional arm its hash
+      // matches the request graph, but that request is not saved/canonical and
+      // must not reactivate persisted analysis or relabel it from caller bytes.
+      mockState.newestAnalysisFact = makeCanonicalAuthorityRunAnalysisFact();
       mockState.persistedGraph = null;
       mockState.persistedGraphReadError = graphReadError;
 
@@ -882,20 +1007,29 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       expect(pack.graph_context).toEqual({ status: expectedStatus });
       expect(pack.analysis).toBeNull();
       expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
-      expectNoCanonicalAuthorityWrite();
+      if (expectedStatus === 'provisional') {
+        // First-touch provisional adoption is an existing validated commit
+        // path. The request analysis still cannot become reasoning authority.
+        expect(mockState.appendWrites).toHaveLength(1);
+        expect(mockState.appendWrites[0]?.handler_facts).toEqual([]);
+      } else {
+        expectNoCanonicalAuthorityWrite();
+      }
     }
   );
 
   it('loads the scenario-wide newest run_analysis fact after its parent turn leaves the 20-turn hot window', async () => {
-    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    const canonicalFact = makeCanonicalAuthorityFactWithPromptCanaries();
     mockState.priorTurns = recentNonAnalysisTurns(20);
     mockState.priorTurnsTotal = 41;
     mockState.priorFacts = [];
     mockState.newestAnalysisFact = canonicalFact;
     mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
 
-    const adapter = recordingRoutingAdapter();
-    await runTurnExecutor(
+    const analysisGroundedAnswer =
+      `The analysis shows ${CANONICAL_LEADER_LABEL} is leading.`;
+    const adapter = recordingRoutingAdapter(analysisGroundedAnswer);
+    const result = await runTurnExecutor(
       mkPayload('Continue the strategic reasoning from the saved model.'),
       'req-analysis-outside-hot-window',
       {
@@ -910,24 +1044,240 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       leading_option?: { label?: string };
       top_drivers?: Array<{ label?: string }>;
     } | null;
+    const coaching = pack.coaching as {
+      decision_review?: { narrative_summary?: string } | null;
+      last_coaching_signal?: { turn_id?: string } | null;
+    };
+    const coachingContext = pack.coaching_context as {
+      analysis_present?: boolean;
+      freshness?: string;
+      usable_for_prose?: boolean;
+    } | undefined;
     expect(pack.graph_context).toEqual({ status: 'canonical' });
     expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
     expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expect(coaching.decision_review?.narrative_summary).toBe(
+      DURABLE_DECISION_REVIEW_CANARY,
+    );
+    expect(coaching.last_coaching_signal?.turn_id).toBe(
+      DURABLE_COACHING_TURN_CANARY,
+    );
+    expect(coachingContext).toMatchObject({
+      analysis_present: true,
+      freshness: 'fresh',
+      usable_for_prose: true,
+    });
+    expect(prompt).toContain(DURABLE_DECISION_REVIEW_CANARY);
+    expect(prompt).toContain(DURABLE_COACHING_TURN_CANARY);
+    expect(
+      events.find((event) => event.event === 'v5.context_pack.assembled')
+        ?.data.graph_compact_via,
+    ).toBe('strict_parse');
+    expect(result.response.assistant_text).toContain(analysisGroundedAnswer);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('applies one withheld verdict to durable analysis, selected-option focus and Decision Review', async () => {
+    const canonicalFact = makeCanonicalAuthorityFactWithPromptCanaries();
+    const result = canonicalFact.result as Record<string, unknown>;
+    result.constraint_verdict = {
+      may_name_leading_option: false,
+      constraint_verdict_state: 'unevaluated',
+    };
+    result.win_probabilities = {
+      opt_status_quo: 0.83,
+      opt_hire_local: 0.17,
+    };
+    result.enrichment = {
+      ...canonicalStoredAnalysisEnrichment(),
+      results: [
+        {
+          option_id: 'opt_status_quo',
+          option_label: CANONICAL_LEADER_LABEL,
+          outcome: { mean: 0.8, p10: 0.7, p90: 0.9 },
+          status: 'computed',
+          win_probability: 0.83,
+        },
+        {
+          option_id: 'opt_hire_local',
+          option_label: REQUEST_LEADER_LABEL,
+          outcome: { mean: 0.2, p10: 0.1, p90: 0.3 },
+          status: 'computed',
+          win_probability: 0.17,
+        },
+      ],
+      decision_review: {
+        produced_at: '2026-08-27T09:00:00.000Z',
+        narrative_summary:
+          'DECISION_REVIEW_SECRET_LEADER wins at 83% against 17%.',
+      },
+    };
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter('Discuss the selected options.');
+    await runTurnExecutor(
+      mkPayload('Discuss the two selected options without recommending one.'),
+      'req-analysis-withheld-focus-and-review',
+      {
+        routingAdapter: adapter,
+        selectedElements: {
+          node_ids: ['opt_status_quo', 'opt_hire_local'],
+          edge_ids: [],
+        },
+      },
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as Record<string, unknown> | null;
+    expect(analysis).not.toBeNull();
+    expect(analysis).not.toHaveProperty('leading_option');
+    expect(analysis).not.toHaveProperty('runner_up');
+    expect(analysis).not.toHaveProperty('options');
+
+    const focus = pack.focus as {
+      elements: Array<{
+        id: string;
+        analysis_link: string;
+        analysis?: unknown;
+      }>;
+    };
+    expect(focus.elements.map((element) => element.id).sort()).toEqual([
+      'opt_hire_local',
+      'opt_status_quo',
+    ]);
+    for (const element of focus.elements) {
+      expect(element.analysis_link).toBe('analysis_withheld');
+      expect(element).not.toHaveProperty('analysis');
+    }
+
+    const coaching = pack.coaching as { decision_review?: unknown };
+    expect(coaching.decision_review).toBeNull();
+    expect(prompt).toContain('analysis_withheld');
+    expect(prompt).not.toContain('DECISION_REVIEW_SECRET_LEADER');
+    expect(prompt).not.toContain('83%');
+    expect(prompt).not.toContain('17%');
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('preserves durable canonical analysis and coaching through a real strict-compaction ceiling cut', async () => {
+    const denseFactors = Array.from({ length: 45 }, (_, index) => ({
+      id: `dense_factor_${String(index).padStart(2, '0')}`,
+      kind: 'factor' as const,
+      label: `DENSE_CANONICAL_GRAPH_CANARY_${index}_${'x'.repeat(300)}`,
+    }));
+    const denseCanonicalGraph = {
+      ...CANONICAL_AUTHORITY_GRAPH,
+      nodes: [...CANONICAL_AUTHORITY_GRAPH.nodes, ...denseFactors],
+    };
+    expect(denseCanonicalGraph.nodes).toHaveLength(50);
+    const denseHash = computeAnalysisAffectingGraphHash(
+      denseCanonicalGraph as never,
+    );
+    expect(denseHash).not.toBeNull();
+
+    const canonicalFact = makeCanonicalAuthorityFactWithPromptCanaries(
+      denseHash!,
+    );
+    mockState.priorTurns = fatRecentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = denseCanonicalGraph;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-durable-analysis-dense-budget',
+      {
+        routingAdapter: adapter,
+        graphState: denseCanonicalGraph as never,
+      },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(JSON.stringify(pack.graph)).toContain(
+      'DENSE_CANONICAL_GRAPH_CANARY_44_',
+    );
+    expect(JSON.stringify(pack.analysis)).toContain(CANONICAL_DRIVER_LABEL);
+    expect(JSON.stringify(pack.coaching)).toContain(
+      DURABLE_DECISION_REVIEW_CANARY,
+    );
+    expect(JSON.stringify(pack.coaching)).toContain(
+      DURABLE_COACHING_TURN_CANARY,
+    );
+
+    const assembled = events.find(
+      (event) => event.event === 'v5.context_pack.assembled',
+    );
+    expect(assembled?.data.graph_compact_via).toBe('strict_parse');
+    expect(assembled?.data.graph_context_status).toBe('canonical');
+    expect(assembled?.data.context_pack_chars).toEqual(
+      expect.any(Number),
+    );
+    // Internal handler state may remain larger than the model-facing ceiling:
+    // raw graph/analysis bytes are retained for deterministic consumers but no
+    // longer participate in conversation eviction.
+    expect(assembled!.data.context_pack_chars as number).toBeGreaterThan(
+      CONTEXT_POLICY.coach_converse.total_char_budget!,
+    );
+
+    const ceilingCut = events.find(
+      (event) =>
+        event.event === 'v5.context_truncation' &&
+        event.data.site ===
+          'context-pack-assembler.enforceContextPackCeiling' &&
+        event.data.section === 'conversation',
+    );
+    expect(ceilingCut, 'the dense route must exercise the real pack ceiling').toBeDefined();
+    expect(ceilingCut!.data.pack_total_chars_before as number).toBeGreaterThan(
+      CONTEXT_POLICY.coach_converse.total_char_budget!,
+    );
+    expect(ceilingCut!.data.pack_total_chars_after as number).toBeLessThanOrEqual(
+      CONTEXT_POLICY.coach_converse.total_char_budget!,
+    );
+    expect(ceilingCut!.data.floor_reached).toBeUndefined();
+    expect(ceilingCut!.data.pack_total_chars_after).toBe(
+      JSON.stringify(pack).length,
+    );
+    expect(ceilingCut!.data.kept_records as number).toBeGreaterThanOrEqual(
+      CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+    );
+    expect(ceilingCut!.data.kept_records as number).toBeLessThan(
+      ceilingCut!.data.original_records as number,
+    );
+    const conversation = pack.conversation as {
+      window?: { shown?: number; notice?: string };
+    };
+    expect(conversation.window?.shown).toBe(ceilingCut!.data.kept_records);
+    expect(conversation.window?.notice).toContain('INCOMPLETE');
     expectNoCanonicalAuthorityWrite();
   });
 
   it('fails weak when the scenario-wide analysis-fact read degrades instead of substituting body state', async () => {
+    const hotCanaryFact = makeCanonicalAuthorityFactWithPromptCanaries();
     mockState.priorTurns = recentNonAnalysisTurns(20);
     mockState.priorTurnsTotal = 41;
-    mockState.priorFacts = [];
+    // A known hot fact remains contradiction-only. It cannot recover a failed
+    // scenario-wide read or leak Decision Review into the model prompt.
+    mockState.priorFacts = [hotCanaryFact];
     mockState.newestAnalysisFact = null;
     mockState.newestAnalysisFactReadError = new Error(
       'scenario fact read unavailable'
     );
     mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
 
-    const adapter = recordingRoutingAdapter();
-    await runTurnExecutor(
+    const unsafeAnalysisClaim =
+      `The analysis shows ${CANONICAL_LEADER_LABEL} is leading.`;
+    const adapter = recordingRoutingAdapter(unsafeAnalysisClaim);
+    const result = await runTurnExecutor(
       mkPayload('Continue the strategic reasoning from the saved model.'),
       'req-analysis-fact-read-degraded',
       {
@@ -941,42 +1291,112 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     const pack = observeSerialisedPack(prompt);
     expect(pack.graph_context).toEqual({ status: 'canonical' });
     expect(pack.analysis).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: false,
+      freshness: 'unknown',
+      usable_for_prose: false,
+    });
     expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expect(prompt).not.toContain(DURABLE_DECISION_REVIEW_CANARY);
+    expect(prompt).not.toContain(DURABLE_COACHING_TURN_CANARY);
+    expect(result.response.assistant_text).not.toContain(unsafeAnalysisClaim);
     expectNoCanonicalAuthorityWrite();
   });
 
-  it('genuinely data-absent body analysis_state (no drivers anywhere) now reaches the coach instead of the recap stub', async () => {
-    // ⚠ ROADMAP 2.229 — INVERTED, NOT DELETED. This case used to assert the
-    // OPPOSITE: `not.toHaveBeenCalled()` on the adapter and
-    // `toContain(RECAP_STUB_PREFIX)`, on the reasoning that "with no driver
-    // data the needs_top_driver class cannot compose, and the deterministic
-    // recap + chip is the honest fallback".
-    //
-    // That reasoning is exactly what the founder ruling overturned. The recap
-    // is a string constant with ZERO inputs; it is not "honest fallback", it
-    // is the absence of an answer. Data-absent is precisely the case where the
-    // coach — which sees the conversation and the graph, not just the analysis
-    // projection — has the best chance of saying something true. The guard
-    // that emitted the constant is retired and its module deleted, so this
-    // turn now falls through to `routeWithToolUse`.
-    //
-    // The part of the original claim that was about SAFETY is kept verbatim:
-    // no proposal is fabricated on a data-absent turn.
+  it('fails weak at the real prompt boundary when scenario-wide analysis history is capped', async () => {
+    const facts = Array.from({ length: 21 }, (_, index) => {
+      const fact = makeCanonicalAuthorityFactWithPromptCanaries();
+      const result = fact.result as Record<string, unknown>;
+      result.computed_at = new Date(
+        Date.now() - (index + 1) * 60_000,
+      ).toISOString();
+      return fact;
+    });
+    // Keep a known hot fact and the separate newest-fact entitlement read
+    // successful. Neither may upgrade a capped scenario snapshot into prompt
+    // reasoning authority.
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [facts[0]!];
+    mockState.newestAnalysisFact = facts[0]!;
+    mockState.scenarioAnalysisFactsOverride = facts;
+    mockState.scenarioAnalysisTotalCountOverride = 21;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
     const adapter = recordingRoutingAdapter();
-    const thin = stagingShapedAnalysisState();
-    delete thin.factor_sensitivity;
-    const result = await runTurnExecutor(
-      mkPayload('What would change the outcome?'),
-      'req-body-analysis-state-thin',
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-history-capped',
       {
         routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(pack.analysis).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: false,
+      freshness: 'unknown',
+      usable_for_prose: false,
+    });
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expect(prompt).not.toContain(CANONICAL_DRIVER_LABEL);
+    expect(prompt).not.toContain(DURABLE_DECISION_REVIEW_CANARY);
+    expect(prompt).not.toContain(DURABLE_COACHING_TURN_CANARY);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('caller-only body analysis_state cannot change canonical reasoning or recovery', async () => {
+    const message = 'Continue the strategic reasoning from the saved model.';
+    const withoutBodyAdapter = recordingRoutingAdapter();
+    const withoutBody = await runTurnExecutor(
+      mkPayload(message),
+      'req-no-body-analysis-state-thin',
+      {
+        routingAdapter: withoutBodyAdapter,
+        graphState: READY_GRAPH as never,
+      },
+    );
+
+    const withBodyAdapter = recordingRoutingAdapter();
+    const thin = stagingShapedAnalysisState();
+    delete thin.factor_sensitivity;
+    const withBody = await runTurnExecutor(
+      mkPayload(message),
+      'req-body-analysis-state-thin',
+      {
+        routingAdapter: withBodyAdapter,
         graphState: READY_GRAPH as never,
         analysisState: thin as never,
       },
     );
 
-    expect(adapter.chatWithTools, 'a data-absent post-analysis turn must reach the coach').toHaveBeenCalled();
-    expect(result.response.assistant_text ?? '').not.toContain(RECAP_STUB_PREFIX);
-    expect(JSON.stringify(result.response)).not.toContain('apply_proposed_change');
+    expect(withoutBodyAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(withBodyAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(
+      withBodyAdapter.chatWithTools.mock.calls[0]?.[0],
+      'request analysis_state must not change any model-facing prompt byte',
+    ).toEqual(withoutBodyAdapter.chatWithTools.mock.calls[0]?.[0]);
+    expect(capturedRoutingPrompt(withBodyAdapter)).toBe(
+      capturedRoutingPrompt(withoutBodyAdapter),
+    );
+    expect(withBody.response).toEqual(withoutBody.response);
+    expect(withBody.response.assistant_text ?? '').not.toContain(RECAP_STUB_PREFIX);
+    expect(JSON.stringify(withBody.response)).not.toContain('apply_proposed_change');
   });
 });

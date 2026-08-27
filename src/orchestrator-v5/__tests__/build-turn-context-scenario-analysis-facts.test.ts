@@ -65,8 +65,15 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
   it('loads the exact lookahead and keeps scenario analysis facts distinct from ordinary prior_facts', async () => {
     const durable = analysisFact('outside-hot-window');
     const limits: number[] = [];
+    let legacyNewestReadCalls = 0;
     const store = {
       ...createNoopSessionStore(),
+      // The converged path must not issue this former second query even when a
+      // legacy/direct store still happens to expose it.
+      readNewestAnalysisFactFor: async () => {
+        legacyNewestReadCalls += 1;
+        return analysisFact('legacy-second-query-canary');
+      },
       readScenarioRunAnalysisFactsFor: async (
         _scenarioId: string,
         limit: number,
@@ -81,6 +88,7 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
     });
 
     expect(limits).toEqual([SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT]);
+    expect(legacyNewestReadCalls).toBe(0);
     expect(context.prior_facts).toEqual([]);
     expect(context.scenario_analysis_fact_set).toEqual({
       status: 'complete',
@@ -88,6 +96,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       facts: [durable],
       total_count: 1,
     });
+    expect(context.newest_analysis_fact).toEqual(durable);
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
   });
 
   it('makes exact complete zero the only authoritative never-analysed state', async () => {
@@ -100,6 +110,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       facts: [],
       total_count: 0,
     });
+    expect(context.newest_analysis_fact).toBeNull();
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
     expect(context.persisted_analysis_freshness).toMatchObject({
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
@@ -132,6 +144,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       facts: [],
       total_count: 37,
     });
+    expect(context.newest_analysis_fact).toEqual(facts[0]);
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
     expect(context.persisted_analysis_freshness).toMatchObject({
       freshness: 'unknown',
       reason: 'derivation_failed',
@@ -147,6 +161,7 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       readScenarioRunAnalysisFactsFor?: SessionStore['readScenarioRunAnalysisFactsFor'];
     };
     delete store.readScenarioRunAnalysisFactsFor;
+    store.readNewestAnalysisFactFor = async () => hot;
 
     const context = await buildTurnContext(PAYLOAD, 'request-omitted', {
       sessionStore: store,
@@ -158,6 +173,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       facts: [],
       reason: 'durable_unavailable',
     });
+    expect(context.newest_analysis_fact).toBeNull();
+    expect(context.newest_analysis_fact_read_ok).toBe(false);
     expect(context.persisted_analysis_freshness.freshness).toBe('unknown');
   });
 
@@ -181,6 +198,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       reason: 'snapshot_conflict',
       total_count: 1,
     });
+    expect(context.newest_analysis_fact).toBeNull();
+    expect(context.newest_analysis_fact_read_ok).toBe(false);
     expect(context.persisted_analysis_freshness.freshness).toBe('unknown');
   });
 
@@ -207,6 +226,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
             ? 'durable_contract_invalid'
             : 'durable_unavailable',
       });
+      expect(context.newest_analysis_fact).toBeNull();
+      expect(context.newest_analysis_fact_read_ok).toBe(false);
       expect(context.persisted_analysis_freshness.freshness).toBe('unknown');
     }
   });

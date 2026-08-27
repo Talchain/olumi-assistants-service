@@ -160,6 +160,7 @@ function baseRunAnalysisFact(): Record<string, unknown> {
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
       graph_hash_at_run: READY_GRAPH_HASH,
@@ -251,9 +252,10 @@ let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
  * DEGRADED-READ MODE — drives `provenance: 'fail_closed_truncated'`.
  *
  * Two conditions, both from the store: `readOk === false` and
- * `windowTruncated === true`. `build-turn-context.ts:1037` returns
- * `{fact: null, readOk: false}` when the store has NO `readNewestAnalysisFactFor`
- * method at all ("absence of the method is the same as a failed read"), and
+ * `windowTruncated === true`. `build-turn-context.ts` returns
+ * `{fact: null, readOk: false}` when the store has NO
+ * `readScenarioRunAnalysisFactsFor` method at all ("absence of the method is
+ * the same as a failed read"), and
  * `windowTruncated` is `prior_turns_total > prior_turns.length` — so a high
  * `countTurns` against a one-turn window. With ZERO facts in the window as well,
  * nothing is selected, and `readMayNameLeadingOptionVerdict` takes its
@@ -270,7 +272,7 @@ function makeStore(): Record<string, unknown> {
       countTurns: async () => 25,
       readFactsFor: async () => [],
       readFactsWithTurnFor: async () => [],
-      // ⚠ `readNewestAnalysisFactFor` DELIBERATELY ABSENT — that is what makes
+      // ⚠ `readScenarioRunAnalysisFactsFor` DELIBERATELY ABSENT — that is what makes
       // `readOk` false without needing to throw.
       loadGraph: async () => READY_GRAPH,
       loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
@@ -289,15 +291,35 @@ function makeStore(): Record<string, unknown> {
       turnRowIds.flatMap((id) => factsByTurnRowId[id] ?? []),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.flatMap((id) =>
-        (factsByTurnRowId[id] ?? []).map((fact) => ({
+        (factsByTurnRowId[id] ?? []).map((fact, index) => ({
           fact,
           turn_id: id,
-          fact_created_at: new Date(Date.now() - 9_000_000).toISOString(),
+          fact_row_id: `${id}-analysis-fact-${index}`,
+          fact_created_at: '2026-08-27T10:00:00.000Z',
         })),
       ),
+    // Retired carrier canary: one-source convergence must not call this.
     readNewestAnalysisFactFor: async () => {
-      const all = Object.values(factsByTurnRowId).flat();
-      return all.find((f) => f.fact_type === 'run_analysis' && f.noop === false) ?? null;
+      throw new Error('retired newest-analysis query was called');
+    },
+    readScenarioRunAnalysisFactsFor: async (
+      _scenarioId: string,
+      limit: number,
+    ) => {
+      const facts = Object.entries(factsByTurnRowId).flatMap(
+        ([turnRowId, candidates]) =>
+          candidates
+            .filter(
+              (fact) =>
+                fact.fact_type === 'run_analysis' && fact.noop === false,
+            )
+            .map((fact, index) => ({
+              fact,
+              fact_row_id: `${turnRowId}-analysis-fact-${index}`,
+              fact_created_at: '2026-08-27T10:00:00.000Z',
+            })),
+      );
+      return { facts: facts.slice(0, limit), total_count: facts.length };
     },
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
@@ -778,9 +800,10 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
     //
     // Re-review falsified the warrant the currency fix was built on. The
     // docstring claimed "a withheld verdict IMPLIES a run_analysis fact exists".
-    // It does not: `claim-safety-read.ts` withholds on THREE branches that could
+    // It does not: `claim-safety-read.ts` withholds on FOUR branches that could
     // not establish what exists —
     //   · `fail_closed_truncated`         no fact selected at all, degraded read;
+    //   · `fail_closed_unavailable`       unread short-window population;
     //   · `fail_closed_no_turn_context`   never reached the store;
     //   · `fail_closed_uninterpretable`   a fact, but not an analysis.
     // On those, "This reflects your most recent analysis" asserts the existence
@@ -830,7 +853,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
 
     it('the existence predicate classifies the WHOLE provenance union, and both values occur', async () => {
       // Derived from the union, not a hand-listed echo of the implementation: a
-      // seventh provenance value fails to compile in
+      // an eighth provenance value fails to compile in
       // `provenanceProvesAnalysisExists` (its `never` default arm), and this arm
       // pins that the classification is not degenerate in either direction — an
       // all-true or all-false predicate would make the gate pointless or the copy
@@ -840,6 +863,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       const unproven = [
         'no_analysis_exists',
         'fail_closed_truncated',
+        'fail_closed_unavailable',
         'fail_closed_uninterpretable',
         'fail_closed_no_turn_context',
       ] as const;
@@ -853,7 +877,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         ).toBe(false);
       }
       // ⚠ THE EXCLUSION-LIST TRAP, pinned. The form first proposed for this gate
-      // was `p !== 'fail_closed_truncated' && p !== 'fail_closed_uninterpretable'`,
+      // was `p !== 'fail_closed_truncated' && p !== 'fail_closed_unavailable' && p !== 'fail_closed_uninterpretable'`,
       // which would wrongly permit `fail_closed_no_turn_context` — whose own
       // docstring says an analysis "may very well exist … we simply could not see
       // it". This assertion is what stops the gate being "simplified" back into

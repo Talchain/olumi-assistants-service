@@ -122,12 +122,21 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
   fact_version: 1,
   noop: false,
   result: {
+    scenario_id: SCENARIO_ID,
     leading_option_id: OPTION_ID,
     summary: 'Prior analysis result',
     // Hashed from the SAME persisted graph the selection resolves against, so
     // the analysis reads as current rather than stale.
     graph_hash_at_run: computeAnalysisAffectingGraphHash(PERSISTED_GRAPH as never),
     computed_at: new Date(Date.now() - 60_000).toISOString(),
+    // This corpus measures positive selection grounding, not a withheld
+    // recommendation. Pin an explicit producer-attested permitted verdict so
+    // the claim-safety gate cannot turn the analysis join into a vacuous
+    // negative control.
+    constraint_verdict: {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    },
     enrichment: {
       analysis_status: 'completed',
       option_comparison: [
@@ -138,6 +147,11 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
     win_probabilities: { [OPTION_ID]: 0.62, opt_offshore: 0.38 },
   },
 };
+
+const ANALYSIS_FACT_ROW_ID = 'cccccccc-7a15-4ccc-8ccc-cccccccccccc';
+const ANALYSIS_FACT_CREATED_AT = (
+  RUN_ANALYSIS_FACT.result as Record<string, unknown>
+).computed_at as string;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -151,11 +165,25 @@ vi.mock('../session/index.js', () => ({
         ? [
             {
               fact: RUN_ANALYSIS_FACT,
+              fact_row_id: ANALYSIS_FACT_ROW_ID,
               turn_id: ANALYSIS_TURN_ROW_ID,
-              fact_created_at: new Date(Date.now() - 60_000).toISOString(),
+              fact_created_at: ANALYSIS_FACT_CREATED_AT,
             },
           ]
         : [],
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+      facts:
+        limit > 0
+          ? [
+              {
+                fact: RUN_ANALYSIS_FACT,
+                fact_row_id: ANALYSIS_FACT_ROW_ID,
+                fact_created_at: ANALYSIS_FACT_CREATED_AT,
+              },
+            ]
+          : [],
+      total_count: 1,
+    }),
     readNewestAnalysisFactFor: async () => RUN_ANALYSIS_FACT,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

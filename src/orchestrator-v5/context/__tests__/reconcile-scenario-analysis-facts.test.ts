@@ -8,9 +8,12 @@ import type {
 import {
   SCENARIO_ANALYSIS_FACT_CAP,
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  isReconciledScenarioAnalysisFactSet,
+  readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
 } from '../reconcile-scenario-analysis-facts.js';
+import { readMayNameLeadingOptionVerdict } from '../claim-safety-read.js';
 import {
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
@@ -126,12 +129,51 @@ function reconcile(
 }
 
 describe('reconcileScenarioAnalysisFacts', () => {
+  it('nominally attests only the exact scenario-bound carrier it returns', () => {
+    const fact = analysisFact('attested');
+    const result = reconcile({ durableRead: durable([fact]) });
+    const forged = {
+      status: 'complete' as const,
+      source: 'scenario' as const,
+      facts: [fact],
+      total_count: 1,
+    };
+
+    expect(isReconciledScenarioAnalysisFactSet(result, SCENARIO)).toBe(true);
+    expect(isReconciledScenarioAnalysisFactSet(result, FOREIGN_SCENARIO)).toBe(false);
+    expect(isReconciledScenarioAnalysisFactSet(forged, SCENARIO)).toBe(false);
+    expect(readScenarioAnalysisClaimSafetyFact(forged, SCENARIO)).toEqual({
+      fact: null,
+      readOk: false,
+    });
+  });
+
+  it('deep-freezes cloned output without freezing caller-owned fact bytes', () => {
+    const fact = analysisFact('immutable');
+    const result = reconcile({ durableRead: durable([fact]) });
+
+    expect(result.status).toBe('complete');
+    if (result.status !== 'complete') return;
+    expect(result.facts[0]).not.toBe(fact);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.facts)).toBe(true);
+    expect(Object.isFrozen(result.facts[0])).toBe(true);
+    expect(Object.isFrozen(result.facts[0]?.result)).toBe(true);
+    expect(Object.isFrozen(fact)).toBe(false);
+    expect(Object.isFrozen(fact.result)).toBe(false);
+  });
+
   it('makes complete + empty the only authoritative never-analysed state', () => {
-    expect(reconcile()).toEqual({
+    const result = reconcile();
+    expect(result).toEqual({
       status: 'complete',
       source: 'scenario',
       facts: [],
       total_count: 0,
+    });
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: null,
+      readOk: true,
     });
   });
 
@@ -187,7 +229,35 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(result).toEqual({ status: 'capped', facts: [], total_count: 37 });
     expect(selectRunAnalysisFact(result.facts)).toBeNull();
     expect(selectDegradedRunAnalysisFact(result.facts)).toBeNull();
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: facts[0],
+      readOk: true,
+    });
   });
+
+  it.each(['partial', 'failed'])(
+    'preserves the existing claim-safety selector behaviour for a newest %s analysis',
+    (status) => {
+      const fact = analysisFact(status, { status });
+      const result = reconcile({ durableRead: durable([fact]) });
+      const converged = readScenarioAnalysisClaimSafetyFact(result, SCENARIO);
+
+      expect(converged).toEqual({ fact, readOk: true });
+      expect(
+        readMayNameLeadingOptionVerdict([], {
+          newestAnalysisFact: converged.fact,
+          readOk: converged.readOk,
+          windowTruncated: true,
+        }),
+      ).toEqual(
+        readMayNameLeadingOptionVerdict([], {
+          newestAnalysisFact: fact,
+          readOk: true,
+          windowTruncated: true,
+        }),
+      );
+    },
+  );
 
   it.each([
     {
@@ -226,10 +296,15 @@ describe('reconcileScenarioAnalysisFacts', () => {
       read: durable([], Number.NaN),
     },
   ])('degrades a $name instead of inferring completeness', ({ read }) => {
-    expect(reconcile({ durableRead: read })).toEqual({
+    const result = reconcile({ durableRead: read });
+    expect(result).toEqual({
       status: 'degraded',
       facts: [],
       reason: 'durable_contract_invalid',
+    });
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: null,
+      readOk: false,
     });
   });
 
@@ -246,23 +321,95 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
-  it('degrades a clean durable zero that contradicts a known hot analysis fact', () => {
-    const knownHot = analysisFact('known-hot');
+  it('never mints no-analysis permission when a valid newest withheld fact has an older corrupt sibling', () => {
+    const validNewestWithheld = analysisFact('newest-withheld');
     expect(
-      reconcile({
-        hotWindowFacts: [knownHot],
-        hotWindowFactsWithIdentity: [
-          hotIdentified(knownHot, 0, {
-            fact_row_id: 'hot-only-row',
-          }),
-        ],
-        durableRead: durable([]),
+      readMayNameLeadingOptionVerdict([], {
+        newestAnalysisFact: validNewestWithheld,
+        readOk: true,
+        windowTruncated: false,
       }),
     ).toEqual({
+      may_name_leading_option: false,
+      constraint_verdict_state: null,
+      provenance: 'scenario_fact',
+    });
+
+    const olderCorrupt = { fact_type: 'run_analysis', noop: false };
+    const result = reconcile({
+      durableRead: durable([validNewestWithheld, olderCorrupt]),
+    });
+    const claimSafetyRead = readScenarioAnalysisClaimSafetyFact(
+      result,
+      SCENARIO,
+    );
+
+    expect(result).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'durable_contract_invalid',
+    });
+    expect(claimSafetyRead).toEqual({ fact: null, readOk: false });
+    expect(
+      readMayNameLeadingOptionVerdict([], {
+        newestAnalysisFact: claimSafetyRead.fact,
+        readOk: claimSafetyRead.readOk,
+        // The scenario is short. That is not evidence that the unread fact
+        // population is empty.
+        windowTruncated: false,
+      }),
+    ).toEqual({
+      may_name_leading_option: false,
+      constraint_verdict_state: null,
+      provenance: 'fail_closed_unavailable',
+    });
+  });
+
+  it('degrades a clean durable zero that contradicts a known hot analysis fact', () => {
+    const knownHot = analysisFact('known-hot');
+    const result = reconcile({
+      hotWindowFacts: [knownHot],
+      hotWindowFactsWithIdentity: [
+        hotIdentified(knownHot, 0, {
+          fact_row_id: 'hot-only-row',
+        }),
+      ],
+      durableRead: durable([]),
+    });
+    expect(result).toEqual({
       status: 'degraded',
       facts: [],
       reason: 'snapshot_conflict',
       total_count: 0,
+    });
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: null,
+      readOk: false,
+    });
+  });
+
+  it('lets a hot contradiction degrade a capped page instead of minting entitlement', () => {
+    const cappedFacts = Array.from(
+      { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
+      (_, index) => analysisFact(`capped-${index}`),
+    );
+    const hotOnly = analysisFact('hot-only');
+    const result = reconcile({
+      hotWindowFacts: [hotOnly],
+      hotWindowFactsWithIdentity: [
+        hotIdentified(hotOnly, 0, { fact_row_id: 'hot-only-row' }),
+      ],
+      durableRead: durable(cappedFacts, 37),
+    });
+
+    expect(result).toMatchObject({
+      status: 'degraded',
+      reason: 'snapshot_conflict',
+      total_count: 37,
+    });
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: null,
+      readOk: false,
     });
   });
 
@@ -481,6 +628,10 @@ describe('reconcileScenarioAnalysisFacts', () => {
       ]),
     });
     expect(result.facts).toEqual([tieHigherId, tieLowerId, oldest]);
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: tieHigherId,
+      readOk: true,
+    });
   });
 
   it.each(['bigint', 'cycle'])('fails weak on non-JSON %s evidence', (kind) => {
@@ -500,15 +651,18 @@ describe('reconcileScenarioAnalysisFacts', () => {
   });
 
   it('never promotes a hot window when the durable read is unavailable', () => {
-    expect(
-      reconcile({
-        hotWindowFacts: [analysisFact('known')],
-        durableRead: { status: 'degraded', reason: 'unavailable' },
-      }),
-    ).toEqual({
+    const result = reconcile({
+      hotWindowFacts: [analysisFact('known')],
+      durableRead: { status: 'degraded', reason: 'unavailable' },
+    });
+    expect(result).toEqual({
       status: 'degraded',
       facts: [],
       reason: 'durable_unavailable',
+    });
+    expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
+      fact: null,
+      readOk: false,
     });
   });
 

@@ -216,11 +216,41 @@ const PRIOR_RUN_ANALYSIS_TURN = {
 let priorTurns: Array<Record<string, unknown>> = [];
 let priorFacts: Array<Record<string, unknown>> = [];
 
+function identifiedPriorAnalysisFacts(): Array<{
+  readonly fact: Record<string, unknown>;
+  readonly fact_row_id: string;
+  readonly turn_id: string;
+  readonly fact_created_at: string;
+}> {
+  return priorFacts
+    .filter((fact) => fact.fact_type === 'run_analysis' && fact.noop !== true)
+    .map((fact, index) => ({
+      fact,
+      fact_row_id: `claim-safety-analysis-fact-${index}`,
+      turn_id: PRIOR_RUN_ANALYSIS_TURN.id,
+      fact_created_at:
+        ((fact.result as Record<string, unknown> | undefined)
+          ?.computed_at as string | undefined) ??
+        PRIOR_RUN_ANALYSIS_TURN.created_at,
+    }));
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
+      turnRowIds.includes(PRIOR_RUN_ANALYSIS_TURN.id)
+        ? identifiedPriorAnalysisFacts()
+        : [],
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const identified = identifiedPriorAnalysisFacts();
+      return {
+        facts: identified.slice(0, limit).map(({ turn_id: _turnId, ...fact }) => fact),
+        total_count: identified.length,
+      };
+    },
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),

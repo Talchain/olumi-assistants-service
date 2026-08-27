@@ -125,11 +125,18 @@ export function readMayNameLeadingOptionForFacts(
  *                              read did NOT succeed, and the window is
  *                              provably shorter than the scenario. The "no
  *                              analysis" premise is UNPROVEN, so we withhold.
+ *   - `fail_closed_unavailable` — no selectable analysis and the
+ *                              scenario-scoped read did NOT succeed, even
+ *                              though truncation was not proven. A malformed
+ *                              row can make both the durable and hot-window
+ *                              page unreadable on a short scenario, so
+ *                              non-truncation is not evidence of emptiness.
  */
 export type MayNameLeadingOptionProvenance =
   | 'scenario_fact'
   | 'no_analysis_exists'
   | 'fail_closed_truncated'
+  | 'fail_closed_unavailable'
   /**
    * A claim-bearing fact WAS selected and could not be interpreted as a
    * run_analysis result. Withhold — and say which kind of withhold it is.
@@ -223,11 +230,9 @@ export interface MayNameLeadingOptionVerdict {
  * WHY THIS EXISTS, AND WHY IT LIVES HERE RATHER THAN AT ITS CALLER.
  *
  * `may_name_leading_option === false` does **NOT** imply an analysis exists.
- * Three of the six branches below withhold precisely BECAUSE they could not
- * establish what exists — `fail_closed_truncated` returns `false` with **no
- * fact selected at all**, and its own comment says so: *"a scenario that
- * genuinely never ran an analysis but has >20 turns withholds while the store
- * is degraded."*
+ * Four of the seven branches below withhold precisely BECAUSE they could not
+ * establish what exists — `fail_closed_truncated` and
+ * `fail_closed_unavailable` return `false` with **no fact selected at all**.
  *
  * Copy that says "your most recent analysis" is therefore making an EXISTENCE
  * claim the permission alone cannot warrant. `compose/withheld-explanation-answer.ts`
@@ -237,7 +242,7 @@ export interface MayNameLeadingOptionVerdict {
  * classify it here — rather than in a caller that will not be re-read.
  *
  * ⚠ AN ALLOWLIST, NOT AN EXCLUSION LIST — and the direction is load-bearing.
- * The obvious form (`p !== 'fail_closed_truncated' && p !== 'fail_closed_uninterpretable'`)
+ * The obvious form (`p !== 'fail_closed_truncated' && p !== 'fail_closed_unavailable' && p !== 'fail_closed_uninterpretable'`)
  * was proposed and is WRONG ON TODAY'S UNION: it silently permits
  * `fail_closed_no_turn_context`, whose own docstring says *"an analysis may very
  * well exist … we simply could not see it."* An exclusion list fails OPEN on
@@ -246,7 +251,7 @@ export interface MayNameLeadingOptionVerdict {
  * unclassified value returns `false`, costing a sentence, never a truth.
  *
  * ⚠ AND IT FAILS AT COMPILE TIME, not at runtime. The classification is a typed
- * TOTAL `Record<MayNameLeadingOptionProvenance, boolean>`, so a seventh
+ * TOTAL `Record<MayNameLeadingOptionProvenance, boolean>`, so an eighth
  * provenance value does not type-check until an entry is added for it — the
  * exhaustiveness comes from the Record's key type, not from a `default` arm.
  * The `?? false` on the lookup is the runtime safe direction for a value that
@@ -259,7 +264,7 @@ export interface MayNameLeadingOptionVerdict {
  * over the derived CoachingSignalId union … adding an id without a bank entry
  * fails to compile").
  *
- * ⚠ THIS IS WHY IT IS A `Record` AND NOT A CONDITION: a SEVENTH provenance value
+ * ⚠ THIS IS WHY IT IS A `Record` AND NOT A CONDITION: an EIGHTH provenance value
  * does not type-check until it is classified here. A boolean expression over a
  * few remembered names cannot do that, and the names nobody remembers are
  * exactly the ones that break (see the exclusion-list note above).
@@ -280,6 +285,10 @@ const PROVENANCE_PROVES_ANALYSIS_EXISTS: Record<MayNameLeadingOptionProvenance, 
   // shorter than the scenario. Existence is UNPROVEN, which is the entire reason
   // this branch withholds.
   fail_closed_truncated: false,
+  // No fact selected and the scenario-scoped read failed. A short window does
+  // not prove emptiness: one malformed sibling can make the whole page
+  // unreadable while a real analysis exists.
+  fail_closed_unavailable: false,
   // A fact WAS selected but is not a `run_analysis` result, so no ANALYSIS is
   // established by it.
   fail_closed_uninterpretable: false,
@@ -508,20 +517,24 @@ export function readMayNameLeadingOptionVerdict(
   // `selected !== null` above, unless S failed eligibility) or proved the
   // scenario has no analysis at all. It exists for the degraded path, where
   // CLAUDE.md's rule applies — where you cannot derive, FAIL LOUD on drift,
-  // never assume-good. `prior_turns_total` is already loaded (`countTurns`),
-  // so this costs no query.
+  // never assume-good.
   //
-  // It over-restricts: a scenario that genuinely never ran an analysis but has
-  // >20 turns withholds while the store is degraded. That is the safe
-  // direction, and it is bounded by the degradation.
-  if (!scope.readOk && scope.windowTruncated) {
+  // Truncation used to be the only failing population. The converged exact-page
+  // read exposes a second one: on a short scenario, one older malformed row can
+  // invalidate both the durable page and the hot-window fact read while a valid
+  // newest withheld analysis still exists. `windowTruncated === false` then says
+  // only that the turn window is short; it does NOT say the unread fact set is
+  // empty. Any failed scenario read with no selected fact therefore withholds.
+  if (!scope.readOk) {
     return {
       may_name_leading_option: false,
       // No fact was selected, so there is no state to report. `null` is the
       // honest "not recorded" — inventing a cause for a withhold whose whole
       // justification is that we could not look would be a fabricated one.
       constraint_verdict_state: null,
-      provenance: 'fail_closed_truncated',
+      provenance: scope.windowTruncated
+        ? 'fail_closed_truncated'
+        : 'fail_closed_unavailable',
     };
   }
 
@@ -636,8 +649,9 @@ function narrowToProjectedAnalysis(
  * file PURE.
  *
  * `windowTruncated` is only ever TRUE on a real number comparison: a `null`
- * / absent `prior_turns_total` means "unknown", and unknown must not arm a
- * guard whose whole justification is that truncation was PROVEN.
+ * / absent `prior_turns_total` means "unknown". A failed scenario read already
+ * withholds; this flag selects the more specific truncated provenance and may
+ * never turn unread facts into authoritative emptiness.
  */
 export function claimSafetyScopeFromContext(context: {
   readonly newest_analysis_fact?: HandlerFact | null;
