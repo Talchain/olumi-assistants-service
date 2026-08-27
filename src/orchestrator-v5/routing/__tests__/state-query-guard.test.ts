@@ -71,6 +71,7 @@ describe('tryStateQueryGuard', () => {
       'What did the change do?',
       'What did this edit do?',
       'What did your adjustment do?',
+      '  What did that update do?!  ',
     ];
 
     for (const message of effectQuestions) {

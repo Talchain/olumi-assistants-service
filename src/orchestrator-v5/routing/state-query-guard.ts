@@ -136,8 +136,9 @@ export type StateQueryGuardOutcome =
  * reaches the existing grounded reasoning path instead of being answered with
  * the same one-line receipt as "what changed?".
  */
-const EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
-  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
+const STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
+  // Whole-turn anchored: only the standalone question reaches model reasoning.
+  /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\s*[?!.]*\s*$/i,
 ];
 
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
@@ -153,9 +154,10 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // — change-word required. Generic "what did you do" deliberately excluded so
   // generic session questions ("What did you do?") fall through to the LLM.
   /\bwhat\s+did\s+you\s+(?:just\s+)?(?:change|update|add)\b/i,
-  // Effect questions stay in the route-protection vocabulary but are
-  // separated at the guard below so they reach grounded reasoning.
-  ...EDIT_EFFECT_QUESTION_PATTERNS,
+  // Keep the deployed, unanchored route-protection shape. Compound suffixes
+  // retain their existing mutation-authority outcome; only a standalone
+  // effect question is separated at the guard below for grounded reasoning.
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
   // "did you change/update/apply/add" — change-word required.
   /\bdid\s+you\s+(?:change|update|apply|add)\b/i,
   // "I can't see it", "I cannot see this", "I can't see this constraint",
@@ -544,7 +546,7 @@ export function tryStateQueryGuard(
   // `isStateQueryQuestionShape` still recognises this exact class, so it cannot
   // be diverted into edit_graph; declining here only enables a read-only model
   // call. No new classifier, handler, or mutation permission is introduced.
-  if (EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
+  if (STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
     return { matched: false };
   }
 
