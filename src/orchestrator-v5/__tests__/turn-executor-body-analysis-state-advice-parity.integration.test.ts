@@ -39,6 +39,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { observeSerialisedPack } from '../context/__tests__/observe-serialised-pack.js';
 import { pickLatestFactorEvppiPriorityGuidance } from '../coaching/select-factor-evppi.js';
 import type {
   ChatWithToolsArgs,
@@ -52,26 +53,72 @@ import type {
 const mockState: {
   priorTurns: Array<Record<string, unknown>>;
   priorFacts: Array<Record<string, unknown>>;
+  priorTurnsTotal: number;
+  newestAnalysisFact: Record<string, unknown> | null;
+  newestAnalysisFactReadError: Error | null;
   persistedGraph: unknown | null;
+  persistedGraphReadError: Error | null;
+  appendWrites: Array<Record<string, unknown>>;
+  invalidationCalls: number;
+  storeDraftGraphCalls: number;
 } = {
   priorTurns: [],
   priorFacts: [],
+  priorTurnsTotal: 0,
+  newestAnalysisFact: null,
+  newestAnalysisFactReadError: null,
   persistedGraph: null,
+  persistedGraphReadError: null,
+  appendWrites: [],
+  invalidationCalls: 0,
+  storeDraftGraphCalls: 0,
 };
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (write: Record<string, unknown>) => {
+      mockState.appendWrites.push(write);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async () => mockState.priorTurns,
+    countTurns: async () => mockState.priorTurnsTotal,
     readFactsFor: async () => mockState.priorFacts,
-    invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    storeDraftGraph: async () => undefined,
-    loadGraph: async () => mockState.persistedGraph,
-    loadGraphAndBriefText: async () => ({
-      graph: mockState.persistedGraph,
-      briefText: null,
-    }),
+    readNewestAnalysisFactFor: async () => {
+      if (mockState.newestAnalysisFactReadError) {
+        throw mockState.newestAnalysisFactReadError;
+      }
+      return mockState.newestAnalysisFact;
+    },
+    invalidateScoped: async () => {
+      mockState.invalidationCalls += 1;
+      return {
+        scope: { kind: 'structural' as const },
+        entries_invalidated: [],
+      };
+    },
+    invalidateAll: async () => {
+      mockState.invalidationCalls += 1;
+      return {
+        scope: { kind: 'structural' as const },
+        entries_invalidated: [],
+      };
+    },
+    storeDraftGraph: async () => {
+      mockState.storeDraftGraphCalls += 1;
+    },
+    loadGraph: async () => {
+      if (mockState.persistedGraphReadError)
+        throw mockState.persistedGraphReadError;
+      return mockState.persistedGraph;
+    },
+    loadGraphAndBriefText: async () => {
+      if (mockState.persistedGraphReadError)
+        throw mockState.persistedGraphReadError;
+      return {
+        graph: mockState.persistedGraph,
+        briefText: null,
+      };
+    },
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
   }),
@@ -149,6 +196,42 @@ const READY_GRAPH = {
 const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH as never)!;
 
 /**
+ * Strict canonical graph used by the authority tests below. The request twin
+ * carries the opposite baseline marker, so a single prompt exposes both
+ * authorities at once: the saved graph must own baseline identity while the
+ * saved run_analysis fact must own leader and driver identity.
+ */
+const CANONICAL_AUTHORITY_GRAPH = {
+  ...READY_GRAPH,
+  edges: READY_GRAPH.edges.map((edge) => ({
+    ...edge,
+    edge_type: 'directed' as const,
+  })),
+};
+
+const CONFLICTING_REQUEST_GRAPH = {
+  ...CANONICAL_AUTHORITY_GRAPH,
+  nodes: CANONICAL_AUTHORITY_GRAPH.nodes.map((node) => {
+    if (node.id === 'opt_hire_local') return { ...node, is_baseline: true };
+    if (node.id === 'opt_status_quo') {
+      const { is_baseline: _ignored, ...withoutBaseline } = node;
+      void _ignored;
+      return withoutBaseline;
+    }
+    return node;
+  }),
+};
+
+const CANONICAL_AUTHORITY_GRAPH_HASH = computeAnalysisAffectingGraphHash(
+  CANONICAL_AUTHORITY_GRAPH as never
+)!;
+
+const CANONICAL_LEADER_LABEL = 'Continue with Current Team';
+const REQUEST_LEADER_LABEL = 'Hire Two Senior Engineers Locally';
+const CANONICAL_DRIVER_LABEL = 'CANONICAL STORED delivery-certainty driver';
+const REQUEST_DRIVER_LABEL = 'REQUEST ONLY fundraising-speed driver';
+
+/**
  * Faithful trim of the captured live staging envelope (Phase 0 rerun,
  * scenario 686dfb35, turn 1ba88589): TOP-LEVEL `option_comparison` /
  * `factor_sensitivity` / `robustness.fragile_edges`, NO per-option
@@ -209,8 +292,84 @@ function stagingShapedAnalysisState(): Record<string, unknown> {
   };
 }
 
+function conflictingRequestAnalysisState(): Record<string, unknown> {
+  return {
+    analysis_status: 'computed',
+    option_comparison: [
+      {
+        option_id: 'opt_hire_local',
+        option_label: REQUEST_LEADER_LABEL,
+        outcome: { mean: 0.7, p10: 0.5, p90: 0.9 },
+        status: 'computed',
+        win_probability: 0.91,
+      },
+      {
+        option_id: 'opt_status_quo',
+        option_label: CANONICAL_LEADER_LABEL,
+        outcome: { mean: 0.1, p10: 0, p90: 0.2 },
+        status: 'computed',
+        win_probability: 0.09,
+      },
+    ],
+    factor_sensitivity: [
+      {
+        factor_id: 'fac_request_only',
+        factor_label: REQUEST_DRIVER_LABEL,
+        influence_score: 0.94,
+        elasticity: 0.94,
+        direction: 'positive',
+      },
+    ],
+    robustness: {
+      level: 'high',
+      is_robust: true,
+      recommended_option_id: 'opt_hire_local',
+      recommended_option_label: REQUEST_LEADER_LABEL,
+      fragile_edges: [],
+    },
+  };
+}
+
+function canonicalStoredAnalysisEnrichment(): Record<string, unknown> {
+  return {
+    analysis_status: 'computed',
+    option_comparison: [
+      {
+        option_id: 'opt_status_quo',
+        option_label: CANONICAL_LEADER_LABEL,
+        outcome: { mean: 0.6, p10: 0.4, p90: 0.8 },
+        status: 'computed',
+        win_probability: 0.82,
+      },
+      {
+        option_id: 'opt_hire_local',
+        option_label: REQUEST_LEADER_LABEL,
+        outcome: { mean: 0.2, p10: 0.1, p90: 0.3 },
+        status: 'computed',
+        win_probability: 0.18,
+      },
+    ],
+    factor_sensitivity: [
+      {
+        factor_id: 'fac_canonical_driver',
+        factor_label: CANONICAL_DRIVER_LABEL,
+        influence_score: 0.88,
+        elasticity: 0.88,
+        direction: 'positive',
+      },
+    ],
+    robustness: {
+      level: 'moderate',
+      is_robust: false,
+      recommended_option_id: 'opt_status_quo',
+      recommended_option_label: CANONICAL_LEADER_LABEL,
+      fragile_edges: [],
+    },
+  };
+}
+
 function makeFreshRunAnalysisFact(
-  enrichment: Record<string, unknown> = { analysis_status: 'completed' },
+  enrichment: Record<string, unknown> = stagingShapedAnalysisState()
 ): Record<string, unknown> {
   return {
     fact_type: 'run_analysis' as const,
@@ -247,6 +406,29 @@ function makeFreshRunAnalysisFact(
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment,
       win_probabilities: { opt_hire_local: 0.638, opt_status_quo: 0.156 },
+    },
+  };
+}
+
+function makeCanonicalAuthorityRunAnalysisFact(
+  graphHash = CANONICAL_AUTHORITY_GRAPH_HASH
+): Record<string, unknown> {
+  return {
+    fact_type: 'run_analysis' as const,
+    fact_version: 1 as const,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_status_quo',
+      summary: 'Canonical persisted analysis result',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
+      graph_hash_at_run: graphHash,
+      computed_at: new Date(Date.now() - 60_000).toISOString(),
+      enrichment: canonicalStoredAnalysisEnrichment(),
+      win_probabilities: { opt_status_quo: 0.82, opt_hire_local: 0.18 },
     },
   };
 }
@@ -309,6 +491,49 @@ function recordingRoutingAdapter() {
   };
 }
 
+function capturedRoutingPrompt(
+  adapter: ReturnType<typeof recordingRoutingAdapter>
+): string {
+  const call = adapter.chatWithTools.mock.calls[0]?.[0];
+  expect(call, 'the routed turn must reach the model adapter').toBeDefined();
+  const user = call!.messages.find((message) => message.role === 'user');
+  expect(user, 'the adapter call must contain a user message').toBeDefined();
+  return typeof user!.content === 'string'
+    ? user!.content
+    : JSON.stringify(user!.content);
+}
+
+function expectNoCanonicalAuthorityWrite(): void {
+  expect(mockState.storeDraftGraphCalls).toBe(0);
+  expect(mockState.invalidationCalls).toBe(0);
+  expect(
+    mockState.appendWrites.length,
+    'the ordinary answered turn remains durable'
+  ).toBe(1);
+  const write = mockState.appendWrites[0]!;
+  expect(write.graph).toBeUndefined();
+  expect(write.handler_facts).toEqual([]);
+  expect(write).not.toHaveProperty('modelVersion');
+}
+
+function recentNonAnalysisTurns(count: number): Array<Record<string, unknown>> {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `recent-row-${String(index).padStart(2, '0')}`,
+    scenario_id: SCENARIO_ID,
+    user_id: null,
+    turn_id: `recent-turn-${String(index).padStart(2, '0')}`,
+    turn_class: 'direct_answer',
+    handler_id: null,
+    request_hash: `sha256:recent-${index}`,
+    response_emitted: true,
+    llm_calls_used: 1,
+    duration_ms: 10,
+    user_message: `Recent user turn ${index}`,
+    assistant_message: `Recent assistant turn ${index}`,
+    created_at: new Date(Date.now() - index * 1_000).toISOString(),
+  }));
+}
+
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
@@ -321,7 +546,14 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     events = [];
     mockState.priorTurns = [PRIOR_RUN_ANALYSIS_TURN];
     mockState.priorFacts = [makeFreshRunAnalysisFact()];
+    mockState.priorTurnsTotal = 1;
+    mockState.newestAnalysisFact = mockState.priorFacts[0]!;
+    mockState.newestAnalysisFactReadError = null;
     mockState.persistedGraph = READY_GRAPH;
+    mockState.persistedGraphReadError = null;
+    mockState.appendWrites = [];
+    mockState.invalidationCalls = 0;
+    mockState.storeDraftGraphCalls = 0;
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 
@@ -397,6 +629,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
         key_assumptions: ['An unranked assumption must not be promoted.'],
       },
     })];
+    mockState.newestAnalysisFact = mockState.priorFacts[0]!;
     expect(
       pickLatestFactorEvppiPriorityGuidance(mockState.priorFacts as never),
     ).toStrictEqual({
@@ -442,6 +675,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       // decision_review deliberately absent: it is configuration-gated and
       // may be absent or soft-fail regardless of the deployed flag posture.
     })];
+    mockState.newestAnalysisFact = mockState.priorFacts[0]!;
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(
       mkPayload('What should we validate?'),
@@ -464,7 +698,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(result.response.assistant_text).not.toMatch(/\b0(?:\.\d+)?\b|evppi/i);
   });
 
-  it('telemetry confirms the parity wiring: analysis_state_source=request + top_driver_source=top_level', async () => {
+  it('treats an equal body analysis_state as compatibility input, never reasoning authority', async () => {
     const adapter = throwingRoutingAdapter();
     await runTurnExecutor(
       mkPayload('What would change the outcome?'),
@@ -482,9 +716,233 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
         e.data.dispatch_path === 'turn_executor_pre_handler',
     );
     expect(freshnessEvent, 'pre-handler freshness telemetry should fire').toBeDefined();
-    expect(freshnessEvent!.data.analysis_state_source).toBe('request');
-    expect(freshnessEvent!.data.top_driver_source).toBe('top_level');
-    expect(freshnessEvent!.data.fragile_edge_source).toBe('top_level');
+    expect(freshnessEvent!.data.analysis_state_source).not.toBe('request');
+  });
+
+  it('uses one canonical server snapshot for baseline, leading option and top driver when body state conflicts', async () => {
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    mockState.priorFacts = [canonicalFact];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-canonical-analysis-authority-conflict',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      }
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as {
+      leading_option?: { label?: string };
+      top_drivers?: Array<{ label?: string }>;
+    } | null;
+    const graph = pack.graph as {
+      nodes?: Array<{ id?: string; is_baseline?: true }>;
+    };
+
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(
+      graph.nodes
+        ?.filter((node) => node.is_baseline === true)
+        .map((node) => node.id)
+    ).toEqual(['opt_status_quo']);
+    expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
+    expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('keeps conflicting request analysis read-only: no graph, fact, version or invalidation write', async () => {
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    mockState.priorFacts = [canonicalFact];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+    const canonicalBytesBefore = JSON.stringify(mockState.persistedGraph);
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-authority-read-only',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      }
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expectNoCanonicalAuthorityWrite();
+    expect(mockState.persistedGraph).toBe(CANONICAL_AUTHORITY_GRAPH);
+    expect(JSON.stringify(mockState.persistedGraph)).toBe(canonicalBytesBefore);
+  });
+
+  it('does not let stale request graph plus body analysis reopen or replace the stored run', async () => {
+    const changedCanonicalGraph = {
+      ...CANONICAL_AUTHORITY_GRAPH,
+      edges: CANONICAL_AUTHORITY_GRAPH.edges.map((edge, index) =>
+        index === 0 ? { ...edge, strength: { mean: 0.37, std: 0.1 } } : edge
+      ),
+    };
+    const changedHash = computeAnalysisAffectingGraphHash(
+      changedCanonicalGraph as never
+    );
+    expect(changedHash).not.toBe(CANONICAL_AUTHORITY_GRAPH_HASH);
+
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact(
+      CANONICAL_AUTHORITY_GRAPH_HASH
+    );
+    mockState.priorFacts = [canonicalFact];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = changedCanonicalGraph;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-stale-request-analysis-authority',
+      {
+        routingAdapter: adapter,
+        graphState: CANONICAL_AUTHORITY_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      }
+    );
+
+    const freshnessEvent = events.find(
+      (event) => event.data.dispatch_path === 'turn_executor_pre_handler'
+    );
+    expect(freshnessEvent?.data.freshness).toBe('stale');
+    expect(freshnessEvent?.data.current_graph_hash).toBe(changedHash);
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as {
+      leading_option?: { label?: string };
+      top_drivers?: Array<{ label?: string }>;
+      analysis_not_current_note?: string;
+    } | null;
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
+    expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expect(analysis?.analysis_not_current_note).toBeDefined();
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it.each([
+    {
+      label: 'provisional',
+      expectedStatus: 'provisional',
+      requestGraph: CANONICAL_AUTHORITY_GRAPH,
+      graphReadError: null,
+    },
+    {
+      label: 'absent',
+      expectedStatus: 'absent',
+      requestGraph: null,
+      graphReadError: null,
+    },
+    {
+      label: 'unavailable',
+      expectedStatus: 'unavailable',
+      requestGraph: CANONICAL_AUTHORITY_GRAPH,
+      graphReadError: new Error('canonical graph read unavailable'),
+    },
+  ] as const)(
+    '$label graph authority never promotes request-only analysis_state',
+    async ({ expectedStatus, requestGraph, graphReadError }) => {
+      mockState.priorTurns = [];
+      mockState.priorFacts = [];
+      mockState.priorTurnsTotal = 0;
+      mockState.newestAnalysisFact = null;
+      mockState.persistedGraph = null;
+      mockState.persistedGraphReadError = graphReadError;
+
+      const adapter = recordingRoutingAdapter();
+      await runTurnExecutor(
+        mkPayload(
+          'Continue the strategic reasoning from the available context.'
+        ),
+        `req-request-analysis-${expectedStatus}`,
+        {
+          routingAdapter: adapter,
+          ...(requestGraph === null
+            ? {}
+            : { graphState: requestGraph as never }),
+          analysisState: conflictingRequestAnalysisState() as never,
+        }
+      );
+
+      const prompt = capturedRoutingPrompt(adapter);
+      const pack = observeSerialisedPack(prompt);
+      expect(pack.graph_context).toEqual({ status: expectedStatus });
+      expect(pack.analysis).toBeNull();
+      expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+      expectNoCanonicalAuthorityWrite();
+    }
+  );
+
+  it('loads the scenario-wide newest run_analysis fact after its parent turn leaves the 20-turn hot window', async () => {
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-outside-hot-window',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+      }
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as {
+      leading_option?: { label?: string };
+      top_drivers?: Array<{ label?: string }>;
+    } | null;
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
+    expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('fails weak when the scenario-wide analysis-fact read degrades instead of substituting body state', async () => {
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [];
+    mockState.newestAnalysisFact = null;
+    mockState.newestAnalysisFactReadError = new Error(
+      'scenario fact read unavailable'
+    );
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-fact-read-degraded',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      }
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(pack.analysis).toBeNull();
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
   });
 
   it('genuinely data-absent body analysis_state (no drivers anywhere) now reaches the coach instead of the recap stub', async () => {
