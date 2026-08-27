@@ -92,6 +92,7 @@ import {
   parseCoachingStateSnapshot,
   type CoachingStateSnapshot,
 } from '../coaching/coaching-state-snapshot.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
 
@@ -1804,6 +1805,108 @@ export class SupabaseSessionStore implements SessionStore {
         turn_id: turnId,
         fact_created_at: createdAt,
       });
+    }
+    return out;
+  }
+
+  /**
+   * Load the scenario's newest successfully-applied mutation receipts beyond
+   * the bounded turn window. See
+   * {@link SessionStore.readRecentAppliedMutationFactsFor} for the authority
+   * and degradation contract.
+   *
+   * SCOPE AT THE BYTES: this service-role query is constrained by the exact
+   * `scenario_id`, the canonical mutation-receipt fact-type set, `noop=false`,
+   * and the persisted result status before any row reaches application code.
+   * It is deliberately uncached: a process-local LRU cannot establish durable
+   * cross-instance history after an authenticated return.
+   */
+  async readRecentAppliedMutationFactsFor(
+    scenarioId: string,
+    limit: number,
+  ): Promise<readonly HandlerFact[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new SessionReadError(
+        `readRecentAppliedMutationFactsFor(${scenarioId}): limit must be a positive safe integer`,
+        { code: 'mutation_fact_limit_invalid' },
+      );
+    }
+
+    const receiptFactTypes = Array.from(MUTATION_RECEIPT_FACT_TYPES);
+    const { data, error } = await this.client
+      .from('v5_handler_facts')
+      .select('id, payload, handler_id, noop, created_at')
+      .eq('scenario_id', scenarioId)
+      .in('handler_id', receiptFactTypes)
+      .eq('noop', false)
+      .eq('payload->result->>status', 'applied')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new SessionReadError(
+        `readRecentAppliedMutationFactsFor(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    if (!Array.isArray(data)) {
+      throw new SessionReadError(
+        `readRecentAppliedMutationFactsFor(${scenarioId}): PostgREST returned a non-array payload`,
+        { code: 'mutation_fact_corrupt' },
+      );
+    }
+
+    const out: HandlerFact[] = [];
+    for (const row of data as Array<{
+      id?: unknown;
+      payload?: unknown;
+      handler_id?: unknown;
+      noop?: unknown;
+      created_at?: unknown;
+    }>) {
+      if (
+        typeof row.id !== 'string' ||
+        row.id.length === 0 ||
+        typeof row.created_at !== 'string' ||
+        row.created_at.length === 0 ||
+        typeof row.handler_id !== 'string' ||
+        row.noop !== false
+      ) {
+        throw new SessionReadError(
+          `readRecentAppliedMutationFactsFor(${scenarioId}): eligible row metadata is malformed`,
+          { code: 'mutation_fact_corrupt' },
+        );
+      }
+
+      const payloadObj =
+        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+          ? (row.payload as Record<string, unknown>)
+          : {};
+      const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop: row.noop });
+      if (!parsed.success) {
+        throw new SessionReadError(
+          `readRecentAppliedMutationFactsFor(${scenarioId}): payload failed HandlerFactSchema — ${parsed.error.message}`,
+          { cause: parsed.error, code: 'mutation_fact_corrupt' },
+        );
+      }
+
+      const result = parsed.data.result;
+      if (
+        parsed.data.fact_type !== row.handler_id ||
+        !MUTATION_RECEIPT_FACT_TYPES.has(parsed.data.fact_type) ||
+        parsed.data.noop !== false ||
+        !result ||
+        typeof result !== 'object' ||
+        Array.isArray(result) ||
+        (result as Record<string, unknown>).status !== 'applied'
+      ) {
+        throw new SessionReadError(
+          `readRecentAppliedMutationFactsFor(${scenarioId}): eligible row contradicts mutation receipt authority`,
+          { code: 'mutation_fact_corrupt' },
+        );
+      }
+      out.push(parsed.data);
     }
     return out;
   }
