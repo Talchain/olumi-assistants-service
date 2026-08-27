@@ -27,6 +27,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { TurnOutcome } from '../../turn-outcome.js';
 import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 // A populated analysis projection — in production the assembler fills this
 // from the prior run_analysis fact, so the analyse-stage "no analysis yet"
@@ -103,6 +104,7 @@ describe('chip floor — canonical convergence', () => {
       stage: 'analyse',
       handlerFacts: [],
       priorFacts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, priorFacts),
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
@@ -124,6 +126,7 @@ describe('chip floor — canonical convergence', () => {
       stage: 'analyse',
       handlerFacts: [],
       priorFacts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, priorFacts),
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
@@ -139,6 +142,7 @@ describe('chip floor — canonical convergence', () => {
       stage: 'analyse',
       handlerFacts: [],
       priorFacts: [],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
       canonicalState,
@@ -164,6 +168,7 @@ describe('chip floor — canonical convergence', () => {
       stage: 'analyse',
       handlerFacts: [],
       priorFacts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, priorFacts),
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
@@ -182,6 +187,7 @@ describe('chip floor — canonical convergence', () => {
       stage: 'analyse' as const,
       handlerFacts: [] as HandlerFact[],
       priorFacts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, priorFacts),
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
@@ -238,6 +244,7 @@ describe('generateChipsRaw post-mutation rule — canonical convergence', () => 
       stage: 'analyse',
       handlerFacts,
       priorFacts: [],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       validationRegistry: REGISTRY,
       analysisReady: READY_PAYLOAD,
       canonicalState,

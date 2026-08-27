@@ -77,9 +77,10 @@
  *
  * DEGRADED READS FAIL CLOSED AT THE SHARED DERIVATION. `buildTurnContext`
  * carries a discriminated scenario-wide analysis fact set. Only `complete`
- * supplies reasoning facts; `complete`/`capped` may supply the validated
- * database-order head for entitlement; degraded/omitted carriers supply
- * neither. The bounded hot window can detect a contradiction but can never
+ * supplies reasoning facts; an internally-consistent `complete`/`capped`
+ * carrier may supply the validated database-order head for entitlement;
+ * degraded/omitted carriers supply neither. The bounded hot window can detect
+ * a contradiction but can never
  * recover completeness from a different query/LRU snapshot. Consequently a
  * failed exact carrier returns `fail_closed_no_turn_context` (or
  * `fail_closed_truncated` when truncation is independently proven), never

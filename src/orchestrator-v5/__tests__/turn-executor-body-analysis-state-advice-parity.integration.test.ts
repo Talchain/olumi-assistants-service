@@ -876,6 +876,12 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
     expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
     expect(analysis?.analysis_not_current_note).toBeDefined();
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: true,
+      freshness: 'stale',
+      usable_for_prose: true,
+      usable_for_chips: false,
+    });
     expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
     expectNoCanonicalAuthorityWrite();
   });
@@ -928,6 +934,17 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       const pack = observeSerialisedPack(prompt);
       expect(pack.graph_context).toEqual({ status: expectedStatus });
       expect(pack.analysis).toBeNull();
+      expect(pack.coaching).toEqual({
+        draft_coaching: null,
+        decision_review: null,
+        last_coaching_signal: null,
+      });
+      expect(pack.coaching_context).toMatchObject({
+        analysis_present: false,
+        freshness: 'none',
+        usable_for_prose: false,
+        usable_for_chips: false,
+      });
       expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
       if (expectedStatus === 'provisional') {
         // First-touch provisional adoption is a pre-existing, validated commit
@@ -989,6 +1006,12 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
         turn_id: 'analysis-turn-outside-hot-window',
         produced_at: '2026-08-27T09:00:01.000Z',
       },
+    });
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: true,
+      freshness: 'fresh',
+      usable_for_prose: true,
+      usable_for_chips: true,
     });
     expect(prompt).toContain('DURABLE_DECISION_REVIEW_CANARY');
     expect(prompt).toContain('analysis-turn-outside-hot-window');
@@ -1099,6 +1122,78 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expectNoCanonicalAuthorityWrite();
   });
 
+  it.each(['scenario_id', 'scenarioId', 'scenario-id', 'SCENARIO_ID'])(
+    'withholds Decision Review nested foreign identity key %s from final prompt bytes',
+    async (identityKey) => {
+      const foreignScenarioId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+      const fact = makeCanonicalAuthorityRunAnalysisFact(
+        CANONICAL_AUTHORITY_GRAPH_HASH,
+        {
+          decision_review: {
+            produced_at: '2026-08-27T09:00:00.000Z',
+            narrative_summary: 'FOREIGN_DECISION_REVIEW_MUST_NOT_REACH_PROMPT',
+            nested: { origin: { [identityKey]: foreignScenarioId } },
+          },
+        },
+      );
+      mockState.priorFacts = [fact];
+      mockState.newestAnalysisFact = fact;
+      mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+      const adapter = recordingRoutingAdapter();
+      await runTurnExecutor(
+        mkPayload('Continue from the current saved analysis.'),
+        `req-analysis-review-foreign-identity-${identityKey}`,
+        {
+          routingAdapter: adapter,
+          graphState: CONFLICTING_REQUEST_GRAPH as never,
+        },
+      );
+
+      const prompt = capturedRoutingPrompt(adapter);
+      const pack = observeSerialisedPack(prompt);
+      expect(pack.coaching).toMatchObject({ decision_review: null });
+      expect(prompt).not.toContain(foreignScenarioId);
+      expect(prompt).not.toContain('FOREIGN_DECISION_REVIEW_MUST_NOT_REACH_PROMPT');
+      expectNoCanonicalAuthorityWrite();
+    },
+  );
+
+  it.each(['partial', 'refused'])(
+    'does not project a producer-carried completion signal from a %s analysis fact into final prompt bytes',
+    async (analysisStatus) => {
+      const canary = `${analysisStatus.toUpperCase()}_FORGED_COMPLETE_CANARY`;
+      const fact = makeCanonicalAuthorityRunAnalysisFact(
+        CANONICAL_AUTHORITY_GRAPH_HASH,
+        {
+          analysis_status: analysisStatus,
+          coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          coaching_signal_turn_id: canary,
+          coaching_signal_produced_at: '2026-08-27T09:00:01.000Z',
+        },
+      );
+      mockState.priorFacts = [fact];
+      mockState.newestAnalysisFact = fact;
+      mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+      const adapter = recordingRoutingAdapter();
+      await runTurnExecutor(
+        mkPayload('Continue from the current saved analysis state.'),
+        `req-analysis-${analysisStatus}-producer-signal`,
+        {
+          routingAdapter: adapter,
+          graphState: CONFLICTING_REQUEST_GRAPH as never,
+        },
+      );
+
+      const prompt = capturedRoutingPrompt(adapter);
+      const pack = observeSerialisedPack(prompt);
+      expect(pack.coaching).toMatchObject({ last_coaching_signal: null });
+      expect(prompt).not.toContain(canary);
+      expectNoCanonicalAuthorityWrite();
+    },
+  );
+
   it('fails weak when the scenario-wide analysis-fact read degrades instead of substituting body state', async () => {
     mockState.priorTurns = recentNonAnalysisTurns(20);
     mockState.priorTurnsTotal = 41;
@@ -1124,7 +1219,149 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     const pack = observeSerialisedPack(prompt);
     expect(pack.graph_context).toEqual({ status: 'canonical' });
     expect(pack.analysis).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: false,
+      freshness: 'unknown',
+      usable_for_prose: false,
+      usable_for_chips: false,
+    });
     expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('fails weak on a true capped scenario page instead of treating its prefix or request body as analysis', async () => {
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = Array.from({ length: 21 }, (_, index) =>
+      makeCanonicalAuthorityRunAnalysisFact(
+        CANONICAL_AUTHORITY_GRAPH_HASH,
+        {
+          factor_sensitivity: [
+            {
+              factor_id: `fac-capped-${index}`,
+              factor_label: `CAPPED_PREFIX_CANARY_${index}`,
+              influence_score: 0.9,
+              direction: 'positive',
+            },
+          ],
+        },
+        `2026-08-${String(27 - Math.min(index, 26)).padStart(2, '0')}T09:00:00.000Z`,
+      ),
+    );
+    mockState.newestAnalysisFact = null;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue from whatever analysis is authoritatively available.'),
+      'req-analysis-fact-read-capped',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      },
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(pack.analysis).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: false,
+      freshness: 'unknown',
+      usable_for_prose: false,
+      usable_for_chips: false,
+    });
+    expect(prompt).not.toContain('CAPPED_PREFIX_CANARY_');
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('preserves canonical analysis authority through dense whole-pack budgeting', async () => {
+    const durableCanary = 'DURABLE_DENSE_ANALYSIS_CANARY';
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact(
+      CANONICAL_AUTHORITY_GRAPH_HASH,
+      {
+        factor_sensitivity: [
+          {
+            factor_id: 'fac-durable-dense',
+            factor_label: durableCanary,
+            influence_score: 0.88,
+            direction: 'positive',
+          },
+        ],
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'dense-durable-analysis-turn',
+        coaching_signal_produced_at: '2026-08-27T09:00:01.000Z',
+      },
+    );
+    mockState.priorTurns = recentNonAnalysisTurns(20).map((turn, index) => ({
+      ...turn,
+      user_message: `IRRELEVANT_DENSE_USER_${index}_${'u'.repeat(6_000)}`,
+      assistant_message: `IRRELEVANT_DENSE_ASSISTANT_${index}_${'a'.repeat(6_000)}`,
+    }));
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue from the saved model under dense context pressure.'),
+      'req-analysis-authority-dense-budget',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+        analysisState: conflictingRequestAnalysisState() as never,
+      },
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    expect(JSON.stringify(pack).length).toBeLessThanOrEqual(55_000);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'v5.context_truncation',
+          data: expect.objectContaining({
+            section: 'conversation',
+            original_chars: expect.any(Number),
+            kept_chars: expect.any(Number),
+          }),
+        }),
+      ]),
+    );
+    const conversationCut = events.find(
+      (event) =>
+        event.event === 'v5.context_truncation' &&
+        event.data.section === 'conversation',
+    );
+    expect(Number(conversationCut?.data.kept_chars)).toBeLessThan(
+      Number(conversationCut?.data.original_chars),
+    );
+    expect(pack.graph_context).toEqual({ status: 'canonical' });
+    expect(pack.analysis).toMatchObject({
+      top_drivers: [expect.objectContaining({ label: durableCanary })],
+    });
+    expect(pack.coaching).toMatchObject({
+      last_coaching_signal: {
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'dense-durable-analysis-turn',
+      },
+    });
+    expect(prompt).toContain(durableCanary);
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expect(prompt).not.toContain('IRRELEVANT_DENSE_USER_19_');
     expectNoCanonicalAuthorityWrite();
   });
 

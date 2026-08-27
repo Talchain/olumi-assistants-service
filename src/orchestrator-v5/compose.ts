@@ -72,6 +72,10 @@ import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from './context/reconcile-scenario-analysis-facts.js';
 
 /**
  * Endpoint labels are durable internal context on adjust-edge facts, not part
@@ -308,11 +312,11 @@ export interface ComposeToolCallInput {
    */
   readonly persistedGraphHash?: string | null;
   /**
-   * ROADMAP 2.211 — the turn's PRIOR handler facts, used for ONE thing: deriving
-   * which lens the immediately-preceding ANALYSIS turn of this scenario selected,
-   * so the no-immediate-repeat tie-break has its single input
-   * (`compose/lens-history.ts`). Already loaded by `buildTurnContext`
-   * (`EnrichedTurnContext.prior_facts`) — no new DB read, no new persisted state.
+   * ROADMAP 2.211 — the attested scenario-wide analysis fact set used only to
+   * replay the immediately-preceding analysis lens. Only a reconciled complete
+   * carrier whose scenario matches the current run fact is readable. A capped,
+   * degraded, foreign, forged or omitted carrier suppresses lens history rather
+   * than falling back to the ordinary bounded fact window.
    *
    * ⚠ THIS IS NOT `lifecycle.priorFacts`, AND THE DIFFERENCE IS LOAD-BEARING.
    * `lifecycle.priorFacts` is the UNIFIED array
@@ -324,10 +328,19 @@ export interface ComposeToolCallInput {
    * are identical at the type level and one call site apart, which is why they
    * are separate fields rather than one reused one.
    *
-   * Omitted ⇒ no history ⇒ byte-identical to the pre-amendment selection. Fail
-   * safe: an unthreaded call site loses lens diversity, never correctness.
+   * Omitted/unlicensed ⇒ no history ⇒ byte-identical to the pre-amendment
+   * selection. Fail safe: an unthreaded call site loses lens diversity, never
+   * correctness.
    */
-  readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
+  readonly scenarioAnalysisFactSetForLensHistory?: ScenarioAnalysisFactSet;
+
+  /**
+   * Ordinary mixed prior-turn facts used only for judgement signals such as an
+   * edge adjudication. This must remain distinct from analysis-lens history:
+   * replacing it with the analysis-only scenario carrier drops adjudications
+   * and can falsely present a resolved disagreement as unresolved.
+   */
+  readonly priorTurnFactsForJudgementSignals?: readonly HandlerFact[];
 
   /**
    * §2.1 row 4 — the factor id this turn's `what_would_flip` proposal targets
@@ -361,7 +374,8 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.lifecycle,
     input.persistedGraph,
     input.persistedGraphHash,
-    input.priorTurnFactsForLensHistory,
+    input.scenarioAnalysisFactSetForLensHistory,
+    input.priorTurnFactsForJudgementSignals,
     input.flipFocusFactorId,
     input.analysisReadyStatus,
   );
@@ -423,7 +437,8 @@ function buildBlocksFromFacts(
   lifecycle?: ComposeToolCallInput['lifecycle'],
   persistedGraph?: unknown,
   persistedGraphHash?: string | null,
-  priorTurnFactsForLensHistory?: readonly HandlerFact[],
+  scenarioAnalysisFactSetForLensHistory?: ScenarioAnalysisFactSet,
+  priorTurnFactsForJudgementSignals?: readonly HandlerFact[],
   flipFocusFactorId?: string,
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
 ): OlumiResponse['blocks'] {
@@ -441,11 +456,23 @@ function buildBlocksFromFacts(
   // the lens that analysis chose, so applying a "don't repeat" rule there would
   // make one analysis show two different lenses on two turns. That branch is
   // reached from `buildLifecycleBlocksFromPrior`, which passes nothing.
+  const currentRunScenarioId = facts.find(
+    (fact): fact is RunAnalysisHandlerFact => fact.fact_type === 'run_analysis',
+  )?.result.scenario_id;
+  const licensedLensHistory =
+    typeof currentRunScenarioId === 'string' &&
+    isReconciledScenarioAnalysisFactSet(
+      scenarioAnalysisFactSetForLensHistory,
+      currentRunScenarioId,
+    ) &&
+    scenarioAnalysisFactSetForLensHistory.status === 'complete'
+      ? scenarioAnalysisFactSetForLensHistory.facts
+      : undefined;
   const previousAnalysisLens =
-    priorTurnFactsForLensHistory === undefined
+    licensedLensHistory === undefined
       ? null
       : derivePreviousAnalysisLens(
-          priorTurnFactsForLensHistory,
+          licensedLensHistory,
           liveLensExecutorAvailability(),
         );
 
@@ -513,9 +540,12 @@ function buildBlocksFromFacts(
         // same scoping as `previousAnalysisLens` (the prior-fact lifecycle
         // branch re-presents an already-seen analysis and passes nothing).
         const judgementSignals =
-          priorTurnFactsForLensHistory === undefined
+          priorTurnFactsForJudgementSignals === undefined
             ? undefined
-            : deriveJudgementSignals(priorTurnFactsForLensHistory, fallbackForFact);
+            : deriveJudgementSignals(
+                priorTurnFactsForJudgementSignals,
+                fallbackForFact,
+              );
         // D-U F2: reuse the SAME hash-gated raw-snapshot the lookup trusts as
         // the lever-union authority — when the snapshot hash diverges from the
         // fact's, we fail closed (undefined ⇒ empty set ⇒ no suppression),

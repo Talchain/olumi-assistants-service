@@ -51,6 +51,12 @@ import {
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { RecentChangesHistoryStatus } from '../context/reconcile-recent-mutation-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { decomposeEditMessage } from './edit-part-decomposition.js';
 import { mentionsStructuralEditRequest } from './mutation-language.js';
@@ -855,12 +861,7 @@ function emptyRecentChangesText(status: RecentChangesHistoryStatus): string {
  */
 export interface ComposeStateQueryChipInput {
   readonly recentChangeCount: number;
-  readonly analysisHistory:
-    | {
-        readonly status: 'complete';
-        readonly hasSuccessfulAnalysis: boolean;
-      }
-    | { readonly status: 'capped' | 'degraded' };
+  readonly analysisFactSet?: ScenarioAnalysisFactSet;
   readonly analysisFreshness: 'fresh' | 'stale' | 'unknown' | 'none' | undefined;
   readonly analysisReadyStatus: string | undefined;
   readonly validationRegistry: HandlerValidationRegistry;
@@ -879,8 +880,18 @@ export function composeStateQueryChip(
   // analysed" or "never analysed". A capped/degraded read is unknown, not
   // absence, so it cannot license a first-run chip from an empty bounded
   // window.
-  if (input.analysisHistory.status !== 'complete') return [];
-  const hasPriorRunAnalysis = input.analysisHistory.hasSuccessfulAnalysis;
+  if (
+    !isReconciledScenarioAnalysisFactSet(input.analysisFactSet) ||
+    input.analysisFactSet.status !== 'complete'
+  ) return [];
+  const analysisFacts = input.analysisFactSet.facts;
+  const hasPriorRunAnalysis = selectRunAnalysisFact(analysisFacts) !== null;
+  const hasAnalysisResult = analysisFacts.some(
+    (fact) =>
+      fact.fact_type === 'run_analysis' &&
+      fact.noop !== true &&
+      !isAnalysisRefusalFact(fact),
+  );
   if (hasPriorRunAnalysis && input.analysisFreshness === 'stale') {
     return [
       {
@@ -891,7 +902,11 @@ export function composeStateQueryChip(
       },
     ];
   }
-  if (!hasPriorRunAnalysis && input.analysisFreshness === 'none') {
+  if (
+    !hasPriorRunAnalysis &&
+    !hasAnalysisResult &&
+    input.analysisFreshness === "none"
+  ) {
     return [
       {
         id: 'chip_action_run_analysis_after_state_query',

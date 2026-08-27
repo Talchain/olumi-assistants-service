@@ -61,6 +61,11 @@ import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 // OUTPUT, not just the shared recovery source.
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { selectFactorEvppiPriorityGuidance } from '../coaching/select-factor-evppi.js';
+import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -97,17 +102,17 @@ export interface ChipGeneratorInput {
    */
   readonly graphOptionCount?: number;
   /**
-   * V5 0.9.0: prior-turn handler facts loaded from the session store.
-   * `handlerFacts` above only carries the CURRENT turn's facts — fine for
-   * "did run_analysis just succeed?" but wrong for "is there an analysis
-   * record anywhere in the conversation?" The new `facts_absent` rule
-   * needs the cross-turn view: if a prior `run_analysis` fact exists but
-   * the current turn is a noop explanation, we should NOT emit a "Run
-   * analysis" chip (the user already has analysis). Optional for
-   * compatibility with chip-suppression / regression tests that pass only
-   * the current turn's facts.
+   * Ordinary mixed prior-turn facts for non-analysis chronology such as
+   * mutation attribution. This bounded hot window is never analysis-history
+   * authority; `analysisFactSet` is the only prior analysis source.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * Scenario-wide analysis history. Only a complete validated carrier may
+   * prove that no displayed analysis result exists. Capped, degraded,
+   * omitted or malformed input is unknown and cannot author a first-run chip.
+   */
+  readonly analysisFactSet?: ScenarioAnalysisFactSet;
   /**
    * V5 state-trust: turn outcome contract. The freshness verdict drives
    * the "Rerun analysis" chip — emitted only when `analysis_freshness ===
@@ -247,9 +252,50 @@ export function validateAndFilterChips(
  * regression.
  */
 export function generateChips(input: ChipGeneratorInput): readonly SuggestedAction[] {
-  const filtered = validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
+  const filtered = validateAndFilterChips(
+    generateChipsRaw(input),
+    input.validationRegistry,
+  );
   const primary = filtered.length > 0 ? filtered : applyChipFloor(input);
   return excludeRecentlyOfferedChips(primary, input.recentlyOfferedChipIds);
+}
+
+function hasNonRefusalAnalysisResult(
+  facts: readonly HandlerFact[] | undefined,
+): boolean {
+  return (facts ?? []).some(
+    (fact) =>
+      fact.fact_type === 'run_analysis' &&
+      fact.noop !== true &&
+      !isAnalysisRefusalFact(fact),
+  );
+}
+
+/** Complete durable absence plus no current result is the sole first-run proof. */
+function isFirstAnalysisProven(input: ChipGeneratorInput): boolean {
+  return (
+    isReconciledScenarioAnalysisFactSet(input.analysisFactSet) &&
+    input.analysisFactSet.status === 'complete' &&
+    !hasNonRefusalAnalysisResult(input.analysisFactSet.facts) &&
+    !hasNonRefusalAnalysisResult(input.handlerFacts)
+  );
+}
+
+/**
+ * One analysis-history source for every chip decision. Current-turn handler
+ * facts may author their own just-produced consequence. Prior analysis facts
+ * are readable only from the nominally attested complete scenario carrier;
+ * the ordinary mixed/hot `priorFacts` window is not analysis authority.
+ */
+function currentAndLicensedAnalysisFacts(
+  input: ChipGeneratorInput,
+): readonly HandlerFact[] {
+  const prior =
+    isReconciledScenarioAnalysisFactSet(input.analysisFactSet) &&
+    input.analysisFactSet.status === 'complete'
+      ? input.analysisFactSet.facts
+      : [];
+  return [...(input.handlerFacts ?? []), ...prior];
 }
 
 /**
@@ -305,7 +351,9 @@ function excludeRecentlyOfferedChips(
  *   5. None of the above → empty preserved; `V5ChipsEmptyIntentional`
  *      emitted with `reason: 'no_safe_floor'`.
  */
-function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
+function applyChipFloor(
+  input: ChipGeneratorInput,
+): readonly SuggestedAction[] {
   const readyStatus = input.analysisReady?.status;
   const readyStatusLabel: string = readyStatus ?? 'unknown';
   // M2 convergence: when the canonical analysis state is threaded, the
@@ -314,10 +362,10 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   // facts) so it cannot disagree with `deriveAnalysisFreshness`. Absent →
   // the prior local expressions, byte-for-byte unchanged.
   const cs = input.canonicalState;
+  const analysisFacts = currentAndLicensedAnalysisFacts(input);
   const hasAnyRunAnalysisFact = cs
     ? cs.selected_fact_index !== null
-    : (input.handlerFacts ?? []).some(isSuccessfulRunAnalysisFact) ||
-      (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+    : analysisFacts.some(isSuccessfulRunAnalysisFact);
   const freshness = cs ? cs.freshness : input.turnOutcome?.analysis_freshness;
   // Rerun affordance. Canonical: `requiresRerun` (stale OR trust-downgrade).
   // Fallback: the prior exact condition (a fact present AND stale).
@@ -354,7 +402,11 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   }
 
   // Priority 2: ready + no analysis fact → executable run_analysis chip.
-  if (readyStatus === 'ready' && !hasAnyRunAnalysisFact) {
+  if (
+    readyStatus === 'ready' &&
+    !hasAnyRunAnalysisFact &&
+    isFirstAnalysisProven(input)
+  ) {
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
     if (runAnalysis) {
@@ -413,11 +465,8 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   // conversational promptChip (status quo) so a click never lands the user on a
   // "no analysis run yet" handler template.
   if (canExploreAnalysis) {
-    const combinedFacts: readonly HandlerFact[] = [
-      ...(input.handlerFacts ?? []),
-      ...(input.priorFacts ?? []),
-    ];
-    const projectionBuildable = buildAnalysisFromPriorFacts(combinedFacts, undefined) !== null;
+    const projectionBuildable =
+      buildAnalysisFromPriorFacts(analysisFacts, undefined) !== null;
     // Deliberately NOT named for the handler precondition any more — it no
     // longer mirrors it, and the old name would re-teach the false parity.
     const chipSafeToOffer = projectionBuildable && freshness !== 'stale';
@@ -475,7 +524,9 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   return [];
 }
 
-function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[] {
+function generateChipsRaw(
+  input: ChipGeneratorInput,
+): readonly SuggestedAction[] {
   const handlerJustRan = findHandlerJustRan(input.handlerFacts);
   const noopExplanationHandlerJustRan = findNoopExplanationHandlerJustRan(
     input.handlerFacts,
@@ -508,6 +559,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // is threaded it is authoritative (unified current+prior facts);
   // otherwise the prior `turnOutcome` read, unchanged.
   const canonicalState = input.canonicalState;
+  const analysisFacts = currentAndLicensedAnalysisFacts(input);
   const effectiveFreshness = canonicalState
     ? canonicalState.freshness
     : input.turnOutcome?.analysis_freshness;
@@ -522,8 +574,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   if (readyStatus !== undefined && readyStatus !== 'ready') {
     const hasAnyRunAnalysisFact = canonicalState
       ? canonicalState.selected_fact_index !== null
-      : (input.handlerFacts ?? []).some(isSuccessfulRunAnalysisFact) ||
-        (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+      : analysisFacts.some(isSuccessfulRunAnalysisFact);
     // A successful current run can compare the configured subset while
     // explicitly excluding an option that still needs values. That exact
     // option is a more specific recovery than the readiness payload's generic
@@ -661,7 +712,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // run_analysis exactly like the local priorFacts scan.
     const hasPriorRunAnalysis = canonicalState
       ? canonicalState.selected_fact_index !== null
-      : (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+      : analysisFacts.some(isSuccessfulRunAnalysisFact);
     const freshness = effectiveFreshness;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysisRegistered = curated.find(
@@ -678,7 +729,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
           },
         ]);
       }
-      if (!hasPriorRunAnalysis) {
+      if (!hasPriorRunAnalysis && isFirstAnalysisProven(input)) {
         return cap([
           executableChip(
             runAnalysisRegistered.handler_id as V5ActionType,
@@ -809,6 +860,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     preconditionUnmetExplanationFact != null &&
     input.analysisReady?.status === 'ready'
   ) {
+    if (!isFirstAnalysisProven(input)) return [];
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
     if (runAnalysis) {
@@ -835,18 +887,19 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     deriveProjectionStatus(
       input.handlerFacts,
       input.analysis ?? null,
-      input.priorFacts,
+      analysisFacts,
     ) === 'facts_absent'
   ) {
     const readyStatus = input.analysisReady?.status;
     const isReady = readyStatus === 'ready';
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
-    if (runAnalysis && isReady) {
+    if (runAnalysis && isReady && isFirstAnalysisProven(input)) {
       return cap([
         executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label),
       ]);
     }
+    if (isReady && !isFirstAnalysisProven(input)) return [];
     // Readiness unknown / not ready — surface the same typed recovery used by
     // the post-draft narrative. Missing status fails closed to model review.
     const recovery = buildReadinessRecoveryChip(input.analysisReady);
@@ -873,9 +926,10 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     const hasOptions = (input.graphOptionCount ?? 0) > 0;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
-    if (runAnalysis && isReady) {
+    if (runAnalysis && isReady && isFirstAnalysisProven(input)) {
       return cap([executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label)]);
     }
+    if (isReady && !isFirstAnalysisProven(input)) return [];
     if (isReady) {
       return cap([
         promptChip(
@@ -1136,15 +1190,15 @@ function findPreconditionUnmetExplanationFact(
  *
  * **Single source of truth (V5 0.9.0):** the persisted `run_analysis`
  * HandlerFact is the canonical signal. The chip rule and the handler-side
- * precondition (`explain_results`/`what_would_flip` checking
- * `prior_facts`) MUST agree on this. Earlier iterations also treated a
+ * precondition (`explain_results`/`what_would_flip` checking the attested
+ * scenario analysis carrier) MUST agree on this. Earlier iterations also treated a
  * populated context-pack analysis projection (`leading_option != null`)
  * as evidence of real analysis, but that diverged from the handler
  * precondition: a turn arriving with `analysis` populated upstream but no
  * persisted fact (UI bypass paths flagged in P1) would produce a
  * precondition-fail template AND chip suppression, leaving the user
- * stranded with "no analysis" text and no recovery action. Using
- * priorFacts exclusively keeps the two signals aligned.
+ * stranded with "no analysis" text and no recovery action. Using licensed
+ * prior-analysis facts exclusively keeps the two signals aligned.
  *
  * The `analysis` argument is retained for the projection_empty vs
  * projection_populated distinction within the "facts present" branch —

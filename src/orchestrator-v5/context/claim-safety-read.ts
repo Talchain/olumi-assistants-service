@@ -37,7 +37,10 @@ import {
   selectCurrentTurnRunAnalysisFacts,
   selectRunAnalysisFact,
 } from './freshness.js';
-import type { ScenarioAnalysisFactSet } from './reconcile-scenario-analysis-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from './reconcile-scenario-analysis-facts.js';
 
 /**
  * May a turn grounded in THIS fact array name a leading option?
@@ -689,6 +692,7 @@ function narrowToProjectedAnalysis(
  * guard whose whole justification is that truncation was PROVEN.
  */
 export function claimSafetyScopeFromContext(context: {
+  readonly session_id?: string;
   readonly scenario_analysis_fact_set?: ScenarioAnalysisFactSet;
   /** Legacy compatibility mirrors; never live entitlement authority. */
   readonly newest_analysis_fact?: HandlerFact | null;
@@ -699,7 +703,8 @@ export function claimSafetyScopeFromContext(context: {
   const total = context.prior_turns_total;
   const carrier = context.scenario_analysis_fact_set;
   const carrierReadable =
-    carrier?.status === 'complete' || carrier?.status === 'capped';
+    isReconciledScenarioAnalysisFactSet(carrier, context.session_id) &&
+    (carrier.status === 'complete' || carrier.status === 'capped');
   return {
     newestAnalysisFact: carrierReadable ? carrier.newest_fact : null,
     // Missing legacy/direct carrier state is ignorance. Never fall back to the

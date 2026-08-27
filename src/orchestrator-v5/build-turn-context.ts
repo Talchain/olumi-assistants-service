@@ -156,7 +156,8 @@ export interface EnrichedTurnContext extends TurnContext {
    *
    * Derived from the SAME validated exact-count page as
    * `scenario_analysis_fact_set`, never a second database query. Complete and
-   * capped pages may supply the head for claim-safety; degraded pages cannot.
+   * internally-consistent capped pages may supply the head for claim-safety;
+   * degraded pages cannot.
    * Optional on the type so hand-constructed test contexts keep compiling.
    */
   readonly newest_analysis_fact?: HandlerFact | null;
@@ -764,9 +765,10 @@ export async function buildTurnContext(
   const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;
   const scenarioAnalysisFactsReadOk = scenarioAnalysisFactSet.status === 'complete';
   const newestAnalysisFactRead =
-    scenarioAnalysisFactSet.status === 'degraded'
-      ? { fact: null, readOk: false }
-      : { fact: scenarioAnalysisFactSet.newest_fact, readOk: true };
+    scenarioAnalysisFactSet.status === 'complete' ||
+    scenarioAnalysisFactSet.status === 'capped'
+      ? { fact: scenarioAnalysisFactSet.newest_fact, readOk: true }
+      : { fact: null, readOk: false };
   if (scenarioAnalysisFactSet.status !== 'complete') {
     log.warn(
       {

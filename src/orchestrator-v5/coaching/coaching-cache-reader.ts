@@ -1,32 +1,24 @@
 /**
  * Resolve a CoachingCache from persisted sources before ContextPack assembly.
  *
- * Sources:
- *  - draft_coaching: sidecar JSONL (logs/v5-draft-graph-coaching.jsonl),
- *    most recent record for scenario_id.
+ * Model-facing sources:
  *  - decision_review: the exact successful run_analysis HandlerFact selected
  *    for the display-analysis projection. An older/differently ordered fact
  *    is never substituted when the selected fact has no review.
- *  - last_coaching_signal: merged from two sources:
- *      1. run_analysis handler facts (enrichment.coaching_signal_id).
- *         FIRST_ANALYSIS_COMPLETE attaches here. The full validated scenario
- *         chronology remains available independently of display selection.
- *      2. last-coaching-signal sidecar (per-scenario). Edit-handler signals
- *         (STALE_*, HIGH_SENSITIVITY_EDIT) write only here because edit
- *         HandlerFact variants have no enrichment field in the frozen
- *         schema.
- *    The validated fact page supplies its DB-newest signal; merging that with
- *    the sidecar by produced_at (not short-circuit) ensures an older
- *    analysis-turn signal does not mask a newer edit-turn signal; this is
- *    review feedback P1.1.
+ *  - last_coaching_signal: the finite, closed projection carried by a
+ *    run_analysis fact in the same complete scenario carrier.
+ *
+ * Draft and last-signal sidecars remain persistence/telemetry mechanisms, but
+ * they are not commit-bound to the canonical turn history at current tip. They
+ * therefore cannot enter ContextPack until a separate authority licence is
+ * established. Capped, degraded, omitted and forged fact carriers all fail
+ * weak with an empty model-facing cache.
  *
  * Never throws; every failure surfaces as null sub-fields.
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { readLatestDraftCoaching } from './draft-coaching-log.js';
-import { readLatestLastCoachingSignal } from './last-coaching-signal-log.js';
 import {
   EMPTY_COACHING_CACHE,
   isCoachingSignalId,
@@ -34,12 +26,17 @@ import {
   type DecisionReviewOutput,
   type LastCoachingSignal,
 } from './types.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 
 export interface CoachingAnalysisFactSources {
   /** Exact fact selected for the model-facing analysis projection. */
   readonly selectedAnalysisFact: HandlerFact | null;
-  /** Complete validated scenario chronology used only for coaching signals. */
-  readonly analysisFactChronology: readonly HandlerFact[];
+  /** Exact scenario authority carrier; capped/degraded/forged fails weak. */
+  readonly analysisFactSet?: ScenarioAnalysisFactSet;
 }
 
 /**
@@ -49,29 +46,34 @@ export async function readCoachingCache(
   scenarioId: string,
   sources: CoachingAnalysisFactSources,
 ): Promise<CoachingCache> {
-  const [draft, sidecarSignal] = await Promise.all([
-    readLatestDraftCoaching(scenarioId),
-    readLatestLastCoachingSignal(scenarioId),
-  ]);
+  const completeAnalysisFactSet =
+    isReconciledScenarioAnalysisFactSet(
+      sources.analysisFactSet,
+      scenarioId,
+    ) &&
+    sources.analysisFactSet.status === 'complete'
+      ? sources.analysisFactSet
+      : null;
+  const analysisFactChronology = completeAnalysisFactSet?.facts ?? [];
   // The selected fact must come from the same complete chronology. A detached
   // clone/direct caller cannot acquire Decision Review authority by assertion.
   const selectedAnalysisFact =
+    completeAnalysisFactSet !== null &&
     sources.selectedAnalysisFact !== null &&
-    sources.analysisFactChronology.includes(sources.selectedAnalysisFact)
+    analysisFactChronology.includes(sources.selectedAnalysisFact)
       ? sources.selectedAnalysisFact
       : null;
   const decisionReview = extractSelectedDecisionReview(selectedAnalysisFact);
-  const factSignal = extractLatestCoachingSignalFromFacts(
-    sources.analysisFactChronology,
+  const lastSignal = extractLatestCoachingSignalFromFacts(
+    analysisFactChronology,
   );
-  const lastSignal = pickNewestSignal(factSignal, sidecarSignal);
 
-  if (draft === null && decisionReview === null && lastSignal === null) {
+  if (decisionReview === null && lastSignal === null) {
     return EMPTY_COACHING_CACHE;
   }
 
   return {
-    draft_coaching: draft,
+    draft_coaching: null,
     decision_review: decisionReview,
     last_coaching_signal: lastSignal,
   };
@@ -102,7 +104,11 @@ function extractLatestCoachingSignalFromFacts(
   facts: readonly HandlerFact[],
 ): LastCoachingSignal | null {
   for (const fact of facts) {
-    if (fact.fact_type !== 'run_analysis') continue;
+    // Signal markers describe a completed local analysis lifecycle event.
+    // Partial/refused facts can carry arbitrary producer enrichment, so they
+    // cannot license the marker even inside an otherwise attested page. Keep
+    // walking: an older successful, locally stamped fact is still usable.
+    if (!isSuccessfulRunAnalysisFact(fact)) continue;
     const enrichment = fact.result.enrichment;
     if (enrichment === undefined) continue;
     const rawSignal = enrichment.coaching_signal_id;
@@ -113,33 +119,59 @@ function extractLatestCoachingSignalFromFacts(
       typeof rawTurn === 'string' &&
       typeof rawAt === 'string'
     ) {
-      return { signal_id: rawSignal, turn_id: rawTurn, produced_at: rawAt };
+      return projectValidSignal({
+        signal_id: rawSignal,
+        turn_id: rawTurn,
+        produced_at: rawAt,
+      });
     }
   }
   return null;
 }
 
-/**
- * Merge the two signal sources by produced_at timestamp. ISO-8601 strings
- * sort lexicographically by time. When both are present, the newer wins;
- * ties resolve to the fact source (ties only happen by coincidence since
- * the enrichment write and the sidecar append are separate operations).
- * Tie resolution is not user-facing: both sources record the same signal
- * on the same turn, so picking either yields the same signal_id.
- */
-function pickNewestSignal(
-  factSignal: LastCoachingSignal | null,
-  sidecarSignal: LastCoachingSignal | null,
-): LastCoachingSignal | null {
-  if (factSignal === null) return sidecarSignal;
-  if (sidecarSignal === null) return factSignal;
-  return sidecarSignal.produced_at > factSignal.produced_at
-    ? sidecarSignal
-    : factSignal;
+/** Closed prompt projection; strips scenario_id and any future sidecar keys. */
+function projectValidSignal(value: LastCoachingSignal | null): LastCoachingSignal | null {
+  if (
+    value === null ||
+    !isCoachingSignalId(value.signal_id) ||
+    typeof value.turn_id !== 'string' ||
+    !Number.isFinite(Date.parse(value.produced_at))
+  ) {
+    return null;
+  }
+  return {
+    signal_id: value.signal_id,
+    turn_id: value.turn_id,
+    produced_at: value.produced_at,
+  };
 }
 
 function isDecisionReviewOutput(value: unknown): value is DecisionReviewOutput {
   if (value === null || typeof value !== 'object') return false;
+  // Decision Review is an open producer payload, but scenario identity is
+  // owned by the surrounding reconciled fact carrier. Passing through a
+  // nested `scenario_id` would let model-authored enrichment introduce a
+  // second identity into prompt bytes. Preserve the artefact verbatim or
+  // withhold it whole; never reshape it locally.
+  if (containsScenarioIdKey(value, new Set<object>())) return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.produced_at === 'string';
+}
+
+function containsScenarioIdKey(value: unknown, seen: Set<object>): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const object = value as object;
+  if (seen.has(object)) return false;
+  seen.add(object);
+  for (const [key, child] of Object.entries(object)) {
+    // Decision Review is an open model-authored object, so spelling is not a
+    // provenance boundary. Treat ASCII case and separators as equivalent:
+    // `scenario_id`, `scenarioId`, `scenario-id`, and case variants all name
+    // the same forbidden second identity. The artefact remains exact-or-null.
+    if (key.toLowerCase().replace(/[^a-z0-9]/g, '') === 'scenarioid') {
+      return true;
+    }
+    if (containsScenarioIdKey(child, seen)) return true;
+  }
+  return false;
 }

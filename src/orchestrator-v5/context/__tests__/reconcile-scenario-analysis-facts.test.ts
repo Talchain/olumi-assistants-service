@@ -154,7 +154,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(selectDegradedRunAnalysisFact(result.facts)).toBeNull();
   });
 
-  it('does not call a valid hot fact below the capped prefix a snapshot conflict', () => {
+  it('degrades when any eligible hot fact is absent from the capped page', () => {
     const prefix = Array.from(
       { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
       (_, index) => analysisFact(`fact-${index}`),
@@ -166,10 +166,10 @@ describe('reconcileScenarioAnalysisFacts', () => {
         durableRead: durable(prefix, 22),
       }),
     ).toEqual({
-      status: 'capped',
+      status: 'degraded',
       facts: [],
+      reason: 'snapshot_conflict',
       total_count: 22,
-      newest_fact: prefix[0],
     });
   });
 

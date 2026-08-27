@@ -1,352 +1,291 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { appendDraftCoaching } from '../draft-coaching-log.js';
-import {
-  DEFAULT_DRAFT_COACHING_LOG_PATH,
-} from '../draft-coaching-log.js';
-import {
-  appendLastCoachingSignal,
-  DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH,
-  type LastCoachingSignalRecord,
-} from '../last-coaching-signal-log.js';
 import { readCoachingCache } from '../coaching-cache-reader.js';
-import type { DraftCoaching } from '../types.js';
+import {
+  cappedScenarioAnalysisFactSet,
+  completeScenarioAnalysisFactSet,
+  degradedScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
 
-function runAnalysisFact(enrichment?: Record<string, unknown>): HandlerFact {
+function runAnalysisFact(
+  scenarioId: string,
+  enrichment?: Record<string, unknown>,
+): HandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: scenarioId,
       leading_option_id: 'opt-1',
       summary: 'done',
-      ...(enrichment ? { enrichment } : {}),
+      ...(enrichment === undefined ? {} : { enrichment }),
     },
   };
 }
 
 function factSources(
+  scenarioId: string,
   facts: readonly HandlerFact[],
-  selectedAnalysisFact: HandlerFact | null = facts[0] ?? null,
+  selectedIndex = facts.length === 0 ? -1 : 0,
 ) {
+  const analysisFactSet = completeScenarioAnalysisFactSet(scenarioId, facts);
   return {
-    selectedAnalysisFact,
-    analysisFactChronology: facts,
+    analysisFactSet,
+    selectedAnalysisFact:
+      selectedIndex < 0 ? null : analysisFactSet.facts[selectedIndex] ?? null,
   };
 }
 
 describe('readCoachingCache', () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'coaching-cache-'));
-    // Redirect default sidecar path for these tests via a spy; simpler is to
-    // use the exported reader-with-path in the helper. Since readCoachingCache
-    // calls readLatestDraftCoaching with the default path, we stub the default
-    // by writing to it under a unique scenario_id, then cleaning up after.
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-    vi.restoreAllMocks();
-  });
-
-  it('returns the empty cache when no sources are present', async () => {
-    const uniqueScenario = `scen-missing-${Date.now()}`;
-    const cache = await readCoachingCache(uniqueScenario, factSources([]));
-    expect(cache).toEqual({
+  it('returns an empty cache for complete durable zero', async () => {
+    const scenarioId = randomUUID();
+    await expect(
+      readCoachingCache(scenarioId, factSources(scenarioId, [])),
+    ).resolves.toEqual({
       draft_coaching: null,
       decision_review: null,
       last_coaching_signal: null,
     });
   });
 
-  it('populates decision_review from the selected run_analysis fact', async () => {
-    const uniqueScenario = `scen-dr-${Date.now()}`;
-    const dr = {
-      produced_at: '2026-04-20T12:00:00.000Z',
-      narrative_summary: 'pick option A',
-      story_headlines: ['A wins'],
-    };
-    const facts: HandlerFact[] = [
-      runAnalysisFact({ decision_review: dr }),
-      runAnalysisFact({ some: 'other' }),
-    ];
+  it.each(['capped', 'degraded', 'omitted', 'forged'] as const)(
+    'fails weak when analysis authority is %s',
+    async (status) => {
+      const scenarioId = randomUUID();
+      const fact = runAnalysisFact(scenarioId, {
+        decision_review: {
+          produced_at: '2026-04-20T12:00:00.000Z',
+          narrative_summary: 'MUST_NOT_REACH_PROMPT',
+        },
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'turn-must-not-reach-prompt',
+        coaching_signal_produced_at: '2026-04-20T12:00:00.000Z',
+      });
+      const analysisFactSet =
+        status === 'capped'
+          ? cappedScenarioAnalysisFactSet(scenarioId, fact)
+          : status === 'degraded'
+            ? degradedScenarioAnalysisFactSet(scenarioId)
+            : status === 'forged'
+              ? ({
+                  status: 'complete',
+                  source: 'scenario',
+                  facts: [fact],
+                  total_count: 1,
+                  newest_fact: fact,
+                } as never)
+              : undefined;
 
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
-    expect(cache.decision_review).toEqual(dr);
-  });
+      const cache = await readCoachingCache(scenarioId, {
+        selectedAnalysisFact: fact,
+        ...(analysisFactSet === undefined ? {} : { analysisFactSet }),
+      });
+      expect(cache).toEqual({
+        draft_coaching: null,
+        decision_review: null,
+        last_coaching_signal: null,
+      });
+    },
+  );
 
-  it('binds decision_review to display selection rather than DB page order', async () => {
-    const uniqueScenario = `scen-dr-selected-${Date.now()}`;
-    const dbHeadDr = {
+  it('reads Decision Review only from the exact selected fact in the complete carrier', async () => {
+    const scenarioId = randomUUID();
+    const headReview = {
       produced_at: '2026-04-21T12:00:00.000Z',
       narrative_summary: 'DB_HEAD_REVIEW_MUST_NOT_REACH_PROMPT',
     };
-    const selectedDr = {
+    const selectedReview = {
       produced_at: '2026-04-20T12:00:00.000Z',
       narrative_summary: 'SELECTED_DISPLAY_REVIEW',
     };
-    const facts: HandlerFact[] = [
-      runAnalysisFact({ decision_review: dbHeadDr }),
-      runAnalysisFact({ decision_review: selectedDr }),
-    ];
-
-    const cache = await readCoachingCache(
-      uniqueScenario,
-      factSources(facts, facts[1]!),
+    const sources = factSources(
+      scenarioId,
+      [
+        runAnalysisFact(scenarioId, { decision_review: headReview }),
+        runAnalysisFact(scenarioId, { decision_review: selectedReview }),
+      ],
+      1,
     );
-    expect(cache.decision_review).toEqual(selectedDr);
+
+    const cache = await readCoachingCache(scenarioId, sources);
+    expect(cache.decision_review).toEqual(selectedReview);
   });
 
-  it('does not substitute another fact review when the selected fact has none', async () => {
-    const uniqueScenario = `scen-dr-withheld-${Date.now()}`;
-    const facts: HandlerFact[] = [
-      runAnalysisFact({
-        decision_review: {
-          produced_at: '2026-04-21T12:00:00.000Z',
-          narrative_summary: 'UNSELECTED_REVIEW',
-        },
-      }),
-      runAnalysisFact({ some: 'selected-without-review' }),
-    ];
-
-    const cache = await readCoachingCache(
-      uniqueScenario,
-      factSources(facts, facts[1]!),
+  it('does not substitute another review when the selected fact has none', async () => {
+    const scenarioId = randomUUID();
+    const sources = factSources(
+      scenarioId,
+      [
+        runAnalysisFact(scenarioId, {
+          decision_review: {
+            produced_at: '2026-04-21T12:00:00.000Z',
+            narrative_summary: 'UNSELECTED_REVIEW',
+          },
+        }),
+        runAnalysisFact(scenarioId, { other: 'selected-without-review' }),
+      ],
+      1,
     );
+
+    const cache = await readCoachingCache(scenarioId, sources);
     expect(cache.decision_review).toBeNull();
   });
 
-  it('fails weak for a selected-fact assertion detached from the chronology', async () => {
-    const uniqueScenario = `scen-dr-detached-${Date.now()}`;
-    const chronology = [runAnalysisFact({ some: 'persisted' })];
-    const detached = runAnalysisFact({
+  it('rejects a detached clone of the selected fact', async () => {
+    const scenarioId = randomUUID();
+    const fact = runAnalysisFact(scenarioId, {
       decision_review: {
         produced_at: '2026-04-21T12:00:00.000Z',
         narrative_summary: 'DETACHED_REVIEW_MUST_NOT_REACH_PROMPT',
       },
     });
+    const analysisFactSet = completeScenarioAnalysisFactSet(scenarioId, [fact]);
 
-    const cache = await readCoachingCache(
-      uniqueScenario,
-      factSources(chronology, detached),
-    );
+    const cache = await readCoachingCache(scenarioId, {
+      analysisFactSet,
+      selectedAnalysisFact: fact,
+    });
     expect(cache.decision_review).toBeNull();
   });
 
-  it('picks the NEWEST coaching_signal when multiple run_analysis facts carry one', async () => {
-    const uniqueScenario = `scen-sig-newest-${Date.now()}`;
-    const facts: HandlerFact[] = [
-      runAnalysisFact({
+  it.each(['scenario_id', 'scenarioId', 'scenario-id', 'SCENARIO_ID'])(
+    'withholds a Decision Review carrying nested scenario identity key %s',
+    async (identityKey) => {
+      const scenarioId = randomUUID();
+      const foreignScenarioId = randomUUID();
+      const sources = factSources(scenarioId, [
+        runAnalysisFact(scenarioId, {
+          decision_review: {
+            produced_at: '2026-04-21T12:00:00.000Z',
+            narrative_summary: 'FOREIGN_IDENTITY_REVIEW_MUST_NOT_REACH_PROMPT',
+            nested: { source: { [identityKey]: foreignScenarioId } },
+          },
+        }),
+      ]);
+
+      const cache = await readCoachingCache(scenarioId, sources);
+      expect(cache.decision_review).toBeNull();
+      expect(JSON.stringify(cache)).not.toContain(foreignScenarioId);
+    },
+  );
+
+  it('projects the DB-newest valid fact-enriched coaching signal', async () => {
+    const scenarioId = randomUUID();
+    const sources = factSources(scenarioId, [
+      runAnalysisFact(scenarioId, {
         coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_signal_turn_id: 'turn-newest',
         coaching_signal_produced_at: '2026-04-21T12:00:00.000Z',
       }),
-      runAnalysisFact({
+      runAnalysisFact(scenarioId, {
         coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_signal_turn_id: 'turn-older',
         coaching_signal_produced_at: '2026-04-20T12:00:00.000Z',
       }),
-    ];
+    ]);
 
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
-    expect(cache.last_coaching_signal?.turn_id).toBe('turn-newest');
-  });
-
-  it('returns null decision_review when run_analysis fact lacks enrichment', async () => {
-    const uniqueScenario = `scen-no-dr-${Date.now()}`;
-    const facts: HandlerFact[] = [runAnalysisFact()];
-
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
-    expect(cache.decision_review).toBeNull();
-  });
-
-  it('populates last_coaching_signal when fact enrichment carries a coaching signal', async () => {
-    const uniqueScenario = `scen-sig-${Date.now()}`;
-    const facts: HandlerFact[] = [
-      runAnalysisFact({
-        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
-        coaching_signal_turn_id: 'turn-42',
-        coaching_signal_produced_at: '2026-04-20T09:00:00.000Z',
-      }),
-    ];
-
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
+    const cache = await readCoachingCache(scenarioId, sources);
     expect(cache.last_coaching_signal).toEqual({
       signal_id: 'FIRST_ANALYSIS_COMPLETE',
-      turn_id: 'turn-42',
-      produced_at: '2026-04-20T09:00:00.000Z',
+      turn_id: 'turn-newest',
+      produced_at: '2026-04-21T12:00:00.000Z',
     });
+    expect(Object.keys(cache.last_coaching_signal ?? {})).toEqual([
+      'signal_id',
+      'turn_id',
+      'produced_at',
+    ]);
   });
 
-  it('rejects an unrecognised coaching_signal_id', async () => {
-    const uniqueScenario = `scen-bad-sig-${Date.now()}`;
-    const facts: HandlerFact[] = [
-      runAnalysisFact({
+  it.each(['partial', 'refused', 'failed']) (
+    'ignores a producer-carried signal on %s and continues to an older successful local signal',
+    async (analysisStatus) => {
+      const scenarioId = randomUUID();
+      const sources = factSources(scenarioId, [
+        runAnalysisFact(scenarioId, {
+          analysis_status: analysisStatus,
+          coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          coaching_signal_turn_id: `${analysisStatus.toUpperCase()}_FORGED_COMPLETE_CANARY`,
+          coaching_signal_produced_at: '2026-04-22T12:00:00.000Z',
+        }),
+        runAnalysisFact(scenarioId, {
+          analysis_status: 'completed',
+          coaching_signal_id: 'RERUN_ANALYSIS_COMPLETE',
+          coaching_signal_turn_id: 'turn-older-local',
+          coaching_signal_produced_at: '2026-04-21T12:00:00.000Z',
+        }),
+      ]);
+
+      const cache = await readCoachingCache(scenarioId, sources);
+      expect(cache.last_coaching_signal).toEqual({
+        signal_id: 'RERUN_ANALYSIS_COMPLETE',
+        turn_id: 'turn-older-local',
+        produced_at: '2026-04-21T12:00:00.000Z',
+      });
+      expect(JSON.stringify(cache)).not.toContain(
+        `${analysisStatus.toUpperCase()}_FORGED_COMPLETE_CANARY`,
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: 'unrecognised id',
+      enrichment: {
         coaching_signal_id: 'NOT_A_REAL_SIGNAL',
         coaching_signal_turn_id: 'turn-42',
         coaching_signal_produced_at: '2026-04-20T09:00:00.000Z',
-      }),
-    ];
-
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
+      },
+    },
+    {
+      name: 'invalid timestamp',
+      enrichment: {
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'turn-42',
+        coaching_signal_produced_at: 'not-a-timestamp',
+      },
+    },
+    {
+      name: 'missing turn',
+      enrichment: {
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_produced_at: '2026-04-20T09:00:00.000Z',
+      },
+    },
+  ])('fails weak for a $name fact signal', async ({ enrichment }) => {
+    const scenarioId = randomUUID();
+    const cache = await readCoachingCache(
+      scenarioId,
+      factSources(scenarioId, [runAnalysisFact(scenarioId, enrichment)]),
+    );
     expect(cache.last_coaching_signal).toBeNull();
   });
 
-  it('populates draft_coaching from the sidecar log', async () => {
-    const uniqueScenario = `scen-draft-${Date.now()}`;
-    const record: DraftCoaching = {
-      scenario_id: uniqueScenario,
-      produced_at: '2026-04-20T10:00:00.000Z',
-      summary: 'headline',
-      strengthen_items: [],
-      widening_log: null,
-      bias_signals: null,
-    };
-    // Write to the default sidecar path (module-level constant). The record is
-    // scoped to a unique scenario_id so it does not collide with other tests.
-    await appendDraftCoaching(record, DEFAULT_DRAFT_COACHING_LOG_PATH);
-
-    try {
-      const cache = await readCoachingCache(uniqueScenario, factSources([]));
-      expect(cache.draft_coaching).toEqual(record);
-    } finally {
-      // Best-effort cleanup: unique scenario id means leftover records are
-      // effectively invisible to other tests; we skip deleting the shared
-      // file to avoid fighting concurrent tests.
-    }
-  });
-
-  it('keeps draft_coaching.bias_signals independent from a CEE preflight-style field on the same fact', async () => {
-    const uniqueScenario = `scen-collision-${Date.now()}`;
-    const draftRecord: DraftCoaching = {
-      scenario_id: uniqueScenario,
-      produced_at: '2026-04-20T10:00:00.000Z',
-      summary: 's',
-      strengthen_items: [],
-      widening_log: null,
-      bias_signals: [{ type: 'anchoring', confidence: 'high', evidence: 'price reference' }],
-    };
-    await appendDraftCoaching(draftRecord, DEFAULT_DRAFT_COACHING_LOG_PATH);
-
-    const facts: HandlerFact[] = [
-      runAnalysisFact({
-        // A bare `bias_signals` on the enrichment (hypothetical, not a real
-        // contract). The reader must not conflate this with draft_coaching.bias_signals.
-        bias_signals: [{ type: 'preflight_marker' }],
+  it('rejects a complete carrier attested for another scenario', async () => {
+    const scenarioA = randomUUID();
+    const scenarioB = randomUUID();
+    const sources = factSources(scenarioA, [
+      runAnalysisFact(scenarioA, {
+        decision_review: {
+          produced_at: '2026-04-21T12:00:00.000Z',
+          narrative_summary: 'FOREIGN_REVIEW_MUST_NOT_REACH_PROMPT',
+        },
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'turn-foreign',
+        coaching_signal_produced_at: '2026-04-21T12:00:00.000Z',
       }),
-    ];
+    ]);
 
-    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
-    expect(cache.draft_coaching?.bias_signals).toEqual(draftRecord.bias_signals);
-    // decision_review is null (no decision_review field on that enrichment):
-    expect(cache.decision_review).toBeNull();
-  });
-
-  // Review feedback P1.1: signal sources must merge by produced_at, not
-  // short-circuit on facts. These tests pin the merge contract so a newer
-  // edit-turn signal cannot be masked by an older analysis-turn signal.
-  describe('last_coaching_signal merge precedence', () => {
-    function factWithSignal(args: {
-      signal_id: string;
-      turn_id: string;
-      produced_at: string;
-    }): HandlerFact {
-      return runAnalysisFact({
-        coaching_signal_id: args.signal_id,
-        coaching_signal_turn_id: args.turn_id,
-        coaching_signal_produced_at: args.produced_at,
-      });
-    }
-
-    it('picks the sidecar signal when it is newer than the fact signal', async () => {
-      const uniqueScenario = `scen-merge-sidecar-newer-${Date.now()}`;
-      const olderFactFact = factWithSignal({
-        signal_id: 'FIRST_ANALYSIS_COMPLETE',
-        turn_id: 'turn-older',
-        produced_at: '2026-04-20T09:00:00.000Z',
-      });
-      const newerSidecar: LastCoachingSignalRecord = {
-        scenario_id: uniqueScenario,
-        signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
-        turn_id: 'turn-newer',
-        produced_at: '2026-04-20T10:00:00.000Z',
-      };
-      await appendLastCoachingSignal(newerSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
-
-      const cache = await readCoachingCache(
-        uniqueScenario,
-        factSources([olderFactFact]),
-      );
-      expect(cache.last_coaching_signal?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
-      expect(cache.last_coaching_signal?.turn_id).toBe('turn-newer');
-    });
-
-    it('picks the fact signal when it is newer than the sidecar signal', async () => {
-      const uniqueScenario = `scen-merge-fact-newer-${Date.now()}`;
-      const newerFactFact = factWithSignal({
-        signal_id: 'FIRST_ANALYSIS_COMPLETE',
-        turn_id: 'turn-fact',
-        produced_at: '2026-04-20T11:00:00.000Z',
-      });
-      const olderSidecar: LastCoachingSignalRecord = {
-        scenario_id: uniqueScenario,
-        signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
-        turn_id: 'turn-sidecar',
-        produced_at: '2026-04-20T09:00:00.000Z',
-      };
-      await appendLastCoachingSignal(olderSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
-
-      const cache = await readCoachingCache(
-        uniqueScenario,
-        factSources([newerFactFact]),
-      );
-      expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
-      expect(cache.last_coaching_signal?.turn_id).toBe('turn-fact');
-    });
-
-    it('falls back to sidecar when no fact carries a signal', async () => {
-      const uniqueScenario = `scen-sidecar-only-${Date.now()}`;
-      const sidecarOnly: LastCoachingSignalRecord = {
-        scenario_id: uniqueScenario,
-        signal_id: 'HIGH_SENSITIVITY_EDIT',
-        turn_id: 'turn-edit',
-        produced_at: '2026-04-20T12:00:00.000Z',
-      };
-      await appendLastCoachingSignal(sidecarOnly, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
-
-      const cache = await readCoachingCache(uniqueScenario, factSources([]));
-      expect(cache.last_coaching_signal?.signal_id).toBe('HIGH_SENSITIVITY_EDIT');
-      expect(cache.last_coaching_signal?.turn_id).toBe('turn-edit');
-    });
-
-    it('falls back to fact when no sidecar entry exists for the scenario', async () => {
-      const uniqueScenario = `scen-fact-only-${Date.now()}`;
-      const fact = factWithSignal({
-        signal_id: 'FIRST_ANALYSIS_COMPLETE',
-        turn_id: 'turn-fact-only',
-        produced_at: '2026-04-20T08:00:00.000Z',
-      });
-
-      const cache = await readCoachingCache(
-        uniqueScenario,
-        factSources([fact]),
-      );
-      expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
-    });
-
-    it('returns null when neither source has a signal for this scenario', async () => {
-      const uniqueScenario = `scen-no-signal-${Date.now()}`;
-      const cache = await readCoachingCache(uniqueScenario, factSources([]));
-      expect(cache.last_coaching_signal).toBeNull();
+    const cache = await readCoachingCache(scenarioB, sources);
+    expect(cache).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
     });
   });
 });

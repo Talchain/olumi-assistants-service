@@ -19,26 +19,43 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { composeStateQueryChip } from '../state-query-guard.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
+import {
+  cappedScenarioAnalysisFactSet,
+  completeScenarioAnalysisFactSet,
+  degradedScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
+const SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
 
-const COMPLETE_WITH_ANALYSIS = {
-  status: 'complete' as const,
-  hasSuccessfulAnalysis: true,
-};
-const COMPLETE_WITHOUT_ANALYSIS = {
-  status: 'complete' as const,
-  hasSuccessfulAnalysis: false,
-};
+function analysisFact(status: 'completed' | 'partial'): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: status === 'completed' ? 'option-a' : null,
+      summary: `${status} analysis`,
+      enrichment: { analysis_status: status },
+    },
+  } as HandlerFact;
+}
+
+const COMPLETE_WITH_ANALYSIS = completeScenarioAnalysisFactSet(SCENARIO_ID, [
+  analysisFact('completed'),
+]);
+const COMPLETE_WITHOUT_ANALYSIS = completeScenarioAnalysisFactSet(SCENARIO_ID);
 
 describe('composeStateQueryChip', () => {
   it('emits "Run analysis again" when a prior run_analysis exists and freshness is stale', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITH_ANALYSIS,
+      analysisFactSet: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'stale',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -51,7 +68,7 @@ describe('composeStateQueryChip', () => {
   it('emits "Run analysis" when no prior run_analysis exists and the model is ready', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -64,7 +81,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when prior analysis is fresh', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITH_ANALYSIS,
+      analysisFactSet: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'fresh',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -75,7 +92,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when the model is not structurally ready', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'needs_user_input',
       validationRegistry: REGISTRY,
@@ -86,7 +103,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when recent_changes is empty', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 0,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -97,7 +114,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when run_analysis handler is not registered', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       // Empty registry → run_analysis not registered.
@@ -109,14 +126,14 @@ describe('composeStateQueryChip', () => {
   it('chip ids are namespaced as state_query so analytics can join them separately from the mutation-turn chip', () => {
     const stale = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITH_ANALYSIS,
+      analysisFactSet: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'stale',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
     });
     const fresh = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -130,7 +147,13 @@ describe('composeStateQueryChip', () => {
     (status) => {
       const chips = composeStateQueryChip({
         recentChangeCount: 1,
-        analysisHistory: { status },
+        analysisFactSet:
+          status === 'capped'
+            ? cappedScenarioAnalysisFactSet(
+                SCENARIO_ID,
+                analysisFact('completed'),
+              )
+            : degradedScenarioAnalysisFactSet(SCENARIO_ID),
         analysisFreshness: 'unknown',
         analysisReadyStatus: 'ready',
         validationRegistry: REGISTRY,
@@ -142,9 +165,22 @@ describe('composeStateQueryChip', () => {
   it('fails weak when complete-zero history contradicts a fresh verdict', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFactSet: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'fresh',
       analysisReadyStatus: 'ready',
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toEqual([]);
+  });
+
+  it("does not turn a complete partial/degraded result into a first analysis", () => {
+    const chips = composeStateQueryChip({
+      recentChangeCount: 1,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+        analysisFact('partial'),
+      ]),
+      analysisFreshness: "none",
+      analysisReadyStatus: "ready",
       validationRegistry: REGISTRY,
     });
     expect(chips).toEqual([]);

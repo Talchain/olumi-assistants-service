@@ -92,6 +92,15 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => mockState.priorTurns,
     countTurns: async () => mockState.priorTurnsTotal ?? mockState.priorTurns.length,
     readFactsFor: async () => mockState.priorFacts,
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop === false,
+      );
+      return {
+        facts: facts.slice(0, limit),
+        total_count: facts.length,
+      };
+    },
     readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) => {
       if (mockState.durableMutationReadFails) {
         throw new Error('simulated durable mutation receipt read failure');

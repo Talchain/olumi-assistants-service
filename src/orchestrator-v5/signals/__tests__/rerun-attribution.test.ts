@@ -37,11 +37,36 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   deriveInterveningChange,
   type InterveningChange,
-} from '../../coaching/intervening-change.js';
-import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { applyTerminologyRewrite } from '../../compose/terminology-rewrite.js';
-import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
+} from "../../coaching/intervening-change.js";
+import type { SuccessfulHandlerOutcome } from "../../tools/handler-outcome.js";
+import { findForbiddenPhraseHit } from "../../compose/forbidden-user-facing-phrases.js";
+import { applyTerminologyRewrite } from "../../compose/terminology-rewrite.js";
+import {
+  COACHING_TEXT,
+  detectCoachingSignal as detectCoachingSignalProduction,
+  type CoachingSignalInput,
+} from "../coaching-signals.js";
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
+
+const SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
+
+type TestCoachingSignalInput = Omit<
+  CoachingSignalInput,
+  'priorAnalysisFactSet'
+>;
+
+function detectCoachingSignal(input: TestCoachingSignalInput) {
+  return detectCoachingSignalProduction({
+    ...input,
+    priorAnalysisFactSet: completeScenarioAnalysisFactSet(
+      SCENARIO_ID,
+      input.priorFacts.filter(
+        (fact): fact is HandlerFact & { fact_type: 'run_analysis' } =>
+          fact.fact_type === 'run_analysis' && fact.noop !== true,
+      ),
+    ),
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures. Envelope shape mirrors `compare-runs.test.ts` / the sibling
@@ -87,9 +112,9 @@ function currentRunOutcome(env: Record<string, unknown>): SuccessfulHandlerOutco
         fact_version: 1,
         noop: false,
         result: {
-          scenario_id: 'scen-a',
-          leading_option_id: 'opt-1',
-          summary: 'Ran analysis',
+          scenario_id: SCENARIO_ID,
+          leading_option_id: "opt-1",
+          summary: "Ran analysis",
           enrichment: env,
         },
       } as unknown as HandlerFact,
@@ -103,9 +128,9 @@ function priorRunFact(env: Record<string, unknown>): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
-      leading_option_id: 'opt-1',
-      summary: 'prior',
+      scenario_id: SCENARIO_ID,
+      leading_option_id: "opt-1",
+      summary: "prior",
       enrichment: env,
       graph_hash_at_run: 'hash-prior',
       computed_at: '2026-07-01T00:00:00.000Z',

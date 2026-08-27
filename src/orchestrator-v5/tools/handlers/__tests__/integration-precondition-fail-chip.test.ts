@@ -28,6 +28,7 @@ import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator';
 import { EMPTY_COACHING_STATE } from '../../../coaching/coaching-state.js';
 import { EMPTY_COACHING_LIFECYCLE } from '../../../coaching/coaching-lifecycle.js';
 import { deriveAnalysisFreshness } from '../../../context/freshness.js';
+import { completeScenarioAnalysisFactSet } from '../../../__tests__/support/scenario-analysis-fact-set.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
@@ -115,6 +116,7 @@ describe('integration: precondition-fail chip surfaces at envelope level (Test B
       stage: 'analyse',
       handlerFacts: outcome.handler_facts,
       priorFacts: invocation.context.prior_facts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       analysis: null,
       analysisReady: invocation.analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
@@ -145,6 +147,7 @@ describe('integration: precondition-fail chip surfaces at envelope level (Test B
       stage: 'analyse',
       handlerFacts: outcome.handler_facts,
       priorFacts: invocation.context.prior_facts,
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       analysis: null,
       analysisReady: invocation.analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
@@ -168,6 +171,7 @@ describe('integration: precondition-fail chip surfaces at envelope level (Test B
       stage: 'analyse',
       handlerFacts: outcome.handler_facts,
       // priorFacts deliberately omitted to verify rule independence.
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       analysis: null,
       analysisReady: invocation.analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,

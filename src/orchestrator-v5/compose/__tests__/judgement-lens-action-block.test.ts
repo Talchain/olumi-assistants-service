@@ -39,9 +39,14 @@ import {
   DISAGREEMENT_ACTION_LABEL,
   OVERRIDE_STRESS_TEST_ACTION_LABEL,
 } from '../../coaching/judgement-offer-text.js';
+import { composeToolCallResponse } from '../../compose.js';
+import {
+  completeScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 type Enrichment = Record<string, unknown>;
+const SCENARIO_ID = '10101010-1010-4010-8010-101010101010';
 
 function loadCapture(file: string): Enrichment {
   return JSON.parse(
@@ -65,7 +70,7 @@ function makeFact(
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-pr2-l1',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_leader',
       summary: 'Ran analysis.',
       graph_hash_at_run: 'gh_pr2l100000000001',
@@ -135,7 +140,7 @@ function priorAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-pr2-l1',
+      scenario_id: SCENARIO_ID,
       summary: 'Prior analysis.',
       graph_hash_at_run: 'gh_pr2l100000000000',
       computed_at: '2026-08-09T00:00:00.000Z',
@@ -178,6 +183,23 @@ const T1_FACTS: readonly HandlerFact[] = [
 ];
 /** T2's feed: no adjudication at all, so the contested join is live. */
 const T2_FACTS: readonly HandlerFact[] = [];
+
+const COMPOSE_BASE = {
+  answerKind: 'functional' as const,
+  orientation: '',
+  confirmation: 'Analysis complete.',
+  coaching: null,
+  stage: 'analyse' as const,
+  persistedGraph: GRAPH_TWO_CONTESTED,
+  persistedGraphHash: CTX.graph_hash_at_generation,
+};
+
+function judgementActionLabels(response: OlumiResponse): readonly string[] {
+  return response.blocks.flatMap((raw) => {
+    const block = raw as Record<string, unknown>;
+    return typeof block.action_label === 'string' ? [block.action_label] : [];
+  });
+}
 
 interface MintedBlock {
   readonly type: string;
@@ -248,6 +270,53 @@ describe('§1 the judgement tiers carry an action', () => {
       expect((block as unknown as Record<string, unknown>).action_intent).toBeUndefined();
     }
   });
+});
+
+describe('scenario analysis history stays separate from mixed judgement history', () => {
+  it('a routed current run honours a hot edge adjudication instead of minting disagreement', () => {
+    const current = makeFact(SPARSE);
+    const withoutAdjudication = composeToolCallResponse({
+      ...COMPOSE_BASE,
+      handlerFacts: [current],
+      scenarioAnalysisFactSetForLensHistory:
+        completeScenarioAnalysisFactSet(SCENARIO_ID),
+      priorTurnFactsForJudgementSignals: [],
+    });
+    const withAdjudication = composeToolCallResponse({
+      ...COMPOSE_BASE,
+      handlerFacts: [current],
+      scenarioAnalysisFactSetForLensHistory:
+        completeScenarioAnalysisFactSet(SCENARIO_ID),
+      priorTurnFactsForJudgementSignals: [
+        adjudicationFact(WINNER.from, WINNER.to),
+      ],
+    });
+    const unavailable = composeToolCallResponse({
+      ...COMPOSE_BASE,
+      handlerFacts: [current],
+      scenarioAnalysisFactSetForLensHistory:
+        completeScenarioAnalysisFactSet(SCENARIO_ID),
+      // `priorTurnFactsForJudgementSignals` deliberately omitted: a degraded
+      // read is unknown, not proof that no adjudication exists.
+    });
+
+    expect(judgementActionLabels(withoutAdjudication)).toContain(
+      DISAGREEMENT_ACTION_LABEL,
+    );
+    expect(judgementActionLabels(withAdjudication)).not.toContain(
+      DISAGREEMENT_ACTION_LABEL,
+    );
+    expect(judgementActionLabels(withAdjudication)).toContain(
+      OVERRIDE_STRESS_TEST_ACTION_LABEL,
+    );
+    expect(judgementActionLabels(unavailable)).not.toContain(
+      DISAGREEMENT_ACTION_LABEL,
+    );
+    expect(judgementActionLabels(unavailable)).not.toContain(
+      OVERRIDE_STRESS_TEST_ACTION_LABEL,
+    );
+  });
+
 });
 
 // ============================================================================

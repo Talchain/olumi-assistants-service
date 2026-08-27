@@ -72,6 +72,7 @@ import {
 } from '../../context/freshness.js';
 import { compareRuns, projectRunFact } from '../compare-runs.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -150,9 +151,6 @@ function outcomeFor(fact: HandlerFact): SuccessfulHandlerOutcome {
     llm_calls_used: 0,
   } as unknown as SuccessfulHandlerOutcome;
 }
-
-/** Both option labels the copy could name. Used for the harm-level assertion. */
-const OPTION_LABELS = ['Launch now', 'Status quo'] as const;
 
 // ============================================================================
 // Precondition: the status predicate this whole file rests on.
@@ -238,7 +236,7 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
     });
   }
 
-  it('withholds the leader in the coaching sentence when the DISPLAYED analysis withholds it', () => {
+  it('withholds coaching when the current analysis is partial even if its claim verdict permits', () => {
     const current = currentPartialPermitting();
     const prior = priorProjectableWithheld();
     const older = olderStillWithheld();
@@ -286,31 +284,26 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts,
-      priorAnalysisFacts: priorFacts,
+      priorAnalysisFactSet: completeScenarioAnalysisFactSet(
+        SCENARIO_ID,
+        priorFacts,
+      ),
       handlerFacts,
       requestId: 'req-divergence',
       scenarioId: SCENARIO_ID,
       claimSafetyScope: SCOPE,
     });
 
-    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
-    // Bound to the PRODUCTION text bank's comparison-free degrade, not a
-    // paraphrase and not a substring predicate another branch could satisfy.
-    expect(out.coachingText).toBe(
-      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
-    );
-    // The harm, stated directly: no option label reaches the screen.
-    for (const label of OPTION_LABELS) {
-      expect(out.coachingText).not.toContain(label);
-    }
+    // A partial current run is claim-bearing for fail-closed permission, but
+    // it is not a completed analysis and cannot author a completion signal.
+    expect(out.signalId).toBeNull();
+    expect(out.coachingText).toBeNull();
   });
 
-  it('SUPPRESSES the first-analysis nudge when B withholds (no prior run_analysis fact)', () => {
-    // The FIRST_ANALYSIS arm of the same gate. `hasAnyPriorRunAnalysisFact`
-    // (renamed from `hasPriorSuccessfulRunAnalysis` in ROADMAP 2.842 — the old
-    // name claimed a success test it does not perform) tests only
-    // `fact_type === 'run_analysis'`, so the divergence has to be produced by
-    // the scenario-scoped fact instead of a prior-window fact.
+  it('does not misclassify a partial current run over durable history as completed coaching', () => {
+    // The scenario-scoped fact is outside the ordinary prior-fact window but
+    // remains a real prior displayed analysis. Durable history must therefore
+    // select the comparison-free RERUN arm, never the leader-naming FIRST arm.
     const current = runFact({
       analysisStatus: 'partial',
       computedAt: '2026-08-01T00:00:00.000Z',
@@ -343,7 +336,7 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
     const handlerFacts = [current];
 
     // PRECONDITION PINS — A permits, B withholds, and no prior fact exists in
-    // the window (so this really is the FIRST_ANALYSIS arm).
+    // the hot window. The durable fact is nevertheless authoritative history.
     expect(
       readMayNameLeadingOptionVerdictForFact(current).may_name_leading_option,
     ).toBe(true);
@@ -360,15 +353,15 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts: [],
-      priorAnalysisFacts: [scenarioNewestWithheld],
+      priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+        scenarioNewestWithheld,
+      ]),
       handlerFacts,
       requestId: 'req-first-divergence',
       scenarioId: SCENARIO_ID,
       claimSafetyScope: scope,
     });
 
-    // Suppressed entirely — the whole value of this signal is the "explore the
-    // leading option" nudge, and there is no leading option to explore.
     expect(out.signalId).toBeNull();
     expect(out.coachingText).toBeNull();
   });
@@ -431,7 +424,10 @@ describe('the coaching slot reads the SETTLED permission, not the turn-entry one
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts,
-      priorAnalysisFacts: priorFacts,
+      priorAnalysisFactSet: completeScenarioAnalysisFactSet(
+        SCENARIO_ID,
+        priorFacts,
+      ),
       handlerFacts,
       requestId: 'req-settled',
       scenarioId: SCENARIO_ID,
