@@ -28,8 +28,10 @@
  * declares `accepted_entity_kinds: ['goal','option']`), but `entity` is
  * REQUIRED on every proposal, so the router fills it on a GENERIC flip question
  * too. Reading it as "the user named this option" would mis-address every
- * untargeted turn. The user's own words are the only honest evidence that an
- * option was named, so that is what this reads.
+ * untargeted turn. The current user's own words remain the strongest evidence;
+ * the canonical-context wrapper below may additionally use one fully resolved
+ * canvas selection for a deictic follow-up. Model-authored router guesses are
+ * never referent authority.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY EXACTLY-ONE, AND WHY THAT IS NOT A HAND-KEPT PHRASE LIST. A message that
@@ -45,6 +47,12 @@
  * collision case UI #492's resolver had to handle), so a label that maps to more
  * than one id resolves to nothing rather than picking one.
  */
+
+import {
+  isSelectedContextGraphSnapshot,
+  type ContextGraphSelection,
+} from '../../../context/context-graph-snapshot.js';
+import type { TurnSelection } from '../../../build-turn-context.js';
 
 /** An option identity read off the graph. `label` is display copy only. */
 export interface TargetOption {
@@ -65,7 +73,13 @@ export type TargetOptionMissReason =
   /** Two or more DISTINCT options were named — a comparison, not a target. */
   | 'multiple_options_named'
   /** The named label maps to more than one option id — identity is ambiguous. */
-  | 'label_collision';
+  | 'label_collision'
+  /** Canonical option rows disagree about the label for one identity. */
+  | 'identity_collision'
+  /** A selection cannot license a target without an attested canonical graph. */
+  | 'selection_not_canonical'
+  /** The selected reference was not one fully resolved canonical option. */
+  | 'selection_not_unique';
 
 export type TargetOptionResolution =
   | { readonly kind: 'resolved'; readonly option: TargetOption }
@@ -81,6 +95,143 @@ function nonEmptyString(x: unknown): string | null {
   if (typeof x !== 'string') return null;
   const trimmed = x.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+interface LabeledGraphEntity extends TargetOption {
+  readonly kind: string;
+}
+
+/** Keep all labelled rows so a longer non-option label can own its own span. */
+function collectLabeledGraphEntities(graph: unknown): readonly LabeledGraphEntity[] {
+  const g = asRecord(graph);
+  if (g === null) return [];
+
+  const rows: LabeledGraphEntity[] = [];
+  const seen = new Set<string>();
+  const take = (raw: unknown, impliedKind?: string): void => {
+    const r = asRecord(raw);
+    if (r === null) return;
+    const id = nonEmptyString(r.id) ?? nonEmptyString(r.option_id);
+    const label = nonEmptyString(r.label);
+    const kind = impliedKind ?? nonEmptyString(r.kind);
+    if (id === null || label === null || kind === null) return;
+    const key = `${kind}\u0000${id}\u0000${label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ id, label, kind });
+  };
+
+  if (Array.isArray(g.options)) {
+    for (const option of g.options) take(option, 'option');
+  }
+  if (Array.isArray(g.nodes)) {
+    for (const node of g.nodes) take(node);
+  }
+  return rows;
+}
+
+/** Keep all option rows so duplicate identities cannot be hidden by a map. */
+function collectGraphOptionRows(graph: unknown): readonly TargetOption[] {
+  return collectLabeledGraphEntities(graph)
+    .filter((row) => row.kind === 'option')
+    .map(({ id, label }) => ({ id, label }));
+}
+
+function hasConflictingOptionIdentity(rows: readonly TargetOption[]): boolean {
+  const labelById = new Map<string, string>();
+  for (const row of rows) {
+    const prior = labelById.get(row.id);
+    if (prior !== undefined && prior !== row.label) return true;
+    labelById.set(row.id, row.label);
+  }
+  return false;
+}
+
+/**
+ * Detect one identity being asserted as more than one graph kind.
+ *
+ * A top-level `options[]` row is an option assertion even though that live
+ * shape omits `kind`. An identical top-level option + option-node pair is the
+ * legitimate dual representation this resolver already supports. An option
+ * id reused by a factor/goal/etc. is not a target we may safely resolve.
+ */
+function hasCrossKindIdentityCollision(graph: unknown): boolean {
+  const g = asRecord(graph);
+  if (g === null) return false;
+
+  const kindsById = new Map<string, Set<string>>();
+  const add = (id: string | null, kind: string | null): void => {
+    if (id === null || kind === null) return;
+    const kinds = kindsById.get(id) ?? new Set<string>();
+    kinds.add(kind);
+    kindsById.set(id, kinds);
+  };
+
+  if (Array.isArray(g.options)) {
+    for (const raw of g.options) {
+      const row = asRecord(raw);
+      if (row === null) continue;
+      add(nonEmptyString(row.id) ?? nonEmptyString(row.option_id), 'option');
+    }
+  }
+
+  if (Array.isArray(g.nodes)) {
+    for (const raw of g.nodes) {
+      const row = asRecord(raw);
+      if (row === null) continue;
+      add(nonEmptyString(row.id), nonEmptyString(row.kind));
+    }
+  }
+
+  return Array.from(kindsById.values()).some((kinds) => kinds.size > 1);
+}
+
+/**
+ * Closed grammar for a selected-option deictic.
+ *
+ * This does not classify or route the turn. It only answers the much narrower
+ * authority question: did the user's current words explicitly refer to the
+ * selected item as an option whose outcome could change? Bare `it`, `this`, or
+ * `that` is deliberately insufficient: those pronouns commonly refer to a
+ * factor, the result, or the model. The deictic must participate in an
+ * option-outcome construction such as “make it win” or “for this option to come
+ * out ahead”.
+ */
+const OPTION_DEICTIC_REFERENCE =
+  '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
+const TERMINAL_PUNCTUATION_CLUSTER = '[?!.]+[\\p{Pe}\\p{Pf}"\']*';
+const TERMINAL_OUTCOME_BOUNDARY =
+  `(?=\\s*(?:(?:instead|overall)\\s*)?(?:${TERMINAL_PUNCTUATION_CLUSTER}(?=\\s*$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))`;
+const TERMINAL_WIN_CUE =
+  `win${TERMINAL_OUTCOME_BOUNDARY}`;
+const TERMINAL_OPTION_RANK_CUE =
+  `(?:the\\s+)?(?:leader|leading|preferred|best|top)${TERMINAL_OUTCOME_BOUNDARY}`;
+const NAMED_OPTION_RANK_CUE =
+  '(?:the\\s+)?(?:leading|preferred|best|top)\\s+(?:option|alternative|choice)';
+const OPTION_OUTCOME_CUE =
+  `(?:${TERMINAL_WIN_CUE}|take the lead|come out ahead|(?:be|become)\\s+(?:${NAMED_OPTION_RANK_CUE}|${TERMINAL_OPTION_RANK_CUE})|${NAMED_OPTION_RANK_CUE}|${TERMINAL_OPTION_RANK_CUE})`;
+const SELECTED_OPTION_DEICTIC_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    `\\b(?:make|help|enable|allow|get)\\s+${OPTION_DEICTIC_REFERENCE}\\s+(?:to\\s+)?${OPTION_OUTCOME_CUE}\\b`,
+    'iu',
+  ),
+  new RegExp(
+    `\\bfor\\s+${OPTION_DEICTIC_REFERENCE}\\s+to\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'iu',
+  ),
+  new RegExp(
+    `\\b(?:could|can|would|might|should)\\s+${OPTION_DEICTIC_REFERENCE}\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'iu',
+  ),
+  new RegExp(
+    `\\b${OPTION_DEICTIC_REFERENCE}\\s+(?:could|can|would|might|should)\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'iu',
+  ),
+];
+
+function hasSelectedOptionDeicticReference(messageText: string | null | undefined): boolean {
+  if (typeof messageText !== 'string') return false;
+  return SELECTED_OPTION_DEICTIC_PATTERNS.some((pattern) => pattern.test(messageText));
 }
 
 /**
@@ -103,52 +254,21 @@ function nonEmptyString(x: unknown): string | null {
  * would have failed, exactly as the sibling module documents.
  */
 export function collectGraphOptionIdentities(graph: unknown): readonly TargetOption[] {
-  const g = asRecord(graph);
-  if (g === null) return [];
-
   const byId = new Map<string, string>();
-
-  const take = (raw: unknown): void => {
-    const r = asRecord(raw);
-    if (r === null) return;
-    const id = nonEmptyString(r.id) ?? nonEmptyString(r.option_id);
-    const label = nonEmptyString(r.label);
-    // An option with no readable label cannot be named by the user, and an
-    // option with no id has no identity to match on. Either missing ⇒ skip.
-    if (id === null || label === null) return;
-    if (!byId.has(id)) byId.set(id, label);
-  };
-
-  // Source 1: top-level options[] (production / ISL ingress representation).
-  if (Array.isArray(g.options)) for (const opt of g.options) take(opt);
-
-  // Source 2: option-kind nodes (GraphV3 / canvas representation).
-  if (Array.isArray(g.nodes)) {
-    for (const node of g.nodes) {
-      const r = asRecord(node);
-      if (r !== null && r.kind === 'option') take(r);
-    }
+  for (const row of collectGraphOptionRows(graph)) {
+    if (!byId.has(row.id)) byId.set(row.id, row.label);
   }
-
   return Array.from(byId, ([id, label]) => ({ id, label }));
-}
-
-/** Escape a label for use inside a RegExp. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * Resolve the ONE option the user named in this message, or a typed miss.
  *
- * Longest-label-first, and each match CONSUMES its span before shorter labels
- * are tried. Without the consume step, a graph carrying both "Hire Two Senior
- * Engineers" and "Hire Two Senior Engineers Locally" would read a message naming
- * only the longer one as naming TWO options, and refuse to address a perfectly
- * unambiguous question. Longest-match-wins is the same precedence
- * `findNamedFactor` uses ("Engineering Capacity" beats the substring
- * "Capacity"); consuming the span is what makes that precedence hold when the
- * shorter label is a PREFIX of the longer one rather than merely similar.
+ * Longest-entity-label-first, and every selected span excludes overlapping
+ * shorter labels. Without the entity-wide read, “US expansion cost” silently
+ * names the nested option “US expansion”. Without longest-match precedence,
+ * “Hire Two Senior Engineers Locally” looks like two option names. The selected
+ * spans are derived independently of graph array order.
  *
  * Pure. No telemetry, no I/O.
  */
@@ -162,36 +282,160 @@ export function resolveTargetOptionFromMessage(
   const options = collectGraphOptionIdentities(graph);
   if (options.length === 0) return { kind: 'none', reason: 'no_options' };
 
-  // Longest label first so a longer label wins over any shorter one nested in it.
-  const ordered = options.slice().sort((a, b) => b.label.length - a.label.length);
+  // Select non-overlapping labelled spans across ALL graph entities, globally
+  // longest first. A factor such as “US expansion cost” therefore owns that
+  // whole span before the nested option “US expansion” can be considered.
+  // Graph order cannot change the result: length, position and label provide a
+  // total deterministic ordering.
+  const haystack = message.toLowerCase();
+  const entitiesByLabel = new Map<string, LabeledGraphEntity[]>();
+  for (const entity of collectLabeledGraphEntities(graph)) {
+    const label = entity.label.toLowerCase();
+    const group = entitiesByLabel.get(label) ?? [];
+    group.push(entity);
+    entitiesByLabel.set(label, group);
+  }
 
-  let haystack = message.toLowerCase();
+  const candidates: Array<{
+    readonly start: number;
+    readonly end: number;
+    readonly label: string;
+    readonly entities: readonly LabeledGraphEntity[];
+  }> = [];
+  const lexical = /[\p{L}\p{N}\p{M}_]/u;
+  const hasPhraseBoundaries = (start: number, end: number, label: string): boolean => {
+    const labelCodePoints = Array.from(label);
+    const labelStartsLexical = lexical.test(labelCodePoints[0] ?? '');
+    const labelEndsLexical = lexical.test(labelCodePoints.at(-1) ?? '');
+    const previous = Array.from(haystack.slice(0, start)).at(-1) ?? '';
+    const next = Array.from(haystack.slice(end))[0] ?? '';
+    return (
+      (!labelStartsLexical || !lexical.test(previous)) &&
+      (!labelEndsLexical || !lexical.test(next))
+    );
+  };
+  for (const [label, entities] of entitiesByLabel) {
+    let from = 0;
+    while (from <= haystack.length - label.length) {
+      const start = haystack.indexOf(label, from);
+      if (start < 0) break;
+      const end = start + label.length;
+      if (hasPhraseBoundaries(start, end, label)) {
+        candidates.push({ start, end, label, entities });
+      }
+      from = start + Math.max(label.length, 1);
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      (b.end - b.start) - (a.end - a.start) ||
+      a.start - b.start ||
+      (a.label < b.label ? -1 : a.label > b.label ? 1 : 0),
+  );
+
+  const occupied: Array<{ readonly start: number; readonly end: number }> = [];
+  const selectedSpans = candidates.filter((candidate) => {
+    const overlaps = occupied.some(
+      (span) => candidate.start < span.end && candidate.end > span.start,
+    );
+    if (overlaps) return false;
+    occupied.push({ start: candidate.start, end: candidate.end });
+    return true;
+  }).sort((a, b) => a.start - b.start);
+
   const matched: TargetOption[] = [];
-  const matchedLabels = new Set<string>();
+  for (const span of selectedSpans) {
+    const optionRows = span.entities.filter((entity) => entity.kind === 'option');
+    if (optionRows.length === 0) continue;
 
-  for (const option of ordered) {
-    const needle = option.label.toLowerCase();
-    if (!haystack.includes(needle)) continue;
-    matched.push(option);
-    matchedLabels.add(needle);
-    // Consume EVERY occurrence of this label so a shorter nested label cannot
-    // re-match the same span.
-    haystack = haystack.replace(new RegExp(escapeRegExp(needle), 'g'), ' ');
+    const nonOptionRows = span.entities.filter((entity) => entity.kind !== 'option');
+    const optionIds = new Set(optionRows.map((entity) => entity.id));
+    if (nonOptionRows.length > 0 || optionIds.size > 1) {
+      return { kind: 'none', reason: 'label_collision' };
+    }
+    matched.push({ id: optionRows[0]!.id, label: optionRows[0]!.label });
   }
 
   if (matched.length === 0) return { kind: 'none', reason: 'no_option_named' };
-
-  // Label collision: the matched label is shared by more than one option id, so
-  // the user's words do not pick out a single identity. Refuse rather than guess
-  // (the #738 lesson — match on ids, never fold two targets into one label).
-  for (const label of matchedLabels) {
-    const sharing = options.filter((o) => o.label.toLowerCase() === label);
-    if (sharing.length > 1) return { kind: 'none', reason: 'label_collision' };
-  }
 
   // Two or more DISTINCT options named ⇒ a comparison question, not a target.
   const distinctIds = new Set(matched.map((m) => m.id));
   if (distinctIds.size > 1) return { kind: 'none', reason: 'multiple_options_named' };
 
   return { kind: 'resolved', option: matched[0]! };
+}
+
+/**
+ * Resolve a `what_would_flip` target from one attested canonical snapshot.
+ *
+ * Current-turn words outrank canvas focus: an explicit option label is the
+ * user's strongest evidence. Focus is consulted only for a genuinely deictic
+ * message, and only when exactly one canonical option was fully resolved.
+ * Request/provisional bytes, degraded reads and hand-built snapshot lookalikes
+ * never become referent authority.
+ */
+export function resolveTargetOptionFromCanonicalContext(
+  messageText: string | null | undefined,
+  graphSelection: ContextGraphSelection,
+  selection: TurnSelection | null | undefined,
+): TargetOptionResolution {
+  if (
+    !isSelectedContextGraphSnapshot(graphSelection) ||
+    graphSelection.status !== 'canonical'
+  ) {
+    return { kind: 'none', reason: 'selection_not_canonical' };
+  }
+
+  const rows = collectGraphOptionRows(graphSelection.graph);
+  if (
+    hasConflictingOptionIdentity(rows) ||
+    hasCrossKindIdentityCollision(graphSelection.graph)
+  ) {
+    return { kind: 'none', reason: 'identity_collision' };
+  }
+
+  const explicit = resolveTargetOptionFromMessage(messageText, graphSelection.graph);
+  if (explicit.kind === 'resolved' || explicit.reason !== 'no_option_named') {
+    return explicit;
+  }
+
+  // Selection is context, not implicit user intent. Preserve the old generic
+  // answer unless the current message itself carries a licensed deictic.
+  if (!hasSelectedOptionDeicticReference(messageText)) return explicit;
+
+  if (
+    selection === null ||
+    selection === undefined ||
+    selection.graph_read !== 'ok_present' ||
+    selection.requested_ids.length !== 1 ||
+    selection.elements.length !== 1 ||
+    selection.unresolved_ids.length !== 0 ||
+    selection.unreadable_ref_ids.length !== 0
+  ) {
+    return selection == null
+      ? explicit
+      : { kind: 'none', reason: 'selection_not_unique' };
+  }
+
+  const selected = selection.elements[0]!;
+  if (selected.kind !== 'option' || selected.id !== selection.requested_ids[0]) {
+    return { kind: 'none', reason: 'selection_not_unique' };
+  }
+
+  const exactRows = rows.filter(
+    (row) => row.id === selected.id && row.label === selected.label,
+  );
+  const sameLabelOtherIds = rows.some(
+    (row) =>
+      row.id !== selected.id &&
+      row.label.toLowerCase() === selected.label.toLowerCase(),
+  );
+  if (exactRows.length === 0 || sameLabelOtherIds) {
+    return { kind: 'none', reason: 'label_collision' };
+  }
+
+  return {
+    kind: 'resolved',
+    option: { id: selected.id, label: exactRows[0]!.label },
+  };
 }
