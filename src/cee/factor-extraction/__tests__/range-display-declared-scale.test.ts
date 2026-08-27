@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, it, expect } from "vitest";
 import { DeclaredScale } from "@talchain/schemas";
 import { synthesiseRangeDisplayValue } from "../display-value.js";
@@ -574,16 +579,153 @@ describe("COMPOSED TREE — a factor stating 115% renders on ONE scale, in both 
     ).toBe("57.5% to 172.5%");
   });
 
-  it("PRECONDITION PINNED: the prompt-mandated encoding keeps value and raw_value DISTINCT", () => {
-    // The guard's immunity for compliant factors rests on this. Pinned so it is
-    // GUARDED rather than INCIDENTAL: if a future producer ever emits
-    // value === raw_value for a genuine ratio, this REDs and the guard's
-    // premise must be re-derived rather than silently relied on.
-    const compliant = { value: 1.15, raw_value: 115 };
-    expect(compliant.value).not.toBe(compliant.raw_value);
-    // And the compliant factor still earns its ratio declaration.
-    expect(displayFor({ ...compliant, unit: "%", operator: ">=", extractionType: "explicit" })).toBe(
-      "57.5% to 172.5%",
-    );
+  it("the compliant factor still earns its ratio declaration", () => {
+    expect(
+      displayFor({ value: 1.15, raw_value: 115, unit: "%", operator: ">=", extractionType: "explicit" }),
+    ).toBe("57.5% to 172.5%");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE GUARD'S PREMISE, READ FROM THE PRODUCER'S OWN BYTES
+// ---------------------------------------------------------------------------
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "../../../..");
+const SERVED_PROMPT_PATH = resolve(REPO_ROOT, "Prompts/canonical/draft_graph.txt");
+const MANIFEST_PATH = resolve(REPO_ROOT, "Prompts/canonical/manifest.json");
+const SECOND_COPY_PATH = resolve(REPO_ROOT, "src/prompts/defaults-v187.ts");
+
+/**
+ * The ratio-encoding row, matched BY SHAPE rather than by line number (a line
+ * number is its own little mirror — `CLAUDE.md` trap 12). The prompt states the
+ * encoding as a markdown table row:
+ *
+ *   | Type | model value | raw_value | Example |
+ *   | Ratio that can exceed 100% | raw ratio | percentage points | NRR 110% → 1.10, raw 110 |
+ */
+const RATIO_ROW_RE = /^\|\s*Ratio that can exceed 100%\s*\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$/gm;
+/** The worked example's two magnitudes: `… → <model value>, raw <raw_value>`. */
+const WORKED_EXAMPLE_RE = /→\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*raw\s+([0-9]+(?:\.[0-9]+)?)/;
+
+/**
+ * ⛔ THIS BLOCK REPLACES A GUARD THAT COULD NOT FAIL.
+ *
+ * It previously read, in full:
+ *
+ *     const compliant = { value: 1.15, raw_value: 115 };
+ *     expect(compliant.value).not.toBe(compliant.raw_value);
+ *
+ * — two fields of a literal declared on the line above, under a docstring
+ * claiming it "REDs if a future producer ever emits value === raw_value".
+ * `1.15 !== 115` by construction, so nothing about any producer could move it.
+ * MEASURED, not argued: rewriting the mandate row in BOTH cited prompt files to
+ * say the two are the SAME left the file 48/48 GREEN. The premise was
+ * destroyed at the producer and the guard noticed nothing.
+ *
+ * The premise IS real and IS readable, so it is now READ. Everything below
+ * derives from `Prompts/canonical/draft_graph.txt`, bound to the SERVED
+ * artefact by the canonical manifest's own digest — not merely to a file that
+ * happens to sit on disk at that path.
+ */
+describe("PRECONDITION — the ratio encoding is MANDATED by the served draft prompt", () => {
+  it("the cited prompt is readable, non-empty, and IS the served artefact (sha256 == manifest)", () => {
+    // If this REDs the guard is not "broken" — it is telling you the artefact it
+    // derives from has moved or is no longer the one CEE serves, which is
+    // precisely when a silent mirror starts rotting.
+    const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
+    expect(served.length, `prompt unreadable or empty at ${SERVED_PROMPT_PATH}`).toBeGreaterThan(0);
+
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) as {
+      pms_prompts: ReadonlyArray<{ key: string; file: string; sha256: string }>;
+    };
+    const entry = manifest.pms_prompts.find((p) => p.key === "draft_graph");
+    expect(entry, "the canonical manifest has no `draft_graph` entry").toBeDefined();
+    expect(entry!.file).toBe("Prompts/canonical/draft_graph.txt");
+    expect(
+      createHash("sha256").update(served, "utf8").digest("hex"),
+      "the file at Prompts/canonical/draft_graph.txt is NOT the digest the manifest attests as " +
+        "served. Either the file drifted or the manifest did — re-derive which before trusting " +
+        "any expectation in this file, because they all rest on these bytes.",
+    ).toBe(entry!.sha256);
+  });
+
+  it("finds EXACTLY ONE ratio-encoding row — zero would mean this guard silently stopped checking", () => {
+    const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
+    const rows = [...served.matchAll(RATIO_ROW_RE)];
+    expect(
+      rows.length,
+      `expected exactly one "| Ratio that can exceed 100% | … |" row in ${SERVED_PROMPT_PATH}; ` +
+        `found ${rows.length}. ZERO means the row's WORDING changed and every assertion below ` +
+        "would pass by matching nothing (trap 13 — an absence probe with no positive control). " +
+        "MORE THAN ONE means there are competing authorities on the encoding.",
+    ).toBe(1);
+  });
+
+  it("⭐ DERIVED: the served prompt's worked example keeps model value and raw_value DISTINCT", () => {
+    // THIS IS THE GUARD'S WHOLE PREMISE. `declaredScaleOf`'s ratio arm treats
+    // `rawValue === value` as proof of NON-normalisation and declines to stamp
+    // `ratio`. That is only safe because a COMPLIANT factor never presents the
+    // two as equal — and the reason it never does is that the producer's own
+    // instruction mandates the two columns be different quantities.
+    const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
+    const rows = [...served.matchAll(RATIO_ROW_RE)];
+
+    // ── PIN THE PRECONDITION IN-TEST, so this cannot pass vacuously ──────────
+    // Without these three the assertions below hold trivially on a row that
+    // stopped matching, or on an example that stopped parsing.
+    expect(rows.length, "no ratio row matched — see the previous test").toBe(1);
+    const example = rows[0]![3]!;
+    const parsed = WORKED_EXAMPLE_RE.exec(example);
+    expect(
+      parsed,
+      `the ratio row's example column (${JSON.stringify(example)}) no longer parses as ` +
+        '"→ <model value>, raw <raw_value>". The mandate may still be stated in some other ' +
+        "shape, but THIS guard can no longer read it — re-anchor it rather than deleting it.",
+    ).not.toBeNull();
+
+    const modelValue = Number(parsed![1]);
+    const rawValue = Number(parsed![2]);
+    expect(Number.isFinite(modelValue) && Number.isFinite(rawValue)).toBe(true);
+    expect(modelValue, "a zero model value would make DISTINCTNESS accidental").toBeGreaterThan(0);
+
+    // ── THE MANDATE ITSELF, written against the SPEC and not against the
+    // failure mode (trap 13d): the columns are "raw ratio" and "percentage
+    // points", so the raw magnitude IS the model value expressed in percentage
+    // points. Distinctness is a CONSEQUENCE of that, which is why it is
+    // asserted second rather than assumed first.
+    expect(
+      Math.round(modelValue * 100),
+      `the served prompt now mandates model value ${modelValue} with raw_value ${rawValue}. ` +
+        "The ratio row's two columns are declared `raw ratio` and `percentage points`, so " +
+        "raw_value should be the model value in percentage points.",
+    ).toBe(rawValue);
+
+    // ⭐ AND THE CLAUSE `declaredScaleOf` ACTUALLY RESTS ON. If a future producer
+    // ever mandates value === raw_value for a genuine ratio, THIS REDs — which
+    // is what the deleted literal-comparison only claimed to do.
+    expect(
+      modelValue,
+      "THE GUARD'S PREMISE HAS BEEN WITHDRAWN AT THE PRODUCER. `declaredScaleOf` " +
+        "(unreachable-factors.ts) reads `rawValue === value` as proof a factor was NOT " +
+        "normalised and refuses to stamp `ratio`. If the served prompt now mandates them " +
+        "equal, that read fires on COMPLIANT factors and strips the declaration from every " +
+        "legitimate ratio — re-derive the guard, do not re-point this test.",
+    ).not.toBe(rawValue);
+  });
+
+  it("the SECOND copy the guard cites has not drifted from the served bytes", () => {
+    // Two authorities on one question do not get to drift (trap 21). Both files
+    // are cited by `declaredScaleOf`'s own comment; if they disagree, the
+    // comment is naming a rule that is only half true.
+    const servedRows = [...readFileSync(SERVED_PROMPT_PATH, "utf8").matchAll(RATIO_ROW_RE)];
+    const copyRows = [...readFileSync(SECOND_COPY_PATH, "utf8").matchAll(RATIO_ROW_RE)];
+    expect(servedRows.length, "served prompt: ratio row missing").toBe(1);
+    expect(
+      copyRows.length,
+      `${SECOND_COPY_PATH} no longer carries the ratio-encoding row that ` +
+        "`declaredScaleOf`'s comment cites alongside the canonical prompt.",
+    ).toBe(1);
+    expect(copyRows[0]![0]!.trim()).toBe(servedRows[0]![0]!.trim());
   });
 });
