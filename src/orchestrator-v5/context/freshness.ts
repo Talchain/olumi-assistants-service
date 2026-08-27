@@ -457,6 +457,37 @@ export function selectCurrentTurnRunAnalysisFacts(
 }
 
 /**
+ * Compare two producer timestamps in newest-first order.
+ *
+ * Licensed refusal facts historically accepted any Date.parse-finite
+ * timestamp, not only canonical UTC-Z strings. Comparing those strings
+ * lexically can invert chronology across offsets, so compare represented
+ * instants when possible. The lexical fallback preserves the pre-existing
+ * total order for malformed legacy/direct inputs outside the validated
+ * scenario carrier.
+ */
+export function compareRunAnalysisComputedAtDesc(
+  a: string | null,
+  b: string | null,
+): number {
+  if (a !== null && b !== null) {
+    const aEpoch = Date.parse(a);
+    const bEpoch = Date.parse(b);
+    if (Number.isFinite(aEpoch) && Number.isFinite(bEpoch)) {
+      if (aEpoch < bEpoch) return 1;
+      if (aEpoch > bEpoch) return -1;
+      return 0;
+    }
+    if (a < b) return 1;
+    if (a > b) return -1;
+    return 0;
+  }
+  if (a !== null) return -1;
+  if (b !== null) return 1;
+  return 0;
+}
+
+/**
  * ⭐ THE ONE ORDERING CORE. Every eligible `run_analysis` fact, newest-first.
  * `requireSuccessfulStatus` is the ONLY difference between the freshness and
  * entitlement selectors — the sort is shared, never copied.
@@ -494,34 +525,12 @@ function orderRunAnalysisFacts(
     candidates.push(view);
   }
 
-  // Stable sort by the instant represented by computed_at desc, putting facts
-  // without computed_at last. Licensed refusal facts historically accepted any
-  // Date.parse-finite timestamp, not only canonical UTC-Z strings. Comparing
-  // those strings lexically can invert chronology across offsets, so compare
-  // epochs when both timestamps parse and preserve the old lexical fallback
-  // only for malformed legacy/direct inputs outside the validated carrier.
   // JavaScript Array.sort is stable in V8, so insertion order is preserved
   // among equal instants (or two nulls), and the database delivery order breaks
   // true ties.
-  candidates.sort((a, b) => {
-    if (a.computed_at !== null && b.computed_at !== null) {
-      const aEpoch = Date.parse(a.computed_at);
-      const bEpoch = Date.parse(b.computed_at);
-      if (Number.isFinite(aEpoch) && Number.isFinite(bEpoch)) {
-        if (aEpoch < bEpoch) return 1;
-        if (aEpoch > bEpoch) return -1;
-        return 0;
-      }
-      // Preserve the pre-existing total order for malformed direct/legacy
-      // inputs; the scenario authority carrier rejects these before selection.
-      if (a.computed_at < b.computed_at) return 1;
-      if (a.computed_at > b.computed_at) return -1;
-      return 0;
-    }
-    if (a.computed_at !== null) return -1; // a is fresher than untimestamped b
-    if (b.computed_at !== null) return 1;
-    return 0;
-  });
+  candidates.sort((a, b) =>
+    compareRunAnalysisComputedAtDesc(a.computed_at, b.computed_at),
+  );
   return candidates;
 }
 

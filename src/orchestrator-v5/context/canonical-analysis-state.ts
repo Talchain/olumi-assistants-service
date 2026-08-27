@@ -63,6 +63,7 @@ import type {
   AnalysisReadyStatusT,
 } from '../../schemas/analysis-ready.js';
 import {
+  compareRunAnalysisComputedAtDesc,
   deriveAnalysisFreshness,
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
@@ -397,7 +398,10 @@ export function selectCanonicalAnalysisState(
       ? true
       : degradedComputedAt !== null &&
         selected.computed_at !== null &&
-        degradedComputedAt > selected.computed_at);
+        compareRunAnalysisComputedAtDesc(
+          degradedComputedAt,
+          selected.computed_at,
+        ) < 0);
 
   // Option-identity observability (diagnostic only). Recompute the verdict the
   // guard saw — a trivial set comparison — when the caller supplied current

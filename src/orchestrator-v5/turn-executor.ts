@@ -2445,7 +2445,7 @@ export async function runTurnExecutor(
     try {
       const coachingCache = await readCoachingCache(
         context.session_id,
-        context.prior_facts,
+        scenarioAnalysisFacts,
       );
       // V5 Task 1.2: compact the graph before handing it to Sonnet. Full graph
       // stays on graphLookupForValidate for validation; only the Sonnet-facing

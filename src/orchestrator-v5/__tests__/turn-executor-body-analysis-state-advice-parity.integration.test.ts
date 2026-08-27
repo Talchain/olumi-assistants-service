@@ -421,7 +421,8 @@ function makeFreshRunAnalysisFact(
 }
 
 function makeCanonicalAuthorityRunAnalysisFact(
-  graphHash = CANONICAL_AUTHORITY_GRAPH_HASH
+  graphHash = CANONICAL_AUTHORITY_GRAPH_HASH,
+  enrichmentOverrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     fact_type: 'run_analysis' as const,
@@ -437,7 +438,10 @@ function makeCanonicalAuthorityRunAnalysisFact(
       },
       graph_hash_at_run: graphHash,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
-      enrichment: canonicalStoredAnalysisEnrichment(),
+      enrichment: {
+        ...canonicalStoredAnalysisEnrichment(),
+        ...enrichmentOverrides,
+      },
       win_probabilities: { opt_status_quo: 0.82, opt_hire_local: 0.18 },
     },
   };
@@ -904,7 +908,18 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
   );
 
   it('loads the scenario-wide newest run_analysis fact after its parent turn leaves the 20-turn hot window', async () => {
-    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact(
+      CANONICAL_AUTHORITY_GRAPH_HASH,
+      {
+        decision_review: {
+          produced_at: '2026-08-27T09:00:00.000Z',
+          narrative_summary: 'DURABLE_DECISION_REVIEW_CANARY',
+        },
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'analysis-turn-outside-hot-window',
+        coaching_signal_produced_at: '2026-08-27T09:00:01.000Z',
+      },
+    );
     mockState.priorTurns = recentNonAnalysisTurns(20);
     mockState.priorTurnsTotal = 41;
     mockState.priorFacts = [];
@@ -930,6 +945,20 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(pack.graph_context).toEqual({ status: 'canonical' });
     expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
     expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: {
+        produced_at: '2026-08-27T09:00:00.000Z',
+        narrative_summary: 'DURABLE_DECISION_REVIEW_CANARY',
+      },
+      last_coaching_signal: {
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'analysis-turn-outside-hot-window',
+        produced_at: '2026-08-27T09:00:01.000Z',
+      },
+    });
+    expect(prompt).toContain('DURABLE_DECISION_REVIEW_CANARY');
+    expect(prompt).toContain('analysis-turn-outside-hot-window');
     expectNoCanonicalAuthorityWrite();
   });
 
