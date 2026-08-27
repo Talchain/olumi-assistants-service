@@ -92,8 +92,11 @@ const ADD_CONSTRAINT_50K: RecentMutation = {
   target_label: 'Total cost',
 };
 
-function ctxWith(recent: readonly RecentMutation[]): Pick<ContextPack, 'recent_changes'> {
-  return { recent_changes: recent };
+function ctxWith(
+  recent: readonly RecentMutation[],
+  status: ContextPack['recent_changes_status'] = 'complete',
+): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  return { recent_changes: recent, recent_changes_status: status };
 }
 
 const briefAudit = { briefText: B1.brief_text, graph: B1.graph };

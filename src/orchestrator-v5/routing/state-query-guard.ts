@@ -15,7 +15,7 @@
  *      `direct_answer` dispatch with deterministic copy that quotes the
  *      most recent change's summary verbatim (so the answer is grounded
  *      in the persisted handler fact, not a fabricated summary),
- *      ATTRIBUTED TO THE RECORD ("Earlier in this conversation: …") so that a
+ *      ATTRIBUTED TO SAVED MODEL HISTORY ("From the saved model history: …") so that a
  *      past receipt can never read as a claim about the current turn.
  *   3. If matched AND `recent_changes` is empty, return a "no recent
  *      changes" dispatch that owns the state-query without falling to
@@ -52,6 +52,7 @@ import {
 } from '../../cee/context-integrity/structure-origin-answer.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
+import type { RecentChangesHistoryStatus } from '../context/reconcile-recent-mutation-facts.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { decomposeEditMessage } from './edit-part-decomposition.js';
@@ -70,6 +71,11 @@ export type StateQueryGuardOutcome =
   | {
       readonly matched: true;
       readonly dispatch: 'no_recent_changes';
+      readonly assistant_text: string;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'changes_unavailable';
       readonly assistant_text: string;
     }
   /**
@@ -438,7 +444,8 @@ export function isStateQueryQuestionShape(message: string): boolean {
 
 export interface TryStateQueryGuardInput {
   readonly message: string;
-  readonly contextPack: Pick<ContextPack, 'recent_changes'>;
+  readonly contextPack: Pick<ContextPack, 'recent_changes'> &
+    Partial<Pick<ContextPack, 'recent_changes_status'>>;
   /**
    * ROADMAP 2.975 — the persisted brief and graph, for answering a BRIEF-AUDIT
    * question ("what did you keep from my brief?") rather than a session-edit
@@ -464,6 +471,13 @@ export interface TryStateQueryGuardInput {
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
+  // Production ContextPacks always carry this status. Legacy/direct callers
+  // may omit it, and malformed JS callers can still evade the TypeScript
+  // boundary; both resolve to the weakest interpretation rather than silently
+  // licensing an authoritative "no edits" claim.
+  const recentChangesStatus = resolveRecentChangesStatus(
+    input.contextPack.recent_changes_status,
+  );
   // Set by the origin arm when it defers: the recorded change that is actually
   // ABOUT the element the question named. `null` everywhere else, so the ordinary
   // readback arms keep quoting the head, which is what "what changed?" means.
@@ -632,10 +646,13 @@ export function tryStateQueryGuard(
       isCarrierLookingCompoundTail(focused.trailingClause);
     return {
       matched: true,
-      dispatch: 'no_recent_changes',
+      dispatch:
+        recentChangesStatus === 'complete'
+          ? 'no_recent_changes'
+          : 'changes_unavailable',
       assistant_text: discloseTail
-        ? `${NO_RECENT_CHANGES_TEXT} ${CARRIER_LOOKING_COMPOUND_DISCLOSURE}`
-        : NO_RECENT_CHANGES_TEXT,
+        ? `${emptyRecentChangesText(recentChangesStatus)} ${CARRIER_LOOKING_COMPOUND_DISCLOSURE}`
+        : emptyRecentChangesText(recentChangesStatus),
     };
   }
 
@@ -685,7 +702,7 @@ export function tryStateQueryGuard(
   //     for context rather than asserting nothing happened.
   const stateQueryMatched = STATE_QUERY_PATTERNS.some((pat) => pat.test(input.message));
   const postMutationCandidate =
-    recent.length > 0 &&
+    (recent.length > 0 || recentChangesStatus !== 'complete') &&
     POST_MUTATION_COMPLAINT_PATTERNS.some((pat) => pat.test(input.message));
   if (!stateQueryMatched && !postMutationCandidate) {
     return { matched: false };
@@ -705,8 +722,11 @@ export function tryStateQueryGuard(
   if (recent.length === 0) {
     return {
       matched: true,
-      dispatch: 'no_recent_changes',
-      assistant_text: NO_RECENT_CHANGES_TEXT,
+      dispatch:
+        recentChangesStatus === 'complete'
+          ? 'no_recent_changes'
+          : 'changes_unavailable',
+      assistant_text: emptyRecentChangesText(recentChangesStatus),
     };
   }
 
@@ -716,7 +736,11 @@ export function tryStateQueryGuard(
   return {
     matched: true,
     dispatch: 'with_recent_change',
-    assistant_text: composeRecentChangeAnswer(head, recent.length),
+    assistant_text: composeRecentChangeAnswer(
+      head,
+      recent.length,
+      recentChangesStatus,
+    ),
     recent_change: head,
     recent_change_count: recent.length,
   };
@@ -756,13 +780,21 @@ export function tryStateQueryGuard(
  *
  * British English; no em dashes; no internal terms.
  */
-export const RECENT_CHANGE_RECORD_PREFIX = 'Earlier in this conversation: ';
+export const RECENT_CHANGE_RECORD_PREFIX = 'From the saved model history: ';
 
-function composeRecentChangeAnswer(head: RecentMutation, totalCount: number): string {
+function composeRecentChangeAnswer(
+  head: RecentMutation,
+  totalCount: number,
+  status: RecentChangesHistoryStatus,
+): string {
   const tail =
-    totalCount > 1
-      ? ' If you want to see the earlier changes from this conversation, just ask.'
-      : '';
+    status === 'capped'
+      ? ' The available history is limited to the latest three recorded edits, so earlier edits may not be shown.'
+      : status === 'degraded'
+        ? ' I can verify this recorded edit, but I cannot confirm that the recent edit history is complete.'
+        : totalCount > 1
+          ? ' If you want to see the other saved model edits, just ask.'
+          : '';
   // Terminate the receipt so the multi-change tail is a separate sentence rather
   // than being welded onto it ("…and spend If you want…"). `cap()` closes a
   // truncated summary with `…`, which is already terminal.
@@ -781,8 +813,24 @@ function composeRecentChangeAnswer(head: RecentMutation, totalCount: number): st
 // recorded edits without contradicting an upstream mutation the
 // runtime might have missed.
 const NO_RECENT_CHANGES_TEXT =
-  "I don't have a record of recent edits in this conversation. " +
+  "I don't have a record of recent edits in the saved model history. " +
   "If you'd like to make a change, tell me what to update and I'll do it directly.";
+
+export const CHANGES_UNAVAILABLE_TEXT =
+  "I can't verify the recent edit history right now, so I can't confirm what changed. " +
+  'This reply does not change the model; please try again.';
+
+function resolveRecentChangesStatus(
+  status: ContextPack['recent_changes_status'] | undefined,
+): RecentChangesHistoryStatus {
+  return status === 'complete' || status === 'capped' || status === 'degraded'
+    ? status
+    : 'degraded';
+}
+
+function emptyRecentChangesText(status: RecentChangesHistoryStatus): string {
+  return status === 'complete' ? NO_RECENT_CHANGES_TEXT : CHANGES_UNAVAILABLE_TEXT;
+}
 
 /**
  * Compose the state-query continuity chip INLINE for the

@@ -202,7 +202,8 @@ describe('routeWithToolUse — F2 forced explanation intent', () => {
     const serialisedPack = observeSerialisedPack(userContent);
     expect(serialisedPack.graph_context).toEqual({ status });
     expect(userContent).toContain('accepted update did');
-    expect(userContent).toContain('recent accepted-change record');
+    expect(userContent).toContain('supplied accepted-change receipts');
+    expect(userContent).toContain('according to recent_changes_status');
     expect(userContent).toContain('any analysis facts actually present');
     expect(userContent).toContain('graph_context.status');
     expect(userContent).toContain('canonical only when that status is canonical');
@@ -355,7 +356,8 @@ describe('buildForcedIntentDirective', () => {
     expect(directive).toContain('canonical only when that status is canonical');
     expect(directive).toContain('provisional is not saved or accepted state');
     expect(directive).toContain('unavailable or absent must fail weak');
-    expect(directive).toContain('recent accepted-change record');
+    expect(directive).toContain('supplied accepted-change receipts');
+    expect(directive).toContain('according to recent_changes_status');
     expect(directive).toContain('any analysis facts actually present');
     expect(directive).toContain('trailing clause is handled separately');
     expect(directive).toContain('do not infer that it is a request');
