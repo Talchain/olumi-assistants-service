@@ -40,6 +40,7 @@ import {
   BRIEF_INSTRUCTION,
   buildUserMessage,
   GRAPH_CONTEXT_INSTRUCTION,
+  RECENT_CHANGES_INSTRUCTION,
   routeWithToolUse,
 } from '../../routing/route-with-tool-use.js';
 
@@ -136,15 +137,19 @@ function assembleWithCurrentModel(brief: string | undefined): ContextPack {
   });
 }
 
-function subtractGraphAuthorityDelta(message: string): string {
-  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+function subtractMandatoryAuthorityDelta(message: string): string {
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
   expect(jsonStart).toBeGreaterThan(-1);
   expect(jsonEnd).toBeGreaterThan(jsonStart);
   const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
   expect(parsed.graph_context).toEqual({ status: 'unavailable' });
+  expect(parsed.recent_changes_status).toBe('degraded');
+  expect(message.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  expect(message.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
   delete parsed.graph_context;
+  delete parsed.recent_changes_status;
   return (
     message.slice(0, jsonStart) +
     JSON.stringify(parsed, null, 2) +
@@ -310,7 +315,7 @@ describe('brief reaches the serialised routing prompt', () => {
     expect(prompt).not.toContain('"brief"');
     expect(prompt).toContain('"status": "unavailable"');
     expect(prompt.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
-    expect(createHash('sha256').update(subtractGraphAuthorityDelta(prompt)).digest('hex')).toBe(
+    expect(createHash('sha256').update(subtractMandatoryAuthorityDelta(prompt)).digest('hex')).toBe(
       'd88af36934273487395d40be6accf0359bf2b94e88ba9c183abd3781fc39c516',
     );
   });
