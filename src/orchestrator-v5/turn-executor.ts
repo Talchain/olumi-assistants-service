@@ -724,6 +724,31 @@ export interface TurnExecutorRunResult {
    * assigns one of the two kinds).
    */
   answerKind?: AnswerKind;
+  /**
+   * THE TURN'S LOADED `prior_facts`, surfaced so route-v2 can thread them into
+   * `finaliseV5Response` for the run-over-run consequence block
+   * (`coaching/build-run-delta.ts` → `OlumiResponseSchema.run_delta`).
+   *
+   * ⚠ WHY THIS EXISTS AT ALL. The producer and the finaliser call site both
+   * merged without it, so `attachRunDelta`'s `if (ctx.priorFacts === undefined)
+   * return response;` fired on EVERY turn and `run_delta` reached nobody — the
+   * "built but not plugged in" failure, in the seam built to fix it. This is
+   * the field that closes it.
+   *
+   * READ, NEVER RE-DERIVED: this is the same array the turn's freshness verdict
+   * and claim-safety reads were taken from, so the delta cannot describe a run
+   * the rest of the response never saw (CLAUDE.md trap #12 — two derivations
+   * over different inputs are how one response contradicts itself).
+   *
+   * OPTIONAL, deliberately, and NOT the latent-forgetting-point the two fields
+   * above condemn: absence here is a MEANINGFUL state the contract models —
+   * "this exit had no facts in scope", which is different from "there were
+   * none". The finaliser's fail-closed path stamps nothing on absence, and
+   * `run_delta` is `.optional()` precisely so a consumer renders no delta card.
+   * Making it required would force every non-analysis exit to assert something
+   * about facts it never loaded.
+   */
+  priorFacts?: readonly HandlerFact[];
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -13576,6 +13601,10 @@ export async function runTurnExecutor(
       // Always surfaced when a response was composed; route synthesises a shape
       // only for 'substantive'.
       answerKind,
+      // Threaded for the run-over-run consequence block; see
+      // TurnExecutorRunResult.priorFacts. This exit genuinely has the facts in
+      // scope, so it says so — no `?? []`, which would assert "there were none".
+      priorFacts: context.prior_facts,
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

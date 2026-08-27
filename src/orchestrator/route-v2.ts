@@ -716,6 +716,19 @@ async function sendFinalised200(
      *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
+     * The turn's loaded `prior_facts`, threaded into `finaliseV5Response` so it
+     * can stamp the run-over-run consequence block (`run_delta`). Supplied by
+     * the exits that genuinely have facts in scope — today the turn_executor
+     * exit, via `TurnExecutorRunResult.priorFacts`.
+     *
+     * ⚠ ABSENCE IS THE FAIL-CLOSED PATH AND IS FULLY SUPPORTED: an exit that
+     * omits it stamps no `run_delta`, which is exactly what the contract models
+     * ("absent on every non-rerun turn ... a consumer renders NO delta card").
+     * Never default it — `?? []` would assert "there were no prior runs", which
+     * is a different and false claim from "this exit did not load them".
+     */
+    readonly priorFacts?: readonly import('@talchain/schemas/orchestrator').HandlerFact[];
+    /**
      * V5 diagnostic trace (additive observability). Threaded in by paths
      * that build the trace out-of-band on the dispatch result
      * (draft_graph). For paths that attach the trace on the candidate
@@ -6142,6 +6155,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // boolean is: a value reported without its provenance is a value no walk
       // can falsify.
       mayNameLeadingOptionProvenance: run.mayNameLeadingOptionProvenance,
+      // The run-over-run consequence block's input. Present on this exit
+      // because the executor loaded the facts; omitted elsewhere, which the
+      // finaliser reads as "no facts in scope" and stamps nothing.
+      ...(run.priorFacts ? { priorFacts: run.priorFacts } : {}),
       // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
       // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
       // the honest reading for a permitted turn or a non-explanation handler.
