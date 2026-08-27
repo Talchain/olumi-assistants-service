@@ -339,6 +339,10 @@ function rowUuid(n: number): string {
   return `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
+function factRowUuid(n: number, slot: 1 | 2 | 3 | 4): string {
+  return `30000000-0000-4000-800${slot}-${String(n).padStart(12, '0')}`;
+}
+
 function turnTimestamp(n: number): string {
   return `2026-08-25T09:${String(n).padStart(2, '0')}:00.000Z`;
 }
@@ -521,6 +525,7 @@ function buildForeignFactRow(
     }),
     // This parent row is durable but belongs to another scenario and is not
     // among the requested scenario's twenty persisted parent turn rows.
+    fact_row_id: factRowUuid(1, 4),
     turn_id: '20000000-0000-4000-8000-000000000001',
     fact_created_at: '2026-08-25T10:01:00.000Z',
   };
@@ -556,11 +561,13 @@ function buildDurableFactRows(
   const rows: HandlerFactWithTurn[] = [
     {
       fact: analysis,
+      fact_row_id: factRowUuid(kase.analysis.turn_number, 1),
       turn_id: rowUuid(kase.analysis.turn_number),
       fact_created_at: turnTimestamp(kase.analysis.turn_number),
     },
     {
       fact: accepted,
+      fact_row_id: factRowUuid(kase.accepted_change.turn_number, 2),
       turn_id: rowUuid(kase.accepted_change.turn_number),
       fact_created_at: turnTimestamp(kase.accepted_change.turn_number),
     },
@@ -574,6 +581,7 @@ function buildDurableFactRows(
         after_value: LATER_SEMANTIC_CHANGE_VALUE,
         unit: kase.accepted_change.unit,
       }),
+      fact_row_id: factRowUuid(LATER_SEMANTIC_CHANGE_TURN, 3),
       turn_id: rowUuid(LATER_SEMANTIC_CHANGE_TURN),
       fact_created_at: turnTimestamp(LATER_SEMANTIC_CHANGE_TURN),
     });
@@ -658,14 +666,23 @@ function createSessionStoreFacade(
           ? []
           : record.facts;
       return rows
-        .map((row) => row.fact)
-        .filter((fact) => {
-          const result = fact.result as { status?: unknown };
-          return MUTATION_RECEIPT_FACT_TYPES.has(fact.fact_type) &&
-            fact.noop === false &&
+        .filter((row) => {
+          const result = row.fact.result as { status?: unknown };
+          return MUTATION_RECEIPT_FACT_TYPES.has(row.fact.fact_type) &&
+            row.fact.noop === false &&
             result.status === 'applied';
         })
-        .slice(0, limit);
+        .slice(0, limit)
+        .map((row) => {
+          if (row.fact_row_id === undefined) {
+            throw new Error('durable fixture mutation fact lacks persisted row identity');
+          }
+          return {
+            fact: row.fact,
+            fact_row_id: row.fact_row_id,
+            fact_created_at: row.fact_created_at,
+          };
+        });
     },
     readNewestAnalysisFactFor: async (scenarioId) => {
       const record = read('session.readNewestAnalysisFactFor', scenarioId);
