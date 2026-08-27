@@ -46,6 +46,7 @@ import {
   type GraphWithOptions,
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
+import { bindRecentMutationHistoryToPriorFacts } from '../reconcile-recent-mutation-facts.js';
 
 const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
@@ -116,6 +117,107 @@ describe('assembleContextPack', () => {
     expect(pack.conversation.turn_count).toBe(0);
     expect(pack.conversation.last_tool_used).toBeNull();
     expect(pack.conversation.pending_confirmation).toBe(false);
+  });
+
+  describe('durable recent-change projection authority', () => {
+    const projectableConstraint = (label: string, value: number): HandlerFact => ({
+      fact_type: 'add_constraint',
+      fact_version: 1,
+      noop: false,
+      result: {
+        target_id: `constraint-${label}`,
+        status: 'applied',
+        before: null,
+        after: {
+          constraint_id: `constraint-${label}`,
+          node_id: `factor-${label}`,
+          operator: '<=',
+          value,
+          label,
+        },
+      },
+    });
+
+    // HandlerFactSchema accepts this applied receipt, but the legacy
+    // RecentMutation projector has no honest display summary for it.
+    const unprojectableConstraint: HandlerFact = {
+      fact_type: 'add_constraint',
+      fact_version: 1,
+      noop: false,
+      result: {
+        target_id: 'constraint-unprojectable',
+        status: 'applied',
+        before: null,
+        after: null,
+      },
+    };
+
+    it('downgrades complete when an attested applied receipt is lost in projection', () => {
+      const priorFacts = bindRecentMutationHistoryToPriorFacts(
+        [],
+        {
+          recent_mutation_facts: [unprojectableConstraint],
+          recent_changes_status: 'complete',
+        },
+      );
+
+      const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts });
+
+      expect(pack.recent_changes).toEqual([]);
+      expect(pack.recent_changes_status).toBe('degraded');
+    });
+
+    it('preserves projectable receipts but downgrades capped when any attested receipt is lost', () => {
+      const priorFacts = bindRecentMutationHistoryToPriorFacts(
+        [],
+        {
+          recent_mutation_facts: [
+            projectableConstraint('newest', 3),
+            unprojectableConstraint,
+            projectableConstraint('older', 1),
+          ],
+          recent_changes_status: 'capped',
+        },
+      );
+
+      const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts });
+
+      expect(pack.recent_changes.map((change) => change.target_label)).toEqual([
+        'newest',
+        'older',
+      ]);
+      expect(pack.recent_changes_status).toBe('degraded');
+    });
+
+    it.each(['complete', 'capped'] as const)(
+      'preserves %s when every bound receipt projects',
+      (recentChangesStatus) => {
+        const priorFacts = bindRecentMutationHistoryToPriorFacts(
+          [],
+          {
+            recent_mutation_facts: [projectableConstraint('known', 1)],
+            recent_changes_status: recentChangesStatus,
+          },
+        );
+
+        const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts });
+
+        expect(pack.recent_changes).toHaveLength(1);
+        expect(pack.recent_changes_status).toBe(recentChangesStatus);
+      },
+    );
+
+    it('preserves complete plus empty only when the durable carrier itself is empty', () => {
+      const priorFacts = bindRecentMutationHistoryToPriorFacts(
+        [],
+        { recent_mutation_facts: [], recent_changes_status: 'complete' },
+      );
+
+      const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts });
+
+      expect(pack.recent_changes).toEqual([]);
+      expect(pack.recent_changes_status).toBe('complete');
+    });
   });
 
   it('projects analysis summary into compact ContextPack fields when supplied', () => {

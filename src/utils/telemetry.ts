@@ -2155,11 +2155,15 @@ export const TelemetryEvents = {
   //
   // Payload:
   //   - matched: boolean — did the message match a state-query phrase
-  //   - dispatch?: 'with_recent_change' | 'no_recent_changes' — only set
-  //     when matched
+  //   - dispatch?: 'with_recent_change' | 'no_recent_changes' |
+  //       'changes_unavailable' — only set when matched
   //   - recent_change_count: number — entries projected into ContextPack
+  //   - recent_changes_status: 'complete' | 'capped' | 'degraded'
   //   - prior_mutation_fact_count: number — successful mutation facts
-  //     across prior_facts (not capped, used for observability)
+  //     in the loaded hot window (durable cold-return receipts are carried
+  //     separately and do not inflate this count)
+  // Content-free by contract: no summaries, labels, target IDs, fact payloads
+  // or receipt bodies may enter this event.
   //
   // The `matched: true` branch means the turn was dispatched as a
   // direct_answer with no LLM call. `matched: false` means the guard

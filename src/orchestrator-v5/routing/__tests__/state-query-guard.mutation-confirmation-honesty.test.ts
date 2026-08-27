@@ -176,8 +176,11 @@ const WITNESS_GRAPH_WITH_QUOTE = {
   ),
 };
 
-function ctx(recent: readonly RecentMutation[]): Pick<ContextPack, 'recent_changes'> {
-  return { recent_changes: recent };
+function ctx(
+  recent: readonly RecentMutation[],
+  status: ContextPack['recent_changes_status'] = 'complete',
+): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  return { recent_changes: recent, recent_changes_status: status };
 }
 
 // ============================================================================
@@ -550,7 +553,8 @@ describe('TWIN: what must keep working, unchanged', () => {
  */
 const OPENS_WITH_COMMIT_CLAIM =
   /^\s*(?:Updated|Set|Added|Removed|Changed|Edited|Applied|Adjusted|Modified|Created|Strengthened|Weakened|Done)\b/i;
-const CARRIES_PAST_ATTRIBUTION = /\b(?:earlier|previously|already|on record|so far)\b/i;
+const CARRIES_PAST_ATTRIBUTION =
+  /\b(?:earlier|previously|already|on record|so far|saved model history)\b/i;
 
 describe('the record attribution is pinned by SEMANTICS, not only by identity', () => {
   it('SEM-CONTROL the property instrument SEES the exact mutant that slipped the round-1 kit', () => {
@@ -569,12 +573,9 @@ describe('the record attribution is pinned by SEMANTICS, not only by identity', 
   });
 
   it('SEM-LITERAL the constant is exactly the agreed string', () => {
-    // ⚠ "conversation", not "session": the record behind it is bounded by
-    // scenario and by COUNT (`readRecent`: `WHERE scenario_id = ? ORDER BY
-    // created_at DESC LIMIT 20`), never by time or by sitting, so a user
-    // returning to the same scenario next week would be told "this session"
-    // about a change from a previous one.
-    expect(RECENT_CHANGE_RECORD_PREFIX).toBe('Earlier in this conversation: ');
+    // The durable receipt reader is scenario-wide rather than session- or
+    // conversation-scoped, so cold-return copy must name saved model history.
+    expect(RECENT_CHANGE_RECORD_PREFIX).toBe('From the saved model history: ');
   });
 
   it('SEM-PROPERTY any replacement must still be a past-time attribution and never a commit claim', () => {

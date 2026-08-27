@@ -450,7 +450,7 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },
   'stateQueryOutcome.assistant_text': {
     stance: 'structural',
-    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane), and structural in the STRONGEST sense: the analysis projection is out of reach BY TYPE. `TryStateQueryGuardInput.contextPack` is `Pick<ContextPack, 'recent_changes'>` (state-query-guard.ts:267-270), so the guard cannot read `analysis` / `display_analysis` at all. Its three outputs are `NO_RECENT_CHANGES_TEXT` (constant), the `structure_origin` answer (composed in `cee/context-integrity/structure-origin-answer.ts` from a node's own persisted provenance enum), and `composeRecentChangeAnswer` = `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${tail}`, where the receipt is a persisted MUTATION receipt (factor / constraint labels and values) and the prefix attributes it to the record rather than to this turn (18 Aug 2026: emitted BARE it read as a fresh mutation claim on a turn that wrote nothing). A receipt may name an entity; it makes no comparison between options, which is the same standard the sibling add-risk echo entry is held to.",
+    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane), and structural in the STRONGEST sense: the analysis projection is out of reach BY TYPE. `TryStateQueryGuardInput.contextPack` is narrowed to `recent_changes` plus its optional fail-weak `recent_changes_status`, so the guard cannot read `analysis` / `display_analysis` at all. Its deterministic outputs are constant no-record/unavailable copy, the `structure_origin` answer (composed in `cee/context-integrity/structure-origin-answer.ts` from a node's own persisted provenance enum), and `composeRecentChangeAnswer` from a persisted mutation receipt plus a saved-model-history attribution. A receipt may name an entity; it makes no comparison between options, which is the same standard the sibling add-risk echo entry is held to.",
   },
 
   // ── GATED — sites that compose leader text from STRUCTURED data in code,
@@ -1382,7 +1382,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         'stateQueryOutcome.assistant_text',
         '../routing/state-query-guard.ts',
         // The strongest form of the claim: the analysis is out of reach BY TYPE.
-        "readonly contextPack: Pick<ContextPack, 'recent_changes'>;",
+        "readonly contextPack: Pick<ContextPack, 'recent_changes'> &\n    Partial<Pick<ContextPack, 'recent_changes_status'>>;",
       ],
     ];
     for (const [site, rel, fragment] of STRUCTURAL_EVIDENCE) {
@@ -1411,7 +1411,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // site — the state-query guard's `Pick`-narrowed input type — which is the
     // stronger of the two claims and is still live.
     const guardSource = readFileSync(resolve(HERE, '../routing/state-query-guard.ts'), 'utf8');
-    const PIN = "readonly contextPack: Pick<ContextPack, 'recent_changes'>;";
+    const PIN =
+      "readonly contextPack: Pick<ContextPack, 'recent_changes'> &\n    Partial<Pick<ContextPack, 'recent_changes_status'>>;";
     expect(guardSource).toContain(PIN);
     // The drift this pin exists to catch: the input type widening to the whole
     // ContextPack, which would put the analysis projection back in reach.

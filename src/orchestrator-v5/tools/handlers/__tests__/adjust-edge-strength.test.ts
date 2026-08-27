@@ -167,7 +167,7 @@ describe('adjust_edge_strength handler', () => {
       throw new Error(`expected with_recent_change, got ${JSON.stringify(followUp)}`);
     }
     expect(followUp.assistant_text).toContain(
-      'Earlier in this conversation: Adjusted the link from Marketing budget to Revenue.',
+      'From the saved model history: Adjusted the link from Marketing budget to Revenue.',
     );
     expect(followUp.assistant_text).not.toContain('f-budget');
     expect(followUp.assistant_text).not.toContain('g-revenue');
