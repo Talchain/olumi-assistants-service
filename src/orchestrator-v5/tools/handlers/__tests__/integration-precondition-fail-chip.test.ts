@@ -28,6 +28,7 @@ import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator';
 import { EMPTY_COACHING_STATE } from '../../../coaching/coaching-state.js';
 import { EMPTY_COACHING_LIFECYCLE } from '../../../coaching/coaching-lifecycle.js';
 import { deriveAnalysisFreshness } from '../../../context/freshness.js';
+import { bindRecentMutationHistoryToPriorFacts } from '../../../context/reconcile-recent-mutation-facts.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
@@ -49,7 +50,10 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     request_id: REQUEST_ID,
     budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
     prior_turns: [],
-    prior_facts: [],
+    prior_facts: bindRecentMutationHistoryToPriorFacts([], {
+      recent_mutation_facts: [],
+      recent_changes_status: 'degraded',
+    }),
     prior_facts_with_turn: [],
     // ROADMAP 2.1264 — the context's persisted-graph freshness derivation.
     // DERIVED from this fixture's own inputs (no prior facts, no persisted

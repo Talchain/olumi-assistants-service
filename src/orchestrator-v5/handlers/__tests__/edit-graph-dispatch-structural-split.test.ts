@@ -51,6 +51,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { getAdapter } from '../../../adapters/llm/router.js';
 import { loadPersistedGraphStrict, buildTurnContext } from '../../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { bindRecentMutationHistoryToPriorFacts } from '../../context/reconcile-recent-mutation-facts.js';
 import { staleAnalysisBlocksApply } from '../../graph-management/frame-gate.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -593,7 +594,13 @@ describe('⭐⭐ an already-analysed scenario can continue straight to the next 
     (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
       async (...args) => {
         const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
-        return { ...ctx, prior_facts: [runAnalysisFact(hash)] };
+        return {
+          ...ctx,
+          prior_facts: bindRecentMutationHistoryToPriorFacts(
+            [runAnalysisFact(hash)],
+            { recent_mutation_facts: [], recent_changes_status: 'degraded' },
+          ),
+        };
       },
     );
   });
@@ -667,7 +674,13 @@ describe('⚠ KNOWN RESIDUAL — the 20-turn window is still blind, and now has 
     (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
       async (...args) => {
         const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
-        return { ...ctx, prior_facts: [] };
+        return {
+          ...ctx,
+          prior_facts: bindRecentMutationHistoryToPriorFacts([], {
+            recent_mutation_facts: [],
+            recent_changes_status: 'degraded',
+          }),
+        };
       },
     );
   });
@@ -691,7 +704,13 @@ describe('⚠ KNOWN RESIDUAL — the 20-turn window is still blind, and now has 
     (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
       async (...args) => {
         const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
-        return { ...ctx, prior_facts: [runAnalysisFact(hash)] };
+        return {
+          ...ctx,
+          prior_facts: bindRecentMutationHistoryToPriorFacts(
+            [runAnalysisFact(hash)],
+            { recent_mutation_facts: [], recent_changes_status: 'degraded' },
+          ),
+        };
       },
     );
     const withFact = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
