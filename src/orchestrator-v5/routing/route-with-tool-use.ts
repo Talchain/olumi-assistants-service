@@ -1325,6 +1325,13 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.factor_values !== undefined) {
     parts.push('', FACTOR_VALUES_INSTRUCTION);
   }
+  // RUN-OVER-RUN CONSEQUENCE — ALWAYS RENDERED, like GRAPH_CONTEXT_INSTRUCTION
+  // and RECENT_CHANGES_INSTRUCTION above and for the identical reason: this
+  // block's load-bearing rule governs the turn where `run_delta` is ABSENT, and
+  // absence is the producer's DEFAULT path, not an edge case. Gating this on
+  // `contextPack.run_delta !== undefined` would render the absence rule only on
+  // the turns that do not need it — see the constant's header.
+  parts.push('', RUN_DELTA_INSTRUCTION);
   parts.push('', '## User turn', message);
   return parts.join('\n');
 }
@@ -1728,6 +1735,53 @@ export const FOCUS_INSTRUCTION = [
  * to make it fire — manufacturing prose the real labels do not have would fake
  * the signal instead of closing the hole.
  */
+/**
+ * RUN-OVER-RUN CONSEQUENCE — CODE-OWNED, and ALWAYS RENDERED.
+ *
+ * ⛔⛔ UNCONDITIONAL ON PURPOSE, AND THIS IS THE WHOLE SAFETY ARGUMENT. Every
+ * other field-scoped block here is emitted by the same condition that puts its
+ * field on the pack, and for those fields that is right. It is WRONG for this
+ * one, and the first draft of this change got it wrong: the load-bearing rule
+ * in this block governs the turn where `run_delta` is ABSENT, so gating the
+ * block on the field's PRESENCE would render the rule only on the turns where
+ * it is not needed and never on the turns where it is. A conditionally-emitted
+ * absence clause is dead text.
+ *
+ * The producer (`coaching/build-run-delta.ts`) REFUSES — with a discriminated
+ * reason — on every pair it cannot honestly classify, and its own header states
+ * the doctrine: *"THE OMIT PATH IS THE DEFAULT AND IT IS NOT A DEGRADED
+ * STATE… a fabricated comparison is worse than an absent one."* Absence is
+ * therefore the COMMON case, not the edge case. A model that meets an absent
+ * `run_delta` and helpfully reconstructs "what changed" from the transcript
+ * converts a producer that honestly refuses into a coach that fabricates —
+ * STRICTLY WORSE than the silence shipped today, and it would invert the whole
+ * point of the field.
+ *
+ * This is the same reasoning, and the same unconditional treatment, that
+ * `GRAPH_CONTEXT_INSTRUCTION` and `RECENT_CHANGES_INSTRUCTION` already carry:
+ * where a field's ABSENCE or emptiness could silently license a false claim,
+ * the licence text is always rendered so absence can never be read as
+ * permission. Every sentence below is therefore written to be TRUE IN BOTH
+ * ARMS — present and absent — because it is rendered in both.
+ *
+ * The served V5 orchestrator prompt is an operator-managed PMS row and is not
+ * editable from this repo, so a code-owned block is the only lever that can
+ * sanction a new pack field — the same reasoning as its ten siblings above.
+ */
+export const RUN_DELTA_INSTRUCTION = [
+  '## What changed between the last two runs (`run_delta` — deterministic, authoritative)',
+  'A `run_delta` block is the system’s own comparison of the two most recent completed analysis runs. Every number, tag and case in it is computed by deterministic code from the two saved runs — no part of it is written by a model. When one is present above and the user asks what changed, whether something got better or worse, or whether a difference matters, answer from it and not from anything said earlier in this conversation.',
+  '- ⛔ IF NO `run_delta` BLOCK APPEARS ABOVE, YOU DO NOT KNOW WHAT CHANGED — say so rather than work it out. Its absence means the system could not honestly compare the runs (there may be fewer than two, or the pair may not be comparable like-for-like). It NEVER means nothing changed, it is NEVER a licence to reconstruct a comparison yourself from earlier messages, from remembered numbers, or from the current analysis, and it is never something to apologise for or to fill in helpfully. Do not describe, estimate, hedge towards or imply any run-over-run movement when the block is absent: say plainly that you cannot compare the runs, and offer to run the analysis again.',
+  '- `attribution_case` says what a difference can honestly be blamed on, and ONLY `C1_attributable` licenses saying the user’s own change caused it. `C0_identical` means the two runs match. `C2_unpaired` means they are not comparable like-for-like. `C3_engine_drift` and `C4_budget_drift` mean something other than the user’s edit differed between the runs — the calculation itself, or how much computation it was given. Never present those last three as the consequence of an edit.',
+  '- `noise_verdict` is the entitlement to call a movement real, and it appears on the leader line and on every option. `signal` = the movement is larger than the run-to-run wobble and may be reported as a real change. `within_noise` = it is NOT distinguishable from wobble: say the number moved but that the movement is within what repeated runs vary by anyway, and never present it as an improvement, a decline, or evidence for a decision. `not_noise_qualified` = no honest band exists for that quantity on this pair: report the direction only, never dressed as a real change. The three are never interchangeable and you must not upgrade one to another.',
+  '- Options are identified by `option_id`, never by name. Use the `analysis` block above to turn an id into the option’s label, and never name an option the block carries no id for.',
+  '- On `leader`: absence of `prior_leading_option_id` or `current_leading_option_id` means there is NO ENTITLED CLAIM about which option led on that side — it does NOT mean no option led, and you must not name one. `changed: true` means the leading option genuinely differs between the runs; read it together with the leader’s own `noise_verdict` before calling that change meaningful. `changed: false` means no leader change was established — where an id is missing on either side that is because it could not be determined, not proof the leader stayed the same.',
+  '- ⛔ THIS BLOCK NEVER SAYS ANYTHING ABOUT TIPPING POINTS OR FLIP THRESHOLDS, AND THAT SILENCE IS NOT A FINDING. How far a factor would have to move to change the answer is NOT COMPUTED for this comparison — it is never looked at. Never say that no tipping point exists, that none changed, or that the result has become more or less easily flipped, on the strength of anything here or of anything missing here.',
+  '- `pair_provenance` records how alike the two runs were set up (same starting conditions, same saved model, same pipeline, same amount of computation). Use it to justify the `attribution_case` if the user challenges it; do not recite it unprompted.',
+  '- Report only movements the block carries. Do not compute new differences, percentages or totals from its numbers, and do not compare against any run other than the two it shows.',
+  '- Never repeat the field names, case ids or verdict tokens into user-facing text; state the substance in plain language.',
+].join('\n');
+
 export const FACTOR_VALUES_INSTRUCTION = [
   '## Factor values (deterministic — authoritative)',
   'The `factor_values` block above is the system’s verified answer to "which factors carry a value, and which do not?", read from the saved model itself. When the user asks what still needs a value, answer from this block — not from anything said earlier in this conversation.',

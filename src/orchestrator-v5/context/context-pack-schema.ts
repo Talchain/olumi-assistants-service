@@ -43,6 +43,14 @@
 
 import { z } from 'zod';
 
+import type { RunDelta } from '@talchain/schemas/boundary';
+import {
+  RunDeltaAttributionCase,
+  RunDeltaLeaderDeltaSchema,
+  RunDeltaPairProvenanceSchema,
+  RunDeltaWinProbabilityDeltaSchema,
+} from '@talchain/schemas/boundary';
+
 import { RECENT_CHANGES_SUMMARY_MAX_CHARS } from './recent-changes.js';
 
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
@@ -598,6 +606,59 @@ export const ContextPackFactorValuesSchema = z
   })
   .strict();
 
+/**
+ * RUN-OVER-RUN CONSEQUENCE — the model-facing projection of the WIRE `RunDelta`
+ * (`@talchain/schemas/boundary`), built by the SAME pure producer that stamps
+ * the turn envelope (`coaching/build-run-delta.ts`).
+ *
+ * ⭐ DERIVED FROM THE WIRE SUB-SCHEMAS, NOT MIRRORED (trap 12). Every member
+ * below is the contract's own schema object, so a change to the wire shape
+ * propagates here instead of drifting. Only the top-level KEY LIST is written
+ * out, and `.strict()` makes a new wire key fail LOUD in the non-prod
+ * `safeParse` gate rather than ride silently into the prompt.
+ * `run-delta-pack-parity.guard.test.ts` pins this key set against the wire's.
+ *
+ * ⛔ `flip_thresholds` IS DELIBERATELY ABSENT, AND THAT IS NOT AN OVERSIGHT —
+ * DO NOT "FIX" IT BY PASSING IT THROUGH. The producer emits it FROZEN EMPTY
+ * (`RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED`, `compose/claim-safety-cage.ts`)
+ * because the flip-threshold join is DEFERRED and it never looked. That
+ * constant's own header states the rule: *"an empty array is NOT a neutral
+ * placeholder: read naively it asserts THERE ARE NO FLIP THRESHOLDS, which is
+ * a claim"*, and *"POPULATING this slot is a claim-safety change, not a wiring
+ * change"*. An LLM is precisely a naive reader, so serialising `[]` into the
+ * prompt would hand it a computed-looking answer to a question nothing asked.
+ * Omitting the key is the honest projection: the field is not merely empty
+ * here, it is ABSENT, and `RUN_DELTA_INSTRUCTION` tells the model in as many
+ * words that it must not infer flip behaviour from that absence.
+ * (Consumption of the constant is also pinned to exactly ONE call site by
+ * `tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts`, so this
+ * module must never import it.)
+ */
+export const ContextPackRunDeltaSchema = z
+  .object({
+    attribution_case: RunDeltaAttributionCase,
+    pair_provenance: RunDeltaPairProvenanceSchema,
+    leader: RunDeltaLeaderDeltaSchema,
+    /** May be empty (no options with a computable pair) — the wire's own semantics. */
+    win_probabilities: z.array(RunDeltaWinProbabilityDeltaSchema),
+    /**
+     * The edit set between the two runs. `.min(1)` mirrors the wire: an empty
+     * list is unrepresentable, so ABSENCE is the only way to say "underivable".
+     */
+    edit_list: z.array(z.string()).min(1).optional(),
+  })
+  .strict();
+
+/**
+ * The TypeScript face of {@link ContextPackRunDeltaSchema}, derived from the
+ * WIRE type rather than from the Zod schema — deliberately a SECOND,
+ * INDEPENDENT derivation of the same contract. The assembler assigns the
+ * producer's own `RunDelta` (minus the omitted key) into this type, so if the
+ * schema above and this type ever disagree about the shape, the assignment
+ * stops compiling instead of drifting quietly.
+ */
+export type ContextPackRunDelta = Omit<RunDelta, 'flip_thresholds'>;
+
 export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
   z
     .object({
@@ -723,6 +784,22 @@ export const ContextPackSchema = z
      * into the prompt alongside the label.
      */
     factor_values: ContextPackFactorValuesSchema.optional(),
+    /**
+     * RUN-OVER-RUN CONSEQUENCE: what changed between the two most recent
+     * completed runs, and what the producer is ENTITLED to say about it.
+     *
+     * Present ONLY when the pure producer could honestly classify the pair
+     * (`buildRunDelta` returns a discriminated REFUSAL otherwise, and a
+     * refusal projects to NO KEY).
+     *
+     * ⛔ ABSENCE MEANS "NO ENTITLED COMPARISON", NEVER "NOTHING CHANGED".
+     * The producer refuses on every pair it cannot classify, and the omit path
+     * is the DEFAULT rather than a degraded state — a fabricated comparison is
+     * worse than an absent one. `RUN_DELTA_INSTRUCTION` carries that rule to
+     * the model, because a field the model reads as "nothing changed" would
+     * convert an honest refusal into a confident falsehood.
+     */
+    run_delta: ContextPackRunDeltaSchema.optional(),
     /**
      * SELECTION-AWARE ANSWERING (hop 4): the user's canvas selection, resolved
      * against canonical state and projected display-safe by `projectFocus`.

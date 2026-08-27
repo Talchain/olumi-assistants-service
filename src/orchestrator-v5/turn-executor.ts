@@ -2709,6 +2709,29 @@ export async function runTurnExecutor(
         // did you make?") have no human-readable receipt to ground
         // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
         priorFacts: context.prior_facts,
+        // RUN-OVER-RUN CONSEQUENCE — the leader-claim entitlement for the
+        // `run_delta` projection the assembler builds from `prior_facts` above.
+        //
+        // ⚠ THIS LINE IS THE WIRE for the leader half of that projection.
+        // Deleting it does NOT remove the delta — `mayNameLeadingOption` is
+        // fail-closed (`=== true`) in the assembler — it silently strips the
+        // leader ids from it, which is the quieter and more dangerous failure.
+        // Neutering it MUST turn the leader arm of
+        // context/__tests__/run-delta-wire.route-level.test.ts red.
+        //
+        // ⭐ THE ENTRY VALUE IS THE CORRECT AUTHORITY HERE, NOT AN
+        // APPROXIMATION OF THE POST-HANDLER ONE. `mayNameLeadingOptionForRun`
+        // is derived at turn entry from `[...prior_facts, scenario-newest-fact]`
+        // and re-read after dispatch over a documented SUPERSET
+        // (`[...handlerFactsForCommit, ...prior_facts]`). Pack assembly runs
+        // BEFORE dispatch, and the pair this projection compares comes from
+        // `prior_facts` — precisely the facts the entry verdict was derived
+        // from. Passing the post-handler value would be impossible here and
+        // wrong if it were possible: it describes a fact set that includes this
+        // turn's not-yet-existing run. The finaliser's wire `run_delta` uses
+        // the post-dispatch verdict because it compares that larger set. Two
+        // questions, two fact sets, each with the verdict derived from its own.
+        mayNameLeadingOption: mayNameLeadingOptionForRun,
         // CONTEXT/MEMORY V5 defect 4 — the assembler derives its OWN canonical
         // analysis state from these facts (`deriveContextPackAnalysisState` →
         // `selectCanonicalAnalysisState`); this call passes no `canonicalState`,

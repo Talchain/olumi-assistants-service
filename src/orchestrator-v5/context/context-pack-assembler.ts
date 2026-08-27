@@ -38,6 +38,7 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
+import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -86,6 +87,7 @@ import {
   CONTEXT_PACK_BRIEF_CHAR_CAP,
   CONTEXT_PACK_RECENT_TURNS_CAP,
   ContextPackSchema,
+  type ContextPackRunDelta,
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 import {
@@ -500,6 +502,21 @@ export interface ContextPack {
    */
   readonly factor_values?: ContextPackFactorValues;
   /**
+   * RUN-OVER-RUN CONSEQUENCE — what changed between the two most recent
+   * completed runs in the fact window, and what the producer is ENTITLED to
+   * say about it. Built by the pure, total `buildRunDelta` over `priorFacts`;
+   * see {@link ContextPackRunDeltaSchema} for why `flip_thresholds` is omitted.
+   *
+   * ⛔ ABSENT (key missing, never `run_delta: null`) whenever the producer
+   * REFUSED — fewer than two successful runs, an unprojectable fact, missing
+   * producer echoes, or no honest attribution case. ABSENCE MEANS "NO ENTITLED
+   * COMPARISON", NEVER "NOTHING CHANGED", and the omit path is the DEFAULT
+   * rather than a degraded state: a fabricated comparison is worse than an
+   * absent one. The model is told exactly this by `RUN_DELTA_INSTRUCTION`,
+   * which is emitted by the SAME condition that puts this key on the pack.
+   */
+  readonly run_delta?: ContextPackRunDelta;
+  /**
    * LLM-facing graph projection. Edges carry decision-language `relationship`
    * phrases ("moderate positive link") plus the compactor's closed coefficient
    * confidence band instead of raw `strength` / `std` floats; raw `exists`
@@ -685,6 +702,31 @@ export interface AssembleContextPackInput {
    * follow-up state-queries can be grounded.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * THE TURN'S LEADER-CLAIM ENTITLEMENT, threaded rather than re-derived.
+   *
+   * `run_delta` may name which option was leading on each side of the pair, so
+   * it is subject to the same permission as every other leader-bearing
+   * projection. It is consumed by `buildRunDelta`, which AND-gates it against
+   * each run's OWN persisted verdict — so a `true` here can never promote a
+   * run whose own fact withheld the claim.
+   *
+   * ⚠ FAIL-CLOSED: `undefined` is read as NOT ENTITLED (`=== true`). A caller
+   * that forgets to thread it gets a delta with no leader ids — which is the
+   * producer's documented absence semantics ("no entitled leader claim on that
+   * side"), not a broken delta.
+   *
+   * ⭐ THE TURN-ENTRY VALUE IS THE CORRECT ONE HERE, and that is not an
+   * approximation. `turn-executor.ts` derives its entry verdict from
+   * `[...prior_facts, scenario-newest-fact]` and RE-READS it post-handler over
+   * a documented SUPERSET (`[...handlerFactsForCommit, ...prior_facts]`). Pack
+   * assembly runs BEFORE dispatch, so the facts this projection compares are
+   * exactly the facts the ENTRY verdict was derived from. The finaliser's wire
+   * `run_delta` uses the post-dispatch verdict because it compares a fact set
+   * that includes this turn's new run; the two answer different questions over
+   * different fact sets, each with the verdict derived from its own set.
+   */
+  readonly mayNameLeadingOption?: boolean;
   /**
    * CONTEXT/MEMORY V5 defect 4 — did the read that produced `priorFacts`
    * SUCCEED? Threaded from `EnrichedTurnContext.prior_facts_read_ok`.
@@ -1563,6 +1605,35 @@ export function assembleContextPackWithSummary(
   const recentMutationHistory = readRecentMutationHistoryFromPriorFacts(
     input.priorFacts,
   );
+  // RUN-OVER-RUN CONSEQUENCE. Hoisted out of the literal below so the refusal
+  // path is visible as a named branch rather than buried in a spread.
+  //
+  // `input.priorFacts === undefined` means the facts were never wired into
+  // this call — NOT that the scenario has none. `buildRunDelta` would answer
+  // `insufficient_runs` for both, which would be the assembler asserting a
+  // fact about the scenario on the strength of its own missing input, so the
+  // two are kept apart here and an unwired call simply produces no key.
+  //
+  // ⚠ FAIL-CLOSED ON THE LEADER PERMISSION (`=== true`): an absent
+  // `mayNameLeadingOption` is read as NOT entitled. `buildRunDelta` then
+  // AND-gates that against each run's own persisted verdict, so this can only
+  // ever withhold a leader id, never promote one.
+  const runDeltaBuild =
+    input.priorFacts === undefined
+      ? null
+      : buildRunDelta({
+          priorFacts: input.priorFacts,
+          mayNameLeadingOption: input.mayNameLeadingOption === true,
+        });
+  // Strip the frozen-empty `flip_thresholds` — see the projection comment and
+  // `ContextPackRunDeltaSchema`. Destructured rather than deleted so a wire
+  // change that removes the field fails to compile here.
+  const runDeltaForPack: ContextPackRunDelta | null = (() => {
+    if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
+    const { flip_thresholds: _flipThresholdsNotComputed, ...rest } = runDeltaBuild.delta;
+    void _flipThresholdsNotComputed;
+    return rest;
+  })();
   // Plain/direct arrays predate the durable carrier. They may still provide a
   // useful bounded projection, but cannot establish that scenario history is
   // complete; omission therefore resolves to degraded, never permission to
@@ -1671,6 +1742,41 @@ export function assembleContextPackWithSummary(
     ...(graphContext.status === 'canonical' && input.factorValues !== undefined
       ? { factor_values: input.factorValues }
       : {}),
+    // RUN-OVER-RUN CONSEQUENCE — the last open link in the closure chain
+    // (real prior run → canonical change → consequence → user-visible
+    // consequence → SUBSEQUENT Olumi reasoning uses it). The producer has been
+    // merged and threaded since #1160/#1166, but it ran only in
+    // `finaliseV5Response` — i.e. at response assembly, AFTER the model call by
+    // construction — so the model was told a rerun had happened and never what
+    // changed. This line is what puts the consequence in front of it.
+    //
+    // ⚠ THIS LINE IS THE WIRE — the same pin as `selection`, `goalTarget` and
+    // `compactedConstraints` above, and for the same reason: a defended pure
+    // function with a dark call site is this estate's chronic failure #1.
+    // Neutering this line MUST turn
+    // context/__tests__/run-delta-wire.route-level.test.ts red.
+    //
+    // PURE AND TOTAL over an input the assembler ALREADY receives —
+    // `buildRunDelta` performs no I/O, no LLM call, no clock or config read, so
+    // this adds a fold over the fact window and nothing else. The pair it
+    // selects is the two newest `run_analysis` facts in `priorFacts`, which is
+    // the SESSION_READ_WINDOW_TURNS window (default 20) the finaliser already
+    // depends on — this states that bound, it does not widen it.
+    //
+    // ⛔ A REFUSAL PROJECTS TO NO KEY. `buildRunDelta` returns a DISCRIMINATED
+    // refusal on every pair it cannot honestly classify, and nothing here
+    // converts one into a partial, a placeholder or a null: `kind !== 'ok'`
+    // contributes no key at all. That is the producer's documented default
+    // path, not a degraded state — a fabricated comparison is worse than an
+    // absent one.
+    //
+    // ⛔ `flip_thresholds` IS STRIPPED HERE, DELIBERATELY — DO NOT PASS IT
+    // THROUGH. The producer emits it frozen-empty because the flip-threshold
+    // join is deferred and it never looked; serialising `[]` to an LLM, which
+    // is a naive reader, would present that absence as a computed finding.
+    // See `ContextPackRunDeltaSchema` for the full reasoning and the
+    // single-call-site guard that forbids importing the constant here.
+    ...(runDeltaForPack !== null ? { run_delta: runDeltaForPack } : {}),
     // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
     // above `conversation`, so the model reads the user's focus as part of the
     // model rather than as conversational colour. ⚠ In the SERIALISED prompt
