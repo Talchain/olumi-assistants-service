@@ -434,6 +434,29 @@ describe('ROADMAP 2.384 — the anchor obeys BOTH of the blocker\'s conditions',
     assertStyle(response.assistant_text);
   });
 
+  it('CONJUNCT 1 catches a display string that CONTAINS the label, not just equals it', () => {
+    // ⚠ ADDED AFTER A MUTANT CAUGHT THE GAP: weakening `isLabelEcho` to
+    // `lowered === factorLabelLower` SURVIVED the first version of this suite,
+    // because the only echo case here was an EXACT match. The realistic shape
+    // is the enricher appending to the label — `"CRM Annual Licence Cost
+    // (0.5)"` — which equality-only lets straight through, putting the label
+    // back in front of the user with a number stapled on. The `includes` half
+    // of the predicate is the half that does the work, and it was unpinned.
+    const echoGraph: GraphLookup = {
+      findEntityById: () => ({ id: TARGET_ID, kind: 'node', label: ECHO_LABEL }),
+      listEntitiesByKind: () => [{ id: TARGET_ID, label: ECHO_LABEL }],
+      findFactorObservedState: () => ({ value: 0.5, display_value: `${ECHO_LABEL} (0.5)` }),
+    };
+    const { response } = composeValidationFailure(
+      paramInvalid(),
+      ctxWith(WITNESSED_MESSAGE, echoGraph),
+      'frame',
+    );
+    expect(response.assistant_text).not.toContain(ECHO_LABEL);
+    expect(response.assistant_text).not.toContain('just now');
+    expect(response.assistant_text).toContain('"high"');
+  });
+
   it('CONJUNCT 1 still ADMITS a band whose text merely sits inside the label', () => {
     // "High (0.7)" for a factor labelled "High Risk" is NOT an echo — the rule
     // strips only when the candidate contains the LABEL, never the reverse.
