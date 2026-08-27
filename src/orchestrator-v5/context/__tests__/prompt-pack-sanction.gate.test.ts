@@ -57,6 +57,8 @@ import {
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  FACTOR_VALUES_INSTRUCTION,
+  OLDER_RELEVANT_FACTS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -142,6 +144,30 @@ const CODE_OWNED_INSTRUCTIONS = [
   // the pack. It licences continuity while keeping historical framing below
   // the current Living Model and explicit current-user corrections.
   ['BRIEF_INSTRUCTION', BRIEF_INSTRUCTION],
+  // ⛔ FOUND MISSING 2026-08-27, by the reviewer of the block below. This is
+  // emitted by `buildUserMessage` and was NOT registered here — so the very
+  // instruction whose header explains why hand-maintained sanction lists drift
+  // was itself outside the EMISSION check. That is the defect this gate exists
+  // to catch, live inside the gate. REGISTRATION_COMPLETENESS below now derives
+  // the emission set from the source, so this list cannot fall short again.
+  ['OLDER_RELEVANT_FACTS_INSTRUCTION', OLDER_RELEVANT_FACTS_INSTRUCTION],
+  // Factor value state. Emitted by the SAME condition that puts `factor_values`
+  // on the pack — same reasoning as its seven siblings above. PR #1122 shipped
+  // the FIELD with no instruction at all; registering here puts the block under
+  // the EMISSION check.
+  //
+  // ⚠ AND THE FIELD'S COVERAGE BY *THIS GATE* IS FIXTURE-CONTINGENT, NOT FREE.
+  // `proseLeaves` only collects strings of >= 4 words, so a `factor_values`
+  // fixture carrying only short labels scores ZERO prose leaves and THE GATE
+  // passes it by testing nothing. An earlier revision of this comment called
+  // that blindness STRUCTURAL, on the premise that "real factor labels are
+  // short". ⛔ THAT PREMISE IS FALSE and this file disproves it 200 lines up:
+  // `label` is `z.string().min(1)` with NO maximum, and the maximal fixture
+  // already carries `factor_label: 'Engineer salary in the local market'`.
+  // Measured: one six-word label is the whole difference between this gate
+  // being blind to the field and RED-ing on it by name. The fixture above now
+  // carries representative labels, and FACTOR_VALUES_PROSE_COVERAGE pins it.
+  ['FACTOR_VALUES_INSTRUCTION', FACTOR_VALUES_INSTRUCTION],
 ] as const satisfies ReadonlyArray<readonly [string, string]>;
 
 const MODEL_FACING_CORPUS = [
@@ -368,8 +394,24 @@ function assembleMaximalPack(
     // (`without_value_count: 0`) is exercised in factor-value-record.test.ts.
     factorValues: {
       factors: [
-        { label: 'Churn rate', has_value: true, provenance: 'user_stated' },
-        { label: 'Onboarding time', has_value: false, provenance: 'ai_drafted' },
+        // ⚠ AT LEAST ONE LABEL MUST BE PROSE-LENGTH, AND THAT IS NOT COSMETIC —
+        // it is what makes THE GATE cover this field at all. `proseLeaves` only
+        // collects strings of >= 4 words; with only short labels `factor_values`
+        // scores ZERO prose leaves and the gate passes it by testing nothing.
+        // MEASURED, three runs: short labels − registration → 21/21 GREEN (the
+        // gate is blind); ONE six-word label − registration → THE GATE REDs
+        // naming `factor_values`; long label + registration → GREEN. The gate
+        // was one label away from being the thing that would have caught the
+        // mute-field defect it exists to catch.
+        //
+        // These lengths are REPRESENTATIVE, not padding: `label` is
+        // `z.string().min(1)` with NO maximum, and this very fixture already
+        // carries `factor_label: 'Engineer salary in the local market'` (six
+        // words) and eleven-word graph node labels.
+        // FACTOR_VALUES_PROSE_COVERAGE below pins this so a tidy-up cannot
+        // silently return the field to being uncovered.
+        { label: 'Monthly churn rate across enterprise accounts', has_value: true, provenance: 'user_stated' },
+        { label: 'Onboarding time for new enterprise customers', has_value: false, provenance: 'ai_drafted' },
         { label: 'Support load', has_value: false, provenance: 'unattributed' },
       ],
       without_value_count: 2,
@@ -564,6 +606,72 @@ describe('prompt ↔ pack sanction gate', () => {
         `sees the licence, so any waiver removed on its authority is a false claim), or the ` +
         `instruction is no longer code-owned and must leave MODEL_FACING_CORPUS.`,
     ).toEqual([]);
+  });
+
+  /**
+   * ⭐⭐ THE UNMIRRORED LIST, DERIVED. `CODE_OWNED_INSTRUCTIONS` above is
+   * hand-written, and on 2026-08-27 it was found SHORT: `buildUserMessage`
+   * emitted NINE instruction blocks and this list registered EIGHT, so
+   * `OLDER_RELEVANT_FACTS_INSTRUCTION` sat outside the EMISSION check entirely.
+   * A hand-maintained list drifting silently, inside the gate built to catch a
+   * hand-maintained list drifting silently (platform CLAUDE.md trap 12).
+   *
+   * This derives the emission set from the SOURCE of `buildUserMessage`, so the
+   * registration list can never again be short without a RED. It is deliberately
+   * one-directional: registered → rendered is already covered by EMISSION above;
+   * this closes emitted → registered.
+   */
+  it('REGISTRATION_COMPLETENESS — every instruction buildUserMessage emits is registered above (derived, not mirrored)', () => {
+    const routingSource = readFileSync(
+      join(HERE, '..', '..', 'routing', 'route-with-tool-use.ts'),
+      'utf8',
+    );
+    const emitted = [
+      ...new Set(
+        [...routingSource.matchAll(/parts\.push\('',\s*([A-Z_]+_INSTRUCTION)\)/g)].map(
+          (m) => m[1]!,
+        ),
+      ),
+    ].sort();
+
+    // POSITIVE CONTROL (trap #13): an absence claim from a regex that matched
+    // nothing is vacuous, and a silently-broken pattern returns exactly the
+    // clean output of a healthy one. Prove the probe SEES a known member.
+    expect(emitted.length, 'derived zero emissions — the probe is blind').toBeGreaterThan(0);
+    expect(emitted, 'the probe missed a known emission — pattern drift').toContain(
+      'GRAPH_CONTEXT_INSTRUCTION',
+    );
+
+    const registered = new Set<string>(CODE_OWNED_INSTRUCTIONS.map(([name]) => name));
+    const unregistered = emitted.filter((name) => !registered.has(name));
+    expect(
+      unregistered,
+      `buildUserMessage renders these instruction blocks into the prompt, but they are not ` +
+        `registered in CODE_OWNED_INSTRUCTIONS: ${unregistered.join(', ')}. They therefore sit ` +
+        `outside the EMISSION check and outside MODEL_FACING_CORPUS — a field sanctioned only ` +
+        `by one of them would read as UNSANCTIONED here, and a block that stopped being ` +
+        `emitted would go unnoticed.`,
+    ).toEqual([]);
+  });
+
+  /**
+   * ⭐ THIS GATE'S COVERAGE OF `factor_values` IS FIXTURE-CONTINGENT — pin it, or
+   * it decays silently (trap 12b: a control that quietly stops discriminating).
+   * `proseLeaves` needs >= 4 words; shorten these labels and the field scores
+   * zero prose leaves and THE GATE passes it by testing nothing. Measured: that
+   * is a 21/21 GREEN over a completely unsanctioned field.
+   */
+  it('FACTOR_VALUES_PROSE_COVERAGE — the fixture keeps factor_values prose-bearing, so THE GATE genuinely covers it', () => {
+    const leaves = unsanctionableProse(SERIALISED.factor_values, USER_MESSAGE);
+    expect(
+      leaves.length,
+      'factor_values carries no prose leaf of >= 4 words, so THE GATE cannot fire on it and ' +
+        'passes this field by testing nothing. Restore a representative multi-word factor label ' +
+        '— `label` is z.string().min(1) with no maximum and real labels run long.',
+    ).toBeGreaterThan(0);
+    // CONTRAST CONTROL: a field that genuinely IS control-metadata still reads
+    // zero, so the assertion above is not passing on a blanket truth.
+    expect(unsanctionableProse(SERIALISED.scenario_id, USER_MESSAGE)).toEqual([]);
   });
 
   it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
