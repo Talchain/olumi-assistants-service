@@ -38,7 +38,15 @@ const KNOWN_SCHEMA_SYMBOL_TWINS: Readonly<Record<string, readonly string[]>> = {
 
 const SCHEMAS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Every exported declaration name in a file, DERIVED from its bytes. */
+/**
+ * Every exported DECLARATION name in a file, DERIVED from its bytes.
+ *
+ * ⚠ SCOPE, STATED: this sees `export const|let|type|interface|enum|function|class`
+ * only. It is BLIND to re-export forms — `export { X }`, `export { X } from '…'`,
+ * `export * from '…'` — and four `export {` forms exist in `src/schemas/*.ts`. A twin
+ * created purely by re-export would therefore NOT be caught. Widen the pattern before
+ * claiming this guard covers re-exports.
+ */
 function exportedNames(source: string): string[] {
   const names: string[] = [];
   const re = /^export\s+(?:declare\s+)?(?:const|let|type|interface|enum|function|class)\s+([A-Za-z_$][\w$]*)/gm;

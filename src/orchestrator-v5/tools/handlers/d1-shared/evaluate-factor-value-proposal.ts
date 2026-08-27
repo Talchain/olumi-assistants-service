@@ -102,8 +102,10 @@ export function canonicaliseUnitForDisplay(unit: string | undefined): string | u
  * `__tests__/unit-comparison-key.test.ts`. Never widen this to strip punctuation
  * or match prefixes — that would bless a real rescale as a spelling.
  *
- * NOT for percent classification: a unit's IDENTITY and its SCALE CONVENTION are
- * two more different questions. See `unit-percent-authority.ts`.
+ * NOT for percent classification: a unit's IDENTITY ("are these the same unit?")
+ * and its SCALE CONVENTION ("what multiplier does this unit imply?") are two more
+ * different questions, and this function answers only the first. Do not extend it
+ * to classify scales.
  */
 export function unitComparisonKey(unit: string | undefined): string | undefined {
   const display = canonicaliseUnitForDisplay(unit);

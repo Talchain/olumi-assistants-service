@@ -41,6 +41,7 @@ import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
   canonicaliseUnitForDisplay,
+  unitComparisonKey,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
@@ -434,8 +435,25 @@ export function createSetFactorValueHandler(): HandlerFn {
             elicited_from: appliedProvenance.elicited_from,
           }
         : {}),
+      // ⭐ ON A FOLDED-KEY MATCH, THE FACTOR'S STORED SPELLING WINS — nothing was
+      // redeclared, so a value edit must not silently re-case what the factor
+      // DECLARES. This is not "fold the display path": a genuinely NEW unit (no
+      // stored unit, or a different comparison key) still persists the user's own
+      // case, which is the whole point of keeping a display form.
+      //
+      // ⚠ THE MEASURED HARM. `currencyPrefix` (`cee/factor-extraction/display-value
+      // .ts:65`) matches `unit === "GBP"` EXACTLY, not on a folded key. Persisting a
+      // proposal's 'gbp' over a stored 'GBP' therefore stripped the £ from every
+      // subsequent render. Folding the unit_mismatch gate is what first let a
+      // spelling-only proposal reach this write at all, so this guard ships with it.
       ...(parsed.unit !== undefined
-        ? { unit: parsed.unit }
+        ? {
+            unit:
+              before.unit !== undefined &&
+              unitComparisonKey(parsed.unit) === unitComparisonKey(before.unit)
+                ? before.unit
+                : parsed.unit,
+          }
         : before.unit !== undefined
           ? { unit: before.unit }
           : {}),
@@ -571,10 +589,26 @@ export function createSetFactorValueHandler(): HandlerFn {
       return { before, after };
     });
 
+    // ⚠ COMPARED ON THE FOLDED KEY, NOT STRICTLY. `noop` is a THIRD reader of the
+    // "are these the same unit?" question that `unitComparisonKey` owns; leaving it
+    // on strict equality made a spelling-only proposal report as an APPLIED CHANGE:
+    // "Updated Headcount from 12 people to 12 People. This makes the last analysis
+    // stale. Re-run analysis…" — narrating a change that did not happen, contradicting
+    // the freshness authority (the analysis hash is unchanged), and prompting a paid
+    // re-run. The 12 other strict unit-equality gates in this repo are rowed
+    // separately; this one is here because folding the mismatch gate made it reachable.
+    //
+    // ⚠ HONEST STATUS: this is DEFENCE-IN-DEPTH, not independently load-bearing.
+    // Mutation-checked and it SURVIVED — reverting it to strict equality leaves the
+    // suite green, because the write above now keeps `before.unit` on a folded match,
+    // so the two spellings are already identical by the time `noop` sees them, and a
+    // non-matching key is refused earlier at guard 2b. It is kept so the invariant is
+    // EXPLICIT rather than incidental: if the write rule ever changes, `noop` must not
+    // silently start narrating phantom changes again. Do not cite it as mutation-verified.
     const noop =
       before.value === after.value &&
       before.raw_value === after.raw_value &&
-      before.unit === after.unit &&
+      unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
       before.cap === after.cap;
 
     const fact: SetFactorValueHandlerFact = {
