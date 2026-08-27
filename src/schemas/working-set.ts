@@ -195,7 +195,15 @@ export type HighlightT = z.infer<typeof Highlight>;
 /**
  * Provenance - source attribution for responses.
  */
-export const ProvenanceSource = z.enum([
+/**
+ * WHICH SUBSYSTEM CONTRIBUTED TO THIS ASSISTANT RESPONSE — attribution carried on
+ * `ProvenanceItem` for the /assist/v1/ask reply.
+ *
+ * ⚠ NOT the same concept as `GraphEvidenceSource` (`schemas/graph.ts`), which
+ * answers "how was this graph datum obtained?". See that declaration for the full
+ * note. Pinned by `schemas/__tests__/schema-symbol-twins.test.ts`.
+ */
+export const ResponseAttributionSource = z.enum([
   "brief",
   "graph",
   "market_context",
@@ -207,7 +215,7 @@ export const ProvenanceSource = z.enum([
 export const ProvenanceConfidence = z.enum(["high", "medium", "low"]);
 
 export const ProvenanceItem = z.object({
-  source: ProvenanceSource,
+  source: ResponseAttributionSource,
   confidence: ProvenanceConfidence,
   note: z.string().max(500),
   references: z.object({

@@ -26,7 +26,17 @@
 import { z } from "zod";
 import { GoalThresholdFrame } from "@talchain/schemas";
 
-export const ProvenanceSource = z.enum([
+/**
+ * HOW A GRAPH DATUM WAS OBTAINED — the evidence kind stamped on a node or edge.
+ *
+ * ⚠ NOT the same concept as `ResponseAttributionSource` (`working-set.ts`), which
+ * answers a DIFFERENT question: "which subsystem contributed to this assistant
+ * RESPONSE?". Both were called `ProvenanceSource` until the C4 lane; they shared
+ * one member (`engine`) and no file ever referenced both. They were renamed apart
+ * rather than merged — converging two answers to different questions is the
+ * defect, not the fix. Pinned by `__tests__/schema-symbol-twins.test.ts`.
+ */
+export const GraphEvidenceSource = z.enum([
   "document", "metric", "hypothesis", "engine", "synthetic",
   // Extended set: LLM legitimately produces these for edge provenance
   "structural",        // structural edges (decision→option, option→factor)
@@ -435,7 +445,7 @@ const EdgeInput = z.object({
   belief: z.number().min(0).max(1).optional(),
   // Support both structured and legacy string provenance for migration
   provenance: z.union([StructuredProvenance, z.string().min(1)]).optional(),
-  provenance_source: ProvenanceSource.optional(),
+  provenance_source: GraphEvidenceSource.optional(),
   // Effect direction: LLM outputs directly, fallback to heuristic inference if missing
   effect_direction: EffectDirection.optional(),
   // Edge origin: tracks whether edge was created by user, AI, or system defaults
