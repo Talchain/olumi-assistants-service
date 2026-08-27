@@ -355,6 +355,48 @@ export const AnalysisReadyPayload = z.object({
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 
+/**
+ * THE ONE SPELLING of the degenerate "blocked, and I am not describing a model"
+ * carrier — `status: 'blocked'` with an EMPTY identity.
+ *
+ * ⭐ WHY THIS IS A FUNCTION AND NOT THREE OBJECT LITERALS. Three production
+ * sites used to spell this shape independently, each with a DIFFERENT optional
+ * field set beside it:
+ *   · `orchestrator-v5/compose/analysis-ready-emit.ts`  + `bias_findings: []`
+ *   · `orchestrator/tools/analysis-ready-helper.ts`     + `blocked_reason`,
+ *                                                         `readiness_issues`, …
+ *   · `orchestrator/tools/analysis-ready-helper.ts`     + `blocked_reason`
+ * Three spellings of one shape is how they drift apart silently, and a consumer
+ * cannot tell which producer it is holding. The REQUIRED TRIPLE lives here; each
+ * caller spreads it and adds only the fields its own turn genuinely produced.
+ *
+ * ⚠ `options` AND `goal_node_id` ARE PRESENT-BUT-EMPTY, NEVER DROPPED. Both are
+ * REQUIRED at the boundary (`@talchain/schemas` `OlumiResponseSchema` declares
+ * `options: z.array(z.unknown())` and `goal_node_id: z.string()`), so omitting
+ * either fails egress validation and destroys the whole turn.
+ *
+ * ⚠ THIS IS NOT A "NO MODEL EXISTS" CLAIM. It is "this turn is not describing
+ * one". A producer that HOLDS a real identity must carry it rather than reach
+ * for this — see `buildAnalysisRefusalReadiness`, which returns this shape only
+ * when the refusal is genuinely not about the model.
+ */
+export function blockedIdentityCarrier(): {
+  options: never[];
+  goal_node_id: string;
+  status: "blocked";
+} {
+  // ⚠ KEY ORDER IS LOAD-BEARING HERE, AND ONLY HERE — do not "tidy" it.
+  // `analysis-refusal-carries-repair-route.test.ts:247` pins the refusal
+  // carrier as BYTE-IDENTICAL to its previous behaviour via `JSON.stringify`,
+  // which is key-order sensitive. This order is that carrier's original order,
+  // so adopting the factory changes no bytes at the site that guarantees it.
+  // (Swept before choosing: every OTHER equality on this payload goes through
+  // `stableStringify` — which sorts keys — or `Object.keys(...).sort()`, so no
+  // other site can observe the order. The two remaining callers' key order does
+  // change, and nothing pins or hashes it.)
+  return { options: [], goal_node_id: "", status: "blocked" };
+}
+
 // ============================================================================
 // Extended Response Type
 // ============================================================================

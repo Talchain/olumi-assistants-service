@@ -22,6 +22,7 @@
 
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import type { FreshnessDerivation, FreshnessReason } from '../context/freshness.js';
+import { blockedIdentityCarrier } from '../../schemas/analysis-ready.js';
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -57,7 +58,11 @@ export const FRESHNESS_ONLY_SYNTHESIS_REASONS: ReadonlySet<FreshnessReason> = ne
  * ("validation failure prevents analysis — invalid graph structure").
  */
 export function synthesiseFreshnessOnlyAnalysisReady(): AnalysisReadyPayload {
-  return { status: 'blocked', goal_node_id: '', options: [], bias_findings: [] };
+  // The required triple comes from `blockedIdentityCarrier` — the single owner
+  // of this shape (see its doc block). Only `bias_findings` is added here, and
+  // only because this carrier's contract is "no science content": an empty
+  // array is the explicit form of that claim for this one field.
+  return { ...blockedIdentityCarrier(), bias_findings: [] };
 }
 
 /**
