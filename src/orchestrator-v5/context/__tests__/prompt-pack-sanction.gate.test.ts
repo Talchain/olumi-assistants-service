@@ -642,7 +642,7 @@ describe('prompt ↔ pack sanction gate', () => {
       'GRAPH_CONTEXT_INSTRUCTION',
     );
 
-    const registered = new Set(CODE_OWNED_INSTRUCTIONS.map(([name]) => name));
+    const registered = new Set<string>(CODE_OWNED_INSTRUCTIONS.map(([name]) => name));
     const unregistered = emitted.filter((name) => !registered.has(name));
     expect(
       unregistered,
