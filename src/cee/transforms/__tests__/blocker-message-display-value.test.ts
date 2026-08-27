@@ -154,6 +154,21 @@ describe("a blocker message renders the factor's current level in its own displa
     expect(messageFor(payload, "fac_licence_cost")).not.toContain("is currently 0.78");
   });
 
+  it("renders a PERCENT factor as a percentage, not as its internal level", () => {
+    // ⭐ THIS CLASS IS SHARED WITH THE SCALE SEAM (#1134, percent frame inversion).
+    // That change decides WHAT THE NUMBER IS; this one decides HOW IT IS SHOWN.
+    // Both bear on one graph for a percent factor, so the case is pinned here:
+    // a change to either side that silently reverted the other would RED.
+    const payload = payloadFor([
+      factor("fac_churn", "Monthly Churn Rate", {
+        observed_state: { value: 0.12, raw_value: 12, unit: "%", factor_type: "other" },
+      }),
+    ]);
+
+    expect(messageFor(payload, "fac_churn")).toContain("is currently 12%");
+    expect(messageFor(payload, "fac_churn")).not.toContain("is currently 0.12");
+  });
+
   it("says the bare level when that is genuinely all the record settles — honest, never absent", () => {
     // Rung 3, the terminal rung. `factor_type` is absent too, so no qualitative band
     // is available. The number is SAID rather than encoded as an absence.
