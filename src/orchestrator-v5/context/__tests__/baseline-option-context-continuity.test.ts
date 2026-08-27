@@ -179,6 +179,88 @@ describe('canonical baseline-option continuity', () => {
     },
   );
 
+  it('leaves structural-fallback baseline transport byte-equivalent to the prior path', () => {
+    const outcome = compactGraphForContextPack(
+      {
+        nodes: [
+          {
+            id: 'opt_current',
+            kind: 'option',
+            label: 'Current arrangement',
+            is_baseline: false,
+            data: { is_baseline: true },
+          },
+          { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+        ],
+        // Missing strict GraphV3 edge fields deliberately selects the legacy
+        // structural fallback. That path must not acquire the strict-parser
+        // recovery introduced by this change.
+        edges: [{ from: 'opt_current', to: 'goal_growth' }],
+      } as GraphStateIngress,
+      { requestId: 'req-baseline-structural-fallback' },
+    );
+    expect(outcome.kind).toBe('compacted');
+    if (outcome.kind !== 'compacted') throw new Error('expected compacted graph');
+    expect(outcome.via).toBe('structural_fallback');
+    expect(outcome.compact.nodes.find((node) => node.id === 'opt_current')).not.toHaveProperty(
+      'is_baseline',
+    );
+  });
+
+  it('does not let one nested marker contaminate a duplicate-ID sibling', () => {
+    const prompt = promptFromRawNodes([
+      {
+        id: 'opt_same',
+        kind: 'option',
+        label: 'Marked sibling',
+        is_baseline: false,
+        data: { is_baseline: true },
+      },
+      {
+        id: 'opt_same',
+        kind: 'option',
+        label: 'Unmarked sibling',
+        is_baseline: false,
+        data: { is_baseline: false },
+      },
+    ] as GraphStateIngress['nodes']);
+    expect(
+      observedOptionNodes(prompt).map((node) => [node.label, node.is_baseline]),
+    ).toEqual([
+      ['Marked sibling', true],
+      ['Unmarked sibling', undefined],
+    ]);
+  });
+
+  it('fails weak when the raw and parsed positions no longer identify the same node', () => {
+    const first = [
+      {
+        id: 'opt_marked',
+        kind: 'option',
+        label: 'Marked option',
+        is_baseline: false,
+        data: { is_baseline: true },
+      },
+      { id: 'opt_other', kind: 'option', label: 'Other option' },
+    ];
+    const reversed = [...first].reverse();
+    let reads = 0;
+    const graph = {
+      get nodes() {
+        reads += 1;
+        return reads === 1 ? first : reversed;
+      },
+      edges: [],
+    } as unknown as GraphStateIngress;
+    const outcome = compactGraphForContextPack(graph, {
+      requestId: 'req-baseline-position-mismatch',
+    });
+    expect(outcome.kind).toBe('compacted');
+    if (outcome.kind !== 'compacted') throw new Error('expected compacted graph');
+    expect(outcome.via).toBe('strict_parse');
+    expect(outcome.compact.nodes.every((node) => node.is_baseline !== true)).toBe(true);
+  });
+
   it('does not infer baseline identity from a status-quo label or a non-option marker', () => {
     const prompt = promptFromRawNodes([
       { id: 'opt_status_quo', kind: 'option', label: 'Status quo alternative' },
