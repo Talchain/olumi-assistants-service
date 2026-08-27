@@ -903,29 +903,31 @@ describe('System B — selected canonical option referent continuity', () => {
         graphState: SHORT_OPTION_LABEL_GRAPH as never,
       },
     );
-    const terminalWin = await runTurnExecutor(
-      mkPayload('What would make it win?'),
-      'req-referent-terminal-win',
-      {
+    let selectedResponseCount = 0;
+    for (const [message, requestId] of [
+      ['What would make it win?', 'req-referent-terminal-win'],
+      ['What would make it win?!', 'req-referent-terminal-cluster'],
+      ['What would make it win??', 'req-referent-repeated-question'],
+      ['“What would make it win?”', 'req-referent-curly-quote'],
+      ['“What would make it win?”\u00a0', 'req-referent-unicode-whitespace'],
+      ['"What would make it win?"', 'req-referent-straight-quote'],
+      ['What would make it win?)', 'req-referent-closing-bracket'],
+      ['What would make it win?）', 'req-referent-unicode-bracket'],
+      ['What would make it the leading option?', 'req-referent-option-rank'],
+    ] as const) {
+      const result = await runTurnExecutor(mkPayload(message), requestId, {
         routingAdapter: { chatWithTools: vi.fn() } as never,
         handlerRegistry: REAL_REGISTRY,
         graphState: SHORT_OPTION_LABEL_GRAPH as never,
         selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
-      },
-    );
-    const optionRank = await runTurnExecutor(
-      mkPayload('What would make it the leading option?'),
-      'req-referent-option-rank',
-      {
-        routingAdapter: { chatWithTools: vi.fn() } as never,
-        handlerRegistry: REAL_REGISTRY,
-        graphState: SHORT_OPTION_LABEL_GRAPH as never,
-        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
-      },
-    );
+      });
+      selectedResponseCount += 1;
+      expect(result.response.assistant_text, message).toBe(
+        explicit.response.assistant_text,
+      );
+      expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
+    }
 
-    expect(terminalWin.response.assistant_text).toBe(explicit.response.assistant_text);
-    expect(optionRank.response.assistant_text).toBe(explicit.response.assistant_text);
     expect(explicit.response.assistant_text).toContain('US would lead instead');
     const flipFacts = appendCalls
       .flatMap(([write]) => {
@@ -937,11 +939,13 @@ describe('System B — selected canonical option referent continuity', () => {
         return record.handler_facts ?? [];
       })
       .filter((fact) => fact.fact_type === 'what_would_flip');
-    expect(flipFacts).toHaveLength(3);
+    expect(flipFacts).toHaveLength(10);
+    const explicitFactBytes = JSON.stringify(flipFacts[0]!.result);
     for (const fact of flipFacts) {
       expect(fact.result?.answer_source).toBe('deterministic_fallback');
       expect(fact.result?.fallback_reason).toBeNull();
+      expect(JSON.stringify(fact.result)).toBe(explicitFactBytes);
     }
-    expect(JSON.stringify(optionRank.response)).not.toContain('model_version_receipt');
+    expect(selectedResponseCount).toBe(9);
   });
 });

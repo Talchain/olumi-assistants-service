@@ -336,6 +336,13 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
 
   it.each([
     'What would make it win?',
+    'What would make it win?!',
+    'What would make it win??',
+    '“What would make it win?”',
+    '“What would make it win?”\u00a0',
+    '"What would make it win?"',
+    'What would make it win?)',
+    'What would make it win?）',
     'What would make it win if demand improved?',
     'What would make it win, given current demand?',
     'What would make it the leading option?',

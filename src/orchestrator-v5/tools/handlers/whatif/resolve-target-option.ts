@@ -199,8 +199,9 @@ function hasCrossKindIdentityCollision(graph: unknown): boolean {
  */
 const OPTION_DEICTIC_REFERENCE =
   '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
+const TERMINAL_PUNCTUATION_CLUSTER = '[?!.]+[\\p{Pe}\\p{Pf}"\']*';
 const TERMINAL_OUTCOME_BOUNDARY =
-  '(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?!.](?=\\s*$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))';
+  `(?=\\s*(?:(?:instead|overall)\\s*)?(?:${TERMINAL_PUNCTUATION_CLUSTER}(?=\\s*$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))`;
 const TERMINAL_WIN_CUE =
   `win${TERMINAL_OUTCOME_BOUNDARY}`;
 const TERMINAL_OPTION_RANK_CUE =
@@ -212,19 +213,19 @@ const OPTION_OUTCOME_CUE =
 const SELECTED_OPTION_DEICTIC_PATTERNS: readonly RegExp[] = [
   new RegExp(
     `\\b(?:make|help|enable|allow|get)\\s+${OPTION_DEICTIC_REFERENCE}\\s+(?:to\\s+)?${OPTION_OUTCOME_CUE}\\b`,
-    'i',
+    'iu',
   ),
   new RegExp(
     `\\bfor\\s+${OPTION_DEICTIC_REFERENCE}\\s+to\\s+${OPTION_OUTCOME_CUE}\\b`,
-    'i',
+    'iu',
   ),
   new RegExp(
     `\\b(?:could|can|would|might|should)\\s+${OPTION_DEICTIC_REFERENCE}\\s+${OPTION_OUTCOME_CUE}\\b`,
-    'i',
+    'iu',
   ),
   new RegExp(
     `\\b${OPTION_DEICTIC_REFERENCE}\\s+(?:could|can|would|might|should)\\s+${OPTION_OUTCOME_CUE}\\b`,
-    'i',
+    'iu',
   ),
 ];
 
