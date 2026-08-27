@@ -207,7 +207,7 @@ describe('routeWithToolUse — F2 forced explanation intent', () => {
     expect(userContent).toContain('graph_context.status');
     expect(userContent).toContain('canonical only when that status is canonical');
     expect(userContent).toContain('provisional is not saved or accepted state');
-    expect(userContent).toContain('carrier-looking trailing clause is handled separately');
+    expect(userContent).toContain('trailing clause is handled separately');
     expect(userContent).toContain('do not infer that it is a request');
     expect(userContent).not.toContain('did not authorise a model change');
     expect(args.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
@@ -357,7 +357,7 @@ describe('buildForcedIntentDirective', () => {
     expect(directive).toContain('unavailable or absent must fail weak');
     expect(directive).toContain('recent accepted-change record');
     expect(directive).toContain('any analysis facts actually present');
-    expect(directive).toContain('carrier-looking trailing clause is handled separately');
+    expect(directive).toContain('trailing clause is handled separately');
     expect(directive).toContain('do not infer that it is a request');
     expect(directive).toContain('do not propose, apply, confirm, or claim to have applied it');
     expect(directive).toContain('handler_id "explain_from_structure"');

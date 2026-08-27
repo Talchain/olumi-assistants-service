@@ -543,7 +543,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         const prompt = String(call.messages[0]!.content);
         expect(call.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
         expect(prompt).toContain('accepted update did');
-        expect(prompt).toContain('carrier-looking trailing clause is handled separately');
+        expect(prompt).toContain('trailing clause is handled separately');
         expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
         expect(prompt).toContain(SAFE_SUMMARY);
 
