@@ -19,7 +19,7 @@ import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
 // be a mirror of the schema and would drift the first time a field is added.
-import { AnalysisBlocker } from "../../schemas/analysis-ready.js";
+import { AnalysisBlocker, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
 import {
   validateGraphStructure,
   CURRENT_STATE_VIOLATION_MESSAGES,
@@ -1180,9 +1180,7 @@ export function assessCanonicalAnalysisReadiness(
           ...(proposal ? { repair_proposal: proposal } : {}),
         }
       : {
-          status: 'blocked',
-          goal_node_id: '',
-          options: [],
+          ...blockedIdentityCarrier(),
           blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR',
           readiness_issues: allIssues,
           ...(proposal ? { repair_proposal: proposal } : {}),
@@ -1268,8 +1266,45 @@ export function buildCanonicalAnalysisReadyFromGraph(
 }
 
 /**
- * CARRY the canonical run-admission verdict onto a payload that was built by some
- * OTHER projection of the same graph. A carry, never a second derivation.
+ * CARRY the CANONICAL-ONLY fields onto a payload that was built by some OTHER
+ * projection of the same graph. A carry, never a second derivation.
+ *
+ * The canonical-only set is `may_run`, `readiness_issues` and `repair_proposal`
+ * — the three fields the canonical authority computes that no other producer
+ * does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
+ * member; the name is now the general one, because a function that carries an
+ * exhaustive issue record while calling itself a run-admission carry is the
+ * mis-naming this module keeps paying for.
+ *
+ * ⭐⭐ WHY THE OTHER TWO JOINED, AND WHY A SPREAD WOULD NOT HAVE DONE IT.
+ *
+ * `analysis_ready` reached consumers in two shapes on one graph (measured on a
+ * four-valueless-factor graph, both producers driven):
+ *
+ *   canonical (`buildCanonicalAnalysisReadyFromGraph`)
+ *       8 blockers · 8 readiness_issues · repair_proposal PRESENT
+ *   pipeline  (`cee/transforms/analysis-ready.ts`)
+ *       8 blockers · 0 readiness_issues · repair_proposal ABSENT
+ *
+ * ⚠ THE ATTRIBUTION IS THE LOAD-BEARING PART. The two fields are NOT dropped by
+ * `extractAnalysisReady`. The pipeline builds its payload by calling
+ * `buildAnalysisReadyPayload` DIRECTLY (`cee/transforms/schema-v3.ts:1595`), and
+ * that producer never computes either field — zero occurrences of both names in
+ * the file, contrast control `blockers` = 20 in the same sweep. A re-projection
+ * cannot drop what was never in the body it re-projects, so making
+ * `extractAnalysisReady` spread instead of naming fields would NOT have
+ * recovered them. Carrying from the authority that DOES compute them is the only
+ * fix that works, and it is why this function grew rather than that one.
+ *
+ * THE COST OF NOT CARRYING, both consumers named:
+ *   · `summariseReadiness` (`routing/readiness-summary.ts:200,210`) gated its
+ *     multi-item branch on `repair_proposal` and told a user *"One factor still
+ *     has no value set"* while FOUR had none — a silent 4x under-report,
+ *     wire-witnessed twice. That consumer carries a local compensation today.
+ *   · `evaluateReadiness` (`coaching/coaching-state.ts:332`) adds the
+ *     `goal_node_missing` coaching signal only from `readiness_issues`. It has
+ *     NO compensation, so on every pipeline-shaped payload that signal is
+ *     silently absent. Nothing was watching this one.
  *
  * ⭐ WHY THIS EXISTS, AND WHY IT IS NOT A SECOND STAMPER.
  *
@@ -1296,14 +1331,55 @@ export function buildCanonicalAnalysisReadyFromGraph(
  * (`may_run !== false`) turns into its existing fallback. Absence is never
  * synthesised into `false`: inventing a refusal out of an assessor failure is the
  * false-BLOCK harm the field was published to end.
+ *
+ * ⚠⚠ WHAT THIS DELIBERATELY DOES NOT COVER — READ THIS BEFORE "FIXING" IT.
+ *
+ * A graph that does not parse as V3 has NO canonical payload to carry from.
+ * `draft-graph.ts:403` sets `graphOutput = isGraphV3(graph) ? graph : null` and
+ * `:421` builds the canonical payload ONLY when `graphOutput` is non-null, so on
+ * that path `canonical` arrives `undefined` and this function returns the
+ * pipeline-shaped payload UNCHANGED.
+ *
+ * THAT IS THE INTENDED BEHAVIOUR, NOT AN OVERSIGHT. The alternative is to
+ * re-derive `readiness_issues` from `blockers` here so the hole is filled — and
+ * that would put a SECOND authority on what an issue is into the tree, mint a
+ * record no assessment produced, and do it precisely on the graphs the canonical
+ * authority could not understand, i.e. where a derivation is least trustworthy.
+ * A payload that is visibly pipeline-shaped is a true statement about a graph we
+ * could not assess; a back-filled one is a confident wrong answer. The gap is
+ * pinned as `graph_not_parseable_as_v3` in the KNOWN-NOT-COVERED set in
+ * `__tests__/canonical-readiness-record-carry.test.ts`, which REDs if that set
+ * grows OR shrinks — so this limit cannot silently change scope.
  */
-export function carryCanonicalRunAdmission(
+export function carryCanonicalOnlyFields(
   payload: NonNullable<GraphPatchBlockData['analysis_ready']>,
   canonical: AnalysisReadyPayload | undefined,
 ): NonNullable<GraphPatchBlockData['analysis_ready']> {
-  const mayRun = canonical?.may_run;
-  if (mayRun === undefined || payload.may_run === mayRun) return payload;
-  return { ...payload, may_run: mayRun };
+  if (!canonical) return payload;
+
+  const patch: Record<string, unknown> = {};
+
+  const mayRun = canonical.may_run;
+  if (mayRun !== undefined && payload.may_run !== mayRun) patch.may_run = mayRun;
+
+  // ⚠ REFERENCE comparison, not deep equality. When `payload` IS the canonical
+  // build (every non-pipeline path), these are the SAME array/object, so no
+  // patch is produced and the identity guarantee below holds by construction.
+  // A deep comparison would be slower and would buy nothing: two structurally
+  // equal records from two different assessments would still be one authority
+  // disagreeing with itself, which is a defect to surface, not to smooth over.
+  const issues = canonical.readiness_issues;
+  if (issues !== undefined && payload.readiness_issues !== issues) {
+    patch.readiness_issues = issues;
+  }
+
+  const proposal = canonical.repair_proposal;
+  if (proposal !== undefined && payload.repair_proposal !== proposal) {
+    patch.repair_proposal = proposal;
+  }
+
+  if (Object.keys(patch).length === 0) return payload;
+  return { ...payload, ...patch };
 }
 
 // ============================================================================
@@ -1445,7 +1521,16 @@ export function computeStructuralReadiness(
  * on the wire — `synthesiseFreshnessOnlyAnalysisReady` emits it for the
  * transport-recovery carrier. Nothing new is minted here.
  */
-export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
+/**
+ * ⚠ DERIVED FROM THE CARRIER, NOT SPELLED AGAIN. Until the shared factory
+ * landed, this constant and the three carrier literals each wrote `'blocked'`
+ * independently — and the refusal carrier read this constant while the other two
+ * did not, so "the status the blocked carrier ships" had two sources that only
+ * happened to agree. Reading it off `blockedIdentityCarrier()` makes that
+ * structural: the constant cannot drift from the payload it describes, because
+ * it IS the payload's value. (No cycle: this module already imports the factory.)
+ */
+export const ANALYSIS_READY_BLOCKED_STATUS = blockedIdentityCarrier().status;
 
 /**
  * Build the typed readiness state for a REFUSED analyse turn.
@@ -1644,9 +1729,7 @@ export function buildAnalysisRefusalReadiness(
   structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>,
 ): AnalysisReadyPayload {
   const refusal: AnalysisReadyPayload = {
-    options: [],
-    goal_node_id: '',
-    status: ANALYSIS_READY_BLOCKED_STATUS,
+    ...blockedIdentityCarrier(),
     blocked_reason: blockedReason,
   };
   // `!` not `=== undefined`: the parameter is optional at compile time, but a

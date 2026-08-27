@@ -58,7 +58,7 @@ vi.mock('../../../cee/unified-pipeline/index.js', () => ({
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
-  carryCanonicalRunAdmission,
+  carryCanonicalOnlyFields,
 } from '../analysis-ready-helper.js';
 import { extractAnalysisReady, handleDraftGraph } from '../draft-graph.js';
 
@@ -284,7 +284,7 @@ describe('draft turn — bound to the canonical assessment by identity, not by c
 });
 
 /**
- * `carryCanonicalRunAdmission` directly — the precedence and identity rules the
+ * `carryCanonicalOnlyFields` directly — the precedence and identity rules the
  * end-to-end arms above cannot reach.
  *
  * The draft path never presents a payload that already carries a verdict (the
@@ -292,7 +292,7 @@ describe('draft turn — bound to the canonical assessment by identity, not by c
  * rule the function must hold: the moment any producer DOES name the field, the
  * answer must be CEE's, and nothing else in the tree would notice if it were not.
  */
-describe('carryCanonicalRunAdmission — precedence and identity', () => {
+describe('carryCanonicalOnlyFields — precedence and identity', () => {
   const refusingGraph = (): Graph => withUnconfiguredOptions(optionIds().slice(0, 2));
   const admittingGraph = (): Graph => withUnconfiguredOptions(optionIds().slice(0, 1));
 
@@ -307,7 +307,7 @@ describe('carryCanonicalRunAdmission — precedence and identity', () => {
       'PRECONDITION: the payload must really disagree, or this asserts nothing',
     ).toBe(true);
 
-    expect(carryCanonicalRunAdmission(claiming, canonical).may_run).toBe(false);
+    expect(carryCanonicalOnlyFields(claiming, canonical).may_run).toBe(false);
   });
 
   it('OPPOSITE DIRECTION — the canonical ADMISSION overrules a payload that claims it may not', () => {
@@ -318,7 +318,7 @@ describe('carryCanonicalRunAdmission — precedence and identity', () => {
     const claiming = { ...canonical!, may_run: false };
     expect(claiming.may_run, 'PRECONDITION: the payload must really disagree').toBe(false);
 
-    expect(carryCanonicalRunAdmission(claiming, canonical).may_run).toBe(true);
+    expect(carryCanonicalOnlyFields(claiming, canonical).may_run).toBe(true);
   });
 
   it('IDENTITY when there is no canonical verdict — absence is never synthesised into false', () => {
@@ -327,7 +327,7 @@ describe('carryCanonicalRunAdmission — precedence and identity', () => {
     // Reference equality, not deep equality: the path that already built
     // canonically must be provably unperturbed, which is what makes "every
     // non-draft turn is byte-identical" a property rather than a hope.
-    expect(carryCanonicalRunAdmission(payload, undefined)).toBe(payload);
+    expect(carryCanonicalOnlyFields(payload, undefined)).toBe(payload);
   });
 
   it('IDENTITY when the payload already carries that exact verdict', () => {
@@ -335,6 +335,6 @@ describe('carryCanonicalRunAdmission — precedence and identity', () => {
     const canonical = buildCanonicalAnalysisReadyFromGraph(graph)!;
     expect(canonical.may_run, 'PRECONDITION: canonical must have a verdict').toBeTypeOf('boolean');
 
-    expect(carryCanonicalRunAdmission(canonical, canonical)).toBe(canonical);
+    expect(carryCanonicalOnlyFields(canonical, canonical)).toBe(canonical);
   });
 });

@@ -17,7 +17,7 @@ import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, Orche
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
-import { buildCanonicalAnalysisReadyFromGraph, carryCanonicalRunAdmission } from "./analysis-ready-helper.js";
+import { buildCanonicalAnalysisReadyFromGraph, carryCanonicalOnlyFields } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { buildModelBuildingNotices } from "../../cee/draft/records/model-building-notices.js";
@@ -424,13 +424,22 @@ export async function handleDraftGraph(
   const projectedAnalysisReady = pipelineHasAnalysisReady
     ? extractAnalysisReady(body)
     : canonicalAnalysisReady;
-  // ⭐ THE DRAFT TURN MUST REPORT THE SAME RUN ADMISSION AS EVERY OTHER TURN.
-  // `extractAnalysisReady` is a named-field re-projection, so it drops `may_run` —
-  // and the pipeline could not have supplied it anyway, because the admission rule
-  // belongs to the side holding the graph. Carry CEE's own verdict on; do not
-  // recompute it. See `carryCanonicalRunAdmission`.
+  // ⭐ THE DRAFT TURN MUST REPORT THE SAME READINESS AS EVERY OTHER TURN.
+  // Three fields are computed ONLY by the canonical authority and can never
+  // arrive on the pipeline body, for the same underlying reason — they belong to
+  // the side holding the graph:
+  //   · `may_run`          the admission rule is CEE's, not the pipeline's
+  //   · `readiness_issues` the pipeline's producer never computes it
+  //   · `repair_proposal`  likewise
+  // ⚠ NOTE THE TWO DISTINCT MECHANISMS, because they invite different fixes.
+  // `may_run` is DROPPED by `extractAnalysisReady`'s named-field re-projection.
+  // The other two are never PRESENT to drop — `buildAnalysisReadyPayload`
+  // (`cee/transforms/schema-v3.ts:1595`) does not compute them at all, so making
+  // the re-projection spread would recover `may_run` and still lose those two.
+  // Carrying from the authority is what fixes both. Carry; never recompute.
+  // See `carryCanonicalOnlyFields`.
   const analysisReady = projectedAnalysisReady
-    ? carryCanonicalRunAdmission(projectedAnalysisReady, canonicalAnalysisReady)
+    ? carryCanonicalOnlyFields(projectedAnalysisReady, canonicalAnalysisReady)
     : undefined;
   if (analysisReady) {
     patchData.analysis_ready = analysisReady;
