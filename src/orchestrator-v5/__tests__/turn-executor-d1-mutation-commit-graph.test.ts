@@ -80,6 +80,16 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = priorFacts.filter(
+        (fact) =>
+          typeof fact === 'object' &&
+          fact !== null &&
+          (fact as { fact_type?: unknown }).fact_type === 'run_analysis' &&
+          (fact as { noop?: unknown }).noop !== true,
+      );
+      return { facts: facts as never, total_count: facts.length };
+    },
     readMostRecentPendingActions: async () => [],
     invalidateScoped: async () => ({
       scope: { kind: 'structural' as const },

@@ -436,6 +436,12 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts: facts as never, total_count: facts.length };
+    },
     // Production parity: `SupabaseSessionStore.readFactsFor` delegates to
     // `readFactsWithTurnFor` (single source of truth). The mockState in
     // this file already carries paired `priorTurns` / `priorFacts` arrays

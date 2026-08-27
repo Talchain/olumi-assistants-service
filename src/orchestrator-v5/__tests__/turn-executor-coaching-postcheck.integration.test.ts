@@ -38,6 +38,7 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -258,4 +259,3 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
     expect(postcheckEvent()?.data.violation).toBe('invented_mutation_success');
   });
 });
-

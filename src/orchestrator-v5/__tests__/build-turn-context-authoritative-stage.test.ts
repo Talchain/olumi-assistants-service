@@ -93,9 +93,11 @@ function makeRunAnalysisFact(graphHashAtRun: string): HandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
-    turn_id: 't1',
     noop: false,
     result: {
+      scenario_id: BASE.scenario_id,
+      leading_option_id: 'opt_hire',
+      summary: 'Analysis completed.',
       graph_hash_at_run: graphHashAtRun,
       computed_at: '2026-05-01T00:00:00.000Z',
       enrichment: { analysis_status: 'computed' },
@@ -128,6 +130,7 @@ function freshStoreFor(graph: unknown) {
       loadGraphResult: graph,
       priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
       facts: [fact],
+      scenarioAnalysisFacts: [fact],
     }),
   };
 }
@@ -177,6 +180,7 @@ describe('buildTurnContext — CEE derives the stage from its own model state', 
       loadGraphResult: mutatedGraph,
       priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
       facts: [fact],
+      scenarioAnalysisFacts: [fact],
     });
 
     expect(deriveAnalysisFreshness([fact], hashOf(mutatedGraph)).freshness).toBe('stale');
@@ -199,6 +203,7 @@ describe('buildTurnContext — CEE derives the stage from its own model state', 
       loadGraphResult: mutatedGraph,
       priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
       facts: [makeRunAnalysisFact(analysedHash)],
+      scenarioAnalysisFacts: [makeRunAnalysisFact(analysedHash)],
     });
 
     const decidePayload = makeMessagePayload({

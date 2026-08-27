@@ -122,6 +122,7 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
   fact_version: 1,
   noop: false,
   result: {
+    scenario_id: SCENARIO_ID,
     leading_option_id: OPTION_ID,
     summary: 'Prior analysis result',
     // Hashed from the SAME persisted graph the selection resolves against, so
@@ -146,6 +147,10 @@ vi.mock('../session/index.js', () => ({
     countTurns: async () => 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(ANALYSIS_TURN_ROW_ID) ? [RUN_ANALYSIS_FACT] : [],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [RUN_ANALYSIS_FACT],
+      total_count: 1,
+    }),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(ANALYSIS_TURN_ROW_ID)
         ? [

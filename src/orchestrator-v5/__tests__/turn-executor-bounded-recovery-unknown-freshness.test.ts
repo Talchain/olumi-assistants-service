@@ -73,6 +73,12 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return { facts, total_count: facts.length };
+    },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -350,16 +356,12 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
   });
 
   it(
-    'NONE (no successful prior fact) + body analysis_state populates the projection: ' +
-      'does NOT assert the model changed, gives honest can\'t-confirm copy + Re-run (F5 fix)',
+    'NONE (no successful prior fact) + body analysis_state cannot author the projection: ' +
+      'recovery and routing prompt stay byte-identical to omission',
     async () => {
-      // The exact F5 defect cell: a request supplies analysis_state in the body
-      // (populating contextPackForLog.analysis.leading_option — te:1498-1526), but
-      // there is NO successful prior run_analysis fact, so deriveAnalysisFreshness
-      // returns 'none' (freshness.ts:458). Before the fix, hasAnalysisProjection &&
-      // !isFresh && !isUnknown lumped 'none' with 'stale' and emitted "The model has
-      // changed since the last analysis" — a change assertion with zero evidence
-      // (there was never a prior analysis to change FROM).
+      // Request analysis_state is retained only for wire compatibility and
+      // narrowing metadata. With no canonical run_analysis fact it cannot mint
+      // a reasoning projection, change recovery copy/chips, or alter the prompt.
       mockState.priorTurns = [];
       mockState.priorFacts = [];
       mockState.persistedGraph = null;
@@ -394,17 +396,17 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
           fragile_edges: [],
         },
       };
-      const adapter = {
+      const adapterWithBody = {
         chatWithTools: vi
           .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
           .mockResolvedValueOnce(emptyAnswerCoachToolResult()),
       };
 
-      const result = await runTurnExecutor(
+      const resultWithBody = await runTurnExecutor(
         mkPayload('help me think this through'),
         'req-f5-none-with-projection',
         {
-          routingAdapter: adapter,
+          routingAdapter: adapterWithBody,
           graphState: READY_GRAPH as never,
           analysisState: bodyAnalysisState as never,
         },
@@ -413,22 +415,31 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
       // Sanity-pin: the verdict genuinely is 'none', not 'stale'.
       expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('none');
 
-      const text = result.response.assistant_text;
-      // F5 assertion: no fabricated change claim — there was never a prior analysis.
-      expect(text).not.toMatch(/has changed/i);
-      expect(text.toLowerCase()).not.toContain('out of date');
-      // Honest, and still offers a path forward.
-      expect(text).not.toBe('');
-      expect(text.toLowerCase()).toMatch(/can'?t confirm/);
-      expect(text.toLowerCase()).toMatch(/re-?run analysis/);
-
-      // Conservative chip choice: Re-run only (Explain would surface unconfirmed
-      // results). A projection is present, so the retry copy's no-chip arm must
-      // NOT swallow it.
-      const actionTypes = result.response.suggested_actions.map(
-        (a: { action_type?: string }) => a.action_type,
+      events = [];
+      const adapterWithoutBody = {
+        chatWithTools: vi
+          .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+          .mockResolvedValueOnce(emptyAnswerCoachToolResult()),
+      };
+      const resultWithoutBody = await runTurnExecutor(
+        mkPayload('help me think this through'),
+        'req-f5-none-without-projection',
+        {
+          routingAdapter: adapterWithoutBody,
+          graphState: READY_GRAPH as never,
+        },
       );
-      expect(actionTypes).toEqual(['run_analysis']);
+      expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('none');
+
+      const genericRetry =
+        "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
+      expect(resultWithBody.response.assistant_text).toBe(genericRetry);
+      expect(resultWithBody.response.suggested_actions).toEqual([]);
+      expect(resultWithoutBody.response.assistant_text).toBe(genericRetry);
+      expect(resultWithoutBody.response.suggested_actions).toEqual([]);
+      expect(adapterWithBody.chatWithTools.mock.calls[0]![0].messages).toEqual(
+        adapterWithoutBody.chatWithTools.mock.calls[0]![0].messages,
+      );
     },
   );
 

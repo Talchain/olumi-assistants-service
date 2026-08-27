@@ -1527,11 +1527,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
 
     // And the anti-regression half: a source that DID revert to the windowed
     // read must trip the `not.toContain` above.
-    const reverted = source.replace(
-      'let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(\n    context.prior_facts,\n    claimSafetyScope,\n  );',
+    const canonicalSource =
+      'let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(\n    scenarioAnalysisFacts,\n    claimSafetyScope,\n  );';
+    expect(source).toContain(canonicalSource);
+    const windowed = source.replace(
+      canonicalSource,
       'let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);',
     );
-    expect(reverted).toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
+    expect(windowed).toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1709,7 +1712,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // third caller gets the same answer BY CONSTRUCTION rather than by a
     // reviewer noticing", and the third caller got it by copy. Pinned in both
     // directions so the copy cannot come back.
-    expect(CHIP_CLICK).toContain('readMayNameLeadingOptionVerdict(');
+    expect(CHIP_CLICK).toContain('readMayNameLeadingOptionVerdictForTurn({');
     expect(CHIP_CLICK).not.toContain('selectRunAnalysisFact([...enrichedFacts');
 
     // 2026-07-27 — and the SCOPE is shared too, not just the reader. Calling
