@@ -24,6 +24,7 @@ import {
   buildUserMessage,
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
+  RUN_DELTA_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
 } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
@@ -103,6 +104,22 @@ function subtractMandatoryAuthorityDelta(
   message: string,
   expectedStatus: 'canonical' | 'provisional' | 'absent' | 'unavailable',
 ): string {
+  // ⭐ THE THIRD MANDATORY BLOCK. `RUN_DELTA_INSTRUCTION` is ALWAYS RENDERED
+  // (its load-bearing clause governs the turn where `run_delta` is ABSENT —
+  // the producer's default path — so gating it on the field's presence would
+  // render the absence rule only on the turns that do not need it). It is
+  // subtracted here exactly like the two authority blocks below, which is what
+  // keeps PRE_CHANGE_SHA256 and the 2535-byte length at their ORIGINAL values:
+  // this helper exists so a new MANDATORY block never forces a re-pin of a
+  // golden captured to detect UNINTENDED drift.
+  //
+  // Exactly-once asserted BEFORE the subtraction: a replace that silently
+  // matched nothing would subtract nothing and quietly re-pin the golden to
+  // different bytes, which is the failure this assertion exists to prevent.
+  expect(message.split(RUN_DELTA_INSTRUCTION)).toHaveLength(2);
+  const withoutRunDelta = message.replace(`\n\n${RUN_DELTA_INSTRUCTION}`, '');
+  expect(withoutRunDelta).not.toBe(message);
+  message = withoutRunDelta;
   const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
@@ -185,9 +202,20 @@ describe('buildUserMessage — conversation_summary (S4-inject)', () => {
       null,
       2,
     );
+    // ⚠ ANCHOR UPDATED, RECONSTRUCTION STILL EXACT. This inserted the precedence
+    // block immediately before '## User turn', which assumed it was the LAST
+    // block in the prompt. `RUN_DELTA_INSTRUCTION` is now always rendered and
+    // trails every conditional block, so the precedence block is inserted
+    // before IT instead. This remains a byte-exact reconstruction — the
+    // "adds EXACTLY the block" property is preserved, not weakened; only the
+    // anchor moved, and naming the new trailing block here is what keeps the
+    // assertion honest about the real ordering.
     const expected = base
       .replace(baseJson, expectedJson)
-      .replace('\n\n## User turn', `\n\n${SUMMARY_PRECEDENCE_INSTRUCTION}\n\n## User turn`);
+      .replace(
+        `\n\n${RUN_DELTA_INSTRUCTION}\n\n## User turn`,
+        `\n\n${SUMMARY_PRECEDENCE_INSTRUCTION}\n\n${RUN_DELTA_INSTRUCTION}\n\n## User turn`,
+      );
     expect(out).toBe(expected);
   });
 

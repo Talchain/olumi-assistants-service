@@ -1770,6 +1770,18 @@ export function assembleContextPackWithSummary(
     // path, not a degraded state — a fabricated comparison is worse than an
     // absent one.
     //
+    // ⚠ DELIBERATELY *NOT* GATED ON `graphContext.status === 'canonical'`,
+    // unlike `goal_target`, `factor_values` and `focus` beside it. Those are
+    // claims about the SAVED MODEL, so a non-canonical read cannot support
+    // them. This is a claim about two PERSISTED RUN FACTS — already-committed
+    // analysis envelopes — and `buildRunDelta` never reads the graph at all.
+    // Gating it on this turn's graph read would withhold a true, independently
+    // grounded comparison because of an unrelated read failure, and the model
+    // would then correctly report that it cannot compare the runs — a
+    // FALSE statement we would have manufactured. The precedent is
+    // `recent_changes` directly below, the other `priorFacts`-derived
+    // projection, which is likewise emitted ungated.
+    //
     // ⛔ `flip_thresholds` IS STRIPPED HERE, DELIBERATELY — DO NOT PASS IT
     // THROUGH. The producer emits it frozen-empty because the flip-threshold
     // join is deferred and it never looked; serialising `[]` to an LLM, which
