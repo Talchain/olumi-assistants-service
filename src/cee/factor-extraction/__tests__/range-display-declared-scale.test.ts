@@ -197,10 +197,15 @@ describe("synthesiseRangeDisplayValue — both directions pinned (G4)", () => {
 /**
  * G3 — THE TWIN-PREDICATE CLASS THIS SEAM IS EXPOSED TO, PINNED AS A KNOWN GAP.
  *
- * `draft/records/projector.ts:1016` `isPercentScaledUnit` matches by PREFIX —
+ * `draft/records/projector.ts` `isPercentScaledUnit` — now delegating to the one
+ * authority `classifyUnitScaleClass`, which matches EXACT-then-PREFIX on
  * `%` · `percent` · `per cent` · `pct` — while `display-value.ts` tests
  * `unit === "%"` EXACTLY, in seven places. Two predicates, one concept: the
  * differently-named-twins defect this estate keeps paying for.
+ * ⚠ The prefix limb is what makes the family UNBOUNDED, and it is intact: the
+ * exact limb in front of it is redundant today and exists only as the mechanism
+ * a future scale-class decision will need. So the sample below is still a
+ * SAMPLE of an unbounded family, exactly as its author wrote it.
  *
  * ⚠⚠ THE RULING THAT COMMISSIONED THIS TEST SAID `'% NRR'` "honestly throws".
  * MEASURED AT PR HEAD ffb9aacc, IT DOES NOT. It falls through the exact-match
@@ -261,28 +266,28 @@ describe("G3 — percent-scaled spellings that this function does NOT treat as p
     },
   );
 
-  it("every sampled spelling DIVERGES AT THE RENDERED OUTPUT — the sample is DERIVED, not invented", () => {
+  it("every sampled spelling DIVERGES — pinned at BOTH ends, so the set cannot move in either direction", () => {
     /**
-     * ⚠ RE-POINTED (C4 1B lane) — INTENT PRESERVED, BINDING CORRECTED.
+     * ⭐⭐ THIS GUARD BINDS TO BOTH MODULES ON PURPOSE, AND THE REASON IS A
+     * MEASURED FAILURE OF THE VERSION THAT DID NOT.
      *
-     * This assertion previously read `expect(isPercentScaledUnit(unit)).toBe(true)`
-     * for every member. Its PURPOSE — stated by its original author and kept
-     * verbatim below — is to stop this sample drifting into units that are not
-     * actually divergent, so the corpus cannot quietly become invented. That
-     * purpose is right and is unchanged.
+     * An earlier revision re-pointed this assertion from the predicate boolean to
+     * the RENDERED OUTPUT alone, on the sound-sounding grounds that the output is
+     * what a user sees. Measured, that DISCONNECTED it from the module under
+     * change: `display-value.ts` has exactly one import and it is NOT `projector`,
+     * so `synthesiseRangeDisplayValue` is structurally incapable of being affected
+     * by a change to `isPercentScaledUnit`. A mutant on `projector.ts` left this
+     * test GREEN, and G3's divergent set silently HALVED — 12/12 → 6/12 — in
+     * exactly the SHRINK direction the docstring below promises to catch.
      *
-     * What was wrong was the BINDING. It bound to a PREDICATE'S BOOLEAN, which is
-     * an implementation detail, rather than to the USER-VISIBLE VALUE this file
-     * exists to protect. So it fired on a change that moves no value: when
-     * `isPercentScaledUnit` was narrowed to an exact-match classifier
-     * (`classifyUnitScaleClass`, projector.ts), this test RED'd while
-     * `synthesiseRangeDisplayValue` returned BYTE-IDENTICAL output for all twelve
-     * sampled spellings — measured, before and after.
+     * ⭐ THE LESSON, worth more than the fix: RE-POINTING A GUARD AT "THE OUTPUT"
+     * DISCONNECTS IT FROM THE INPUT YOU CARE ABOUT WHEN THE OUTPUT IS PRODUCED BY
+     * A DIFFERENT MODULE. Divergence is a claim about TWO modules disagreeing. A
+     * guard over it must therefore assert BOTH halves, or it is watching one door.
      *
-     * It is now bound to the divergence ITSELF, at the output: every sampled
-     * spelling renders UN-MULTIPLIED while the canonical `'%'` renders MULTIPLIED.
-     * That is the property the sample is selected on, it is what a user sees, and
-     * it survives the next legitimate predicate change too.
+     * So: the projector's CLASS per spelling (not a boolean — a class, so the
+     * assertion says which way it moved) AND the rendered output. The set REDs if
+     * it grows, if it shrinks, or if either side changes its mind.
      */
     // Original author's rationale, carried forward: "Without this the list could
     // drift into units the predicate never accepted, and the 'twin predicate'
@@ -290,10 +295,28 @@ describe("G3 — percent-scaled spellings that this function does NOT treat as p
     const canonical = synthesiseRangeDisplayValue({ range_min: 0.2, range_max: 0.8 }, "%");
     expect(canonical).toBe("20% to 80%"); // DISCRIMINATING CONTRAST: the exact gate DOES multiply.
     for (const unit of SAMPLED_DIVERGENT_PERCENT_SPELLINGS) {
+      // HALF ONE — the projector's verdict. Binds this block to the module that
+      // owns the percent family; pinned as the CLASS so a re-classification is
+      // named in the failure rather than collapsed into `false`.
+      expect(classifyUnitScaleClass(unit), `${unit}: projector must still class this percent`).toBe("percent");
+      expect(isPercentScaledUnit(unit), `${unit}: the twin predicate must still accept it`).toBe(true);
+      // HALF TWO — what the user actually sees.
       const rendered = synthesiseRangeDisplayValue({ range_min: 0.2, range_max: 0.8 }, unit);
       expect(rendered, `${unit} must render un-multiplied`).toBe(`0.2 to 0.8 ${unit}`);
       expect(rendered, `${unit} must differ from the canonical '%' rendering`).not.toBe(canonical);
     }
+  });
+
+  it("CONTRAST CONTROL for the binding above: `%` satisfies half two and FAILS half one's divergence", () => {
+    // Proves the block discriminates rather than accepting anything: the canonical
+    // spelling is percent-classed AND multiplied, so it is NOT divergent and is
+    // correctly outside the sample. Without this, "every member is percent-classed"
+    // could pass on a classifier that says percent to everything.
+    expect(classifyUnitScaleClass("%")).toBe("percent");
+    expect(synthesiseRangeDisplayValue({ range_min: 0.2, range_max: 0.8 }, "%")).toBe("20% to 80%");
+    // …and a non-percent unit is classed away, so "percent" is a real verdict.
+    expect(classifyUnitScaleClass("bps")).toBe("basis_points");
+    expect(classifyUnitScaleClass("widgets")).toBe("unknown");
   });
 
   it("CONTRAST CONTROL: `bps` is divergent but NOT percent-scaled — a different class, correctly excluded", () => {
@@ -327,24 +350,30 @@ describe("G3 — percent-scaled spellings that this function does NOT treat as p
    * too — exactly the `declared_scale` read this file's G1 block installs for
    * `'%'` — not a wider unit-string match.
    */
-  it("⛔ `percentage points` must never be multiplied — pinned so a widening cannot silently ship a 100x lie", () => {
+  it("⛔ `percentage points` is percent-scaled BUT must never be multiplied — pinned so a widening cannot silently ship a 100x lie", () => {
     /**
-     * ⚠ RE-POINTED (C4 1B lane) — AND THE TRAP ABOVE IS STRENGTHENED, NOT REMOVED.
+     * ⛔ THE PREDICATE PIN IS RESTORED, AND ITS RESTORATION IS THE POINT.
      *
-     * This previously also asserted `isPercentScaledUnit("percentage points") ===
-     * true`. The docstring above calls that behaviour "the CORRECT number reached
-     * by the WRONG route", and says the real fix "needs the PRODUCER'S DECLARATION
-     * ... not a wider unit-string match". `percentage points` is now its OWN scale
-     * class (`classifyUnitScaleClass` -> "percentage_points", multiplier x1), so
-     * the wrong route is gone and the correct number is reached by the right one.
-     * The predicate assertion was a pin on a shape its own author called wrong.
+     * An earlier revision replaced it with `classifyUnitScaleClass(...) ===
+     * "percentage_points"` plus `isPercentScaledUnit(...) === false`, arguing the
+     * "wrong route" was gone. Two problems, both measured:
      *
-     * The x100-lie guard it protects is UNCHANGED and is what the assertion below
-     * enforces: if a future change ever renders this "20% to 80%", that is a
-     * regression even though it looks like the fix.
+     *  1. It was not a test change, it was a PRODUCT change wearing one. Moving
+     *     'percentage points' out of the percent class moves its frame from a
+     *     pinned 100 to the derived ladder — at max 1.5 that is level 0.015 →
+     *     0.75, a 50× overstatement, silent. That is a one-way door and it is now
+     *     ROWED, not taken (see `classifyUnitScaleClass`'s docstring).
+     *  2. The docstring above is right that this is "the CORRECT number reached by
+     *     the WRONG route" — but the fix it prescribes is the PRODUCER'S
+     *     DECLARATION, not a re-classification of the unit string. Until that
+     *     exists, the wrong route is what ships, and a test that pretends
+     *     otherwise stops guarding the ×100 lie.
+     *
+     * So both halves are asserted: it IS routed as percent (the honest, current,
+     * measured state), and it still renders un-multiplied.
      */
-    expect(classifyUnitScaleClass("percentage points")).toBe("percentage_points");
-    expect(isPercentScaledUnit("percentage points")).toBe(false); // no longer routed as percent
+    expect(classifyUnitScaleClass("percentage points")).toBe("percent");
+    expect(isPercentScaledUnit("percentage points")).toBe(true);
     // Today it renders un-multiplied, which for THIS spelling is the CORRECT
     // number reached by the wrong route. If a future widening changes this to
     // "20% to 80%", that is a regression even though it looks like the fix.
