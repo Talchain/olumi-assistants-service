@@ -2161,6 +2161,24 @@ export async function runTurnExecutor(
    * source that is not request-supplied.
    */
   let handlerFactsForCommit: readonly HandlerFact[] = [];
+  /**
+   * THE POST-DISPATCH FACT WINDOW, HOISTED SO `finalizeRun` CAN READ THE
+   * BINDING RATHER THAN RETYPE THE LITERAL.
+   *
+   * ⚠ IT MUST BE THE SAME ARRAY OBJECT, NOT AN EQUAL ONE, AND THAT IS NOT
+   * PEDANTRY. `freshness.selected_fact_index` is an index INTO this exact
+   * array — its own docblock says consumers must resolve against the array
+   * they passed in — and the composer resolves blocks against it too. A second
+   * literal with the same contents is a hand-maintained mirror of the first:
+   * it reads identically today and diverges silently the moment either is
+   * edited. `claim-safety-one-derivation.test.ts` makes that a failing gate,
+   * and it caught exactly this mistake in review.
+   *
+   * Null until the post-dispatch assembly runs, which is honest: an exit that
+   * never reached it has no window, and the run-delta gate at `finalizeRun`
+   * treats null as "nothing to compare".
+   */
+  let unifiedFactsAtExit: readonly HandlerFact[] | null = null;
   let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
 
   try {
@@ -10581,6 +10599,10 @@ export async function runTurnExecutor(
         ...handlerFactsForCommit,
         ...context.prior_facts,
       ];
+      // Hand the SAME array to `finalizeRun` (see `unifiedFactsAtExit`). An
+      // assignment, not a second literal: this is the binding the freshness
+      // index and the composer's block resolution are relative to.
+      unifiedFactsAtExit = unifiedFactsForPostHandler;
       freshness = deriveAnalysisFreshness(
         unifiedFactsForPostHandler,
         hashForPostHandlerFreshness,
@@ -13628,11 +13650,19 @@ export async function runTurnExecutor(
       // window on a rerun emits the pair (A′, A) — the run that just completed
       // is absent from its own consequence block, and the delta describes a
       // comparison the user did not just ask for. The canonical post-dispatch
-      // basis is `[...handlerFactsForCommit, ...context.prior_facts]`: the same
-      // array `freshness` was derived over above, which is precisely what makes
-      // `compare-runs.ts`'s invariant hold — `pair.current` IS the fact the
-      // turn's freshness verdict was derived from. Same array, one derivation
-      // (CLAUDE.md trap #12).
+      // basis is the post-dispatch window — read here as the BINDING
+      // `unifiedFactsAtExit`, which IS the array `freshness` was derived over
+      // (not a second literal with the same contents; the repo's
+      // one-derivation gate forbids retyping it, and caught this in review).
+      // That is precisely what makes `compare-runs.ts`'s invariant hold —
+      // `pair.current` IS the fact the turn's freshness verdict was derived
+      // from. One array, one derivation (CLAUDE.md trap #12).
+      //
+      // The null check is the honest reading of an exit that never reached the
+      // post-dispatch assembly, and the `some(...)` gate additionally covers
+      // the case where `handlerFactsForCommit` was later cleared (the
+      // withheld-write path): the window would then be stale, and the gate
+      // suppresses rather than emitting from it.
       //
       // ⚠ THE GATE. The contract emits ONE `run_delta` per COMPLETED RERUN.
       // Unconditional threading stamped the block on turns that ran no analysis
@@ -13650,8 +13680,8 @@ export async function runTurnExecutor(
       // Absence is the fail-closed default and is fully supported: no
       // successful run this turn ⇒ the key is omitted ⇒ the finaliser stamps
       // nothing. Never `?? []`, which would assert "there were no prior runs".
-      ...(handlerFactsForCommit.some(isSuccessfulRunAnalysisFact)
-        ? { priorFacts: [...handlerFactsForCommit, ...context.prior_facts] }
+      ...(unifiedFactsAtExit !== null && handlerFactsForCommit.some(isSuccessfulRunAnalysisFact)
+        ? { priorFacts: unifiedFactsAtExit }
         : {}),
       telemetry: {
         stages_completed: stagesCompleted,
