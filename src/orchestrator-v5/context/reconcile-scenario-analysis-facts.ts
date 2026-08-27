@@ -12,6 +12,7 @@ import {
   HandlerFactSchema,
   type HandlerFact,
 } from '@talchain/schemas/orchestrator';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 /** Sole bounded scenario-history wall for model-facing analysis authority. */
 export const SCENARIO_ANALYSIS_FACT_CAP = 20;
@@ -26,15 +27,15 @@ export type ScenarioAnalysisFactSetStatus =
   | 'degraded';
 
 export type ScenarioAnalysisFactSetDegradedReason =
-  | 'durable_unavailable_hot_window_incomplete'
+  | 'durable_unavailable'
   | 'durable_contract_invalid'
-  | 'durable_zero_conflicts_with_hot_fact'
+  | 'snapshot_conflict'
   | 'hot_window_contract_invalid';
 
 export type ScenarioAnalysisFactSet =
   | {
       readonly status: 'complete';
-      readonly source: 'scenario' | 'complete_hot_window';
+      readonly source: 'scenario';
       readonly facts: readonly HandlerFact[];
       readonly total_count: number;
     }
@@ -72,11 +73,6 @@ export type DurableScenarioAnalysisFactRead =
 export interface ReconcileScenarioAnalysisFactsInput {
   readonly scenarioId: string;
   readonly hotWindowFacts: readonly unknown[];
-  /** True only when both the turn-window and fact reads succeeded. */
-  readonly hotWindowReadOk: boolean;
-  readonly loadedTurnCount: number;
-  /** Exact pre-cap scenario turn count; null/undefined means unknown. */
-  readonly priorTurnsTotal?: number | null;
   /** Omission is an unavailable durable port, never an empty fact set. */
   readonly durableRead?: DurableScenarioAnalysisFactRead;
 }
@@ -91,9 +87,10 @@ interface ClassifiedHotFacts {
  *
  * A validated, complete durable read replaces the hot window rather than
  * merging with it. This prevents overlap duplication while retaining
- * genuinely distinct byte-identical durable facts. Hot-window recovery is
- * permitted only for an unavailable read and only when exact turn coverage
- * proves that the window is the whole scenario.
+ * genuinely distinct byte-identical durable facts. The hot window is only a
+ * one-way contradiction detector. Its turn read, exact count read and LRU
+ * cache do not share a database snapshot, so it can never promote itself into
+ * complete scenario authority when the durable read is unavailable.
  */
 export function reconcileScenarioAnalysisFacts(
   input: ReconcileScenarioAnalysisFactsInput,
@@ -111,14 +108,17 @@ export function reconcileScenarioAnalysisFacts(
       return freezeCapped(durable.total_count);
     }
 
-    // A clean durable zero cannot erase a valid fact already loaded from the
-    // same scenario. Preserve neither source as authority until the read
-    // disagreement is resolved.
-    if (durableContract.length === 0 && hot.eligible.length > 0) {
-      return degraded(
-        'durable_zero_conflicts_with_hot_fact',
-        durable.total_count,
-      );
+    // These reads are not one database snapshot. A hot fact that is absent
+    // from the complete durable page proves the page was already stale by the
+    // time the window arrived; replacing the window would promote an older
+    // snapshot. Multiset inclusion is a consistency check only — it never
+    // deduplicates the durable output, so two genuinely distinct identical
+    // persisted facts remain two facts.
+    if (hot.invalid) {
+      return degraded('hot_window_contract_invalid', durable.total_count);
+    }
+    if (!multisetIncludes(durableContract, hot.eligible)) {
+      return degraded('snapshot_conflict', durable.total_count);
     }
 
     return freezeComplete(
@@ -132,26 +132,27 @@ export function reconcileScenarioAnalysisFacts(
     return degraded('durable_contract_invalid');
   }
 
-  // A malformed hot fact set cannot author either absence or completeness.
-  if (hot.invalid) {
-    return degraded('hot_window_contract_invalid');
-  }
+  return degraded('durable_unavailable');
+}
 
-  if (
-    input.hotWindowReadOk &&
-    hasCompleteTurnCoverage(input.priorTurnsTotal, input.loadedTurnCount)
-  ) {
-    if (hot.eligible.length > SCENARIO_ANALYSIS_FACT_CAP) {
-      return freezeCapped(hot.eligible.length);
-    }
-    return freezeComplete(
-      hot.eligible,
-      'complete_hot_window',
-      hot.eligible.length,
-    );
+function multisetIncludes(
+  superset: readonly HandlerFact[],
+  subset: readonly HandlerFact[],
+): boolean {
+  if (subset.length > superset.length) return false;
+  const remaining = new Map<string, number>();
+  for (const fact of superset) {
+    const key = stableStringify(fact);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
-
-  return degraded('durable_unavailable_hot_window_incomplete');
+  for (const fact of subset) {
+    const key = stableStringify(fact);
+    const count = remaining.get(key) ?? 0;
+    if (count === 0) return false;
+    if (count === 1) remaining.delete(key);
+    else remaining.set(key, count - 1);
+  }
+  return true;
 }
 
 function validateDurableContract(
@@ -212,7 +213,11 @@ function classifyHotFacts(
     }
 
     const fact = parsed.data;
-    if (fact.fact_type !== 'run_analysis' || fact.noop) continue;
+    if (fact.fact_type !== 'run_analysis') continue;
+    if (fact.noop) {
+      invalid = true;
+      continue;
+    }
     const eligibleFact = parseEligibleRunAnalysisFact(fact, expectedScenarioId);
     if (eligibleFact === null) {
       invalid = true;
@@ -246,22 +251,9 @@ function parseEligibleRunAnalysisFact(
   return fact;
 }
 
-function hasCompleteTurnCoverage(
-  priorTurnsTotal: number | null | undefined,
-  loadedTurnCount: number,
-): boolean {
-  return (
-    Number.isSafeInteger(priorTurnsTotal) &&
-    (priorTurnsTotal as number) >= 0 &&
-    Number.isSafeInteger(loadedTurnCount) &&
-    loadedTurnCount >= 0 &&
-    (priorTurnsTotal as number) <= loadedTurnCount
-  );
-}
-
 function freezeComplete(
   facts: readonly HandlerFact[],
-  source: 'scenario' | 'complete_hot_window',
+  source: 'scenario',
   totalCount: number,
 ): ScenarioAnalysisFactSet {
   return Object.freeze({

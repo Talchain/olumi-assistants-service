@@ -79,9 +79,6 @@ function reconcile(
   return reconcileScenarioAnalysisFacts({
     scenarioId: SCENARIO,
     hotWindowFacts: [],
-    hotWindowReadOk: true,
-    loadedTurnCount: 20,
-    priorTurnsTotal: 41,
     durableRead: durable([]),
     ...overrides,
   });
@@ -216,43 +213,62 @@ describe('reconcileScenarioAnalysisFacts', () => {
     ).toEqual({
       status: 'degraded',
       facts: [],
-      reason: 'durable_zero_conflicts_with_hot_fact',
+      reason: 'snapshot_conflict',
       total_count: 0,
     });
   });
 
-  it('recovers from an unavailable durable read only when the hot window covers every turn', () => {
-    const fact = analysisFact('turn-16');
-    expect(
-      reconcile({
-        hotWindowFacts: [fact, nonAnalysisFact()],
-        loadedTurnCount: 20,
-        priorTurnsTotal: 20,
-        durableRead: { status: 'degraded', reason: 'unavailable' },
-      }),
-    ).toEqual({
-      status: 'complete',
-      source: 'complete_hot_window',
-      facts: [fact],
-      total_count: 1,
+  it('degrades when a newer hot fact is absent from a nonempty durable snapshot', () => {
+    const durableOlder = analysisFact('durable-older', {
+      computedAt: '2026-08-26T12:00:00.000Z',
     });
-  });
+    const hotNewer = analysisFact('hot-newer', {
+      computedAt: '2026-08-27T12:00:00.000Z',
+    });
 
-  it.each([
-    { hotWindowReadOk: false, loadedTurnCount: 20, priorTurnsTotal: 20 },
-    { hotWindowReadOk: true, loadedTurnCount: 20, priorTurnsTotal: 21 },
-    { hotWindowReadOk: true, loadedTurnCount: 20, priorTurnsTotal: null },
-  ])('keeps unavailable + incomplete hot evidence degraded: %j', (coverage) => {
     expect(
       reconcile({
-        hotWindowFacts: [analysisFact('known')],
-        durableRead: { status: 'degraded', reason: 'unavailable' },
-        ...coverage,
+        hotWindowFacts: [hotNewer, durableOlder],
+        durableRead: durable([durableOlder]),
       }),
     ).toEqual({
       status: 'degraded',
       facts: [],
-      reason: 'durable_unavailable_hot_window_incomplete',
+      reason: 'snapshot_conflict',
+      total_count: 1,
+    });
+  });
+
+  it('uses multiset inclusion without deduplicating distinct identical durable facts', () => {
+    const identical = analysisFact('identical');
+    const result = reconcile({
+      hotWindowFacts: [identical, identical],
+      durableRead: durable([identical, identical]),
+    });
+    expect(result.status).toBe('complete');
+    expect(result.facts).toHaveLength(2);
+
+    expect(
+      reconcile({
+        hotWindowFacts: [identical, identical],
+        durableRead: durable([identical]),
+      }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'snapshot_conflict',
+    });
+  });
+
+  it('never promotes a hot window when the durable read is unavailable', () => {
+    expect(
+      reconcile({
+        hotWindowFacts: [analysisFact('known')],
+        durableRead: { status: 'degraded', reason: 'unavailable' },
+      }),
+    ).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'durable_unavailable',
     });
   });
 
@@ -260,8 +276,6 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(
       reconcile({
         hotWindowFacts: [analysisFact('known')],
-        loadedTurnCount: 1,
-        priorTurnsTotal: 1,
         durableRead: { status: 'degraded', reason: 'contract_invalid' },
       }),
     ).toEqual({
@@ -271,22 +285,22 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
-  it('does not let malformed or foreign hot facts establish recovered authority', () => {
+  it('fails weak when a hot row claims malformed, foreign, or noop analysis', () => {
     for (const candidate of [
       { fact_type: 'run_analysis', noop: false },
       analysisFact('foreign', { scenarioId: FOREIGN_SCENARIO }),
+      analysisFact('noop', { noop: true }),
     ]) {
       expect(
         reconcile({
           hotWindowFacts: [candidate],
-          loadedTurnCount: 1,
-          priorTurnsTotal: 1,
-          durableRead: { status: 'degraded', reason: 'unavailable' },
+          durableRead: durable([]),
         }),
       ).toEqual({
         status: 'degraded',
         facts: [],
         reason: 'hot_window_contract_invalid',
+        total_count: 0,
       });
     }
   });
@@ -296,13 +310,11 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(
       reconcile({
         hotWindowFacts: [{ fact_type: 'future_non_analysis_fact' }, fact],
-        loadedTurnCount: 2,
-        priorTurnsTotal: 2,
-        durableRead: { status: 'degraded', reason: 'unavailable' },
+        durableRead: durable([fact]),
       }),
     ).toEqual({
       status: 'complete',
-      source: 'complete_hot_window',
+      source: 'scenario',
       facts: [fact],
       total_count: 1,
     });
