@@ -95,10 +95,16 @@ export interface DisplaySafeEdge {
   readonly provenance?: CompactProvenance;
 }
 
+export interface DisplaySafeOption {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface DisplaySafeGraph {
   readonly nodes: readonly DisplaySafeNode[];
   readonly edges: readonly DisplaySafeEdge[];
-  readonly options: readonly unknown[];
+  /** Display-only duplicate index. Baseline identity lives on option nodes. */
+  readonly options: readonly DisplaySafeOption[];
   /**
    * Goal nodes, projected through the SAME `projectNode` as `nodes` — not the
    * raw `ContextPackGraph.goals` passthrough this field used to carry.
@@ -190,6 +196,11 @@ interface RawEdgeShape {
   /** Idempotency: a second pass through the formatter sees no `strength`
    *  but should preserve an existing allowlisted relationship phrase. */
   readonly relationship?: unknown;
+}
+
+interface RawOptionShape {
+  readonly id?: unknown;
+  readonly label?: unknown;
 }
 
 function asString(value: unknown): string | undefined {
@@ -499,6 +510,23 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
 }
 
 /**
+ * Project the display-only option index to its documented `{id, label}` shape.
+ *
+ * The authoritative option facts already live on `nodes`. In particular,
+ * `is_baseline` is intentionally not copied from this duplicate index: doing
+ * so would let a raw/direct caller present a second, contradictory current-
+ * approach authority. Malformed entries fail closed rather than acquiring a
+ * label through local inference.
+ */
+function projectOption(raw: unknown): DisplaySafeOption | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const option = raw as RawOptionShape;
+  const id = asString(option.id);
+  const label = asString(option.label);
+  return id !== undefined && label !== undefined ? { id, label } : null;
+}
+
+/**
  * Project the raw `ContextPackGraph` into the LLM-facing display-safe shape.
  *
  *   - Edges: `strength` and `exists` are stripped; `plain_interpretation` is
@@ -558,9 +586,11 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     model had (the stripped twin was always already present) and gains
  *     `display_value`, which the raw compact node has no field for.
  *
- *   - `options`, `constraints`, `counts`: pass through unchanged. `options` is
- *     already projected to `{id, label}` by the assembler and carries no
- *     numerics; `constraints` is threaded from the caller.
+ *   - `options`: projected independently to the closed `{id, label}` display
+ *     shape. Raw/direct assembler callers may supply richer records, so this
+ *     boundary must not trust them to have been pre-projected. Baseline,
+ *     ranking, readiness, intervention, and other fields are stripped.
+ *     `constraints` and `counts` pass through unchanged.
  */
 export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
   const labelMap = new Map<string, string>();
@@ -592,10 +622,16 @@ export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
     if (projected !== null) goals.push(projected);
   }
 
+  const options: DisplaySafeOption[] = [];
+  for (const option of raw.options) {
+    const projected = projectOption(option);
+    if (projected !== null) options.push(projected);
+  }
+
   return {
     nodes,
     edges,
-    options: raw.options,
+    options,
     goals,
     constraints: raw.constraints,
     counts: raw.counts,
