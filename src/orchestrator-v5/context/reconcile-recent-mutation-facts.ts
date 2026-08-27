@@ -75,6 +75,23 @@ export interface ReconciledRecentMutationFacts {
   readonly recent_changes_status: RecentChangesHistoryStatus;
 }
 
+/**
+ * Array-compatible bridge for existing ContextPack call sites.
+ *
+ * `turn-executor.ts` already passes `context.prior_facts` to the assembler at
+ * every live routing seam. Binding the independently-reconciled mutation
+ * history to that same array keeps all other fact consumers on the unchanged
+ * hot-window facts while allowing the assembler to read the durable receipt
+ * slice without a second store read or an executor edit. The two properties
+ * are non-enumerable, so array iteration/JSON bytes remain those of the prior
+ * facts themselves.
+ */
+export interface HandlerFactsWithRecentMutationHistory
+  extends ReadonlyArray<HandlerFact> {
+  readonly recent_mutation_facts: readonly HandlerFact[];
+  readonly recent_changes_status: RecentChangesHistoryStatus;
+}
+
 interface ClassifiedFacts {
   readonly eligible: readonly HandlerFact[];
   readonly malformed: boolean;
@@ -133,6 +150,55 @@ export function reconcileRecentMutationFacts(
   }
 
   return degraded(hot.eligible);
+}
+
+/** Attach one reconciliation result to an otherwise unchanged prior-fact array. */
+export function bindRecentMutationHistoryToPriorFacts(
+  priorFacts: readonly HandlerFact[],
+  history: ReconciledRecentMutationFacts,
+): HandlerFactsWithRecentMutationHistory {
+  const carrier = [...priorFacts] as HandlerFact[] & {
+    recent_mutation_facts: readonly HandlerFact[];
+    recent_changes_status: RecentChangesHistoryStatus;
+  };
+  Object.defineProperties(carrier, {
+    recent_mutation_facts: {
+      value: history.recent_mutation_facts,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+    recent_changes_status: {
+      value: history.recent_changes_status,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+  });
+  return Object.freeze(carrier);
+}
+
+/**
+ * Read the array-compatible bridge. Plain/legacy arrays return null and must
+ * be interpreted weakly by the caller, never as complete history.
+ */
+export function readRecentMutationHistoryFromPriorFacts(
+  priorFacts: readonly HandlerFact[] | undefined,
+): ReconciledRecentMutationFacts | null {
+  if (!priorFacts) return null;
+  const candidate = priorFacts as Partial<HandlerFactsWithRecentMutationHistory>;
+  if (
+    !Array.isArray(candidate.recent_mutation_facts) ||
+    (candidate.recent_changes_status !== 'complete' &&
+      candidate.recent_changes_status !== 'capped' &&
+      candidate.recent_changes_status !== 'degraded')
+  ) {
+    return null;
+  }
+  return freezeResult(
+    candidate.recent_mutation_facts,
+    candidate.recent_changes_status,
+  );
 }
 
 function classifyFacts(candidates: readonly unknown[]): ClassifiedFacts {

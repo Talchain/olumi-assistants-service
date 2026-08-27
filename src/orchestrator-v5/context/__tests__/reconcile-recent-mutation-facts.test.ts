@@ -4,6 +4,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { RECENT_CHANGES_CAP } from '../recent-changes.js';
 import {
   RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT,
+  bindRecentMutationHistoryToPriorFacts,
+  readRecentMutationHistoryFromPriorFacts,
   reconcileRecentMutationFacts,
   type DurableRecentMutationFactRead,
 } from '../reconcile-recent-mutation-facts.js';
@@ -288,5 +290,24 @@ describe('reconcileRecentMutationFacts', () => {
     const result = reconcile({ durableRead: durable([constraint('immutable', 1)]) });
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.recent_mutation_facts)).toBe(true);
+  });
+
+  it('binds durable history without changing ordinary fact iteration or JSON bytes', () => {
+    const hot = constraint('hot', 7);
+    const durableReceipt = constraint('durable', 6);
+    const history = reconcile({ durableRead: durable([durableReceipt]) });
+    const bound = bindRecentMutationHistoryToPriorFacts([hot], history);
+
+    expect([...bound]).toEqual([hot]);
+    expect(JSON.stringify(bound)).toBe(JSON.stringify([hot]));
+    expect(Object.keys(bound)).toEqual(['0']);
+    expect(readRecentMutationHistoryFromPriorFacts(bound)).toEqual(history);
+    expect(Object.isFrozen(bound)).toBe(true);
+  });
+
+  it('treats a plain legacy fact array as lacking scenario-wide authority', () => {
+    expect(
+      readRecentMutationHistoryFromPriorFacts([constraint('legacy-window', 5)]),
+    ).toBeNull();
   });
 });

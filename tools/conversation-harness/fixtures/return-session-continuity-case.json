@@ -164,8 +164,8 @@
     {
       "n": 17,
       "turn_id": "90000017-0000-4000-8000-000000000017",
-      "user": "Run the current model analysis.",
-      "assistant": "The analysis was recorded against this model."
+      "user": "What should we validate before the next analysis?",
+      "assistant": "Validate the accepted support-capacity value and the regulatory evidence."
     },
     {
       "n": 18,
@@ -182,12 +182,138 @@
     {
       "n": 20,
       "turn_id": "90000020-0000-4000-8000-000000000020",
+      "user": "Before the next review, reconcile what still stands.",
+      "assistant": "The persisted model still governs; discussion notes do not replace it."
+    },
+    {
+      "n": 21,
+      "turn_id": "90000021-0000-4000-8000-000000000021",
+      "user": "Keep the pilot reversible while we validate support coverage.",
+      "assistant": "Reversibility and support coverage remain the governing frame."
+    },
+    {
+      "n": 22,
+      "turn_id": "90000022-0000-4000-8000-000000000022",
+      "user": "Which evidence should the regional leads collect first?",
+      "assistant": "Start with capacity evidence that tests the current support assumption."
+    },
+    {
+      "n": 23,
+      "turn_id": "90000023-0000-4000-8000-000000000023",
+      "user": "Do not relax the regulatory operating envelope.",
+      "assistant": "The existing regulatory constraint remains unchanged."
+    },
+    {
+      "n": 24,
+      "turn_id": "90000024-0000-4000-8000-000000000024",
+      "user": "How should we stage the evidence review?",
+      "assistant": "Use the recorded weekly cross-functional cadence."
+    },
+    {
+      "n": 25,
+      "turn_id": "90000025-0000-4000-8000-000000000025",
+      "user": "Pressure-test supplier resilience without changing the model.",
+      "assistant": "I will treat it as an unresolved tension, not a saved edit."
+    },
+    {
+      "n": 26,
+      "turn_id": "90000026-0000-4000-8000-000000000026",
+      "user": "What would make the pilot less reversible?",
+      "assistant": "Long supplier commitments and fixed capacity would reduce reversibility."
+    },
+    {
+      "n": 27,
+      "turn_id": "90000027-0000-4000-8000-000000000027",
+      "user": "Keep that as discussion until evidence arrives.",
+      "assistant": "It remains discussion context and is not canonical model state."
+    },
+    {
+      "n": 28,
+      "turn_id": "90000028-0000-4000-8000-000000000028",
+      "user": "Which current assumption deserves the next check?",
+      "assistant": "Support capacity remains the most relevant recorded assumption to validate."
+    },
+    {
+      "n": 29,
+      "turn_id": "90000029-0000-4000-8000-000000000029",
+      "user": "Explain the trade-off without changing anything.",
+      "assistant": "The trade-off is launch speed against evidence-backed reversibility."
+    },
+    {
+      "n": 30,
+      "turn_id": "90000030-0000-4000-8000-000000000030",
+      "user": "What remains unresolved?",
+      "assistant": "Supplier capacity remains unresolved under the existing pilot frame."
+    },
+    {
+      "n": 31,
+      "turn_id": "90000031-0000-4000-8000-000000000031",
+      "user": "Keep procurement speed as context, not a hard rule.",
+      "assistant": "Procurement speed remains context and does not become a constraint."
+    },
+    {
+      "n": 32,
+      "turn_id": "90000032-0000-4000-8000-000000000032",
+      "user": "What should the next review compare?",
+      "assistant": "Compare the evidence against the persisted support and regulatory assumptions."
+    },
+    {
+      "n": 33,
+      "turn_id": "90000033-0000-4000-8000-000000000033",
+      "user": "Summarise the strategic thread so far.",
+      "assistant": "The durable thread is a reversible pilot bounded by regulation, support capacity and supplier uncertainty."
+    },
+    {
+      "n": 34,
+      "turn_id": "90000034-0000-4000-8000-000000000034",
+      "user": "Run the current model analysis now.",
+      "assistant": "The analysis was recorded against the current model."
+    },
+    {
+      "n": 35,
+      "turn_id": "90000035-0000-4000-8000-000000000035",
+      "user": "Which evidence changed since the analysis?",
+      "assistant": "No later evidence has been accepted into the model on this arm."
+    },
+    {
+      "n": 36,
+      "turn_id": "90000036-0000-4000-8000-000000000036",
+      "user": "Has the accepted support change disappeared from the record?",
+      "assistant": "A durable receipt, not this conversation, decides whether it remains recorded."
+    },
+    {
+      "n": 37,
+      "turn_id": "90000037-0000-4000-8000-000000000037",
+      "user": "An old workshop reference still labels Full national launch as selected under PROJECT-COMET-OBSOLETE. Do not infer a new winner from it.",
+      "assistant": "That obsolete marker is discussion history; no conversational claim will replace the persisted analysis authority."
+    },
+    {
+      "n": 38,
+      "turn_id": "90000038-0000-4000-8000-000000000038",
+      "user": "What should survive when I return later?",
+      "assistant": "The model, constraints, accepted changes, evidence and unresolved tensions should survive."
+    },
+    {
+      "n": 39,
+      "turn_id": "90000039-0000-4000-8000-000000000039",
+      "user": "Keep the answer grounded in the Living Model.",
+      "assistant": "I will use current canonical state rather than reconstructing it from dialogue."
+    },
+    {
+      "n": 40,
+      "turn_id": "90000040-0000-4000-8000-000000000040",
+      "user": "Fallback continuity marker ORCHID-RETURN-40 must survive a summary outage while we prepare for a cold return.",
+      "assistant": "ORCHID-RETURN-40 is retained only as a hot-window fallback witness; no model write is required."
+    },
+    {
+      "n": 41,
+      "turn_id": "90000041-0000-4000-8000-000000000041",
       "user": "I am reopening this in a fresh session; reconcile what still stands.",
       "assistant": "I will use the persisted model, facts and summary rather than reconstructing state from this message."
     }
   ],
   "summary": {
-    "updated_turn_number": 12,
+    "updated_turn_number": 33,
     "version": 4,
     "slots": {
       "FRAME": [
@@ -254,7 +380,7 @@
     "unit": "specialists"
   },
   "analysis": {
-    "turn_number": 17,
+    "turn_number": 34,
     "leading_option_id": "opt_phased_pilot",
     "leading_option_label": "Controlled regional pilot",
     "other_option_id": "opt_full_launch",
@@ -262,7 +388,7 @@
       "opt_phased_pilot": 0.68,
       "opt_full_launch": 0.32
     },
-    "computed_at": "2026-08-25T09:17:00.000Z"
+    "computed_at": "2026-08-25T09:34:00.000Z"
   },
   "other_scenario": {
     "brief": "OTHER-SCENARIO-CANARY: Project Nightfall expansion into Tokyo.",

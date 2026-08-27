@@ -63,6 +63,13 @@ import type { FreshnessDerivation } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
+import {
+  RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT,
+  bindRecentMutationHistoryToPriorFacts,
+  reconcileRecentMutationFacts,
+  type DurableRecentMutationFactRead,
+  type HandlerFactsWithRecentMutationHistory,
+} from './context/reconcile-recent-mutation-facts.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, GraphStaleWriteError, type SessionStore } from './session/store.js';
@@ -160,7 +167,7 @@ export interface EnrichedTurnContext extends TurnContext {
    * Order matches prior_turns (newest-first). Empty array when no prior
    * handler turns exist or when the facts read degraded.
    */
-  readonly prior_facts: readonly HandlerFact[];
+  readonly prior_facts: HandlerFactsWithRecentMutationHistory;
   /**
    * CONTEXT/MEMORY V5 defect 4 — did the `prior_facts` read SUCCEED?
    *
@@ -633,12 +640,20 @@ export async function buildTurnContext(
   // returns how many turns actually exist (or null when unknown).
   // The third read joins the same concurrent batch for the same reason: the T1
   // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
-  // 20-turn window. Concurrent ⇒ it costs the batch's max latency, not a
-  // serial addition.
-  const [priorTurnsRead, priorTurnsTotal, newestAnalysisFactRead] = await Promise.all([
+  // 20-turn window. The fourth read is the scenario-wide applied-mutation
+  // lookahead: one extra row beyond the sole recent-changes cap proves whether
+  // the visible history is complete or capped after a cold return. Concurrent
+  // ⇒ these reads cost the batch's max latency, not their sum.
+  const [
+    priorTurnsRead,
+    priorTurnsTotal,
+    newestAnalysisFactRead,
+    durableMutationFactRead,
+  ] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
+    fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
@@ -704,6 +719,22 @@ export async function buildTurnContext(
    * fact that WAS read stays authoritative and the hash comparison still decides.
    */
   const priorFactsReadOk = factsReadOk && priorTurnsRead.readOk;
+  const reconciledRecentMutationFacts = reconcileRecentMutationFacts({
+    scenarioId: payload.scenario_id,
+    hotWindowFacts: priorFacts,
+    hotWindowReadOk: priorFactsReadOk,
+    loadedTurnCount: priorTurns.length,
+    priorTurnsTotal,
+    durableRead: durableMutationFactRead,
+  });
+  // Keep the ordinary fact array byte/iteration-compatible for analysis,
+  // coaching and mutation-warrant consumers. The non-enumerable binding lets
+  // the already-existing ContextPack call sites carry the separately scoped
+  // durable receipt history without an executor edit or a second store read.
+  const priorFactsWithRecentMutationHistory = bindRecentMutationHistoryToPriorFacts(
+    priorFacts,
+    reconciledRecentMutationFacts,
+  );
   // V5 Phase 1 brief persistence: load the persisted brief_text alongside
   // the graph so callers can read both from canonical state. Failure to
   // read scenarios.* is non-fatal (graceful degradation); the field
@@ -973,7 +1004,7 @@ export async function buildTurnContext(
     prior_turns_total: priorTurnsTotal,
     newest_analysis_fact: newestAnalysisFactRead.fact,
     newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
-    prior_facts: priorFacts,
+    prior_facts: priorFactsWithRecentMutationHistory,
     prior_facts_read_ok: priorFactsReadOk,
     // ONE derivation, two consumers — `deriveCoachingState` above and the
     // graph-less exits' `analysis_state` via `turn-claim-safety.ts`. Exposed
@@ -1828,6 +1859,49 @@ async function fetchNewestAnalysisFact(
       severity: 'warning',
     });
     return { fact: null, readOk: false };
+  }
+}
+
+/**
+ * Load the scenario's newest applied mutation receipts past the bounded turn
+ * window. The exact lookahead limit is carried alongside the result so the
+ * reconciler can reject an accidentally under-bounded "successful" read.
+ *
+ * Missing legacy port or any read failure is degraded, never empty. The hot
+ * window may still prove complete when its own reads succeeded and the exact
+ * turn count shows that every turn was loaded.
+ */
+async function fetchRecentAppliedMutationFacts(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<DurableRecentMutationFactRead> {
+  if (!store?.readRecentAppliedMutationFactsFor) return { status: 'degraded' };
+  try {
+    const facts = await store.readRecentAppliedMutationFactsFor(
+      scenarioId,
+      RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT,
+    );
+    return {
+      status: 'ok',
+      scenario_id: scenarioId,
+      query_limit: RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT,
+      facts,
+    };
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: scenario mutation-receipt read failed — recent changes are degraded',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return { status: 'degraded' };
   }
 }
 

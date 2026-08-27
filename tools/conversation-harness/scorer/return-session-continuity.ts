@@ -48,12 +48,14 @@ import {
   type ContextPack,
 } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../../../src/orchestrator-v5/mutation-receipt-fact-types.js';
 import { formatProbability } from '../../../src/orchestrator-v5/format/format-analysis-value.js';
 import {
   buildUserMessage,
   routeWithToolUse,
 } from '../../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import type { SessionTurnWithContent } from '../../../src/orchestrator-v5/session/conversation-content.js';
+import { SESSION_READ_WINDOW_DEFAULT } from '../../../src/orchestrator-v5/session/index.js';
 import type { SessionStore } from '../../../src/orchestrator-v5/session/store.js';
 import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
 import {
@@ -136,14 +138,14 @@ export const ReturnSessionContinuityCaseSchema = z.object({
   question: z.string().min(1),
   brief: z.string().min(1),
   graph: GraphFixtureSchema,
-  turns: z.array(TurnFixtureSchema).length(20),
+  turns: z.array(TurnFixtureSchema).length(41),
   summary: z.object({
-    updated_turn_number: z.number().int().min(1).max(20),
+    updated_turn_number: z.number().int().min(1).max(41),
     version: z.number().int().positive(),
     slots: SummarySlotsSchema,
   }).strict(),
   accepted_change: z.object({
-    turn_number: z.number().int().min(1).max(20),
+    turn_number: z.number().int().min(1).max(41),
     target_id: z.string().min(1),
     target_label: z.string().min(1),
     before_value: z.number().finite(),
@@ -151,7 +153,7 @@ export const ReturnSessionContinuityCaseSchema = z.object({
     unit: z.string().min(1),
   }).strict(),
   analysis: z.object({
-    turn_number: z.number().int().min(1).max(20),
+    turn_number: z.number().int().min(1).max(41),
     leading_option_id: z.string().min(1),
     leading_option_label: z.string().min(1),
     other_option_id: z.string().min(1),
@@ -181,6 +183,7 @@ export type ReturnSessionMutant =
   | 'drop_causal_edge'
   | 'drop_summary_wire'
   | 'drop_facts'
+  | 'durable_mutation_read_degraded'
   | 'drop_fact_row_filter'
   | 'cross_scenario_read'
   | 'drop_precedence_instruction'
@@ -209,6 +212,7 @@ export interface DurableReadObservation {
   readonly channel: string;
   readonly requested_scenario_id: string;
   readonly resolved_scenario_id: string;
+  readonly limit?: number;
 }
 
 /**
@@ -339,7 +343,7 @@ function turnTimestamp(n: number): string {
   return `2026-08-25T09:${String(n).padStart(2, '0')}:00.000Z`;
 }
 
-const LATER_SEMANTIC_CHANGE_TURN = 18;
+const LATER_SEMANTIC_CHANGE_TURN = 35;
 const LATER_SEMANTIC_CHANGE_VALUE = 48;
 
 function deepFreeze<T>(value: T): T {
@@ -593,13 +597,18 @@ function createSessionStoreFacade(
   mutant: ReturnSessionMutant,
 ): { readonly id: string; readonly store: SessionStore } {
   const id = randomUUID();
-  const read = (channel: string, requested: string): ScenarioRecord => {
+  const read = (
+    channel: string,
+    requested: string,
+    limit?: number,
+  ): ScenarioRecord => {
     const resolved = resolveScenarioId(backend.kase, requested, mutant);
     backend.reads.push({
       runtime_id: runtimeId,
       channel,
       requested_scenario_id: requested,
       resolved_scenario_id: resolved,
+      ...(limit !== undefined ? { limit } : {}),
     });
     const record = backend.records.get(resolved);
     if (!record) throw new Error(`durable fake has no scenario ${resolved}`);
@@ -626,7 +635,7 @@ function createSessionStoreFacade(
   const store = createMockSessionStore({
     readRecent: async (scenarioId, limit) => {
       const turns = read('session.readRecent', scenarioId).turns;
-      return turns.slice(0, limit ?? turns.length);
+      return turns.slice(0, limit ?? SESSION_READ_WINDOW_DEFAULT);
     },
     countTurns: async (scenarioId) => read('session.countTurns', scenarioId).turns.length,
     readFactsWithTurnFor: async (rowIds) => {
@@ -637,6 +646,26 @@ function createSessionStoreFacade(
       logParentFactRead('session.readFactsFor');
       return factRowsForParentRows(rowIds)
         .map((row) => row.fact);
+    },
+    readRecentAppliedMutationFactsFor: async (scenarioId, limit) => {
+      const record = read('session.readRecentAppliedMutationFactsFor', scenarioId, limit);
+      if (mutant === 'durable_mutation_read_degraded') {
+        throw new Error('durable mutation receipt read unavailable');
+      }
+      const rows = mutant === 'drop_fact_row_filter'
+        ? backend.factRows
+        : mutant === 'drop_facts'
+          ? []
+          : record.facts;
+      return rows
+        .map((row) => row.fact)
+        .filter((fact) => {
+          const result = fact.result as { status?: unknown };
+          return MUTATION_RECEIPT_FACT_TYPES.has(fact.fact_type) &&
+            fact.noop === false &&
+            result.status === 'applied';
+        })
+        .slice(0, limit);
     },
     readNewestAnalysisFactFor: async (scenarioId) => {
       const record = read('session.readNewestAnalysisFactFor', scenarioId);
@@ -1204,7 +1233,10 @@ function assertFixtureChannelsAreIndependent(
   if (!turnsText.includes('PROJECT-COMET-OBSOLETE') || graphText.includes('PROJECT-COMET-OBSOLETE')) {
     throw new Error('obsolete witness is not transcript-only');
   }
-  if (!turnsText.includes('ORCHID-12') || graphText.includes('ORCHID-12')) {
+  if (
+    !turnsText.includes('ORCHID-RETURN-40') ||
+    graphText.includes('ORCHID-RETURN-40')
+  ) {
     throw new Error('degraded-fallback witness is not transcript-only');
   }
   const primaryBytes = JSON.stringify({
