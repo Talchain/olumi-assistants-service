@@ -1157,9 +1157,13 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     ).resolves.toEqual({
       facts: [
         expect.objectContaining({
-          fact_type: 'run_analysis',
-          noop: false,
-          result: expect.objectContaining({ scenario_id: SCENARIO }),
+          fact_row_id: runAnalysisRow.id,
+          fact_created_at: runAnalysisRow.created_at,
+          fact: expect.objectContaining({
+            fact_type: 'run_analysis',
+            noop: false,
+            result: expect.objectContaining({ scenario_id: SCENARIO }),
+          }),
         }),
       ],
       total_count: 1,

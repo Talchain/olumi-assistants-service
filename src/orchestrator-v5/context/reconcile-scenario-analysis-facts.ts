@@ -13,6 +13,10 @@ import {
   type HandlerFact,
 } from '@talchain/schemas/orchestrator';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import type {
+  HandlerFactWithTurn,
+  IdentifiedHandlerFact,
+} from '../types/handler-fact.js';
 
 /** Sole bounded scenario-history wall for model-facing analysis authority. */
 export const SCENARIO_ANALYSIS_FACT_CAP = 20;
@@ -63,7 +67,7 @@ export type DurableScenarioAnalysisFactRead =
       readonly scenario_id: string;
       readonly query_limit: number;
       readonly total_count: number;
-      readonly facts: readonly unknown[];
+      readonly facts: readonly IdentifiedHandlerFact[];
     }
   | {
       readonly status: 'degraded';
@@ -73,12 +77,19 @@ export type DurableScenarioAnalysisFactRead =
 export interface ReconcileScenarioAnalysisFactsInput {
   readonly scenarioId: string;
   readonly hotWindowFacts: readonly unknown[];
+  /**
+   * Persisted identities for the same bounded hot-window facts. Production
+   * always supplies this. Parsed payloads without row identity are not enough
+   * to prove that a byte-identical durable row is the same occurrence.
+   */
+  readonly hotWindowFactsWithIdentity?: readonly HandlerFactWithTurn[];
   /** Omission is an unavailable durable port, never an empty fact set. */
   readonly durableRead?: DurableScenarioAnalysisFactRead;
 }
 
 interface ClassifiedHotFacts {
   readonly eligible: readonly HandlerFact[];
+  readonly identified: readonly IdentifiedHandlerFact[];
   readonly invalid: boolean;
 }
 
@@ -95,7 +106,11 @@ interface ClassifiedHotFacts {
 export function reconcileScenarioAnalysisFacts(
   input: ReconcileScenarioAnalysisFactsInput,
 ): ScenarioAnalysisFactSet {
-  const hot = classifyHotFacts(input.hotWindowFacts, input.scenarioId);
+  const hot = classifyHotFacts(
+    input.hotWindowFacts,
+    input.hotWindowFactsWithIdentity ?? [],
+    input.scenarioId,
+  );
   const durable = input.durableRead;
 
   if (durable?.status === 'ok') {
@@ -108,21 +123,19 @@ export function reconcileScenarioAnalysisFacts(
       return freezeCapped(durable.total_count);
     }
 
-    // These reads are not one database snapshot. A hot fact that is absent
-    // from the complete durable page proves the page was already stale by the
-    // time the window arrived; replacing the window would promote an older
-    // snapshot. Multiset inclusion is a consistency check only — it never
-    // deduplicates the durable output, so two genuinely distinct identical
-    // persisted facts remain two facts.
+    // These reads are not one database snapshot. A persisted hot identity that
+    // is absent from the complete durable page proves the page was already
+    // stale by the time the window arrived. Payload equality is deliberately
+    // irrelevant: two legitimate analysis runs can have byte-identical facts.
     if (hot.invalid) {
       return degraded('hot_window_contract_invalid', durable.total_count);
     }
-    if (!multisetIncludes(durableContract, hot.eligible)) {
+    if (!identifiedSnapshotIncludes(durableContract, hot.identified)) {
       return degraded('snapshot_conflict', durable.total_count);
     }
 
     return freezeComplete(
-      durableContract,
+      durableContract.map((entry) => entry.fact),
       'scenario',
       durable.total_count,
     );
@@ -133,28 +146,6 @@ export function reconcileScenarioAnalysisFacts(
   }
 
   return degraded('durable_unavailable');
-}
-
-function multisetIncludes(
-  superset: readonly HandlerFact[],
-  subset: readonly HandlerFact[],
-): boolean {
-  if (subset.length > superset.length) return false;
-  const remaining = new Map<string, number>();
-  for (const fact of superset) {
-    const key = stableFactKey(fact);
-    if (key === null) return false;
-    remaining.set(key, (remaining.get(key) ?? 0) + 1);
-  }
-  for (const fact of subset) {
-    const key = stableFactKey(fact);
-    if (key === null) return false;
-    const count = remaining.get(key) ?? 0;
-    if (count === 0) return false;
-    if (count === 1) remaining.delete(key);
-    else remaining.set(key, count - 1);
-  }
-  return true;
 }
 
 function stableFactKey(fact: HandlerFact): string | null {
@@ -200,7 +191,7 @@ function isJsonSafe(value: unknown, ancestors: Set<object>): boolean {
 function validateDurableContract(
   read: Extract<DurableScenarioAnalysisFactRead, { readonly status: 'ok' }>,
   expectedScenarioId: string,
-): readonly HandlerFact[] | null {
+): readonly IdentifiedHandlerFact[] | null {
   if (
     read.scenario_id !== expectedScenarioId ||
     read.query_limit !== SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT ||
@@ -218,20 +209,28 @@ function validateDurableContract(
       : SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT;
   if (read.facts.length !== expectedLength) return null;
 
-  const out: HandlerFact[] = [];
+  const out: IdentifiedHandlerFact[] = [];
+  const seenIds = new Set<string>();
   for (const candidate of read.facts) {
-    const fact = parseEligibleRunAnalysisFact(candidate, expectedScenarioId);
-    if (fact === null) return null;
-    out.push(fact);
+    const identified = parseIdentifiedRunAnalysisFact(
+      candidate,
+      expectedScenarioId,
+    );
+    if (identified === null || seenIds.has(identified.fact_row_id)) return null;
+    seenIds.add(identified.fact_row_id);
+    out.push(identified);
   }
+  out.sort(comparePersistedFactsNewestFirst);
   return Object.freeze(out);
 }
 
 function classifyHotFacts(
   candidates: readonly unknown[],
+  candidatesWithIdentity: readonly HandlerFactWithTurn[],
   expectedScenarioId: string,
 ): ClassifiedHotFacts {
   const eligible: HandlerFact[] = [];
+  const rawEligibleObjects: object[] = [];
   let invalid = false;
 
   for (const candidate of candidates) {
@@ -266,9 +265,164 @@ function classifyHotFacts(
       continue;
     }
     eligible.push(eligibleFact);
+    rawEligibleObjects.push(candidate as object);
   }
 
-  return { eligible: Object.freeze(eligible), invalid };
+  const identified: IdentifiedHandlerFact[] = [];
+  const identifiedFactObjects: object[] = [];
+  const seenIds = new Set<string>();
+  for (const candidate of candidatesWithIdentity) {
+    if (
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate) ||
+      candidate.fact === null ||
+      typeof candidate.fact !== 'object' ||
+      Array.isArray(candidate.fact) ||
+      (candidate.fact as { readonly fact_type?: unknown }).fact_type !==
+        'run_analysis'
+    ) {
+      continue;
+    }
+    const parsed = parseIdentifiedRunAnalysisFact(candidate, expectedScenarioId);
+    if (parsed === null || seenIds.has(parsed.fact_row_id)) {
+      invalid = true;
+      continue;
+    }
+    seenIds.add(parsed.fact_row_id);
+    identified.push(parsed);
+    identifiedFactObjects.push(candidate.fact as object);
+  }
+
+  // In production `priorFacts` is mapped directly from
+  // `priorFactsWithTurn`, so the fact objects are the same occurrences. A
+  // legacy/direct caller that supplies cloned payloads cannot acquire row
+  // identity by payload resemblance and therefore fails weak.
+  const unmatchedIdentified = [...identifiedFactObjects];
+  for (const factObject of rawEligibleObjects) {
+    const index = unmatchedIdentified.indexOf(factObject);
+    if (index < 0) {
+      invalid = true;
+      continue;
+    }
+    unmatchedIdentified.splice(index, 1);
+  }
+  if (unmatchedIdentified.length > 0) invalid = true;
+
+  return {
+    eligible: Object.freeze(eligible),
+    identified: Object.freeze(identified),
+    invalid,
+  };
+}
+
+function parseIdentifiedRunAnalysisFact(
+  candidate: unknown,
+  expectedScenarioId: string,
+): IdentifiedHandlerFact | null {
+  if (
+    candidate === null ||
+    typeof candidate !== 'object' ||
+    Array.isArray(candidate)
+  ) {
+    return null;
+  }
+  const record = candidate as Readonly<Record<string, unknown>>;
+  const factRowId = record.fact_row_id;
+  const factCreatedAt = record.fact_created_at;
+  if (
+    typeof factRowId !== 'string' ||
+    factRowId.length === 0 ||
+    typeof factCreatedAt !== 'string' ||
+    persistedInstantOrderKey(factCreatedAt) === null
+  ) {
+    return null;
+  }
+  const fact = parseEligibleRunAnalysisFact(record.fact, expectedScenarioId);
+  if (fact === null) return null;
+  return Object.freeze({
+    fact,
+    fact_row_id: factRowId,
+    fact_created_at: factCreatedAt,
+  });
+}
+
+function identifiedSnapshotIncludes(
+  durable: readonly IdentifiedHandlerFact[],
+  hot: readonly IdentifiedHandlerFact[],
+): boolean {
+  const durableById = new Map(
+    durable.map((entry) => [entry.fact_row_id, entry] as const),
+  );
+  for (const hotEntry of hot) {
+    const durableEntry = durableById.get(hotEntry.fact_row_id);
+    if (!durableEntry) return false;
+    if (
+      persistedInstantOrderKey(durableEntry.fact_created_at) !==
+        persistedInstantOrderKey(hotEntry.fact_created_at) ||
+      stableFactKey(durableEntry.fact) !== stableFactKey(hotEntry.fact)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function comparePersistedFactsNewestFirst(
+  left: IdentifiedHandlerFact,
+  right: IdentifiedHandlerFact,
+): number {
+  const leftTime = persistedInstantOrderKey(left.fact_created_at)!;
+  const rightTime = persistedInstantOrderKey(right.fact_created_at)!;
+  if (leftTime !== rightTime) return leftTime < rightTime ? 1 : -1;
+  if (left.fact_row_id === right.fact_row_id) return 0;
+  return left.fact_row_id < right.fact_row_id ? 1 : -1;
+}
+
+/**
+ * Lossless ordering key for Postgres timestamptz values. Date.parse truncates
+ * sub-millisecond precision, so retain the remaining nanoseconds as well.
+ */
+function persistedInstantOrderKey(value: string): bigint | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) return null;
+  const year = Number.parseInt(match[1]!, 10);
+  const month = Number.parseInt(match[2]!, 10);
+  const day = Number.parseInt(match[3]!, 10);
+  const hour = Number.parseInt(match[4]!, 10);
+  const minute = Number.parseInt(match[5]!, 10);
+  const second = Number.parseInt(match[6]!, 10);
+  const offsetHour = match[10] ? Number.parseInt(match[10], 10) : 0;
+  const offsetMinute = match[11] ? Number.parseInt(match[11], 10) : 0;
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    return null;
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) return null;
+  const fraction = (match[7] ?? '').padEnd(9, '0');
+  const nanos = Number.parseInt(fraction || '0', 10);
+  return BigInt(milliseconds) * 1_000_000n + BigInt(nanos % 1_000_000);
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
 function parseEligibleRunAnalysisFact(

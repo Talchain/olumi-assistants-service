@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 
 import { buildTurnContext } from '../build-turn-context.js';
 import { SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../context/reconcile-scenario-analysis-facts.js';
@@ -47,6 +48,19 @@ function priorTurn() {
   };
 }
 
+function identifiedAnalysisFact(
+  fact: HandlerFact,
+  index: number,
+): IdentifiedHandlerFact {
+  return {
+    fact,
+    fact_row_id: `scenario-analysis-row-${index}`,
+    fact_created_at: new Date(
+      Date.UTC(2026, 7, 27, 12, 0, 59 - index),
+    ).toISOString(),
+  };
+}
+
 describe('buildTurnContext — scenario analysis fact authority', () => {
   it('loads the exact lookahead and keeps scenario analysis facts distinct from ordinary prior_facts', async () => {
     const durable = analysisFact('outside-hot-window');
@@ -58,7 +72,7 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
         limit: number,
       ) => {
         limits.push(limit);
-        return { facts: [durable], total_count: 1 };
+        return { facts: [identifiedAnalysisFact(durable, 0)], total_count: 1 };
       },
     };
 
@@ -104,7 +118,7 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
     const store = {
       ...createNoopSessionStore(),
       readScenarioRunAnalysisFactsFor: async () => ({
-        facts,
+        facts: facts.map(identifiedAnalysisFact),
         total_count: 37,
       }),
     };

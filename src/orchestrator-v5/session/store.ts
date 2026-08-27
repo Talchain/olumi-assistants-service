@@ -101,7 +101,7 @@ export interface SessionAppendOutcome {
  * facts. `total_count` is the pre-limit database count, never an estimate.
  */
 export interface ScenarioRunAnalysisFactPage {
-  readonly facts: readonly HandlerFact[];
+  readonly facts: readonly IdentifiedHandlerFact[];
   readonly total_count: number;
 }
 

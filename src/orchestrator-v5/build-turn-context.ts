@@ -764,6 +764,7 @@ export async function buildTurnContext(
   const scenarioAnalysisFactSet = reconcileScenarioAnalysisFacts({
     scenarioId: payload.scenario_id,
     hotWindowFacts: priorFacts,
+    hotWindowFactsWithIdentity: priorFactsWithTurn,
     durableRead: durableScenarioAnalysisFactRead,
   });
   const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;

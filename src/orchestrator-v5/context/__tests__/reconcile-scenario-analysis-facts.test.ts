@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type {
+  HandlerFactWithTurn,
+  IdentifiedHandlerFact,
+} from '../../types/handler-fact.js';
 
 import {
   SCENARIO_ANALYSIS_FACT_CAP,
@@ -56,6 +60,35 @@ function nonAnalysisFact(): HandlerFact {
   };
 }
 
+function persistedTimestamp(index: number): string {
+  return `2026-08-27T12:00:${String(59 - index).padStart(2, '0')}.000Z`;
+}
+
+function identified(
+  fact: unknown,
+  index: number,
+  overrides: Partial<IdentifiedHandlerFact> = {},
+): IdentifiedHandlerFact {
+  return {
+    fact: fact as HandlerFact,
+    fact_row_id: `analysis-row-${index}`,
+    fact_created_at: persistedTimestamp(index),
+    ...overrides,
+  };
+}
+
+function hotIdentified(
+  fact: HandlerFact,
+  index: number,
+  overrides: Partial<HandlerFactWithTurn> = {},
+): HandlerFactWithTurn {
+  return {
+    ...identified(fact, index),
+    turn_id: `turn-${index}`,
+    ...overrides,
+  };
+}
+
 function durable(
   facts: readonly unknown[],
   totalCount = facts.length,
@@ -68,7 +101,14 @@ function durable(
     scenario_id: SCENARIO,
     query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
     total_count: totalCount,
-    facts,
+    facts: facts.map((candidate, index) =>
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      !Array.isArray(candidate) &&
+      'fact' in candidate
+        ? (candidate as IdentifiedHandlerFact)
+        : identified(candidate, index),
+    ),
     ...overrides,
   };
 }
@@ -79,6 +119,7 @@ function reconcile(
   return reconcileScenarioAnalysisFacts({
     scenarioId: SCENARIO,
     hotWindowFacts: [],
+    hotWindowFactsWithIdentity: [],
     durableRead: durable([]),
     ...overrides,
   });
@@ -102,6 +143,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
 
     const result = reconcile({
       hotWindowFacts: [current],
+      hotWindowFactsWithIdentity: [hotIdentified(current, 0)],
       durableRead: durable([current, prior]),
     });
 
@@ -205,9 +247,15 @@ describe('reconcileScenarioAnalysisFacts', () => {
   });
 
   it('degrades a clean durable zero that contradicts a known hot analysis fact', () => {
+    const knownHot = analysisFact('known-hot');
     expect(
       reconcile({
-        hotWindowFacts: [analysisFact('known-hot')],
+        hotWindowFacts: [knownHot],
+        hotWindowFactsWithIdentity: [
+          hotIdentified(knownHot, 0, {
+            fact_row_id: 'hot-only-row',
+          }),
+        ],
         durableRead: durable([]),
       }),
     ).toEqual({
@@ -229,6 +277,10 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(
       reconcile({
         hotWindowFacts: [hotNewer, durableOlder],
+        hotWindowFactsWithIdentity: [
+          hotIdentified(hotNewer, 0, { fact_row_id: 'hot-newer-row' }),
+          hotIdentified(durableOlder, 0),
+        ],
         durableRead: durable([durableOlder]),
       }),
     ).toEqual({
@@ -239,19 +291,28 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
-  it('uses multiset inclusion without deduplicating distinct identical durable facts', () => {
-    const identical = analysisFact('identical');
+  it('uses persisted identity without deduplicating distinct identical durable facts', () => {
+    const identicalFirst = analysisFact('identical');
+    const identicalSecond = analysisFact('identical');
     const result = reconcile({
-      hotWindowFacts: [identical, identical],
-      durableRead: durable([identical, identical]),
+      hotWindowFacts: [identicalFirst, identicalSecond],
+      hotWindowFactsWithIdentity: [
+        hotIdentified(identicalFirst, 0),
+        hotIdentified(identicalSecond, 1),
+      ],
+      durableRead: durable([identicalFirst, identicalSecond]),
     });
     expect(result.status).toBe('complete');
     expect(result.facts).toHaveLength(2);
 
     expect(
       reconcile({
-        hotWindowFacts: [identical, identical],
-        durableRead: durable([identical]),
+        hotWindowFacts: [identicalFirst, identicalSecond],
+        hotWindowFactsWithIdentity: [
+          hotIdentified(identicalFirst, 0),
+          hotIdentified(identicalSecond, 1),
+        ],
+        durableRead: durable([identicalFirst]),
       }),
     ).toMatchObject({
       status: 'degraded',
@@ -278,9 +339,148 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(
       reconcile({
         hotWindowFacts: [hotFact],
+        hotWindowFactsWithIdentity: [hotIdentified(hotFact, 0)],
         durableRead: durable([durableFact]),
       }),
     ).toMatchObject({ status: 'complete', source: 'scenario' });
+  });
+
+  it('does not let a byte-identical payload mint missing persisted identity', () => {
+    const durableFact = analysisFact('same-payload');
+    const hotFact = analysisFact('same-payload');
+
+    expect(
+      reconcile({
+        hotWindowFacts: [hotFact],
+        hotWindowFactsWithIdentity: [hotIdentified(hotFact, 0, {
+          fact_row_id: 'newer-distinct-row',
+        })],
+        durableRead: durable([durableFact]),
+      }),
+    ).toMatchObject({ status: 'degraded', reason: 'snapshot_conflict' });
+  });
+
+  it('fails weak when a hot analysis payload has no persisted identity', () => {
+    const hotFact = analysisFact('missing-identity');
+    expect(
+      reconcile({
+        hotWindowFacts: [hotFact],
+        hotWindowFactsWithIdentity: [],
+        durableRead: durable([hotFact]),
+      }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'hot_window_contract_invalid',
+    });
+  });
+
+  it('fails weak when a direct caller offers an unattested payload clone', () => {
+    const rawFact = analysisFact('clone');
+    const clone = analysisFact('clone');
+    expect(
+      reconcile({
+        hotWindowFacts: [rawFact],
+        hotWindowFactsWithIdentity: [hotIdentified(clone, 0)],
+        durableRead: durable([rawFact]),
+      }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'hot_window_contract_invalid',
+    });
+  });
+
+  it('degrades empty when one persisted id has contradictory payload or time', () => {
+    const durableFact = analysisFact('durable');
+    const hotPayloadConflict = analysisFact('hot-conflict');
+    expect(
+      reconcile({
+        hotWindowFacts: [hotPayloadConflict],
+        hotWindowFactsWithIdentity: [hotIdentified(hotPayloadConflict, 0)],
+        durableRead: durable([durableFact]),
+      }),
+    ).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'snapshot_conflict',
+      total_count: 1,
+    });
+
+    expect(
+      reconcile({
+        hotWindowFacts: [durableFact],
+        hotWindowFactsWithIdentity: [
+          hotIdentified(durableFact, 0, {
+            fact_created_at: '2026-08-27T12:00:58.000Z',
+          }),
+        ],
+        durableRead: durable([durableFact]),
+      }),
+    ).toMatchObject({ status: 'degraded', reason: 'snapshot_conflict' });
+  });
+
+  it('treats equivalent timestamp offsets as the same persisted instant', () => {
+    const fact = analysisFact('offset-equivalent');
+    const result = reconcile({
+      hotWindowFacts: [fact],
+      hotWindowFactsWithIdentity: [
+        hotIdentified(fact, 0, {
+          fact_created_at: '2026-08-27T13:00:59.000+01:00',
+        }),
+      ],
+      durableRead: durable([fact]),
+    });
+    expect(result).toMatchObject({ status: 'complete', total_count: 1 });
+  });
+
+  it('rejects duplicate ids and impossible persisted timestamps', () => {
+    const first = analysisFact('first');
+    const second = analysisFact('second');
+    expect(
+      reconcile({
+        durableRead: durable([
+          identified(first, 0, { fact_row_id: 'duplicate' }),
+          identified(second, 1, { fact_row_id: 'duplicate' }),
+        ]),
+      }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'durable_contract_invalid',
+    });
+    expect(
+      reconcile({
+        durableRead: durable([
+          identified(first, 0, {
+            fact_created_at: '2026-02-30T12:00:00.000Z',
+          }),
+        ]),
+      }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'durable_contract_invalid',
+    });
+  });
+
+  it('normalises complete pages to exact timestamp then id database order', () => {
+    const oldest = analysisFact('oldest');
+    const tieLowerId = analysisFact('tie-lower-id');
+    const tieHigherId = analysisFact('tie-higher-id');
+    const result = reconcile({
+      durableRead: durable([
+        identified(oldest, 0, {
+          fact_row_id: 'row-a',
+          fact_created_at: '2026-08-27T12:00:00.000000100Z',
+        }),
+        identified(tieLowerId, 1, {
+          fact_row_id: 'row-b',
+          fact_created_at: '2026-08-27T12:00:00.000000200Z',
+        }),
+        identified(tieHigherId, 2, {
+          fact_row_id: 'row-z',
+          fact_created_at: '2026-08-27T12:00:00.000000200Z',
+        }),
+      ]),
+    });
+    expect(result.facts).toEqual([tieHigherId, tieLowerId, oldest]);
   });
 
   it.each(['bigint', 'cycle'])('fails weak on non-JSON %s evidence', (kind) => {
@@ -350,6 +550,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
     expect(
       reconcile({
         hotWindowFacts: [{ fact_type: 'future_non_analysis_fact' }, fact],
+        hotWindowFactsWithIdentity: [hotIdentified(fact, 0)],
         durableRead: durable([fact]),
       }),
     ).toEqual({
