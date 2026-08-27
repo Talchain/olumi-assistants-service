@@ -506,10 +506,20 @@ export function transformNodeToV3(
     if ((node as any).category === "external" && v3Node.prior) {
       // Path A: external factor — synthesise from prior range
       const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
+      // ⭐ THE SCALE IS DECLARED BY A PRODUCER, NOT SNIFFED BY THIS CONSUMER.
+      // `repair/unreachable-factors.ts:542` stamps `declared_scale` on THIS
+      // node object (`anyNode`, `:451`) — one property from the `unit` read
+      // directly above — and records at `:555` that it is "the producer-side
+      // answer". Passing it stops `synthesiseRangeDisplayValue` inferring a
+      // scale from magnitude wherever the producer already knows it.
+      // Absence is passed through as absence: the contract's failure semantics
+      // forbid reading it as `unit_interval`, so the formatter falls back to
+      // its existing behaviour rather than to a default.
       const synthesised = synthesiseRangeDisplayValue(
         v3Node.prior,
         priorUnit,
         v3Node.factor_type,
+        anyNode.declared_scale,
       );
       if (synthesised !== undefined) {
         v3Node.display_value = synthesised;
