@@ -524,13 +524,55 @@ describe('formatGraphForContext — canonical & legacy edge shapes', () => {
   });
 });
 
-describe('formatGraphForContext — passthrough fields', () => {
-  it('preserves options, constraints, counts unchanged', () => {
+describe('formatGraphForContext — duplicate indexes and passthrough fields', () => {
+  it('projects options to display identity only while preserving constraints and counts', () => {
     const raw = rawGraph();
     const out = formatGraphForContext(raw);
-    expect(out.options).toBe(raw.options);
+    expect(out.options).toEqual([{ id: 'opt_a', label: 'Option A' }]);
+    expect(out.options).not.toBe(raw.options);
     expect(out.constraints).toBe(raw.constraints);
     expect(out.counts).toBe(raw.counts);
+  });
+
+  it('strips a conflicting baseline marker and ranking fields from raw/direct options', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'opt_current', kind: 'option', label: 'Current approach', is_baseline: true },
+          { id: 'opt_change', kind: 'option', label: 'Alternative' },
+        ],
+        options: [
+          {
+            id: 'opt_current',
+            label: 'Current approach',
+            is_baseline: false,
+            decision_score: 0.01,
+            status: 'ready',
+          },
+          {
+            id: 'opt_change',
+            label: 'Alternative',
+            is_baseline: true,
+            decision_score: 0.99,
+            interventions: { fac_cost: 1 },
+          },
+          { id: 'opt_missing_label', is_baseline: true },
+          null,
+          'opt_primitive',
+        ],
+      }),
+    );
+
+    expect(out.nodes.filter((node) => node.is_baseline === true)).toEqual([
+      expect.objectContaining({ id: 'opt_current' }),
+    ]);
+    expect(out.options).toEqual([
+      { id: 'opt_current', label: 'Current approach' },
+      { id: 'opt_change', label: 'Alternative' },
+    ]);
+    expect(JSON.stringify(out.options)).not.toMatch(
+      /is_baseline|decision_score|status|interventions/,
+    );
   });
 
   /**
