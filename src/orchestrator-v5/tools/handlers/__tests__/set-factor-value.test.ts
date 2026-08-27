@@ -488,6 +488,7 @@ describe('set_factor_value handler', () => {
 // ---------------------------------------------------------------------------
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { bindRecentMutationHistoryToPriorFacts } from '../../../context/reconcile-recent-mutation-facts.js';
 
 function buildInvocationWithPriorAnalysis(
   graph: GraphV3T,
@@ -510,7 +511,10 @@ function buildInvocationWithPriorAnalysis(
     ...inv,
     context: {
       ...inv.context,
-      prior_facts: [successFact],
+      prior_facts: bindRecentMutationHistoryToPriorFacts([successFact], {
+        recent_mutation_facts: [],
+        recent_changes_status: 'degraded',
+      }),
     } as HandlerInvocation['context'],
   };
 }

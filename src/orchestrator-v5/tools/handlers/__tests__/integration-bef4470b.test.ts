@@ -48,6 +48,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registr
 import type { ProposalAction } from '../../../routing/types.js';
 import { containsMutationLanguage } from '../../../routing/mutation-language.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { bindRecentMutationHistoryToPriorFacts } from '../../../context/reconcile-recent-mutation-facts.js';
 
 const SCENARIO_ID = 'bef4470b-bef4-4470-bbef-4470bbef4470';
 const REQUEST_ID = 'req-bef4470b-replay';
@@ -385,7 +386,10 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
       ...baseInvocation,
       context: {
         ...baseInvocation.context,
-        prior_facts: [RUN_ANALYSIS_FACT],
+        prior_facts: bindRecentMutationHistoryToPriorFacts([RUN_ANALYSIS_FACT], {
+          recent_mutation_facts: [],
+          recent_changes_status: 'degraded',
+        }),
       } as HandlerInvocation['context'],
       explanation: {
         answer_text: '',
