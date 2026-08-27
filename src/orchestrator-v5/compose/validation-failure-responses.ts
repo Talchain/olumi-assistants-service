@@ -37,6 +37,7 @@ import {
   renderParameterPhrasing,
 } from './parameter-user-phrasing.js';
 import { readMissingValueAnswer } from '../routing/missing-value-answer.js';
+import { isLabelEcho } from '../../cee/transforms/label-echo.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
@@ -837,9 +838,37 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
       // missing label drops the anchor rather than filling it.
       const rawLabel = typeof entity?.label === 'string' ? entity.label.trim() : '';
       const factorLabel = rawLabel.length > 0 ? safeLabel(entity) : null;
+      // ⛔⛔ TWO DECLINING CONJUNCTS, DERIVED FROM THE BLOCKER'S OWN PREDICATE.
+      //
+      // ⚠ THE CLAIM THIS PR WAS APPROVED ON — "the reply quotes the same field
+      // the blocker quotes, so the two cannot diverge" — WAS REFUTED IN REVIEW,
+      // and it was refuted because the field is only the FIRST of three things
+      // the blocker's rung 1 requires. `analysis-ready.ts:485` reads
+      // `factorNode.display_value` only when it is NOT a label echo, and it is
+      // reached at all only when the quoted level genuinely came from
+      // `observed_state` (`:829` passes `typeof observedValue === "number"`).
+      // Reading the same FIELD past both conditions is not the same READ.
+      //
+      // Measured on the first version of this branch:
+      //   · `"CRM Annual Licence Cost" is CRM Annual Licence Cost just now.`
+      //     — the label echoed back as its own value, which is the precise harm
+      //     `isLabelEcho` exists to stop, in a sentence about honesty.
+      //   · a factor with `{raw_value, display_value}` and NO observed value
+      //     quoted "50,000" while the blocker returns the bare level — the two
+      //     surfaces disagreeing, which is what this branch promised not to do.
+      //
+      // ⭐ `isLabelEcho` is IMPORTED, not restated. Its own header records that
+      // it once had four call sites hand-copied at three; a fifth copy here
+      // would be that defect committed inside the fix for it. It now lives in
+      // `cee/transforms/label-echo.ts` so both layers read one definition.
+      const levelCameFromObservedState = typeof snapshot?.value === 'number';
+      const rawDisplay =
+        typeof snapshot?.display_value === 'string' ? snapshot.display_value.trim() : '';
       const currentDisplay =
-        typeof snapshot?.display_value === 'string' && snapshot.display_value.trim().length > 0
-          ? sanitiseForUser(snapshot.display_value)
+        rawDisplay.length > 0 &&
+        levelCameFromObservedState &&
+        !isLabelEcho(rawLabel.toLowerCase(), rawDisplay)
+          ? sanitiseForUser(rawDisplay)
           : null;
       const phrasing = phrasingForParameter('value');
       return {

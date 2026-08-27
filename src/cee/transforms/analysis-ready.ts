@@ -26,6 +26,7 @@ import type {
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
+import { isLabelEcho } from "./label-echo.js";
 import {
   magnitudeUnderScale,
   resolveMagnitudeScale,
@@ -396,28 +397,9 @@ export interface InterventionDetail {
   unit?: string;
 }
 
-/**
- * CEE-6 echo rule, stated ONCE.
- *
- * A display string must not simply repeat the factor's label (e.g. "Marketing
- * Expertise" as the display for the "Marketing Expertise" factor). Strip only
- * when the candidate IS the label or fully CONTAINS it — never when the label
- * contains the candidate, which would discard valid qualitative band output
- * ("High (0.7)" for a factor labelled "High Risk").
- *
- * Guard against an empty label: `String.includes("")` is always true, which
- * would strip every supplied display value for unlabelled nodes.
- *
- * ⚠ This predicate had FOUR call sites and was hand-copied at three of them.
- * A rule a human must remember to keep in step across copies is the
- * hand-maintained mirror this estate keeps paying for (CLAUDE.md trap 12), so
- * it is derived from one definition here rather than restated per site.
- */
-function isLabelEcho(factorLabelLower: string, candidate: string): boolean {
-  if (factorLabelLower === "") return false;
-  const lowered = candidate.toLowerCase().trim();
-  return lowered === factorLabelLower || lowered.includes(factorLabelLower);
-}
+// CEE-6 echo rule — MOVED to `./label-echo.js` (ROADMAP 2.384) when a sixth
+// consumer arrived from `orchestrator-v5/compose/`. Imported above; the five
+// call sites below are unchanged and still read ONE definition.
 
 /**
  * Render a factor's CURRENT level for the blocker sentence
