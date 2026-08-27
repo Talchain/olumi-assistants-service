@@ -616,7 +616,8 @@ export const ContextPackFactorValuesSchema = z
  * propagates here instead of drifting. Only the top-level KEY LIST is written
  * out, and `.strict()` makes a new wire key fail LOUD in the non-prod
  * `safeParse` gate rather than ride silently into the prompt.
- * `run-delta-pack-parity.guard.test.ts` pins this key set against the wire's.
+ * `tests/contract/run-delta-pack-parity.guard.test.ts` pins this key set against
+ * the wire's, deriving BOTH sides at runtime so a new wire key REDs here.
  *
  * ⛔ `flip_thresholds` IS DELIBERATELY ABSENT, AND THAT IS NOT AN OVERSIGHT —
  * DO NOT "FIX" IT BY PASSING IT THROUGH. The producer emits it FROZEN EMPTY
