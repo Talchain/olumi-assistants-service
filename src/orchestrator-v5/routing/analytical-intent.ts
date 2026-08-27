@@ -36,13 +36,40 @@
  * concrete target ("What should we update based on this?") still pass
  * through to advice paths.
  */
+const VERB_TO_X_MUTATION_PATTERN =
+  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\bto\s+\S+/i;
+const VERB_WITH_NUMERIC_MUTATION_PATTERN =
+  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i;
+const STRUCTURAL_ADD_MUTATION_PATTERN =
+  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i;
+const STRUCTURAL_REMOVE_MUTATION_PATTERN =
+  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i;
+const FROM_TO_MUTATION_PATTERN = /\bfrom\s+\S+\s+to\s+\S+/i;
+const UNQUALIFIED_LINE_START_MUTATION_PATTERN =
+  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im;
+
+/**
+ * Concrete mutation shapes whose object, value or structure is expressed by
+ * the same match. Unlike the legacy line-start fallback, these do not grant on
+ * a verb-shaped noun phrase such as "Set membership is important".
+ *
+ * Exposed through `hasStructuredMutationSignal` for callers that have already
+ * isolated one clause and therefore need positive authority from that clause
+ * itself. The regexes remain the same instances consumed by
+ * {@link MUTATION_SIGNAL_PATTERNS}; this is a subset of the canonical SSOT, not
+ * a parallel classifier.
+ */
+const STRUCTURED_MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
+  VERB_TO_X_MUTATION_PATTERN,
+  VERB_WITH_NUMERIC_MUTATION_PATTERN,
+  STRUCTURAL_ADD_MUTATION_PATTERN,
+  STRUCTURAL_REMOVE_MUTATION_PATTERN,
+  FROM_TO_MUTATION_PATTERN,
+];
+
 export const MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\bto\s+\S+/i,
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i,
-  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i,
-  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i,
-  /\bfrom\s+\S+\s+to\s+\S+/i,
-  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im,
+  ...STRUCTURED_MUTATION_SIGNAL_PATTERNS,
+  UNQUALIFIED_LINE_START_MUTATION_PATTERN,
 ];
 
 /**
@@ -53,6 +80,14 @@ export const MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
  */
 export function hasMutationSignal(message: string): boolean {
   for (const re of MUTATION_SIGNAL_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  return false;
+}
+
+/** Does one isolated clause carry canonical structured mutation authority? */
+export function hasStructuredMutationSignal(message: string): boolean {
+  for (const re of STRUCTURED_MUTATION_SIGNAL_PATTERNS) {
     if (re.test(message)) return true;
   }
   return false;
@@ -86,15 +121,12 @@ export function hasMutationSignal(message: string): boolean {
  * the flip phrasing.
  */
 const ALWAYS_INDEPENDENT_MUTATION_PATTERNS: readonly RegExp[] = [
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i,
-  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i,
-  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i,
-  /\bfrom\s+\S+\s+to\s+\S+/i,
-  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im,
+  VERB_WITH_NUMERIC_MUTATION_PATTERN,
+  STRUCTURAL_ADD_MUTATION_PATTERN,
+  STRUCTURAL_REMOVE_MUTATION_PATTERN,
+  FROM_TO_MUTATION_PATTERN,
+  UNQUALIFIED_LINE_START_MUTATION_PATTERN,
 ];
-
-const VERB_TO_X_MUTATION_PATTERN =
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\bto\s+\S+/i;
 
 /**
  * `what_would_flip` patterns mirrored here so the strip-and-recheck in

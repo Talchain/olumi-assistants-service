@@ -9,6 +9,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
+import {
+  hasMutationSignal,
+  hasStructuredMutationSignal,
+} from '../analytical-intent.js';
 import { hasMutationWarrantSignal } from '../mutation-warrant.js';
 import {
   isStateQueryQuestionShape,
@@ -118,7 +122,7 @@ describe('tryStateQueryGuard', () => {
 
     it.each([
       'What did that update do? Add another option.',
-      'What did that update do? Remove another option.',
+      'What did that update do? Delete the old option.',
     ])('preserves an existing whole-message mutation warrant for %s', (message) => {
       expect(hasMutationWarrantSignal(message)).toBe(true);
       expect(tryStateQueryGuard({
@@ -133,6 +137,8 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? Deletes are irreversible.',
       'What did that update do? The increase in cost is worrying.',
       'What did that update do? Lower risk would be better.',
+      'What did that update do? Set membership is important.',
+      'What did that update do? Delete operations are irreversible.',
       'What did that update do? Rename nothing.',
       'What did that update do? Configure how?',
       'What did that update do? Rename it back? No, leave it.',
@@ -159,6 +165,37 @@ describe('tryStateQueryGuard', () => {
         })).toEqual({ matched: false });
       },
     );
+
+    it.each([
+      ['Set membership is important.', false],
+      ['Delete operations are irreversible.', false],
+      ['Set churn to 5%.', true],
+      ['Delete the old option.', true],
+      ['Add another constraint.', true],
+    ] as const)(
+      'distinguishes the canonical structured subset from the broad line-start signal: %s',
+      (trailingClause, expectedStructured) => {
+        // The broad SSOT deliberately retains a legacy line-start fallback for
+        // ordinary routing. A split consequence tail may not inherit that
+        // fallback as write authority; it must match this structured subset.
+        expect(hasMutationSignal(trailingClause)).toBe(true);
+        expect(hasStructuredMutationSignal(trailingClause)).toBe(expectedStructured);
+      },
+    );
+
+    it.each([
+      'What did that update do? Set churn to 5%.',
+      'What did that update do? Delete the old option.',
+      'What did that update do? Add another constraint.',
+      'What did that update do? Churn must be at most 3%.',
+    ])('preserves independent affirmative trailing authority: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
 
     it('preserves an explicit trailing veto', () => {
       const message =

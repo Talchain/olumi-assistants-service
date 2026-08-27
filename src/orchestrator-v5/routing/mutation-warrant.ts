@@ -68,7 +68,10 @@
  * recognises must also grant a warrant, so the two can never fork.
  */
 
-import { hasMutationSignal } from './analytical-intent.js';
+import {
+  hasMutationSignal,
+  hasStructuredMutationSignal,
+} from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
 import {
   isStateQueryQuestionShape,
@@ -307,7 +310,7 @@ export function hasMutationWarrantSignal(message: string): boolean {
   if (leadingEditEffect !== null) {
     const trailing = leadingEditEffect.trailingClause;
     if (trailing === null) return false;
-    if (!hasMutationSignal(trailing) && !hasConstraintMutationSignal(trailing)) {
+    if (!hasStructuredMutationSignal(trailing) && !hasConstraintMutationSignal(trailing)) {
       return false;
     }
     return hasMutationWarrantSignal(trailing);

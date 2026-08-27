@@ -193,7 +193,7 @@ function witnessedAddConstraintAdapter() {
 }
 
 /** The trap-19 twin: a DIFFERENT mutating handler, same warrant question. */
-function witnessedSetFactorValueAdapter() {
+function witnessedSetFactorValueAdapter(value = 2) {
   return {
     chatWithTools: vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
@@ -210,7 +210,7 @@ function witnessedSetFactorValueAdapter() {
               resolution_method: 'label_match',
             },
             parameters: [
-              { name: 'value', value: { value: 2, unit: '%' }, source: 'user_explicit' },
+              { name: 'value', value: { value, unit: '%' }, source: 'user_explicit' },
             ],
             cited_context_fields: [],
           },
@@ -351,16 +351,18 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
   });
 
   it.each([
-    'What did that update do? The increase in cost is worrying.',
-    'What did that update do? Lower risk would be better.',
+    ['What did that update do? The increase in cost is worrying.', 'cost'],
+    ['What did that update do? Lower risk would be better.', 'risk'],
+    ['What did that update do? Set membership is important.', 'set-noun'],
+    ['What did that update do? Delete operations are irreversible.', 'delete-noun'],
   ])(
     'a leading consequence question plus a hostile observation reaches the model but writes nothing: %s',
-    async (message) => {
+    async (message, caseId) => {
       const routingAdapter = witnessedAddConstraintAdapter();
 
       const result = await runTurnExecutor(
         payload(message),
-        `req-warrant-effect-observation-${message.includes('increase') ? 'cost' : 'risk'}`,
+        `req-warrant-effect-observation-${caseId}`,
         { routingAdapter, graphState: buildChurnGraph() },
       );
 
@@ -379,6 +381,39 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     await runTurnExecutor(
       payload('What did that update do? Add another constraint.'),
       'req-warrant-effect-concrete-edit',
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(1);
+    expect(churnConstraints(graphWrites()[0]!.graph)).toHaveLength(1);
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+  });
+
+  it('a numeric trailing edit keeps value-mutation authority', async () => {
+    const routingAdapter = witnessedSetFactorValueAdapter(5);
+
+    await runTurnExecutor(
+      payload('What did that update do? Set churn to 5%.'),
+      'req-warrant-effect-set-value',
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(1);
+    expect(churnRawValue(graphWrites()[0]!.graph)).toBe(5);
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+  });
+
+  it.each([
+    ['What did that update do? Add another constraint.', 'structural'],
+    ['What did that update do? Churn must be at most 3%.', 'constraint'],
+  ])('a trailing %s edit keeps constraint-mutation authority', async (message, caseId) => {
+    const routingAdapter = witnessedAddConstraintAdapter();
+
+    await runTurnExecutor(
+      payload(message),
+      `req-warrant-effect-${caseId}`,
       { routingAdapter, graphState: buildChurnGraph() },
     );
 

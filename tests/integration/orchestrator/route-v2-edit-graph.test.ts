@@ -513,8 +513,23 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         expectDispatch: false,
       },
       {
+        label: 'suppressed: consequence question + set-noun observation',
+        message: 'What did that update do? Set membership is important.',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: consequence question + delete-noun observation',
+        message: 'What did that update do? Delete operations are irreversible.',
+        expectDispatch: false,
+      },
+      {
         label: 'protected from direct edit dispatch: consequence question + concrete edit',
         message: 'What did that update do? Add another option.',
+        expectDispatch: false,
+      },
+      {
+        label: 'protected from direct edit dispatch: consequence question + delete edit',
+        message: 'What did that update do? Delete the old option.',
         expectDispatch: false,
       },
       {
@@ -822,7 +837,10 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     it.each([
       'What did that update do? The increase in cost is worrying.',
       'What did that update do? Lower risk would be better.',
+      'What did that update do? Set membership is important.',
+      'What did that update do? Delete operations are irreversible.',
       'What did that update do? Add another option.',
+      'What did that update do? Delete the old option.',
     ])('a leading consequence question always reaches the protected TurnExecutor path: %s', async (message) => {
       const res = await app.inject({
         method: 'POST',
