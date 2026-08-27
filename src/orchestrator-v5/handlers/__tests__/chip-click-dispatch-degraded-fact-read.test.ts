@@ -96,6 +96,7 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 const {
   readRecentMock,
   readFactsForMock,
+  readScenarioRunAnalysisFactsForMock,
   appendMock,
   loadScenarioSnapshotForRunAnalysisMock,
   commitDirectAnswerMock,
@@ -105,6 +106,7 @@ const {
 } = vi.hoisted(() => ({
   readRecentMock: vi.fn(),
   readFactsForMock: vi.fn(),
+  readScenarioRunAnalysisFactsForMock: vi.fn(),
   appendMock: vi.fn().mockResolvedValue({ id: 'mock-row-id' }),
   loadScenarioSnapshotForRunAnalysisMock: vi.fn(),
   commitDirectAnswerMock: vi.fn(),
@@ -119,6 +121,7 @@ vi.mock('../../session/index.js', () => ({
     append: appendMock,
     readRecent: readRecentMock,
     readFactsFor: readFactsForMock,
+    readScenarioRunAnalysisFactsFor: readScenarioRunAnalysisFactsForMock,
     readMostRecentPendingActions: async () => [],
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
@@ -165,6 +168,7 @@ vi.mock('../../tools/registry.js', async () => {
 
 import { dispatchChipClickRunAnalysis } from '../chip-click-dispatch.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -241,15 +245,58 @@ function handlerOkNoFacts() {
  * fields at the TOP level make the fact silently UNSELECTABLE, and arm 3 would
  * be asserting against a fact the derivation cannot see.
  */
-function runAnalysisFact(graphHashAtRun: string) {
+function runAnalysisFact(
+  graphHashAtRun: string,
+  options: {
+    readonly computedAt?: string;
+    readonly status?: string;
+    readonly mayNameLeadingOption?: boolean;
+  } = {},
+) {
+  const mayNameLeadingOption = options.mayNameLeadingOption ?? true;
   return {
     fact_type: 'run_analysis' as const,
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_launch',
+      summary: 'Launch now leads on the recorded model.',
+      win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
       graph_hash_at_run: graphHashAtRun,
-      computed_at: '2026-08-15T00:00:00.000Z',
+      computed_at: options.computedAt ?? '2026-08-15T00:00:00.000Z',
+      enrichment: {
+        analysis_status: options.status ?? 'completed',
+        option_comparison: [
+          {
+            option_id: 'opt_launch',
+            option_label: 'Launch now',
+            win_probability: 0.62,
+            outcome_mean: 0.6,
+          },
+          {
+            option_id: 'opt_status_quo',
+            option_label: 'Status quo',
+            win_probability: 0.38,
+            outcome_mean: 0.4,
+          },
+        ],
+      },
+      constraint_verdict: {
+        may_name_leading_option: mayNameLeadingOption,
+        constraint_verdict_state: mayNameLeadingOption
+          ? 'evaluated_feasible'
+          : 'unevaluated',
+      },
     },
+  };
+}
+
+function handlerOutcomeWithFact(fact: ReturnType<typeof runAnalysisFact>) {
+  return {
+    assistant_text: 'Ran analysis on your current scenario.',
+    handler_facts: [fact],
+    llm_calls_used: 0,
   };
 }
 
@@ -290,6 +337,11 @@ function primeMocks() {
   // Non-empty prior turns WITH row ids — clears the three `fetchPriorFacts`
   // short-circuits so the try/catch is genuinely reached.
   readRecentMock.mockResolvedValue([{ id: 'prior-run-row' }]);
+  readFactsForMock.mockResolvedValue([]);
+  readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+    facts: [],
+    total_count: 0,
+  });
 }
 
 async function runDispatch() {
@@ -315,14 +367,18 @@ describe('chip-click-dispatch — a degraded prior-fact read must not claim "nev
     setTestSink(null);
   });
 
-  it('DEGRADED: readFactsFor THROWS → unknown / derivation_failed, never none', async () => {
-    readFactsForMock.mockRejectedValue(new Error('simulated prior-fact read failure'));
+  it('DEGRADED: the exact scenario fact read THROWS → unknown / derivation_failed, never none', async () => {
+    readScenarioRunAnalysisFactsForMock.mockRejectedValue(
+      new Error('simulated scenario analysis-fact read failure'),
+    );
 
     const out = await runDispatch();
     expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.mayNameLeadingOption).toBe(false);
 
     // Precondition pin: the rejecting read was genuinely reached.
-    expect(readFactsForMock).toHaveBeenCalled();
+    expect(readScenarioRunAnalysisFactsForMock).toHaveBeenCalledWith(SCENARIO_ID, 21);
 
     const derived = soleDerived();
     expect(derived.freshness).toBe('unknown');
@@ -336,16 +392,18 @@ describe('chip-click-dispatch — a degraded prior-fact read must not claim "nev
     expect(derived.prior_fact_count).toBe(0);
   });
 
-  it('OK-ARM CONTROL: readFactsFor RESOLVES [] → none / no_successful_run_analysis_fact', async () => {
+  it('OK-ARM CONTROL: the exact scenario page is complete-empty → none / no_successful_run_analysis_fact', async () => {
     // The discriminating twin: identical to the arm above except the read
     // SUCCEEDS and is genuinely empty. A fix that downgraded every empty read
     // would pass arm 1 and fail here.
-    readFactsForMock.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [], total_count: 0 });
 
     const out = await runDispatch();
     expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.mayNameLeadingOption).toBe(true);
 
-    expect(readFactsForMock).toHaveBeenCalled();
+    expect(readScenarioRunAnalysisFactsForMock).toHaveBeenCalledWith(SCENARIO_ID, 21);
 
     const derived = soleDerived();
     expect(derived.freshness).toBe('none');
@@ -356,12 +414,17 @@ describe('chip-click-dispatch — a degraded prior-fact read must not claim "nev
 
   it('FACT-AUTHORITATIVE: a real run_analysis fact is never blanked out, and the verdict tracks the HASH', async () => {
     // ── half 1: diverged hash → the hash-derived stale verdict ───────────────
-    readFactsForMock.mockResolvedValue([runAnalysisFact('sha256:deliberately-diverged')]);
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+      facts: [runAnalysisFact('sha256:deliberately-diverged')],
+      total_count: 1,
+    });
 
     const out = await runDispatch();
     expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.mayNameLeadingOption).toBe(true);
 
-    expect(readFactsForMock).toHaveBeenCalled();
+    expect(readScenarioRunAnalysisFactsForMock).toHaveBeenCalledWith(SCENARIO_ID, 21);
 
     const diverged = soleDerived();
     expect(diverged.freshness).toBe('stale');
@@ -382,16 +445,69 @@ describe('chip-click-dispatch — a degraded prior-fact read must not claim "nev
     captured = [];
     vi.clearAllMocks();
     primeMocks();
-    readFactsForMock.mockResolvedValue([runAnalysisFact(currentGraphHash as string)]);
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+      facts: [runAnalysisFact(currentGraphHash as string)],
+      total_count: 1,
+    });
 
     const out2 = await runDispatch();
     expect(out2.outcome).toBe('ok');
+    if (out2.outcome !== 'ok') throw new Error(`expected ok, got ${out2.outcome}`);
+    expect(out2.mayNameLeadingOption).toBe(true);
 
-    expect(readFactsForMock).toHaveBeenCalled();
+    expect(readScenarioRunAnalysisFactsForMock).toHaveBeenCalledWith(SCENARIO_ID, 21);
 
     const matched = soleDerived();
     expect(matched.freshness).toBe('fresh');
     expect(matched.reason).toBe('graph_hash_match');
     expect(matched.selected_fact_index).toBe(0);
+  });
+
+  it('CURRENT SUCCESS: same-turn analysis outranks a future-skewed durable fact', async () => {
+    const currentGraphHash = computeAnalysisAffectingGraphHash(READY_GRAPH as never)!;
+    const durableFutureWithheld = runAnalysisFact('sha256:durable-diverged', {
+      computedAt: '2099-01-01T00:00:00.000Z',
+      mayNameLeadingOption: false,
+    });
+    const currentPermitted = runAnalysisFact(currentGraphHash, {
+      computedAt: '2026-08-27T00:00:00.000Z',
+      mayNameLeadingOption: true,
+    });
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+      facts: [durableFutureWithheld],
+      total_count: 1,
+    });
+    handlerFnMock.mockResolvedValue(handlerOutcomeWithFact(currentPermitted));
+
+    const out = await runDispatch();
+    expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.freshness.freshness).toBe('fresh');
+    expect(out.freshness.reason).toBe('graph_hash_match');
+    expect(out.freshness.computed_at).toBe('2026-08-27T00:00:00.000Z');
+    expect(out.mayNameLeadingOption).toBe(true);
+  });
+
+  it('CURRENT PARTIAL: a withheld same-turn result cannot be widened by older durable permission', async () => {
+    const currentGraphHash = computeAnalysisAffectingGraphHash(READY_GRAPH as never)!;
+    const durablePermitted = runAnalysisFact(currentGraphHash, {
+      computedAt: '2026-08-26T00:00:00.000Z',
+      mayNameLeadingOption: true,
+    });
+    const currentPartialWithheld = runAnalysisFact(currentGraphHash, {
+      computedAt: '2026-08-27T00:00:00.000Z',
+      status: 'partial',
+      mayNameLeadingOption: false,
+    });
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+      facts: [durablePermitted],
+      total_count: 1,
+    });
+    handlerFnMock.mockResolvedValue(handlerOutcomeWithFact(currentPartialWithheld));
+
+    const out = await runDispatch();
+    expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.mayNameLeadingOption).toBe(false);
   });
 });

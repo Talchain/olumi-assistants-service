@@ -21,7 +21,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
-  readMayNameLeadingOptionVerdict,
+  readMayNameLeadingOptionVerdictForTurn,
   type ClaimSafetyScenarioScope,
 } from '../context/claim-safety-read.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
@@ -42,6 +42,14 @@ export interface ApplyCoachingSignalInput {
   readonly contextPack: ContextPack | null;
   /** Facts from prior turns in this scenario (newest-first). */
   readonly priorFacts: readonly HandlerFact[];
+  /**
+   * Complete scenario-wide analysis facts for claim-safety only. Kept
+   * separate from `priorFacts` because prefixing two independently ordered
+   * reads fabricates a mixed chronology and breaks intervening-change
+   * attribution. Capped/degraded callers pass an empty array; scope carries
+   * the corresponding fail-weak entitlement state.
+   */
+  readonly priorAnalysisFacts: readonly HandlerFact[];
   /**
    * The facts destined for commit on THIS turn (post decision_review
    * enrichment). When a run_analysis signal fires, the signal marker is
@@ -124,15 +132,16 @@ export function applyCoachingSignal(
   // in the turn.
   //
   // ONE DERIVATION, TWO READ POINTS. This is the same
-  // `readMayNameLeadingOptionVerdict` over the same union shape (this turn's
-  // facts ∪ the window) and the same scope that the executor's post-handler
-  // re-read and the chip-click exit use. Not a second derivation: one function,
-  // one selector pair, one leaf reader (CLAUDE.md trap #12).
+  // `readMayNameLeadingOptionVerdictForTurn` composition the executor's
+  // post-handler re-read and chip-click exit use. The ordinary `priorFacts`
+  // array remains the sole mixed newest-first timeline for change attribution;
+  // scenario-wide analysis facts never get prefixed onto it.
   // ═══════════════════════════════════════════════════════════════════════════
-  const mayNameLeadingOption = readMayNameLeadingOptionVerdict(
-    [...input.handlerFacts, ...input.priorFacts],
-    input.claimSafetyScope,
-  ).may_name_leading_option;
+  const mayNameLeadingOption = readMayNameLeadingOptionVerdictForTurn({
+    currentFacts: input.handlerFacts,
+    priorAnalysisFacts: input.priorAnalysisFacts,
+    priorScope: input.claimSafetyScope,
+  }).may_name_leading_option;
 
   const detection = detectCoachingSignal({
     proposedHandlerId: input.proposedHandlerId,

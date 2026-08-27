@@ -262,6 +262,12 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    readScenarioRunAnalysisFactsFor: async (_id: string, limit: number) => {
+      const analyses = priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop === false,
+      );
+      return { facts: analyses.slice(0, limit), total_count: analyses.length };
+    },
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),

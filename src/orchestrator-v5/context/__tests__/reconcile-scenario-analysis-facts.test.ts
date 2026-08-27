@@ -91,6 +91,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
       source: 'scenario',
       facts: [],
       total_count: 0,
+      newest_fact: null,
     });
   });
 
@@ -110,6 +111,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
       source: 'scenario',
       facts: [current, prior],
       total_count: 2,
+      newest_fact: current,
     });
   });
 
@@ -142,9 +144,33 @@ describe('reconcileScenarioAnalysisFacts', () => {
     );
     const result = reconcile({ durableRead: durable(facts, 37) });
 
-    expect(result).toEqual({ status: 'capped', facts: [], total_count: 37 });
+    expect(result).toEqual({
+      status: 'capped',
+      facts: [],
+      total_count: 37,
+      newest_fact: facts[0],
+    });
     expect(selectRunAnalysisFact(result.facts)).toBeNull();
     expect(selectDegradedRunAnalysisFact(result.facts)).toBeNull();
+  });
+
+  it('does not call a valid hot fact below the capped prefix a snapshot conflict', () => {
+    const prefix = Array.from(
+      { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
+      (_, index) => analysisFact(`fact-${index}`),
+    );
+    const belowPrefix = analysisFact('fact-21');
+    expect(
+      reconcile({
+        hotWindowFacts: [belowPrefix],
+        durableRead: durable(prefix, 22),
+      }),
+    ).toEqual({
+      status: 'capped',
+      facts: [],
+      total_count: 22,
+      newest_fact: prefix[0],
+    });
   });
 
   it.each([
@@ -283,13 +309,15 @@ describe('reconcileScenarioAnalysisFacts', () => {
     ).toMatchObject({ status: 'complete', source: 'scenario' });
   });
 
-  it.each(['bigint', 'cycle'])('fails weak on non-JSON %s evidence', (kind) => {
+  it.each(['bigint', 'cycle', 'undefined', 'function'])('fails weak on non-JSON %s evidence', (kind) => {
     const fact = analysisFact(`non-json-${kind}`) as HandlerFact & {
       result: Record<string, unknown>;
     };
     const impossible: Record<string, unknown> = {};
     if (kind === 'bigint') impossible.value = BigInt(1);
-    else impossible.self = impossible;
+    else if (kind === 'cycle') impossible.self = impossible;
+    else if (kind === 'undefined') impossible.value = undefined;
+    else impossible.value = () => 'not-json';
     fact.result.enrichment = impossible;
 
     expect(reconcile({ durableRead: durable([fact]) })).toEqual({
@@ -298,6 +326,96 @@ describe('reconcileScenarioAnalysisFacts', () => {
       reason: 'durable_contract_invalid',
     });
   });
+
+  it('treats nested array order as meaningful in snapshot reconciliation', () => {
+    const durableFact = analysisFact('array-order') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    const hotFact = analysisFact('array-order') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    durableFact.result.enrichment = {
+      analysis_status: 'computed',
+      evidence: ['first', 'second'],
+    };
+    hotFact.result.enrichment = {
+      analysis_status: 'computed',
+      evidence: ['second', 'first'],
+    };
+
+    expect(
+      reconcile({
+        hotWindowFacts: [hotFact],
+        durableRead: durable([durableFact]),
+      }),
+    ).toMatchObject({ status: 'degraded', reason: 'snapshot_conflict' });
+  });
+
+  it('rejects a sparse array whose custom key disguises the missing index', () => {
+    const fact = analysisFact('sparse-array') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    const disguised = new Array<unknown>(2);
+    disguised[0] = 'present';
+    (disguised as unknown as Record<string, unknown>).custom = null;
+    fact.result.enrichment = {
+      analysis_status: 'computed',
+      evidence: disguised,
+    };
+
+    expect(reconcile({ durableRead: durable([fact]) })).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'durable_contract_invalid',
+    });
+  });
+
+  it.each(['fact getter', 'nested getter', 'toJSON', 'proxy']) (
+    'degrades hostile %s evidence without throwing',
+    (kind) => {
+      let candidate: unknown = analysisFact(`hostile-${kind}`);
+      if (kind === 'fact getter') {
+        Object.defineProperty(candidate, 'fact_type', {
+          enumerable: true,
+          get: () => {
+            throw new Error('fact_type trap');
+          },
+        });
+      } else if (kind === 'nested getter') {
+        const fact = candidate as HandlerFact & { result: Record<string, unknown> };
+        Object.defineProperty(fact.result, 'scenario_id', {
+          enumerable: true,
+          get: () => {
+            throw new Error('scenario trap');
+          },
+        });
+      } else if (kind === 'toJSON') {
+        (candidate as HandlerFact & { toJSON?: unknown }).toJSON = () => ({ forged: true });
+      } else {
+        candidate = new Proxy(candidate as object, {
+          ownKeys: () => {
+            throw new Error('proxy trap');
+          },
+        });
+      }
+
+      expect(() => reconcile({ durableRead: durable([candidate]) })).not.toThrow();
+      expect(reconcile({ durableRead: durable([candidate]) })).toEqual({
+        status: 'degraded',
+        facts: [],
+        reason: 'durable_contract_invalid',
+      });
+      expect(() =>
+        reconcile({ hotWindowFacts: [candidate], durableRead: durable([]) }),
+      ).not.toThrow();
+      expect(
+        reconcile({ hotWindowFacts: [candidate], durableRead: durable([]) }),
+      ).toMatchObject({
+        status: 'degraded',
+        reason: 'hot_window_contract_invalid',
+      });
+    },
+  );
 
   it('never promotes a hot window when the durable read is unavailable', () => {
     expect(
@@ -325,11 +443,10 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
-  it('fails weak when a hot row claims malformed, foreign, or noop analysis', () => {
+  it('fails weak when a hot row claims malformed or foreign analysis', () => {
     for (const candidate of [
       { fact_type: 'run_analysis', noop: false },
       analysisFact('foreign', { scenarioId: FOREIGN_SCENARIO }),
-      analysisFact('noop', { noop: true }),
     ]) {
       expect(
         reconcile({
@@ -345,6 +462,48 @@ describe('reconcileScenarioAnalysisFacts', () => {
     }
   });
 
+  it('ignores a valid hot noop because it carries no analysis claim', () => {
+    expect(
+      reconcile({
+        hotWindowFacts: [analysisFact('noop', { noop: true })],
+        durableRead: durable([]),
+      }),
+    ).toEqual({
+      status: 'complete',
+      source: 'scenario',
+      facts: [],
+      total_count: 0,
+      newest_fact: null,
+    });
+  });
+
+  it.each([
+    ['unparseable computed_at', { computed_at: 'not-a-date' }],
+    ['blank graph hash', { graph_hash_at_run: '  ' }],
+    ['blank analysis status', { enrichment: { analysis_status: '  ' } }],
+  ])('fails weak when a present producer selector field is %s', (_name, patch) => {
+    const fact = analysisFact('malformed-selector') as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    Object.assign(fact.result, patch);
+    expect(reconcile({ durableRead: durable([fact]) })).toEqual({
+      status: 'degraded',
+      facts: [],
+      reason: 'durable_contract_invalid',
+    });
+  });
+
+  it('accepts legacy absence of every producer selector field', () => {
+    const legacy = analysisFact('legacy', { computedAt: null }) as HandlerFact & {
+      result: Record<string, unknown>;
+    };
+    delete legacy.result.enrichment;
+    expect(reconcile({ durableRead: durable([legacy]) })).toMatchObject({
+      status: 'complete',
+      newest_fact: legacy,
+    });
+  });
+
   it('does not make an unrelated malformed hot row part of analysis policy', () => {
     const fact = analysisFact('known');
     expect(
@@ -357,6 +516,57 @@ describe('reconcileScenarioAnalysisFacts', () => {
       source: 'scenario',
       facts: [fact],
       total_count: 1,
+      newest_fact: fact,
+    });
+  });
+
+  it.each(['bigint', 'function', 'nested accessor'])(
+    'ignores unrelated hot %s payloads without broadening analysis policy',
+    (kind) => {
+      const unrelated: Record<string, unknown> = {
+        fact_type: 'future_non_analysis_fact',
+      };
+      if (kind === 'bigint') unrelated.payload = { value: BigInt(1) };
+      else if (kind === 'function') unrelated.payload = { value: () => 'not-json' };
+      else {
+        const payload: Record<string, unknown> = {};
+        Object.defineProperty(payload, 'value', {
+          enumerable: true,
+          get: () => {
+            throw new Error('unrelated nested accessor');
+          },
+        });
+        unrelated.payload = payload;
+      }
+      const fact = analysisFact(`known-${kind}`);
+
+      expect(
+        reconcile({
+          hotWindowFacts: [unrelated, fact],
+          durableRead: durable([fact]),
+        }),
+      ).toMatchObject({ status: 'complete', source: 'scenario' });
+    },
+  );
+
+  it('fails weak when a hot proxy cannot disclose its fact_type descriptor', () => {
+    const candidate = new Proxy(
+      { fact_type: 'future_non_analysis_fact' },
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error('fact_type descriptor trap');
+        },
+      },
+    );
+
+    expect(() =>
+      reconcile({ hotWindowFacts: [candidate], durableRead: durable([]) }),
+    ).not.toThrow();
+    expect(
+      reconcile({ hotWindowFacts: [candidate], durableRead: durable([]) }),
+    ).toMatchObject({
+      status: 'degraded',
+      reason: 'hot_window_contract_invalid',
     });
   });
 

@@ -103,4 +103,113 @@ describe('selectCanonicalAnalysisState — degraded prior-fact read', () => {
     expect(fresh.freshness).toBe('fresh');
     expect(fresh.usableForChips).toBe(true);
   });
+
+  it('gives a current successful run precedence over a future-skewed durable timestamp', () => {
+    const current = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2026-08-27T12:00:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as never;
+    const futureSkewedPrior = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: 'old-graph-hash',
+        computed_at: '2099-01-01T00:00:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as never;
+
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [current],
+      priorFacts: [futureSkewedPrior],
+      currentGraphHash: HASH,
+      priorFactsReadOk: true,
+    });
+
+    expect(state.freshness).toBe('fresh');
+    expect(state.computed_at).toBe('2026-08-27T12:00:00.000Z');
+  });
+
+  it('does not let a future-skewed prior degradation poison a current success', () => {
+    const current = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2026-08-27T12:00:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as never;
+    const futureSkewedPriorPartial = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2099-01-01T00:00:00.000Z',
+        enrichment: { analysis_status: 'partial' },
+      },
+    } as never;
+
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [current],
+      priorFacts: [futureSkewedPriorPartial],
+      currentGraphHash: HASH,
+      priorFactsReadOk: true,
+    });
+
+    expect(state.freshness).toBe('fresh');
+    expect(state.degraded_fact_status).toBeNull();
+    expect(state.contradictions).not.toContain(
+      'fact_status_success_but_degraded_newer',
+    );
+    expect(state.usableForChips).toBe(true);
+  });
+
+  it.each(['partial', 'refused']) (
+    'treats a current %s run as newer than a future-skewed durable success',
+    (status) => {
+      const current = {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          graph_hash_at_run: HASH,
+          computed_at: '2026-08-27T12:00:00.000Z',
+          enrichment: { analysis_status: status },
+        },
+      } as never;
+      const futureSkewedPrior = {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          graph_hash_at_run: HASH,
+          computed_at: '2099-01-01T00:00:00.000Z',
+          enrichment: { analysis_status: 'computed' },
+        },
+      } as never;
+
+      const state = selectCanonicalAnalysisState({
+        handlerFacts: [current],
+        priorFacts: [futureSkewedPrior],
+        currentGraphHash: HASH,
+        priorFactsReadOk: true,
+      });
+
+      expect(state.degraded_fact_status).toBe(status);
+      expect(state.contradictions).toContain(
+        'fact_status_success_but_degraded_newer',
+      );
+      expect(state.usableForChips).toBe(false);
+    },
+  );
 });

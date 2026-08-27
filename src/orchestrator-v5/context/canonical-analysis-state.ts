@@ -30,9 +30,9 @@
  *   - the canonical readiness payload for status + blockers.
  *
  * The unification fix for the documented split: current-turn handlerFacts
- * and prior-turn facts are merged into ONE ordered chain (current first =
- * newest) BEFORE deriving freshness, so the selector, the chip floor and
- * the freshness verdict all read one fact set and cannot disagree.
+ * form an explicit chronology arm ahead of prior-turn facts. The selectors
+ * still apply their existing computed_at ordering WITHIN each arm, but a
+ * future-skewed durable timestamp cannot outrank a fact produced this turn.
  *
  * ## Side-effect split
  *
@@ -332,9 +332,9 @@ export interface SelectCanonicalAnalysisStateInput {
    * Omitted ⇒ byte-identical to the pre-fix derivation, so an unwired caller
    * cannot be silently changed.
    *
-   * Note the interaction with `handlerFacts`: the unified chain puts
-   * current-turn facts FIRST, so a run_analysis that just ran is selected
-   * regardless of this flag. The degraded branch is reachable only when
+   * Note the interaction with `handlerFacts`: the current-turn arm has
+   * explicit precedence, so a successful run_analysis that just ran is
+   * selected regardless of this flag. The degraded branch is reachable only when
    * NEITHER source yielded a usable fact — which is exactly the ambiguous case.
    */
   readonly priorFactsReadOk?: boolean;
@@ -349,28 +349,28 @@ function readComputedAt(fact: HandlerFact): string | null {
 /**
  * Compose the canonical analysis state. Pure — no I/O, no telemetry.
  *
- * The verdict is built entirely from the existing canonical primitives
- * over a UNIFIED fact chain (current-turn facts first, then prior facts),
- * so the freshness verdict, the selected fact and the chip floor all agree
- * on one fact set. See module header for the design rationale.
+ * The verdict is built entirely from the existing canonical primitives. A
+ * current-turn successful fact is selected within the current arm; otherwise
+ * the persisted prior arm is selected under its existing chronology. See the
+ * module header for why array position alone cannot express this boundary.
  */
 export function selectCanonicalAnalysisState(
   input: SelectCanonicalAnalysisStateInput,
 ): CanonicalAnalysisState {
-  // Unify current-turn + prior facts. Current first so the freshly-run
-  // run_analysis fact is newest — this is the fix for the documented
-  // chip-floor / freshness divergence.
-  const unifiedFacts: readonly HandlerFact[] = [
-    ...(input.handlerFacts ?? []),
-    ...(input.priorFacts ?? []),
-  ];
+  const currentFacts = input.handlerFacts ?? [];
+  const priorFacts = input.priorFacts ?? [];
+  const currentSuccessful = selectRunAnalysisFact(currentFacts);
+  // A current successful run owns this turn even when a persisted producer
+  // timestamp is accidentally in the future. If the current turn produced no
+  // successful run, preserve the existing persisted computed_at selection.
+  const reasoningFacts = currentSuccessful === null ? priorFacts : currentFacts;
 
   // Freshness verdict (also yields selected_fact_index / hashes /
   // computed_at — the single source for those fields here). Threads the
   // option-identity guard inputs verbatim: undefined (flag off) → byte-
   // identical to the pre-guard derivation.
   const derivation = deriveAnalysisFreshness(
-    unifiedFacts,
+    reasoningFacts,
     input.currentGraphHash,
     input.currentGraphOptionIds,
     // Defect 4: distinguishes "the store says no analysis" from "the store
@@ -379,8 +379,12 @@ export function selectCanonicalAnalysisState(
       ? undefined
       : { priorFactsReadOk: input.priorFactsReadOk },
   );
-  const selected = selectRunAnalysisFact(unifiedFacts);
-  const degraded = selectDegradedRunAnalysisFact(unifiedFacts);
+  const selected = selectRunAnalysisFact(reasoningFacts);
+  const currentDegraded = selectDegradedRunAnalysisFact(currentFacts);
+  const degraded =
+    currentSuccessful === null
+      ? currentDegraded ?? selectDegradedRunAnalysisFact(priorFacts)
+      : currentDegraded;
 
   // A newer run failed/partial while an older success would be presented
   // as current. Only provable when both timestamps are present. (Needs the
@@ -389,9 +393,11 @@ export function selectCanonicalAnalysisState(
   const degradedNewerThanSelectedSuccess =
     degraded !== null &&
     selected !== null &&
-    degradedComputedAt !== null &&
-    selected.computed_at !== null &&
-    degradedComputedAt > selected.computed_at;
+    (currentDegraded !== null && currentSuccessful === null
+      ? true
+      : degradedComputedAt !== null &&
+        selected.computed_at !== null &&
+        degradedComputedAt > selected.computed_at);
 
   // Option-identity observability (diagnostic only). Recompute the verdict the
   // guard saw — a trivial set comparison — when the caller supplied current

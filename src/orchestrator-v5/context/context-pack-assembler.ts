@@ -700,6 +700,15 @@ export interface AssembleContextPackInput {
    */
   readonly priorFactsReadOk?: boolean;
   /**
+   * Scenario-wide analysis-only fact authority. This is intentionally
+   * separate from `priorFacts`, whose bounded array also carries mutation
+   * history for `recent_changes`. Omission fails weak and never falls back to
+   * the generic fact window.
+   */
+  readonly analysisFacts?: readonly HandlerFact[];
+  /** Complete exact-count scenario read. False/omitted means unknown. */
+  readonly analysisFactsReadOk?: boolean;
+  /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
    * `EnrichedTurnContext.scenarioBriefText` (loaded once per turn by
@@ -1412,7 +1421,7 @@ export function projectBrief(
  * Source order:
  *   1. `input.canonicalState` (M5 — authoritative, threaded by the dispatch
  *      path which has the raw graph + freshness).
- *   2. Best-effort from `input.priorFacts` + a freshness hash of the turn
+ *   2. Best-effort from `input.analysisFacts` + a freshness hash of the turn
  *      graph — ONLY when a raw graph is available here. The production
  *      compacted-graph path passes `graph: undefined`; hashing a compacted
  *      projection would not match `graph_hash_at_run`, so we return null
@@ -1420,7 +1429,7 @@ export function projectBrief(
  *      verdict ships on the wire via the route's redacted context-summary
  *      surface.
  *
- * Critical-omission diagnostic: when `priorFacts` is absent entirely, emit a
+ * Critical-omission diagnostic: when `analysisFacts` is absent entirely, emit a
  * structured warning rather than silently returning an authoritative-looking
  * 'none' — production callers (turn-executor) always thread facts.
  */
@@ -1430,13 +1439,13 @@ function deriveContextPackAnalysisState(
   if (input.canonicalState) {
     return summariseCanonicalAnalysisState(input.canonicalState);
   }
-  if (input.priorFacts === undefined) {
+  if (input.analysisFacts === undefined) {
     log.warn(
       {
         event: 'context_pack.canonical_state_facts_absent',
         scenario_id: input.payload.scenario_id,
       },
-      'ContextPack assembled without prior_facts — canonical analysis_state omitted',
+      'ContextPack assembled without scenario analysis facts — canonical analysis_state omitted',
     );
     return null;
   }
@@ -1447,7 +1456,7 @@ function deriveContextPackAnalysisState(
     rawGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
   );
   const canonical = selectCanonicalAnalysisState({
-    priorFacts: input.priorFacts,
+    priorFacts: input.analysisFacts,
     currentGraphHash,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
@@ -1459,9 +1468,7 @@ function deriveContextPackAnalysisState(
     // CONTEXT/MEMORY V5 defect 4 — the pack's canonical state is LLM-facing
     // and diagnostic-facing. A thrown prior-fact read arrives here as `[]`,
     // which is indistinguishable from "never analysed" without this flag.
-    ...(input.priorFactsReadOk === undefined
-      ? {}
-      : { priorFactsReadOk: input.priorFactsReadOk }),
+    priorFactsReadOk: input.analysisFactsReadOk === true,
   });
   return summariseCanonicalAnalysisState(canonical);
 }

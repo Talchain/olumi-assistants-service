@@ -140,8 +140,7 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly prior_turns_total?: number | null;
   /**
-   * The SCENARIO's newest non-noop `run_analysis` fact — read past the window,
-   * `WHERE scenario_id = … ORDER BY created_at DESC LIMIT 1`.
+   * The SCENARIO's newest non-noop `run_analysis` fact in database order.
    *
    * `prior_facts` below is a WINDOW: its facts are fetched by an `IN` over the
    * 20 turn rows `readRecent` returned. The T1 claim-safety permission was
@@ -155,8 +154,10 @@ export interface EnrichedTurnContext extends TurnContext {
    * `null` = the scenario has no such fact, OR the read did not run; those two
    * are told apart by `newest_analysis_fact_read_ok`, never by this field.
    *
-   * Optional on the type so hand-constructed test contexts keep compiling
-   * (mirrors `prior_turns_total`); production `buildTurnContext` always sets it.
+   * Derived from the SAME validated exact-count page as
+   * `scenario_analysis_fact_set`, never a second database query. Complete and
+   * capped pages may supply the head for claim-safety; degraded pages cannot.
+   * Optional on the type so hand-constructed test contexts keep compiling.
    */
   readonly newest_analysis_fact?: HandlerFact | null;
   /**
@@ -657,26 +658,21 @@ export async function buildTurnContext(
   // add a serial round-trip to the turn's critical path. `fetchPriorTurns`
   // returns a window capped at SESSION_READ_WINDOW_TURNS; `fetchPriorTurnsTotal`
   // returns how many turns actually exist (or null when unknown).
-  // The third read joins the same concurrent batch for the same reason: the T1
-  // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
-  // 20-turn window. The fourth read is the scenario-wide applied-mutation
+  // The third read is the scenario-wide applied-mutation
   // lookahead: one extra row beyond the sole recent-changes cap proves whether
   // the visible history is complete or capped after a cold return. The fifth
-  // read is the exact-count scenario run-analysis set. It is intentionally
-  // distinct from both the bounded generic facts and the newest entitlement
-  // fact: it supplies complete reasoning history to the existing selectors
-  // without repurposing the claim-safety carrier. Concurrent ⇒ these reads cost
-  // the batch's max latency, not their sum.
+  // logical input is the exact-count scenario run-analysis set. That ONE page
+  // supplies both complete reasoning history and its database-order head for
+  // claim-safety, removing the former second query/snapshot. Concurrent ⇒ these
+  // reads cost the batch's max latency, not their sum.
   const [
     priorTurnsRead,
     priorTurnsTotal,
-    newestAnalysisFactRead,
     durableMutationFactRead,
     durableScenarioAnalysisFactRead,
   ] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
-    fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
     fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
     fetchScenarioAnalysisFacts(payload.scenario_id, requestId, store),
   ]);
@@ -767,6 +763,10 @@ export async function buildTurnContext(
   });
   const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;
   const scenarioAnalysisFactsReadOk = scenarioAnalysisFactSet.status === 'complete';
+  const newestAnalysisFactRead =
+    scenarioAnalysisFactSet.status === 'degraded'
+      ? { fact: null, readOk: false }
+      : { fact: scenarioAnalysisFactSet.newest_fact, readOk: true };
   if (scenarioAnalysisFactSet.status !== 'complete') {
     log.warn(
       {
@@ -1921,57 +1921,6 @@ async function fetchScenarioAnalysisFacts(
       status: 'degraded',
       reason: contractInvalid ? 'contract_invalid' : 'unavailable',
     };
-  }
-}
-
-/**
- * The SCENARIO's newest non-noop `run_analysis` fact, plus whether the read
- * actually happened.
- *
- * WHY IT IS A SEPARATE READ FROM `fetchPriorFacts`. `fetchPriorFacts` loads
- * facts by an `IN` over the WINDOWED turn row ids — so past
- * `SESSION_READ_WINDOW_TURNS` (default 20) turns, the scenario's analysis fact
- * is simply not there. The T1 claim-safety permission was read off that array
- * while the channels it gates read the whole scenario (rolling summary
- * `LIMIT 1000`; decision records scenario-wide), so on a long conversation a
- * WITHHELD scenario shipped an ungated summary. This read makes the
- * permission's scope match the content's scope. Same shape of fix, and the
- * same justification, as `fetchPriorTurnsTotal`.
- *
- * ⚠ `readOk` IS NOT COSMETIC — it is what separates "the scenario has no
- * analysis" from "I could not look". The first is an honest `true`; the second
- * must not be allowed to masquerade as one, and it is the input that arms the
- * fail-closed guard in `readMayNameLeadingOptionVerdict`. A store without the
- * method (test mocks) is `readOk: false` for the same reason: absence of
- * evidence is not evidence of absence.
- *
- * Never throws: a degraded fact read must not fail the turn. It degrades to
- * `{fact: null, readOk: false}`, which is strictly MORE restrictive than the
- * pre-fix behaviour, never less.
- */
-async function fetchNewestAnalysisFact(
-  scenarioId: string,
-  requestId: string,
-  store: SessionStore | undefined,
-): Promise<{ readonly fact: HandlerFact | null; readonly readOk: boolean }> {
-  if (!store?.readNewestAnalysisFactFor) return { fact: null, readOk: false };
-  try {
-    const fact = await store.readNewestAnalysisFactFor(scenarioId);
-    return { fact, readOk: true };
-  } catch (error) {
-    const errorCode = error instanceof SessionReadError ? error.code : undefined;
-    const message = error instanceof Error ? error.message : String(error);
-    log.warn(
-      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
-      'V5 buildTurnContext: session.readNewestAnalysisFactFor failed — claim-safety falls back to the window and may fail CLOSED',
-    );
-    emit(TelemetryEvents.SessionReadDegraded, {
-      request_id: requestId,
-      scenario_id: scenarioId,
-      error_code: errorCode ?? 'unknown',
-      severity: 'warning',
-    });
-    return { fact: null, readOk: false };
   }
 }
 

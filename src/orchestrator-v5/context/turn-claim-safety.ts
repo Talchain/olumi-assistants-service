@@ -75,32 +75,18 @@
  * alter a wire byte; a spurious `true` disarms the alarm on a real leak. The
  * asymmetry is not close, so this module never answers `true` on its own.
  *
- * ⚠ BUT DO NOT READ THAT AS "A DEGRADED STORE WITHHOLDS" — IT DOES NOT, AND
- * THE SENTENCE THAT USED TO SIT HERE CLAIMED IT DID. Measured, not assumed
- * (the claim was written first and the test refuted it):
+ * DEGRADED READS FAIL CLOSED AT THE SHARED DERIVATION. `buildTurnContext`
+ * carries a discriminated scenario-wide analysis fact set. Only `complete`
+ * supplies reasoning facts; `complete`/`capped` may supply the validated
+ * database-order head for entitlement; degraded/omitted carriers supply
+ * neither. The bounded hot window can detect a contradiction but can never
+ * recover completeness from a different query/LRU snapshot. Consequently a
+ * failed exact carrier returns `fail_closed_no_turn_context` (or
+ * `fail_closed_truncated` when truncation is independently proven), never
+ * `no_analysis_exists`.
  *
- *   - `buildTurnContext` NEVER THROWS on a read failure. Every fetch inside it
- *     is individually guarded and degrades to an empty/null value. So the
- *     `catch` below is genuinely DEFENSIVE and has no known reachable trigger;
- *     it is kept because an unguarded `await` at a claim-safety seam is not a
- *     risk worth taking, not because it is a live guarantee.
- *   - A degraded WINDOW read is safe for a different reason than fail-closing:
- *     the scenario-scoped read still supplies the fact, so the verdict is a
- *     real `scenario_fact`. Pinned.
- *   - ⚠ A FULLY degraded store (window AND count AND scenario read all
- *     failing) yields `true` / `no_analysis_exists`. This is a REAL residual
- *     fail-open. It is PRE-EXISTING, it lives in the canonical derivation
- *     (`readMayNameLeadingOptionVerdict`'s fail-closed guard needs
- *     `windowTruncated`, which needs a `prior_turns_total` that a degraded
- *     `countTurns` cannot supply), and the EXECUTE path has exactly the same
- *     exposure because it calls the same function with the same scope.
- *
- * It is deliberately NOT fixed here. Forking the derivation to patch it at this
- * seam is precisely the second-derivation defect (CLAUDE.md trap #12) this
- * module exists to avoid, and changing it in `claim-safety-read.ts` moves the
- * execute path too — a wider blast radius that needs its own over-suppression
- * controls and its own change. It is pinned by a test so it FAILS LOUD in both
- * directions: closing it turns that test red and forces a deliberate edit.
+ * `buildTurnContext` still guards its individual reads, so the `catch` below
+ * remains defensive rather than the ordinary degraded path.
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
@@ -231,11 +217,17 @@ export function createTurnClaimSafetyResolver(
     if (payload === null) return { verdict: NO_TURN_CONTEXT_VERDICT };
     try {
       const context = await buildTurnContext(payload, requestId);
-      // THE canonical derivation — the same two arguments the execute path
-      // passes at `turn-executor.ts`. Nothing is re-derived or mirrored here.
+      const analysisFacts =
+        context.scenario_analysis_fact_set?.status === 'complete'
+          ? context.scenario_analysis_fact_set.facts
+          : [];
+      // THE canonical derivation — the same scenario carrier and scope the
+      // execute path passes at `turn-executor.ts`. Generic bounded prior facts
+      // remain available to unrelated context slices but cannot author this
+      // analysis entitlement.
       return {
         verdict: readMayNameLeadingOptionVerdict(
-          context.prior_facts,
+          analysisFacts,
           claimSafetyScopeFromContext(context),
         ),
         // NOT a second derivation: the context computed this from the same

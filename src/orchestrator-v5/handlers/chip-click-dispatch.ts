@@ -75,6 +75,7 @@ import {
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  selectRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import {
@@ -89,6 +90,7 @@ import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
 import {
   claimSafetyScopeFromContext,
   readMayNameLeadingOptionVerdict,
+  readMayNameLeadingOptionVerdictForTurn,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { AnalysisNotReadyError } from '../tools/handlers/analysis-ready-core.js';
@@ -543,17 +545,14 @@ function deriveChipClickFreshness(
   cachedSnapshot: RunAnalysisScenarioSnapshot | null,
   facts: readonly HandlerFact[],
   /**
-   * CONTEXT/MEMORY V5 defect 4 — did the read that produced the PRIOR half of
-   * `facts` succeed? `false` ONLY on a thrown read; `undefined` ⇒ pre-fix
-   * behaviour.
+   * Did the exact scenario carrier that produced the prior analysis arm
+   * succeed? `false` means capped/degraded/omitted rather than authoritative
+   * empty; `undefined` preserves legacy direct-caller behaviour.
    *
    * Threaded rather than derived here because this helper never reads the
-   * store — its callers own the read. On the post-dispatch call `facts` is the
-   * UNIFIED array (`[...enrichedFacts, ...context.prior_facts]`), so the flag
-   * describes only the prior half; that is sound, because the degraded branch
-   * in `deriveAnalysisFreshness` fires only when NO fact was selected at all,
-   * which on that path means `enrichedFacts` was empty too and the emptiness of
-   * the prior half is therefore genuinely unexplained.
+   * store — its callers own the discriminated carrier. A same-turn successful
+   * fact is an explicit precedence arm, so this flag is inert when the current
+   * turn produced usable analysis and load-bearing otherwise.
    */
   priorFactsReadOk?: boolean,
 ): FreshnessDerivation {
@@ -916,6 +915,13 @@ export async function dispatchChipClickRunAnalysis(
   // Build the turn context using the same builder TurnExecutor uses, so the
   // handler invocation is indistinguishable from a Sonnet-routed call.
   const context = await buildTurnContext(payload, requestId);
+  const scenarioAnalysisFacts =
+    context.scenario_analysis_fact_set?.status === 'complete'
+      ? context.scenario_analysis_fact_set.facts
+      : [];
+  const scenarioAnalysisFactsReadOk =
+    context.scenario_analysis_fact_set?.status === 'complete';
+  const scenarioClaimSafetyScope = claimSafetyScopeFromContext(context);
 
   // V5 finaliser contract — single-source-of-truth for the scenario graph.
   //
@@ -1098,8 +1104,8 @@ export async function dispatchChipClickRunAnalysis(
           cachedSnapshot
             ? deriveChipClickFreshness(
                 cachedSnapshot,
-                context.prior_facts,
-                context.prior_facts_read_ok,
+                scenarioAnalysisFacts,
+                scenarioAnalysisFactsReadOk,
               )
             : undefined,
           payload,
@@ -1252,16 +1258,20 @@ export async function dispatchChipClickRunAnalysis(
       proposedHandlerId: 'run_analysis',
       outcome,
       contextPack: null,
+      // Preserve the one truthful mixed newest-first chronology for change
+      // attribution. Scenario analysis authority is supplied separately.
       priorFacts: context.prior_facts,
+      priorAnalysisFacts: scenarioAnalysisFacts,
       handlerFacts: enrichedFacts,
       requestId,
       scenarioId: context.session_id,
       // ROADMAP 2.804 — the SAME scope builder this path's own claim-safety
       // exit uses below, so the coaching slot and the response's
       // `mayNameLeadingOption` cannot describe different scenarios. The helper
-      // derives the permission from `enrichedFacts ∪ prior_facts`, which is the
-      // same union the exit builds — one derivation, two read points.
-      claimSafetyScope: claimSafetyScopeFromContext(context),
+      // derives the permission from `enrichedFacts` plus the scenario analysis
+      // carrier (while retaining unrelated bounded facts for other coaching
+      // rules), the same authority split the exit below uses.
+      claimSafetyScope: scenarioClaimSafetyScope,
       // Same collector + raw-graph source the freshness derivation below
       // uses (snapshot first, turn-context fallback on the test path).
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
@@ -1538,15 +1548,21 @@ export async function dispatchChipClickRunAnalysis(
       // a stale verdict — its wire response MUST report fresh.
       const postDispatchFacts: readonly HandlerFact[] = [
         ...enrichedFacts,
-        ...context.prior_facts,
+        ...scenarioAnalysisFacts,
       ];
-      // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
-      // selected first), but it matters for a rerun that produced no usable
-      // run_analysis fact AND could not read the prior chain.
+      const currentSuccessfulAnalysis = selectRunAnalysisFact(enrichedFacts);
+      // Same-turn successful output is authoritative even when a durable
+      // producer timestamp is skewed into the future. Without a current
+      // success, retain the complete scenario carrier's existing chronology.
+      // A capped/degraded carrier supplies no reasoning facts and fails weak.
+      const freshnessFacts =
+        currentSuccessfulAnalysis === null
+          ? scenarioAnalysisFacts
+          : enrichedFacts;
       const freshness = deriveChipClickFreshness(
         cachedSnapshot,
-        postDispatchFacts,
-        context.prior_facts_read_ok,
+        freshnessFacts,
+        scenarioAnalysisFactsReadOk,
       );
       emitFreshnessTelemetry(
         freshness,
@@ -1556,7 +1572,7 @@ export async function dispatchChipClickRunAnalysis(
           dispatch_path: 'chip_click_run_analysis',
         },
         {
-          prior_fact_count: context.prior_facts.length,
+          prior_fact_count: scenarioAnalysisFacts.length,
           current_turn_fact_count: enrichedFacts.length,
         },
       );
@@ -1574,15 +1590,11 @@ export async function dispatchChipClickRunAnalysis(
         // ROADMAP 1.132 (F1) — the run_analysis chip response is a receipt +
         // coaching blocks, not a prose answer: functional (stays plain).
         answerKind: 'functional' as AnswerKind,
-        // T1 claim safety — READ off the just-produced run_analysis fact, using
-        // the SAME canonical selector the routed path uses. Never re-derived
-        // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
-        // a fact with no stamp ⇒ `readMayNameLeadingOptionFromResult` fails
-        // CLOSED. (A6, 2026-07-27: this line used to name
-        // `readMayNameLeadingOption`, the legacy enrichment-only reader, which
-        // is NOT on this call chain and which answers `false` unconditionally
-        // on post-0.25.0 facts. The behaviour described was right; the reader
-        // named for it was not.)
+        // T1 claim safety — READ through the SAME canonical selector the routed
+        // path uses. Current-turn claim-bearing facts own entitlement; current
+        // success owns the displayed projection; otherwise the complete
+        // scenario carrier supplies history. Degraded carrier state with no
+        // current fact fails closed and never becomes "no analysis exists".
         //
         // 2026-07-27 — this used to be an INLINE IIFE that was line-for-line the
         // body of `readMayNameLeadingOptionForFacts`: same selector, same
@@ -1596,20 +1608,14 @@ export async function dispatchChipClickRunAnalysis(
         // what makes the chip-click exit's permission the same permission by
         // construction.
         //
-        // 2026-07-27 (the scope fix) — and the SAME argument now forces the
-        // SCOPE to be shared too, not just the reader. `context.prior_facts` is
-        // a 20-turn window; the routed path's permission is derived from
-        // `[...prior_facts, the scenario's newest analysis fact]`. Passing the
-        // window alone here would make this exit's permission a different
-        // permission again — the exact divergence the paragraph above says
-        // calling the shared reader was meant to end, reintroduced one layer
-        // down. `enrichedFacts` usually carries this turn's fresh analysis and
-        // masks the difference; on a degraded analysis it does not, and that is
-        // precisely the turn you least want reading a stale-window `true`.
-        mayNameLeadingOption: readMayNameLeadingOptionVerdict(
-          [...enrichedFacts, ...context.prior_facts],
-          claimSafetyScopeFromContext(context),
-        ).may_name_leading_option,
+        // The discriminated scenario scope is shared too. The ordinary
+        // 20-turn fact window remains available to unrelated coaching/history
+        // consumers but cannot become analysis entitlement by union.
+        mayNameLeadingOption: readMayNameLeadingOptionVerdictForTurn({
+          currentFacts: enrichedFacts,
+          priorAnalysisFacts: scenarioAnalysisFacts,
+          priorScope: scenarioClaimSafetyScope,
+        }).may_name_leading_option,
       };
     } catch (err) {
       log.error(

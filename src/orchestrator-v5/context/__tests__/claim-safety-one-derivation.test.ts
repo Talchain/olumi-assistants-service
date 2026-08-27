@@ -44,6 +44,7 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  claimSafetyScopeFromContext,
   readConstraintVerdictStateForFacts,
   readMayNameLeadingOptionForFacts,
   readMayNameLeadingOptionVerdict,
@@ -207,6 +208,60 @@ describe('the permission and the state come from ONE selection (B2)', () => {
   });
 });
 
+describe('claim-safety scenario carrier authority', () => {
+  const forgedLegacy = runFact('2099-01-01T00:00:00.000Z', {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+  });
+  const canonicalHead = runFact('2026-08-27T00:00:00.000Z', {
+    may_name_leading_option: false,
+    constraint_verdict_state: 'unevaluated',
+  });
+
+  it('reads the discriminated scenario carrier, not divergent legacy mirrors', () => {
+    expect(
+      claimSafetyScopeFromContext({
+        scenario_analysis_fact_set: {
+          status: 'complete',
+          source: 'scenario',
+          facts: [canonicalHead],
+          total_count: 1,
+          newest_fact: canonicalHead,
+        },
+        newest_analysis_fact: forgedLegacy,
+        newest_analysis_fact_read_ok: true,
+        prior_turns: [],
+      }),
+    ).toMatchObject({ newestAnalysisFact: canonicalHead, readOk: true });
+  });
+
+  it.each([
+    {
+      name: 'degraded carrier',
+      carrier: {
+        status: 'degraded' as const,
+        facts: [] as const,
+        reason: 'durable_unavailable' as const,
+      },
+    },
+    { name: 'omitted carrier', carrier: undefined },
+  ])('fails weak for a $name even when legacy mirrors claim success', ({ carrier }) => {
+    const scope = claimSafetyScopeFromContext({
+      ...(carrier === undefined
+        ? {}
+        : { scenario_analysis_fact_set: carrier }),
+      newest_analysis_fact: forgedLegacy,
+      newest_analysis_fact_read_ok: true,
+      prior_turns: [],
+    });
+    expect(scope).toMatchObject({ newestAnalysisFact: null, readOk: false });
+    expect(readMayNameLeadingOptionVerdict([], scope)).toMatchObject({
+      may_name_leading_option: false,
+      provenance: 'fail_closed_no_turn_context',
+    });
+  });
+});
+
 describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => {
   const claimSafetySource = readFileSync(CLAIM_SAFETY_READ, 'utf8');
   const turnExecutorSource = readFileSync(TURN_EXECUTOR, 'utf8');
@@ -236,7 +291,7 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
     return out;
   };
 
-  it('the mechanism file performs EXACTLY THE TWO NAMED SELECTIONS', () => {
+  it('the mechanism file performs each scenario selection and the sanctioned same-turn composition exactly once', () => {
     // ⚠ CORRECTED BY F1 — AND THE VERSION THIS REPLACES HAD BECOME A FALSE
     // LABEL ON A TRUE FILE. It asserted "the mechanism file performs EXACTLY
     // ONE selection" and its failure message ended "do not call the selector
@@ -248,29 +303,32 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
     // to what it claimed to measure. CLAUDE.md trap #14, in an instrument.
     //
     // ⭐ THE INVARIANT IS NOT "ONE SELECTION". It never really was — it is
-    // ONE DERIVATION PER QUESTION. Two questions genuinely govern one turn:
+    // ONE DERIVATION PER QUESTION and ONE explicitly named same-turn
+    // composition. Two questions genuinely govern one turn:
     //
     //   `selectClaimBearingRunAnalysisFact` — ENTITLEMENT: what is the newest
     //       claim, and did its verdict withhold? (#730)
     //   `selectRunAnalysisFact`             — DISPLAY: which analysis does this
     //       turn actually project, and did THAT fact's verdict withhold? (F1)
     //
-    // Two selectors answering two questions is DESIGN; a second selector
-    // answering the SAME question is the defect this file exists to catch, and
-    // it is what `readConstraintVerdictStateForFacts` was until #730 made it a
-    // delegate. The map below is exact, so a THIRD selection — or a second call
-    // to either of these two — fails loudly, which is the property the old
-    // count was reaching for and, as of F1, no longer had.
+    // Same-turn output has different chronology from durable history. Its two
+    // views are selected once behind `selectCurrentTurnRunAnalysisFacts`, then
+    // consumed as one value by every turn surface. That named composition is
+    // sanctioned; another direct call to either scenario selector is not.
+    // The map below is exact, so a duplicate scenario selection OR a second
+    // same-turn composition fails loudly.
     expect(
       selectionCalls(claimSafetySource),
-      'claim-safety-read.ts must perform EXACTLY these two selections, once each: ' +
+        'claim-safety-read.ts must perform EXACTLY these two scenario selections once each ' +
+        'and one sanctioned same-turn composition: ' +
         '`selectClaimBearingRunAnalysisFact` (entitlement) and `selectRunAnalysisFact` ' +
-        '(the displayed analysis). A THIRD selection, or a second call to either, is a second ' +
+        '(the displayed analysis). A duplicate scenario selection or turn composition is a second ' +
         'DERIVATION of an answer this module already has — the exact class this module exists ' +
         'to close. If you need another projection of the verdict, add a MEMBER to ' +
         'MayNameLeadingOptionVerdict and read it off a selection that already happened.',
     ).toEqual({
       selectClaimBearingRunAnalysisFact: 1,
+      selectCurrentTurnRunAnalysisFacts: 1,
       selectRunAnalysisFact: 1,
     });
   });
@@ -281,6 +339,7 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
     const planted = `${claimSafetySource}\nconst extra = selectRunAnalysisFact(facts);`;
     expect(selectionCalls(planted)).toEqual({
       selectClaimBearingRunAnalysisFact: 1,
+      selectCurrentTurnRunAnalysisFacts: 1,
       selectRunAnalysisFact: 2,
     });
     // …and the code-vs-comment discriminator really works, or the pin would

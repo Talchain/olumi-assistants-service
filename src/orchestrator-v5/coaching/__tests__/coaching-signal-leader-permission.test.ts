@@ -62,6 +62,7 @@ import { COACHING_TEXT } from '../../signals/coaching-signals.js';
 import {
   readMayNameLeadingOptionVerdict,
   readMayNameLeadingOptionVerdictForFact,
+  readMayNameLeadingOptionVerdictForTurn,
   type ClaimSafetyScenarioScope,
 } from '../../context/claim-safety-read.js';
 import {
@@ -285,6 +286,7 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts,
+      priorAnalysisFacts: priorFacts,
       handlerFacts,
       requestId: 'req-divergence',
       scenarioId: SCENARIO_ID,
@@ -339,14 +341,17 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       windowTruncated: true,
     };
     const handlerFacts = [current];
-    const unified = [...handlerFacts];
 
     // PRECONDITION PINS — A permits, B withholds, and no prior fact exists in
     // the window (so this really is the FIRST_ANALYSIS arm).
     expect(
       readMayNameLeadingOptionVerdictForFact(current).may_name_leading_option,
     ).toBe(true);
-    const verdictB = readMayNameLeadingOptionVerdict(unified, scope);
+    const verdictB = readMayNameLeadingOptionVerdictForTurn({
+      currentFacts: handlerFacts,
+      priorAnalysisFacts: [scenarioNewestWithheld],
+      priorScope: scope,
+    });
     expect(verdictB.may_name_leading_option).toBe(false);
     expect(verdictB.provenance).toBe('fail_closed_projected_analysis');
 
@@ -355,6 +360,7 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts: [],
+      priorAnalysisFacts: [scenarioNewestWithheld],
       handlerFacts,
       requestId: 'req-first-divergence',
       scenarioId: SCENARIO_ID,
@@ -425,6 +431,7 @@ describe('the coaching slot reads the SETTLED permission, not the turn-entry one
       outcome: outcomeFor(current),
       contextPack: null,
       priorFacts,
+      priorAnalysisFacts: priorFacts,
       handlerFacts,
       requestId: 'req-settled',
       scenarioId: SCENARIO_ID,
