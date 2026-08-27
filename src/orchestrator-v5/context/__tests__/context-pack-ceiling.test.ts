@@ -337,17 +337,19 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
     const baseGraph = bulkyCompactGraph(OVERFLOW.graphNodes, OVERFLOW.labelChars);
     const graph: GraphV3Compact = {
       ...baseGraph,
-      nodes: baseGraph.nodes.map((node, index) =>
-        index === 2
-          ? {
-              ...node,
-              uncertainty_drivers: [
-                'Supplier lead-time evidence is incomplete.',
-                'Demand response is based on a short pilot.',
-              ],
-            }
-          : node,
-      ),
+      nodes: baseGraph.nodes.map((node, index) => {
+        if (index === 1) return { ...node, is_baseline: true as const };
+        if (index === 2) {
+          return {
+            ...node,
+            uncertainty_drivers: [
+              'Supplier lead-time evidence is incomplete.',
+              'Demand response is based on a short pilot.',
+            ],
+          };
+        }
+        return node;
+      }),
     };
     const common = {
       payload: BASE_PAYLOAD,
@@ -409,6 +411,17 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
 
     expect(trimmed.graph_context).toBe(graphContext);
     expect(trimmed.graph_context).toEqual({ status: 'canonical' });
+    expect(
+      (trimmed.graph.nodes as readonly CompactNode[]).find((node) => node.id === 'n1')
+        ?.is_baseline,
+    ).toBe(true);
+    expect(
+      (
+        trimmed.display_graph as {
+          readonly nodes: readonly { readonly id: string; readonly is_baseline?: true }[];
+        }
+      ).nodes.find((node) => node.id === 'n1')?.is_baseline,
+    ).toBe(true);
     expect(trimmed.conversation_summary).toBe(conversationSummary);
     expect(trimmed.factor_values).toBe(factorValues);
     expect(trimmed.graph.constraints).toBe(constraints);

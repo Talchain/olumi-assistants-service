@@ -23,6 +23,7 @@
  */
 
 import { log } from '../../utils/telemetry.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import {
   compactGraph,
@@ -82,7 +83,7 @@ export function compactGraphForContextPack(
   if (parsed.success) {
     return {
       kind: 'compacted',
-      compact: compactGraph(parsed.data),
+      compact: compactGraph(withProducerBaselineIdentity(parsed.data, graphState)),
       via: 'strict_parse',
     };
   }
@@ -100,7 +101,7 @@ export function compactGraphForContextPack(
     const fallback = toStructuralGraphV3(graphState);
     return {
       kind: 'compacted',
-      compact: compactGraph(fallback),
+      compact: withoutBaselineIdentity(compactGraph(fallback)),
       via: 'structural_fallback',
     };
   } catch (err) {
@@ -165,6 +166,76 @@ export function isCanonicalStrictContextGraphCompaction(
     Object.isFrozen(graph) &&
     CANONICAL_STRICT_COMPACTIONS.has(graph)
   );
+}
+
+/**
+ * Baseline identity is licensed only by the strict GraphV3 recovery above.
+ * Structural fallback is a degraded shape-preservation path and must remain
+ * byte-equivalent to its pre-baseline carrier, including when permissive input
+ * happens to contain a top-level marker that the shared compactor understands.
+ */
+function withoutBaselineIdentity(compact: GraphV3Compact): GraphV3Compact {
+  if (compact.nodes.every((node) => node.is_baseline === undefined)) return compact;
+  return {
+    ...compact,
+    nodes: compact.nodes.map((node) => {
+      const copy = { ...node };
+      Reflect.deleteProperty(copy, 'is_baseline');
+      return copy;
+    }),
+  };
+}
+
+/**
+ * GraphV3's strict projection intentionally removes the legacy `data` bag.
+ * Baseline identity is one of the few producer-attested facts that can still
+ * arrive on that surface, so resolve the estate's existing authority rule
+ * before parsing and carry only an explicit effective `true` onto the parsed
+ * option at the same position with the same ID and kind. This is transport,
+ * not adjudication: labels and the ingress `options[]` index are never
+ * consulted. A positional mismatch fails weak instead of letting one raw node
+ * license a different parsed node that happens to share its ID.
+ */
+function withProducerBaselineIdentity(
+  parsed: GraphV3T,
+  raw: GraphStateIngress,
+): GraphV3T {
+  let changed = false;
+  const nodes = parsed.nodes.map((parsedNode, index) => {
+    const candidate = raw.nodes[index] as {
+      readonly id?: unknown;
+      readonly kind?: unknown;
+      readonly is_baseline?: unknown;
+      readonly data?: unknown;
+    } | undefined;
+    if (
+      candidate === undefined ||
+      parsedNode.kind !== 'option' ||
+      candidate.kind !== parsedNode.kind ||
+      candidate.id !== parsedNode.id
+    ) {
+      return parsedNode;
+    }
+    const data =
+      typeof candidate.data === 'object' && candidate.data !== null
+        ? (candidate.data as { readonly is_baseline?: boolean })
+        : undefined;
+    const effective = readIsBaseline({
+      ...(typeof candidate.is_baseline === 'boolean'
+        ? { is_baseline: candidate.is_baseline }
+        : {}),
+      ...(data === undefined ? {} : { data }),
+    });
+    if (effective !== true || parsedNode.is_baseline === true) return parsedNode;
+    changed = true;
+    return { ...parsedNode, is_baseline: true };
+  });
+
+  if (!changed) return parsed;
+  return {
+    ...parsed,
+    nodes,
+  };
 }
 
 /**

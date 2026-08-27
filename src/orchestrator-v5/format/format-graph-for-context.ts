@@ -48,6 +48,8 @@ export interface DisplaySafeNode {
   readonly id: string;
   readonly label: string;
   readonly kind: string;
+  /** Producer-attested status-quo identity (option nodes only). */
+  readonly is_baseline?: true;
   /** Saved Living Model detail, bounded without local interpretation. */
   readonly description?: string;
   readonly category?: string;
@@ -93,10 +95,16 @@ export interface DisplaySafeEdge {
   readonly provenance?: CompactProvenance;
 }
 
+export interface DisplaySafeOption {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface DisplaySafeGraph {
   readonly nodes: readonly DisplaySafeNode[];
   readonly edges: readonly DisplaySafeEdge[];
-  readonly options: readonly unknown[];
+  /** Display-only duplicate index. Baseline identity lives on option nodes. */
+  readonly options: readonly DisplaySafeOption[];
   /**
    * Goal nodes, projected through the SAME `projectNode` as `nodes` — not the
    * raw `ContextPackGraph.goals` passthrough this field used to carry.
@@ -136,6 +144,7 @@ interface RawNodeShape {
   readonly id?: unknown;
   readonly label?: unknown;
   readonly kind?: unknown;
+  readonly is_baseline?: unknown;
   readonly description?: unknown;
   readonly category?: unknown;
   readonly unit?: unknown;
@@ -187,6 +196,11 @@ interface RawEdgeShape {
   /** Idempotency: a second pass through the formatter sees no `strength`
    *  but should preserve an existing allowlisted relationship phrase. */
   readonly relationship?: unknown;
+}
+
+interface RawOptionShape {
+  readonly id?: unknown;
+  readonly label?: unknown;
 }
 
 function asString(value: unknown): string | undefined {
@@ -340,6 +354,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     id: string;
     label: string;
     kind: string;
+    is_baseline?: true;
     description?: string;
     category?: string;
     unit?: string;
@@ -348,6 +363,10 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
   } = { id, label, kind };
+  // One narrow authority: only a literal producer field on an option can
+  // identify the saved current approach. Labels such as "status quo" are not
+  // reclassified here, malformed values are ignored, and false is omitted.
+  if (kind === 'option' && raw.is_baseline === true) node.is_baseline = true;
   const description = boundNodeDescriptionForContext(raw.description);
   if (description !== undefined) node.description = description;
   const category = asString(raw.category);
@@ -491,6 +510,23 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
 }
 
 /**
+ * Project the display-only option index to its documented `{id, label}` shape.
+ *
+ * The authoritative option facts already live on `nodes`. In particular,
+ * `is_baseline` is intentionally not copied from this duplicate index: doing
+ * so would let a raw/direct caller present a second, contradictory current-
+ * approach authority. Malformed entries fail closed rather than acquiring a
+ * label through local inference.
+ */
+function projectOption(raw: unknown): DisplaySafeOption | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const option = raw as RawOptionShape;
+  const id = asString(option.id);
+  const label = asString(option.label);
+  return id !== undefined && label !== undefined ? { id, label } : null;
+}
+
+/**
  * Project the raw `ContextPackGraph` into the LLM-facing display-safe shape.
  *
  *   - Edges: `strength` and `exists` are stripped; `plain_interpretation` is
@@ -517,6 +553,8 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     numerics for handlers, freshness hashing, and edit_graph
  *     dispatch — Sonnet just doesn't see them. Internal `source` /
  *     `_raw_provenance` are dropped (diagnostic-only).
+ *     A literal producer-attested `is_baseline: true` survives only on option
+ *     nodes; the formatter does not infer it from labels or IDs.
  *     The `unit` extractor still reads compact top-level `unit`
  *     first and canonical `observed_state.unit` second so the
  *     assembler raw-graph fallback preserves the user-facing label.
@@ -548,9 +586,11 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     model had (the stripped twin was always already present) and gains
  *     `display_value`, which the raw compact node has no field for.
  *
- *   - `options`, `constraints`, `counts`: pass through unchanged. `options` is
- *     already projected to `{id, label}` by the assembler and carries no
- *     numerics; `constraints` is threaded from the caller.
+ *   - `options`: projected independently to the closed `{id, label}` display
+ *     shape. Raw/direct assembler callers may supply richer records, so this
+ *     boundary must not trust them to have been pre-projected. Baseline,
+ *     ranking, readiness, intervention, and other fields are stripped.
+ *     `constraints` and `counts` pass through unchanged.
  */
 export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
   const labelMap = new Map<string, string>();
@@ -582,10 +622,16 @@ export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
     if (projected !== null) goals.push(projected);
   }
 
+  const options: DisplaySafeOption[] = [];
+  for (const option of raw.options) {
+    const projected = projectOption(option);
+    if (projected !== null) options.push(projected);
+  }
+
   return {
     nodes,
     edges,
-    options: raw.options,
+    options,
     goals,
     constraints: raw.constraints,
     counts: raw.counts,
