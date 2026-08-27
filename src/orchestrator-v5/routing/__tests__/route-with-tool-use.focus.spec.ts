@@ -34,6 +34,7 @@ import {
   FOCUS_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
+  RUN_DELTA_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
@@ -145,6 +146,15 @@ const PRISTINE_GOLDEN_SHA256 =
   '8f43569dcdbfee06ab0bad056ce746e61a17980f6cfa7ac0afbc622663f9c504';
 
 function subtractMandatoryAuthorityDelta(message: string): string {
+  // ⭐ THE THIRD MANDATORY BLOCK — see the twin helper in
+  // context/__tests__/context-pack-brief.test.ts. `run_delta`'s licence is
+  // always rendered, so subtracting it here keeps the HISTORICAL golden below
+  // valid instead of forcing a re-pin. Exactly-once asserted first, so a
+  // subtraction that silently matched nothing cannot re-pin the golden.
+  expect(message.split(RUN_DELTA_INSTRUCTION)).toHaveLength(2);
+  const withoutRunDelta = message.replace(`\n\n${RUN_DELTA_INSTRUCTION}`, '');
+  expect(withoutRunDelta).not.toBe(message);
+  message = withoutRunDelta;
   const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);

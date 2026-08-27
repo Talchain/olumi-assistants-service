@@ -29,6 +29,7 @@ import {
   COACHING_CONTEXT_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
+  RUN_DELTA_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
@@ -169,6 +170,23 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
       GRAPH_CONTEXT_INSTRUCTION,
       '',
       RECENT_CHANGES_INSTRUCTION,
+      '',
+      // ⭐ THE THIRD MANDATORY BLOCK, added deliberately with the `run_delta`
+      // pack slice. This assertion is the alarm that a new ALWAYS-RENDERED
+      // instruction cannot slip into every prompt unnoticed, and it fired
+      // exactly as designed — the list is updated here, in the same change
+      // that made the block mandatory, rather than the assertion being
+      // loosened.
+      //
+      // WHY THIS ONE IS UNCONDITIONAL, like its two neighbours above: its
+      // load-bearing clause governs the turn where `run_delta` is ABSENT, and
+      // absence is the producer's DEFAULT path. Gating it on the field's
+      // presence would render the absence rule only on the turns that do not
+      // need it — a conditionally-emitted absence clause is dead text. Same
+      // reasoning that already makes graph-authority and edit-history
+      // mandatory: where absence could silently license a false claim, the
+      // licence text is always present so absence can never read as permission.
+      RUN_DELTA_INSTRUCTION,
       '',
       '## User turn',
       'hi',

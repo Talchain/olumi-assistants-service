@@ -60,6 +60,7 @@ import {
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
+  RUN_DELTA_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -170,6 +171,25 @@ const CODE_OWNED_INSTRUCTIONS = [
   // being blind to the field and RED-ing on it by name. The fixture above now
   // carries representative labels, and FACTOR_VALUES_PROSE_COVERAGE pins it.
   ['FACTOR_VALUES_INSTRUCTION', FACTOR_VALUES_INSTRUCTION],
+  // Run-over-run consequence. ⚠ UNLIKE ITS TEN SIBLINGS THIS ONE IS EMITTED
+  // UNCONDITIONALLY, and that is deliberate: its load-bearing clause governs
+  // the turn where `run_delta` is ABSENT — the producer's DEFAULT path — so
+  // gating it on the field's presence would render the absence rule only on
+  // the turns that do not need it. See the constant's header. For THIS gate
+  // the difference is invisible (the maximal fixture populates the field
+  // either way), which is exactly why the property is pinned in
+  // run-delta-wire.route-level.test.ts instead of here.
+  //
+  // ⚠ AND THIS FIELD IS DELIBERATELY NON-PROSE, so THE GATE below does not
+  // fire on it and CANNOT be what covers it. `run_delta` carries only option
+  // ids, factor ids, enums and numbers — no free text at all — so `proseLeaves`
+  // scores it ZERO and the sanction check skips it. That is a SAFETY property,
+  // not a gap: there is no sentence in the block for a model to quote, so it
+  // must join ids against the `analysis` section to say anything at all. Do NOT
+  // "fix" this by padding the fixture with invented prose — that would
+  // manufacture the same false positive the `systemEvent` note above records.
+  // RUN_DELTA_IS_STRUCTURAL_NOT_PROSE in the wire suite pins it.
+  ['RUN_DELTA_INSTRUCTION', RUN_DELTA_INSTRUCTION],
 ] as const satisfies ReadonlyArray<readonly [string, string]>;
 
 const MODEL_FACING_CORPUS = [
@@ -264,6 +284,60 @@ function namedInCorpus(field: string, corpus = MODEL_FACING_CORPUS): boolean {
  *  payload and to buildUserMessage, so the fixture must too. */
 const USER_MESSAGE = 'increase the price to 45000 and run the analysis';
 
+/**
+ * FIXTURE_COMPLETENESS for `run_delta`: the maximal fixture must POPULATE the
+ * field or the gate narrows its own scope (trap #13). That takes a genuine
+ * pair — `buildRunDelta` is a real producer over real persisted facts and
+ * refuses anything it cannot honestly classify, so there is no way to fake this
+ * field into existence, which is precisely the property that makes it worth
+ * having.
+ *
+ * REALISTIC, NOT MAXIMAL-IN-THE-ABSTRACT (the `systemEvent` lesson below): the
+ * option ids are the SAME ids the `ANALYSIS` fixture carries, because in
+ * production the model resolves a `run_delta` option id to a label through the
+ * `analysis` block. A pair with unrelated ids would populate the key while
+ * describing a pack that could never occur.
+ *
+ * Each fact carries the four PRODUCER ECHOES the producer requires
+ * (`seed_used`, `graph_hash_at_run`, `_meta.builds`, `n_samples`) plus its own
+ * leader-claim verdict — all read off the envelope, never self-reported.
+ */
+function runAnalysisFact(
+  win: readonly (readonly [string, number])[],
+  seed: string,
+  hash: string,
+  at: string,
+): unknown {
+  return {
+    fact_type: 'run_analysis',
+    noop: false,
+    result: {
+      enrichment: {
+        analysis_status: 'completed',
+        results: win.map(([option_id, win_probability]) => ({
+          option_id,
+          option_label: option_id === 'opt_local' ? 'Hire locally' : 'Offshore partner',
+          win_probability,
+        })),
+        meta: { seed_used: seed, n_samples: 10_000 },
+        _meta: { builds: { plot: 'p1', isl: 'i1' } },
+      },
+      computed_at: at,
+      graph_hash_at_run: hash,
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
+    },
+  };
+}
+
+/** Newest-first, exactly how the turn loader delivers `prior_facts`. */
+const RUN_DELTA_PRIOR_FACTS = [
+  runAnalysisFact([['opt_local', 0.62], ['opt_offshore', 0.38]], '222', 'hash-b', '2026-07-25T00:00:00Z'),
+  runAnalysisFact([['opt_local', 0.41], ['opt_offshore', 0.59]], '111', 'hash-a', '2026-07-24T00:00:00Z'),
+];
+
 const ANALYSIS = {
   winner: { option_id: 'opt_local', option_label: 'Hire locally', win_probability: 0.62 },
   options: [
@@ -308,7 +382,13 @@ function assembleMaximalPack(
         assistant_message: 'You have two options set up on the canvas right now.',
       } as never,
     ],
-    priorFacts: [],
+    priorFacts: RUN_DELTA_PRIOR_FACTS as never,
+    // FIXTURE_COMPLETENESS: `run_delta` is a schema-declared key, so the
+    // maximal fixture must populate it. The MAXIMAL arm is the ENTITLED one —
+    // leader ids present on both sides — so the gate sees the field at its
+    // widest. The withheld arm and the refusal arm are exercised in
+    // run-delta-wire.route-level.test.ts, which is where their defects live.
+    mayNameLeadingOption: true,
     analysis: ANALYSIS,
     brief:
       'Should we hire two senior engineers locally or engage an offshore partner? Budget 250k, decision needed by Q3.',
