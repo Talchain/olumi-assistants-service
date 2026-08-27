@@ -301,6 +301,10 @@ describe('canonical baseline-option continuity', () => {
             label: 'First',
             source: 'system',
             provenance: 'ai_inferred',
+            // Structural reachability is emitted on every option node,
+            // empty set included. Declared here so this exhaustive `toEqual`
+            // keeps its second job: failing loud on ANY unexpected field.
+            reaches: ['factor'],
           },
           {
             id: 'dup',
@@ -308,6 +312,7 @@ describe('canonical baseline-option continuity', () => {
             label: 'Second',
             source: 'system',
             provenance: 'ai_inferred',
+            reaches: ['factor'],
           },
           {
             id: 'factor',
