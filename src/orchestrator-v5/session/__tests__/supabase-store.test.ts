@@ -55,16 +55,25 @@ function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00', u
 
 interface MockConfig {
   rpcResult?: { data?: unknown; error?: { message: string; code?: string } | null };
-  selectResult?: { data?: unknown; error?: { message: string; code?: string } | null };
+  selectResult?: {
+    data?: unknown;
+    error?: { message: string; code?: string } | null;
+    count?: unknown;
+  };
 }
 
 function makeClient(cfg: MockConfig = {}): {
   client: SupabaseClient;
   rpcCalls: Array<{ fn: string; args: unknown }>;
-  selectCalls: Array<{ table: string; cols: string; filters: unknown }>;
+  selectCalls: Array<{ table: string; cols: string; options?: unknown; filters: unknown }>;
 } {
   const rpcCalls: Array<{ fn: string; args: unknown }> = [];
-  const selectCalls: Array<{ table: string; cols: string; filters: unknown }> = [];
+  const selectCalls: Array<{
+    table: string;
+    cols: string;
+    options?: unknown;
+    filters: unknown;
+  }> = [];
 
   const client = {
     rpc: vi.fn(async (fn: string, args: unknown) => {
@@ -75,8 +84,8 @@ function makeClient(cfg: MockConfig = {}): {
       const filters: Record<string, unknown> = {};
       const builder: Record<string, unknown> = {};
       const chain = {
-        select: (cols: string) => {
-          selectCalls.push({ table, cols, filters });
+        select: (cols: string, options?: unknown) => {
+          selectCalls.push({ table, cols, options, filters });
           return chain;
         },
         eq: (col: string, val: unknown) => {
@@ -1106,6 +1115,226 @@ describe('SupabaseSessionStore.readRecentAppliedMutationFactsFor', () => {
     await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 0)).rejects.toMatchObject({
       name: 'SessionReadError',
       code: 'mutation_fact_limit_invalid',
+    });
+    expect(selectCalls).toHaveLength(0);
+  });
+});
+
+describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
+  const runAnalysisRow = {
+    id: '11111111-1111-4111-8111-111111111111',
+    scenario_id: SCENARIO,
+    v5_conversation_turn_id: '33333333-3333-4333-8333-333333333333',
+    created_at: '2026-08-27T10:00:00.000Z',
+    handler_id: 'run_analysis',
+    action_type: 'run_analysis',
+    noop: false,
+    payload: {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO,
+        leading_option_id: 'option-a',
+        summary: 'Analysis completed.',
+        computed_at: '2026-08-27T09:59:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    },
+  };
+
+  it('uses one uncached exact-count query with stable scenario authority', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [runAnalysisRow], error: null, count: 1 },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).resolves.toEqual({
+      facts: [
+        expect.objectContaining({
+          fact_type: 'run_analysis',
+          noop: false,
+          result: expect.objectContaining({ scenario_id: SCENARIO }),
+        }),
+      ],
+      total_count: 1,
+    });
+
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]).toMatchObject({
+      table: 'v5_handler_facts',
+      cols:
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+      options: { count: 'exact' },
+    });
+    const filters = selectCalls[0]!.filters as Record<string, unknown>;
+    expect(filters['eq:scenario_id']).toBe(SCENARIO);
+    expect(filters['eq:handler_id']).toBe('run_analysis');
+    expect(filters['eq:action_type']).toBe('run_analysis');
+    expect(filters['eq:noop']).toBe(false);
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:id']).toEqual({ ascending: false });
+    expect(filters.limit).toBe(21);
+
+    await store.readScenarioRunAnalysisFactsFor(SCENARIO, 21);
+    expect(selectCalls).toHaveLength(2);
+  });
+
+  it('returns authoritative zero only with an exact zero count and empty page', async () => {
+    const { client } = makeClient({
+      selectResult: { data: [], error: null, count: 0 },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).resolves.toEqual({ facts: [], total_count: 0 });
+  });
+
+  it('maps database failure to a closed content-free error code', async () => {
+    const { client } = makeClient({
+      selectResult: {
+        data: null,
+        error: { message: 'private database diagnostic', code: '08006' },
+        count: null,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    const promise = store.readScenarioRunAnalysisFactsFor(SCENARIO, 21);
+    await expect(promise).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_query_failed',
+    });
+    await expect(promise).rejects.not.toThrow('private database diagnostic');
+  });
+
+  it.each([
+    ['missing exact count', { data: [], error: null }],
+    ['negative exact count', { data: [], error: null, count: -1 }],
+    ['fractional exact count', { data: [], error: null, count: 1.5 }],
+    ['non-array page', { data: null, error: null, count: 0 }],
+  ])('fails weak on %s', async (_name, selectResult) => {
+    const { client } = makeClient({ selectResult });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_contract_invalid',
+    });
+  });
+
+  it.each([
+    ['missing row id', { id: '' }],
+    ['foreign row scenario', { scenario_id: '22222222-2222-4222-8222-222222222222' }],
+    ['missing parent id', { v5_conversation_turn_id: '' }],
+    ['malformed timestamp', { created_at: 'not-a-time' }],
+    ['wrong handler', { handler_id: 'explain_results' }],
+    ['wrong action type', { action_type: 'explain_results' }],
+    ['noop row', { noop: true }],
+  ])('rejects %s metadata', async (_name, override) => {
+    const { client } = makeClient({
+      selectResult: {
+        data: [{ ...runAnalysisRow, ...override }],
+        error: null,
+        count: 1,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_corrupt',
+    });
+  });
+
+  it.each([
+    [
+      'malformed strict payload',
+      { payload: { fact_type: 'run_analysis', result: {} } },
+    ],
+    [
+      'payload fact-type mismatch',
+      {
+        payload: {
+          fact_type: 'explain_results',
+          fact_version: 1,
+          result: { precondition_unmet: false, option_count: 2 },
+        },
+      },
+    ],
+    [
+      'payload scenario mismatch',
+      {
+        payload: {
+          ...runAnalysisRow.payload,
+          result: {
+            ...runAnalysisRow.payload.result,
+            scenario_id: '22222222-2222-4222-8222-222222222222',
+          },
+        },
+      },
+    ],
+  ])('rejects %s', async (_name, override) => {
+    const { client } = makeClient({
+      selectResult: {
+        data: [{ ...runAnalysisRow, ...override }],
+        error: null,
+        count: 1,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_corrupt',
+    });
+  });
+
+  it('rejects an invalid lookahead before issuing a query', async () => {
+    const { client, selectCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 0),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_limit_invalid',
     });
     expect(selectCalls).toHaveLength(0);
   });
