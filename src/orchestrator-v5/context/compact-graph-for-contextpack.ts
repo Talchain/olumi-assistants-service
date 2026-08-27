@@ -173,50 +173,50 @@ export function isCanonicalStrictContextGraphCompaction(
  * Baseline identity is one of the few producer-attested facts that can still
  * arrive on that surface, so resolve the estate's existing authority rule
  * before parsing and carry only an explicit effective `true` onto the parsed
- * option with the same ID. This is transport, not adjudication: labels and the
- * ingress `options[]` index are never consulted, and every explicit marker is
- * preserved.
+ * option at the same position with the same ID and kind. This is transport,
+ * not adjudication: labels and the ingress `options[]` index are never
+ * consulted. A positional mismatch fails weak instead of letting one raw node
+ * license a different parsed node that happens to share its ID.
  */
 function withProducerBaselineIdentity(
   parsed: GraphV3T,
   raw: GraphStateIngress,
 ): GraphV3T {
-  const baselineOptionIds = new Set<string>();
-
-  for (const candidate of raw.nodes) {
-    const node = candidate as {
+  let changed = false;
+  const nodes = parsed.nodes.map((parsedNode, index) => {
+    const candidate = raw.nodes[index] as {
       readonly id?: unknown;
       readonly kind?: unknown;
       readonly is_baseline?: unknown;
       readonly data?: unknown;
-    };
-    if (node.kind !== 'option' || typeof node.id !== 'string') continue;
-
-    const data =
-      typeof node.data === 'object' && node.data !== null
-        ? (node.data as { readonly is_baseline?: boolean })
-        : undefined;
+    } | undefined;
     if (
-      readIsBaseline({
-        ...(typeof node.is_baseline === 'boolean'
-          ? { is_baseline: node.is_baseline }
-          : {}),
-        ...(data === undefined ? {} : { data }),
-      }) === true
+      candidate === undefined ||
+      parsedNode.kind !== 'option' ||
+      candidate.kind !== parsedNode.kind ||
+      candidate.id !== parsedNode.id
     ) {
-      baselineOptionIds.add(node.id);
+      return parsedNode;
     }
-  }
+    const data =
+      typeof candidate.data === 'object' && candidate.data !== null
+        ? (candidate.data as { readonly is_baseline?: boolean })
+        : undefined;
+    const effective = readIsBaseline({
+      ...(typeof candidate.is_baseline === 'boolean'
+        ? { is_baseline: candidate.is_baseline }
+        : {}),
+      ...(data === undefined ? {} : { data }),
+    });
+    if (effective !== true || parsedNode.is_baseline === true) return parsedNode;
+    changed = true;
+    return { ...parsedNode, is_baseline: true };
+  });
 
-  if (baselineOptionIds.size === 0) return parsed;
-
+  if (!changed) return parsed;
   return {
     ...parsed,
-    nodes: parsed.nodes.map((node) =>
-      node.kind === 'option' && baselineOptionIds.has(node.id)
-        ? { ...node, is_baseline: true }
-        : node,
-    ),
+    nodes,
   };
 }
 
@@ -249,5 +249,5 @@ function toStructuralGraphV3(graphState: GraphStateIngress): GraphV3T {
     } as GraphV3T['edges'][number];
   });
 
-  return withProducerBaselineIdentity({ nodes, edges }, graphState);
+  return { nodes, edges };
 }
