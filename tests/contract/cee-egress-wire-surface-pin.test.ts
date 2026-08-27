@@ -133,8 +133,16 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       'reasoning',
       'response_version',
       // 0.39.0-new: optional top-level run-to-run delta (`RunDeltaSchema`).
-      // DECLARED here by the re-vendor; CEE does NOT yet EMIT it — this pin
-      // bump is consumer-parity only. ⚠ Note for whoever wires it: `RunDelta`
+      // ⚠ THIS COMMENT USED TO SAY "CEE does NOT yet EMIT it — this pin bump is
+      // consumer-parity only". THAT IS NO LONGER TRUE and was corrected in the
+      // same change that made it false: CEE now emits `run_delta`, produced by
+      // `orchestrator-v5/coaching/build-run-delta.ts` and stamped at the single
+      // `attachRunDelta` seam in `response-finaliser.ts`, on turns that
+      // COMPLETED A RUN with a comparable pair in the window. A pin comment
+      // asserting a capability is dark, left standing by the wiring change
+      // itself, is the hand-maintained mirror this estate keeps paying for
+      // (CLAUDE.md trap #12).
+      // ⚠ Still true, and still worth reading before touching it: `RunDelta`
       // is ALSO the name of a pre-existing LOCAL interface in this repo
       // (src/orchestrator-v5/coaching/compare-runs.ts) which is a DIFFERENT
       // type. Alias the wire import; do not assume the two shapes agree.

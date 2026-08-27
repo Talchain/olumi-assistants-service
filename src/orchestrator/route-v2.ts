@@ -716,6 +716,29 @@ async function sendFinalised200(
      *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
+     * The COMPLETED RERUN's fact window, threaded into `finaliseV5Response` so
+     * it can stamp the run-over-run consequence block (`run_delta`). Supplied
+     * by the turn_executor exit via `TurnExecutorRunResult.priorFacts`, which
+     * sets it ONLY on a turn that completed a run and sets it to the canonical
+     * post-dispatch window `[...handlerFactsForCommit, ...context.prior_facts]`
+     * — see that field's docblock for why the turn-ENTRY window was the wrong
+     * array (it omits the run the turn just produced).
+     *
+     * ⚠ THIS HOP IS A PASSTHROUGH AND MUST STAY ONE. The two questions —
+     * "did a run complete?" and "is there an honest pair?" — are answered
+     * upstream (the executor's gate) and downstream (the producer's refusals)
+     * respectively. Re-deciding either here would be a third authority over one
+     * answer (CLAUDE.md trap #12).
+     *
+     * ⚠ ABSENCE IS THE FAIL-CLOSED PATH AND IS FULLY SUPPORTED: a run result
+     * that omits it stamps no `run_delta`, which is exactly what the contract
+     * models ("absent on every non-rerun turn ... a consumer renders NO delta
+     * card"). Never default it — `?? []` would assert "there were no prior
+     * runs", which is a different and false claim from "this turn completed no
+     * run". Pinned by `route-v2-run-delta-threading.test.ts`.
+     */
+    readonly priorFacts?: readonly import('@talchain/schemas/orchestrator').HandlerFact[];
+    /**
      * V5 diagnostic trace (additive observability). Threaded in by paths
      * that build the trace out-of-band on the dispatch result
      * (draft_graph). For paths that attach the trace on the candidate
@@ -6142,6 +6165,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // boolean is: a value reported without its provenance is a value no walk
       // can falsify.
       mayNameLeadingOptionProvenance: run.mayNameLeadingOptionProvenance,
+      // The run-over-run consequence block's input. Present on this exit
+      // because the executor loaded the facts; omitted elsewhere, which the
+      // finaliser reads as "no facts in scope" and stamps nothing.
+      ...(run.priorFacts ? { priorFacts: run.priorFacts } : {}),
       // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
       // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
       // the honest reading for a permitted turn or a non-explanation handler.
