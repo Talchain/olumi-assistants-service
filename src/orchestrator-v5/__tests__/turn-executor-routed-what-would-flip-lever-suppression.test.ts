@@ -269,10 +269,14 @@ const REAL_REGISTRY: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
  * factor (`fac_market_demand`). Analysed on the canonical READY_GRAPH so the
  * hash matches the persisted graph → freshness fresh.
  */
-function priorFactWithDriversAndFlip(): Record<string, unknown> {
-  const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+function priorFactWithDriversAndFlip(
+  graph: typeof READY_GRAPH = READY_GRAPH,
+): Record<string, unknown> {
+  const parsed = GraphStateIngressSchema.safeParse(graph);
   if (!parsed.success) throw new Error('test setup: graph parse failed');
   const hash = computeAnalysisAffectingGraphHash(parsed.data)!;
+  const optionLabel = (id: 'opt_freelance' | 'opt_hire'): string =>
+    graph.nodes.find((node) => node.id === id)?.label ?? id;
   return {
     fact_type: 'run_analysis' as const,
     fact_version: 1 as const,
@@ -303,13 +307,13 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
         analysis_status: 'computed',
         margin_pp: 24,
         option_comparison: [
-          { option_id: 'opt_freelance', option_label: 'Freelance + Moderate Ad Spend', win_probability: 0.62 },
-          { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.38 },
+          { option_id: 'opt_freelance', option_label: optionLabel('opt_freelance'), win_probability: 0.62 },
+          { option_id: 'opt_hire', option_label: optionLabel('opt_hire'), win_probability: 0.38 },
         ],
         results: [
           {
             option_id: 'opt_freelance',
-            option_label: 'Freelance + Moderate Ad Spend',
+            option_label: optionLabel('opt_freelance'),
             win_probability: 0.62,
             outcome_mean: 1,
             factor_sensitivity: [
@@ -317,7 +321,7 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
               { node_id: 'fac_market_demand', label: 'Market demand', elasticity: 0.5, direction: 'positive' },
             ],
           },
-          { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.38, outcome_mean: 0.8 },
+          { option_id: 'opt_hire', option_label: optionLabel('opt_hire'), win_probability: 0.38, outcome_mean: 0.8 },
         ],
         flip_thresholds: [
           { factor_id: 'fac_acquisition_cost', factor_label: 'Acquisition cost', flip_value: 0.6, direction: 'increase' },
@@ -327,7 +331,7 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
             flip_value: 0.45,
             direction: 'increase',
             alternative_winner_id: 'opt_hire',
-            alternative_winner_label: 'Hire Marketing Manager',
+            alternative_winner_label: optionLabel('opt_hire'),
           },
         ],
       },
@@ -595,5 +599,105 @@ describe('System B — selected canonical option referent continuity', () => {
       expect(fact.result?.fallback_reason).toBeNull();
     }
     expect(JSON.stringify(deictic.response)).not.toContain('model_version_receipt');
+  });
+
+  it('preserves generic and factor-targeted Sonnet answers when a canvas option is merely selected', async () => {
+    const offshoreGraph = {
+      ...READY_GRAPH,
+      nodes: READY_GRAPH.nodes.map((node) =>
+        node.id === 'opt_hire'
+          ? { ...node, label: 'Engage Offshore Partner' }
+          : node,
+      ),
+    };
+    const genericAnswer =
+      'Market demand and the current acquisition-cost assumptions are the main factors that could change the result, while the present analysis still leaves meaningful uncertainty around the alternatives.';
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(genericAnswer),
+    );
+    mockState.persistedGraph = offshoreGraph;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(offshoreGraph)];
+
+    for (const [message, requestId] of [
+      ['What would change the result?', 'req-referent-generic'],
+      ['What would change if Acquisition cost increased?', 'req-referent-factor-named'],
+      ['What would change if it increased?', 'req-referent-factor-pronoun'],
+    ] as const) {
+      const result = await runTurnExecutor(mkPayload(message), requestId, {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: offshoreGraph as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      });
+
+      // Selection is contextual evidence, not an implicit target. Without a
+      // current-message option deictic, the existing valid generic answer is
+      // byte-preserved instead of being rewritten for Engage Offshore Partner.
+      expect(result.response.assistant_text, message).toBe(genericAnswer);
+      expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
+    }
+
+    const flipFacts: Array<{ result?: Record<string, unknown> }> = [];
+    for (const [write] of appendCalls) {
+      const record = write as {
+        graph?: unknown;
+        handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+      };
+      expect(record.graph).toBeUndefined();
+      flipFacts.push(
+        ...(record.handler_facts ?? []).filter(
+          (fact) => fact.fact_type === 'what_would_flip',
+        ),
+      );
+    }
+    expect(flipFacts).toHaveLength(3);
+    for (const fact of flipFacts) {
+      expect(fact.result?.answer_source).toBe('sonnet');
+      expect(fact.result?.fallback_reason).toBeNull();
+    }
+  });
+
+  it('fails weak when one selected identity is asserted as both option and factor', async () => {
+    const crossKindGraph = {
+      ...READY_GRAPH,
+      nodes: [
+        ...READY_GRAPH.nodes,
+        { id: 'opt_hire', kind: 'factor' as const, label: 'Conflicting factor identity' },
+      ],
+    };
+    const genericAnswer =
+      'Market demand and the current acquisition-cost assumptions are the main factors that could change the result, while the present analysis still leaves meaningful uncertainty around the alternatives.';
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(genericAnswer),
+    );
+    mockState.persistedGraph = crossKindGraph;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(crossKindGraph)];
+
+    const result = await runTurnExecutor(
+      mkPayload('What would make it win?'),
+      'req-referent-cross-kind',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: crossKindGraph as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      },
+    );
+
+    // The selection resolver sees the first option row, so this is a real
+    // end-to-end falsifier for cross-kind identity handling rather than a test
+    // that happens to fail earlier as “selected factor”.
+    expect(result.response.assistant_text).toBe(genericAnswer);
+    const flipFact = appendCalls
+      .flatMap(([write]) => {
+        const record = write as {
+          handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+        };
+        return record.handler_facts ?? [];
+      })
+      .find((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFact?.result?.answer_source).toBe('sonnet');
+    expect(flipFact?.result?.fallback_reason).toBeNull();
+    expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
   });
 });

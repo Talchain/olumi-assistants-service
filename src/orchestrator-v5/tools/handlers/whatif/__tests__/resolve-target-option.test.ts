@@ -229,6 +229,45 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
     });
   });
 
+  it('requires option-outcome deictic evidence before selection can supply a target', () => {
+    const focus = selected('opt_a', 'Expand in Europe');
+    for (const message of [
+      'What would change the result?',
+      'What would change in the model?',
+      'What would change if Acquisition cost increased?',
+      'What would change if it increased?',
+      'Would it lead to lower acquisition cost?',
+      'Could it win support from customers?',
+    ]) {
+      expect(
+        resolveTargetOptionFromCanonicalContext(
+          message,
+          canonicalSnapshot(),
+          focus,
+        ),
+        message,
+      ).toEqual({ kind: 'none', reason: 'no_option_named' });
+    }
+  });
+
+  it.each([
+    'What would make it win?',
+    'What would make it win if demand improved?',
+    'What would need to change for this option to come out ahead?',
+    'Could the selected alternative become the leading option?',
+  ])('accepts a closed option-outcome deictic: %s', (message) => {
+    expect(
+      resolveTargetOptionFromCanonicalContext(
+        message,
+        canonicalSnapshot(),
+        selected('opt_a', 'Expand in Europe'),
+      ),
+    ).toEqual({
+      kind: 'resolved',
+      option: { id: 'opt_a', label: 'Expand in Europe' },
+    });
+  });
+
   it('current explicit words outrank a different selected option', () => {
     expect(
       resolveTargetOptionFromCanonicalContext(
@@ -377,6 +416,24 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
       resolveTargetOptionFromCanonicalContext(
         'What would make it win?',
         canonicalSnapshot(conflicting),
+        selected('opt_a', 'Expand in Europe'),
+      ),
+    ).toEqual({ kind: 'none', reason: 'identity_collision' });
+  });
+
+  it('rejects one identity asserted across option and factor kinds', () => {
+    const crossKind = {
+      options: [{ id: 'opt_a', label: 'Expand in Europe' }],
+      nodes: [
+        { id: 'opt_a', kind: 'factor', label: 'Acquisition cost' },
+        { id: 'opt_b', kind: 'option', label: 'Expand in the US' },
+      ],
+      edges: [],
+    };
+    expect(
+      resolveTargetOptionFromCanonicalContext(
+        'What would make it win?',
+        canonicalSnapshot(crossKind),
         selected('opt_a', 'Expand in Europe'),
       ),
     ).toEqual({ kind: 'none', reason: 'identity_collision' });

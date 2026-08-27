@@ -132,6 +132,86 @@ function hasConflictingOptionIdentity(rows: readonly TargetOption[]): boolean {
 }
 
 /**
+ * Detect one identity being asserted as more than one graph kind.
+ *
+ * A top-level `options[]` row is an option assertion even though that live
+ * shape omits `kind`. An identical top-level option + option-node pair is the
+ * legitimate dual representation this resolver already supports. An option
+ * id reused by a factor/goal/etc. is not a target we may safely resolve.
+ */
+function hasCrossKindIdentityCollision(graph: unknown): boolean {
+  const g = asRecord(graph);
+  if (g === null) return false;
+
+  const kindsById = new Map<string, Set<string>>();
+  const add = (id: string | null, kind: string | null): void => {
+    if (id === null || kind === null) return;
+    const kinds = kindsById.get(id) ?? new Set<string>();
+    kinds.add(kind);
+    kindsById.set(id, kinds);
+  };
+
+  if (Array.isArray(g.options)) {
+    for (const raw of g.options) {
+      const row = asRecord(raw);
+      if (row === null) continue;
+      add(nonEmptyString(row.id) ?? nonEmptyString(row.option_id), 'option');
+    }
+  }
+
+  if (Array.isArray(g.nodes)) {
+    for (const raw of g.nodes) {
+      const row = asRecord(raw);
+      if (row === null) continue;
+      add(nonEmptyString(row.id), nonEmptyString(row.kind));
+    }
+  }
+
+  return Array.from(kindsById.values()).some((kinds) => kinds.size > 1);
+}
+
+/**
+ * Closed grammar for a selected-option deictic.
+ *
+ * This does not classify or route the turn. It only answers the much narrower
+ * authority question: did the user's current words explicitly refer to the
+ * selected item as an option whose outcome could change? Bare `it`, `this`, or
+ * `that` is deliberately insufficient: those pronouns commonly refer to a
+ * factor, the result, or the model. The deictic must participate in an
+ * option-outcome construction such as “make it win” or “for this option to come
+ * out ahead”.
+ */
+const OPTION_DEICTIC_REFERENCE =
+  '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
+const TERMINAL_WIN_CUE =
+  'win(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?.!,]|$|(?:if|when|under|given|with|without|against|over)\\b))';
+const OPTION_OUTCOME_CUE =
+  `(?:${TERMINAL_WIN_CUE}|take the lead|come out ahead|become (?:the )?(?:leader|leading|preferred|best|top)(?: option| alternative| choice)?)`;
+const SELECTED_OPTION_DEICTIC_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    `\\b(?:make|help|enable|allow|get)\\s+${OPTION_DEICTIC_REFERENCE}\\s+(?:to\\s+)?${OPTION_OUTCOME_CUE}\\b`,
+    'i',
+  ),
+  new RegExp(
+    `\\bfor\\s+${OPTION_DEICTIC_REFERENCE}\\s+to\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'i',
+  ),
+  new RegExp(
+    `\\b(?:could|can|would|might|should)\\s+${OPTION_DEICTIC_REFERENCE}\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'i',
+  ),
+  new RegExp(
+    `\\b${OPTION_DEICTIC_REFERENCE}\\s+(?:could|can|would|might|should)\\s+${OPTION_OUTCOME_CUE}\\b`,
+    'i',
+  ),
+];
+
+function hasSelectedOptionDeicticReference(messageText: string | null | undefined): boolean {
+  if (typeof messageText !== 'string') return false;
+  return SELECTED_OPTION_DEICTIC_PATTERNS.some((pattern) => pattern.test(messageText));
+}
+
+/**
  * Read `{id, label}` for every option on the RAW, unparsed graph.
  *
  * Deliberately mirrors `context/option-identity.ts:extractGraphOptionIds` —
@@ -243,7 +323,10 @@ export function resolveTargetOptionFromCanonicalContext(
   }
 
   const rows = collectGraphOptionRows(graphSelection.graph);
-  if (hasConflictingOptionIdentity(rows)) {
+  if (
+    hasConflictingOptionIdentity(rows) ||
+    hasCrossKindIdentityCollision(graphSelection.graph)
+  ) {
     return { kind: 'none', reason: 'identity_collision' };
   }
 
@@ -251,6 +334,10 @@ export function resolveTargetOptionFromCanonicalContext(
   if (explicit.kind === 'resolved' || explicit.reason !== 'no_option_named') {
     return explicit;
   }
+
+  // Selection is context, not implicit user intent. Preserve the old generic
+  // answer unless the current message itself carries a licensed deictic.
+  if (!hasSelectedOptionDeicticReference(messageText)) return explicit;
 
   if (
     selection === null ||
