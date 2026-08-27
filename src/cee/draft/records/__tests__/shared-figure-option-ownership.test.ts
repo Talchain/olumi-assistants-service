@@ -40,6 +40,10 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { normaliseDraftResponse } from "../../../../adapters/llm/normalisation.js";
+import { resolveRunAdmission } from "../../../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import { buildAnalysisReadyPayload } from "../../../transforms/analysis-ready.js";
+import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
 import type { DraftRecordSet } from "../grammar.js";
 import { projectRecordsToGraph } from "../projector.js";
 
@@ -306,5 +310,133 @@ describe("what counts as a rival claim", () => {
     expect(bindingOf(projection, FULL_SWITCH, LICENCE)).toMatchObject({
       source: "cee_hypothesis",
     });
+  });
+});
+
+/**
+ * COMPOSITION WITH #1143's `IDENTICAL_OPTIONS` FLOOR.
+ *
+ * Two individually-correct changes can define the same authority. #1143 refuses a
+ * STRICTLY-READY graph whose options carry the same intervention map (locally,
+ * instead of letting PLoT 422 a network hop away). This change withdraws brief
+ * authority when one stated figure is claimed by two options — and the shape that
+ * triggers it, both options set to the SAME magnitude from the SAME sentence, is
+ * precisely a shape whose maps can be identical. They meet on one payload.
+ *
+ * ⭐ MEASURED, BOTH TREES, SAME PAYLOAD (2026-08-27):
+ *
+ *                          staging (#1143 alone)   with this change
+ *   willProceed            false                   false      (UNCHANGED)
+ *   analysis_ready.status  "ready"                 "needs_user_input"
+ *   blockers               0                       2 ambiguous_value/confirm_value
+ *   intervention source    brief_extraction        cee_hypothesis
+ *                          (the FALSE claim live)
+ *
+ * The floor keys on intervention VALUES, which this change does not touch, so it
+ * fires identically either way. What the change adds is the two asks that say how
+ * to resolve what the floor refuses: at staging alone the user gets a refusal with
+ * ZERO blockers while the product still asserts they stated the challenger's price.
+ * Complementary, not competing — and the direction is additive in the user's favour.
+ *
+ * ⚠ Separately measured: `ambiguous_value` blockers do NOT gate admission (a graph
+ * with distinct maps reads `needs_user_input` with these asks AND `willProceed:
+ * true`), so this change cannot weaken the floor even in principle.
+ */
+describe("composition with the IDENTICAL_OPTIONS admission floor", () => {
+  /** One factor only, so both options' maps are COMPLETE and IDENTICAL. */
+  function singleFactor(contested: boolean): DraftRecordSet {
+    return {
+      stated_items: [
+        { kind: "option", source_quote: FULL_SWITCH, is_baseline: false },
+        { kind: "option", source_quote: STATUS_QUO, is_baseline: true },
+        {
+          kind: "goal",
+          source_quote: "higher sales productivity without blowing the budget",
+          role: "target",
+        },
+        { kind: "figure", source_quote: SHARED_FIGURE_QUOTE, value: 50_000, unit: "£" },
+        { kind: "figure", source_quote: SOLE_FIGURE_QUOTE, value: 20_000, unit: "£" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: LICENCE, basis: [3], value: 50_000 },
+        {
+          claim_kind: "causal_link",
+          label: "HubSpot sets the annual licence cost",
+          basis: [3],
+          from_stated: 0,
+          to_claim: 0,
+          effect: "positive",
+          sets_to: 50_000,
+        },
+        contested
+          ? // Both options claim the SAME figure: identical maps AND a contest.
+            {
+              claim_kind: "causal_link",
+              label: "Status quo sets the annual licence cost",
+              basis: [3],
+              from_stated: 1,
+              to_claim: 0,
+              effect: "positive",
+              sets_to: 50_000,
+            }
+          : // Control: a different figure and a distinct value — no contest.
+            {
+              claim_kind: "causal_link",
+              label: "Status quo sets a different level",
+              basis: [4],
+              from_stated: 1,
+              to_claim: 0,
+              effect: "positive",
+              sets_to: 20_000,
+            },
+        {
+          claim_kind: "causal_link",
+          label: "Licence cost affects the goal",
+          basis: [3],
+          from_claim: 0,
+          to_stated: 2,
+          effect: "negative",
+        },
+      ],
+    };
+  }
+
+  function evaluate(contested: boolean) {
+    const projection = projectRecordsToGraph(singleFactor(contested), BRIEF);
+    const normalised = normaliseDraftResponse(structuredClone(projection.graph));
+    const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: BRIEF });
+    return {
+      readiness: buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph),
+      admission: resolveRunAdmission(v3.graph as unknown),
+    };
+  }
+
+  it("refuses the run AND names the asks that resolve it", () => {
+    const { readiness, admission } = evaluate(true);
+
+    // Precondition pinned in-test: the floor is the operative gate here. A graph
+    // that were merely un-ready would refuse for a different reason entirely, and
+    // this assertion would then be about the wrong mechanism.
+    expect(admission.strict?.status).toBe("analysis_ready");
+    expect(admission.blockedNextStep).toBeNull();
+    expect(admission.willProceed).toBe(false);
+
+    // And this change supplies what that refusal does not carry on its own.
+    expect(readiness.status).toBe("needs_user_input");
+    const asks = (readiness.blockers ?? []).filter(
+      (blocker) => blocker.blocker_type === "ambiguous_value",
+    );
+    expect(asks).toHaveLength(2);
+    expect(asks.every((blocker) => blocker.suggested_action === "confirm_value")).toBe(true);
+  });
+
+  it("leaves an uncontested, genuinely-distinct comparison admissible", () => {
+    // The discriminating control: without it, the case above proves only that
+    // SOMETHING refuses, not that the refusal tracks the contested shape.
+    const { readiness, admission } = evaluate(false);
+
+    expect(admission.willProceed).toBe(true);
+    expect(readiness.status).toBe("ready");
+    expect(readiness.blockers ?? []).toHaveLength(0);
   });
 });
