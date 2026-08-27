@@ -1931,7 +1931,10 @@ export class SupabaseSessionStore implements SessionStore {
   async readScenarioRunAnalysisFactsFor(
     scenarioId: string,
     limit: number,
-  ): Promise<{ readonly facts: readonly HandlerFact[]; readonly total_count: number }> {
+  ): Promise<{
+    readonly facts: readonly IdentifiedHandlerFact[];
+    readonly total_count: number;
+  }> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
         'Scenario analysis-fact lookahead limit is invalid',
@@ -1972,7 +1975,7 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    const facts: HandlerFact[] = [];
+    const facts: IdentifiedHandlerFact[] = [];
     for (const row of data as Array<{
       id?: unknown;
       scenario_id?: unknown;
@@ -2030,7 +2033,11 @@ export class SupabaseSessionStore implements SessionStore {
           { code: 'analysis_fact_corrupt' },
         );
       }
-      facts.push(parsed.data);
+      facts.push({
+        fact: parsed.data,
+        fact_row_id: row.id,
+        fact_created_at: row.created_at,
+      });
     }
 
     return Object.freeze({
