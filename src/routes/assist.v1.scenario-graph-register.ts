@@ -35,6 +35,16 @@
  *                     of it BEFORE any database work, so a malformed body costs
  *                     no round trip and cannot be used to probe scenarios.
  *   3. ownership    — the SAME shared pre-flight the turn route runs.
+ *                     ⚠ Ownership here is the VERIFIED TOKEN SUBJECT alone
+ *                     (`CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call
+ *                     site), which makes CEE_REQUIRE_USER_JWT load-bearing
+ *                     rather than a rollback lever: with it OFF — its DEFAULT,
+ *                     and unguarded in that direction — no caller is ever
+ *                     identified and every OWNED scenario is refused to its
+ *                     OWN owner across all six /assist/v1/scenarios/*
+ *                     endpoints. Disclosed at boot
+ *                     (`config.scenario_ownership_posture`, server.ts) and
+ *                     pinned in the suite as a KNOWN MISCONFIGURATION.
  *   4. the base read— the trusted CAS base, from the SERVER's own bytes.
  *   5. the write    — projected, hashed, atomic.
  *
@@ -106,6 +116,7 @@ import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-ext
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import {
   authorizeScenarioOwnership,
+  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
@@ -310,7 +321,12 @@ export default async function route(app: FastifyInstance) {
       try {
         owned = await authorizeScenarioOwnership(
           scenarioId,
-          extensions.value.userId,
+          // Ownership on this surface is derived from the verified token
+          // subject. A request-supplied identifier is not an input to that
+          // decision, so the sentinel is passed rather than the parsed
+          // extension. See the constant for why this is expressed here and not
+          // in the shared function.
+          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
           resolved.identity,
           requestId,
         );

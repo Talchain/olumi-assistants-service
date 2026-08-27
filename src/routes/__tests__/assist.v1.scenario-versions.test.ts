@@ -92,8 +92,15 @@ vi.mock("../../utils/telemetry.js", () => ({
 // export added since) and control only `resolveUserIdentity`. Everything below
 // it stays real: `resolveVerifiedIdentityOrRefuse` and the sign-in envelope are
 // the production ones, so the 401 this suite asserts is the route's own bytes.
-// Default `{ mode: "off" }` is exactly what `requireUserJwt: false` produces,
-// so every other test in this file is unaffected.
+// ⚠ THE DEFAULT IDENTITY IS NOW A VERIFIED SUBJECT, AND THAT IS THE POINT.
+// It used to be `{ mode: "off" }`, with every case establishing ownership by
+// putting `user_id` in the request body. That is no longer an ownership input
+// on these routes (see the route header), so 100% of this suite ran in the mode
+// the cutover abolishes — it could not have observed the ownership step either
+// way. Only the CARRIER of identity changed here: every assertion is preserved,
+// and the cross-tenant case below now varies the TOKEN subject rather than a
+// body field. `requireUserJwt: false` above is left as-is: `resolveUserIdentity`
+// is mocked, so the flag no longer decides what this suite exercises.
 // `vi.hoisted` is load-bearing: this factory DEREFERENCES the spy when it runs
 // (unlike the lazy `getSessionStore: () => store` idiom below), and `vi.mock` is
 // hoisted above plain `const` declarations — a bare `const` here fails the whole
@@ -244,7 +251,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default posture: scenario exists, OWNED by OWNER, holds CURRENT_GRAPH,
   // and has two versions with A as head/current.
-  resolveUserIdentity.mockResolvedValue({ mode: "off" });
+  resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   scenarioExists.mockResolvedValue(true);
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
   getScenarioOwner.mockResolvedValue(OWNER);
@@ -363,7 +370,7 @@ beforeEach(() => {
 describe("POST /versions — list", () => {
   it("returns the scenario's versions with the frozen envelope and current pointer", async () => {
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -382,18 +389,18 @@ describe("POST /versions — list", () => {
 
   it("lists the ADDRESSED scenario — identity-bound to the path param", async () => {
     const app = await buildApp();
-    await post(app, "/versions", { user_id: OWNER });
+    await post(app, "/versions", {});
     expect(listVersions).toHaveBeenCalledWith(SCENARIO, 51, undefined);
     await app.close();
   });
 
   it("passes a valid limit through and refuses an invalid one without a service call", async () => {
     const app = await buildApp();
-    await post(app, "/versions", { user_id: OWNER, limit: 5 });
+    await post(app, "/versions", { limit: 5 });
     expect(listVersions).toHaveBeenCalledWith(SCENARIO, 6, undefined);
 
     listVersions.mockClear();
-    const res = await post(app, "/versions", { user_id: OWNER, limit: -2 });
+    const res = await post(app, "/versions", { limit: -2 });
     expect(res.statusCode).toBe(422);
     expect(listVersions).not.toHaveBeenCalled();
     await app.close();
@@ -409,7 +416,7 @@ describe("POST /versions — list", () => {
       ],
     });
     const app = await buildApp();
-    const first = await post(app, "/versions", { user_id: OWNER, limit: 2 });
+    const first = await post(app, "/versions", { limit: 2 });
 
     expect(first.statusCode).toBe(200);
     const firstBody = first.json();
@@ -422,7 +429,6 @@ describe("POST /versions — list", () => {
       value: [summary({ id: VERSION_A, version_number: 1 })],
     });
     const second = await post(app, "/versions", {
-      user_id: OWNER,
       limit: 2,
       cursor: firstBody.next_cursor,
     });
@@ -435,7 +441,6 @@ describe("POST /versions — list", () => {
   it("fails closed on a forged history cursor", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions", {
-      user_id: OWNER,
       cursor: "not-a-server-cursor",
     });
     expect(res.statusCode).toBe(422);
@@ -455,7 +460,7 @@ describe("POST /versions — list", () => {
       value: [summary(metadata)],
     });
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
     expect(res.statusCode).toBe(200);
     expect(res.json().versions[0].actor).toEqual(expected);
     await app.close();
@@ -467,7 +472,7 @@ describe("POST /versions — list", () => {
       value: [summary({ actor_kind: null, authored_by: "owner" })],
     });
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
     expect(res.statusCode).toBe(503);
     await app.close();
   });
@@ -489,21 +494,24 @@ describe("POST /versions — list", () => {
 
   it("positive control for the upsert fence: an EXISTING owned scenario DOES reach the upsert-bearing pre-flight", async () => {
     const app = await buildApp();
-    await post(app, "/versions", { user_id: OWNER });
+    await post(app, "/versions", {});
     expect(ensureScenarioExists).toHaveBeenCalled();
     await app.close();
   });
 
   it("refuses another user's scenario with the same 404 bytes as an absent one", async () => {
+    // The caller is a VERIFIED stranger. Carried by the token, because a body
+    // field would no longer change the outcome in either direction.
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     const app = await buildApp();
-    const resOther = await post(app, "/versions", { user_id: OTHER_USER });
+    const resOther = await post(app, "/versions", {});
     expect(resOther.statusCode).toBe(404);
 
     scenarioExists.mockResolvedValue(false);
     const resAbsent = await app.inject({
       method: "POST",
       url: `/assist/v1/scenarios/${ABSENT_SCENARIO}/versions`,
-      payload: { user_id: OTHER_USER },
+      payload: {},
     });
     const a = resOther.json();
     const b = resAbsent.json();
@@ -515,7 +523,7 @@ describe("POST /versions — list", () => {
   it("fails CLOSED (503) when the existence probe is unavailable or throws", async () => {
     scenarioExists.mockRejectedValue(new Error("db blip"));
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
     expect(res.statusCode).toBe(503);
     await app.close();
   });
@@ -523,7 +531,7 @@ describe("POST /versions — list", () => {
   it("maps a disabled service to 503 with an honest reason, never an empty list", async () => {
     listVersions.mockResolvedValue({ status: "disabled" });
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
     expect(res.statusCode).toBe(503);
     expect(res.json().details.code).toBe("VERSIONS_DISABLED");
     await app.close();
@@ -535,7 +543,7 @@ describe("POST /versions — list", () => {
       value: [summary({ graph_identity_hash: "not-a-hash" })],
     });
     const app = await buildApp();
-    const res = await post(app, "/versions", { user_id: OWNER });
+    const res = await post(app, "/versions", {});
     expect(res.statusCode).toBe(503);
     await app.close();
   });
@@ -549,7 +557,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
   it("compares only the two addressed server versions and omits internal count telemetry", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: VERSION_A,
       to_version_id: VERSION_B,
     });
@@ -594,7 +601,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: VERSION_A,
       to_version_id: VERSION_B,
     });
@@ -624,7 +630,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: VERSION_A,
       to_version_id: VERSION_B,
     });
@@ -636,7 +641,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
   it("rejects client graph or alleged hash truth", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: VERSION_A,
       to_version_id: VERSION_B,
       graph: { nodes: [{ id: "fabricated" }], edges: [] },
@@ -651,7 +655,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
   it("refuses malformed ids before comparison", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: "not-a-version",
       to_version_id: VERSION_B,
     });
@@ -672,7 +675,6 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/compare", {
-      user_id: OWNER,
       from_version_id: VERSION_A,
       to_version_id: VERSION_B,
     });
@@ -689,7 +691,7 @@ describe("POST /versions/compare — authoritative stored-version diff", () => {
 describe("POST /versions/save — named save of the SERVER's current graph", () => {
   it("versions the server's persisted graph with the user's label and provenance user_save", async () => {
     const app = await buildApp();
-    const res = await post(app, "/versions/save", { user_id: OWNER, label: "Before pivot" });
+    const res = await post(app, "/versions/save", { label: "Before pivot" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -711,7 +713,7 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
   it("NEVER saves a client-supplied graph — a smuggled `graph` body field is ignored", async () => {
     const smuggled = { nodes: [{ id: "evil", label: "Fabricated", kind: "factor" }], edges: [] };
     const app = await buildApp();
-    const res = await post(app, "/versions/save", { user_id: OWNER, graph: smuggled });
+    const res = await post(app, "/versions/save", { graph: smuggled });
 
     expect(res.statusCode).toBe(200);
     const arg = saveVersion.mock.calls[0][0];
@@ -726,7 +728,7 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
       error: { code: "empty_graph", recoverable: true, message: "No graph content to version." },
     });
     const app = await buildApp();
-    const res = await post(app, "/versions/save", { user_id: OWNER });
+    const res = await post(app, "/versions/save", {});
     expect(res.statusCode).toBe(422);
     expect(res.json().details.code).toBe("NOTHING_TO_SAVE");
     await app.close();
@@ -761,7 +763,6 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
     });
     const app = await buildApp();
     const res = await post(app, "/versions/save", {
-      user_id: OWNER,
       expected_graph_identity_hash: HASH_B,
     });
     expect(res.statusCode).toBe(409);
@@ -771,7 +772,7 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
 
   it("refuses a non-string label without a service call", async () => {
     const app = await buildApp();
-    const res = await post(app, "/versions/save", { user_id: OWNER, label: 42 });
+    const res = await post(app, "/versions/save", { label: 42 });
     expect(res.statusCode).toBe(422);
     expect(saveVersion).not.toHaveBeenCalled();
     await app.close();
@@ -786,7 +787,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
   it("returns the one-transaction receipt with exact graph, undo and two hashes", async () => {
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
 
@@ -826,7 +826,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
   it("makes exactly one atomic service write — no snapshot RPC and no post-version append", async () => {
     const app = await buildApp();
     await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
 
@@ -847,7 +846,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
   it("never accepts a client graph — the atomic carrier receives the stored version projection", async () => {
     const app = await buildApp();
     await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
       graph: {
         nodes: [{ id: "evil", label: "Fabricated", kind: "factor" }],
@@ -868,7 +866,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
       method: "POST",
       url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
       payload: {
-        user_id: OWNER,
         version_id: VERSION_A,
         expected_graph_identity_hash: HASH_B,
       },
@@ -879,7 +876,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
       method: "POST",
       url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
       payload: {
-        user_id: OWNER,
         version_id: VERSION_A,
         mutation_id: MUTATION_ID,
       },
@@ -887,7 +883,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
     expect(missingCas.statusCode).toBe(422);
 
     const nullCas = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
       expected_graph_identity_hash: null,
     });
@@ -909,7 +904,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(res.statusCode).toBe(409);
@@ -922,7 +916,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
   it("returns an idempotent replay receipt without any route-level follow-up write", async () => {
     const app = await buildApp();
     const original = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(original.statusCode).toBe(200);
@@ -957,7 +950,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
       },
     });
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(res.statusCode).toBe(200);
@@ -1005,7 +997,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(res.statusCode).toBe(409);
@@ -1017,7 +1008,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
     loadGraph.mockRejectedValue(new Error("unreadable"));
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(res.statusCode).toBe(503);
@@ -1027,7 +1017,7 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
 
   it("refuses a missing/invalid version_id without any service call", async () => {
     const app = await buildApp();
-    const res = await post(app, "/versions/restore", { user_id: OWNER });
+    const res = await post(app, "/versions/restore", {});
     expect(res.statusCode).toBe(422);
     expect(getVersion).not.toHaveBeenCalled();
     await app.close();
@@ -1040,7 +1030,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
     });
     const app = await buildApp();
     const res = await post(app, "/versions/restore", {
-      user_id: OWNER,
       version_id: VERSION_A,
     });
     expect(res.statusCode).toBe(422);
@@ -1093,7 +1082,7 @@ describe("ordering — an unauthenticated caller learns nothing about payload va
       // Without this control the 401 above is vacuous — a body that is not
       // actually invalid would satisfy it while proving nothing about order.
       const app = await buildApp();
-      const res = await post(app, path, { ...body, user_id: OWNER });
+      const res = await post(app, path, body);
 
       expect(res.statusCode).toBe(422);
       await app.close();

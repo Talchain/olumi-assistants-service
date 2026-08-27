@@ -178,6 +178,51 @@ export async function build() {
     log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
   }
 
+  // ── SCENARIO OWNERSHIP POSTURE — say it out loud, at boot, unconditionally ──
+  //
+  // Ownership on the /assist/v1/scenarios/* family is derived from the VERIFIED
+  // token subject alone (route-v2-preflight.ts's
+  // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE). That is correct — and it makes
+  // CEE_REQUIRE_USER_JWT load-bearing rather than optional.
+  //
+  // With the flag OFF, `resolveUserIdentity` returns `{ mode: "off" }` for every
+  // caller, so the effective user is null. A scenario with a non-null stored
+  // owner then has a non-null owner and a null caller, which is refused
+  // (`scenario_requires_authenticated_owner`) on EVERY endpoint below. The
+  // owner cannot read their own scenario and cannot write to it. It reads to
+  // the user as data loss; the cause is a flag.
+  //
+  // ⚠ THIS IS NOT A ROLLBACK LEVER. Turning CEE_REQUIRE_USER_JWT off no longer
+  // restores legacy behaviour — it takes the scenario surfaces DOWN for every
+  // signed-in user. Nothing else in the config layer guards this direction: the
+  // only refine on this flag (config/index.ts) fires when it is TRUE.
+  //
+  // Non-fatal on purpose: guest (unowned) scenarios still work, so this is a
+  // partial outage, and a service that refuses to boot would be worse. But it
+  // must never be silent again.
+  if (config.auth?.requireUserJwt !== true) {
+    log.warn(
+      {
+        event: 'config.scenario_ownership_posture',
+        require_user_jwt: false,
+        owned_scenarios_reachable_by_owner: false,
+        endpoints: [
+          'POST /assist/v1/scenarios/:scenario_id/graph',
+          'POST /assist/v1/scenarios/:scenario_id/graph/register',
+          'POST /assist/v1/scenarios/:scenario_id/versions',
+          'POST /assist/v1/scenarios/:scenario_id/versions/compare',
+          'POST /assist/v1/scenarios/:scenario_id/versions/save',
+          'POST /assist/v1/scenarios/:scenario_id/versions/restore',
+        ],
+      },
+      'MISCONFIGURATION: CEE_REQUIRE_USER_JWT is OFF, so no caller is ever identified — and ownership ' +
+        'on the scenario surfaces is derived from the verified token subject alone. Every OWNED scenario ' +
+        'is therefore unreadable AND unwritable by its own owner across all six /assist/v1/scenarios/* ' +
+        'endpoints, which answer 404. Guest (unowned) scenarios are unaffected. This flag is NOT a ' +
+        'rollback lever for the scenario family: set CEE_REQUIRE_USER_JWT=true to restore owner access.',
+    );
+  }
+
   // Prompt environment — always logged at startup so every boot records which
   // PMS pointer this deployment serves and why. A production runtime resolving
   // the STAGING pointer is logged at error level and (when the prod verdict is
