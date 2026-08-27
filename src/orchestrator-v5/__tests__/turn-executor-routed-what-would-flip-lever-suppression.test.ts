@@ -45,10 +45,14 @@ const mockState: {
   priorFacts: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
 } = { priorTurns: [], priorFacts: [], persistedGraph: null };
+const appendCalls: unknown[][] = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (...args: unknown[]) => {
+      appendCalls.push(args);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -221,6 +225,20 @@ function routedWhatWouldFlip() {
   };
 }
 
+function routedWhatWouldFlipWithAnswer(answerText: string) {
+  const routed = routedWhatWouldFlip();
+  return {
+    ...routed,
+    proposal: {
+      ...routed.proposal,
+      action: {
+        ...routed.proposal.action,
+        explanation: { answer_text: answerText },
+      },
+    },
+  };
+}
+
 let capturedFlip: FlipSummary | null | undefined;
 
 /** Spy handler: captures the threaded flipSummary, returns a minimal outcome. */
@@ -303,7 +321,14 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
         ],
         flip_thresholds: [
           { factor_id: 'fac_acquisition_cost', factor_label: 'Acquisition cost', flip_value: 0.6, direction: 'increase' },
-          { factor_id: 'fac_market_demand', factor_label: 'Market demand', flip_value: 0.45, direction: 'increase' },
+          {
+            factor_id: 'fac_market_demand',
+            factor_label: 'Market demand',
+            flip_value: 0.45,
+            direction: 'increase',
+            alternative_winner_id: 'opt_hire',
+            alternative_winner_label: 'Hire Marketing Manager',
+          },
         ],
       },
     },
@@ -313,6 +338,7 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
 describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip-click parity)', () => {
   beforeEach(() => {
     capturedFlip = undefined;
+    appendCalls.length = 0;
     routeWithToolUseMock.mockReset();
     routeWithToolUseMock.mockResolvedValue(routedWhatWouldFlip());
     mockState.priorTurns = [PRIOR_RA_TURN];
@@ -484,5 +510,90 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
     // proving the routed path re-summarises kept entries rather than leaking a
     // stale 'concrete' verdict.
     expect(capturedFlip?.overall_status).toBe('no_practical_flip');
+  });
+});
+
+describe('System B — selected canonical option referent continuity', () => {
+  beforeEach(() => {
+    capturedFlip = undefined;
+    appendCalls.length = 0;
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(
+        'Freelance plus moderate advertising is the option to focus on because it is currently ahead and should remain the preferred route.',
+      ),
+    );
+    mockState.priorTurns = [PRIOR_RA_TURN];
+    mockState.priorFacts = [priorFactWithDriversAndFlip()];
+    mockState.persistedGraph = READY_GRAPH;
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('makes exact-label and selected deictic turns produce the same canonical targeted answer', async () => {
+    const explicit = await runTurnExecutor(
+      mkPayload('What would make Hire Marketing Manager win?'),
+      'req-referent-explicit',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: READY_GRAPH as never,
+      },
+    );
+
+    const requestWithDisagreeingLabel = {
+      ...READY_GRAPH,
+      nodes: READY_GRAPH.nodes.map((node) =>
+        node.id === 'opt_hire'
+          ? { ...node, label: 'Request-only decoy option' }
+          : node,
+      ),
+    };
+    const deictic = await runTurnExecutor(
+      mkPayload('What would make it win?'),
+      'req-referent-selected',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: requestWithDisagreeingLabel as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      },
+    );
+
+    expect(deictic.response.assistant_text).toBe(explicit.response.assistant_text);
+    expect(deictic.response.assistant_text).toContain(
+      'Hire Marketing Manager would lead instead',
+    );
+    expect(deictic.response.assistant_text).not.toContain('Freelance plus moderate advertising');
+    expect(deictic.response.assistant_text).not.toContain('Request-only decoy option');
+
+    // Read-only by construction: committing the conversational answers may
+    // append turn rows, but neither append carries graph bytes and no model
+    // version receipt reaches the response.
+    expect(appendCalls.length).toBeGreaterThan(0);
+    const flipFacts: Array<{ result?: Record<string, unknown> }> = [];
+    for (const [write] of appendCalls) {
+      const record = write as {
+        graph?: unknown;
+        handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+      };
+      expect(record.graph).toBeUndefined();
+      flipFacts.push(
+        ...(record.handler_facts ?? []).filter(
+          (fact) => fact.fact_type === 'what_would_flip',
+        ),
+      );
+    }
+    expect(flipFacts).toHaveLength(2);
+    for (const fact of flipFacts) {
+      // Null failure reason pins that the deliberately wrong Sonnet answer was
+      // valid and was displaced because the canonical target owns the turn —
+      // not because the ordinary invalid-answer fallback happened to fire.
+      expect(fact.result?.answer_source).toBe('deterministic_fallback');
+      expect(fact.result?.fallback_reason).toBeNull();
+    }
+    expect(JSON.stringify(deictic.response)).not.toContain('model_version_receipt');
   });
 });

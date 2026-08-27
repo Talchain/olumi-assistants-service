@@ -208,8 +208,8 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   // for the two explainers: what_would_flip does not consume the proposal
   // entity either. Its only target-aware branch keys on
   // `invocation.flipTargetOption` (what-would-flip.ts:159-166), which
-  // turn-executor.ts:7249-7259 resolves from the MESSAGE TEXT via
-  // `resolveTargetOptionFromMessage` — never from the proposal. A factor
+  // turn-executor resolves from explicit current-message text or one fully
+  // resolved canonical canvas selection — never from the proposal. A factor
   // target leaves `flipTargetOption` null and the handler takes its existing,
   // untouched scenario-wide branch. 'edge' and 'constraint' stay rejected for
   // the same reason as above.

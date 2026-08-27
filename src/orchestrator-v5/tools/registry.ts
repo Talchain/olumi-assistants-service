@@ -377,16 +377,15 @@ export interface HandlerInvocation {
    */
   readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
   /**
-   * M1 (finish-line criterion 7) — the ONE option the user named in this turn's
-   * message, resolved to a graph option IDENTITY, or null when they named none
-   * (or named more than one, which is a comparison rather than a target).
+   * M1 / System B referent continuity — the ONE option established by the
+   * current user's explicit words, or by one fully resolved canonical canvas
+   * selection on a deictic follow-up. Null when neither source establishes one
+   * (or explicit words name more than one, which remains a comparison).
    *
    * Resolved in the turn-executor rather than here because that is where the
-   * user text and the CANONICAL graph authority meet — the same
-   * `context.persistedGraph ?? options.graphState` the flip evidence is already
-   * filtered against, so the target and the rows it is matched into describe one
-   * graph. It is the same seam `structureProjection` uses to read a user-named
-   * FACTOR (`buildStructureProjectionSummary(..., { messageText })`).
+   * user text, resolved selection and the attested canonical ContextPack graph
+   * meet. Request/provisional bytes and model-authored proposal entities cannot
+   * supply this target.
    *
    * Read by `what_would_flip` to answer about THAT option — matching on
    * `alternative_winner_id`, never on a label — with a typed refusal when no

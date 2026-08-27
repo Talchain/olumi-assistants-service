@@ -28,8 +28,10 @@
  * declares `accepted_entity_kinds: ['goal','option']`), but `entity` is
  * REQUIRED on every proposal, so the router fills it on a GENERIC flip question
  * too. Reading it as "the user named this option" would mis-address every
- * untargeted turn. The user's own words are the only honest evidence that an
- * option was named, so that is what this reads.
+ * untargeted turn. The current user's own words remain the strongest evidence;
+ * the canonical-context wrapper below may additionally use one fully resolved
+ * canvas selection for a deictic follow-up. Model-authored router guesses are
+ * never referent authority.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY EXACTLY-ONE, AND WHY THAT IS NOT A HAND-KEPT PHRASE LIST. A message that
@@ -45,6 +47,12 @@
  * collision case UI #492's resolver had to handle), so a label that maps to more
  * than one id resolves to nothing rather than picking one.
  */
+
+import {
+  isSelectedContextGraphSnapshot,
+  type ContextGraphSelection,
+} from '../../../context/context-graph-snapshot.js';
+import type { TurnSelection } from '../../../build-turn-context.js';
 
 /** An option identity read off the graph. `label` is display copy only. */
 export interface TargetOption {
@@ -65,7 +73,13 @@ export type TargetOptionMissReason =
   /** Two or more DISTINCT options were named — a comparison, not a target. */
   | 'multiple_options_named'
   /** The named label maps to more than one option id — identity is ambiguous. */
-  | 'label_collision';
+  | 'label_collision'
+  /** Canonical option rows disagree about the label for one identity. */
+  | 'identity_collision'
+  /** A selection cannot license a target without an attested canonical graph. */
+  | 'selection_not_canonical'
+  /** The selected reference was not one fully resolved canonical option. */
+  | 'selection_not_unique';
 
 export type TargetOptionResolution =
   | { readonly kind: 'resolved'; readonly option: TargetOption }
@@ -81,6 +95,40 @@ function nonEmptyString(x: unknown): string | null {
   if (typeof x !== 'string') return null;
   const trimmed = x.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/** Keep all option rows so duplicate identities cannot be hidden by a map. */
+function collectGraphOptionRows(graph: unknown): readonly TargetOption[] {
+  const g = asRecord(graph);
+  if (g === null) return [];
+
+  const rows: TargetOption[] = [];
+  const take = (raw: unknown): void => {
+    const r = asRecord(raw);
+    if (r === null) return;
+    const id = nonEmptyString(r.id) ?? nonEmptyString(r.option_id);
+    const label = nonEmptyString(r.label);
+    if (id !== null && label !== null) rows.push({ id, label });
+  };
+
+  if (Array.isArray(g.options)) for (const option of g.options) take(option);
+  if (Array.isArray(g.nodes)) {
+    for (const node of g.nodes) {
+      const r = asRecord(node);
+      if (r !== null && r.kind === 'option') take(r);
+    }
+  }
+  return rows;
+}
+
+function hasConflictingOptionIdentity(rows: readonly TargetOption[]): boolean {
+  const labelById = new Map<string, string>();
+  for (const row of rows) {
+    const prior = labelById.get(row.id);
+    if (prior !== undefined && prior !== row.label) return true;
+    labelById.set(row.id, row.label);
+  }
+  return false;
 }
 
 /**
@@ -103,33 +151,10 @@ function nonEmptyString(x: unknown): string | null {
  * would have failed, exactly as the sibling module documents.
  */
 export function collectGraphOptionIdentities(graph: unknown): readonly TargetOption[] {
-  const g = asRecord(graph);
-  if (g === null) return [];
-
   const byId = new Map<string, string>();
-
-  const take = (raw: unknown): void => {
-    const r = asRecord(raw);
-    if (r === null) return;
-    const id = nonEmptyString(r.id) ?? nonEmptyString(r.option_id);
-    const label = nonEmptyString(r.label);
-    // An option with no readable label cannot be named by the user, and an
-    // option with no id has no identity to match on. Either missing ⇒ skip.
-    if (id === null || label === null) return;
-    if (!byId.has(id)) byId.set(id, label);
-  };
-
-  // Source 1: top-level options[] (production / ISL ingress representation).
-  if (Array.isArray(g.options)) for (const opt of g.options) take(opt);
-
-  // Source 2: option-kind nodes (GraphV3 / canvas representation).
-  if (Array.isArray(g.nodes)) {
-    for (const node of g.nodes) {
-      const r = asRecord(node);
-      if (r !== null && r.kind === 'option') take(r);
-    }
+  for (const row of collectGraphOptionRows(graph)) {
+    if (!byId.has(row.id)) byId.set(row.id, row.label);
   }
-
   return Array.from(byId, ([id, label]) => ({ id, label }));
 }
 
@@ -194,4 +219,72 @@ export function resolveTargetOptionFromMessage(
   if (distinctIds.size > 1) return { kind: 'none', reason: 'multiple_options_named' };
 
   return { kind: 'resolved', option: matched[0]! };
+}
+
+/**
+ * Resolve a `what_would_flip` target from one attested canonical snapshot.
+ *
+ * Current-turn words outrank canvas focus: an explicit option label is the
+ * user's strongest evidence. Focus is consulted only for a genuinely deictic
+ * message, and only when exactly one canonical option was fully resolved.
+ * Request/provisional bytes, degraded reads and hand-built snapshot lookalikes
+ * never become referent authority.
+ */
+export function resolveTargetOptionFromCanonicalContext(
+  messageText: string | null | undefined,
+  graphSelection: ContextGraphSelection,
+  selection: TurnSelection | null | undefined,
+): TargetOptionResolution {
+  if (
+    !isSelectedContextGraphSnapshot(graphSelection) ||
+    graphSelection.status !== 'canonical'
+  ) {
+    return { kind: 'none', reason: 'selection_not_canonical' };
+  }
+
+  const rows = collectGraphOptionRows(graphSelection.graph);
+  if (hasConflictingOptionIdentity(rows)) {
+    return { kind: 'none', reason: 'identity_collision' };
+  }
+
+  const explicit = resolveTargetOptionFromMessage(messageText, graphSelection.graph);
+  if (explicit.kind === 'resolved' || explicit.reason !== 'no_option_named') {
+    return explicit;
+  }
+
+  if (
+    selection === null ||
+    selection === undefined ||
+    selection.graph_read !== 'ok_present' ||
+    selection.requested_ids.length !== 1 ||
+    selection.elements.length !== 1 ||
+    selection.unresolved_ids.length !== 0 ||
+    selection.unreadable_ref_ids.length !== 0
+  ) {
+    return selection == null
+      ? explicit
+      : { kind: 'none', reason: 'selection_not_unique' };
+  }
+
+  const selected = selection.elements[0]!;
+  if (selected.kind !== 'option' || selected.id !== selection.requested_ids[0]) {
+    return { kind: 'none', reason: 'selection_not_unique' };
+  }
+
+  const exactRows = rows.filter(
+    (row) => row.id === selected.id && row.label === selected.label,
+  );
+  const sameLabelOtherIds = rows.some(
+    (row) =>
+      row.id !== selected.id &&
+      row.label.toLowerCase() === selected.label.toLowerCase(),
+  );
+  if (exactRows.length === 0 || sameLabelOtherIds) {
+    return { kind: 'none', reason: 'label_collision' };
+  }
+
+  return {
+    kind: 'resolved',
+    option: { id: selected.id, label: exactRows[0]!.label },
+  };
 }
