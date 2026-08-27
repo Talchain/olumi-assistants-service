@@ -177,6 +177,7 @@ export type AnalysisMode = 'current' | 'stale';
 export type ReturnSessionMutant =
   | 'none'
   | 'drop_graph_and_brief'
+  | 'malformed_persisted_graph'
   | 'drop_causal_edge'
   | 'drop_summary_wire'
   | 'drop_facts'
@@ -645,6 +646,12 @@ function createSessionStoreFacade(
     loadGraphAndBriefText: async (scenarioId) => {
       const record = read('session.loadGraphAndBriefText', scenarioId);
       if (mutant === 'drop_graph_and_brief') return { graph: null, briefText: null };
+      if (mutant === 'malformed_persisted_graph') {
+        return {
+          graph: { nodes: 'MALFORMED-PERSISTED-GRAPH', edges: [] },
+          briefText: record.brief,
+        };
+      }
       return { graph: record.graph, briefText: record.brief };
     },
     loadGraph: async (scenarioId) => read('session.loadGraph', scenarioId).graph,
@@ -786,19 +793,16 @@ export async function runFreshFacadeReturnSession(
     summaryStore: summaryFacade.store,
   });
 
-  const authoritativeGraph = GraphStateIngressSchema.safeParse(context.persistedGraph).data ?? null;
+  const selected = selectContextGraphSnapshot({
+    canonicalRead: context.persistedGraphRead,
+    requestGraph: null,
+  });
+  const authoritativeGraph = selected.status === 'canonical' ? selected.graph : null;
   const graphForProjection = mutant === 'drop_causal_edge' && authoritativeGraph !== null
     ? { ...authoritativeGraph, edges: [] }
     : authoritativeGraph;
   const brief = context.scenarioBriefText;
   const facts = mutant === 'drop_facts' ? [] : context.prior_facts;
-  const selected = selectContextGraphSnapshot({
-    canonicalRead:
-      authoritativeGraph === null
-        ? { status: 'ok_absent' }
-        : { status: 'ok_present', graph: authoritativeGraph },
-    requestGraph: null,
-  });
   const compact =
     mutant === 'drop_causal_edge'
       ? compactGraphForContextPack(graphForProjection, { requestId: `return-${runtimeId}` })
@@ -823,7 +827,7 @@ export async function runFreshFacadeReturnSession(
     // The strict parse above consumed the graph loaded through the fresh
     // persisted-session facade. State that authority explicitly; omission is
     // intentionally `unavailable` and would invalidate this harness's claim.
-    graphContext: { status: 'canonical' },
+    graphContext: { status: selected.status },
     graph: compactedGraph ? undefined : authoritativeGraph,
     compactedGraph,
     compactedConstraints,
