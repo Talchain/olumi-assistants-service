@@ -790,10 +790,15 @@ describe('non-production runtime gate', () => {
       failureWith([makeIssue(['version'], 'Required')]),
     );
 
-    // priorFacts: [] so the canonical-state facts-absent warn does not fire —
-    // this test isolates the schema-drift warn.
+    // A successful scenario-wide empty analysis read keeps the canonical-state
+    // facts-absent warning quiet, isolating the schema-drift warning.
     expect(() =>
-      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts: [] }),
+      assembleContextPack({
+        payload: BASE_PAYLOAD,
+        priorTurns: [],
+        analysisFacts: [],
+        analysisFactsReadOk: true,
+      }),
     ).not.toThrow();
 
     expect(warnSpy).toHaveBeenCalledTimes(1);

@@ -278,9 +278,9 @@ describe('selectCanonicalAnalysisState — contradictions (fail loud, no silent 
     expect(state.usableForProse).toBe(true);
   });
 
-  it('degraded-newer false-positive guard: missing timestamps do NOT raise the contradiction', () => {
-    // Neither fact carries computed_at → "newer" is unprovable → no
-    // contradiction (the guard must not fire on ambiguous ordering).
+  it('missing timestamps preserve newest-first durable order for degraded-newer', () => {
+    // Neither fact carries computed_at, so the durable newest-first delivery
+    // order is the canonical tie-break: the leading degraded fact is current.
     const success = mkRunAnalysisFact({ status: 'computed', graph_hash_at_run: HASH_A });
     const degradedNoTs = mkRunAnalysisFact({ status: 'partial', graph_hash_at_run: HASH_A });
     const state = selectCanonicalAnalysisState({
@@ -288,12 +288,9 @@ describe('selectCanonicalAnalysisState — contradictions (fail loud, no silent 
       currentGraphHash: HASH_A,
       readiness: READY,
     });
-    expect(state.contradictions).not.toContain('fact_status_success_but_degraded_newer');
-    expect(state.usableForChips).toBe(true); // fresh + no contradiction
-    // The degraded fact is NOT provably newer than the success, so it is
-    // treated as superseded/historical → degraded_fact_status is null (the
-    // latest analysis is the success; there is no CURRENT degradation).
-    expect(state.degraded_fact_status).toBeNull();
+    expect(state.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(state.usableForChips).toBe(false);
+    expect(state.degraded_fact_status).toBe('partial');
   });
 
   it('degraded_fact_status is null when an older degraded fact is superseded by a newer success', () => {

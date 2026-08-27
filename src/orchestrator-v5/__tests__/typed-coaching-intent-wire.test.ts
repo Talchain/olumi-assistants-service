@@ -62,6 +62,10 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+      facts: mockState.priorFacts.slice(0, limit),
+      total_count: mockState.priorFacts.length,
+    }),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

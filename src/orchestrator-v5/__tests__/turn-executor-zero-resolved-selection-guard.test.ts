@@ -231,6 +231,10 @@ vi.mock('../session/index.js', () => ({
       harness.replayAppendedHistory ? harness.appendedRows.length + 1 : 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID) ? [RUN_ANALYSIS_FACT] : [],
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+      facts: [RUN_ANALYSIS_FACT].slice(0, limit),
+      total_count: 1,
+    }),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID)
         ? [

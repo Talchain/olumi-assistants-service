@@ -2,7 +2,7 @@
  * TRUST-SPINE — board item #4: reload → visible == committed == analysed.
  *
  * ⚠ RETIRED `it.fails` (17 Jul) — under-mocked the assembler.
- * The original RED gate here called `assembleContextPack({ …, priorFacts, graph
+ * The original RED gate here called `assembleContextPack({ …, analysisFacts, graph
  * omitted, canonicalState omitted })` and asserted `pack.analysis_state` is
  * non-null. That call hits the assembler's DELIBERATELY-null compacted-graph
  * fallback (`context-pack-assembler.ts:698` — `rawGraph === null → return null`),
@@ -80,7 +80,8 @@ describe('TRUST-SPINE T4 — reload visible==committed==analysed (board #4)', ()
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(COMMITTED_HASH)],
+      analysisFacts: [runAnalysisFact(COMMITTED_HASH)],
+      analysisFactsReadOk: true,
       graph: COMMITTED_GRAPH,
     });
     expect(pack.analysis_state).not.toBeNull();

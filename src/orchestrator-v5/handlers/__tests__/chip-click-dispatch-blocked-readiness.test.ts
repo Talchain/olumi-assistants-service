@@ -76,32 +76,41 @@ vi.mock('../../build-turn-context.js', async () => {
   return {
     ...actual,
     loadScenarioSnapshotForRunAnalysis: loadScenarioSnapshotForRunAnalysisMock,
-    buildTurnContext: vi.fn(async () => ({
-      stage: 'analyse',
-      entity_registry: { option_ids: [], goal_id: null },
-      capabilities: {
-        can_run_analysis: false,
-        can_edit_graph: false,
-        can_run_decision_review: false,
-        can_generate_coaching: false,
-        can_invoke_tools: false,
-        can_commit_session_state: false,
-      },
-      messages: [{ role: 'user', content: 'Run the analysis' }],
-      session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      request_id: 'req-test',
-      budgets: {
-        turn_ms: 30000,
-        handler_ms: 20000,
-        plot_ms: 15000,
-        anthropic_ms: 15000,
-        openai_ms: 15000,
-      },
-      prior_turns: [],
-      prior_facts: [],
-      scenarioBriefText: null,
-      persistedGraph: null,
-    })),
+    buildTurnContext: vi.fn(async () => {
+      const { completeScenarioAnalysisFactSet } = await import(
+        '../../__tests__/support/scenario-analysis-fact-set.js'
+      );
+      return {
+        stage: 'analyse',
+        entity_registry: { option_ids: [], goal_id: null },
+        capabilities: {
+          can_run_analysis: false,
+          can_edit_graph: false,
+          can_run_decision_review: false,
+          can_generate_coaching: false,
+          can_invoke_tools: false,
+          can_commit_session_state: false,
+        },
+        messages: [{ role: 'user', content: 'Run the analysis' }],
+        session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        request_id: 'req-test',
+        budgets: {
+          turn_ms: 30000,
+          handler_ms: 20000,
+          plot_ms: 15000,
+          anthropic_ms: 15000,
+          openai_ms: 15000,
+        },
+        prior_turns: [],
+        prior_facts: [],
+        scenario_analysis_fact_set: completeScenarioAnalysisFactSet(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          [],
+        ),
+        scenarioBriefText: null,
+        persistedGraph: null,
+      };
+    }),
   };
 });
 

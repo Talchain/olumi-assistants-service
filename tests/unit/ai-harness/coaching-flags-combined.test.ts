@@ -72,6 +72,10 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // exist only for Cap-1's prior run_analysis turn row.
     readFactsFor: async (rowIds: readonly string[]) =>
       Array.isArray(rowIds) && rowIds.includes(PRIOR_RA_TURN.id) ? mockState.priorFacts : [],
+    readScenarioRunAnalysisFactsFor: async (scenarioId: string, limit: number) => {
+      const facts = scenarioId === SCENARIO_ID ? mockState.priorFacts : [];
+      return { facts: facts.slice(0, limit), total_count: facts.length };
+    },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,

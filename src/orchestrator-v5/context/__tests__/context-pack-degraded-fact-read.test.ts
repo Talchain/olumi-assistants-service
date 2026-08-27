@@ -75,8 +75,8 @@ describe('ContextPack analysis_state — a degraded fact read is not "never anal
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [],
-      priorFactsReadOk: false,
+      analysisFacts: [],
+      analysisFactsReadOk: false,
       graph,
     });
 
@@ -95,25 +95,25 @@ describe('ContextPack analysis_state — a degraded fact read is not "never anal
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [],
-      priorFactsReadOk: true,
+      analysisFacts: [],
+      analysisFactsReadOk: true,
       graph,
     });
     expect(pack.analysis_state!.freshness).toBe('none');
     expect(pack.analysis_state!.freshness_reason).toBe('no_successful_run_analysis_fact');
   });
 
-  it('CONTROL (absent flag): unwired callers keep the pre-fix verdict exactly', () => {
-    // Back-compatibility. Most callers (and every existing test) omit the field;
-    // widening the input type must not change what they get.
+  it('CONTROL (absent completeness): an unwired analysis-fact input fails weak', () => {
+    // Facts without proof that the scenario-wide read completed cannot mint a
+    // confident "never analysed" verdict.
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [],
+      analysisFacts: [],
       graph,
     });
-    expect(pack.analysis_state!.freshness).toBe('none');
-    expect(pack.analysis_state!.freshness_reason).toBe('no_successful_run_analysis_fact');
+    expect(pack.analysis_state!.freshness).toBe('unknown');
+    expect(pack.analysis_state!.freshness_reason).toBe('derivation_failed');
   });
 
   it('a fact that WAS read stays authoritative — the degraded flag never blanks it', () => {
@@ -124,8 +124,8 @@ describe('ContextPack analysis_state — a degraded fact read is not "never anal
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(HASH)],
-      priorFactsReadOk: false,
+      analysisFacts: [runAnalysisFact(HASH)],
+      analysisFactsReadOk: false,
       graph,
     });
     expect(pack.analysis_state!.freshness).toBe('fresh');

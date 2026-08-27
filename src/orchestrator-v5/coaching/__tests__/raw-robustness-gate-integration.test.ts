@@ -1,7 +1,7 @@
 /**
  * Two layers covering the rawRobustness override path:
  *
- *   1. Helper → gate contract: prove `pickLatestRawRobustness(prior_facts)`
+ *   1. Helper → gate contract: prove `pickLatestRawRobustness(analysis facts)`
  *      composes correctly with `tryPostAnalysisAdviceGate` so the raw
  *      fragile / near-tie signals override a conflicting projected band.
  *      These tests call the helpers directly — they do NOT prove the
@@ -11,7 +11,7 @@
  *   2. Turn-executor call-site wiring: a separate `describe` reads the
  *      source of `turn-executor.ts` and asserts the literal wiring
  *      expression is present. Fails immediately if the
- *      `rawRobustness: pickLatestRawRobustness(context.prior_facts)`
+ *      `rawRobustness: pickLatestRawRobustness(scenarioAnalysisFacts)`
  *      line is removed — exactly the silent regression the contract
  *      tests above cannot catch. A full `runTurnExecutor` mock harness
  *      would be disproportionate to the wiring under test; the source-
@@ -216,7 +216,7 @@ describe('raw-robustness → gate integration (contract)', () => {
 // Turn-executor call-site wiring assertion.
 //
 // The contract tests above do NOT catch a regression where someone
-// removes the `rawRobustness: pickLatestRawRobustness(context.prior_facts)`
+// removes the `rawRobustness: pickLatestRawRobustness(scenarioAnalysisFacts)`
 // line from `turn-executor.ts`. This source-level assertion does. It is
 // deliberately literal — a future formatting change that splits the
 // expression across lines or renames the parameter would also break it,
@@ -224,7 +224,7 @@ describe('raw-robustness → gate integration (contract)', () => {
 // update this assertion (a one-line, deliberate change, never silent).
 // =========================================================================
 describe('turn-executor call-site — rawRobustness wiring', () => {
-  it('threads pickLatestRawRobustness(context.prior_facts) into the gate input', async () => {
+  it('threads pickLatestRawRobustness(scenarioAnalysisFacts) into the gate input', async () => {
     // __dirname-equivalent for ESM. Resolve to the worktree's
     // turn-executor.ts regardless of where vitest is invoked from.
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -252,11 +252,11 @@ describe('turn-executor call-site — rawRobustness wiring', () => {
     // swapped, or the line commented out), this assertion fails —
     // making the change deliberate.
     const wiringLine = activeLines.find((line) =>
-      /rawRobustness\s*:\s*pickLatestRawRobustness\s*\(\s*context\.prior_facts\s*\)/.test(line),
+      /rawRobustness\s*:\s*pickLatestRawRobustness\s*\(\s*scenarioAnalysisFacts\s*\)/.test(line),
     );
     expect(
       wiringLine,
-      'rawRobustness: pickLatestRawRobustness(context.prior_facts) wiring missing from turn-executor.ts',
+      'rawRobustness: pickLatestRawRobustness(scenarioAnalysisFacts) wiring missing from turn-executor.ts',
     ).toBeDefined();
   });
 });

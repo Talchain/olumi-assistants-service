@@ -191,6 +191,10 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // early-return empty (prior_facts is gated on prior_turns being non-empty).
     readRecent: async () => [PRIOR_TURN_ROW],
     readFactsFor: async () => [PRIOR_RUN_ANALYSIS_FACT],
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+      facts: [PRIOR_RUN_ANALYSIS_FACT].slice(0, limit),
+      total_count: 1,
+    }),
     loadGraph: async () => GRAPH_STATE,
     loadGraphAndBriefText: async () => ({ graph: GRAPH_STATE, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),

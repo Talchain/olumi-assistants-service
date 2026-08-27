@@ -126,6 +126,10 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
               ]
             : [],
         readFactsFor: async () => mockedPriorFacts as never,
+        readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+          facts: mockedPriorFacts.slice(0, limit) as never,
+          total_count: mockedPriorFacts.length,
+        }),
       }),
     resetSessionStoreForTests: () => {},
   };

@@ -216,6 +216,10 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => readRecentTurns,
     readFactsFor: async () => priorFacts,
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+      facts: priorFacts.slice(0, limit),
+      total_count: priorFacts.length,
+    }),
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
