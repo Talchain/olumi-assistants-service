@@ -1299,9 +1299,104 @@ function refinementConflictsWithStatedOption(
 }
 
 /**
+ * The typed evidence a DIRECT option→factor link may cite, resolved exactly as
+ * {@link bindDirectStatedMagnitude} consumes it: the link's own `basis`, else
+ * the one inheritable target-factor basis.
+ *
+ * The mounted £25k twin exposed a valid producer shape the original carrier
+ * fixture did not cover: the direct option→factor link omitted `basis`, while
+ * the target FACTOR claim carried both the same option record and the exact
+ * numeric figure. That is still one typed evidence chain, not a whole-brief
+ * numeric scan. Inherit it only when the link has no competing basis of its
+ * own and the target explicitly joins exactly this one option. A factor
+ * citing no option cannot tell us which option owns the magnitude; a factor
+ * citing two options cannot tell us which one owns a shared figure. Both stay
+ * unbound rather than borrowing another option's evidence.
+ *
+ * ⭐ EXTRACTED so {@link statedFigureIsClaimedByAnotherOption} asks the SAME
+ * question of every RIVAL claim that the binder asks of this one. A collision
+ * check reading a different basis than the binder reads would be a guard
+ * agreeing with itself (CLAUDE.md trap 13b). Used by the direct branch ONLY —
+ * `bindFactorCarriedStatedMagnitude` keeps its own stricter rules untouched.
+ */
+function resolveDirectBindingBasis(args: {
+  readonly claim: DraftInferenceClaim;
+  readonly claims: readonly DraftInferenceClaim[];
+  readonly statedItems: readonly DraftStatedItem[];
+}): readonly number[] {
+  const { claim, claims, statedItems } = args;
+  const directBasis = [...new Set(claim.basis ?? [])];
+  const targetClaim = claim.to_claim === undefined ? undefined : claims[claim.to_claim];
+  const targetBasis = [...new Set(targetClaim?.basis ?? [])];
+  const targetBasisOptions = targetBasis.filter(
+    (index) => Number.isInteger(index) && statedItems[index]?.kind === "option",
+  );
+  const mayInheritTargetBasis =
+    directBasis.length === 0 &&
+    targetClaim?.claim_kind === "factor" &&
+    targetBasisOptions.length === 1 &&
+    targetBasisOptions[0] === claim.from_stated;
+  return directBasis.length > 0 ? directBasis : mayInheritTargetBasis ? targetBasis : [];
+}
+
+/**
+ * ⭐⭐ ONE STATED FIGURE MAY LICENSE AT MOST ONE OPTION.
+ *
+ * The recovery branch already refuses evidence that cannot name ONE owning
+ * option — *"A target factor that cites two options cannot lend one option's
+ * figure to the other… the old rule falsely certified both links as brief
+ * extraction, INCLUDING THE STATUS QUO"*
+ * (`__tests__/source-authority-option-magnitude.test.ts:419-431`). The DIRECT
+ * branch never received the same principle, and the deployed product shipped
+ * exactly the defect that comment describes: measured 26 Aug 2026 over the
+ * banked golden-journey corpus, 4 of the 6 captures using this branch bound the
+ * SAME stated figure — *"Annual CRM cost is about £50,000"*, a sentence about
+ * the INCUMBENT — to BOTH the challenger and the status quo, stamping both
+ * `brief_extraction` at high confidence (runs `c96f01`, `17c4a0`, `d30b34`,
+ * `693ddb`).
+ *
+ * ⛔ THE QUOTE CANNOT SETTLE IT AND THE QUOTE VETOES GET IT BACKWARDS. Run
+ * against the real quotes, `figureQuoteContradictsOptionBasis` does NOT fire on
+ * the challenger (the false claim) and DOES fire on the status quo (the true
+ * one), because "CRM" sits in the challenger's own label AND in the incumbent's
+ * cost sentence; `figureQuoteContradictsTypedOptionRole` fires on neither. The
+ * incumbent-ness lives in the brief's PRECEDING clause, not in the quoted
+ * sentence. So this is a STRUCTURAL check over the typed records, with no
+ * marker list, no tokenisation and no role term — it asks only whether the
+ * figure would equally license a DIFFERENT option.
+ *
+ * Rivalry is deliberately narrow: another STATED OPTION (never the same one —
+ * two links from one option are not an ownership conflict) whose own resolved
+ * basis cites this figure AND whose magnitude the figure would equally verify.
+ * Anything less would withdraw authority from figures no one else claims.
+ */
+function statedFigureIsClaimedByAnotherOption(args: {
+  readonly claim: DraftInferenceClaim;
+  readonly figureIndex: number;
+  readonly claims: readonly DraftInferenceClaim[];
+  readonly statedItems: readonly DraftStatedItem[];
+}): boolean {
+  const { claim, figureIndex, claims, statedItems } = args;
+  const figure = statedItems[figureIndex];
+  if (figure?.kind !== "figure") return false;
+  for (const rival of claims) {
+    if (rival.claim_kind !== "causal_link") continue;
+    if (rival.from_stated === undefined || rival.from_stated === claim.from_stated) continue;
+    if (statedItems[rival.from_stated]?.kind !== "option") continue;
+    if (typeof rival.sets_to !== "number" || rival.sets_to !== figure.value) continue;
+    if (!resolveDirectBindingBasis({ claim: rival, claims, statedItems }).includes(figureIndex)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
  * Describe a direct stated-option magnitude only when its basis names numeric
- * stated-item evidence for that exact value. Verified evidence earns brief
- * authority; unresolved evidence remains marked so readiness can fail closed.
+ * stated-item evidence for that exact value, AND that evidence names only this
+ * option. Verified, singly-owned evidence earns brief authority; unresolved or
+ * contested evidence remains marked so readiness can fail closed.
  */
 function bindDirectStatedMagnitude(args: {
   readonly claim: DraftInferenceClaim;
@@ -1314,31 +1409,7 @@ function bindDirectStatedMagnitude(args: {
   if (claim.from_stated === undefined || typeof claim.sets_to !== "number") return undefined;
   if (statedItems[claim.from_stated]?.kind !== "option") return undefined;
 
-  const directBasis = [...new Set(claim.basis ?? [])];
-  const targetClaim = claim.to_claim === undefined ? undefined : claims[claim.to_claim];
-  // The mounted £25k twin exposed a valid producer shape the original carrier
-  // fixture did not cover: the direct option→factor link omitted `basis`, while
-  // the target FACTOR claim carried both the same option record and the exact
-  // numeric figure. That is still one typed evidence chain, not a whole-brief
-  // numeric scan. Inherit it only when the link has no competing basis of its
-  // own and the target explicitly joins exactly this one option. A factor
-  // citing no option cannot tell us which option owns the magnitude; a factor
-  // citing two options cannot tell us which one owns a shared figure. Both stay
-  // unbound rather than borrowing another option's evidence.
-  const targetBasis = [...new Set(targetClaim?.basis ?? [])];
-  const targetBasisOptions = targetBasis.filter(
-    (index) => Number.isInteger(index) && statedItems[index]?.kind === "option",
-  );
-  const mayInheritTargetBasis =
-    directBasis.length === 0 &&
-    targetClaim?.claim_kind === "factor" &&
-    targetBasisOptions.length === 1 &&
-    targetBasisOptions[0] === claim.from_stated;
-  const bindingBasis = directBasis.length > 0
-    ? directBasis
-    : mayInheritTargetBasis
-      ? targetBasis
-      : [];
+  const bindingBasis = resolveDirectBindingBasis({ claim, claims, statedItems });
 
   const matches = bindingBasis
     .filter((index) => Number.isInteger(index))
@@ -1377,6 +1448,25 @@ function bindDirectStatedMagnitude(args: {
   }
 
   const { index, item } = verified[0]!;
+
+  // ⭐ SINGLE OWNERSHIP. A figure two mutually exclusive options both claim
+  // cannot be the user's stated value for either — the brief said it once, and
+  // nothing here can say about which. Keep the VALUE, withdraw the unearned
+  // LABEL, and reuse the branch's existing "unresolved stated-item binding"
+  // receipt so readiness routes it to the confirm-value ask it already
+  // understands (`transforms/analysis-ready.ts` reads that exact prefix). This
+  // fails closed in BOTH directions — it never prefers the baseline or the
+  // challenger — because wrongly claiming the user's authorship is worse than
+  // omitting our own, and a contested attribution is undeterminable either way.
+  if (statedFigureIsClaimedByAnotherOption({ claim, figureIndex: index, claims, statedItems })) {
+    return {
+      raw_value: claim.sets_to,
+      ...(item.unit !== undefined ? { unit: item.unit } : {}),
+      source: "cee_hypothesis",
+      reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; stated_items[${index}] is claimed by more than one option`,
+    };
+  }
+
   return {
     raw_value: claim.sets_to,
     ...(item.unit !== undefined ? { unit: item.unit } : {}),
