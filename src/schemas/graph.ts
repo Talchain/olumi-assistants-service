@@ -509,8 +509,27 @@ export type EdgeTypeT = z.infer<typeof EdgeType>;
 /**
  * Check if an edge is directed (not bidirected).
  * Treats absent edge_type as 'directed' for backward compatibility.
+ *
+ * ⚠ THE PARAMETER IS THE STRUCTURAL MINIMUM THIS PREDICATE ACTUALLY READS, NOT
+ * `EdgeT`, AND THAT WIDENING IS DELIBERATE.
+ *
+ * This is the estate's single directed-edge policy point (see
+ * `graph/reachability.ts`, which imports it rather than re-deriving it). It is
+ * consumed from BOTH edge vocabularies — `schemas/graph.ts` `EdgeT`
+ * (`strength_mean`) and `schemas/cee-v3.ts` `EdgeV3T` (`strength: {mean,std}`)
+ * — whose only shared field here is `edge_type`, declared as the same enum in
+ * both. Typing the parameter as `EdgeT` forced V3 callers to reach the policy
+ * through an `as unknown as` double-cast, which is (a) a lie the compiler
+ * cannot check and (b) a growth class the required CI job explicitly ratchets
+ * (`scripts/check-forbidden-boundary-patterns.sh`).
+ *
+ * Widening the parameter keeps ONE implementation and ONE policy while letting
+ * both vocabularies satisfy it honestly. `EdgeT` and `EdgeV3T` both remain
+ * assignable, so every existing caller is unaffected.
  */
-export function isDirectedEdge(edge: EdgeT): boolean {
+export function isDirectedEdge(edge: {
+  readonly edge_type?: EdgeTypeT | undefined;
+}): boolean {
   return edge.edge_type !== "bidirected";
 }
 
