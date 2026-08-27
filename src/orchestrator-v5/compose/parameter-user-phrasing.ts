@@ -99,9 +99,16 @@ export function renderParameterPhrasing(
  *   UI   `qualitativeTierLabel` High = (0.6, 0.8]   → 0.7
  *   UI   `FactorExternalPanel`  high = 0.6–1.0      → 0.8
  * and 0.5 itself reads "Moderate" in CEE and "Medium" in the UI. Picking one
- * would stamp a PRODUCT-CHOSEN number as `user_set` (the write path records
- * `ai_inferred → user_set`, `cee_inference → user_override`) — the fabrication
- * class, arrived at by an arbitrary choice among three.
+ * would stamp a PRODUCT-CHOSEN number as the user's own: the accepted write
+ * path re-stamps both the value's provenance and its source to the user, which
+ * is exactly right for a number they typed and a fabrication for one we picked.
+ * ⚠ The provenance LITERALS are deliberately not spelled here. This module is
+ * copy, it stamps nothing, and `no-brief-derived-user-override.writers.test.ts`
+ * derives its reviewed-writer manifest from those literals appearing in `src/`
+ * — so naming them in prose would have put a copy module into the set of files
+ * allowed to claim a value is the user's own. The guard caught exactly that on
+ * this change, which is the guard working: the fix is to stop saying the word,
+ * never to widen the manifest.
  *
  * So the policy is the one `routing/missing-value-answer.ts` already states
  * for the option-effect path, adopted here verbatim rather than re-invented:
