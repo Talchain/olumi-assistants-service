@@ -66,9 +66,11 @@
  *
  *   PER RUN: 2 auth identities, created through open signup, NEVER DELETED.
  *   Scenario rows ARE deleted (and the deletion is asserted — see cleanup).
- *   That includes the FORGED row, whose id is bound at `scenarioForged` for
- *   exactly this reason: it only exists on a run where isolation has broken,
- *   which is the run least able to afford a stranded row.
+ *   That includes the FORGED row: it only exists on a run where isolation has
+ *   broken, which is the run least able to afford a stranded row. The cleanup
+ *   manifest is DERIVED by `rest()` from the POSTs actually made, so adding a
+ *   row later cannot silently escape cleanup the way a hand-listed manifest
+ *   let the forged row escape it.
  *
  *   WHY NOT DELETED: removing an auth user requires the service-role key. This
  *   probe refuses that key on principle — a CI job holding the most dangerous
@@ -186,6 +188,12 @@ const scenarioA = randomUUID(), scenarioB = randomUUID();
 // that is precisely the run that must not strand it.
 const scenarioForged = randomUUID();
 let forgedRowExists = false;
+/**
+ * The cleanup manifest, DERIVED by `rest()` from the POSTs actually made rather
+ * than hand-listed next to them. See the note in `rest()` for the measurement
+ * that motivated it.
+ */
+const ourRows = [];
 
 // ── Throwaway accounts, minted through open signup ─────────────────────────
 async function mint(label) {
@@ -233,6 +241,16 @@ const hdr = (u, extra = {}) => ({
   'Content-Type': 'application/json', Accept: 'application/json', ...extra,
 });
 async function rest(method, path, user, body, extraHeaders = {}) {
+  // ── The cleanup manifest is DERIVED HERE, not hand-maintained beside it ──
+  // Registered BEFORE the request, so a row created by a call that then fails
+  // in transit is still cleaned up. Measured reason: with a hand-listed
+  // manifest, dropping one entry stranded a real row while the run reported
+  // `residue: []` and exited 0 — which is G2's defect at a different index. A
+  // list a human must remember to keep in step with reality drifts silently,
+  // and the drift always reads as green.
+  if (method === 'POST' && path.startsWith('/scenarios') && body?.id) {
+    ourRows.push({ id: body.id, ownerId: body.user_id ?? null, label: body.title ?? body.id });
+  }
   let res;
   try {
     res = await fetch(`${target.restBase}${path}`, {
@@ -302,10 +320,19 @@ function data(r, what) {
  * unclearable residue is an exit-2 condition, and exit 1 always outranks it.
  */
 async function cleanup() {
-  // `forged` is owned by B (that is what made it a forgery), so B is the
-  // identity that can delete it under `Users can delete own scenarios`.
-  for (const [label, id, user] of [['A', scenarioA, A], ['B', scenarioB, B], ['forged', scenarioForged, B]]) {
-    if (user === null) continue; // never minted — nothing of ours can exist
+  // Iterates the DERIVED manifest — every `/scenarios` POST this run made,
+  // including the forged row, whose owner is B (that is what made it a forgery)
+  // and who is therefore the identity that can delete it under `Users can
+  // delete own scenarios`.
+  for (const { id, ownerId, label } of ourRows) {
+    const user = [A, B].find((u) => u !== null && u.userId === ownerId) ?? null;
+    if (user === null) {
+      // Fail LOUD rather than skipping: a row we created whose owner we cannot
+      // resolve is exactly the "owned row resolving to no auth user" class.
+      log({ step: 'cleanup', row: label, ok: false, why: 'no minted identity owns this row' });
+      residue.push(`scenario ${label} (${id}): created by this run, but no minted identity owns it — cannot be deleted here`);
+      continue;
+    }
     try {
       const del = await rest('DELETE', `/scenarios?id=eq.${id}`, user);
       const gone = await rest('GET', `/scenarios?id=eq.${id}&select=id`, user);
