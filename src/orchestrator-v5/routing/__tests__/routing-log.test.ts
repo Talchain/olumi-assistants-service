@@ -57,6 +57,7 @@ function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
     coaching_signal_id: overrides.coaching_signal_id ?? null,
     // V5 product-state continuity (foamy-bee tranche).
     recent_changes_count: overrides.recent_changes_count ?? 0,
+    recent_changes_status: overrides.recent_changes_status ?? 'degraded',
     prior_mutation_fact_count: overrides.prior_mutation_fact_count ?? 0,
     state_query_guard_outcome:
       overrides.state_query_guard_outcome ?? 'not_evaluated',
@@ -130,29 +131,32 @@ describe('buildRoutingLog', () => {
   });
 
   describe('V5 product-state continuity (foamy-bee tranche) fields', () => {
-    it('defaults the three new fields to safe values when not supplied', () => {
+    it('defaults the continuity fields to safe values when not supplied', () => {
       const log = buildRoutingLog(baseInput());
       expect(log.recent_changes_count).toBe(0);
+      expect(log.recent_changes_status).toBe('degraded');
       expect(log.prior_mutation_fact_count).toBe(0);
       expect(log.state_query_guard_outcome).toBe('not_evaluated');
     });
 
-    it('preserves the three new fields through the non-redacted branch', () => {
+    it('preserves the continuity fields through the non-redacted branch', () => {
       const log = buildRoutingLog(
         baseInput({
           recent_changes_count: 3,
+          recent_changes_status: 'capped',
           prior_mutation_fact_count: 7,
           state_query_guard_outcome: 'with_recent_change',
           redacted: false,
         }),
       );
       expect(log.recent_changes_count).toBe(3);
+      expect(log.recent_changes_status).toBe('capped');
       expect(log.prior_mutation_fact_count).toBe(7);
       expect(log.state_query_guard_outcome).toBe('with_recent_change');
     });
 
-    it('preserves the three new fields through the redacted branch (none of them are user-supplied data)', () => {
-      // recent_changes_count, prior_mutation_fact_count, and
+    it('preserves the continuity fields through the redacted branch (none of them are user-supplied data)', () => {
+      // recent_changes_count, recent_changes_status, prior_mutation_fact_count, and
       // state_query_guard_outcome are derived counters / categoricals
       // — they cross the privacy boundary the same way coaching_signal_id
       // does (no raw user content). Redaction must NOT drop them or
@@ -160,6 +164,7 @@ describe('buildRoutingLog', () => {
       const log = buildRoutingLog(
         baseInput({
           recent_changes_count: 2,
+          recent_changes_status: 'complete',
           prior_mutation_fact_count: 5,
           state_query_guard_outcome: 'no_recent_changes',
           redacted: true,
@@ -167,14 +172,29 @@ describe('buildRoutingLog', () => {
       );
       expect(log.redacted).toBe(true);
       expect(log.recent_changes_count).toBe(2);
+      expect(log.recent_changes_status).toBe('complete');
       expect(log.prior_mutation_fact_count).toBe(5);
       expect(log.state_query_guard_outcome).toBe('no_recent_changes');
     });
 
     it('accepts every state_query_guard_outcome categorical value', () => {
       const outcomes: ReadonlyArray<
-        'unmatched' | 'with_recent_change' | 'no_recent_changes' | 'not_evaluated'
-      > = ['unmatched', 'with_recent_change', 'no_recent_changes', 'not_evaluated'];
+        | 'unmatched'
+        | 'with_recent_change'
+        | 'no_recent_changes'
+        | 'changes_unavailable'
+        | 'brief_audit'
+        | 'structure_origin'
+        | 'not_evaluated'
+      > = [
+        'unmatched',
+        'with_recent_change',
+        'no_recent_changes',
+        'changes_unavailable',
+        'brief_audit',
+        'structure_origin',
+        'not_evaluated',
+      ];
       for (const outcome of outcomes) {
         const log = buildRoutingLog(
           baseInput({ state_query_guard_outcome: outcome }),

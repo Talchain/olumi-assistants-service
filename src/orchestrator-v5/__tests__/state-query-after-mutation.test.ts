@@ -31,8 +31,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 
 const TEST_SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
 const PRIOR_TURN_ROW_ID = '22222222-2222-4222-8222-222222222222';
@@ -86,7 +88,25 @@ vi.mock('../session/index.js', () => ({
       return { id: `row-${appendCalls.length}` };
     },
     readRecent: async () => mockState.priorTurns,
+    countTurns: async () => mockState.priorTurns.length,
     readFactsFor: async () => mockState.priorFacts,
+    readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) =>
+      mockState.priorFacts
+        .filter((fact) => {
+          const result = fact.result;
+          return (
+            typeof fact.fact_type === 'string' &&
+            MUTATION_RECEIPT_FACT_TYPES.has(
+              fact.fact_type as HandlerFact['fact_type'],
+            ) &&
+            fact.noop === false &&
+            result !== null &&
+            typeof result === 'object' &&
+            !Array.isArray(result) &&
+            (result as { status?: unknown }).status === 'applied'
+          );
+        })
+        .slice(0, limit),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

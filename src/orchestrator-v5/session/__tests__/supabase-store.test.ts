@@ -20,6 +20,7 @@ import {
 } from '../store.js';
 import { EMPTY_COACHING_STATE } from '../../coaching/coaching-state.js';
 import { toPreDispatchSnapshot } from '../../coaching/coaching-state-snapshot.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../../mutation-receipt-fact-types.js';
 import type { PendingAction } from '../pending-action.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -948,6 +949,152 @@ describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
     const facts = await store.readFactsFor(['turn-row-uuid-1']);
     expect(facts).toHaveLength(1);
     expect(facts[0]!.fact_type).toBe('run_analysis');
+  });
+});
+
+describe('SupabaseSessionStore.readRecentAppliedMutationFactsFor', () => {
+  const appliedConstraintRow = {
+    id: '11111111-1111-4111-8111-111111111111',
+    created_at: '2026-08-27T10:00:00.000Z',
+    handler_id: 'add_constraint',
+    noop: false,
+    payload: {
+      fact_type: 'add_constraint',
+      fact_version: 1,
+      result: {
+        target_id: 'constraint-uuid-1',
+        status: 'applied',
+        before: null,
+        after: {
+          constraint_id: 'constraint-uuid-1',
+          node_id: 'goal-g',
+          operator: '<=',
+          value: 100,
+        },
+      },
+    },
+  };
+
+  it('scopes the uncached query to the scenario and canonical applied-mutation authority', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [appliedConstraintRow], error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    const facts = await store.readRecentAppliedMutationFactsFor(SCENARIO, 4);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      fact_type: 'add_constraint',
+      noop: false,
+      result: { status: 'applied' },
+    });
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.table).toBe('v5_handler_facts');
+    expect(selectCalls[0]!.cols).toBe('id, payload, handler_id, noop, created_at');
+    const filters = selectCalls[0]!.filters as Record<string, unknown>;
+    expect(filters['eq:scenario_id']).toBe(SCENARIO);
+    expect(filters['in:handler_id']).toEqual(Array.from(MUTATION_RECEIPT_FACT_TYPES));
+    expect(filters['eq:noop']).toBe(false);
+    expect(filters['eq:payload->result->>status']).toBe('applied');
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:id']).toEqual({ ascending: false });
+    expect(filters.limit).toBe(4);
+
+    await store.readRecentAppliedMutationFactsFor(SCENARIO, 4);
+    expect(selectCalls).toHaveLength(2);
+  });
+
+  it('returns an authoritative empty set only for a clean zero-row read', async () => {
+    const { client } = makeClient({ selectResult: { data: [], error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 4)).resolves.toEqual([]);
+  });
+
+  it('fails weak on a null payload without an explicit database error', async () => {
+    const { client } = makeClient({ selectResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 4)).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'mutation_fact_corrupt',
+    });
+  });
+
+  it('throws on a database failure instead of converting it to no recent changes', async () => {
+    const { client } = makeClient({
+      selectResult: { data: null, error: { message: 'read unavailable', code: '08006' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 4)).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: '08006',
+    });
+  });
+
+  it('fails weak on a malformed eligible payload rather than silently dropping the row', async () => {
+    const { client } = makeClient({
+      selectResult: {
+        data: [{ ...appliedConstraintRow, payload: { result: { status: 'applied' } } }],
+        error: null,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 4)).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'mutation_fact_corrupt',
+    });
+  });
+
+  it('fails weak when the indexed handler authority and payload fact type disagree', async () => {
+    const { client } = makeClient({
+      selectResult: {
+        data: [{ ...appliedConstraintRow, handler_id: 'set_factor_value' }],
+        error: null,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 4)).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'mutation_fact_corrupt',
+    });
+  });
+
+  it('rejects an invalid bound instead of issuing an unbounded or false-empty read', async () => {
+    const { client, selectCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readRecentAppliedMutationFactsFor(SCENARIO, 0)).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'mutation_fact_limit_invalid',
+    });
+    expect(selectCalls).toHaveLength(0);
   });
 });
 

@@ -104,20 +104,25 @@ export interface RoutingLogInput {
    * the layered fix to the "what update did you make?" misroute class.
    * `recent_changes_count` is the count of curated mutation summaries
    * projected into the LLM-facing ContextPack on this turn (0..3, capped
-   * by the projection budget). `prior_mutation_fact_count` is the
-   * uncapped count of successful (non-noop) mutation facts across the
-   * whole prior history — useful for distinguishing "long conversation
-   * with several edits" from "fresh scenario". `state_query_guard_outcome`
+   * by the projection budget). `recent_changes_status` states whether that
+   * projected receipt set is complete, a newest bounded subset, or degraded.
+   * `prior_mutation_fact_count` is the count of successful (non-noop)
+   * mutation facts in the loaded hot window. Durable cold-return receipts are
+   * carried out-of-band on the array-compatible history bridge and therefore
+   * are not included in that count. `state_query_guard_outcome`
    * records the pre-route outcome:
    *   - `'unmatched'`: guard pattern did not fire; turn proceeded to LLM
    *   - `'with_recent_change'`: matched, dispatched a deterministic
    *     direct_answer grounded in recent_changes
    *   - `'no_recent_changes'`: matched but no mutations to reference;
-   *     dispatched the curated "I haven't applied any changes" reply
+   *     dispatched the curated no-record reply under complete history
+   *   - `'changes_unavailable'`: matched with empty non-complete history;
+   *     dispatched an honest unavailable reply rather than a false zero
    *   - `'not_evaluated'`: pre-route never ran (e.g. an earlier
    *     pre-route already synthesised a routingResult)
    */
   readonly recent_changes_count: number;
+  readonly recent_changes_status: 'complete' | 'capped' | 'degraded';
   readonly prior_mutation_fact_count: number;
   readonly state_query_guard_outcome: StateQueryGuardOutcomeForLog;
 }
@@ -126,6 +131,7 @@ export type StateQueryGuardOutcomeForLog =
   | 'unmatched'
   | 'with_recent_change'
   | 'no_recent_changes'
+  | 'changes_unavailable'
   /**
    * ROADMAP 2.975 — the turn asked what became of the user's BRIEF, and was
    * answered from the derived not-modelled manifest rather than from edit
@@ -225,6 +231,7 @@ export const ROUTING_LOG_FIELD_POLICY = {
   cqe_ambiguous_phrasing_detected: 'structural',
   coaching_signal_id: 'structural',
   recent_changes_count: 'structural',
+  recent_changes_status: 'structural',
   prior_mutation_fact_count: 'structural',
   state_query_guard_outcome: 'structural',
 } as const satisfies Record<keyof RoutingLogInput, RoutingLogFieldPolicy>;

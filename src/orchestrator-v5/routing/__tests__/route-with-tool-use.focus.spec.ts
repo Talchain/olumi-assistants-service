@@ -33,6 +33,7 @@ import {
   buildUserMessage,
   FOCUS_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  RECENT_CHANGES_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
@@ -143,15 +144,19 @@ function selectionFor(ids: readonly string[]): TurnSelection {
 const PRISTINE_GOLDEN_SHA256 =
   '8f43569dcdbfee06ab0bad056ce746e61a17980f6cfa7ac0afbc622663f9c504';
 
-function subtractGraphAuthorityDelta(message: string): string {
-  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+function subtractMandatoryAuthorityDelta(message: string): string {
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
   expect(jsonStart).toBeGreaterThan(-1);
   expect(jsonEnd).toBeGreaterThan(jsonStart);
   const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
   expect(parsed.graph_context).toEqual({ status: 'canonical' });
+  expect(parsed.recent_changes_status).toBe('degraded');
+  expect(message.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  expect(message.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
   delete parsed.graph_context;
+  delete parsed.recent_changes_status;
   return (
     message.slice(0, jsonStart) +
     JSON.stringify(parsed, null, 2) +
@@ -238,7 +243,7 @@ describe('buildUserMessage — a turn with no selection remains byte-stable', ()
     expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
     expect(observeSerialisedPack(msg).graph_context).toEqual({ status: 'canonical' });
     expect(msg.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
-    expect(createHash('sha256').update(subtractGraphAuthorityDelta(msg)).digest('hex')).toBe(
+    expect(createHash('sha256').update(subtractMandatoryAuthorityDelta(msg)).digest('hex')).toBe(
       PRISTINE_GOLDEN_SHA256,
     );
   });

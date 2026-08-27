@@ -371,6 +371,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // from CONTEXT_PACK_CEILING_CUT_ORDER, the array the pass iterates.
     { name: 'conversation', source: 'conversation_window', projection: 'projectConversation (8 turns with summary coverage; fetched hot window when summary absent/zero); whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'recent_changes_status', source: 'recent_changes', projection: 'scenario-wide mutation-history reconciliation (complete | capped | degraded)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
     // conversation_summary → facts beat summary). ENFORCED: projectDecisionRecords

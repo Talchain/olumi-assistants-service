@@ -88,6 +88,10 @@ import {
   ContextPackSchema,
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
+import {
+  readRecentMutationHistoryFromPriorFacts,
+  type RecentChangesHistoryStatus,
+} from './reconcile-recent-mutation-facts.js';
 import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
 import { extractGraphOptionIds } from './option-identity.js';
 import {
@@ -580,6 +584,12 @@ export interface ContextPack {
    * See {@link projectRecentChanges} for the cap and shape rules.
    */
   readonly recent_changes: readonly RecentMutation[];
+  /**
+   * Whether `recent_changes` describes all durable mutation receipts, the
+   * newest bounded three, or a degraded read. `complete + []` is the only
+   * authoritative no-changes state; an empty degraded list means unknown.
+   */
+  readonly recent_changes_status: RecentChangesHistoryStatus;
   /**
    * Coaching state assembled from prior turns. draft_coaching is populated
    * from the draft-graph sidecar (logs/v5-draft-graph-coaching.jsonl) keyed
@@ -1550,6 +1560,32 @@ export function assembleContextPackWithSummary(
           window: { ...projectedConversation.window, summarised: input.summarisedTurns },
         }
       : projectedConversation;
+  const recentMutationHistory = readRecentMutationHistoryFromPriorFacts(
+    input.priorFacts,
+  );
+  // Plain/direct arrays predate the durable carrier. They may still provide a
+  // useful bounded projection, but cannot establish that scenario history is
+  // complete; omission therefore resolves to degraded, never permission to
+  // say that no change occurred.
+  const recentMutationFacts =
+    recentMutationHistory?.recent_mutation_facts ?? input.priorFacts ?? [];
+  const recentChangesStatus =
+    recentMutationHistory?.recent_changes_status ?? 'degraded';
+  // Project exactly once, then bind the completeness claim to what the model
+  // can actually see. HandlerFactSchema admits some applied mutation receipts
+  // that the older display projector cannot yet interpret (for example an
+  // add_constraint receipt whose before/after payloads are both null). Losing
+  // one of those receipts while retaining `complete` would turn a real edit
+  // into an authoritative "no recent changes" claim downstream. Preserve every
+  // projectable receipt, but fail the HISTORY claim weak whenever projection
+  // drops any bound durable carrier entry. Plain/direct arrays are already
+  // degraded and stay so.
+  const projectedRecentChanges = projectRecentChanges(recentMutationFacts);
+  const effectiveRecentChangesStatus: RecentChangesHistoryStatus =
+    recentChangesStatus !== 'degraded' &&
+    projectedRecentChanges.length !== recentMutationFacts.length
+      ? 'degraded'
+      : recentChangesStatus;
   // Hoisted out of the literal below (it was inline) so the hop-4 focus
   // projection can join against the SAME display-safe values the model
   // receives. One computation, one authority — a second call here would be a
@@ -1658,7 +1694,8 @@ export function assembleContextPackWithSummary(
     ...(input.conversationSummary !== undefined
       ? { conversation_summary: input.conversationSummary }
       : {}),
-    recent_changes: projectRecentChanges(input.priorFacts),
+    recent_changes: projectedRecentChanges,
+    recent_changes_status: effectiveRecentChangesStatus,
     // Knowledge-over-time (P6): the decision-records read slice. Placed with the
     // hard structured state (above the rolling summary, which buildUserMessage
     // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional

@@ -37,6 +37,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -51,6 +52,8 @@ import {
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
 import { extractProposedConcept } from '../coaching/proposal-continuation.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
+import { CHANGES_UNAVAILABLE_TEXT } from '../routing/state-query-guard.js';
 
 // ---------------------------------------------------------------------------
 // Session store mock — replayable across two synthetic turns
@@ -60,12 +63,18 @@ const mockState: {
   priorTurns: Array<Record<string, unknown>>;
   priorFacts: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
+  priorTurnsTotal: number | null;
+  durableMutationFacts: Array<Record<string, unknown>> | null;
+  durableMutationReadFails: boolean;
   appendWrites: Array<Record<string, unknown>>;
   pendingActions: PendingAction[];
 } = {
   priorTurns: [],
   priorFacts: [],
   persistedGraph: null,
+  priorTurnsTotal: null,
+  durableMutationFacts: null,
+  durableMutationReadFails: false,
   appendWrites: [],
   pendingActions: [],
 };
@@ -77,7 +86,32 @@ vi.mock('../session/index.js', () => ({
       return { id: `row-${randomUUID()}` };
     },
     readRecent: async () => mockState.priorTurns,
+    countTurns: async () => mockState.priorTurnsTotal ?? mockState.priorTurns.length,
     readFactsFor: async () => mockState.priorFacts,
+    readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) => {
+      if (mockState.durableMutationReadFails) {
+        throw new Error('simulated durable mutation receipt read failure');
+      }
+      if (mockState.durableMutationFacts !== null) {
+        return mockState.durableMutationFacts.slice(0, limit);
+      }
+      return mockState.priorFacts
+        .filter((fact) => {
+          const result = fact.result;
+          return (
+            typeof fact.fact_type === 'string' &&
+            MUTATION_RECEIPT_FACT_TYPES.has(
+              fact.fact_type as HandlerFact['fact_type'],
+            ) &&
+            fact.noop === false &&
+            result !== null &&
+            typeof result === 'object' &&
+            !Array.isArray(result) &&
+            (result as { status?: unknown }).status === 'applied'
+          );
+        })
+        .slice(0, limit);
+    },
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -170,6 +204,18 @@ const ACCEPTED_EDIT_GRAPH_FACT = {
     safe_summary: SAFE_SUMMARY,
     impact: 'moderate' as const,
     rerun_recommended: true,
+  },
+};
+
+const APPLIED_BUT_UNPROJECTABLE_FACT: HandlerFact = {
+  fact_type: 'add_constraint',
+  fact_version: 1,
+  noop: false,
+  result: {
+    target_id: 'constraint-unprojectable',
+    status: 'applied',
+    before: null,
+    after: null,
   },
 };
 
@@ -303,6 +349,12 @@ function consequenceRoutingAdapter(answer: string) {
   };
 }
 
+function committedPendingActions(): unknown[] {
+  return mockState.appendWrites.flatMap((write) =>
+    Array.isArray(write.pending_actions) ? write.pending_actions : [],
+  );
+}
+
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
@@ -316,6 +368,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
     mockState.priorTurns = [];
     mockState.priorFacts = [];
     mockState.persistedGraph = null;
+    mockState.priorTurnsTotal = null;
+    mockState.durableMutationFacts = null;
+    mockState.durableMutationReadFails = false;
     mockState.appendWrites = [];
     mockState.pendingActions = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
@@ -375,6 +430,12 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt!.data.matched).toBe(true);
       expect(evt!.data.dispatch).toBe('with_recent_change');
       expect(evt!.data.recent_change_count).toBe(1);
+      expect(evt!.data.recent_changes_status).toBe('complete');
+      const telemetryBytes = JSON.stringify(evt!.data);
+      expect(telemetryBytes).not.toContain(SAFE_SUMMARY);
+      expect(telemetryBytes).not.toContain('Incremental Hiring Cost edge');
+      expect(evt!.data).not.toHaveProperty('recent_changes');
+      expect(evt!.data).not.toHaveProperty('handler_facts');
     });
 
     it('dispatches as direct_answer with zero LLM calls', async () => {
@@ -500,6 +561,178 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         dispatch: null,
         recent_change_count: 1,
       });
+    });
+  });
+
+  describe('scenario-wide recent history status consumption', () => {
+    it('uses no_recent_changes only for a complete empty durable history', async () => {
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 0;
+      mockState.durableMutationFacts = [];
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What changed?'),
+        'req-complete-empty-history',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toContain(
+        'record of recent edits in the saved model history',
+      );
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data)
+        .toMatchObject({
+          dispatch: 'no_recent_changes',
+          recent_change_count: 0,
+          recent_changes_status: 'complete',
+        });
+    });
+
+    it('returns changes_unavailable on a 41-turn durable read failure with no known receipt and performs no model or mutation write', async () => {
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 41;
+      mockState.durableMutationReadFails = true;
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What changed?'),
+        'req-degraded-empty-history',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toBe(CHANGES_UNAVAILABLE_TEXT);
+      expect(result.response.suggested_actions ?? []).toEqual([]);
+      expect(result.telemetry.llm_calls_used).toBe(0);
+      expect(result.response.blocks).toEqual([]);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(committedPendingActions()).toEqual([]);
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-degraded-empty-history',
+      );
+      expect(committed).toMatchObject({
+        handler_id: null,
+        turn_class: 'direct_answer',
+        handler_facts: [],
+      });
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data)
+        .toMatchObject({
+          dispatch: 'changes_unavailable',
+          recent_change_count: 0,
+          recent_changes_status: 'degraded',
+        });
+    });
+
+    it('downgrades a complete durable carrier when its applied receipt cannot be projected', async () => {
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 41;
+      mockState.durableMutationFacts = [
+        APPLIED_BUT_UNPROJECTABLE_FACT as unknown as Record<string, unknown>,
+      ];
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What changed?'),
+        'req-projection-loss-history',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toBe(CHANGES_UNAVAILABLE_TEXT);
+      expect(result.response.suggested_actions ?? []).toEqual([]);
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data)
+        .toMatchObject({
+          dispatch: 'changes_unavailable',
+          recent_change_count: 0,
+          recent_changes_status: 'degraded',
+        });
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+    });
+
+    it('retains the newest capped receipts and discloses that older saved edits may be absent', async () => {
+      mockState.persistedGraph = POST_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 41;
+      mockState.durableMutationFacts = Array.from(
+        { length: 4 },
+        () => ACCEPTED_EDIT_GRAPH_FACT as unknown as Record<string, unknown>,
+      );
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What changed?'),
+        'req-capped-known-history',
+        { routingAdapter: adapter, graphState: POST_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toContain(SAFE_SUMMARY);
+      expect(result.response.assistant_text).toContain(
+        'available history is limited to the latest three recorded edits',
+      );
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data)
+        .toMatchObject({
+          dispatch: 'with_recent_change',
+          recent_change_count: 3,
+          recent_changes_status: 'capped',
+        });
+    });
+
+    it('retains a known hot-window receipt under degraded durable history without claiming latest or complete', async () => {
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
+      mockState.persistedGraph = POST_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 41;
+      mockState.durableMutationReadFails = true;
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What changed?'),
+        'req-degraded-known-history',
+        { routingAdapter: adapter, graphState: POST_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toContain(SAFE_SUMMARY);
+      expect(result.response.assistant_text).toContain(
+        'cannot confirm that the recent edit history is complete',
+      );
+      expect(result.response.assistant_text).not.toMatch(/latest/i);
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data)
+        .toMatchObject({
+          dispatch: 'with_recent_change',
+          recent_change_count: 1,
+          recent_changes_status: 'degraded',
+        });
+    });
+
+    it('carries a degraded known receipt and its status into the read-only consequence prompt', async () => {
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
+      mockState.persistedGraph = POST_EDIT_GRAPH;
+      mockState.priorTurnsTotal = 41;
+      mockState.durableMutationReadFails = true;
+      const adapter = consequenceRoutingAdapter(
+        'The saved cost link is stronger, but I cannot confirm the edit history is complete.',
+      );
+
+      const result = await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-degraded-known-consequence',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const prompt = adapter.chatWithTools.mock.calls[0]![0].messages[0]!
+        .content as string;
+      expect(prompt).toContain('"recent_changes_status": "degraded"');
+      expect(prompt).toContain(SAFE_SUMMARY);
+      expect(prompt).toContain('Conversation turns and rolling summaries are not');
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(committedPendingActions()).toEqual([]);
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
     });
   });
 

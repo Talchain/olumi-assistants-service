@@ -93,7 +93,7 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
 
     expect(afterReload.contextPack.conversation.window).toMatchObject({
       shown: 8,
-      available: 20,
+      available: 41,
       summarised: 12,
     });
     const summaryWatermark = kase.turns.find(
@@ -131,6 +131,22 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
         target_label: 'Support capacity',
       }),
     ]);
+    expect(afterReload.contextPack.recent_changes_status).toBe('complete');
+    expect(
+      afterReload.context.prior_turns.some(
+        (turn) => turn.turn_id === kase.turns[15]!.turn_id,
+      ),
+    ).toBe(false);
+    expect(
+      afterReload.context.prior_facts.some(
+        (fact) => fact.fact_type === 'set_factor_value',
+      ),
+    ).toBe(false);
+    expect(
+      afterReload.reads.find(
+        (read) => read.channel === 'session.readRecentAppliedMutationFactsFor',
+      )?.limit,
+    ).toBe(4);
     expect(afterReload.contextPack.graph.edges).toEqual([
       expect.objectContaining({
         from: 'factor_support_capacity',
@@ -162,6 +178,28 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
     expect(observation.routedUserMessage).not.toContain(kase.client_claims.history);
     expect(observation.routedUserMessage).not.toContain(kase.other_scenario.brief);
     expect(observation.routedUserMessage).not.toContain(kase.other_scenario.graph_label);
+  });
+
+  it('keeps a failed durable mutation read distinct from authoritative no changes', async () => {
+    const backend = DurableReturnSessionBackend.current(kase);
+    const before = backend.snapshotBytes();
+    const first = await runFreshFacadeReturnSession(backend, {
+      mutant: 'durable_mutation_read_degraded',
+    });
+    const afterColdFacade = await runFreshFacadeReturnSession(backend, {
+      mutant: 'durable_mutation_read_degraded',
+    });
+
+    expect(backend.snapshotBytes()).toBe(before);
+    expect(first.contextPack.recent_changes).toEqual([]);
+    expect(first.contextPack.recent_changes_status).toBe('degraded');
+    expect(first.routedUserMessage).toContain('"recent_changes_status": "degraded"');
+    expect(first.routedUserMessage).not.toContain('Support capacity changed from 30 to 42');
+    expect(afterColdFacade.contextPack).toEqual(first.contextPack);
+    expect(afterColdFacade.routedUserMessage).toBe(first.routedUserMessage);
+    expect(
+      scoreReturnSessionContinuity(kase, first, 'current').failures,
+    ).toContain('accepted change fact missing or not bound to its before/after values');
   });
 
   it('represents a malformed persisted graph as unavailable, never canonical-empty', async () => {
@@ -200,10 +238,10 @@ describe('return-session continuity — degraded summary joins the preceding fal
     expect(observation.contextPack.conversation_summary).toBeUndefined();
     expect(observation.contextPack.conversation.window).toMatchObject({
       shown: 20,
-      available: 20,
+      available: 41,
     });
     expect(observation.contextPack.conversation.window?.summarised).toBeUndefined();
-    expect(observation.routedUserMessage).toContain('ORCHID-12');
+    expect(observation.routedUserMessage).toContain('ORCHID-RETURN-40');
     expect(observation.routedUserMessage).not.toContain('TENSION-SAFFRON');
     expect(observation.visibleAnswer).not.toContain('TENSION-SAFFRON');
     expect(observation.visibleAnswer).toContain(
@@ -226,10 +264,10 @@ describe('return-session continuity — degraded summary joins the preceding fal
     );
     expect(observation.contextPack.conversation.window).toMatchObject({
       shown: 20,
-      available: 20,
+      available: 41,
       summarised: 0,
     });
-    expect(observation.routedUserMessage).toContain('ORCHID-12');
+    expect(observation.routedUserMessage).toContain('ORCHID-RETURN-40');
     expect(observation.routedUserMessage).not.toContain('TENSION-SAFFRON');
     expect(observation.visibleAnswer).not.toContain('TENSION-SAFFRON');
     expect(observation.visibleAnswer).toContain(

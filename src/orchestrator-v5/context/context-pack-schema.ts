@@ -747,6 +747,11 @@ export const ContextPackSchema = z
      */
     older_relevant_facts: z.string().optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
+    /**
+     * Scenario history authority for `recent_changes`. An empty array is an
+     * authoritative no-changes claim only when this is `complete`.
+     */
+    recent_changes_status: z.enum(['complete', 'capped', 'degraded']),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),
     /**

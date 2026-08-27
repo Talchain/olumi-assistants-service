@@ -84,6 +84,7 @@ export function createMockSessionStore(
     wasLatestScenarioTurnStopped: async () => false,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    readRecentAppliedMutationFactsFor: async () => [],
     // Consistent with the empty fact reads above: this scenario has no
     // analysis. The read SUCCEEDS and reports none — which is the honest
     // default and NOT the same as the read failing. A default that threw would

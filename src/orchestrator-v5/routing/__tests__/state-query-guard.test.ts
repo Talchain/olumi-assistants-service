@@ -9,7 +9,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
-import { tryStateQueryGuard } from '../state-query-guard.js';
+import {
+  CHANGES_UNAVAILABLE_TEXT,
+  tryStateQueryGuard,
+} from '../state-query-guard.js';
 
 const ADD_CONSTRAINT_50K: RecentMutation = {
   action: 'constraint_added',
@@ -17,11 +20,115 @@ const ADD_CONSTRAINT_50K: RecentMutation = {
   target_label: 'Total cost',
 };
 
-function ctxWith(recent: readonly RecentMutation[]): Pick<ContextPack, 'recent_changes'> {
-  return { recent_changes: recent };
+function ctxWith(
+  recent: readonly RecentMutation[],
+  status: ContextPack['recent_changes_status'] = 'complete',
+): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  return { recent_changes: recent, recent_changes_status: status };
 }
 
 describe('tryStateQueryGuard', () => {
+  describe('recent history status truth table', () => {
+    it('licenses no_recent_changes only for complete plus empty', () => {
+      expect(
+        tryStateQueryGuard({
+          message: 'What changed?',
+          contextPack: ctxWith([], 'complete'),
+        }),
+      ).toMatchObject({ matched: true, dispatch: 'no_recent_changes' });
+    });
+
+    it.each(['capped', 'degraded'] as const)(
+      'returns changes_unavailable for %s plus empty',
+      (status) => {
+        const outcome = tryStateQueryGuard({
+          message: 'What changed?',
+          contextPack: ctxWith([], status),
+        });
+        expect(outcome).toEqual({
+          matched: true,
+          dispatch: 'changes_unavailable',
+          assistant_text: CHANGES_UNAVAILABLE_TEXT,
+        });
+      },
+    );
+
+    it('normalises an omitted legacy/direct status to degraded', () => {
+      expect(
+        tryStateQueryGuard({
+          message: 'What changed?',
+          contextPack: { recent_changes: [] },
+        }),
+      ).toEqual({
+        matched: true,
+        dispatch: 'changes_unavailable',
+        assistant_text: CHANGES_UNAVAILABLE_TEXT,
+      });
+    });
+
+    it('preserves the ordinary complete nonempty receipt answer', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([ADD_CONSTRAINT_50K], 'complete'),
+      });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'with_recent_change' });
+      if (!outcome.matched) throw new Error('expected receipt-backed response');
+      expect(outcome.assistant_text).not.toMatch(/limited|cannot confirm/i);
+    });
+
+    it('preserves capped receipts while disclosing the bounded newest subset', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([ADD_CONSTRAINT_50K], 'capped'),
+      });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'with_recent_change' });
+      if (!outcome.matched) throw new Error('expected receipt-backed response');
+      expect(outcome.assistant_text).toContain(
+        'available history is limited to the latest three recorded edits',
+      );
+      expect(outcome.assistant_text).not.toMatch(/history is complete/i);
+    });
+
+    it('preserves degraded known receipts without claiming completeness or latest', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([ADD_CONSTRAINT_50K], 'degraded'),
+      });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'with_recent_change' });
+      if (!outcome.matched) throw new Error('expected receipt-backed response');
+      expect(outcome.assistant_text).toContain('I can verify this recorded edit');
+      expect(outcome.assistant_text).toContain(
+        'cannot confirm that the recent edit history is complete',
+      );
+      expect(outcome.assistant_text).not.toMatch(/latest/i);
+    });
+
+    it.each(['capped', 'degraded'] as const)(
+      'owns a %s empty post-mutation complaint as unavailable',
+      (status) => {
+        expect(
+          tryStateQueryGuard({
+            message: 'Did that apply?',
+            contextPack: ctxWith([], status),
+          }),
+        ).toEqual({
+          matched: true,
+          dispatch: 'changes_unavailable',
+          assistant_text: CHANGES_UNAVAILABLE_TEXT,
+        });
+      },
+    );
+
+    it('preserves healthy complete-empty complaint fallthrough', () => {
+      expect(
+        tryStateQueryGuard({
+          message: 'Did that apply?',
+          contextPack: ctxWith([], 'complete'),
+        }),
+      ).toEqual({ matched: false });
+    });
+  });
+
   describe('matches the named follow-up phrases', () => {
     const matchingMessages = [
       'What changed?',
@@ -172,7 +279,7 @@ describe('tryStateQueryGuard', () => {
         throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
       }
       expect(outcome.assistant_text).toContain('£50,000');
-      expect(outcome.assistant_text.toLowerCase()).toContain('earlier');
+      expect(outcome.assistant_text.toLowerCase()).toContain('other saved model edits');
       expect(outcome.recent_change_count).toBe(2);
     });
 

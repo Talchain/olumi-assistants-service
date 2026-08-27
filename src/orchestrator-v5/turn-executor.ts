@@ -7270,6 +7270,7 @@ export async function runTurnExecutor(
             ? stateQueryOutcome.dispatch
             : null,
           recent_change_count: contextPack.recent_changes.length,
+          recent_changes_status: contextPack.recent_changes_status,
           prior_mutation_fact_count: priorMutationFactCountForLog,
         });
 
@@ -8167,6 +8168,13 @@ export async function runTurnExecutor(
           // prompt's projections; conversation/brief are embedded as-is).
           const routingSectionChars: Record<string, number> = {
             conversation: packJsonChars(contextPack.conversation),
+            recent_changes: packJsonChars(contextPack.recent_changes),
+            // Always present and model-facing; tracking the short status token
+            // separately prevents a dark authority marker from looking like a
+            // healthy prompt in the policy tripwire.
+            recent_changes_status: packJsonChars(
+              contextPack.recent_changes_status,
+            ),
             // Context v2 S4-INJECT: the rolling-summary block's compact
             // size. 0 below 'inject' / when no stored summary — the key is
             // always present so the dashboard shows the layer arriving
@@ -12445,12 +12453,16 @@ export async function runTurnExecutor(
         cqeSummaryForLog?.ambiguous_phrasing_detected ?? false,
       coaching_signal_id: coachingSignalId,
       // V5 product-state continuity (foamy-bee tranche). `recent_changes_count`
-      // mirrors the cap on the projection (0..3); `prior_mutation_fact_count`
-      // is uncapped (whole-history observability); `state_query_guard_outcome`
-      // captures whether the named-follow-up guard matched, dispatched, or
-      // was never reached. All three default to safe zero/`'not_evaluated'`
-      // when the turn fails before the relevant code runs.
+      // mirrors the cap on the projection (0..3); `recent_changes_status`
+      // records whether that projection is complete, capped or degraded;
+      // `prior_mutation_fact_count` covers the loaded hot window only (durable
+      // cold-return receipts live on the non-enumerable history bridge);
+      // `state_query_guard_outcome` captures whether the named-follow-up guard
+      // matched, dispatched, or was never reached. Defaults fail weak when the
+      // turn stops before the relevant code runs.
       recent_changes_count: contextPackForLog?.recent_changes.length ?? 0,
+      recent_changes_status:
+        contextPackForLog?.recent_changes_status ?? 'degraded',
       prior_mutation_fact_count: priorMutationFactCountForLog,
       state_query_guard_outcome: stateQueryGuardOutcomeForLog,
     });

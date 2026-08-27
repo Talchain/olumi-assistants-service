@@ -59,6 +59,7 @@ import {
   GRAPH_CONTEXT_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
+  RECENT_CHANGES_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -124,6 +125,7 @@ function shortSha256(s: string): string {
  */
 const CODE_OWNED_INSTRUCTIONS = [
   ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
+  ['RECENT_CHANGES_INSTRUCTION', RECENT_CHANGES_INSTRUCTION],
   ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
   ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
   // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
@@ -697,6 +699,33 @@ describe('prompt ↔ pack sanction gate', () => {
 
     expect(serialised.graph_context).toEqual({ status: 'unavailable' });
     expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  });
+
+  it.each(['complete', 'capped', 'degraded'] as const)(
+    'RECENT HISTORY AUTHORITY — serialises %s exactly and emits its interpretation block once',
+    (status) => {
+      const rendered = buildUserMessage(
+        { ...PACK, recent_changes_status: status },
+        USER_MESSAGE,
+      );
+      const serialised = observeSerialisedPack(rendered);
+
+      expect(serialised.recent_changes_status).toBe(status);
+      expect(rendered).toContain(`"recent_changes_status": "${status}"`);
+      expect(rendered.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
+    },
+  );
+
+  it('RECENT HISTORY AUTHORITY — legacy omission resolves exactly to degraded', () => {
+    const { recent_changes_status: _omittedStatus, ...legacyPack } = PACK;
+    void _omittedStatus;
+
+    const rendered = buildUserMessage(legacyPack as ContextPack, USER_MESSAGE);
+    const serialised = observeSerialisedPack(rendered);
+
+    expect(serialised.recent_changes_status).toBe('degraded');
+    expect(rendered).toContain('"recent_changes_status": "degraded"');
+    expect(rendered.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
   });
 
   it('THE GATE — every prose-bearing model-facing field is NAMED in the text the model receives', () => {

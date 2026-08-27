@@ -37,6 +37,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { isNoopFact } from '../tools/fact-noop.js';
 import { sanitiseUserFacingText } from '../../orchestrator/shared/output-safety.js';
+import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import {
   formatConstraintAdded,
   formatConstraintUpdated,
@@ -162,13 +163,7 @@ export function projectRecentChanges(
  *
  * Adding a mutation handler ⇒ add its `fact_type` here AND a branch below.
  */
-export const MUTATION_RECEIPT_FACT_TYPES: ReadonlySet<HandlerFact['fact_type']> =
-  new Set<HandlerFact['fact_type']>([
-    'add_constraint',
-    'set_factor_value',
-    'adjust_edge_strength',
-    'edit_graph',
-  ]);
+export { MUTATION_RECEIPT_FACT_TYPES };
 
 /** Non-surfaced fact types + the reason each carries no `recent_changes` entry. */
 export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], string> =

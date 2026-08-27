@@ -1210,6 +1210,16 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // graph claims cannot silently become authority.
   const resolvedGraphContext: NonNullable<ContextPack['graph_context']> =
     graph_context ?? { status: 'unavailable' };
+  // Production assembly always supplies this status. Legacy/direct packs may
+  // omit it, and omission must resolve to the weakest safe interpretation:
+  // visible receipts remain usable, but an empty list is not evidence that no
+  // edit exists.
+  const resolvedRecentChangesStatus: ContextPack['recent_changes_status'] =
+    contextPack.recent_changes_status === 'complete' ||
+    contextPack.recent_changes_status === 'capped' ||
+    contextPack.recent_changes_status === 'degraded'
+      ? contextPack.recent_changes_status
+      : 'degraded';
   // Context v2 S4-INJECT (01 §2, 04 §3.1): the rolling-summary section is
   // re-appended AFTER the ground-truth `analysis`/`graph` substitutions so
   // the serialised prompt reads it BELOW structured state — Layer-A
@@ -1224,6 +1234,7 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
     analysis: display_analysis,
     graph_context: resolvedGraphContext,
     graph: display_graph,
+    recent_changes_status: resolvedRecentChangesStatus,
     ...(conversation_summary !== undefined ? { conversation_summary } : {}),
   };
   const parts: string[] = ['## ContextPack', JSON.stringify(llmFacing, null, 2)];
@@ -1231,6 +1242,10 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // legacy omission is normalised above to `unavailable`, so absence can never
   // mean permission to trust caller or conversational graph claims.
   parts.push('', GRAPH_CONTEXT_INSTRUCTION);
+  // RECENT EDIT HISTORY — always rendered. The status is always in production
+  // packs and legacy omission is normalised above, so an empty projection can
+  // never silently license a no-edits claim.
+  parts.push('', RECENT_CHANGES_INSTRUCTION);
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
   // `coaching_context` pack was injected (flag on). Flag-off → the field is
@@ -1455,6 +1470,21 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
   '- `absent`: no Living Model exists yet. Do not reconstruct one from conversation or claim that a model fact is recorded.',
   '- `unavailable`: canonical model state could not be established. Do not substitute caller input, conversation or summaries as model truth, and do not turn this into a claim that no model exists.',
   '- Never expose this status token, graph identifiers, read failures or internal field names to the user; express only the warranted substance in plain language.',
+].join('\n');
+
+/**
+ * Scenario-wide saved-edit history authority. Co-located with the model-facing
+ * status so a capped or degraded receipt set cannot acquire completeness from
+ * transcript or summary prose.
+ */
+export const RECENT_CHANGES_INSTRUCTION = [
+  '## Saved model edit history (deterministic authority)',
+  'Read `recent_changes_status` before interpreting `recent_changes`.',
+  '- `complete`: the supplied receipt list is complete. Only `complete` with an empty list licences saying there are no recorded model edits.',
+  '- `capped`: the supplied receipts are the newest bounded subset. Use them, but never claim the history is complete or that no earlier edit exists.',
+  '- `degraded`: listed receipts remain valid, but the history may be incomplete. An empty list means edit history is unavailable, not that no edit exists.',
+  '- Conversation turns and rolling summaries are not applied-mutation receipts and must never fill a missing history entry or upgrade its status.',
+  '- Never expose status tokens, receipt identifiers or internal field names to the user; state only the warranted substance in plain language.',
 ].join('\n');
 
 /**
