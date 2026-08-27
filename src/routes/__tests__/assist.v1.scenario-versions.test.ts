@@ -1511,6 +1511,40 @@ describe("POST /versions/restore — C8 persisted-graph invariants", () => {
     expect(restoreVersionAtomic).not.toHaveBeenCalled();
   });
 
+  // ⭐ ENVELOPE DRIFT. Without these four cases, deleting ALL FOUR envelope
+  // conjuncts from the binding leaves the whole suite GREEN — every other
+  // return-leg fixture varies only the hash VALUE, so the envelope comparison
+  // is exercised but never DISCRIMINATES. That is precisely the defect class
+  // this PR exists to close (an admission branch whose guard nothing pins),
+  // sitting inside the fix for it.
+  //
+  // The precondition is what makes each case bite: the head's `graph_identity_hash`
+  // still MATCHES the working graph, so conjuncts 1-3 and the hash value all
+  // hold, and the drifted envelope field is the ONLY reason to refuse. A stale
+  // envelope means the head's hash was computed under a different projection /
+  // normaliser / schema / algorithm, so its equality with a freshly computed
+  // value is not evidence the graphs are the same — fail closed.
+  it.each([
+    ["hash_algorithm", "sha512"],
+    ["identity_projection_version", "identity.v0"],
+    ["identity_normaliser_version", "normaliser.v0"],
+    ["graph_schema_version", "graph.v0"],
+  ])("ENVELOPE DRIFT — a head whose %s no longer matches is NOT a return leg", async (field, stale) => {
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    undoVersionIs();
+    getCurrentVersion.mockResolvedValue({
+      status: "ok",
+      value: restoreHead(VERSION_A, STORED_VERSION_GRAPH, { [field]: stale }),
+    });
+
+    const res = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
   it("HEAD IS NOT A RESTORE — a `user_save` head with a parent pointer is not something to return FROM", async () => {
     loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
     undoVersionIs();

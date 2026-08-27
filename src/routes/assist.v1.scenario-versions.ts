@@ -268,6 +268,26 @@ const RestoreBodySchema = z.object({
  *     introducing old corruption into a graph that has since changed — and the
  *     refusal stands.
  *
+ * ⚠⚠ DO NOT DELETE CONJUNCT 4 AS REDUNDANT WITH 1-3. IT IS NOT. There are
+ * production writers that move `scenarios.graph` WITHOUT moving
+ * `current_model_version_id`, and against those, conjuncts 1-3 ALL STILL HOLD
+ * after the graph has changed — the identity comparison is the only thing that
+ * can see it. Derived, not assumed: `current_model_version_id` has exactly FOUR
+ * write sites across every migration (`20260705120000:308` and `:464`, and this
+ * migration's `:467` and `:877`) and NONE of them is in
+ * `append_turn_atomic_v2/v3/v4` — yet that family writes
+ * `UPDATE scenarios SET graph = p_graph`, and it is a LIVE path
+ * (`session/supabase-store.ts:378` selects v3 or v2 by config). The same is true
+ * of `append_turn_atomic_v5`'s no-version path, which returns early after the
+ * delegated graph write (`20260824200000:808-810`).
+ *
+ * ⚠ AND THE HONEST BOUND, because the over-broad version of this claim is
+ * tempting: on the v5 seam an OWNED scenario whose graph actually CHANGED does
+ * move the head (`v_should_create`, `20260824200000:615`) and stamps
+ * `provenance = 'commit'`, so conjunct 2 catches that one. Conjunct 4 is the
+ * sole guard on the v2/v3/v4 seam and on v5's no-version path — not on every
+ * conceivable turn.
+ *
  * ⚠ EVERY FAILURE MODE FAILS CLOSED. An unreadable head, a null identity, a
  * drifted projection/normaliser envelope: each returns `false`, which restores
  * the pre-existing 422. The widening can only ever be granted by a positive
@@ -1054,37 +1074,42 @@ export default async function route(app: FastifyInstance) {
       //
       // ⭐ WHAT CHANGED, AND WHICH OF THE TWO DELIBERATE DECISIONS THIS IS. The
       // superseded pin named the only two ways out: *"either the undo capture
-      // became checked or the baseline semantics changed"*. THIS IS THE SECOND,
-      // and the first was considered and REJECTED. Checking the undo capture —
-      // i.e. refusing the whole outward restore when the pre-restore graph would
-      // be unreturnable — does not remove the trap, it INVERTS it: the user is
-      // then trapped INSIDE the corruption with no escape at all, and it
-      // reverses this estate's own written rationale that an absolute refusal on
-      // an already-invalid base *"would make the scenario permanently
-      // uneditable"* (`edit-graph.ts:2750-2755`, quoted in
-      // `persisted-graph-invariants.ts:199-204`).
+      // became checked or the baseline semantics changed"*. THIS IS THE SECOND.
+      // The first — refusing the whole OUTWARD restore when the pre-restore
+      // graph would be unreturnable — was considered and REJECTED: it does not
+      // remove the trap, it INVERTS it, leaving the user trapped INSIDE the
+      // corruption with no escape at all. The standing reason an absolute check
+      // is wrong here is NOT restated in this file; it is owned by
+      // `persisted-graph-invariants.ts:195-204`, which quotes
+      // `edit-graph.ts:2750-2755`. Read it there.
       //
-      // The baseline semantics changed instead, and NARROWLY: the delta check
-      // never had a concept for returning to a state the scenario ALREADY HELD
-      // (see `isReturnLegRestore`). It still refuses every NEW state that would
-      // make the scenario structurally worse — the outward-leg guarantee is
-      // untouched.
+      // What is NEW, and therefore what this file owns: the delta check had no
+      // concept for a target the scenario ALREADY HELD (`isReturnLegRestore`).
+      // Every NEW state that would make the scenario structurally worse is still
+      // refused — the outward-leg guarantee is untouched.
       //
       // ⚠ THE WIDENING, STATED PLAINLY BECAUSE IT IS REAL: a graph carrying a
       // structural violation CAN now be written to `scenarios.graph` by this
       // route, on one narrow branch. It is justified because those exact bytes
       // WERE `scenarios.graph` a moment earlier and this floor permitted them
       // there — we are undoing a write the floor allowed, not introducing one it
-      // refused. TWO HARMS CANNOT SHARE ONE WINDOW: "we refuse a corrupt write"
-      // and "the user can always get back" are DIFFERENT guarantees, and naming
-      // the return leg apart is what lets us keep both instead of trading one
-      // for the other.
+      // refused.
       if (returnLeg) {
         // OBSERVE, DO NOT REFUSE. The admission decision was made by the
         // identity binding above; re-running the delta here with a self-baseline
-        // would be a guard agreeing with itself. What this call is for is
-        // DISCLOSURE — "admitted knowingly" is the whole of Option B, and an
-        // unlogged widening is a silent one.
+        // would be a guard agreeing with itself. This call is DISCLOSURE only.
+        //
+        // ⚠ WHY THIS IS A THIRD EVENT AND NOT `v5.graph_persist.invariant_*`.
+        // The surfacing RULE is the floor's, not this file's — "a violation
+        // nobody can see is one nobody will ever fix"
+        // (`persist-graph-write.ts:272-274`). But neither existing event can
+        // express this case: `invariant_violation` means REFUSED, and
+        // `invariant_inherited` means the BASE already carried it. Here the set
+        // is `introduced` by the delta's own arithmetic — the base does NOT
+        // carry it — and is admitted anyway, on the identity binding. A distinct
+        // name is the deliberate divergence; the payload deliberately says
+        // `admitted`, never `introduced` or `inherited`, so a log consumer
+        // cannot read this as either of the other two.
         const admitted = checkPersistedGraphInvariants(graphForStore, {
           baseGraph: currentGraph,
         });
