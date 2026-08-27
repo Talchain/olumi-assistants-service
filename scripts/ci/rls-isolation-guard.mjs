@@ -408,6 +408,18 @@ try {
 
   // Bind to the OUTCOME, read back as the owner — not to the write's status code.
   const readBack = data(await rest('GET', `/scenarios?id=eq.${scenarioB}&select=title`, B), 'the owner read-back');
+  // ⚠ THIS IS THE VACUITY PIN. DO NOT REMOVE IT AS REDUNDANT.
+  // Every negative probe above asks whether A can reach B's row. If B's row is
+  // not there — or is visible to nobody — all of them pass TRIVIALLY, and the
+  // run would report "8/8 probes ran, all held" while having observed nothing.
+  // This asserts the payload under test genuinely COULD have exhibited the
+  // property, so a pass is the policy's doing and not the fixture's failure.
+  // MEASURED: against a fixture where B's row exists but is visible to nobody,
+  // this line is what turns a green exit 0 into exit 2 — removing it (and
+  // null-guarding the line below) flips that fixture to a full green pass.
+  // It is currently also backstopped by a TypeError on the next line, but that
+  // is an ACCIDENT of null-dereference, not a guard: a routine `?.` tidy-up
+  // would silently delete the only real protection. Hence this comment.
   if (readBack.count !== 1) die('could not read the second user’s own row back — this run lost its observation point', { http: readBack.http });
   if (readBack.rows[0].title === MARKER) fails.push('the other user’s row WAS modified (read-back)');
 } catch (e) {
