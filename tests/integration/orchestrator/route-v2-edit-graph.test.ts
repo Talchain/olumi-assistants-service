@@ -518,6 +518,11 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         expectDispatch: false,
       },
       {
+        label: 'suppressed: consequence question + set-noun to-phrase observation',
+        message: 'What did that update do? Set membership is important to us.',
+        expectDispatch: false,
+      },
+      {
         label: 'suppressed: consequence question + delete-noun observation',
         message: 'What did that update do? Delete operations are irreversible.',
         expectDispatch: false,
@@ -838,6 +843,7 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
       'What did that update do? The increase in cost is worrying.',
       'What did that update do? Lower risk would be better.',
       'What did that update do? Set membership is important.',
+      'What did that update do? Set membership is important to us.',
       'What did that update do? Delete operations are irreversible.',
       'What did that update do? Add another option.',
       'What did that update do? Delete the old option.',

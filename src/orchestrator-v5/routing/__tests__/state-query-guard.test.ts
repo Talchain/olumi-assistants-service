@@ -9,11 +9,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
+import { hasMutationSignal } from '../analytical-intent.js';
+import { decomposeEditMessage } from '../edit-part-decomposition.js';
+import { mentionsStructuralEditRequest } from '../mutation-language.js';
 import {
-  hasMutationSignal,
-  hasStructuredMutationSignal,
-} from '../analytical-intent.js';
-import { hasMutationWarrantSignal } from '../mutation-warrant.js';
+  hasConstraintMutationSignal,
+  hasMutationWarrantSignal,
+} from '../mutation-warrant.js';
 import {
   isStateQueryQuestionShape,
   tryStateQueryGuard,
@@ -138,6 +140,7 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? The increase in cost is worrying.',
       'What did that update do? Lower risk would be better.',
       'What did that update do? Set membership is important.',
+      'What did that update do? Set membership is important to us.',
       'What did that update do? Delete operations are irreversible.',
       'What did that update do? Rename nothing.',
       'What did that update do? Configure how?',
@@ -167,21 +170,40 @@ describe('tryStateQueryGuard', () => {
     );
 
     it.each([
-      ['Set membership is important.', false],
-      ['Delete operations are irreversible.', false],
-      ['Set churn to 5%.', true],
-      ['Delete the old option.', true],
-      ['Add another constraint.', true],
-    ] as const)(
-      'distinguishes the canonical structured subset from the broad line-start signal: %s',
-      (trailingClause, expectedStructured) => {
-        // The broad SSOT deliberately retains a legacy line-start fallback for
-        // ordinary routing. A split consequence tail may not inherit that
-        // fallback as write authority; it must match this structured subset.
-        expect(hasMutationSignal(trailingClause)).toBe(true);
-        expect(hasStructuredMutationSignal(trailingClause)).toBe(expectedStructured);
-      },
-    );
+      'Set membership is important.',
+      'Set membership is important to us.',
+      'Delete operations are irreversible.',
+    ])('does not promote a broad lexical signal into carrier authority: %s', (tail) => {
+      // These all hit the broad mutation vocabulary used by legacy routing.
+      // None produces a target/value edit part, structural command, or numeric
+      // constraint through the established carrier parsers.
+      expect(hasMutationSignal(tail)).toBe(true);
+      expect(
+        decomposeEditMessage(tail).accountableParts.some(
+          (part) => part.kind === 'value' && part.namedTargets.length > 0,
+        ),
+      ).toBe(false);
+      expect(mentionsStructuralEditRequest(tail)).toBe(false);
+      expect(hasConstraintMutationSignal(tail)).toBe(false);
+    });
+
+    it('pins numeric D1 authority to a parsed target and value', () => {
+      const parts = decomposeEditMessage('Set churn to 5%.').accountableParts;
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ kind: 'value', namedTargets: ['churn'] });
+    });
+
+    it.each([
+      'Delete the old option.',
+      'Add another constraint.',
+    ])('pins structural authority to the existing structural-intent parser: %s', (tail) => {
+      expect(mentionsStructuralEditRequest(tail)).toBe(true);
+      expect(hasMutationSignal(tail)).toBe(true);
+    });
+
+    it('pins numeric constraint authority to the existing constraint parser', () => {
+      expect(hasConstraintMutationSignal('Churn must be at most 3%.')).toBe(true);
+    });
 
     it.each([
       'What did that update do? Set churn to 5%.',

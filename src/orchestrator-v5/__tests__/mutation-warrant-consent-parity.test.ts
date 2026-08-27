@@ -354,6 +354,7 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     ['What did that update do? The increase in cost is worrying.', 'cost'],
     ['What did that update do? Lower risk would be better.', 'risk'],
     ['What did that update do? Set membership is important.', 'set-noun'],
+    ['What did that update do? Set membership is important to us.', 'set-noun-to-phrase'],
     ['What did that update do? Delete operations are irreversible.', 'delete-noun'],
   ])(
     'a leading consequence question plus a hostile observation reaches the model but writes nothing: %s',

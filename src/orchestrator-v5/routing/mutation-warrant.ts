@@ -68,11 +68,10 @@
  * recognises must also grant a warrant, so the two can never fork.
  */
 
-import {
-  hasMutationSignal,
-  hasStructuredMutationSignal,
-} from './analytical-intent.js';
+import { hasMutationSignal } from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
+import { decomposeEditMessage } from './edit-part-decomposition.js';
+import { mentionsStructuralEditRequest } from './mutation-language.js';
 import {
   isStateQueryQuestionShape,
   splitLeadingEditEffectQuestion,
@@ -302,15 +301,29 @@ export function hasMutationWarrantSignal(message: string): boolean {
   // A leading consequence question is read-only and cannot lend its edit noun
   // to a trailing observation. Conversely, a trailing clause cannot turn the
   // question into a write merely because it contains a broad edit-route verb.
-  // Require the tail, in isolation, to satisfy one of the two established
-  // concrete mutation authorities before applying the ordinary warrant rules
-  // (including veto handling) to that tail. This is clause authority, not a
-  // new noun/mood classifier.
+  // Require the isolated tail to be accepted by an existing carrier parser:
+  // numeric target/value decomposition, structural graph-edit intent, or the
+  // deontic numeric constraint parser. The broad lexical signal remains useful
+  // elsewhere but cannot authorise this split form. This is clause authority,
+  // not a new noun/mood classifier.
   const leadingEditEffect = splitLeadingEditEffectQuestion(message);
   if (leadingEditEffect !== null) {
     const trailing = leadingEditEffect.trailingClause;
     if (trailing === null) return false;
-    if (!hasStructuredMutationSignal(trailing) && !hasConstraintMutationSignal(trailing)) {
+    const parsedValueAuthority = decomposeEditMessage(trailing).accountableParts.some(
+      (part) => part.kind === 'value' && part.namedTargets.length > 0,
+    );
+    // The structural parser recognises a wider edit vocabulary than this
+    // warrant historically grants (for example `rename`). Intersect it with
+    // the existing canonical mutation signal so the parser supplies object /
+    // action structure without silently widening carrier authority.
+    const parsedStructuralAuthority =
+      mentionsStructuralEditRequest(trailing) && hasMutationSignal(trailing);
+    if (
+      !parsedValueAuthority &&
+      !parsedStructuralAuthority &&
+      !hasConstraintMutationSignal(trailing)
+    ) {
       return false;
     }
     return hasMutationWarrantSignal(trailing);
