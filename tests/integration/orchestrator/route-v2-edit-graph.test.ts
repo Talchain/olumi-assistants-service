@@ -498,6 +498,21 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         expectDispatch: false,
       },
       {
+        label: 'suppressed: consequence question + declarative rename noun',
+        message: 'What did that update do? Renames are risky.',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: consequence question + negated rename imperative',
+        message: 'What did that update do? Rename nothing.',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: consequence question + configure question',
+        message: 'What did that update do? Configure how?',
+        expectDispatch: false,
+      },
+      {
         label: 'suppressed: "compare options" alone',
         message: 'Compare options A and B for me',
         expectDispatch: false,

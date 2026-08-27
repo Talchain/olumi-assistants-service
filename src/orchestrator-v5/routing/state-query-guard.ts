@@ -22,10 +22,10 @@
  *      `edit_graph`. The user gets honest copy — "I haven't applied
  *      anything in this session." — instead of the legacy denial.
  *   4. Questions about the consequence of an accepted edit (for example,
- *      "what did that update do?") are protected from edit routing here but
- *      deliberately declined by this guard. The existing read-only reasoning
- *      path can then answer from the canonical graph, freshness state and
- *      persisted receipt instead of merely repeating the receipt.
+ *      "what did that update do?") are protected from edit routing here. With
+ *      a persisted receipt they are declined to the existing read-only
+ *      reasoning path; without one they receive the deterministic unavailable
+ *      answer rather than asking the model to speculate about an unknown edit.
  *   5. If not matched, return `{ matched: false }` and the lifecycle
  *      proceeds to the LLM.
  *
@@ -145,13 +145,14 @@ const EDIT_EFFECT_QUESTION_LEAD =
   /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
 
 /**
- * Return only the text after a leading edit-consequence question.
+ * Detect a second conversational clause after a leading effect question.
  *
- * This is a structural split, not a mutation classifier. Callers that own
- * mutation authority must evaluate the returned clause through their existing
- * warrant policy; this module must not grow a second edit-verb list.
+ * This split only prevents the one-line receipt guard from swallowing a
+ * compound turn. It is deliberately private and MUST NOT be consumed as a
+ * mutation classifier or warrant: the normal routing and action layers retain
+ * sole authority over whether the trailing words request a change.
  */
-export function editEffectTrailingClause(message: string): string | null {
+function editEffectTrailingClause(message: string): string | null {
   const match = EDIT_EFFECT_QUESTION_LEAD.exec(message);
   if (match === null) return null;
   const trailing = message
@@ -557,6 +558,8 @@ export function tryStateQueryGuard(
     // a record for the subject, which is exactly what this deferral routes to.
   }
 
+  const recent = input.contextPack.recent_changes;
+
   // "What changed?" asks for a receipt. "What did that update do?" asks for
   // its consequence. Repeating the same receipt for both is context loss: the
   // pack already carries the canonical post-edit graph, recent receipt and
@@ -568,11 +571,19 @@ export function tryStateQueryGuard(
   // be diverted into edit_graph; declining here only enables a read-only model
   // call. No new classifier, handler, or mutation permission is introduced.
   if (STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
+    if (recent.length === 0) {
+      return {
+        matched: true,
+        dispatch: 'no_recent_changes',
+        assistant_text: NO_RECENT_CHANGES_TEXT,
+      };
+    }
     return { matched: false };
   }
-  // A compound consequence turn is never owned by the one-line receipt guard.
-  // The route evaluates this trailing clause through the canonical mutation-
-  // warrant policy; if it is read-only, the model can answer both questions.
+  // A compound consequence turn also belongs to the conversational path. This
+  // says nothing about mutation authority: a trailing statement, question,
+  // veto or genuine edit request is evaluated later by the existing route and
+  // action warrant gates. In particular, position alone never grants a write.
   if (editEffectTrailingClause(input.message) !== null) return { matched: false };
 
   // Negative gate — cheapest of the session-edit arms. A message with an
@@ -585,7 +596,6 @@ export function tryStateQueryGuard(
     return { matched: false };
   }
 
-  const recent = input.contextPack.recent_changes;
   // Two phrase classes:
   //   - STATE_QUERY_PATTERNS: legacy named follow-ups ("what changed",
   //     "did you update", etc.). Fire regardless of recent_changes — the

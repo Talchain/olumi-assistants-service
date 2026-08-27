@@ -331,6 +331,25 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     expect(warrantEvents('step2_gate')[0]!.data.handler_id).toBe('add_constraint');
   });
 
+  it('a non-request clause after an edit-effect question cannot authorise a model-proposed write', async () => {
+    const routingAdapter = witnessedAddConstraintAdapter();
+
+    await runTurnExecutor(
+      payload('What did that update do? Renames are risky.'),
+      'req-warrant-effect-compound',
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    // The conversational guard correctly hands the compound turn to the model,
+    // but that handoff is not consent. Even a model-proposed execute-class
+    // mutation is stopped at the action boundary.
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(warrantEvents('step2_gate')).toHaveLength(1);
+    expect(warrantEvents('step2_gate')[0]!.data.handler_id).toBe('add_constraint');
+  });
+
   it('⭐ THE WITNESSED DEFECT (walk §J7) — the proposal is DEMOTED to a proposal chip and a persisted pending, not dropped', async () => {
     const routingAdapter = witnessedAddConstraintAdapter();
 

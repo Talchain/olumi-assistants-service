@@ -526,6 +526,31 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       const guardEvent = events.find((e) => e.event === 'v5.state_query_guard');
       expect(guardEvent?.data.recent_change_count).toBe(0);
     });
+
+    it('answers an edit-effect question deterministically when no accepted receipt exists', async () => {
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [{ ...ACCEPTED_EDIT_GRAPH_FACT, noop: true }];
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-no-receipt-edit-effect',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text?.toLowerCase()).toMatch(
+        /record of recent edits|like to make a change/,
+      );
+      expect(findForbiddenPhraseHit(result.response.assistant_text!)).toBeNull();
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data).toMatchObject({
+        matched: true,
+        dispatch: 'no_recent_changes',
+        recent_change_count: 0,
+      });
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+    });
   });
 
   // -------------------------------------------------------------------------

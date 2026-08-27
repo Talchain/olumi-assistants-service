@@ -91,11 +91,19 @@ describe('tryStateQueryGuard', () => {
       });
     }
 
-    it('still declines when no receipt is available instead of inventing an effect or an absence claim', () => {
-      expect(tryStateQueryGuard({
+    it('keeps the no-receipt case deterministic instead of asking the model to speculate', () => {
+      const outcome = tryStateQueryGuard({
         message: 'What did that update do?',
         contextPack: ctxWith([]),
-      })).toEqual({ matched: false });
+      });
+      expect(outcome).toMatchObject({
+        matched: true,
+        dispatch: 'no_recent_changes',
+      });
+      if (!outcome.matched) throw new Error('expected deterministic no-receipt response');
+      expect(outcome.assistant_text.toLowerCase()).toMatch(
+        /record of recent edits|like to make a change/,
+      );
     });
 
     it('does not suppress a compound effect question followed by a real edit', () => {
@@ -109,11 +117,9 @@ describe('tryStateQueryGuard', () => {
     });
 
     it.each([
-      'What did that update do? Rename the option to Enterprise Plus.',
-      'What did that update do? Delete the old option.',
       'What did that update do? Add another option.',
       'What did that update do? Remove another option.',
-    ])('preserves the trailing mutation warrant for %s', (message) => {
+    ])('preserves an existing whole-message mutation warrant for %s', (message) => {
       expect(hasMutationWarrantSignal(message)).toBe(true);
       expect(tryStateQueryGuard({
         message,
@@ -121,9 +127,41 @@ describe('tryStateQueryGuard', () => {
       })).toEqual({ matched: false });
     });
 
+    it.each([
+      'What did that update do? Renames are risky.',
+      'What did that update do? Changes are expected.',
+      'What did that update do? Deletes are irreversible.',
+      'What did that update do? Rename nothing.',
+      'What did that update do? Configure how?',
+      'What did that update do? Rename it back? No, leave it.',
+    ])('does not mint a mutation warrant from trailing position alone: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
+    it.each([
+      ['What did that update do? Delete the old option.', true],
+      ['What did that update do? Rename the option to Enterprise Plus.', false],
+    ] as const)(
+      'keeps protective route suppression separate from whole-message warrant: %s',
+      (message, expectedWarrant) => {
+        expect(isStateQueryQuestionShape(message)).toBe(true);
+        expect(hasMutationWarrantSignal(message)).toBe(expectedWarrant);
+        expect(tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+        })).toEqual({ matched: false });
+      },
+    );
+
     it('preserves an explicit trailing veto', () => {
       const message =
         'What did that update do? Rename the option, but do not change the model.';
+      expect(isStateQueryQuestionShape(message)).toBe(true);
       expect(hasMutationWarrantSignal(message)).toBe(false);
       expect(tryStateQueryGuard({
         message,
