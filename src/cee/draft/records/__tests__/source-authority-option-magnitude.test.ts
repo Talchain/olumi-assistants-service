@@ -824,9 +824,26 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
 
     const projected = projectRecordsToGraph(withExplicitMagnitude, FACTOR_CARRIED_BRIEF);
     expect(rawInterventionOf(projected, FULL_SWITCH)).toBe(30_000);
-    // Its £30k basis is unresolved against the £25k figure, so the unchanged
-    // direct path keeps the value but does not mislabel it as brief-extracted.
-    expect(bindingOf(projected, FULL_SWITCH)).toBeUndefined();
+    // Its £30k basis is unresolved against the £25k figure, so the direct path
+    // keeps the value but does not mislabel it as brief-extracted.
+    //
+    // ⚠ THIS ASSERTION WAS `toBeUndefined()`, AND THAT WAS A PROXY, NOT THE
+    // PROPERTY. The comment above states the property — "does not mislabel it
+    // as brief-extracted" — and an ABSENT binding was merely the shape that
+    // happened to satisfy it while a cited-but-unequal basis was discarded
+    // entirely. It no longer is: this is exactly the composed-magnitude class
+    // (`__tests__/composed-magnitude-cites-stated-figures.test.ts`), where a
+    // model value cites a stated figure it does not equal, and the receipt is
+    // now kept so the live `confirm_value` ask can see it. The stamp is
+    // unchanged, so the property this test guards is intact — only the proxy
+    // moved. Asserted against the property directly, and more specifically than
+    // before (CLAUDE.md trap 13d: write the invariant against the spec, never
+    // against the shape the failure mode happened to take).
+    expect(bindingOf(projected, FULL_SWITCH)).toMatchObject({
+      raw_value: 30_000,
+      source: "cee_hypothesis",
+    });
+    expect(String(bindingOf(projected, FULL_SWITCH)!.reasoning)).toContain("stated_items[4]=25000");
   });
 
   it("preserves the genuine identical-refinement consolidation control", () => {
