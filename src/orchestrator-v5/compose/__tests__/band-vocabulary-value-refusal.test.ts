@@ -39,6 +39,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeValidationFailure } from '../validation-failure-responses.js';
+import { composeRecoverableValidationResponse } from '../recoverable-validation-response.js';
 import { buildQualitativeValueRefusalText } from '../parameter-user-phrasing.js';
 import { readMissingValueAnswer } from '../../routing/missing-value-answer.js';
 import type { ComposeContext } from '../types.js';
@@ -348,5 +349,47 @@ describe('ROADMAP 2.384 — neighbouring refusals are untouched', () => {
       'frame',
     );
     expect(template_id).toBe('parameter_invalid');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE REACHABILITY PIN — the half that goes dark if nobody asserts it.
+//
+// `composeValidationFailure` (asserted above) is the turn-executor's
+// IMPOSSIBLE-STATE 500 SAFETY NET (`turn-executor.ts:9214`). The path a real
+// user takes is the RECOVERABLE 200 one: PARAMETER_INVALID is one of the seven
+// codes that "recover as 200 + coaching" via
+// `composeRecoverableValidationResponse` (`turn-executor.ts:9181`).
+//
+// Both call the same `composeBody`, and the turn-executor hands BOTH the same
+// `composeCtx` — built at `turn-executor.ts:9138-9146` with `graph:
+// graphLookupForValidate` AND `userMessage: payload.message`. So the branch is
+// live. But "they share a helper today" is a fact about this tip, not a
+// guarantee: a suite that only ever drives the 500 net would stay green while
+// the 200 path stopped carrying the copy, and the user only ever sees the 200.
+// ---------------------------------------------------------------------------
+
+describe('ROADMAP 2.384 — reachable on the RECOVERABLE 200 path, not just the 500 net', () => {
+  it('the recoverable composer emits the same band-aware refusal', () => {
+    const { response, template_id } = composeRecoverableValidationResponse(
+      paramInvalid(),
+      ctxWith(WITNESSED_MESSAGE, graphWith([TARGET_ID, OTHER_ID])),
+      'frame',
+    );
+    expect(template_id).toBe('parameter_invalid_qualitative_value');
+    expect(response.assistant_text).toContain('"high"');
+    expect(response.assistant_text).toContain(TARGET_LABEL);
+    expect(response.assistant_text).toContain(WITNESSED_DISPLAY);
+    // and the 200 envelope's own contract still holds
+    expect(response.blocks).toEqual([]);
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('the two entry points agree, so neither can drift dark unnoticed', () => {
+    const ctx = ctxWith(WITNESSED_MESSAGE, graphWith([TARGET_ID, OTHER_ID]));
+    const net = composeValidationFailure(paramInvalid(), ctx, 'frame');
+    const live = composeRecoverableValidationResponse(paramInvalid(), ctx, 'frame');
+    expect(live.response.assistant_text).toBe(net.response.assistant_text);
+    expect(live.template_id).toBe(net.template_id);
   });
 });
