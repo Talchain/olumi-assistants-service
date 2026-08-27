@@ -40,6 +40,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -161,16 +162,16 @@ const SAFE_SUMMARY =
 // Accepted edit_graph fact — the shape EditGraphHandlerFactSchema produces.
 // Modelled on the rich-path builder output: status='applied', noop=false,
 // safe_summary populated, affected_entities[0].label set.
-const ACCEPTED_EDIT_GRAPH_FACT = {
-  fact_type: 'edit_graph' as const,
-  fact_version: 1 as const,
+const ACCEPTED_EDIT_GRAPH_FACT = EditGraphHandlerFactSchema.parse({
+  fact_type: 'edit_graph',
+  fact_version: 1,
   noop: false,
   result: {
-    edit_kind: 'parameter_update' as const,
-    status: 'applied' as const,
+    edit_kind: 'parameter_update',
+    status: 'applied',
     operations_count: 1,
     affected_entities: [
-      { kind: 'edge' as const, label: 'Incremental Hiring Cost edge' },
+      { kind: 'edge', label: 'Incremental Hiring Cost edge' },
     ],
     graph_hash_before: 'pre0000000000000',
     graph_hash_after: 'post000000000000',
@@ -178,7 +179,7 @@ const ACCEPTED_EDIT_GRAPH_FACT = {
     impact: 'moderate' as const,
     rerun_recommended: true,
   },
-};
+});
 
 const PRIOR_EDIT_TURN = {
   id: PRIOR_EDIT_ROW_ID,
@@ -508,6 +509,40 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         discloseTail: true,
       },
       {
+        // The canonical factor label makes this look exactly like the
+        // deterministic value-update carrier. The receipt-backed consequence
+        // route must already own the turn before that pre-route runs.
+        message:
+          'What did that update do? It may set Incremental Hiring Cost to 5%.',
+        discloseTail: true,
+      },
+      {
+        // Likewise, an imperative analysis tail must remain part of the
+        // read-only explanation turn rather than execute run_analysis.
+        message: 'What did that update do? Run the analysis again.',
+        // The existing structural-tail recogniser does not classify analysis
+        // execution copy as a graph-edit carrier. The ordering/no-execution
+        // invariant is independent of that disclosure policy.
+        discloseTail: false,
+      },
+      {
+        // These next three are independent deterministic pre-route families.
+        // Their disclosure classification is not the invariant under test;
+        // each must defer to the sole receipt-backed explanation carrier.
+        message:
+          'What did that update do? 3 out of 7 similar projects succeeded.',
+        discloseTail: undefined,
+      },
+      {
+        message:
+          'What did that update do? Incremental Hiring Cost is pretty likely.',
+        discloseTail: undefined,
+      },
+      {
+        message: 'What did that update do? Should I rerun it?',
+        discloseTail: undefined,
+      },
+      {
         message:
           'What did that update do? It may link Incremental Hiring Cost to Q3 Roadmap Commitments.',
         discloseTail: true,
@@ -546,13 +581,18 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         expect(prompt).toContain('trailing clause is handled separately');
         expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
         expect(prompt).toContain(SAFE_SUMMARY);
+        expect(events.find((event) => event.event === 'v5.state_query_guard')?.data).toMatchObject({
+          matched: false,
+          dispatch: null,
+          recent_change_count: 1,
+        });
 
         expect(result.response.assistant_text).toContain(answer);
-        if (discloseTail) {
+        if (discloseTail === true) {
           expect(result.response.assistant_text).toContain(
             'I did not apply the carrier-looking clause',
           );
-        } else {
+        } else if (discloseTail === false) {
           expect(result.response.assistant_text).not.toContain(
             'I did not apply the carrier-looking clause',
           );
@@ -569,6 +609,95 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         expect(committed).toHaveProperty('graph', undefined);
       },
     );
+
+    it.each([
+      {
+        preRoute: 'run comparison',
+        message: 'What did that update do? Why did the result change?',
+        facts: () => [
+          ACCEPTED_EDIT_GRAPH_FACT,
+          {
+            ...makeRunAnalysisFact(POST_EDIT_HASH),
+            result: {
+              ...makeRunAnalysisFact(POST_EDIT_HASH).result,
+              computed_at: new Date(Date.now() - 30_000).toISOString(),
+              summary: 'Current run',
+            },
+          },
+          {
+            ...makeRunAnalysisFact(PRE_EDIT_HASH),
+            result: {
+              ...makeRunAnalysisFact(PRE_EDIT_HASH).result,
+              computed_at: new Date(Date.now() - 180_000).toISOString(),
+              summary: 'Baseline run',
+            },
+          },
+        ],
+      },
+      {
+        preRoute: 'fresh post-analysis advice',
+        message: 'What did that update do? Explain the results.',
+        facts: () => [makeRunAnalysisFact(POST_EDIT_HASH), ACCEPTED_EDIT_GRAPH_FACT],
+      },
+      {
+        preRoute: 'no-analysis recovery',
+        message: 'What did that update do? Walk me through the analysis.',
+        facts: () => [ACCEPTED_EDIT_GRAPH_FACT],
+      },
+    ])(
+      'keeps the $preRoute pre-route behind the receipt-backed explanation carrier',
+      async ({ message, facts }) => {
+        mockState.priorFacts = facts();
+        const adapter = hostileMutatingRoutingAdapter(
+          'The saved change and current model together explain the consequence without applying anything else.',
+        );
+
+        const result = await runTurnExecutor(
+          mkPayload(message),
+          `req-edit-effect-preroute-${randomUUID()}`,
+          { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+        );
+
+        expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+        expect(result.telemetry.turn_class).toBe('direct_answer');
+        expect(result.response.suggested_actions ?? []).toHaveLength(0);
+        expect(result.response).not.toHaveProperty('model_version_receipt');
+        expect(committedPendingActions()).toHaveLength(0);
+        expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+      },
+    );
+
+    it('keeps typed mutation-chip metadata behind the same focused read-only carrier', async () => {
+      const adapter = hostileMutatingRoutingAdapter(
+        'The accepted update changed the saved relationship; the chip metadata did not create another edit.',
+      );
+      const payload: MessageTurnPayload = {
+        ...mkPayload('What did that update do? Please use this control.'),
+        source: 'chip_click',
+        chip: {
+          action_type: 'set_factor_value',
+          parameters: {
+            target_id: 'fac_hiring_cost',
+            value: 5,
+            unit: '%',
+            operator: 'set',
+          },
+        },
+      };
+
+      const result = await runTurnExecutor(
+        payload,
+        'req-edit-effect-typed-chip',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      expect(result.telemetry.turn_class).toBe('direct_answer');
+      expect(result.response.suggested_actions ?? []).toHaveLength(0);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(committedPendingActions()).toHaveLength(0);
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+    });
 
     it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
       'carries graph_context=%s into the effective compound-consequence call without request promotion',
@@ -616,6 +745,26 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       const result = await runTurnExecutor(
         mkPayload('Note: What did that update do? Add another option.'),
         'req-edit-effect-unanchored',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      expect(result.response.suggested_actions ?? []).toHaveLength(0);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      expect(committedPendingActions()).toHaveLength(0);
+      expect(
+        mockState.appendWrites.some((write) => write.graph !== undefined),
+      ).toBe(false);
+    });
+
+    it('suppresses text-only proposal chips and pending capture for an unanchored occurrence', async () => {
+      const adapter = callingRoutingAdapter(
+        'I can explain the accepted update. Would you like me to add Supplier concentration as a risk?',
+      );
+
+      const result = await runTurnExecutor(
+        mkPayload('Note: What did that update do? Add another option.'),
+        'req-edit-effect-unanchored-text-proposal',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
 
@@ -706,14 +855,20 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(guardEvent?.data.recent_change_count).toBe(0);
     });
 
-    it('answers an edit-effect question deterministically when no accepted receipt exists', async () => {
+    it.each([
+      'What did that update do?',
+      'What did that update do? Set Incremental Hiring Cost to 42.',
+      'What did that update do? Please run the analysis again.',
+    ])(
+      'answers an edit-effect question deterministically when no accepted receipt exists: %s',
+      async (message) => {
       mockState.priorTurns = [PRIOR_EDIT_TURN];
       mockState.priorFacts = [{ ...ACCEPTED_EDIT_GRAPH_FACT, noop: true }];
       mockState.persistedGraph = PRE_EDIT_GRAPH;
       const adapter = throwingRoutingAdapter();
 
       const result = await runTurnExecutor(
-        mkPayload('What did that update do?'),
+        mkPayload(message),
         'req-no-receipt-edit-effect',
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
@@ -729,7 +884,10 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         recent_change_count: 0,
       });
       expect(result.response).not.toHaveProperty('model_version_receipt');
-    });
+      expect(committedPendingActions()).toHaveLength(0);
+      expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
+      },
+    );
   });
 
   // -------------------------------------------------------------------------

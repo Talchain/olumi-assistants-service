@@ -198,7 +198,11 @@ import {
 } from './context/grounded-selection.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
+  CARRIER_LOOKING_COMPOUND_DISCLOSURE,
   composeStateQueryChip,
+  containsEditEffectQuestion,
+  isCarrierLookingCompoundTail,
+  splitLeadingEditEffectQuestion,
   tryStateQueryGuard,
 } from './routing/state-query-guard.js';
 import {
@@ -1451,11 +1455,22 @@ export async function runTurnExecutor(
           preserveMutationReceipt: mutationReceiptWillBePersisted,
         },
       );
-      const commitMeta = zeroSelectionProjection.applied
-        ? { ...meta, pending_actions: [] }
-        : meta;
+      // A message that asks what an accepted edit did is read-only at the
+      // whole-turn boundary, even when the question is embedded in other
+      // prose.  The action-layer warrant already prevents a graph write; this
+      // commit chokepoint independently prevents either model text or a
+      // deterministic guard from minting a weaker chip/pending authority.
+      // Existing live pendings still follow the ordinary carry-forward rules;
+      // this turn simply cannot create another one.
+      const editEffectReadOnlyResponse = containsEditEffectQuestionForRun
+        ? { ...zeroSelectionProjection.response, suggested_actions: [] }
+        : zeroSelectionProjection.response;
+      const commitMeta =
+        zeroSelectionProjection.applied || containsEditEffectQuestionForRun
+          ? { ...meta, pending_actions: [] }
+          : meta;
       result = await commitDirectAnswer(
-        zeroSelectionProjection.response,
+        editEffectReadOnlyResponse,
         {
           // Injected BEFORE ...meta so a call site could still override; no
           // current call site does (the wrapper's server-read derivation is
@@ -1586,6 +1601,14 @@ export async function runTurnExecutor(
   // union, and adding the brief-audit outcome is precisely the edit that would
   // have drifted.
   let stateQueryGuardOutcomeForLog: StateQueryGuardOutcomeForLog = 'not_evaluated';
+  // Accepted-edit consequence questions are a read-only reasoning class. The
+  // split is message-only and grants no authority: a persisted receipt is
+  // still required below before the existing explanation carrier is forced.
+  const leadingEditEffectQuestion = splitLeadingEditEffectQuestion(payload.message);
+  const leadingEditEffectTail = leadingEditEffectQuestion?.trailingClause ?? null;
+  const containsEditEffectQuestionForRun = containsEditEffectQuestion(payload.message);
+  let focusedCompoundConsequenceForRun = false;
+  let discloseFocusedCompoundTailForRun = false;
   // Compute the successful-mutation-fact count ONCE at function entry so
   // every turn class (including those where an earlier pre-route —
   // short-confirm, deterministic value-update — synthesises a routing
@@ -2876,6 +2899,22 @@ export async function runTurnExecutor(
         ...cqeSummary,
       });
       contextPackForLog = contextPack;
+      // Classify the focused, receipt-backed consequence turn as soon as the
+      // authoritative ContextPack exists. Every deterministic/analysis
+      // pre-route below must defer to this one read-only route; assigning the
+      // class only beside the eventual LLM call allowed value and rerun
+      // pre-routes to act first.
+      focusedCompoundConsequenceForRun =
+        leadingEditEffectTail !== null && contextPack.recent_changes.length > 0;
+      discloseFocusedCompoundTailForRun =
+        focusedCompoundConsequenceForRun &&
+        isCarrierLookingCompoundTail(leadingEditEffectTail!);
+      // The state-query guard owns the entire accepted-edit consequence
+      // question class, including the truthful no-receipt outcome.  If only
+      // receipt-backed focused compounds disabled the corridor, value-update
+      // and rerun pre-routes could act before the guard established that no
+      // accepted change exists.
+      const competingPreRoutesAllowedForRun = !containsEditEffectQuestionForRun;
       contextPackCharsForObs = JSON.stringify(contextPack).length;
       if (timingsEnabled) {
         turnTimings.context_pack_assembly_ms = Date.now() - contextPackStartedAt;
@@ -3906,13 +3945,15 @@ export async function runTurnExecutor(
         context.most_recent_pending_actions ?? [],
         options.chipClickResumeIntent,
       );
-      const shortConfirmDispatch = tryShortConfirmResume({
-        message: resumerMessage,
-        pendingActions: pendingsForShortConfirm,
-        currentTurnIndex: context.prior_turns.length,
-        nowMs: Date.now(),
-        analysisFreshness: freshness?.freshness,
-      });
+      const shortConfirmDispatch = competingPreRoutesAllowedForRun
+        ? tryShortConfirmResume({
+            message: resumerMessage,
+            pendingActions: pendingsForShortConfirm,
+            currentTurnIndex: context.prior_turns.length,
+            nowMs: Date.now(),
+            analysisFreshness: freshness?.freshness,
+          })
+        : ({ matched: false, skip_reason: 'no_short_confirm' } as const);
       if (!shortConfirmDispatch.matched) {
         emit(TelemetryEvents.PendingActionSkipped, {
           request_id: requestId,
@@ -4768,7 +4809,7 @@ export async function runTurnExecutor(
       // against ALL live apply_proposed_change candidates so an
       // exact-label or ordinal pick resolves deterministically
       // regardless of how short-confirm classified the message.
-      if (!shortConfirmDispatch.matched) {
+      if (competingPreRoutesAllowedForRun && !shortConfirmDispatch.matched) {
         const liveProposals = (context.most_recent_pending_actions ?? []).filter(
           (pa) => pa.action.kind === 'apply_proposed_change',
         );
@@ -4994,7 +5035,11 @@ export async function runTurnExecutor(
       // negative-control gate ensures messages mixing dismissal with
       // positive tokens ("not now, but add it anyway") fall through
       // to the LLM.
-      if (!shortConfirmDispatch.matched && routingResult === undefined) {
+      if (
+        competingPreRoutesAllowedForRun &&
+        !shortConfirmDispatch.matched &&
+        routingResult === undefined
+      ) {
         const dismissal = tryProposalDismissal({
           message: payload.message,
           livePendingActions: context.most_recent_pending_actions ?? [],
@@ -5088,6 +5133,7 @@ export async function runTurnExecutor(
           : {}),
       });
       if (
+        competingPreRoutesAllowedForRun &&
         clarificationDispatch.matched &&
         clarificationDispatch.dispatch === 'set_factor_value'
       ) {
@@ -5161,6 +5207,7 @@ export async function runTurnExecutor(
           consumedPendingAction = pending;
         }
       } else if (
+        competingPreRoutesAllowedForRun &&
         clarificationDispatch.matched &&
         clarificationDispatch.dispatch === 'edit_graph_add_risk'
       ) {
@@ -5248,7 +5295,14 @@ export async function runTurnExecutor(
           );
         }
         return finalizeRun();
-      } else if (clarificationDispatch.matched) {
+      } else if (
+        competingPreRoutesAllowedForRun &&
+        clarificationDispatch.matched &&
+        (clarificationDispatch.dispatch === 'recovery_expired' ||
+          clarificationDispatch.dispatch === 'recovery_graph_changed' ||
+          clarificationDispatch.dispatch === 'recovery_targets_missing' ||
+          clarificationDispatch.dispatch === 'recovery_label_ambiguous')
+      ) {
         // Focused recovery dispatches — the resumer claimed the turn
         // but the persisted clarification is no longer applicable
         // (expired, graph mutated, targets removed, or the user's
@@ -5496,6 +5550,7 @@ export async function runTurnExecutor(
       // a turn falls through to the LLM instead, per the #634/#635 contract.
       let typedChipMutationUnroutedFallThrough = false;
       if (
+        competingPreRoutesAllowedForRun &&
         routingResult === undefined &&
         typedChipActionType !== undefined &&
         isTypedChipMutationActionType(typedChipActionType)
@@ -5596,6 +5651,7 @@ export async function runTurnExecutor(
       // exactly as it was before 2.918. Chip-click turns never reach this
       // (their copy is canned, not an answer): source-gated below.
       if (
+        competingPreRoutesAllowedForRun &&
         routingResult === undefined &&
         payload.source !== 'chip_click' &&
         payload.source !== 'chip'
@@ -5808,7 +5864,11 @@ export async function runTurnExecutor(
       // FUTURE slice that writes anything derived from this to the graph
       // must pass `mutation-warrant`'s INV-1; recording a user's own stated
       // counts as context is not a model mutation and does not.
-      if (routingResult === undefined && !typedChipMutationUnroutedFallThrough) {
+      if (
+        competingPreRoutesAllowedForRun &&
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough
+      ) {
         const referenceClass = recogniseReferenceClass(payload.message);
         if (referenceClass.kind !== 'none') {
           const referenceClassAt = new Date().toISOString();
@@ -5919,7 +5979,11 @@ export async function runTurnExecutor(
         }
       }
 
-      if (routingResult === undefined && !typedChipMutationUnroutedFallThrough) {
+      if (
+        competingPreRoutesAllowedForRun &&
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough
+      ) {
         const calibrationOnly = classifyCalibrationMessage(payload.message);
         const calibrationTarget =
           calibrationOnly.kind === 'none'
@@ -6004,7 +6068,9 @@ export async function runTurnExecutor(
       }
 
       let deterministicValueUpdate =
-        routingResult === undefined && !typedChipMutationUnroutedFallThrough
+        competingPreRoutesAllowedForRun &&
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough
           ? tryDeterministicValueUpdate(
               payload.message,
               contextPack.parsed_quantities,
@@ -6027,6 +6093,7 @@ export async function runTurnExecutor(
       // wins (selection is also a tie-breaker for label-based ambiguous
       // cases, handled inside `tryDeterministicValueUpdate`).
       const deicticDispatch =
+        competingPreRoutesAllowedForRun &&
         routingResult === undefined &&
         !typedChipMutationUnroutedFallThrough &&
         !deterministicValueUpdate.matched
@@ -6074,6 +6141,7 @@ export async function runTurnExecutor(
       // S2-L3 precedence: also skipped when a typed-chip proposal already
       // routed (routingResult set) so the compound text parser cannot overwrite.
       if (
+        competingPreRoutesAllowedForRun &&
         routingResult === undefined &&
         !typedChipMutationUnroutedFallThrough &&
         !deterministicValueUpdate.matched
@@ -6974,6 +7042,7 @@ export async function runTurnExecutor(
       // reason so "did not read as a re-run" and "read as one but could not be
       // served" are distinguishable in ops rather than both being silence.
       if (
+        competingPreRoutesAllowedForRun &&
         routingResult === undefined &&
         looksLikeImperativeRerun(payload.message) &&
         !hasMutationSignal(payload.message)
@@ -7073,7 +7142,7 @@ export async function runTurnExecutor(
       // present an old comparison as the current model). Otherwise it
       // declines and the state-query guard keeps its existing behaviour.
       // 0 LLM calls, 0 new DB reads (reuses prior_facts + freshness).
-      if (routingResult === undefined) {
+      if (competingPreRoutesAllowedForRun && routingResult === undefined) {
         const runComparisonOutcome = tryRunComparisonGate({
           message: payload.message,
           priorFacts: context.prior_facts,
@@ -7341,7 +7410,7 @@ export async function runTurnExecutor(
       // sees the same input shape it always has — the gate continues
       // to fast-fail on `not_fresh` for everything this guard does
       // not match, so behaviour is additive.
-      if (routingResult === undefined) {
+      if (competingPreRoutesAllowedForRun && routingResult === undefined) {
         const staleOutcome = tryStaleRerunGuard({
           message: payload.message,
           freshness: freshness?.freshness,
@@ -7425,7 +7494,11 @@ export async function runTurnExecutor(
       // the pre-F2 behaviour. Skip it for a forced pill; the coach + explanation
       // handler own the answer (with the deterministic composer still the routed
       // fallback). Non-pill turns are unaffected.
-      if (routingResult === undefined && options.chipClickForcedIntent === undefined) {
+      if (
+        competingPreRoutesAllowedForRun &&
+        routingResult === undefined &&
+        options.chipClickForcedIntent === undefined
+      ) {
         // ROADMAP 1.233 — bound to a local so the gate's INPUT and the gate's
         // TELEMETRY read the SAME object. Reporting `leading_option_present`
         // off the raw pack while `missing_inputs` reports the projected input
@@ -7816,7 +7889,11 @@ export async function runTurnExecutor(
       //
       // Reuses the readiness snapshot emitted earlier in the turn so
       // the predicate is a single field read, not a re-derivation.
-      if (routingResult === undefined && contextReadiness !== null) {
+      if (
+        competingPreRoutesAllowedForRun &&
+        routingResult === undefined &&
+        contextReadiness !== null
+      ) {
         const noAnalysisOutcome = tryNoAnalysisGuard({
           message: payload.message,
           readiness: contextReadiness,
@@ -8028,10 +8105,15 @@ export async function runTurnExecutor(
           // claimed by the run-comparison gate above and never reaches this call
           // as a forced explanation (the gate returns first). Guard the union so
           // only the two explanation intents can pin a handler here.
-          ...(options.chipClickForcedIntent === 'explain_results' ||
-          options.chipClickForcedIntent === 'what_would_flip'
-            ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
-            : {}),
+          ...(focusedCompoundConsequenceForRun
+            ? {
+                forcedExplanationHandlerId: 'explain_from_structure' as const,
+                forcedExplanationReason: 'compound_consequence_structural_tail' as const,
+              }
+            : options.chipClickForcedIntent === 'explain_results' ||
+                options.chipClickForcedIntent === 'what_would_flip'
+              ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
+              : {}),
         });
 
         // ══════════════════════════════════════════════════════════════
@@ -8322,6 +8404,7 @@ export async function runTurnExecutor(
       // affirmative edit never enters the narrow class and keeps its route. The
       // second call is pinned to one non-mutating explanation tool.
       if (
+        !focusedCompoundConsequenceForRun &&
         routingResult.type === 'tool_call' &&
         routingResult.proposal.intent_class === 'execute' &&
         !EXPLANATION_HANDLER_IDS.has(
@@ -9411,7 +9494,16 @@ export async function runTurnExecutor(
         let demotionOutcome: string;
         let demotionText: string;
 
-        if (!demotion.ok) {
+        if (containsEditEffectQuestionForRun) {
+          // The read-only consequence question is an explicit veto on both an
+          // immediate write and the weaker persisted-pending authority. The
+          // user may send a separate mutation instruction; this turn records
+          // only the deterministic no-write answer.
+          demotionOutcome = 'emit_refused:edit_effect_question';
+          demotionText =
+            'I did not apply a model change from that message. Ask about the accepted update ' +
+            'and request any new change in separate messages so I can keep them distinct.';
+        } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
           // says nothing was changed — never an execution.
@@ -9727,8 +9819,20 @@ export async function runTurnExecutor(
         }
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
-        handlerIdForCommit = proposedHandlerId;
-        handlerFactsForCommit = handlerOutcome.handler_facts;
+        // The forced explanation handler is an internal validation/composition
+        // carrier for this read-only turn, not a new semantic event. Persist the
+        // conversation answer without a handler fact or handler identity so it
+        // cannot masquerade as another accepted change on a later return.
+        if (focusedCompoundConsequenceForRun) {
+          handlerIdForCommit = null;
+          handlerFactsForCommit = [];
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+        } else {
+          handlerIdForCommit = proposedHandlerId;
+          handlerFactsForCommit = handlerOutcome.handler_facts;
+        }
         // P0 V5 golden-path repair (follow-up): record graph-mutation
         // observation for turn_outcome.graph_mutated. Any non-null
         // `mutated_graph` on the handler outcome counts — handler-id
@@ -10664,7 +10768,7 @@ export async function runTurnExecutor(
           ? { excludedOptions: handlerOutcome.__excluded_options }
           : {}),
       });
-      if (boundedAnalyticalExecute) {
+      if (boundedAnalyticalExecute || containsEditEffectQuestionForRun) {
         executeChips = [];
       }
 
@@ -10831,6 +10935,9 @@ export async function runTurnExecutor(
             graph: contextPackForLog?.graph,
           });
         }
+      }
+      if (discloseFocusedCompoundTailForRun) {
+        confirmationForCompose = `${confirmationForCompose} ${CARRIER_LOOKING_COMPOUND_DISCLOSURE}`;
       }
       composedOk = composeToolCallResponse({
         answerKind: toolCallAnswerKind,
@@ -11982,14 +12089,16 @@ export async function runTurnExecutor(
           return null;
         }
       })();
-      const proposalPendingForCommit = buildPendingActionsWithProposalCapture({
-        assistantText: composedOk.assistant_text,
-        chips: composedOk.suggested_actions ?? [],
-        scenarioId: context.session_id,
-        graphHash: llmGraphHash,
-        requestId,
-        originPath: 'llm_sonnet',
-      });
+      const proposalPendingForCommit = containsEditEffectQuestionForRun
+        ? undefined
+        : buildPendingActionsWithProposalCapture({
+            assistantText: composedOk.assistant_text,
+            chips: composedOk.suggested_actions ?? [],
+            scenarioId: context.session_id,
+            graphHash: llmGraphHash,
+            requestId,
+            originPath: 'llm_sonnet',
+          });
 
       // Defence-in-depth brief persistence (V5 Phase 3A prerequisite):
       // re-pass the scenario brief that build-turn-context already

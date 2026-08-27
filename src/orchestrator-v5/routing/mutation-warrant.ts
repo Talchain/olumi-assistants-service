@@ -303,12 +303,13 @@ export function hasMutationWarrantSignal(message: string): boolean {
   // carrier-shaped content, not grammatical authority. Consequently this
   // compound class always fails closed at the immediate-write boundary.
   //
-  // The protected route still lets the model reason over the whole message.
-  // When it forms a supported typed mutation proposal, the action-layer
-  // warrant demotion persists that proposal and offers its confirmation chip;
-  // a later product-minted confirmation is the existing authoritative path to
-  // execution. This avoids adding the lexical mood classifier that repeated
-  // reviews have falsified.
+  // A leading, receipt-backed question still reaches the existing read-only
+  // reasoning carrier. Any mutating proposal formed from an unanchored or
+  // otherwise unfocused occurrence is refused at the action layer without a
+  // pending confirmation: mixing a read question into the same message cannot
+  // mint weaker mutation authority either. A separate user instruction remains
+  // the existing authoritative path to execution. This avoids adding the
+  // lexical mood classifier that repeated reviews have falsified.
   if (containsEditEffectQuestion(message)) {
     return false;
   }
