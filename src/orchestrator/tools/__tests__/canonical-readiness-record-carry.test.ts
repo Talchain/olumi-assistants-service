@@ -44,6 +44,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 vi.mock("../../../utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -278,9 +279,16 @@ describe("C2 L1 — the canonical readiness record must reach the pipeline-shape
 const KNOWN_NOT_COVERED = [
   // `draft-graph.ts:403` — `graphOutput = isGraphV3(graph) ? graph : null`, and
   // `:421` computes the canonical payload ONLY when graphOutput is non-null. A
-  // graph that does not parse as V3 therefore has NO canonical authority to
+  // graph that does not clear that gate therefore has NO canonical authority to
   // carry from, and the payload stays visibly pipeline-shaped. Back-filling it
   // from a derivation would invent a record no authority produced.
+  //
+  // ⚠ AND THE GATE IS NARROWER THAN THE NAME SUGGESTS — DERIVED, NOT INFERRED.
+  // `isGraphV3` (`draft-graph.ts:599`) is `Array.isArray(g.nodes) &&
+  // Array.isArray(g.edges)` — a shape sniff, NOT a `GraphV3.safeParse`. So the
+  // uncovered state is "the pipeline body's graph has no nodes/edges arrays",
+  // and it is decided by a MODULE-PRIVATE predicate on the DRAFT PATH, not by
+  // anything this file's unit under test can be handed.
   "graph_not_parseable_as_v3",
 ] as const;
 
@@ -289,21 +297,36 @@ describe("C2 — the uncovered case is named, not silently unexercised", () => {
     expect([...KNOWN_NOT_COVERED].sort()).toEqual(["graph_not_parseable_as_v3"]);
   });
 
-  it("BEHAVIOURAL: a graph the canonical authority cannot assess yields NO canonical payload", () => {
-    // Not a hand-built "invalid" object: a structurally real graph with the goal
-    // node removed, so V3 parsing/assessment genuinely cannot produce a payload.
-    const graph = graphWithFourValuelessFactors(false);
-    graph.nodes = graph.nodes.filter((n: any) => n.kind !== "goal");
-    const canonical = buildCanonicalAnalysisReadyFromGraph(graph);
-
-    const poor = pipelineShaped(false);
-    const carried = carryCanonicalOnlyFields(poor, canonical as any);
-    // Whatever the authority did or did not produce, the pipeline payload must
-    // never be back-filled with an invented record.
-    if (!canonical || !(canonical as any).readiness_issues) {
-      expect((carried as any).readiness_issues).toBeUndefined();
-    }
-  });
+  /**
+   * ⚠⚠ THERE IS DELIBERATELY NO BEHAVIOURAL TEST HERE, AND THE REASON IS THE
+   * FINDING. An earlier version of this file carried one, titled *"a graph the
+   * canonical authority cannot assess yields NO canonical payload"*, whose
+   * fixture removed the goal node and whose assertion sat inside
+   * `if (!canonical || !canonical.readiness_issues)`.
+   *
+   * MEASURED: on that fixture the authority returns a PAYLOAD — `status:
+   * 'blocked'`, `readiness_issues` length 1, code `NO_GOAL`, `repair_proposal`
+   * absent — so the `if` was FALSE and the body executed ZERO assertions.
+   * Inverting the guarded assertion left the file 15/15 GREEN; only forcing the
+   * branch REDs it. A test that cannot fail, under a title claiming it guards,
+   * is the class this PR is otherwise fixing.
+   *
+   * AND IT COULD NOT BE REPAIRED IN PLACE. Removing a node cannot falsify
+   * `Array.isArray(nodes) && Array.isArray(edges)` (measured: `true` on that
+   * fixture; contrast control `isGraphV3({})` = `false`, so the gate IS
+   * falsifiable — just not by any graph). Nor does
+   * `buildCanonicalAnalysisReadyFromGraph` return `undefined` on that condition:
+   * it returns `undefined` only when `resolveRunAdmission(...).assessment
+   * .analysisReady` is falsy, which is a DIFFERENT condition on a DIFFERENT
+   * seam. Representing this limit needs a draft-path test driving a pipeline
+   * body — not a fixture handed to the unit under test here.
+   *
+   * ✅ THE LIMIT ITSELF IS COVERED, unconditionally, by *"IDENTITY when there is
+   * no canonical payload at all"* above: given `undefined`, the carry returns the
+   * pipeline payload BY REFERENCE and invents nothing. That is the whole of what
+   * this function can promise about the uncovered state, and it is asserted with
+   * no branch to dodge.
+   */
 });
 
 /**
@@ -314,13 +337,73 @@ describe("C2 — the uncovered case is named, not silently unexercised", () => {
  * to name it there too — a hand-maintained mirror wearing a function's clothes,
  * and `may_run` was already its victim once.
  *
- * This guard DERIVES the key set from the schema (the source of truth) and
- * requires every key to be ACCOUNTED FOR in exactly one bucket. A new schema
- * field REDs this test until someone decides which bucket it belongs in. It
- * cannot prove the buckets are RIGHT — only that no key is unconsidered. That
- * is the honest limit of a derived guard (it proves agreement, never
- * completeness), which is why the behavioural carry tests above exist too.
+ * ⚠⚠ THE FIRST VERSION OF THIS GUARD READ ONLY `AnalysisReadyPayload.shape` AND
+ * CALLED THE SCHEMA *"the source of truth"*. THAT WAS THE FALSE PREMISE, and it
+ * made the guard blind to the exact field class C2 exists to fix.
+ *
+ * `AnalysisReadyPayload` is `.passthrough()`. `.shape` is therefore BY
+ * CONSTRUCTION not the payload's key set — it is only the DECLARED subset, and
+ * every additive field that rides the wire without a Zod declaration is
+ * invisible to it. Measured at this tip:
+ *
+ *   schema `.shape`                       17 keys
+ *   payload TYPE                          20 keys
+ *   in TYPE, absent from `.shape`         readiness_issues · repair_proposal ·
+ *                                         computed_at · coaching_summary
+ *   in `.shape`, absent from TYPE         user_questions
+ *
+ * ⭐ `readiness_issues` AND `repair_proposal` ARE THE TWO FIELDS THIS PR EXISTS
+ * TO CARRY, and the schema-only guard could not see either of them.
+ * `coaching_summary` is likewise live and shipped (`draft-graph-dispatch.ts:1028`)
+ * and sat in NO bucket with the guard fully green.
+ *
+ * ⭐ AND NEITHER SIDE IS A SUPERSET, which is why this derives from BOTH rather
+ * than swapping one blindness for its mirror: `user_questions` is declared on the
+ * schema and absent from the type, so a TYPE-ONLY guard would stop considering a
+ * key that is already bucketed. The honest key set is the UNION.
+ *
+ * The guard requires every key in that union to be ACCOUNTED FOR in exactly one
+ * bucket. A new field on EITHER side REDs this test until someone decides which
+ * bucket it belongs in. It still cannot prove the buckets are RIGHT — only that
+ * no key is unconsidered. That is the honest limit of a derived guard (it proves
+ * agreement, never completeness), which is why the behavioural carry tests above
+ * exist too.
  */
+
+/**
+ * The payload TYPE's own key set, read from the declaration by the TypeScript
+ * AST — `GraphPatchBlockData['analysis_ready']` in `src/orchestrator/types.ts`,
+ * which is the type `extractAnalysisReady` returns and `carryCanonicalOnlyFields`
+ * takes. Read from the AST rather than from `keyof`, because the TYPE must be
+ * enumerable AT RUNTIME for this guard to RED inside the test gate; `z.infer` of
+ * a `.passthrough()` schema carries an index signature and is no use either way.
+ */
+function payloadTypeKeys(): string[] {
+  const rel = "../../types.ts";
+  const path = fileURLToPath(new URL(rel, import.meta.url));
+  const sf = ts.createSourceFile(rel, readFileSync(path, "utf8"), ts.ScriptTarget.ES2022, true);
+  let keys: string[] | null = null;
+  const visit = (node: ts.Node): void => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === "GraphPatchBlockData") {
+      for (const member of node.members) {
+        if (
+          ts.isPropertySignature(member) &&
+          member.name !== undefined &&
+          member.name.getText() === "analysis_ready" &&
+          member.type !== undefined &&
+          ts.isTypeLiteralNode(member.type)
+        ) {
+          keys = member.type.members
+            .filter(ts.isPropertySignature)
+            .map((p) => p.name.getText());
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return keys ?? [];
+}
 /**
  * ⚠ THE TRIO IS DERIVED, NOT LISTED — and the first version of this file proved
  * why. It hand-listed a `goal_threshold_display` that does not exist and omitted
@@ -352,25 +435,95 @@ const DELIBERATELY_NOT_CARRIED = [
   "freshness_reason",
   "graph_hash_at_run",
   "current_graph_hash",
+  // Stamped DOWNSTREAM of the re-projection, by the draft dispatch handler:
+  // `draft-graph-dispatch.ts:1028` spreads it onto the payload this seam has
+  // already produced (`{ ...baseAnalysisReady, coaching_summary }`). So it is
+  // not a re-projection field and not a carry — it survives by a different
+  // mechanism entirely, which is precisely why the schema-only guard never
+  // asked about it.
+  "coaching_summary",
 ] as const;
+
+const schemaShapeKeys = (): string[] => Object.keys((AnalysisReadyPayloadSchema as any).shape ?? {});
+
+/** The honest key set: everything either declaration knows about. */
+const analysisReadyKeyUnion = (): string[] =>
+  [...new Set([...schemaShapeKeys(), ...payloadTypeKeys()])].sort();
 
 describe("C2 L2 — every analysis_ready field is accounted for at the re-projection seam", () => {
   it("PRECONDITION: the schema really exposes its key set (or this guard is vacuous)", () => {
-    const keys = Object.keys((AnalysisReadyPayloadSchema as any).shape ?? {});
+    const keys = schemaShapeKeys();
     expect(keys.length, "PRECONDITION: a zero-key read means the probe broke, not that the schema is empty")
       .toBeGreaterThan(5);
     expect(keys, "PRECONDITION: contrast control — a field known to exist").toContain("options");
   });
 
-  it("no schema field is UNCONSIDERED — a new field REDs until someone buckets it", () => {
+  it("PRECONDITION: the payload TYPE really parses (or half this guard is vacuous)", () => {
+    const keys = payloadTypeKeys();
+    expect(keys.length, "PRECONDITION: a zero-key AST read means the parse broke, not that the type is empty")
+      .toBeGreaterThan(5);
+    expect(keys, "PRECONDITION: contrast control — a field known to be on the type").toContain("options");
+  });
+
+  /**
+   * ⚠ THE PRECONDITION THAT MAKES THIS GUARD DIFFERENT FROM THE ONE IT REPLACES.
+   * It pins, in-test, that the two halves genuinely DISAGREE — and it binds by
+   * IDENTITY to the two fields C2 exists to carry, never by a count another pair
+   * could satisfy. If the schema ever declares them, this REDs and the union
+   * derivation should be re-argued rather than silently kept.
+   */
+  it("PRECONDITION: the schema is passthrough and CANNOT see the fields C2 carries", () => {
+    expect(
+      (AnalysisReadyPayloadSchema as any)._def?.unknownKeys,
+      "PRECONDITION: a strict schema would make .shape the real key set and change this argument",
+    ).toBe("passthrough");
+
+    const shape = new Set(schemaShapeKeys());
+    for (const field of ["readiness_issues", "repair_proposal"] as const) {
+      expect(
+        shape.has(field),
+        `PRECONDITION: '${field}' must be INVISIBLE to .shape — that blindness is why the type half exists`,
+      ).toBe(false);
+      expect(
+        payloadTypeKeys(),
+        `PRECONDITION: '${field}' must be visible on the TYPE, or the type half adds nothing`,
+      ).toContain(field);
+    }
+
+    // The mirror direction, so a later "just use the type" tidy-up REDs here:
+    // a type-only guard would stop considering a key that IS declared and IS
+    // already bucketed.
+    const onlyOnSchema = schemaShapeKeys().filter((k) => !new Set(payloadTypeKeys()).has(k));
+    expect(
+      onlyOnSchema,
+      "PRECONDITION: neither side is a superset — that is why the union, not a swap",
+    ).not.toEqual([]);
+  });
+
+  it("no field on EITHER declaration is UNCONSIDERED — a new field REDs until someone buckets it", () => {
     const declared = new Set<string>([
       ...NAMED_BY_REPROJECTION,
       ...CARRIED_FROM_CANONICAL,
       ...DELIBERATELY_NOT_CARRIED,
     ]);
-    const schemaKeys = Object.keys((AnalysisReadyPayloadSchema as any).shape ?? {});
-    const unconsidered = schemaKeys.filter((k) => !declared.has(k));
+    const unconsidered = analysisReadyKeyUnion().filter((k) => !declared.has(k));
     expect(unconsidered, `unbucketed analysis_ready field(s): ${unconsidered.join(", ")}`).toEqual([]);
+  });
+
+  /**
+   * The mirror defect, and this file has already paid for it once: the first
+   * version of the trio hand-listed a `goal_threshold_display` that does not
+   * exist. A bucket entry naming a field no declaration carries is a
+   * hand-maintained mirror that has already drifted.
+   */
+  it("no bucket entry is a PHANTOM — every declared key exists on some declaration", () => {
+    const known = new Set(analysisReadyKeyUnion());
+    const phantom = [
+      ...NAMED_BY_REPROJECTION,
+      ...CARRIED_FROM_CANONICAL,
+      ...DELIBERATELY_NOT_CARRIED,
+    ].filter((k) => !known.has(k));
+    expect(phantom, `bucketed but non-existent analysis_ready field(s): ${phantom.join(", ")}`).toEqual([]);
   });
 
   it("the buckets are DISJOINT — a field in two buckets is two answers to one question", () => {

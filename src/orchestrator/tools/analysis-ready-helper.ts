@@ -1296,15 +1296,22 @@ export function buildCanonicalAnalysisReadyFromGraph(
  * recovered them. Carrying from the authority that DOES compute them is the only
  * fix that works, and it is why this function grew rather than that one.
  *
- * THE COST OF NOT CARRYING, both consumers named:
+ * THE COST OF NOT CARRYING — ONE consumer, named precisely:
  *   · `summariseReadiness` (`routing/readiness-summary.ts:200,210`) gated its
  *     multi-item branch on `repair_proposal` and told a user *"One factor still
  *     has no value set"* while FOUR had none — a silent 4x under-report,
  *     wire-witnessed twice. That consumer carries a local compensation today.
- *   · `evaluateReadiness` (`coaching/coaching-state.ts:332`) adds the
- *     `goal_node_missing` coaching signal only from `readiness_issues`. It has
- *     NO compensation, so on every pipeline-shaped payload that signal is
- *     silently absent. Nothing was watching this one.
+ *     It is the only consumer this carry is written for.
+ *
+ * ⚠ A SECOND HARMED CONSUMER WAS CLAIMED HERE AND IS REFUTED — recorded so it is
+ * not re-derived. `evaluateReadiness` (`coaching/coaching-state.ts:301`) takes a
+ * GRAPH, not a payload, and calls `buildCanonicalAnalysisReadyFromGraph` ITSELF
+ * at `:312`; the `readiness` it reads at `:332` is therefore ALWAYS canonical.
+ * Both production call sites (`coaching-state.ts:288`,
+ * `coaching-lifecycle.ts:183`) pass a graph, and no call site anywhere passes a
+ * payload. It cannot receive a pipeline-shaped payload, was never harmed, and
+ * nothing here changes it. A function that consumes a graph is not a consumer of
+ * this seam, however similar the field name looks.
  *
  * ⭐ WHY THIS EXISTS, AND WHY IT IS NOT A SECOND STAMPER.
  *
