@@ -1912,6 +1912,123 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * Load the bounded scenario-wide run-analysis fact set with an exact
+   * pre-limit count. This is reasoning authority, not claim-safety
+   * entitlement: it deliberately returns every non-noop run_analysis fact and
+   * leaves successful/failed/partial chronology to the existing selectors.
+   */
+  async readScenarioRunAnalysisFactsFor(
+    scenarioId: string,
+    limit: number,
+  ): Promise<{ readonly facts: readonly HandlerFact[]; readonly total_count: number }> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new SessionReadError(
+        'Scenario analysis-fact lookahead limit is invalid',
+        { code: 'analysis_fact_limit_invalid' },
+      );
+    }
+
+    const { data, error, count } = await this.client
+      .from('v5_handler_facts')
+      .select(
+        'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
+        { count: 'exact' },
+      )
+      .eq('scenario_id', scenarioId)
+      .eq('handler_id', 'run_analysis')
+      .eq('action_type', 'run_analysis')
+      .eq('noop', false)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new SessionReadError('Scenario analysis-fact query failed', {
+        cause: error,
+        code: 'analysis_fact_query_failed',
+      });
+    }
+    if (!Number.isSafeInteger(count) || (count as number) < 0) {
+      throw new SessionReadError(
+        'Scenario analysis-fact query returned no valid exact count',
+        { code: 'analysis_fact_contract_invalid' },
+      );
+    }
+    if (!Array.isArray(data)) {
+      throw new SessionReadError(
+        'Scenario analysis-fact query returned a non-array payload',
+        { code: 'analysis_fact_contract_invalid' },
+      );
+    }
+
+    const facts: HandlerFact[] = [];
+    for (const row of data as Array<{
+      id?: unknown;
+      scenario_id?: unknown;
+      v5_conversation_turn_id?: unknown;
+      payload?: unknown;
+      handler_id?: unknown;
+      action_type?: unknown;
+      noop?: unknown;
+      created_at?: unknown;
+    }>) {
+      if (
+        typeof row.id !== 'string' ||
+        row.id.length === 0 ||
+        row.scenario_id !== scenarioId ||
+        typeof row.v5_conversation_turn_id !== 'string' ||
+        row.v5_conversation_turn_id.length === 0 ||
+        row.handler_id !== 'run_analysis' ||
+        row.action_type !== 'run_analysis' ||
+        row.noop !== false ||
+        typeof row.created_at !== 'string' ||
+        !Number.isFinite(Date.parse(row.created_at))
+      ) {
+        throw new SessionReadError(
+          'Scenario analysis-fact row metadata is invalid',
+          { code: 'analysis_fact_corrupt' },
+        );
+      }
+
+      const payloadObj =
+        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+          ? (row.payload as Record<string, unknown>)
+          : {};
+      const parsed = HandlerFactSchema.safeParse({
+        ...payloadObj,
+        noop: row.noop,
+      });
+      if (!parsed.success) {
+        throw new SessionReadError(
+          'Scenario analysis-fact payload is invalid',
+          { cause: parsed.error, code: 'analysis_fact_corrupt' },
+        );
+      }
+
+      const result = parsed.data.result;
+      if (
+        parsed.data.fact_type !== 'run_analysis' ||
+        parsed.data.noop !== false ||
+        result === null ||
+        typeof result !== 'object' ||
+        Array.isArray(result) ||
+        (result as { readonly scenario_id?: unknown }).scenario_id !== scenarioId
+      ) {
+        throw new SessionReadError(
+          'Scenario analysis-fact payload contradicts its indexed authority',
+          { code: 'analysis_fact_corrupt' },
+        );
+      }
+      facts.push(parsed.data);
+    }
+
+    return Object.freeze({
+      facts: Object.freeze(facts),
+      total_count: count as number,
+    });
+  }
+
+  /**
    * The scenario's newest non-noop `run_analysis` fact — see
    * {@link SessionStore.readNewestAnalysisFactFor} for WHY this is scoped to
    * the scenario and not to the read window.
