@@ -39,8 +39,6 @@
  * dispatch ("OK, run the analysis") routes cleanly.
  */
 
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
-
 import {
   isBriefAuditQuestion,
   tryBriefAuditAnswer,
@@ -54,7 +52,6 @@ import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { RecentChangesHistoryStatus } from '../context/reconcile-recent-mutation-facts.js';
 import type { SuggestedAction } from '../compose/types.js';
-import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { decomposeEditMessage } from './edit-part-decomposition.js';
 import { mentionsStructuralEditRequest } from './mutation-language.js';
 import type { HandlerValidationRegistry } from './validator.js';
@@ -844,19 +841,26 @@ function emptyRecentChangesText(status: RecentChangesHistoryStatus): string {
  *
  * The state-query guard knows it just dispatched a deterministic
  * answer about recent_changes, so it owns the follow-up chip choice:
- *   - Prior successful run_analysis exists AND freshness === 'stale'
+ *   - Complete durable history proves a successful run_analysis exists AND
+ *     freshness === 'stale'
  *     (graph hash diverged because the mutation invalidated it) →
  *     "Run analysis again".
- *   - No prior run_analysis fact (model never analysed) AND model is
- *     structurally ready → "Run analysis".
- *   - Otherwise (fresh analysis, or model not ready) → no chip; the
- *     user has the answer and no useful next step requires a chip.
+ *   - Complete durable history proves no prior run_analysis exists (model
+ *     never analysed) AND model is structurally ready → "Run analysis".
+ *   - Capped/degraded history → no chip; unknown never becomes first-run.
+ *   - Otherwise (fresh analysis, or model not ready) → no chip; the user
+ *     has the answer and no useful next step requires a chip.
  *
  * Returns at most one chip. Empty array when no chip is appropriate.
  */
 export interface ComposeStateQueryChipInput {
   readonly recentChangeCount: number;
-  readonly priorFacts: readonly HandlerFact[];
+  readonly analysisHistory:
+    | {
+        readonly status: 'complete';
+        readonly hasSuccessfulAnalysis: boolean;
+      }
+    | { readonly status: 'capped' | 'degraded' };
   readonly analysisFreshness: 'fresh' | 'stale' | 'unknown' | 'none' | undefined;
   readonly analysisReadyStatus: string | undefined;
   readonly validationRegistry: HandlerValidationRegistry;
@@ -871,7 +875,12 @@ export function composeStateQueryChip(
   // not registered (test overrides, future flag-gated builds).
   if (input.validationRegistry.run_analysis == null) return [];
 
-  const hasPriorRunAnalysis = input.priorFacts.some(isSuccessfulRunAnalysisFact);
+  // Only a complete durable scenario read can author either "already
+  // analysed" or "never analysed". A capped/degraded read is unknown, not
+  // absence, so it cannot license a first-run chip from an empty bounded
+  // window.
+  if (input.analysisHistory.status !== 'complete') return [];
+  const hasPriorRunAnalysis = input.analysisHistory.hasSuccessfulAnalysis;
   if (hasPriorRunAnalysis && input.analysisFreshness === 'stale') {
     return [
       {
@@ -882,7 +891,7 @@ export function composeStateQueryChip(
       },
     ];
   }
-  if (!hasPriorRunAnalysis) {
+  if (!hasPriorRunAnalysis && input.analysisFreshness === 'none') {
     return [
       {
         id: 'chip_action_run_analysis_after_state_query',
