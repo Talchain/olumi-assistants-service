@@ -423,6 +423,7 @@ function makeFreshRunAnalysisFact(
 function makeCanonicalAuthorityRunAnalysisFact(
   graphHash = CANONICAL_AUTHORITY_GRAPH_HASH,
   enrichmentOverrides: Record<string, unknown> = {},
+  computedAt = new Date(Date.now() - 60_000).toISOString(),
 ): Record<string, unknown> {
   return {
     fact_type: 'run_analysis' as const,
@@ -437,7 +438,7 @@ function makeCanonicalAuthorityRunAnalysisFact(
         constraint_verdict_state: 'evaluated_feasible' as const,
       },
       graph_hash_at_run: graphHash,
-      computed_at: new Date(Date.now() - 60_000).toISOString(),
+      computed_at: computedAt,
       enrichment: {
         ...canonicalStoredAnalysisEnrichment(),
         ...enrichmentOverrides,
@@ -959,6 +960,79 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     });
     expect(prompt).toContain('DURABLE_DECISION_REVIEW_CANARY');
     expect(prompt).toContain('analysis-turn-outside-hot-window');
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('binds Decision Review to the exact computed_at-selected display fact', async () => {
+    const dbHeadButOlderRun = makeCanonicalAuthorityRunAnalysisFact(
+      CANONICAL_AUTHORITY_GRAPH_HASH,
+      {
+        factor_sensitivity: [
+          {
+            factor_id: 'fac_db_head',
+            factor_label: 'DB_HEAD_DRIVER_MUST_NOT_REACH_PROMPT',
+            influence_score: 0.9,
+            direction: 'positive',
+          },
+        ],
+        decision_review: {
+          produced_at: '2026-04-30T01:01:00+02:00',
+          narrative_summary: 'DB_HEAD_REVIEW_MUST_NOT_REACH_PROMPT',
+        },
+      },
+      // First in the DB-created chronology, but the represented run instant
+      // is older than the second row below.
+      '2026-04-30T01:00:00+02:00',
+    );
+    const selectedDisplayRun = makeCanonicalAuthorityRunAnalysisFact(
+      CANONICAL_AUTHORITY_GRAPH_HASH,
+      {
+        factor_sensitivity: [
+          {
+            factor_id: 'fac_selected',
+            factor_label: 'SELECTED_DISPLAY_DRIVER',
+            influence_score: 0.8,
+            direction: 'positive',
+          },
+        ],
+        decision_review: {
+          produced_at: '2026-04-30T00:31:00.000Z',
+          narrative_summary: 'SELECTED_DISPLAY_REVIEW',
+        },
+      },
+      '2026-04-30T00:30:00.000Z',
+    );
+    mockState.priorFacts = [dbHeadButOlderRun, selectedDisplayRun];
+    mockState.newestAnalysisFact = null;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue from the current analysis.'),
+      'req-analysis-display-review-same-fact',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+      },
+    );
+
+    const prompt = capturedRoutingPrompt(adapter);
+    const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as {
+      top_drivers?: Array<{ label?: string }>;
+    } | null;
+    expect(analysis?.top_drivers?.[0]?.label).toBe(
+      'SELECTED_DISPLAY_DRIVER',
+    );
+    expect(pack.coaching).toMatchObject({
+      decision_review: {
+        narrative_summary: 'SELECTED_DISPLAY_REVIEW',
+      },
+    });
+    expect(prompt).toContain('SELECTED_DISPLAY_DRIVER');
+    expect(prompt).toContain('SELECTED_DISPLAY_REVIEW');
+    expect(prompt).not.toContain('DB_HEAD_DRIVER_MUST_NOT_REACH_PROMPT');
+    expect(prompt).not.toContain('DB_HEAD_REVIEW_MUST_NOT_REACH_PROMPT');
     expectNoCanonicalAuthorityWrite();
   });
 

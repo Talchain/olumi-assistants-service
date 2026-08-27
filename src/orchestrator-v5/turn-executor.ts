@@ -2395,10 +2395,15 @@ export async function runTurnExecutor(
           label: typeof node.label === 'string' ? node.label : null,
         };
       });
-    const fallback = buildAnalysisFromPriorFacts(
-      scenarioAnalysisFacts,
-      optionLabelSource,
-    );
+    const selectedScenarioAnalysisFact =
+      selectRunAnalysisFact(scenarioAnalysisFacts)?.fact ?? null;
+    const fallback =
+      selectedScenarioAnalysisFact === null
+        ? null
+        : buildAnalysisFromPriorFacts(
+            [selectedScenarioAnalysisFact],
+            optionLabelSource,
+          );
     if (fallback) {
       analysisSummary = fallback;
       analysisStateSource = 'fallback';
@@ -2434,7 +2439,10 @@ export async function runTurnExecutor(
     try {
       const coachingCache = await readCoachingCache(
         context.session_id,
-        scenarioAnalysisFacts,
+        {
+          selectedAnalysisFact: selectedScenarioAnalysisFact,
+          analysisFactChronology: scenarioAnalysisFacts,
+        },
       );
       // V5 Task 1.2: compact the graph before handing it to Sonnet. Full graph
       // stays on graphLookupForValidate for validation; only the Sonnet-facing
