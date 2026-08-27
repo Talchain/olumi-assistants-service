@@ -97,28 +97,44 @@ function nonEmptyString(x: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Keep all option rows so duplicate identities cannot be hidden by a map. */
-function collectGraphOptionRows(graph: unknown): readonly TargetOption[] {
+interface LabeledGraphEntity extends TargetOption {
+  readonly kind: string;
+}
+
+/** Keep all labelled rows so a longer non-option label can own its own span. */
+function collectLabeledGraphEntities(graph: unknown): readonly LabeledGraphEntity[] {
   const g = asRecord(graph);
   if (g === null) return [];
 
-  const rows: TargetOption[] = [];
-  const take = (raw: unknown): void => {
+  const rows: LabeledGraphEntity[] = [];
+  const seen = new Set<string>();
+  const take = (raw: unknown, impliedKind?: string): void => {
     const r = asRecord(raw);
     if (r === null) return;
     const id = nonEmptyString(r.id) ?? nonEmptyString(r.option_id);
     const label = nonEmptyString(r.label);
-    if (id !== null && label !== null) rows.push({ id, label });
+    const kind = impliedKind ?? nonEmptyString(r.kind);
+    if (id === null || label === null || kind === null) return;
+    const key = `${kind}\u0000${id}\u0000${label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ id, label, kind });
   };
 
-  if (Array.isArray(g.options)) for (const option of g.options) take(option);
+  if (Array.isArray(g.options)) {
+    for (const option of g.options) take(option, 'option');
+  }
   if (Array.isArray(g.nodes)) {
-    for (const node of g.nodes) {
-      const r = asRecord(node);
-      if (r !== null && r.kind === 'option') take(r);
-    }
+    for (const node of g.nodes) take(node);
   }
   return rows;
+}
+
+/** Keep all option rows so duplicate identities cannot be hidden by a map. */
+function collectGraphOptionRows(graph: unknown): readonly TargetOption[] {
+  return collectLabeledGraphEntities(graph)
+    .filter((row) => row.kind === 'option')
+    .map(({ id, label }) => ({ id, label }));
 }
 
 function hasConflictingOptionIdentity(rows: readonly TargetOption[]): boolean {
@@ -185,8 +201,12 @@ const OPTION_DEICTIC_REFERENCE =
   '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
 const TERMINAL_WIN_CUE =
   'win(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?.!,]|$|(?:if|when|under|given|with|without|against|over)\\b))';
+const TERMINAL_OPTION_RANK_CUE =
+  '(?:the\\s+)?(?:leader|leading|preferred|best|top)(?=\\s*(?:[?.!,]|$|(?:if|when|under|given|with|without|against|over)\\b))';
+const NAMED_OPTION_RANK_CUE =
+  '(?:the\\s+)?(?:leading|preferred|best|top)\\s+(?:option|alternative|choice)';
 const OPTION_OUTCOME_CUE =
-  `(?:${TERMINAL_WIN_CUE}|take the lead|come out ahead|become (?:the )?(?:leader|leading|preferred|best|top)(?: option| alternative| choice)?)`;
+  `(?:${TERMINAL_WIN_CUE}|take the lead|come out ahead|(?:be|become)\\s+(?:${NAMED_OPTION_RANK_CUE}|${TERMINAL_OPTION_RANK_CUE})|${NAMED_OPTION_RANK_CUE}|${TERMINAL_OPTION_RANK_CUE})`;
 const SELECTED_OPTION_DEICTIC_PATTERNS: readonly RegExp[] = [
   new RegExp(
     `\\b(?:make|help|enable|allow|get)\\s+${OPTION_DEICTIC_REFERENCE}\\s+(?:to\\s+)?${OPTION_OUTCOME_CUE}\\b`,
@@ -238,22 +258,14 @@ export function collectGraphOptionIdentities(graph: unknown): readonly TargetOpt
   return Array.from(byId, ([id, label]) => ({ id, label }));
 }
 
-/** Escape a label for use inside a RegExp. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Resolve the ONE option the user named in this message, or a typed miss.
  *
- * Longest-label-first, and each match CONSUMES its span before shorter labels
- * are tried. Without the consume step, a graph carrying both "Hire Two Senior
- * Engineers" and "Hire Two Senior Engineers Locally" would read a message naming
- * only the longer one as naming TWO options, and refuse to address a perfectly
- * unambiguous question. Longest-match-wins is the same precedence
- * `findNamedFactor` uses ("Engineering Capacity" beats the substring
- * "Capacity"); consuming the span is what makes that precedence hold when the
- * shorter label is a PREFIX of the longer one rather than merely similar.
+ * Longest-entity-label-first, and every selected span excludes overlapping
+ * shorter labels. Without the entity-wide read, “US expansion cost” silently
+ * names the nested option “US expansion”. Without longest-match precedence,
+ * “Hire Two Senior Engineers Locally” looks like two option names. The selected
+ * spans are derived independently of graph array order.
  *
  * Pure. No telemetry, no I/O.
  */
@@ -267,32 +279,66 @@ export function resolveTargetOptionFromMessage(
   const options = collectGraphOptionIdentities(graph);
   if (options.length === 0) return { kind: 'none', reason: 'no_options' };
 
-  // Longest label first so a longer label wins over any shorter one nested in it.
-  const ordered = options.slice().sort((a, b) => b.label.length - a.label.length);
+  // Select non-overlapping labelled spans across ALL graph entities, globally
+  // longest first. A factor such as “US expansion cost” therefore owns that
+  // whole span before the nested option “US expansion” can be considered.
+  // Graph order cannot change the result: length, position and label provide a
+  // total deterministic ordering.
+  const haystack = message.toLowerCase();
+  const entitiesByLabel = new Map<string, LabeledGraphEntity[]>();
+  for (const entity of collectLabeledGraphEntities(graph)) {
+    const label = entity.label.toLowerCase();
+    const group = entitiesByLabel.get(label) ?? [];
+    group.push(entity);
+    entitiesByLabel.set(label, group);
+  }
 
-  let haystack = message.toLowerCase();
+  const candidates: Array<{
+    readonly start: number;
+    readonly end: number;
+    readonly label: string;
+    readonly entities: readonly LabeledGraphEntity[];
+  }> = [];
+  for (const [label, entities] of entitiesByLabel) {
+    let from = 0;
+    while (from <= haystack.length - label.length) {
+      const start = haystack.indexOf(label, from);
+      if (start < 0) break;
+      candidates.push({ start, end: start + label.length, label, entities });
+      from = start + Math.max(label.length, 1);
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      (b.end - b.start) - (a.end - a.start) ||
+      a.start - b.start ||
+      (a.label < b.label ? -1 : a.label > b.label ? 1 : 0),
+  );
+
+  const occupied: Array<{ readonly start: number; readonly end: number }> = [];
+  const selectedSpans = candidates.filter((candidate) => {
+    const overlaps = occupied.some(
+      (span) => candidate.start < span.end && candidate.end > span.start,
+    );
+    if (overlaps) return false;
+    occupied.push({ start: candidate.start, end: candidate.end });
+    return true;
+  }).sort((a, b) => a.start - b.start);
+
   const matched: TargetOption[] = [];
-  const matchedLabels = new Set<string>();
+  for (const span of selectedSpans) {
+    const optionRows = span.entities.filter((entity) => entity.kind === 'option');
+    if (optionRows.length === 0) continue;
 
-  for (const option of ordered) {
-    const needle = option.label.toLowerCase();
-    if (!haystack.includes(needle)) continue;
-    matched.push(option);
-    matchedLabels.add(needle);
-    // Consume EVERY occurrence of this label so a shorter nested label cannot
-    // re-match the same span.
-    haystack = haystack.replace(new RegExp(escapeRegExp(needle), 'g'), ' ');
+    const nonOptionRows = span.entities.filter((entity) => entity.kind !== 'option');
+    const optionIds = new Set(optionRows.map((entity) => entity.id));
+    if (nonOptionRows.length > 0 || optionIds.size > 1) {
+      return { kind: 'none', reason: 'label_collision' };
+    }
+    matched.push({ id: optionRows[0]!.id, label: optionRows[0]!.label });
   }
 
   if (matched.length === 0) return { kind: 'none', reason: 'no_option_named' };
-
-  // Label collision: the matched label is shared by more than one option id, so
-  // the user's words do not pick out a single identity. Refuse rather than guess
-  // (the #738 lesson — match on ids, never fold two targets into one label).
-  for (const label of matchedLabels) {
-    const sharing = options.filter((o) => o.label.toLowerCase() === label);
-    if (sharing.length > 1) return { kind: 'none', reason: 'label_collision' };
-  }
 
   // Two or more DISTINCT options named ⇒ a comparison question, not a target.
   const distinctIds = new Set(matched.map((m) => m.id));

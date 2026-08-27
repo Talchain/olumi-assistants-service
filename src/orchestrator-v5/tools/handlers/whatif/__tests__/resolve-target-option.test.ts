@@ -123,6 +123,51 @@ describe('resolveTargetOptionFromMessage — the user names ONE option', () => {
     });
   });
 
+  it('a longer canonical non-option label owns its span over a nested option label', () => {
+    const graph = {
+      nodes: [
+        { id: 'o1', kind: 'option', label: 'US expansion' },
+        { id: 'f1', kind: 'factor', label: 'US expansion cost' },
+      ],
+      edges: [],
+    };
+    expect(
+      resolveTargetOptionFromMessage(
+        'What would change if US expansion cost increased?',
+        graph,
+      ),
+    ).toEqual({ kind: 'none', reason: 'no_option_named' });
+
+    // A separate, non-overlapping occurrence still explicitly names the option.
+    expect(
+      resolveTargetOptionFromMessage(
+        'If US expansion cost increased, what would make US expansion win?',
+        graph,
+      ),
+    ).toEqual({
+      kind: 'resolved',
+      option: { id: 'o1', label: 'US expansion' },
+    });
+
+    expect(
+      resolveTargetOptionFromMessage(
+        'What would change if US expansion cost increased?',
+        { ...graph, nodes: [...graph.nodes].reverse() },
+      ),
+    ).toEqual({ kind: 'none', reason: 'no_option_named' });
+  });
+
+  it('an exact label shared by an option and non-option is entity-ambiguous', () => {
+    expect(
+      resolveTargetOptionFromMessage('What would make Expansion win?', {
+        nodes: [
+          { id: 'o1', kind: 'option', label: 'Expansion' },
+          { id: 'f1', kind: 'factor', label: 'Expansion' },
+        ],
+      }),
+    ).toEqual({ kind: 'none', reason: 'label_collision' });
+  });
+
   it('TWO distinct options named ⇒ a comparison, not a target', () => {
     expect(
       resolveTargetOptionFromMessage(
@@ -238,6 +283,7 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
       'What would change if it increased?',
       'Would it lead to lower acquisition cost?',
       'Could it win support from customers?',
+      'What would make it become the top factor?',
     ]) {
       expect(
         resolveTargetOptionFromCanonicalContext(
@@ -253,6 +299,8 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
   it.each([
     'What would make it win?',
     'What would make it win if demand improved?',
+    'What would make it the leading option?',
+    'What would make it become top?',
     'What would need to change for this option to come out ahead?',
     'Could the selected alternative become the leading option?',
   ])('accepts a closed option-outcome deictic: %s', (message) => {

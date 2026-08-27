@@ -104,6 +104,17 @@ const READY_GRAPH = {
   ],
 };
 
+const SUBSTRING_LABEL_GRAPH = {
+  ...READY_GRAPH,
+  nodes: READY_GRAPH.nodes.map((node) => {
+    if (node.id === 'opt_hire') return { ...node, label: 'US expansion' };
+    if (node.id === 'fac_acquisition_cost') {
+      return { ...node, label: 'US expansion cost' };
+    }
+    return node;
+  }),
+};
+
 /** A graph with NO option interventions → controlled set is empty (no-op case). */
 const UNPINNED_GRAPH = {
   nodes: [
@@ -699,5 +710,107 @@ describe('System B — selected canonical option referent continuity', () => {
     expect(flipFact?.result?.answer_source).toBe('sonnet');
     expect(flipFact?.result?.fallback_reason).toBeNull();
     expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
+  });
+
+  it('preserves generic Sonnet truth for a longer factor label and a non-option rank phrase', async () => {
+    const genericAnswer =
+      'Market demand and the recorded cost assumptions are the main factors that could change the result, while the present analysis still leaves meaningful uncertainty around the alternatives.';
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(genericAnswer),
+    );
+    mockState.persistedGraph = SUBSTRING_LABEL_GRAPH;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(SUBSTRING_LABEL_GRAPH)];
+
+    for (const [message, requestId, withSelection] of [
+      [
+        'What would change the result?',
+        'req-referent-entity-exclusive-control',
+        false,
+      ],
+      [
+        'What would change if US expansion cost increased?',
+        'req-referent-longer-factor',
+        true,
+      ],
+      [
+        'What would make it become the top factor?',
+        'req-referent-top-factor',
+        true,
+      ],
+    ] as const) {
+      const result = await runTurnExecutor(mkPayload(message), requestId, {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SUBSTRING_LABEL_GRAPH as never,
+        ...(withSelection
+          ? { selectedElements: { node_ids: ['opt_hire'], edge_ids: [] } }
+          : {}),
+      });
+      expect(result.response.assistant_text, message).toBe(genericAnswer);
+      expect(JSON.stringify(result.response)).not.toContain('model_version_receipt');
+    }
+
+    const writes = appendCalls.map(([write]) => write as {
+      graph?: unknown;
+      handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+    });
+    for (const write of writes) expect(write.graph).toBeUndefined();
+    const flipFacts = writes
+      .flatMap((write) => write.handler_facts ?? [])
+      .filter((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFacts).toHaveLength(3);
+    const controlFactBytes = JSON.stringify(flipFacts[0]!.result);
+    for (const fact of flipFacts) {
+      expect(fact.result?.answer_source).toBe('sonnet');
+      expect(fact.result?.fallback_reason).toBeNull();
+      expect(JSON.stringify(fact.result)).toBe(controlFactBytes);
+    }
+  });
+
+  it('retains explicit and licensed deictic targeting beside a longer factor label', async () => {
+    mockState.persistedGraph = SUBSTRING_LABEL_GRAPH;
+    mockState.priorFacts = [priorFactWithDriversAndFlip(SUBSTRING_LABEL_GRAPH)];
+
+    const explicit = await runTurnExecutor(
+      mkPayload('What would make US expansion win?'),
+      'req-referent-substring-explicit',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SUBSTRING_LABEL_GRAPH as never,
+      },
+    );
+    const deictic = await runTurnExecutor(
+      mkPayload('What would make it the leading option?'),
+      'req-referent-leading-option',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        handlerRegistry: REAL_REGISTRY,
+        graphState: SUBSTRING_LABEL_GRAPH as never,
+        selectedElements: { node_ids: ['opt_hire'], edge_ids: [] },
+      },
+    );
+
+    expect(deictic.response.assistant_text).toBe(explicit.response.assistant_text);
+    expect(deictic.response.assistant_text).toContain('US expansion would lead instead');
+    expect(deictic.response.assistant_text).not.toContain(
+      'Freelance plus moderate advertising',
+    );
+    const flipFacts = appendCalls
+      .flatMap(([write]) => {
+        const record = write as {
+          graph?: unknown;
+          handler_facts?: Array<{ fact_type?: string; result?: Record<string, unknown> }>;
+        };
+        expect(record.graph).toBeUndefined();
+        return record.handler_facts ?? [];
+      })
+      .filter((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFacts).toHaveLength(2);
+    for (const fact of flipFacts) {
+      expect(fact.result?.answer_source).toBe('deterministic_fallback');
+      expect(fact.result?.fallback_reason).toBeNull();
+    }
+    expect(JSON.stringify(deictic.response)).not.toContain('model_version_receipt');
   });
 });
