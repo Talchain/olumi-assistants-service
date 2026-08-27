@@ -890,6 +890,17 @@ const ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT =
 const ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT =
   'I could not read the model to check what you selected, so I can’t answer about it without guessing. I have not substituted a different element.';
 
+// Deliberately exact and standalone. The shared state-query predicate remains
+// the authority for every broader state/history question; this one approved
+// consequence question may instead use the model only when a durable applied
+// receipt is already present in ContextPack.
+const STANDALONE_EDIT_EFFECT_QUESTION =
+  /^\s*what\s+did\s+that\s+update\s+do\s*[?!.]*\s*$/i;
+
+function isStandaloneEditEffectQuestion(message: string): boolean {
+  return STANDALONE_EDIT_EFFECT_QUESTION.test(message);
+}
+
 type ZeroResolvedSelectionProjection = {
   readonly response: OlumiResponse;
   readonly applied: boolean;
@@ -1586,6 +1597,7 @@ export async function runTurnExecutor(
   // union, and adding the brief-audit outcome is precisely the edit that would
   // have drifted.
   let stateQueryGuardOutcomeForLog: StateQueryGuardOutcomeForLog = 'not_evaluated';
+  let explainAcceptedEditConsequenceForRun = false;
   // Compute the successful-mutation-fact count ONCE at function entry so
   // every turn class (including those where an earlier pre-route —
   // short-confirm, deterministic value-update — synthesises a routing
@@ -7219,22 +7231,27 @@ export async function runTurnExecutor(
       // sees the same `recent_changes` projection and can ground its
       // answer (Option B layered with this guard's Option A floor).
       if (routingResult === undefined) {
-        const stateQueryOutcome = tryStateQueryGuard({
-          message: payload.message,
-          contextPack,
-          // ROADMAP 2.975 — the FULL persisted pair, both loaded in the same
-          // round trip by `loadGraphAndBriefText`. Deliberately NOT
-          // `contextPack.brief`, which is hard-sliced at 2,000 chars: a
-          // truncated brief would shorten the list of figures we claim to have
-          // looked for, and report a figure the user DID state as one they
-          // did not. On a degraded read `persistedGraph` is null, the manifest
-          // reports `unavailable`, and the guard declines rather than
-          // answering — never a reassuring zero.
-          briefAudit: {
-            briefText: context.scenarioBriefText,
-            graph: context.persistedGraph,
-          },
-        });
+        explainAcceptedEditConsequenceForRun =
+          isStandaloneEditEffectQuestion(payload.message) &&
+          contextPack.recent_changes.length > 0;
+        const stateQueryOutcome = explainAcceptedEditConsequenceForRun
+          ? ({ matched: false } as const)
+          : tryStateQueryGuard({
+              message: payload.message,
+              contextPack,
+              // ROADMAP 2.975 — the FULL persisted pair, both loaded in the same
+              // round trip by `loadGraphAndBriefText`. Deliberately NOT
+              // `contextPack.brief`, which is hard-sliced at 2,000 chars: a
+              // truncated brief would shorten the list of figures we claim to have
+              // looked for, and report a figure the user DID state as one they
+              // did not. On a degraded read `persistedGraph` is null, the manifest
+              // reports `unavailable`, and the guard declines rather than
+              // answering — never a reassuring zero.
+              briefAudit: {
+                briefText: context.scenarioBriefText,
+                graph: context.persistedGraph,
+              },
+            });
 
         // The successful-mutation count is computed once at function
         // entry (see `priorMutationFactCountForLog`) so the routing log
@@ -8028,10 +8045,15 @@ export async function runTurnExecutor(
           // claimed by the run-comparison gate above and never reaches this call
           // as a forced explanation (the gate returns first). Guard the union so
           // only the two explanation intents can pin a handler here.
-          ...(options.chipClickForcedIntent === 'explain_results' ||
-          options.chipClickForcedIntent === 'what_would_flip'
-            ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
-            : {}),
+          ...(explainAcceptedEditConsequenceForRun
+            ? {
+                forcedExplanationHandlerId: 'explain_from_structure' as const,
+                forcedExplanationReason: 'bounded_non_mutation' as const,
+              }
+            : options.chipClickForcedIntent === 'explain_results' ||
+                options.chipClickForcedIntent === 'what_would_flip'
+              ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
+              : {}),
         });
 
         // ══════════════════════════════════════════════════════════════
@@ -10636,6 +10658,7 @@ export async function runTurnExecutor(
       // emit a misleading "Run analysis" chip when a prior non-noop
       // run_analysis fact already exists in the conversation.
       const boundedAnalyticalExecute =
+        explainAcceptedEditConsequenceForRun ||
         isBoundedNonMutationAnalyticalRequest(payload.message);
       let executeChips = generateChips({
         stage: context.stage,
@@ -11982,14 +12005,16 @@ export async function runTurnExecutor(
           return null;
         }
       })();
-      const proposalPendingForCommit = buildPendingActionsWithProposalCapture({
-        assistantText: composedOk.assistant_text,
-        chips: composedOk.suggested_actions ?? [],
-        scenarioId: context.session_id,
-        graphHash: llmGraphHash,
-        requestId,
-        originPath: 'llm_sonnet',
-      });
+      const proposalPendingForCommit = explainAcceptedEditConsequenceForRun
+        ? undefined
+        : buildPendingActionsWithProposalCapture({
+            assistantText: composedOk.assistant_text,
+            chips: composedOk.suggested_actions ?? [],
+            scenarioId: context.session_id,
+            graphHash: llmGraphHash,
+            requestId,
+            originPath: 'llm_sonnet',
+          });
 
       // Defence-in-depth brief persistence (V5 Phase 3A prerequisite):
       // re-pass the scenario brief that build-turn-context already
@@ -12084,7 +12109,7 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
-        graph: graphForCommit,
+        graph: explainAcceptedEditConsequenceForRun ? undefined : graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
           ? { pending_actions: pendingForCommit }

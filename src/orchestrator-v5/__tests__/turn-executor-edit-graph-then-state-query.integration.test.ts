@@ -48,6 +48,8 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findForbiddenPhraseHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
+import type { PendingAction } from '../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
 // Session store mock — replayable across two synthetic turns
@@ -57,15 +59,22 @@ const mockState: {
   priorTurns: Array<Record<string, unknown>>;
   priorFacts: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
+  appendWrites: Array<Record<string, unknown>>;
+  pendingActions: PendingAction[];
 } = {
   priorTurns: [],
   priorFacts: [],
   persistedGraph: null,
+  appendWrites: [],
+  pendingActions: [],
 };
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (write: Record<string, unknown>) => {
+      mockState.appendWrites.push(write);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -77,7 +86,7 @@ vi.mock('../session/index.js', () => ({
       briefText: null,
     }),
     ensureScenarioExists: async () => ({ user_id: null }),
-    readMostRecentPendingActions: async () => [],
+    readMostRecentPendingActions: async () => mockState.pendingActions,
   }),
   resetSessionStoreForTests: () => undefined,
 }));
@@ -252,6 +261,47 @@ function callingRoutingAdapter(text: string) {
   };
 }
 
+function consequenceRoutingAdapter(answer: string) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(async () => ({
+        content: [
+          {
+            type: 'tool_use' as const,
+            id: 'toolu-edit-effect',
+            name: OLUMI_ACTION_TOOL_NAME,
+            input: {
+              intent_class: 'execute',
+              action: {
+                // Hostile control: the model asks to mutate. The forced
+                // explanation carrier must pin this to a read-only handler.
+                handler_id: 'add_constraint',
+                entity: {
+                  id: 'fac_hiring_cost',
+                  kind: 'node',
+                  label: 'Incremental Hiring Cost',
+                  resolution_status: 'resolved',
+                  resolution_method: 'id_match',
+                },
+                parameters: [],
+                cited_context_fields: ['recent_changes', 'graph.nodes', 'graph.edges'],
+                explanation: {
+                  answer_text: answer,
+                  cited_fields: ['recent_changes', 'graph.nodes', 'graph.edges'],
+                },
+              },
+            },
+          },
+        ],
+        stop_reason: 'tool_use' as const,
+        usage: { input_tokens: 5, output_tokens: 5 },
+        model: 'mock',
+        latencyMs: 0,
+      })),
+  };
+}
+
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
@@ -265,6 +315,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
     mockState.priorTurns = [];
     mockState.priorFacts = [];
     mockState.persistedGraph = null;
+    mockState.appendWrites = [];
+    mockState.pendingActions = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 
@@ -371,6 +423,75 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt!.data.graph_hash_at_run).toBe(PRE_EDIT_HASH);
       expect(evt!.data.current_graph_hash).toBe(POST_EDIT_HASH);
     });
+
+    it('grounds the exact standalone consequence question on canonical state without creating authority', async () => {
+      const answer =
+        'In the saved model, the cost relationship now carries more downside weight when reasoning about the Q3 goal. The previous result is stale, so rerun it before comparing options.';
+      const adapter = consequenceRoutingAdapter(answer);
+      const requestGraphCanary = {
+        ...PRE_EDIT_GRAPH,
+        nodes: PRE_EDIT_GRAPH.nodes.map((node) =>
+          node.id === 'fac_hiring_cost'
+            ? { ...node, label: 'REQUEST GRAPH CANARY' }
+            : node,
+        ),
+      };
+      const existingPending: PendingAction = {
+        id: 'pending-existing',
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_existing_run',
+        action: { kind: 'run_analysis' },
+        preconditions: {},
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-08-27T00:00:00.000Z',
+      };
+      mockState.pendingActions = [existingPending];
+
+      const result = await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-edit-effect-canonical',
+        { routingAdapter: adapter, graphState: requestGraphCanary as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const call = adapter.chatWithTools.mock.calls[0]![0];
+      expect(call.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
+      const prompt = String(call.messages[0]!.content);
+      expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
+      expect(prompt).toContain(SAFE_SUMMARY);
+      expect(prompt).toContain('Incremental Hiring Cost');
+      expect(prompt).not.toContain('REQUEST GRAPH CANARY');
+      expect(prompt).toContain('Requested answer (non-mutating)');
+
+      expect(result.response.assistant_text).toContain('saved model');
+      expect(result.response.suggested_actions ?? []).toEqual([]);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-edit-effect-canonical',
+      );
+      expect(committed).toBeDefined();
+      expect(committed).toHaveProperty('graph', undefined);
+      expect(committed?.handler_id).toBe('explain_from_structure');
+      expect(
+        (committed?.handler_facts as Array<{ fact_type?: string }> | undefined) ?? [],
+      ).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ fact_type: 'edit_graph' }),
+          expect.objectContaining({ fact_type: 'add_constraint' }),
+          expect.objectContaining({ fact_type: 'set_factor_value' }),
+        ]),
+      );
+      expect(committed?.pending_actions).toEqual([
+        expect.objectContaining({ id: existingPending.id, chip_id: existingPending.chip_id }),
+      ]);
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data).toMatchObject({
+        matched: false,
+        dispatch: null,
+        recent_change_count: 1,
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -401,6 +522,32 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       // change replaces the forbidden denial with neutral copy).
       const guardEvent = events.find((e) => e.event === 'v5.state_query_guard');
       expect(guardEvent?.data.recent_change_count).toBe(0);
+    });
+
+    it('keeps the exact standalone consequence question deterministic when no receipt exists', async () => {
+      mockState.priorTurns = [PRIOR_EDIT_TURN];
+      mockState.priorFacts = [{ ...ACCEPTED_EDIT_GRAPH_FACT, noop: true }];
+      mockState.persistedGraph = PRE_EDIT_GRAPH;
+      const adapter = throwingRoutingAdapter();
+
+      const result = await runTurnExecutor(
+        mkPayload('What did that update do?'),
+        'req-no-receipt-edit-effect',
+        { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(events.find((event) => event.event === 'v5.state_query_guard')?.data).toMatchObject({
+        matched: true,
+        dispatch: 'no_recent_changes',
+        recent_change_count: 0,
+      });
+      expect(result.response.suggested_actions ?? []).toEqual([]);
+      expect(result.response).not.toHaveProperty('model_version_receipt');
+      const committed = mockState.appendWrites.find(
+        (write) => write.turn_id === 'req-no-receipt-edit-effect',
+      );
+      expect(committed).toHaveProperty('graph', undefined);
     });
   });
 
