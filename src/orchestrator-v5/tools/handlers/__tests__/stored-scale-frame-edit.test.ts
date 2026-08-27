@@ -482,9 +482,29 @@ describe("percent factors above 100 are refused, not silently rescaled", () => {
  *  1. A "unification" toward the NARROW predicate — making `'% NRR'` behave
  *     like `'%'` — would convert three currently-correct cases into the same
  *     silent error. That is the trap, and these tests exist to REDden it.
- *  2. The safe unification is toward the BROAD predicate, which is the same
- *     family as the principled fix deliberately NOT taken on this PR (percent
- *     units always framing at 100). Rowed, with this measurement attached.
+ *  2. ⚠⚠ **THIS ENTRY'S ORIGINAL SECOND CONSEQUENCE WAS WRONG AND IS WITHDRAWN.**
+ *     It read: *"The safe unification is toward the BROAD predicate."* Measured
+ *     since, over the sub-1 half of the input space this table never sampled:
+ *
+ *       unit "percent" frame 100, states 0.4 → THROWS AmbiguousScaleValueError
+ *       unit "%"       frame 100, states 0.4 → {value: 0.4, raw_value: 40}  ✓
+ *
+ *     The broad spellings route a sub-1 percent input into the frame branch's
+ *     ambiguity throw, so unifying toward BROAD would convert the COMMONEST
+ *     percent edit there is — an ordinary sub-1 level on a 0–100 factor — from
+ *     correct into a throw. **NEITHER unification is safe.** The two spellings
+ *     differ in OPPOSITE directions: broad is right for `>= 1` inputs, narrow
+ *     is right for sub-1 ones.
+ *
+ *     ⭐ The table above is why the error survived review: every row states
+ *     `115`, so the corpus samples only the `>= 1` half and CANNOT observe the
+ *     direction in which broad is worse. Checking what a corpus EXCLUDES is
+ *     what surfaced it — the same move that produced this describe block.
+ *
+ *     The actual fix was neither unification: the percent divisor is now
+ *     resolved from the factor's own frame instead of being hard-coded at 100,
+ *     leaving both predicates exactly where they are. See
+ *     `percent-frame-inversion.test.ts`.
  */
 describe('percent spellings other than "%" already resolve on the stored frame', () => {
   const framedGraph = (unit: string) => ({

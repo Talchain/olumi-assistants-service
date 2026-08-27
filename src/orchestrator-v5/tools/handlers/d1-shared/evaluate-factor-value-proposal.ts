@@ -255,21 +255,63 @@ export function resolveExistingRawValue(snapshot: {
   readonly value?: number;
   readonly unit?: string;
   readonly cap?: number;
+  /**
+   * The factor's SCALE FRAME, when the caller knows it — i.e. the divisor
+   * `normaliseFactorValue` used on the way in. Optional and additive: every
+   * pre-existing caller omits it and gets byte-identical behaviour.
+   *
+   * ⭐ WHY THIS PARAMETER EXISTS. The capless WRITE path
+   * (`normalise-factor-value.ts`) resolves the frame through the shared owner
+   * `resolveScaleFrame` and writes `{value: raw/frame, raw_value: raw}` with NO
+   * percent special case — so a percent factor on a frame of 200 is stored
+   * `{0.575, 115}`, correctly. This function is that write's INVERSE, and it
+   * hard-coded the divisor at 100. The two halves of one round-trip therefore
+   * disagreed by `frame/100` on exactly the class the frame ladder produces:
+   * `deriveFactorScaleFrame` pins 100 only when `isPercentScaledUnit(unit) &&
+   * max <= 100`, so NRR [95,115] frames at 200 and ROI [50,300] at 500.
+   *
+   * Supply it ONLY from `resolveScaleFrame` — never a locally-computed opinion
+   * about the frame, which is the twin-owners defect this estate keeps paying
+   * for. Passing 100 is identical to omitting it.
+   */
+  readonly scaleFrame?: number;
 }): ExistingRawResolution {
-  const { raw_value, value, unit, cap } = snapshot;
+  const { raw_value, value, unit, cap, scaleFrame } = snapshot;
   if (raw_value !== undefined) return { kind: 'resolved', raw: raw_value };
   if (value === undefined) return { kind: 'missing' };
 
   if (unit === '%') {
     // A raw-value-less % factor has no reliable scale provenance: a handler-
     // produced % always carries raw_value (short-circuited above), so this is
-    // an extractor/legacy state. value=raw/100 is only safe to invert when the
-    // value is a normalised proportion in [0,1] and the divisor is unambiguous
-    // (no cap, or cap===100). A value outside [0,1] (5 → 500%? or legacy 5%?)
-    // or cap!==100 is genuinely ambiguous.
+    // an extractor/legacy state. value=raw/frame is only safe to invert when
+    // the value is a normalised proportion in [0,1] and the divisor is
+    // unambiguous. A value outside [0,1] (5 → 500%? or legacy 5%?) is
+    // genuinely ambiguous and stays fail-closed WITH OR WITHOUT a frame — a
+    // frame supplies a divisor, never a licence to guess.
+    //
+    // The divisor, in precedence order:
+    //   · a cap                → the capped convention (cap===100 or nothing);
+    //     a stored cap flips the writer to the clamping path, so a capped
+    //     factor is by construction NOT a framed one and the cap wins.
+    //   · a supplied frame     → the divisor the writer actually used.
+    //     Held to the SAME domain `resolveScaleFrame`/`recoverScaleFrame`
+    //     prove (finite, strictly > 1), so a frame those would refuse is not
+    //     applied here either and the two cannot hand consumers different
+    //     classes of answer.
+    //   · nothing              → 100, the percentage convention, unchanged.
+    const framedDivisor =
+      cap === undefined &&
+      typeof scaleFrame === 'number' &&
+      Number.isFinite(scaleFrame) &&
+      scaleFrame > 1
+        ? scaleFrame
+        : undefined;
+    // (A framed divisor implies `cap === undefined`, so it is already inside
+    // `unambiguousDivisor` — it changes WHAT the divisor is, never WHETHER the
+    // value is invertible. The admission rule is untouched by this parameter.)
     const unambiguousDivisor = cap === undefined || cap === 100;
     if (unambiguousDivisor && value >= 0 && value <= 1) {
-      return { kind: 'resolved', raw: value * 100 };
+      return { kind: 'resolved', raw: value * (framedDivisor ?? 100) };
     }
     return { kind: 'ambiguous' };
   }
