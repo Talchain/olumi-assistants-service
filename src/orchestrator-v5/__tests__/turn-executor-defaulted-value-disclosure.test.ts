@@ -111,6 +111,29 @@ function enrichmentWithoutDefaults(): Record<string, unknown> {
  * switch because `vi.mock` is hoisted and cannot close over per-test state.
  */
 let enrichmentForTurn: Record<string, unknown> = REAL_ENRICHMENT;
+let priorComputedAt = new Date(Date.now() - 60_000).toISOString();
+
+function priorAnalysisFactForStore(): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_hubspot',
+      summary: 'Prior analysis.',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
+      graph_hash_at_run: READY_GRAPH_HASH,
+      computed_at: priorComputedAt,
+      win_probabilities: { opt_hubspot: 0.96, opt_hold: 0.02 },
+      // VERBATIM producer envelope — nothing is constructed here.
+      enrichment: enrichmentForTurn,
+    },
+  } as HandlerFact;
+}
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -130,27 +153,11 @@ vi.mock('../session/index.js', () => ({
         created_at: '2026-08-13T19:30:00.000Z',
       },
     ],
-    readFactsFor: async () => [
-      {
-        fact_type: 'run_analysis' as const,
-        fact_version: 1,
-        noop: false,
-        result: {
-          scenario_id: SCENARIO_ID,
-          leading_option_id: 'opt_hubspot',
-          summary: 'Prior analysis.',
-          constraint_verdict: {
-            may_name_leading_option: true,
-            constraint_verdict_state: 'evaluated_feasible' as const,
-          },
-          graph_hash_at_run: READY_GRAPH_HASH,
-          computed_at: new Date(Date.now() - 60_000).toISOString(),
-          win_probabilities: { opt_hubspot: 0.96, opt_hold: 0.02 },
-          // VERBATIM producer envelope — nothing is constructed here.
-          enrichment: enrichmentForTurn,
-        },
-      },
-    ],
+    readFactsFor: async () => [priorAnalysisFactForStore()],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [priorAnalysisFactForStore()],
+      total_count: 1,
+    }),
     invalidateScoped: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -205,6 +212,7 @@ let events: Event[] = [];
 beforeEach(() => {
   events = [];
   enrichmentForTurn = REAL_ENRICHMENT;
+  priorComputedAt = new Date(Date.now() - 60_000).toISOString();
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 afterEach(() => {
@@ -369,7 +377,10 @@ function mkToolUseResult(input: unknown): ChatWithToolsResult {
 }
 
 /** A handler that produces THIS TURN's analysis, carrying the real defaults. */
-function registryProducingDefaults(): HandlerRegistry {
+function registryProducingAnalysis(
+  enrichment: Record<string, unknown>,
+  status = 'completed',
+): HandlerRegistry {
   const handler: HandlerFn = async () => ({
     assistant_text: HEADLINE,
     handler_facts: [
@@ -387,13 +398,33 @@ function registryProducingDefaults(): HandlerRegistry {
             may_name_leading_option: true,
             constraint_verdict_state: 'not_applicable',
           },
-          enrichment: { ...REAL_ENRICHMENT, analysis_status: 'completed' },
+          enrichment: { ...enrichment, analysis_status: status },
         },
       } as unknown as HandlerFact,
     ],
     llm_calls_used: 0,
   });
   return new Map([['run_analysis', handler]]);
+}
+
+function registryProducingDefaults(): HandlerRegistry {
+  return registryProducingAnalysis(REAL_ENRICHMENT);
+}
+
+function enrichmentWithOneDefault(label: string): Record<string, unknown> {
+  const copy = JSON.parse(JSON.stringify(REAL_ENRICHMENT)) as Record<
+    string,
+    unknown
+  >;
+  const brief = copy.decision_brief as Record<string, unknown>;
+  brief.defaulted_assumptions = [
+    {
+      factor_label: label,
+      source: 'value_defaulted',
+      note: 'Defaulted for this run.',
+    },
+  ];
+  return copy;
 }
 
 describe('turn-executor F6 — the fact basis and the same-run guard', () => {
@@ -427,18 +458,91 @@ describe('turn-executor F6 — the fact basis and the same-run guard', () => {
     expect(occurrences(response.assistant_text ?? '', DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
   });
 
-  /**
-   * ⭐ THE SAME-RUN GUARD. When the request body carries `analysis_state`, the
-   * numbers on screen describe the REQUEST run while any fact-sourced signal
-   * describes a PRIOR one. Pairing them would let the disclosure qualify a
-   * different run than the numbers beside it — or invent a caveat about a run
-   * that defaulted nothing. The four existing selector call sites all carry
-   * this condition; so must this one.
-   */
-  it('stands down when the analysis came from the request body', async () => {
-    enrichmentForTurn = REAL_ENRICHMENT; // prior facts DO carry defaults
+  it('does not let a future-skewed prior run qualify a current successful run that used no defaults', async () => {
+    enrichmentForTurn = enrichmentWithOneDefault('PRIOR_FUTURE');
+    priorComputedAt = '2099-01-01T00:00:00.000Z';
 
     const { response } = await runTurnExecutor(
+      {
+        ...BASE_PAYLOAD,
+        message: 'run the analysis',
+        turn_class: 'decide',
+        stage: 'analyse',
+      },
+      'req-f6-current-success-precedence',
+      {
+        routingAdapter: {
+          chatWithTools: vi
+            .fn<
+              (
+                a: ChatWithToolsArgs,
+                o: { requestId: string },
+              ) => Promise<ChatWithToolsResult>
+            >()
+            .mockImplementation(
+              (async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS)) as never,
+            ),
+        },
+        handlerRegistry: registryProducingAnalysis(
+          enrichmentWithoutDefaults(),
+        ),
+        graphState: GRAPH_WITH_OPTIONS,
+      },
+    );
+
+    expect(response.assistant_text).not.toContain('PRIOR_FUTURE');
+    expect(response.assistant_text).not.toContain(DEFAULTED_DISCLOSURE_TAIL);
+  });
+
+  it('uses a current partial run’s own default instead of a future-skewed prior success', async () => {
+    enrichmentForTurn = enrichmentWithOneDefault('PRIOR_SUCCESS');
+    priorComputedAt = '2099-01-01T00:00:00.000Z';
+
+    const { response } = await runTurnExecutor(
+      {
+        ...BASE_PAYLOAD,
+        message: 'run the analysis',
+        turn_class: 'decide',
+        stage: 'analyse',
+      },
+      'req-f6-current-partial-precedence',
+      {
+        routingAdapter: {
+          chatWithTools: vi
+            .fn<
+              (
+                a: ChatWithToolsArgs,
+                o: { requestId: string },
+              ) => Promise<ChatWithToolsResult>
+            >()
+            .mockImplementation(
+              (async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS)) as never,
+            ),
+        },
+        handlerRegistry: registryProducingAnalysis(
+          enrichmentWithOneDefault('CURRENT_PARTIAL'),
+          'partial',
+        ),
+        graphState: GRAPH_WITH_OPTIONS,
+      },
+    );
+
+    expect(response.assistant_text).toContain('CURRENT_PARTIAL');
+    expect(response.assistant_text).not.toContain('PRIOR_SUCCESS');
+    expect(occurrences(response.assistant_text ?? '', DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
+  });
+
+  /** Request analysis_state remains wire-compatible metadata only. It cannot
+   * suppress the caveat attached to the selected canonical durable run. */
+  it('keeps canonical default disclosure authoritative over request analysis_state', async () => {
+    enrichmentForTurn = REAL_ENRICHMENT; // prior facts DO carry defaults
+
+    const { response: withoutRequestState } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'how solid is this?' },
+      'req-f6-canonical-default-baseline',
+      { routingAdapter: mockRoutingAdapter(STABILITY_LEAK) },
+    );
+    const { response: withRequestState } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'how solid is this?' },
       'req-f6-same-run-guard',
       {
@@ -448,8 +552,10 @@ describe('turn-executor F6 — the fact basis and the same-run guard', () => {
       },
     );
 
-    const text = response.assistant_text ?? '';
-    expect(text).not.toContain(DEFAULTED_DISCLOSURE_TAIL);
-    expect(egressEvent()).toBeUndefined();
+    const text = withRequestState.assistant_text ?? '';
+    expect(text).toContain(DEFAULTED_DISCLOSURE_TAIL);
+    expect(withRequestState.assistant_text).toBe(
+      withoutRequestState.assistant_text,
+    );
   });
 });

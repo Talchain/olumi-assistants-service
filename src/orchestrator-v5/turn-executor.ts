@@ -297,7 +297,10 @@ import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './t
 
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
-import { applyCoachingSignal } from './coaching/coaching-signal-application.js';
+import {
+  applyCoachingSignal,
+  stripUnattestedCeeOwnedRunAnalysisEnrichment,
+} from './coaching/coaching-signal-application.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
 import type { CoachingSignalId } from './coaching/types.js';
 import {
@@ -323,6 +326,7 @@ import {
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
 } from './context/analysis-fallback.js';
+import { isReconciledScenarioAnalysisFactSet } from './context/reconcile-scenario-analysis-facts.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import {
   computeAnalysisAffectingGraphHash,
@@ -333,6 +337,7 @@ import { extractGraphOptionIds } from './context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  selectCurrentTurnRunAnalysisFacts,
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
@@ -423,7 +428,10 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
-import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
+import {
+  pickLatestDefaultedAssumptions,
+  readDefaultedAssumptionsFromEnrichment,
+} from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
 import {
@@ -1613,12 +1621,19 @@ export async function runTurnExecutor(
   // capped/degraded/omitted carriers fail weak. The current-turn run fact may
   // be prepended after dispatch, but request analysis bytes never enter this
   // chain.
+  const licensedScenarioAnalysisFactSet =
+    isReconciledScenarioAnalysisFactSet(
+      context.scenario_analysis_fact_set,
+      context.session_id,
+    )
+      ? context.scenario_analysis_fact_set
+      : undefined;
   const scenarioAnalysisFacts =
-    context.scenario_analysis_fact_set?.status === 'complete'
-      ? context.scenario_analysis_fact_set.facts
+    licensedScenarioAnalysisFactSet?.status === 'complete'
+      ? licensedScenarioAnalysisFactSet.facts
       : [];
   const scenarioAnalysisFactsReadOk =
-    context.scenario_analysis_fact_set?.status === 'complete';
+    licensedScenarioAnalysisFactSet?.status === 'complete';
   // V5 state-trust: freshness derivation. The PRE-dispatch derivation
   // (`routingFreshness`) is built from `context.prior_facts` and is used
   // to ground Sonnet's analysis projection. The POST-dispatch derivation
@@ -2441,7 +2456,7 @@ export async function runTurnExecutor(
         context.session_id,
         {
           selectedAnalysisFact: selectedScenarioAnalysisFact,
-          analysisFactChronology: scenarioAnalysisFacts,
+          analysisFactSet: licensedScenarioAnalysisFactSet,
         },
       );
       // V5 Task 1.2: compact the graph before handing it to Sonnet. Full graph
@@ -7238,19 +7253,7 @@ export async function runTurnExecutor(
           // analysis logic deterministically.
           const stateQueryChips = composeStateQueryChip({
             recentChangeCount: contextPack.recent_changes.length,
-            analysisHistory:
-              context.scenario_analysis_fact_set?.status === 'complete'
-                ? {
-                    status: 'complete',
-                    hasSuccessfulAnalysis:
-                      selectedScenarioAnalysisFact !== null,
-                  }
-                : {
-                    status:
-                      context.scenario_analysis_fact_set?.status === 'capped'
-                        ? 'capped'
-                        : 'degraded',
-                  },
+            analysisFactSet: licensedScenarioAnalysisFactSet,
             analysisFreshness: buildTurnOutcome()?.analysis_freshness,
             analysisReadyStatus: analysisReadyForTurn?.status,
             validationRegistry:
@@ -9717,8 +9720,28 @@ export async function runTurnExecutor(
         }
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
+<<<<<<< HEAD
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+=======
+        // The forced explanation handler is an internal validation/composition
+        // carrier for this read-only turn, not a new semantic event. Persist the
+        // conversation answer without a handler fact or handler identity so it
+        // cannot masquerade as another accepted change on a later return.
+        if (focusedCompoundConsequenceForRun) {
+          handlerIdForCommit = null;
+          handlerFactsForCommit = [];
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+        } else {
+          handlerIdForCommit = proposedHandlerId;
+          handlerFactsForCommit =
+            stripUnattestedCeeOwnedRunAnalysisEnrichment(
+              handlerOutcome.handler_facts,
+            );
+        }
+>>>>>>> d951f0f18 (fix(runtime): bind interactive analysis authority to durable facts)
         // P0 V5 golden-path repair (follow-up): record graph-mutation
         // observation for turn_outcome.graph_mutated. Any non-null
         // `mutated_graph` on the handler outcome counts — handler-id
@@ -10222,7 +10245,7 @@ export async function runTurnExecutor(
 
         if (!config.cee.runAnalysisAwaitDecisionReview) {
           const briefLength = typeof resolvedBrief === 'string' ? resolvedBrief.length : 0;
-          const runAnalysisFact = handlerOutcome.handler_facts.find(
+          const runAnalysisFact = handlerFactsForCommit.find(
             (f) => f.fact_type === 'run_analysis',
           );
           const enrichment =
@@ -10272,7 +10295,7 @@ export async function runTurnExecutor(
           } = {};
           try {
             handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
-              handlerFacts: handlerOutcome.handler_facts,
+              handlerFacts: handlerFactsForCommit,
               requestId,
               scenarioId: context.session_id,
               signal: turnAbort.signal,
@@ -10311,7 +10334,7 @@ export async function runTurnExecutor(
               reason: err instanceof Error ? err.message : 'unknown',
             });
             handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
-              handlerOutcome.handler_facts,
+              handlerFactsForCommit,
             );
           } finally {
             if (timingsEnabled && decisionReviewStartedAt > 0) {
@@ -10374,12 +10397,13 @@ export async function runTurnExecutor(
         // chronology. Scenario analyses are a separate authority input below;
         // prefixing the two reads would fabricate run→mutation ordering.
         priorFacts: context.prior_facts,
-        priorAnalysisFacts: scenarioAnalysisFacts,
+        priorAnalysisFactSet: licensedScenarioAnalysisFactSet,
         handlerFacts: handlerFactsForCommit,
         requestId,
         scenarioId: context.session_id,
         // ROADMAP 2.804 — the SCOPE only. The helper derives the leader-claim
-        // permission itself, from `handlerFacts ∪ priorFacts` above, because
+        // permission itself, from current handler facts plus the canonical
+        // scenario analysis history above, because
         // STEP 5 runs BEFORE the post-handler re-read of
         // `mayNameLeadingOptionForRun` (further down this function). Passing
         // that variable here would hand the coaching slot the TURN-ENTRY value
@@ -10641,6 +10665,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
+        analysisFactSet: licensedScenarioAnalysisFactSet,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
@@ -10863,13 +10888,18 @@ export async function runTurnExecutor(
         // single site that selects it, so compose never re-derives "the flip
         // factor" and cannot disagree with the chip the user is reading.
         flipFocusFactorId,
-        // ROADMAP 2.211 — the PRIOR fact array (this turn's facts EXCLUDED), for
-        // the no-immediate-repeat lens tie-break only. Deliberately NOT
-        // `unifiedFactsForPostHandler`, which is what `lifecycle.priorFacts`
-        // below carries: that array begins with THIS turn's run_analysis fact,
-        // so deriving the previous lens from it would report every turn as a
-        // repeat of itself. Already loaded for the turn — no extra DB read.
-        priorTurnFactsForLensHistory: scenarioAnalysisFacts,
+        // ROADMAP 2.211 — scenario-wide, attested analysis history for the
+        // no-immediate-repeat lens tie-break only. The current turn is excluded
+        // by construction; capped/degraded carriers fail weak. Keep this
+        // separate from the hot mixed chronology below: only that window can
+        // truthfully order an edge adjudication against other fact types.
+        scenarioAnalysisFactSetForLensHistory: licensedScenarioAnalysisFactSet,
+        // A degraded hot read yields `[]`, but that is unknown—not proof that
+        // no adjudication exists. Omit the mixed chronology unless the read
+        // explicitly succeeded so compose takes its existing fail-weak arm.
+        ...(context.prior_facts_read_ok === true
+          ? { priorTurnFactsForJudgementSignals: context.prior_facts }
+          : {}),
         // PR 3 — thread lifecycle context so the composer can serve
         // Phase 3 blocks from prior_facts when the current turn produced
         // no run_analysis fact, or emit the stale-safe rerun coaching
@@ -11031,6 +11061,7 @@ export async function runTurnExecutor(
       const clarifyChips = generateChips({
         stage: context.stage,
         handlerFacts: [],
+        analysisFactSet: licensedScenarioAnalysisFactSet,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
@@ -11121,6 +11152,7 @@ export async function runTurnExecutor(
       const coachChips = generateChips({
         stage: context.stage,
         handlerFacts: [],
+        analysisFactSet: licensedScenarioAnalysisFactSet,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
@@ -11296,6 +11328,7 @@ export async function runTurnExecutor(
       const converseChips = generateChips({
         stage: context.stage,
         handlerFacts: [],
+        analysisFactSet: licensedScenarioAnalysisFactSet,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
@@ -12598,39 +12631,12 @@ export async function runTurnExecutor(
    * tomorrow is covered the day it is written. A threaded parameter is exactly
    * how the disclosure reached two composers and not the generic router.
    *
-   * ⚠⚠ IT READS THE UNIFIED ARRAY, NOT BARE `context.prior_facts` — AND THE
-   * FIRST VERSION OF THIS GUARD GOT THAT WRONG (corrected in review, recorded
-   * rather than quietly fixed, CLAUDE.md trap 14).
-   *
-   * `context.prior_facts` is never mutated anywhere in this service (verified
-   * by sweep: no assignment, push or splice). An EXECUTE turn produces its OWN
-   * `run_analysis` fact in `handlerFactsForCommit`, which is NEWER than
-   * anything in `prior_facts` — this file names passing the bare array "the
-   * historical routed-turn bug" at the freshness call site for exactly this
-   * reason. Reading it bare meant:
-   *
-   *   · a FIRST analysis disclosed nothing at all — its own defaults were in
-   *     `handlerFactsForCommit`, which the guard never looked at;
-   *   · a RERUN qualified this turn's numbers with the PREVIOUS run's defaults.
-   *
-   * Both failures are silent and both point the wrong way. `[...handlerFacts
-   * ForCommit, ...context.prior_facts]` is the canonical basis used everywhere
-   * else in this function.
-   *
-   * ⭐ AND THE SAME-RUN GUARD, DELIBERATELY DUPLICATED RATHER THAN WIDENED —
-   * the identical condition, and the identical wording, as the four existing
-   * selector call sites (`rawRobustness`, `flipSummary`,
-   * `analysisLeadingOptionId`, and the composer-level `defaultedAssumptions`).
-   * `registry.ts` declares the contract those sites implement: this signal is
-   * read off the SAME `run_analysis` fact the robustness evidence is read from,
-   * under the SAME same-run guard.
-   *
-   * When the request body carries `analysis_state`, the numbers on screen
-   * describe the REQUEST run while any fact-sourced signal describes a PRIOR
-   * one. Pairing them would let the disclosure qualify a different run than the
-   * numbers it appears beside — or invent a caveat about a run that defaulted
-   * nothing, which this module's own header forbids. Standing down there is the
-   * pre-existing behaviour and makes no new claim.
+   * ⚠⚠ CURRENT-TURN FACTS HAVE EXPLICIT PRECEDENCE. A successful, partial or
+   * refused `run_analysis` on this turn owns its own caveat regardless of a
+   * future-skewed timestamp in durable history. Only when this turn produced no
+   * claim-bearing run may the selected complete scenario history supply the
+   * disclosure. Request `analysis_state` remains compatibility metadata: it
+   * can neither suppress nor substitute the canonical fact-sourced caveat.
    */
   function enforceDefaultedValueDisclosureGuard(
     dispatchPath: 'turn_executor_finalise',
@@ -12638,12 +12644,20 @@ export async function runTurnExecutor(
     if (!response) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
-    // SAME-RUN GUARD — see the note above. Never qualify request-sourced
-    // numbers with fact-sourced defaults.
-    const defaulted = pickLatestDefaultedAssumptions([
-      ...handlerFactsForCommit,
-      ...scenarioAnalysisFacts,
-    ]);
+    // Same-turn output has explicit precedence over durable chronology. Any
+    // current claim-bearing run (success, partial or refusal) owns its own
+    // caveat and prevents a future-skewed prior success from qualifying this
+    // turn's text. Only a turn with no current run may consult the complete
+    // durable analysis history.
+    const currentRun = selectCurrentTurnRunAnalysisFacts(
+      handlerFactsForCommit,
+    ).claimBearing;
+    const defaulted =
+      currentRun === null
+        ? pickLatestDefaultedAssumptions(scenarioAnalysisFacts)
+        : readDefaultedAssumptionsFromEnrichment(
+            currentRun.fact.result.enrichment,
+          );
     if (defaulted === null) return;
 
     const applied = applyDefaultedValueEgress(assistantText, defaulted);

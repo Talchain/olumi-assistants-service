@@ -74,6 +74,15 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = priorFacts.filter(
+        (fact) =>
+          typeof fact === "object" &&
+          fact !== null &&
+          (fact as { fact_type?: unknown }).fact_type === "run_analysis"
+      );
+      return { facts, total_count: facts.length };
+    },
     readMostRecentPendingActions: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

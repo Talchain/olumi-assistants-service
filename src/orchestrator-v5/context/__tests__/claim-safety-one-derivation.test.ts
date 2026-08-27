@@ -50,6 +50,11 @@ import {
   readMayNameLeadingOptionVerdict,
   type ClaimSafetyScenarioScope,
 } from '../claim-safety-read.js';
+import {
+  cappedScenarioAnalysisFactSet,
+  completeScenarioAnalysisFactSet,
+  degradedScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLAIM_SAFETY_READ = resolve(HERE, '../claim-safety-read.ts');
@@ -209,6 +214,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
 });
 
 describe('claim-safety scenario carrier authority', () => {
+  const scenarioId = '11111111-1111-4111-8111-111111111111';
   const forgedLegacy = runFact('2099-01-01T00:00:00.000Z', {
     may_name_leading_option: true,
     constraint_verdict_state: 'evaluated_feasible',
@@ -219,34 +225,32 @@ describe('claim-safety scenario carrier authority', () => {
   });
 
   it('reads the discriminated scenario carrier, not divergent legacy mirrors', () => {
+    const durableCanonical = {
+      ...canonicalHead,
+      fact_version: 1 as const,
+      result: { ...canonicalHead.result, scenario_id: scenarioId },
+    } as HandlerFact;
+    const carrier = completeScenarioAnalysisFactSet(scenarioId, [durableCanonical]);
     expect(
       claimSafetyScopeFromContext({
-        scenario_analysis_fact_set: {
-          status: 'complete',
-          source: 'scenario',
-          facts: [canonicalHead],
-          total_count: 1,
-          newest_fact: canonicalHead,
-        },
+        session_id: scenarioId,
+        scenario_analysis_fact_set: carrier,
         newest_analysis_fact: forgedLegacy,
         newest_analysis_fact_read_ok: true,
         prior_turns: [],
       }),
-    ).toMatchObject({ newestAnalysisFact: canonicalHead, readOk: true });
+    ).toMatchObject({ newestAnalysisFact: carrier.newest_fact, readOk: true });
   });
 
   it.each([
     {
       name: 'degraded carrier',
-      carrier: {
-        status: 'degraded' as const,
-        facts: [] as const,
-        reason: 'durable_unavailable' as const,
-      },
+      carrier: degradedScenarioAnalysisFactSet(scenarioId),
     },
     { name: 'omitted carrier', carrier: undefined },
   ])('fails weak for a $name even when legacy mirrors claim success', ({ carrier }) => {
     const scope = claimSafetyScopeFromContext({
+      session_id: scenarioId,
       ...(carrier === undefined
         ? {}
         : { scenario_analysis_fact_set: carrier }),
@@ -258,6 +262,63 @@ describe('claim-safety scenario carrier authority', () => {
     expect(readMayNameLeadingOptionVerdict([], scope)).toMatchObject({
       may_name_leading_option: false,
       provenance: 'fail_closed_no_turn_context',
+    });
+  });
+
+  it.each(['forged', 'foreign'] as const)(
+    'fails weak for a %s complete carrier',
+    (kind) => {
+      const otherScenarioId = '22222222-2222-4222-8222-222222222222';
+      const durableCanonical = {
+        ...canonicalHead,
+        fact_version: 1 as const,
+        result: {
+          ...canonicalHead.result,
+          scenario_id: kind === 'foreign' ? otherScenarioId : scenarioId,
+        },
+      } as HandlerFact;
+      const carrier =
+        kind === 'foreign'
+          ? completeScenarioAnalysisFactSet(otherScenarioId, [durableCanonical])
+          : ({
+              status: 'complete',
+              source: 'scenario',
+              facts: [durableCanonical],
+              total_count: 1,
+              newest_fact: durableCanonical,
+            } as never);
+
+      expect(
+        claimSafetyScopeFromContext({
+          session_id: scenarioId,
+          scenario_analysis_fact_set: carrier,
+          newest_analysis_fact: forgedLegacy,
+          newest_analysis_fact_read_ok: true,
+          prior_turns: [],
+        }),
+      ).toMatchObject({ newestAnalysisFact: null, readOk: false });
+    },
+  );
+
+  it('uses only the reconciled capped database head for claim-safety entitlement', () => {
+    const durableHead = {
+      ...canonicalHead,
+      fact_version: 1 as const,
+      result: { ...canonicalHead.result, scenario_id: scenarioId },
+    } as HandlerFact;
+    const carrier = cappedScenarioAnalysisFactSet(scenarioId, durableHead);
+
+    const scope = claimSafetyScopeFromContext({
+      session_id: scenarioId,
+      scenario_analysis_fact_set: carrier,
+      newest_analysis_fact: durableHead,
+      newest_analysis_fact_read_ok: true,
+      prior_turns: [],
+    });
+    expect(scope).toMatchObject({ newestAnalysisFact: carrier.newest_fact, readOk: true });
+    expect(readMayNameLeadingOptionVerdict([], scope)).toMatchObject({
+      may_name_leading_option: false,
+      constraint_verdict_state: 'unevaluated',
     });
   });
 });

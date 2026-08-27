@@ -31,6 +31,7 @@ import type { AnalysisProjectionSummary } from '../../../context/projection-summ
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import { deriveAnalysisFreshness } from '../../../context/freshness.js';
 import type { TurnOutcome } from '../../../turn-outcome.js';
+import { completeScenarioAnalysisFactSet } from '../../../__tests__/support/scenario-analysis-fact-set.js';
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const REQUEST_ID = 'req-explain-results-post-analysis';
@@ -173,6 +174,7 @@ describe('integration: explain_results post-analysis chip surfacing', () => {
       stage: 'analyse',
       handlerFacts: outcome.handler_facts,
       priorFacts: [],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       analysis: null,
       analysisReady: invocation.analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
@@ -207,6 +209,7 @@ describe('integration: explain_results post-analysis chip surfacing', () => {
       stage: 'analyse',
       handlerFacts: outcome.handler_facts,
       priorFacts: [],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
       analysis: populatedAnalysis(), // populated upstream, but no fact
       analysisReady: invocation.analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,

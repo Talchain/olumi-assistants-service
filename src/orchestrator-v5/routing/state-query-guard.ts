@@ -48,6 +48,12 @@ import {
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { RecentChangesHistoryStatus } from '../context/reconcile-recent-mutation-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import type { HandlerValidationRegistry } from './validator.js';
@@ -705,7 +711,11 @@ function emptyRecentChangesText(status: RecentChangesHistoryStatus): string {
  */
 export interface ComposeStateQueryChipInput {
   readonly recentChangeCount: number;
+<<<<<<< HEAD
   readonly priorFacts: readonly HandlerFact[];
+=======
+  readonly analysisFactSet?: ScenarioAnalysisFactSet;
+>>>>>>> d951f0f18 (fix(runtime): bind interactive analysis authority to durable facts)
   readonly analysisFreshness: 'fresh' | 'stale' | 'unknown' | 'none' | undefined;
   readonly analysisReadyStatus: string | undefined;
   readonly validationRegistry: HandlerValidationRegistry;
@@ -720,7 +730,26 @@ export function composeStateQueryChip(
   // not registered (test overrides, future flag-gated builds).
   if (input.validationRegistry.run_analysis == null) return [];
 
+<<<<<<< HEAD
   const hasPriorRunAnalysis = input.priorFacts.some(isSuccessfulRunAnalysisFact);
+=======
+  // Only a complete durable scenario read can author either "already
+  // analysed" or "never analysed". A capped/degraded read is unknown, not
+  // absence, so it cannot license a first-run chip from an empty bounded
+  // window.
+  if (
+    !isReconciledScenarioAnalysisFactSet(input.analysisFactSet) ||
+    input.analysisFactSet.status !== 'complete'
+  ) return [];
+  const analysisFacts = input.analysisFactSet.facts;
+  const hasPriorRunAnalysis = selectRunAnalysisFact(analysisFacts) !== null;
+  const hasAnalysisResult = analysisFacts.some(
+    (fact) =>
+      fact.fact_type === 'run_analysis' &&
+      fact.noop !== true &&
+      !isAnalysisRefusalFact(fact),
+  );
+>>>>>>> d951f0f18 (fix(runtime): bind interactive analysis authority to durable facts)
   if (hasPriorRunAnalysis && input.analysisFreshness === 'stale') {
     return [
       {
@@ -731,7 +760,15 @@ export function composeStateQueryChip(
       },
     ];
   }
+<<<<<<< HEAD
   if (!hasPriorRunAnalysis) {
+=======
+  if (
+    !hasPriorRunAnalysis &&
+    !hasAnalysisResult &&
+    input.analysisFreshness === "none"
+  ) {
+>>>>>>> d951f0f18 (fix(runtime): bind interactive analysis authority to durable facts)
     return [
       {
         id: 'chip_action_run_analysis_after_state_query',

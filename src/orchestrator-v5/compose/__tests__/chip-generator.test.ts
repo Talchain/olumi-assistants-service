@@ -20,8 +20,11 @@ import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.j
 import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
 import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
+const SCENARIO_ID = '00000000-0000-4000-8000-000000000001';
+const COMPLETE_NO_ANALYSIS = completeScenarioAnalysisFactSet(SCENARIO_ID);
 
 function runAnalysisFact(): HandlerFact {
   return {
@@ -29,7 +32,7 @@ function runAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: '00000000-0000-4000-8000-000000000001',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-a',
       summary: 'Prior run',
       win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
@@ -92,6 +95,7 @@ describe('generateChips', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       graphOptionCount: 2,
@@ -201,6 +205,7 @@ describe('generateChips', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: {},
       graphOptionCount: 3,
@@ -305,6 +310,7 @@ describe('generateChips', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [noopFact],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       graphOptionCount: 2,
@@ -367,6 +373,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [noopExplainResultsFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -380,6 +387,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [noopWhatWouldFlipFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -393,6 +401,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     const chips = generateChips({
       stage: 'frame',
       handlerFacts: [noopExplainFromStructureFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -430,6 +439,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [noopRunAnalysisFact, noopExplainResultsFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -480,6 +490,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [noopExplainResultsFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       // priorFacts deliberately empty.
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
@@ -583,6 +594,7 @@ describe('generateChips — what_would_flip SUCCESS rule', () => {
       stage: 'analyse',
       handlerFacts: [preconditionFailFact],
       priorFacts: [],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -783,6 +795,7 @@ describe('generateChips — V5 spec §7 explicit precondition_unmet rule', () =>
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [preconditionUnmetExplainResultsFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -797,6 +810,7 @@ describe('generateChips — V5 spec §7 explicit precondition_unmet rule', () =>
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [preconditionUnmetWhatWouldFlipFact()],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
@@ -1483,6 +1497,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: readyAnalysis(),
@@ -1556,6 +1571,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('what_would_flip');
@@ -1574,6 +1590,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
       turnOutcome: staleOutcome(),
     });
     expect(chips).toHaveLength(1);
@@ -1695,6 +1712,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
       turnOutcome: staleOutcome(),
     });
     expect(stale[0].id).toBe('chip_prompt_floor_rerun_analysis');
@@ -1717,6 +1735,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
     });
     expect(postAnalysis[0].id).toBe('chip_action_what_would_flip');
     expect(postAnalysis[0].action_type).toBe('what_would_flip');
@@ -1725,6 +1744,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
     const ready = generateChips({
       stage: 'decide',
       handlerFacts: [],
+      analysisFactSet: COMPLETE_NO_ANALYSIS,
       analysis: null,
       validationRegistry: REGISTRY,
       analysisReady: readyAnalysis(),
@@ -1745,6 +1765,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       {
         stage: 'decide',
         handlerFacts: [],
+        analysisFactSet: COMPLETE_NO_ANALYSIS,
         analysis: null,
         validationRegistry: REGISTRY,
         analysisReady: readyAnalysis(),
@@ -1784,6 +1805,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
+      analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
       analysisReady: readyAnalysis(),
       turnOutcome: staleOutcome(),
     });

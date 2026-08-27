@@ -23,12 +23,16 @@ import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   readMayNameLeadingOptionVerdictForTurn,
   type ClaimSafetyScenarioScope,
-} from '../context/claim-safety-read.js';
-import type { ContextPack } from '../context/context-pack-assembler.js';
+} from "../context/claim-safety-read.js";
+import type { ContextPack } from "../context/context-pack-assembler.js";
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
 import { detectCoachingSignal } from '../signals/coaching-signals.js';
-import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
-import { appendLastCoachingSignal } from './last-coaching-signal-log.js';
-import type { CoachingSignalId } from './types.js';
+import type { SuccessfulHandlerOutcome } from "../tools/handler-outcome.js";
+import { appendLastCoachingSignal } from "./last-coaching-signal-log.js";
+import type { CoachingSignalId } from "./types.js";
 
 export interface ApplyCoachingSignalInput {
   /** The handler that just succeeded on this turn. */
@@ -43,13 +47,12 @@ export interface ApplyCoachingSignalInput {
   /** Facts from prior turns in this scenario (newest-first). */
   readonly priorFacts: readonly HandlerFact[];
   /**
-   * Complete scenario-wide analysis facts for claim-safety only. Kept
-   * separate from `priorFacts` because prefixing two independently ordered
-   * reads fabricates a mixed chronology and breaks intervening-change
-   * attribution. Capped/degraded callers pass an empty array; scope carries
-   * the corresponding fail-weak entitlement state.
+   * Scenario-wide analysis authority for claim safety and coaching
+   * first/rerun/stale classification. Kept separate from `priorFacts` because
+   * prefixing independently ordered reads fabricates mixed chronology and
+   * breaks intervening-change attribution. Capped/degraded fails weak.
    */
-  readonly priorAnalysisFacts: readonly HandlerFact[];
+  readonly priorAnalysisFactSet?: ScenarioAnalysisFactSet;
   /**
    * The facts destined for commit on THIS turn (post decision_review
    * enrichment). When a run_analysis signal fires, the signal marker is
@@ -90,6 +93,67 @@ export interface AppliedCoachingSignal {
   readonly handlerFacts: readonly HandlerFact[];
 }
 
+const COACHING_SIGNAL_ENRICHMENT_KEYS = new Set([
+  'coaching_signal_id',
+  'coaching_signal_turn_id',
+  'coaching_signal_produced_at',
+]);
+
+/**
+ * Remove CEE-owned enrichment keys from a freshly returned producer fact.
+ *
+ * PLoT enrichment is otherwise a verbatim carrier. That means a downstream
+ * producer can legally return unknown keys, including names that CEE later
+ * treats as proof that its own Decision Review or coaching step ran. Scrub the
+ * reserved namespace before either local producer executes; the local steps
+ * may then add their own values back. PLoT-owned fields remain byte-identical.
+ */
+export function stripUnattestedCeeOwnedRunAnalysisEnrichment(
+  facts: readonly HandlerFact[],
+): readonly HandlerFact[] {
+  return stripRunAnalysisEnrichmentKeys(
+    facts,
+    (key) => key === 'decision_review' || COACHING_SIGNAL_ENRICHMENT_KEYS.has(key),
+  );
+}
+
+function stripUnattestedCoachingSignalEnrichment(
+  facts: readonly HandlerFact[],
+): readonly HandlerFact[] {
+  return stripRunAnalysisEnrichmentKeys(
+    facts,
+    (key) => COACHING_SIGNAL_ENRICHMENT_KEYS.has(key),
+  );
+}
+
+function stripRunAnalysisEnrichmentKeys(
+  facts: readonly HandlerFact[],
+  shouldStrip: (key: string) => boolean,
+): readonly HandlerFact[] {
+  let changed = false;
+  const next = facts.map((fact) => {
+    if (fact.fact_type !== 'run_analysis' || fact.result.enrichment === undefined) {
+      return fact;
+    }
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    const retained = Object.fromEntries(
+      Object.entries(enrichment).filter(([key]) => !shouldStrip(key)),
+    );
+    if (Object.keys(retained).length === Object.keys(enrichment).length) {
+      return fact;
+    }
+    changed = true;
+    return {
+      ...fact,
+      result: {
+        ...fact.result,
+        enrichment: retained,
+      },
+    } as HandlerFact;
+  });
+  return changed ? next : facts;
+}
+
 /**
  * Run the STEP-5 detector and, when a signal fires, perform the canonical
  * follow-through: telemetry, run_analysis fact-attach, sidecar append.
@@ -97,6 +161,10 @@ export interface AppliedCoachingSignal {
 export function applyCoachingSignal(
   input: ApplyCoachingSignalInput,
 ): AppliedCoachingSignal {
+  // The signal tuple is a CEE-owned attestation. Scrub any producer-carried
+  // names on every status before detection; detector-null must still commit a
+  // clean fact. A locally produced Decision Review is deliberately retained.
+  const handlerFacts = stripUnattestedCoachingSignalEnrichment(input.handlerFacts);
   // ═══════════════════════════════════════════════════════════════════════════
   // ⭐ ROADMAP 2.804 — THE LEADER-CLAIM PERMISSION IS DERIVED HERE, ONCE.
   //
@@ -137,24 +205,36 @@ export function applyCoachingSignal(
   // array remains the sole mixed newest-first timeline for change attribution;
   // scenario-wide analysis facts never get prefixed onto it.
   // ═══════════════════════════════════════════════════════════════════════════
+  const licensedAnalysisFactSet =
+    isReconciledScenarioAnalysisFactSet(
+      input.priorAnalysisFactSet,
+      input.scenarioId,
+    ) && input.priorAnalysisFactSet.status === 'complete'
+      ? input.priorAnalysisFactSet
+      : undefined;
+  const priorAnalysisFacts = licensedAnalysisFactSet?.facts ?? [];
   const mayNameLeadingOption = readMayNameLeadingOptionVerdictForTurn({
-    currentFacts: input.handlerFacts,
-    priorAnalysisFacts: input.priorAnalysisFacts,
+    currentFacts: handlerFacts,
+    priorAnalysisFacts,
     priorScope: input.claimSafetyScope,
   }).may_name_leading_option;
 
   const detection = detectCoachingSignal({
     proposedHandlerId: input.proposedHandlerId,
-    outcome: input.outcome,
+    outcome: { ...input.outcome, handler_facts: handlerFacts },
     contextPack: input.contextPack,
     priorFacts: input.priorFacts,
+    // One scenario-bound carrier governs both claim safety and signal
+    // detection. Passing the original input here would let an attested carrier
+    // for another scenario re-enter through the detector's status-only check.
+    priorAnalysisFactSet: licensedAnalysisFactSet,
     mayNameLeadingOption,
     ...(input.interventionControlledFactorIds !== undefined
       ? { interventionControlledFactorIds: input.interventionControlledFactorIds }
       : {}),
   });
   if (detection === null) {
-    return { coachingText: null, signalId: null, handlerFacts: input.handlerFacts };
+    return { coachingText: null, signalId: null, handlerFacts };
   }
 
   emit(TelemetryEvents.V5CoachingSignalFired, {
@@ -167,10 +247,10 @@ export function applyCoachingSignal(
   // Persist signal metadata into enrichment on run_analysis facts (frozen
   // schema has enrichment only there) so the next turn's
   // CoachingCache.last_coaching_signal can surface it.
-  const handlerFacts =
+  const attachedHandlerFacts =
     input.proposedHandlerId === 'run_analysis'
       ? attachCoachingSignalToRunAnalysisFact(
-          input.handlerFacts,
+          handlerFacts,
           detection.signal_id,
           input.requestId,
         )
@@ -190,7 +270,7 @@ export function applyCoachingSignal(
   return {
     coachingText: detection.coaching_text,
     signalId: detection.signal_id,
-    handlerFacts,
+    handlerFacts: attachedHandlerFacts,
   };
 }
 

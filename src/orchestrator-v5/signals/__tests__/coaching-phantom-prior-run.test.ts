@@ -48,9 +48,34 @@ import {
   buildAutoRunProvenance,
   isAutoInitiatedRunAnalysisFact,
   RUN_PROVENANCE_ENRICHMENT_KEY,
-} from '../../context/run-initiator.js';
-import { RUN_PROVENANCE_ENRICHMENT_KEY as KEY_REEXPORTED_BY_THE_WRITER } from '../../handlers/chip-click-dispatch.js';
-import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
+} from "../../context/run-initiator.js";
+import { RUN_PROVENANCE_ENRICHMENT_KEY as KEY_REEXPORTED_BY_THE_WRITER } from "../../handlers/chip-click-dispatch.js";
+import {
+  COACHING_TEXT,
+  detectCoachingSignal as detectCoachingSignalProduction,
+  type CoachingSignalInput,
+} from "../coaching-signals.js";
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
+
+const SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
+
+type TestCoachingSignalInput = Omit<
+  CoachingSignalInput,
+  'priorAnalysisFactSet'
+>;
+
+function detectCoachingSignal(input: TestCoachingSignalInput) {
+  return detectCoachingSignalProduction({
+    ...input,
+    priorAnalysisFactSet: completeScenarioAnalysisFactSet(
+      SCENARIO_ID,
+      input.priorFacts.filter(
+        (fact): fact is HandlerFact & { fact_type: 'run_analysis' } =>
+          fact.fact_type === 'run_analysis' && fact.noop !== true,
+      ),
+    ),
+  });
+}
 
 // ── the posture switch: PRE-DELIVERY ────────────────────────────────────────
 //
@@ -111,9 +136,9 @@ function thisTurnRunOutcome(): SuccessfulHandlerOutcome {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
-      leading_option_id: 'opt-build',
-      summary: 'Ran analysis',
+      scenario_id: SCENARIO_ID,
+      leading_option_id: "opt-build",
+      summary: "Ran analysis",
       enrichment: runEnvelope(),
     },
   } as unknown as HandlerFact;
@@ -134,11 +159,11 @@ function priorRunFact(
     fact_version: 1,
     noop: overrides.noop ?? false,
     result: {
-      scenario_id: 'scen-a',
-      leading_option_id: 'opt-build',
-      summary: 'prior',
-      computed_at: '2026-08-19T22:05:00.000Z',
-      graph_hash_at_run: 'hash-prior',
+      scenario_id: SCENARIO_ID,
+      leading_option_id: "opt-build",
+      summary: "prior",
+      computed_at: "2026-08-19T22:05:00.000Z",
+      graph_hash_at_run: "hash-prior",
       enrichment: {
         ...runEnvelope(),
         ...(provenance === null ? {} : { [RUN_PROVENANCE_ENRICHMENT_KEY]: provenance }),

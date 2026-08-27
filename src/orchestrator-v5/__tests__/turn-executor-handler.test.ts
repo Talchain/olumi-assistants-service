@@ -38,15 +38,39 @@ import type {
 const appendCalls: Array<unknown> = [];
 const priorTurnRows: Array<unknown> = [];
 const priorFactRows: Array<unknown> = [];
-vi.mock('../session/index.js', () => ({
+let scenarioAnalysisFactRows: Array<unknown> | null = null;
+let priorFactReadFailure = false;
+let persistedGraphForContext: unknown | undefined;
+vi.mock("../session/index.js", () => ({
   getSessionStore: () => ({
     append: async (write: unknown) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
     },
     readRecent: async () => priorTurnRows,
-    readFactsFor: async () => priorFactRows,
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    readFactsFor: async () => {
+      if (priorFactReadFailure) throw new Error('simulated prior-fact read failure');
+      return priorFactRows;
+    },
+    loadGraphAndBriefText: async () => {
+      if (persistedGraphForContext === undefined) {
+        throw new Error('no persisted graph in this fixture');
+      }
+      return { graph: persistedGraphForContext, briefText: null };
+    },
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = (scenarioAnalysisFactRows ?? priorFactRows).filter(
+        (fact) =>
+          typeof fact === "object" &&
+          fact !== null &&
+          (fact as { fact_type?: unknown }).fact_type === "run_analysis"
+      );
+      return { facts, total_count: facts.length };
+    },
+    invalidateScoped: async (_s: string, scope: unknown) => ({
+      scope,
+      entries_invalidated: [],
+    }),
     invalidateAll: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -62,6 +86,10 @@ import type { RunAnalysisScenarioSnapshot } from '../tools/handlers/run-analysis
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { createRegistry } = await import('../tools/registry.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+const {
+  DISAGREEMENT_ACTION_LABEL,
+  OVERRIDE_STRESS_TEST_ACTION_LABEL,
+} = await import('../coaching/judgement-offer-text.js');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -133,6 +161,113 @@ function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
   };
 }
 
+const CONTESTED_GRAPH = {
+  nodes: [
+    { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+    { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend' },
+    {
+      id: 'opt_launch',
+      kind: 'option',
+      label: 'Launch now',
+      interventions: { fac_marketing: 0.7 },
+    },
+    {
+      id: 'opt_status_quo',
+      kind: 'option',
+      label: 'Status quo',
+      interventions: { fac_marketing: 0.3 },
+    },
+  ],
+  edges: [
+    {
+      from: 'dec_launch',
+      to: 'opt_launch',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+      validation: {
+        status: 'contested',
+        contested_reasons: ['raw_magnitude'],
+        max_divergence: 0.9,
+      },
+    },
+    {
+      from: 'dec_launch',
+      to: 'opt_status_quo',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_launch',
+      to: 'fac_marketing',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_status_quo',
+      to: 'fac_marketing',
+      strength: { mean: 0.3, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'fac_marketing',
+      to: 'goal_revenue',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+  ],
+};
+
+function makeContestedScenarioSnapshot(): RunAnalysisScenarioSnapshot {
+  return {
+    graph: CONTESTED_GRAPH,
+    options: [
+      {
+        id: 'opt_launch',
+        option_id: 'opt_launch',
+        label: 'Launch now',
+        interventions: { fac_marketing: 0.7 },
+      },
+      {
+        id: 'opt_status_quo',
+        option_id: 'opt_status_quo',
+        label: 'Status quo',
+        interventions: { fac_marketing: 0.3 },
+      },
+    ],
+    goal_node_id: 'goal_revenue',
+    rawPersistedGraph: CONTESTED_GRAPH,
+  } as unknown as RunAnalysisScenarioSnapshot;
+}
+
+function edgeAdjudicationFact(): unknown {
+  return {
+    fact_type: 'edge_adjudication',
+    fact_version: 1,
+    noop: false,
+    result: {
+      from: 'dec_launch',
+      to: 'opt_launch',
+      edge_id: null,
+      verdict: 'overridden',
+      resolved_strength_mean: 0.4,
+      provenance: 'user_set',
+    },
+  };
+}
+
+function responseActionLabels(response: { readonly blocks: readonly unknown[] }): readonly string[] {
+  return response.blocks.flatMap((raw) => {
+    const block = raw as Record<string, unknown>;
+    return typeof block.action_label === 'string' ? [block.action_label] : [];
+  });
+}
+
 function makeMockPlotClient(overrides?: Partial<{ run: PLoTClient['run'] }>): PLoTClient {
   const run = overrides?.run ?? vi.fn(async () => makeGoldenResponse());
   return {
@@ -178,6 +313,9 @@ beforeEach(() => {
   appendCalls.length = 0;
   priorTurnRows.length = 0;
   priorFactRows.length = 0;
+  scenarioAnalysisFactRows = null;
+  priorFactReadFailure = false;
+  persistedGraphForContext = undefined;
   events = [];
   installSink();
 });
@@ -321,7 +459,49 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     );
   });
 
-  it('commit receives handler_facts with exactly one run_analysis fact', async () => {
+  it("RERUN: durable analysis outside the hot turn window cannot become a first analysis", async () => {
+    scenarioAnalysisFactRows = [
+      {
+        fact_type: "run_analysis",
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: TEST_SCENARIO_ID,
+          leading_option_id: "opt_a",
+          summary: "durable prior run",
+          enrichment: makeGoldenResponse(),
+          computed_at: "2026-07-15T00:00:00.000Z",
+          graph_hash_at_run: "hash-prior",
+        },
+      },
+    ];
+    expect(priorFactRows).toEqual([]);
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT)
+    );
+    const registry = createRegistry({
+      plotClient: makeMockPlotClient(),
+      scenarioReader: async () => makeScenarioSnapshot(),
+    });
+
+    const { response } = await runTurnExecutor(
+      BASE_PAYLOAD,
+      "req-durable-rerun-coach",
+      { routingAdapter, handlerRegistry: registry }
+    );
+
+    expect(response.assistant_text).not.toContain("first analysis");
+    expect(response.assistant_text).toMatch(/unchanged|still leads|re-run/i);
+    const write = appendCalls[0] as {
+      handler_facts: Array<{ result: { enrichment: Record<string, unknown> } }>;
+    };
+    expect(write.handler_facts[0]!.result.enrichment.coaching_signal_id).toBe(
+      "RERUN_ANALYSIS_COMPLETE"
+    );
+  });
+
+  it("commit receives handler_facts with exactly one run_analysis fact", async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
     );
@@ -346,6 +526,54 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     expect(write.handler_facts).toHaveLength(1);
     const fact = write.handler_facts[0] as { fact_type: string };
     expect(fact.fact_type).toBe('run_analysis');
+  });
+
+  it('routed current analysis treats degraded hot judgement history as unknown, never no adjudication', async () => {
+    persistedGraphForContext = CONTESTED_GRAPH;
+    priorTurnRows.push({
+      id: 'row-prior-judgement',
+      scenario_id: TEST_SCENARIO_ID,
+      turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      turn_class: 'handler',
+      handler_id: 'edit_graph',
+      created_at: '2026-07-15T00:00:00.000Z',
+      response_emitted: true,
+    });
+    priorFactRows.push(edgeAdjudicationFact());
+
+    const run = async (readFails: boolean, requestId: string) => {
+      priorFactReadFailure = readFails;
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult({
+          ...RUN_ANALYSIS_TOOL_CALL_INPUT,
+          action: {
+            ...RUN_ANALYSIS_TOOL_CALL_INPUT.action,
+            entity: {
+              ...RUN_ANALYSIS_TOOL_CALL_INPUT.action.entity,
+              id: 'opt_launch',
+            },
+          },
+        }),
+      );
+      const registry = createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeContestedScenarioSnapshot(),
+      });
+      return runTurnExecutor(BASE_PAYLOAD, requestId, {
+        routingAdapter,
+        handlerRegistry: registry,
+      });
+    };
+
+    const readable = await run(false, 'req-readable-judgement');
+    const degraded = await run(true, 'req-degraded-judgement');
+    const readableLabels = responseActionLabels(readable.response);
+    const degradedLabels = responseActionLabels(degraded.response);
+
+    expect(readableLabels).toContain(OVERRIDE_STRESS_TEST_ACTION_LABEL);
+    expect(readableLabels).not.toContain(DISAGREEMENT_ACTION_LABEL);
+    expect(degradedLabels).not.toContain(OVERRIDE_STRESS_TEST_ACTION_LABEL);
+    expect(degradedLabels).not.toContain(DISAGREEMENT_ACTION_LABEL);
   });
 
   it('fact persisted to append carries the enrichment byte-for-byte (round-trip evidence)', async () => {
@@ -373,6 +601,49 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
         (plotResponse as Record<string, unknown>)[key],
       );
     }
+  });
+
+  it('default-off routed run scrubs producer CEE attestations before commit and preserves PLoT fields', async () => {
+    const plotResponse = {
+      ...makeGoldenResponse(),
+      producer_canary: 'PLOT_FIELD_RETAINED',
+      decision_review: {
+        produced_at: '2026-08-27T09:00:00.000Z',
+        narrative_summary: 'PRODUCER_REVIEW_MUST_NOT_PERSIST',
+      },
+      coaching_signal_id: 'RERUN_ANALYSIS_COMPLETE',
+      coaching_signal_turn_id: 'PRODUCER_SIGNAL_MUST_NOT_PERSIST',
+      coaching_signal_produced_at: '2026-08-27T09:00:01.000Z',
+    } as unknown as V2RunResponseEnvelope;
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
+      plotClient: makeMockPlotClient({ run: vi.fn(async () => plotResponse) }),
+      scenarioReader: async () => makeScenarioSnapshot(),
+    });
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-routed-producer-attestation', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
+
+    const write = appendCalls[0] as {
+      handler_facts: Array<{ result: { enrichment: Record<string, unknown> } }>;
+    };
+    const enrichment = write.handler_facts[0]!.result.enrichment;
+    expect(enrichment.producer_canary).toBe('PLOT_FIELD_RETAINED');
+    expect(enrichment.decision_review).toBeUndefined();
+    expect(enrichment.coaching_signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+    expect(enrichment.coaching_signal_turn_id).toBe(
+      'req-routed-producer-attestation',
+    );
+    expect(JSON.stringify(enrichment)).not.toContain(
+      'PRODUCER_SIGNAL_MUST_NOT_PERSIST',
+    );
+    expect(JSON.stringify(enrichment)).not.toContain(
+      'PRODUCER_REVIEW_MUST_NOT_PERSIST',
+    );
   });
 });
 

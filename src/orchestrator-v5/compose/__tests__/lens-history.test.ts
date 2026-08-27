@@ -23,12 +23,17 @@ import { BODY_BY_RATIONALE, selectLens } from '../lens-selector.js';
 import { buildFocusInspectorDirective } from '../ui-directive.js';
 import { buildGraphNodeLookupFromGraph, buildLensSurface } from '../phase3-blocks.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
+import {
+  reconcileScenarioAnalysisFacts,
+  SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+} from '../../context/reconcile-scenario-analysis-facts.js';
 
 // ============================================================================
 // Fixtures
 // ============================================================================
 
 const GRAPH_HASH = 'gh_2211_history_0001';
+const SCENARIO_ID = '22112211-2211-4211-8211-221122112211';
 
 const GRAPH = {
   nodes: [
@@ -65,7 +70,7 @@ function bothTriggerFact(computedAt: string): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-2211-history',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_x',
       summary: 'Ran analysis.',
       graph_hash_at_run: GRAPH_HASH,
@@ -94,7 +99,7 @@ function noLensFact(computedAt: string): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-2211-history',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_x',
       summary: 'Ran analysis.',
       graph_hash_at_run: GRAPH_HASH,
@@ -122,8 +127,22 @@ function mutationFact(): HandlerFact {
     fact_type: 'set_factor_value',
     fact_version: 1,
     noop: false,
-    result: { scenario_id: 'scen-2211-history', target_id: 'fac_a', before: 1, after: 2 },
+    result: { scenario_id: SCENARIO_ID, target_id: 'fac_a', before: 1, after: 2 },
   } as unknown as HandlerFact;
+}
+
+function completeAnalysisHistory(facts: readonly HandlerFact[]) {
+  return reconcileScenarioAnalysisFacts({
+    scenarioId: SCENARIO_ID,
+    hotWindowFacts: facts,
+    durableRead: {
+      status: 'ok',
+      scenario_id: SCENARIO_ID,
+      query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+      total_count: facts.length,
+      facts,
+    },
+  });
 }
 
 const BASE_INPUT = {
@@ -251,7 +270,7 @@ describe('2.211 — two consecutive analysis turns through composeToolCallRespon
       handlerFacts: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
       persistedGraph: GRAPH,
       persistedGraphHash: GRAPH_HASH,
-      priorTurnFactsForLensHistory: [],
+      scenarioAnalysisFactSetForLensHistory: completeAnalysisHistory([]),
     });
     expect(lensBodyOf(response)).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
   });
@@ -262,7 +281,9 @@ describe('2.211 — two consecutive analysis turns through composeToolCallRespon
       handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
       persistedGraph: GRAPH,
       persistedGraphHash: GRAPH_HASH,
-      priorTurnFactsForLensHistory: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
+      scenarioAnalysisFactSetForLensHistory: completeAnalysisHistory([
+        bothTriggerFact('2026-07-31T10:00:00.000Z'),
+      ]),
     });
     expect(lensBodyOf(response)).toBe(BODY_BY_RATIONALE.WIN_PROB_MODERATE);
   });
@@ -275,6 +296,31 @@ describe('2.211 — two consecutive analysis turns through composeToolCallRespon
       persistedGraphHash: GRAPH_HASH,
     });
     expect(lensBodyOf(withoutHistory)).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  });
+
+  it('does not promote a hot run into lens history when the scenario-wide carrier is degraded', () => {
+    const degraded = reconcileScenarioAnalysisFacts({
+      scenarioId: SCENARIO_ID,
+      hotWindowFacts: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
+      durableRead: { status: 'degraded', reason: 'unavailable' },
+    });
+    expect(degraded.status).toBe('degraded');
+
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      scenarioAnalysisFactSetForLensHistory: degraded,
+      // The ordinary hot array remains available for genuinely mixed
+      // judgement chronology, but may never substitute for lens authority.
+      priorTurnFactsForJudgementSignals: [
+        bothTriggerFact('2026-07-31T10:00:00.000Z'),
+      ],
+    });
+
+    expect(lensBodyOf(response)).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+    expect(lensBodyOf(response)).not.toBe(BODY_BY_RATIONALE.WIN_PROB_MODERATE);
   });
 });
 
@@ -541,7 +587,7 @@ describe('2.211 A2 — a fact that CANNOT have emitted a lens is excluded, both 
       handlerFacts: [noGraphHashFact('2026-07-31T10:00:00.000Z')],
       persistedGraph: GRAPH,
       persistedGraphHash: GRAPH_HASH,
-      priorTurnFactsForLensHistory: [],
+      scenarioAnalysisFactSetForLensHistory: completeAnalysisHistory([]),
     });
     const lensBlocks = response.blocks.filter((raw) => {
       const b = raw as Record<string, unknown>;
@@ -556,7 +602,7 @@ describe('2.211 A2 — a fact that CANNOT have emitted a lens is excluded, both 
       handlerFacts: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
       persistedGraph: GRAPH,
       persistedGraphHash: GRAPH_HASH,
-      priorTurnFactsForLensHistory: [],
+      scenarioAnalysisFactSetForLensHistory: completeAnalysisHistory([]),
     });
     const lensBlocks = response.blocks.filter((raw) => {
       const b = raw as Record<string, unknown>;

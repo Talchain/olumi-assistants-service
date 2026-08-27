@@ -22,8 +22,10 @@ import { generateChips } from '../chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 import type { TurnOutcome } from '../../turn-outcome.js';
+import { completeScenarioAnalysisFactSet } from '../../__tests__/support/scenario-analysis-fact-set.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
+const SCENARIO_ID = '00000000-0000-4000-8000-000000000001';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -87,7 +89,7 @@ function runAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: '00000000-0000-4000-8000-000000000001',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-a',
       summary: 'Prior',
       win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
@@ -114,6 +116,7 @@ describe('post-mutation chip rule (foamy-bee tranche)', () => {
         stage: 'analyse',
         handlerFacts: [addConstraintFact()],
         priorFacts: [],
+        analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
         analysis: null,
         analysisReady: READY,
         validationRegistry: REGISTRY,
@@ -130,6 +133,7 @@ describe('post-mutation chip rule (foamy-bee tranche)', () => {
         stage: 'analyse',
         handlerFacts: [addConstraintFact()],
         priorFacts: [runAnalysisFact()],
+        analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
         analysis: null,
         analysisReady: READY,
         validationRegistry: REGISTRY,
@@ -145,6 +149,7 @@ describe('post-mutation chip rule (foamy-bee tranche)', () => {
         stage: 'analyse',
         handlerFacts: [setFactorValueFact()],
         priorFacts: [runAnalysisFact()],
+        analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
         analysis: null,
         analysisReady: READY,
         validationRegistry: REGISTRY,
@@ -159,6 +164,7 @@ describe('post-mutation chip rule (foamy-bee tranche)', () => {
         stage: 'analyse',
         handlerFacts: [adjustEdgeFact()],
         priorFacts: [runAnalysisFact()],
+        analysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [runAnalysisFact()]),
         analysis: null,
         analysisReady: READY,
         validationRegistry: REGISTRY,

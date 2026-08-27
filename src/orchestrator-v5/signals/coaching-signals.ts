@@ -43,17 +43,29 @@ import type { CoachingSignalId } from '../coaching/types.js';
 import {
   deriveInterveningChange,
   type InterveningChange,
-} from '../coaching/intervening-change.js';
-import type { RecentChangeAction } from '../context/recent-changes.js';
-import { selectRunAnalysisFact } from '../context/freshness.js';
-import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
-import { formatPercentagePoints } from '../format/format-analysis-value.js';
-import { isNoopFact } from '../tools/fact-noop.js';
-import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
-import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
+} from "../coaching/intervening-change.js";
+import type { RecentChangeAction } from "../context/recent-changes.js";
+import { selectRunAnalysisFact } from "../context/freshness.js";
+import { hasUserSeenRunAnalysisResult } from "../context/run-initiator.js";
+import { formatPercentagePoints } from "../format/format-analysis-value.js";
+import { isNoopFact } from "../tools/fact-noop.js";
+import type { SuccessfulHandlerOutcome } from "../tools/handler-outcome.js";
+import { isAnalysisRefusalFact } from "../context/analysis-refusal-continuity.js";
+import { stableStringify } from "../../orchestrator/context/stable-stringify.js";
+import {
+  isReconciledScenarioAnalysisFactSet,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
 
 export type { CoachingSignalId };
 
+/**
+ * Scenario-wide analysis history available to deterministic coaching.
+ *
+ * Only `complete` licenses either existence or absence. A capped/degraded
+ * history is unknown and must never be interpreted as a first analysis merely
+ * because the ordinary turn window contains no run_analysis fact.
+ */
 export interface CoachingSignalInput {
   /** The handler that just succeeded on this turn. */
   readonly proposedHandlerId: string;
@@ -81,6 +93,12 @@ export interface CoachingSignalInput {
    * emits a continuity fact, but it never counts as a displayed analysis.
    */
   readonly priorFacts: readonly HandlerFact[];
+  /**
+   * Complete scenario-wide analysis history, kept separate from the hot mixed
+   * chronology above. It owns first/rerun/stale existence and prior-run
+   * selection. Capped/degraded history fails weak.
+   */
+  readonly priorAnalysisFactSet?: ScenarioAnalysisFactSet;
   /**
    * ⭐ ROADMAP 2.804 — MAY THIS TURN NAME A LEADING OPTION ON SCREEN?
    *
@@ -312,6 +330,7 @@ function composeRerunText(
 export function detectCoachingSignal(
   input: CoachingSignalInput,
 ): CoachingSignalDetection | null {
+  const priorAnalysisFactSet = input.priorAnalysisFactSet;
   // Edit-handler branch.
   if (EDIT_HANDLER_IDS.has(input.proposedHandlerId)) {
     // Gate-1 claim integrity: a no-op edit changed nothing, so it cannot
@@ -326,11 +345,20 @@ export function detectCoachingSignal(
     // uses to keep no-ops out of the recent-changes projection.
     if (isNoopEditOutcome(input.outcome)) return null;
 
+    // The hot turn window cannot prove either that an analysis exists or that
+    // none exists after a cold return. If the scenario-wide analysis page is
+    // capped/degraded, fail weak rather than selecting STALE or its lower-
+    // priority HIGH_SENSITIVITY alternative under an unproven absence.
+    if (
+      !isReconciledScenarioAnalysisFactSet(priorAnalysisFactSet) ||
+      priorAnalysisFactSet.status !== 'complete'
+    ) return null;
+
     // The question THIS branch asks: "was an analysis on screen that this edit
     // could have made stale?" — existence, not recency and not success. See the
     // helper's own note for why it is kept separate from the run_analysis
     // branch's predicate even though the two agree today.
-    if (hasPriorRunAnalysisFactToStale(input.priorFacts)) {
+    if (hasPriorRunAnalysisFactToStale(priorAnalysisFactSet.facts)) {
       // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
       return {
         signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
@@ -349,6 +377,14 @@ export function detectCoachingSignal(
 
   // run_analysis branch.
   if (input.proposedHandlerId === 'run_analysis') {
+    // A completion signal requires one selector-licensed successful current
+    // result. Partial, failed, refused or absent current facts cannot truthfully
+    // author FIRST_ANALYSIS_COMPLETE / RERUN_ANALYSIS_COMPLETE. Select once and
+    // carry the same fact into the comparison path so a mixed same-turn array
+    // cannot gate on one fact and compare another.
+    const selectedCurrent = selectRunAnalysisFact(input.outcome.handler_facts);
+    if (selectedCurrent === null) return null;
+
     // T1 claim safety. When the constraint verdict forbids naming a leading
     // option, BOTH texts below become false statements: the first-run copy
     // tells the user to "explore the leading option", and the rerun copy names
@@ -370,6 +406,14 @@ export function detectCoachingSignal(
     // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
     const leaderWithheld = !input.mayNameLeadingOption;
 
+    // Only complete durable scenario history can distinguish a genuine first
+    // analysis from a re-run. Empty capped/degraded inputs are unknown, never
+    // evidence that the user has not previously seen an analysis.
+    if (
+      !isReconciledScenarioAnalysisFactSet(priorAnalysisFactSet) ||
+      priorAnalysisFactSet.status !== 'complete'
+    ) return null;
+
     // ⭐⭐ THE QUESTION THIS BRANCH ASKS IS ABOUT THE USER, NOT ABOUT THE SERVER:
     // "has a result ever been PUT IN FRONT OF THIS USER before this turn?"
     //
@@ -389,7 +433,7 @@ export function detectCoachingSignal(
     // two predicates therefore DISAGREE on an auto-run-only scenario, and that
     // disagreement is pinned by test (CLAUDE.md trap #21 — name the concepts
     // apart, never collapse or co-tighten them).
-    if (!hasPriorRunAnalysisShownToUser(input.priorFacts)) {
+    if (!hasPriorRunAnalysisShownToUser(priorAnalysisFactSet.facts)) {
       // SUPPRESSED, not reworded. The whole of this signal's value is the
       // "explore the leading option" nudge, and on a withheld turn there is no
       // leading option to explore. A replacement sentence would either repeat
@@ -431,7 +475,11 @@ export function detectCoachingSignal(
     // warning about).
     const rerun = leaderWithheld
       ? { delta: null, interveningChange: null }
-      : buildRerunAcknowledgement(input);
+      : buildRerunAcknowledgement(
+          input,
+          priorAnalysisFactSet.facts,
+          selectedCurrent.fact,
+        );
     return {
       signal_id: 'RERUN_ANALYSIS_COMPLETE',
       coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
@@ -479,16 +527,20 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * `computed_at`, or any timestamp skew, made this acknowledgment diff against
  * a different "previous run" than the rest of the turn was reasoning about.
  */
+<<<<<<< HEAD
 function buildRerunAcknowledgement(input: CoachingSignalInput): {
   readonly delta: ContentSafeRunDelta | null;
+=======
+function buildRerunAcknowledgement(
+  input: CoachingSignalInput,
+  priorAnalysisFacts: readonly HandlerFact[],
+  currentFact: HandlerFact,
+): {
+  readonly delta: RunDelta | null;
+>>>>>>> d951f0f18 (fix(runtime): bind interactive analysis authority to durable facts)
   readonly interveningChange: InterveningChange | null;
 } {
   const none = { delta: null, interveningChange: null } as const;
-
-  const currentFact = input.outcome.handler_facts.find(
-    (f) => f.fact_type === 'run_analysis',
-  );
-  if (currentFact === undefined) return none;
 
   // ⭐ ONE SELECTION, TWO CONSUMERS. The delta and the attribution clause are
   // derived from the SAME `selectRunAnalysisFact` result, so "the run we
@@ -497,7 +549,7 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   // #12; the same reasoning `orderSuccessfulRunAnalysisFactsNewestFirst`
   // records for the comparison pair). Deriving the index separately here would
   // let the sentence attribute a change to a comparison it did not precede.
-  const selected = selectRunAnalysisFact(input.priorFacts);
+  const selected = selectRunAnalysisFact(priorAnalysisFacts);
   if (selected === null) return none;
 
   const prior = projectRunFact(selected.fact);
@@ -506,8 +558,45 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
 
   return {
     delta: compareRuns(prior, current, input.interventionControlledFactorIds),
-    interveningChange: deriveInterveningChange(input.priorFacts, selected.index),
+    // Attribution needs the cross-type turn chronology, not the independently
+    // ordered scenario analysis page. Join the exact selected persisted fact
+    // back to the hot chronology; when it has aged out or the match is
+    // ambiguous, retain the delta and omit attribution.
+    interveningChange: deriveInterveningChangeForSelectedFact(
+      input.priorFacts,
+      selected.fact
+    ),
   };
+}
+
+/**
+ * Join the scenario-selected prior run back to the hot mixed chronology.
+ * Stable JSON equality is required because the two store reads produce
+ * distinct objects. Duplicate identical rows are ambiguous and fail weak.
+ */
+function deriveInterveningChangeForSelectedFact(
+  hotFacts: readonly HandlerFact[],
+  selectedFact: HandlerFact
+): InterveningChange | null {
+  let selectedKey: string;
+  try {
+    selectedKey = stableStringify(selectedFact);
+  } catch {
+    return null;
+  }
+
+  const matches: number[] = [];
+  for (let index = 0; index < hotFacts.length; index += 1) {
+    const fact = hotFacts[index]!;
+    if (fact.fact_type !== "run_analysis") continue;
+    try {
+      if (stableStringify(fact) === selectedKey) matches.push(index);
+    } catch {
+      return null;
+    }
+  }
+  if (matches.length !== 1) return null;
+  return deriveInterveningChange(hotFacts, matches[0]!);
 }
 
 /**

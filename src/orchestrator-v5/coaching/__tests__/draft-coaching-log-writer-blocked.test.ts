@@ -1,11 +1,11 @@
 /**
  * P5 (2026-07-27) — the draft-coaching sidecar WRITER stays unwired.
  *
- * `appendDraftCoaching` has zero production callers, but its READ end is
- * already wired into ContextPack assembly (`coaching-cache-reader.ts`). The day
- * a writer lands, pre-analysis coaching — produced by a prompt with no
- * output-quality eval, on a turn where nothing has been computed — begins
- * flowing into POST-analysis prompts as apparent prior state.
+ * `appendDraftCoaching` has zero production callers, and the uncommitted
+ * sidecar is deliberately absent from model-facing ContextPack assembly. The
+ * day a writer or reader lands, pre-analysis coaching — produced by a prompt
+ * with no output-quality eval, on a turn where nothing has been computed — can
+ * begin flowing into POST-analysis prompts as apparent prior state.
  *
  * The audit's instruction was "row it as a blocked dependency, not a TODO". A
  * comment is a TODO. This is the gate: it DERIVES the caller set from the
@@ -69,20 +69,20 @@ describe('P5 — the draft-coaching sidecar writer stays unwired (M7)', () => {
       `appendDraftCoaching has gained a production caller: ${callers
         .map((f) => f.split(`src${sep}`)[1])
         .join(', ')}. ` +
-        `Wiring the writer replays UNEVALUATED pre-analysis coaching into post-analysis ` +
-        `prompts as apparent prior state — the read end is already live in ContextPack ` +
-        `assembly. Land the coaching eval checks on the replayed surface first, then ` +
-        `delete this pin deliberately.`,
+        `Wiring the writer creates unlicensed pre-analysis coaching state. Keep its ` +
+        `model-facing reader absent until the writer is commit-bound and the replayed ` +
+        `surface has coaching eval coverage; then delete this pin deliberately.`,
     ).toEqual([]);
   });
 
-  it('the READ end really is wired — this is a live hazard, not a dead module', () => {
-    // If the reader is ever removed the hazard evaporates and this whole pin
-    // becomes pointless; assert the premise rather than assuming it.
+  it('manual draft and orphan-signal sidecars stay absent from model-facing cache assembly', () => {
     const reader = readFileSync(
       resolve(SRC, 'orchestrator-v5/coaching/coaching-cache-reader.ts'),
       'utf8',
     );
-    expect(reader).toContain('readLatestDraftCoaching');
+    expect(reader).not.toContain('readLatestDraftCoaching');
+    expect(reader).not.toContain("from './draft-coaching-log.js'");
+    expect(reader).not.toContain('readLatestLastCoachingSignal');
+    expect(reader).not.toContain("from './last-coaching-signal-log.js'");
   });
 });

@@ -99,6 +99,7 @@ import {
 } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
+import { isReconciledScenarioAnalysisFactSet } from '../context/reconcile-scenario-analysis-facts.js';
 import {
   createRegistry,
   getDefaultPlotClient,
@@ -106,14 +107,17 @@ import {
   type HandlerRegistry,
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
-} from '../tools/registry.js';
-import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
-import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
-import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
-import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
-import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
-import type { V5TurnTimings } from '../telemetry/turn-timings.js';
-import { generateChips } from '../compose/chip-generator.js';
+} from "../tools/registry.js";
+import { HANDLER_VALIDATION_REGISTRY } from "../routing/validation-registry.js";
+import {
+  applyCoachingSignal,
+  stripUnattestedCeeOwnedRunAnalysisEnrichment,
+} from '../coaching/coaching-signal-application.js';
+import { applyDefaultedValueEgress } from "../compose/defaulted-value-egress.js";
+import { readDefaultedAssumptionsFromEnrichment } from "../coaching/pick-defaulted-assumptions.js";
+import { enrichRunAnalysisWithDecisionReview } from "../coaching/decision-review-enricher.js";
+import type { V5TurnTimings } from "../telemetry/turn-timings.js";
+import { generateChips } from "../compose/chip-generator.js";
 import {
   blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
@@ -914,12 +918,19 @@ export async function dispatchChipClickRunAnalysis(
   // Build the turn context using the same builder TurnExecutor uses, so the
   // handler invocation is indistinguishable from a Sonnet-routed call.
   const context = await buildTurnContext(payload, requestId);
+  const licensedScenarioAnalysisFactSet =
+    isReconciledScenarioAnalysisFactSet(
+      context.scenario_analysis_fact_set,
+      context.session_id,
+    )
+      ? context.scenario_analysis_fact_set
+      : undefined;
   const scenarioAnalysisFacts =
-    context.scenario_analysis_fact_set?.status === 'complete'
-      ? context.scenario_analysis_fact_set.facts
+    licensedScenarioAnalysisFactSet?.status === 'complete'
+      ? licensedScenarioAnalysisFactSet.facts
       : [];
   const scenarioAnalysisFactsReadOk =
-    context.scenario_analysis_fact_set?.status === 'complete';
+    licensedScenarioAnalysisFactSet?.status === 'complete';
   const scenarioClaimSafetyScope = claimSafetyScopeFromContext(context);
 
   // V5 finaliser contract — single-source-of-truth for the scenario graph.
@@ -1174,6 +1185,9 @@ export async function dispatchChipClickRunAnalysis(
     // deterministic PLoT analysis. `v5.decision_review.skipped` with
     // reason `autofire_disabled` is emitted in place of the await.
     let enrichedFacts: readonly HandlerFact[];
+    const producerFacts = stripUnattestedCeeOwnedRunAnalysisEnrichment(
+      outcome.handler_facts,
+    );
     // ROADMAP 2.73 Fix C — decision_review call attribution parity with the
     // executor path (#476). Gated exactly like the executor's sink: flag-off
     // production passes no sink and allocates one empty object + one ternary,
@@ -1186,7 +1200,7 @@ export async function dispatchChipClickRunAnalysis(
         typeof context.scenarioBriefText === 'string'
           ? context.scenarioBriefText.length
           : 0;
-      const runAnalysisFact = outcome.handler_facts.find(
+      const runAnalysisFact = producerFacts.find(
         (f) => f.fact_type === 'run_analysis',
       );
       const enrichment =
@@ -1207,7 +1221,7 @@ export async function dispatchChipClickRunAnalysis(
         has_enrichment: enrichment !== undefined,
         leading_option_present: leadingOptionPresent,
       });
-      enrichedFacts = outcome.handler_facts;
+      enrichedFacts = producerFacts;
     } else {
       // Wall-clock the await on the caller's clock and thread the call's
       // model/tokens back via callTelemetrySink — the same #476 pattern the
@@ -1222,7 +1236,7 @@ export async function dispatchChipClickRunAnalysis(
         output_tokens?: number;
       } = {};
       enrichedFacts = await enrichRunAnalysisWithDecisionReview({
-        handlerFacts: outcome.handler_facts,
+        handlerFacts: producerFacts,
         requestId,
         scenarioId: context.session_id,
         signal: turnAbort.signal,
@@ -1260,7 +1274,7 @@ export async function dispatchChipClickRunAnalysis(
       // Preserve the one truthful mixed newest-first chronology for change
       // attribution. Scenario analysis authority is supplied separately.
       priorFacts: context.prior_facts,
-      priorAnalysisFacts: scenarioAnalysisFacts,
+      priorAnalysisFactSet: licensedScenarioAnalysisFactSet,
       handlerFacts: enrichedFacts,
       requestId,
       scenarioId: context.session_id,
@@ -1321,6 +1335,7 @@ export async function dispatchChipClickRunAnalysis(
       stage: context.stage,
       handlerFacts: enrichedFacts,
       priorFacts: context.prior_facts,
+      analysisFactSet: licensedScenarioAnalysisFactSet,
       analysis: null,
       analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
@@ -1380,13 +1395,16 @@ export async function dispatchChipClickRunAnalysis(
       persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
       persistedGraphHash: composedRunFactGraphHash,
       analysisReadyStatus: analysisReady?.status,
-      // ROADMAP 2.211 — the PRIOR fact array (this turn's `enrichedFacts`
-      // EXCLUDED), for the no-immediate-repeat lens tie-break. This path is the
-      // one the live walk exercised (the "Run analysis" chip) and it passes no
-      // `lifecycle` at all, so without this line the amendment would be dead on
-      // exactly the journey it was measured against. Already loaded for the turn
-      // — no extra DB read.
-      priorTurnFactsForLensHistory: context.prior_facts,
+      // ROADMAP 2.211 — scenario-wide, attested analysis history for the
+      // no-immediate-repeat lens tie-break. The current turn is excluded by
+      // construction; capped/degraded carriers fail weak. Mixed judgement
+      // chronology stays on the independently readable hot window below.
+      scenarioAnalysisFactSetForLensHistory: licensedScenarioAnalysisFactSet,
+      // A failed hot-fact read is unknown, not authoritative absence. Omit the
+      // mixed chronology unless the read explicitly succeeded.
+      ...(context.prior_facts_read_ok === true
+        ? { priorTurnFactsForJudgementSignals: context.prior_facts }
+        : {}),
     });
 
     // R2 — the user-visible provisional label, PREPENDED before the egress

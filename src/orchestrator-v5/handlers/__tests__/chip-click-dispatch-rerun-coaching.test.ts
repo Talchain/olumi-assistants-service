@@ -27,6 +27,17 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import {
+  cappedScenarioAnalysisFactSet,
+  completeScenarioAnalysisFactSet,
+  degradedScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import type { ScenarioAnalysisFactSet } from '../../context/reconcile-scenario-analysis-facts.js';
+import {
+  DISAGREEMENT_ACTION_LABEL,
+  OVERRIDE_STRESS_TEST_ACTION_LABEL,
+} from '../../coaching/judgement-offer-text.js';
 
 const {
   loadScenarioSnapshotForRunAnalysisMock,
@@ -46,8 +57,15 @@ const {
 // (the rerun discriminator) without re-mocking the module.
 const buildTurnContextStub: {
   priorFacts: unknown[];
+  priorFactsReadOk: boolean;
   scenarioBriefText: string | null;
-} = { priorFacts: [], scenarioBriefText: null };
+  scenarioAnalysisFactSet: ScenarioAnalysisFactSet | null;
+} = {
+  priorFacts: [],
+  priorFactsReadOk: true,
+  scenarioBriefText: null,
+  scenarioAnalysisFactSet: null,
+};
 
 vi.mock('../../build-turn-context.js', async () => {
   const actual = await vi.importActual<typeof import('../../build-turn-context.js')>(
@@ -79,6 +97,20 @@ vi.mock('../../build-turn-context.js', async () => {
       },
       prior_turns: [],
       prior_facts: buildTurnContextStub.priorFacts,
+      prior_facts_read_ok: buildTurnContextStub.priorFactsReadOk,
+      scenario_analysis_fact_set:
+        buildTurnContextStub.scenarioAnalysisFactSet ??
+        completeScenarioAnalysisFactSet(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          buildTurnContextStub.priorFacts.filter(
+            (fact): fact is HandlerFact =>
+              typeof fact === 'object' &&
+              fact !== null &&
+              (fact as { fact_type?: unknown }).fact_type === 'run_analysis' &&
+              (fact as { noop?: unknown }).noop === false,
+          ),
+          buildTurnContextStub.priorFacts,
+        ),
       scenarioBriefText: buildTurnContextStub.scenarioBriefText,
       persistedGraph: null,
     })),
@@ -141,6 +173,24 @@ const READY_GRAPH: GraphV3T = {
     { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
 } as unknown as GraphV3T;
+const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH)!;
+const CONTESTED_GRAPH = {
+  ...READY_GRAPH,
+  edges: READY_GRAPH.edges.map((edge, index) =>
+    index === 0
+      ? {
+          ...edge,
+          validation: {
+            status: 'contested',
+            contested_reasons: ['raw_magnitude'],
+            max_divergence: 0.9,
+          },
+        }
+      : edge,
+  ),
+} as unknown as GraphV3T;
+const CONTESTED_GRAPH_HASH =
+  computeAnalysisAffectingGraphHash(CONTESTED_GRAPH)!;
 
 function snapshot(): RunAnalysisScenarioSnapshot {
   return {
@@ -177,6 +227,7 @@ function handlerOutcome() {
           leading_option_id: 'opt_launch',
           summary: 'Analysis ran with two options compared.',
           enrichment: runEnvelope(),
+          graph_hash_at_run: READY_GRAPH_HASH,
           // ROADMAP 2.804 — now LOAD-BEARING. The coaching slot's leader-claim
           // permission comes from the fact chain, which fails CLOSED on a fact
           // with no verdict stamp (the pre-#710 population). An unstamped
@@ -191,6 +242,60 @@ function handlerOutcome() {
     ],
     llm_calls_used: 0,
   };
+}
+
+function judgementHandlerOutcome() {
+  return {
+    assistant_text: 'Analysis completed.',
+    handler_facts: [
+      {
+        fact_type: 'run_analysis' as const,
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: 'opt_launch',
+          summary: 'Analysis completed.',
+          graph_hash_at_run: CONTESTED_GRAPH_HASH,
+          enrichment: {
+            analysis_status: 'completed',
+            confidence_tier: 'strong',
+          },
+          constraint_verdict: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'not_applicable',
+          },
+        },
+      },
+    ],
+    llm_calls_used: 0,
+  };
+}
+
+function winnerEdgeAdjudicationFact(): HandlerFact {
+  const edge = CONTESTED_GRAPH.edges[0]!;
+  return {
+    fact_type: 'edge_adjudication',
+    fact_version: 1,
+    noop: false,
+    result: {
+      from: edge.from,
+      to: edge.to,
+      edge_id: null,
+      verdict: 'overridden',
+      resolved_strength_mean: 0.4,
+      provenance: 'user_set',
+    },
+  } as unknown as HandlerFact;
+}
+
+function responseActionLabels(response: {
+  blocks: readonly unknown[];
+}): readonly string[] {
+  return response.blocks.flatMap((raw) => {
+    const block = raw as Record<string, unknown>;
+    return typeof block.action_label === 'string' ? [block.action_label] : [];
+  });
 }
 
 function priorRunFact(): HandlerFact {
@@ -220,7 +325,9 @@ function priorRunFact(): HandlerFact {
 beforeEach(() => {
   vi.clearAllMocks();
   buildTurnContextStub.priorFacts = [];
+  buildTurnContextStub.priorFactsReadOk = true;
   buildTurnContextStub.scenarioBriefText = null;
+  buildTurnContextStub.scenarioAnalysisFactSet = null;
   loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(snapshot());
   createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
   handlerFnMock.mockResolvedValue(handlerOutcome());
@@ -264,7 +371,57 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     expect(out.response.assistant_text).not.toContain('first analysis');
   });
 
-  it('chip RERUN: committed run_analysis fact carries the signal marker (cache-reader visibility)', async () => {
+  it("chip RERUN: complete durable history remains authoritative outside the hot window", async () => {
+    buildTurnContextStub.priorFacts = [];
+    buildTurnContextStub.scenarioAnalysisFactSet =
+      completeScenarioAnalysisFactSet(
+        SCENARIO_ID,
+        [priorRunFact()],
+        [],
+      );
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: "req-cc-durable-rerun",
+    });
+
+    if (out.outcome !== "ok")
+      throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.response.assistant_text).not.toContain("first analysis");
+    expect(out.response.assistant_text).toContain("unchanged");
+  });
+
+  it.each(["capped", "degraded"] as const)(
+    "chip coaching fails weak on %s history instead of trusting a hot analysis canary",
+    async (status) => {
+      const prior = priorRunFact();
+      buildTurnContextStub.priorFacts = [prior];
+      buildTurnContextStub.scenarioAnalysisFactSet =
+        status === "capped"
+          ? cappedScenarioAnalysisFactSet(SCENARIO_ID, prior)
+          : degradedScenarioAnalysisFactSet(SCENARIO_ID);
+
+      const out = await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: `req-cc-${status}`,
+      });
+
+      if (out.outcome !== "ok")
+        throw new Error(`expected ok, got ${out.outcome}`);
+      expect(out.response.assistant_text).not.toContain("first analysis");
+      expect(out.response.assistant_text).not.toMatch(/unchanged|re-run/i);
+      const committed = commitDirectAnswerMock.mock.calls[0]![1] as {
+        handler_facts: Array<{
+          result: { enrichment?: Record<string, unknown> };
+        }>;
+      };
+      expect(
+        committed.handler_facts[0]!.result.enrichment?.coaching_signal_id
+      ).toBeUndefined();
+    }
+  );
+
+  it("chip RERUN: committed run_analysis fact carries the signal marker (cache-reader visibility)", async () => {
     buildTurnContextStub.priorFacts = [priorRunFact()];
 
     await dispatchChipClickRunAnalysis({
@@ -281,6 +438,136 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     );
     expect(committed.handler_facts[0]!.result.enrichment?.coaching_signal_turn_id).toBe(
       'req-cc-rerun-fact',
+    );
+  });
+
+  it('default-off chip run scrubs producer CEE attestations before commit', async () => {
+    const priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'false';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+    try {
+      const forgedOutcome = handlerOutcome();
+      const fact = forgedOutcome.handler_facts[0] as {
+        result: { enrichment: Record<string, unknown> };
+      };
+      fact.result.enrichment = {
+        ...fact.result.enrichment,
+        producer_canary: 'PLOT_FIELD_RETAINED',
+        decision_review: {
+          produced_at: '2026-08-27T09:00:00.000Z',
+          narrative_summary: 'PRODUCER_REVIEW_MUST_NOT_PERSIST',
+        },
+        coaching_signal_id: 'RERUN_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'PRODUCER_SIGNAL_MUST_NOT_PERSIST',
+        coaching_signal_produced_at: '2026-08-27T09:00:01.000Z',
+      };
+      handlerFnMock.mockResolvedValue(forgedOutcome);
+
+      await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: 'req-cc-producer-attestation',
+      });
+
+      expect(enrichRunAnalysisMock).not.toHaveBeenCalled();
+      const committed = commitDirectAnswerMock.mock.calls[0]![1] as {
+        handler_facts: Array<{
+          result: { enrichment: Record<string, unknown> };
+        }>;
+      };
+      const enrichment = committed.handler_facts[0]!.result.enrichment;
+      expect(enrichment.producer_canary).toBe('PLOT_FIELD_RETAINED');
+      expect(enrichment.decision_review).toBeUndefined();
+      expect(enrichment.coaching_signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+      expect(enrichment.coaching_signal_turn_id).toBe(
+        'req-cc-producer-attestation',
+      );
+      expect(JSON.stringify(enrichment)).not.toContain(
+        'PRODUCER_SIGNAL_MUST_NOT_PERSIST',
+      );
+      expect(JSON.stringify(enrichment)).not.toContain(
+        'PRODUCER_REVIEW_MUST_NOT_PERSIST',
+      );
+    } finally {
+      if (priorAwaitFlag === undefined) {
+        delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+      } else {
+        process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+      }
+      _resetConfigCache();
+    }
+  });
+});
+
+describe('chip-click run_analysis — split lens and judgement authorities', () => {
+  it('does not let a foreign hot run alter lens history when the scenario carrier is degraded', async () => {
+    buildTurnContextStub.scenarioAnalysisFactSet =
+      degradedScenarioAnalysisFactSet(SCENARIO_ID);
+    buildTurnContextStub.priorFacts = [];
+    const baseline = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-lens-baseline',
+    });
+    if (baseline.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${baseline.outcome}`);
+    }
+
+    const foreign = priorRunFact();
+    foreign.result.scenario_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    buildTurnContextStub.priorFacts = [foreign];
+    const withForeignHotRun = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-lens-foreign-hot',
+    });
+    if (withForeignHotRun.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${withForeignHotRun.outcome}`);
+    }
+
+    expect(baseline.response.blocks.length).toBeGreaterThan(0);
+    expect(withForeignHotRun.response.blocks).toEqual(baseline.response.blocks);
+  });
+
+  it('uses readable mixed adjudication but does not turn a degraded hot read into disagreement', async () => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue({
+      graph: CONTESTED_GRAPH,
+      options: snapshot().options,
+      goal_node_id: snapshot().goal_node_id,
+      rawPersistedGraph: CONTESTED_GRAPH,
+    });
+    handlerFnMock.mockResolvedValue(judgementHandlerOutcome());
+    buildTurnContextStub.scenarioAnalysisFactSet =
+      degradedScenarioAnalysisFactSet(SCENARIO_ID);
+    buildTurnContextStub.priorFacts = [winnerEdgeAdjudicationFact()];
+    buildTurnContextStub.priorFactsReadOk = true;
+
+    const readable = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-judgement-readable',
+    });
+    if (readable.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${readable.outcome}`);
+    }
+    expect(responseActionLabels(readable.response)).toContain(
+      OVERRIDE_STRESS_TEST_ACTION_LABEL,
+    );
+    expect(responseActionLabels(readable.response)).not.toContain(
+      DISAGREEMENT_ACTION_LABEL,
+    );
+
+    buildTurnContextStub.priorFacts = [];
+    buildTurnContextStub.priorFactsReadOk = false;
+    const degraded = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-judgement-degraded',
+    });
+    if (degraded.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${degraded.outcome}`);
+    }
+    expect(responseActionLabels(degraded.response)).not.toContain(
+      DISAGREEMENT_ACTION_LABEL,
+    );
+    expect(responseActionLabels(degraded.response)).not.toContain(
+      OVERRIDE_STRESS_TEST_ACTION_LABEL,
     );
   });
 });

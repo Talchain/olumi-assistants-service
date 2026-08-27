@@ -125,6 +125,9 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       total_count: 37,
       newest_fact: facts[0],
     });
+    // The reconciler checked every eligible hot fact against the capped page.
+    // The prefix is still not reasoning authority, but its validated database
+    // head remains the existing claim-safety entitlement source.
     expect(context.newest_analysis_fact).toEqual(facts[0]);
     expect(context.newest_analysis_fact_read_ok).toBe(true);
     expect(context.persisted_analysis_freshness).toMatchObject({

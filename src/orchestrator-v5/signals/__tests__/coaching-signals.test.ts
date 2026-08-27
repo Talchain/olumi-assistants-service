@@ -5,7 +5,44 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
+import {
+  COACHING_TEXT,
+  detectCoachingSignal as detectCoachingSignalProduction,
+  type CoachingSignalInput,
+} from '../coaching-signals.js';
+import {
+  cappedScenarioAnalysisFactSet,
+  completeScenarioAnalysisFactSet,
+  degradedScenarioAnalysisFactSet,
+} from '../../__tests__/support/scenario-analysis-fact-set.js';
+
+const SCENARIO_ID = '11111111-1111-4111-8111-111111111111';
+
+type TestCoachingSignalInput = Omit<
+  CoachingSignalInput,
+  'priorAnalysisFactSet'
+> &
+  Partial<Pick<CoachingSignalInput, 'priorAnalysisFactSet'>>;
+
+function detectCoachingSignal(input: TestCoachingSignalInput) {
+  const durableAnalysisFacts = input.priorFacts.filter(
+    (fact) => fact.fact_type === 'run_analysis' && !fact.noop,
+  );
+  return detectCoachingSignalProduction({
+    ...input,
+    // Legacy unit cases declare their durable scenario page from the analysis
+    // rows in the fixture's mixed hot chronology. The production reconciler
+    // still validates/counts the page and checks its overlap; the hot window
+    // itself is never promoted by production code.
+    priorAnalysisFactSet:
+      input.priorAnalysisFactSet ??
+      completeScenarioAnalysisFactSet(
+        SCENARIO_ID,
+        durableAnalysisFacts,
+        input.priorFacts,
+      ),
+  });
+}
 
 function makeContextPack(overrides: {
   topDrivers?: readonly string[];
@@ -63,12 +100,29 @@ function runAnalysisOutcome(): SuccessfulHandlerOutcome {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-1',
       summary: 'Ran analysis',
     },
   };
   return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
+}
+
+function nonSuccessfulRunAnalysisOutcome(
+  status: 'partial' | 'degraded' | 'failed',
+): SuccessfulHandlerOutcome {
+  const fact: HandlerFact = {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt-1',
+      summary: `${status} analysis`,
+      enrichment: { analysis_status: status },
+    },
+  } as HandlerFact;
+  return { assistant_text: status, handler_facts: [fact], llm_calls_used: 0 };
 }
 
 // ── ROADMAP 2.73 rerun fixtures — PLoT V2 envelope shape accepted by
@@ -96,7 +150,7 @@ function runAnalysisOutcomeWithEnvelope(
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-1',
       summary: 'Ran analysis',
       enrichment: env,
@@ -111,7 +165,7 @@ function priorRunAnalysisFactWithEnvelope(
   computedAt: string | null = '2026-07-01T00:00:00.000Z',
 ): HandlerFact {
   const result: Record<string, unknown> = {
-    scenario_id: 'scen-a',
+    scenario_id: SCENARIO_ID,
     leading_option_id: 'opt-1',
     summary: 'prior',
     enrichment: env,
@@ -197,7 +251,7 @@ function priorRunAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-1',
       summary: 'prior',
     },
@@ -220,7 +274,7 @@ function partialPriorRunAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt-1',
       summary: 'prior, degraded',
       enrichment: { analysis_status: 'partial' },
@@ -235,7 +289,7 @@ function refusedPriorRunAnalysisFact(): HandlerFact {
     fact_version: 1,
     noop: false,
     result: {
-      scenario_id: 'scen-a',
+      scenario_id: SCENARIO_ID,
       leading_option_id: null,
       summary: 'Analysis attempt was refused before computation.',
       enrichment: { analysis_status: 'refused' },
@@ -330,6 +384,164 @@ describe('detectCoachingSignal', () => {
         priorFacts: [priorRunAnalysisFact()],
       });
       expect(withheldEdit?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+  });
+
+  describe('scenario-wide analysis history owns first, rerun and stale classification', () => {
+    it('classifies a durable prior result outside the hot window as a rerun', () => {
+      const prior = priorRunAnalysisFact();
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+        priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+          prior,
+        ]),
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+    });
+
+    it('keeps a partial durable result as a displayed prior result, not first-run absence', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+        priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+          partialPriorRunAnalysisFact(),
+        ]),
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toBe(
+        COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+      );
+    });
+
+    it('stales a durable prior result even after it leaves the hot window', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('Customer Churn'),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+        priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+          partialPriorRunAnalysisFact(),
+        ]),
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    it.each(['capped', 'degraded'] as const)(
+      'fails weak on %s history even when hot facts contain an analysis canary',
+      (status) => {
+        const prior = priorRunAnalysisFact();
+        const run = detectCoachingSignal({
+          proposedHandlerId: 'run_analysis',
+          mayNameLeadingOption: true,
+          outcome: runAnalysisOutcome(),
+          contextPack: makeContextPack(),
+          priorFacts: [prior],
+          priorAnalysisFactSet:
+            status === 'capped'
+              ? cappedScenarioAnalysisFactSet(SCENARIO_ID, prior)
+              : degradedScenarioAnalysisFactSet(SCENARIO_ID),
+        });
+        const edit = detectCoachingSignal({
+          proposedHandlerId: 'set_factor_value',
+          mayNameLeadingOption: true,
+          outcome: setFactorOutcome('Customer Churn'),
+          contextPack: makeContextPack(),
+          priorFacts: [prior],
+          priorAnalysisFactSet:
+            status === 'capped'
+              ? cappedScenarioAnalysisFactSet(SCENARIO_ID, prior)
+              : degradedScenarioAnalysisFactSet(SCENARIO_ID),
+        });
+        expect(run).toBeNull();
+        expect(edit).toBeNull();
+      },
+    );
+
+    it('treats a legacy/direct omission as degraded rather than complete-empty', () => {
+      const inputWithoutHistory = {
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+      };
+      expect(
+        detectCoachingSignalProduction(
+          inputWithoutHistory as unknown as CoachingSignalInput,
+        ),
+      ).toBeNull();
+    });
+
+    it('treats malformed complete facts as degraded rather than complete-empty', () => {
+      expect(
+        detectCoachingSignalProduction({
+          proposedHandlerId: 'run_analysis',
+          mayNameLeadingOption: true,
+          outcome: runAnalysisOutcome(),
+          contextPack: makeContextPack(),
+          priorFacts: [],
+          priorAnalysisFactSet: {
+            status: 'complete',
+            facts: [{} as HandlerFact],
+          } as never,
+        }),
+      ).toBeNull();
+    });
+
+    it('rejects a valid unrelated fact from the analysis-only carrier', () => {
+      expect(
+        detectCoachingSignalProduction({
+          proposedHandlerId: 'run_analysis',
+          mayNameLeadingOption: true,
+          outcome: runAnalysisOutcome(),
+          contextPack: makeContextPack(),
+          priorFacts: [],
+          priorAnalysisFactSet: {
+            status: 'complete',
+            facts: [priorEditFact('factor-decoy')],
+          } as never,
+        }),
+      ).toBeNull();
+    });
+
+    it.each(['partial', 'degraded', 'failed'] as const)(
+      'does not call a non-success current %s result complete',
+      (status) => {
+        expect(
+          detectCoachingSignal({
+            proposedHandlerId: 'run_analysis',
+            mayNameLeadingOption: true,
+            outcome: nonSuccessfulRunAnalysisOutcome(status),
+            contextPack: makeContextPack(),
+            priorFacts: [],
+            priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID),
+          }),
+        ).toBeNull();
+      },
+    );
+
+    it('does not call a current partial result a completed rerun', () => {
+      const prior = priorRunAnalysisFact();
+      expect(
+        detectCoachingSignal({
+          proposedHandlerId: 'run_analysis',
+          mayNameLeadingOption: true,
+          outcome: nonSuccessfulRunAnalysisOutcome('partial'),
+          contextPack: makeContextPack(),
+          priorFacts: [prior],
+          priorAnalysisFactSet: completeScenarioAnalysisFactSet(SCENARIO_ID, [
+            prior,
+          ]),
+        }),
+      ).toBeNull();
     });
   });
 
