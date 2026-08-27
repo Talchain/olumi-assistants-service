@@ -74,6 +74,7 @@ const getCurrentVersionPointer = vi.fn();
 const saveVersion = vi.fn();
 const getVersion = vi.fn();
 const restoreVersion = vi.fn();
+const compareVersions = vi.fn();
 vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../orchestrator-v5/model-management/index.js")>();
@@ -85,6 +86,7 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       saveVersion,
       getVersion,
       restoreVersion,
+      compareVersions,
     }),
   };
 });
@@ -148,6 +150,12 @@ beforeEach(() => {
   });
   getVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID, graph: GRAPH } });
   restoreVersion.mockResolvedValue({ status: "ok", value: { id: VERSION_ID } });
+  // Compare is bound to "was the service reached", exactly like its three
+  // siblings, so this default need only be a shape the handler can act on.
+  compareVersions.mockResolvedValue({
+    status: "error",
+    error: { code: "version_not_found" },
+  });
 });
 
 describe("an OWNED scenario is not readable on a caller's say-so", () => {
@@ -200,11 +208,63 @@ describe("an OWNED scenario is not readable on a caller's say-so", () => {
   });
 });
 
+/**
+ * ── THE TWO UNVERIFIED MODES ARE NOT THE SAME KIND OF FACT ─────────────────
+ *
+ * Both are refused, and the refusal is identical on the wire. But only ONE of
+ * them is correct behaviour, and the suite used to assert both as if they were.
+ *
+ * `service_legacy` — CORRECT. A key-authed service caller has not proved whose
+ * behalf it acts on, so it may not reach an owned scenario on a body id. That
+ * is the change this PR exists to make.
+ *
+ * `off` — A MISCONFIGURATION STATE. `resolveUserIdentity` returns `{mode:"off"}`
+ * for EVERY caller when CEE_REQUIRE_USER_JWT is off (user-identity.ts), which
+ * defaults to false (config/index.ts). The effective user is then null for
+ * everyone, so every OWNED scenario is unreadable AND unwritable by its own
+ * owner across all six /assist/v1/scenarios/* endpoints. The 404 below is what
+ * a signed-in user's own data looks like when a flag is down — it is a partial
+ * outage, not a design decision, and it is NOT a rollback lever.
+ *
+ * The refusal is pinned here because it is what the code does. It is pinned as
+ * a KNOWN MISCONFIGURATION so the suite records the outage instead of blessing
+ * it, and so that removing the flag dependency later REDs this file rather than
+ * passing silently. Boot-time disclosure lives in server.ts
+ * (`config.scenario_ownership_posture`).
+ *
+ * ⚠ WHAT THIS GUARD DOES NOT PROVE. It pins the MEMBERSHIP of these two sets,
+ * so a member added or removed here REDs. It CANNOT see a new unverified mode
+ * added to `UserIdentityResolution` and never listed here — a set-equality
+ * check is blind to a short list (CLAUDE.md trap 12d). If you add a mode to
+ * that union, add it to one of these two sets by hand.
+ */
+const CORRECTLY_REFUSED_MODES = [
+  { label: "service_legacy", identity: { mode: "service_legacy" } },
+] as const;
+
+/** Modes whose refusal is an OUTAGE we have chosen to record, not correct behaviour. */
+const KNOWN_MISCONFIGURATION_MODES = [
+  { label: "off (flag down) — KNOWN MISCONFIGURATION, not correct behaviour", identity: { mode: "off" } },
+] as const;
+
+const UNVERIFIED_MODES_REACHING_THE_GATE = [
+  ...CORRECTLY_REFUSED_MODES,
+  ...KNOWN_MISCONFIGURATION_MODES,
+];
+
+describe("the unverified-mode sets are exactly as declared", () => {
+  it("REDs if either set grows or shrinks — the outage is recorded, not blessed", () => {
+    expect(CORRECTLY_REFUSED_MODES.map((m) => m.identity.mode)).toEqual(["service_legacy"]);
+    expect(KNOWN_MISCONFIGURATION_MODES.map((m) => m.identity.mode)).toEqual(["off"]);
+    // `refused` and `verified` are the other two members of the union and
+    // neither reaches this gate: `refused` short-circuits in
+    // `resolveVerifiedIdentityOrRefuse`, `verified` is the admitted path.
+    expect(UNVERIFIED_MODES_REACHING_THE_GATE).toHaveLength(2);
+  });
+});
+
 describe("every unverified mode behaves identically — no mode is a side door", () => {
-  const modes = [
-    { label: "service_legacy", identity: { mode: "service_legacy" } },
-    { label: "off (flag down)", identity: { mode: "off" } },
-  ];
+  const modes = UNVERIFIED_MODES_REACHING_THE_GATE;
 
   for (const { label, identity } of modes) {
     it(`${label}: a request-supplied owner identifier is not honoured`, async () => {
@@ -376,6 +436,51 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
     });
   });
 
+  /**
+   * COMPARE — the fourth endpoint behind the same `preflight()` helper.
+   *
+   * It was GOVERNED but UNGUARDED: an ownership mutant that broke all four
+   * routes produced no failure here, because nothing in this suite drove
+   * compare. The route header promises "it moves all of them or this heading
+   * comes out with it"; this is the guard behind that promise.
+   *
+   * ⚠ WHY THE TWIN IS NOT OPTIONAL HERE. Fastify answers an UNREGISTERED route
+   * with 404 and this family's ownership refusal is also 404, so a refusal-only
+   * case cannot tell "compare refused this caller" from "compare is not
+   * mounted". Both cases therefore bind to `compareVersions` — the first
+   * service read AFTER the gate — which is the same outcome-binding the list,
+   * save and restore tiers use.
+   */
+  describe("compare (read tier)", () => {
+    it("REFUSES an unverified caller who supplies the owner's identifier", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
+
+      const app = await buildVersionsApp();
+      const res = await post(app, "/versions/compare", {
+        user_id: OWNER,
+        from_version_id: VERSION_ID,
+        to_version_id: MUTATION_ID,
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(compareVersions).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("ADMITS the owner when the same id is VERIFIED — the only variable that changed", async () => {
+      resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+
+      const app = await buildVersionsApp();
+      await post(app, "/versions/compare", {
+        from_version_id: VERSION_ID,
+        to_version_id: MUTATION_ID,
+      });
+
+      expect(compareVersions).toHaveBeenCalled();
+      await app.close();
+    });
+  });
+
   describe("save (write tier)", () => {
     it("REFUSES an unverified caller who supplies the owner's identifier — nothing is written", async () => {
       resolveUserIdentity.mockResolvedValue({ mode: "service_legacy" });
@@ -452,10 +557,10 @@ describe("scenario version history is not reachable on a caller's say-so", () =>
   });
 
   describe("every unverified mode behaves identically — no mode is a side door", () => {
-    const modes = [
-      { label: "service_legacy", identity: { mode: "service_legacy" } },
-      { label: "off (flag down)", identity: { mode: "off" } },
-    ];
+    // Same two sets as the read route. `off` is a KNOWN MISCONFIGURATION here
+    // too — on a WRITE tier, so the owner cannot save or restore their own
+    // model either. See the declaration above for why it is pinned, not blessed.
+    const modes = UNVERIFIED_MODES_REACHING_THE_GATE;
 
     for (const { label, identity } of modes) {
       it(`${label}: a request-supplied owner identifier is not honoured on a WRITE`, async () => {

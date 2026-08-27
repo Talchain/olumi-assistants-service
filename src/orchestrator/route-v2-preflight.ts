@@ -197,6 +197,23 @@ export async function resolveVerifiedIdentityOrRefuse(
  * Scoping the change to the scenario call sites leaves that control green,
  * because nothing it guards has moved: the two surfaces have different
  * requirements, and this expresses the difference where the difference lives.
+ *
+ * ── ⚠ CEE_REQUIRE_USER_JWT=false IS NOW AN OUTAGE, NOT A ROLLBACK LEVER ────
+ * Because the verified token subject is the ONLY ownership input on these
+ * surfaces, the flag that decides whether a token is verified at all became
+ * load-bearing the moment this sentinel was introduced. With it off,
+ * `resolveUserIdentity` returns `{mode:"off"}` for everyone, the effective
+ * user is null, and every OWNED scenario is refused to its OWN owner on all
+ * six /assist/v1/scenarios/* endpoints — reads and writes alike. Our own
+ * record has previously described this flag as an incident lever; reaching for
+ * it in an incident would now lock every signed-in user out of their own
+ * scenarios. Guest (unowned) scenarios are unaffected.
+ *
+ * It is disclosed at boot (`config.scenario_ownership_posture`, server.ts) and
+ * pinned in the suite as a KNOWN MISCONFIGURATION rather than as correct
+ * behaviour (scenario-routes-claimed-identity.test.ts). Making the two
+ * failures distinguishable to the caller is deliberately NOT done here and is
+ * rowed separately.
  */
 export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
 
@@ -211,6 +228,25 @@ export async function authorizeScenarioOwnership(
 > {
   let effectiveUserId = claimedUserId;
   if (identity.mode === 'verified') {
+    // ⚠ THIS ALARM IS NO LONGER REACHABLE FROM THE SCENARIO ROUTES, BY
+    // CONSTRUCTION — and it still looks live, which is why this note exists.
+    //
+    // All three /assist/v1/scenarios/* call sites now pass
+    // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE (a literal null), so
+    // `claimedUserId !== null` is UNSATISFIABLE for them and the mismatch can
+    // never fire on those six endpoints again. Only the turn and Stop routes,
+    // which still pass a parsed body id, can reach it.
+    //
+    // One argument was answering two questions — "who owns this?" and "is this
+    // caller misrepresenting itself?" — and removing it as an ownership input
+    // silently removed the second (CLAUDE.md trap 21). Recorded rather than
+    // repaired: splitting them needs an observation-only parameter on this
+    // shared function, which is a change to the turn/Stop seam this PR
+    // deliberately does not touch.
+    //
+    // NOT OVERSTATED: only the COMPARISON is lost. The B1 boundary log still
+    // emits `user_id_present` per request, so the presence of a body-supplied
+    // id on a scenario call remains observable.
     if (claimedUserId !== null && claimedUserId !== identity.userId) {
       emit(TelemetryEvents.UserJwtIdentityMismatch, {
         request_id: requestId,

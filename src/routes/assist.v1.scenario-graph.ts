@@ -52,6 +52,21 @@
  *           follow while it is ON. A reviewer reading (1) in good faith as a
  *           live statement would reach the wrong verdict about this file.
  *
+ *         ⚠⚠ BUT (1)'s CONCLUSION IS NOW THE FLAG-OFF STATE, AND THE FLAG IS
+ *            NO LONGER A ROLLBACK LEVER. Ownership on this surface is the
+ *            verified token subject ALONE, so CEE_REQUIRE_USER_JWT is
+ *            load-bearing, not optional. It defaults to FALSE
+ *            (config/index.ts), and nothing in the config layer guards that
+ *            direction — the only refine on it fires when it is TRUE. With it
+ *            off, every OWNED scenario is refused to its OWN owner across all
+ *            six /assist/v1/scenarios/* endpoints, reads and writes alike.
+ *            Staging deploys it ON today (witnessed above), so this is about
+ *            the DEFAULT and about anyone reaching for the flag in an
+ *            incident — not a live outage. Disclosed at boot
+ *            (`config.scenario_ownership_posture`, server.ts) and pinned in
+ *            the suite as a KNOWN MISCONFIGURATION rather than as correct
+ *            behaviour.
+ *
  *         WHAT DOES NOT CHANGE — the route stays a POST. Reason (2) below never
  *         depended on the flag, is sufficient on its own, and the method is
  *         part of a shipped wire contract the UI already builds against.

@@ -38,6 +38,15 @@
  *      parse is still refused — so the sentence remains true of TRANSPORT and
  *      of every non-identity extension. It is only ownership that moved.
  *
+ *      ⚠⚠ AND THAT MAKES CEE_REQUIRE_USER_JWT LOAD-BEARING, NOT A ROLLBACK
+ *         LEVER. The verified token subject is the only ownership input here,
+ *         so with the flag OFF (its DEFAULT, and unguarded in that direction)
+ *         no caller is ever identified and every OWNED scenario is refused to
+ *         its OWN owner on all four endpoints in this file — list, compare,
+ *         save and restore. Guest (unowned) scenarios are unaffected.
+ *         Disclosed at boot (`config.scenario_ownership_posture`, server.ts)
+ *         and pinned in the suite as a KNOWN MISCONFIGURATION.
+ *
  *      ⚠ WHY THE HEADING IS RESTORED RATHER THAN DELETED. "INHERITED VERBATIM"
  *        was accurate until the read and register routes were cut over and this
  *        one was not; for that interval the file asserted it followed rules it
