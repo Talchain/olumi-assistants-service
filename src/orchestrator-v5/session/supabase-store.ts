@@ -1912,10 +1912,12 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
-   * Load the bounded scenario-wide run-analysis fact set with an exact
-   * pre-limit count. This is reasoning authority, not claim-safety
-   * entitlement: it deliberately returns every non-noop run_analysis fact and
-   * leaves successful/failed/partial chronology to the existing selectors.
+   * Load the bounded scenario-wide run-analysis fact page with an exact
+   * pre-limit count. A complete page feeds the existing reasoning selectors;
+   * the validated database-order head of a complete or capped page feeds the
+   * existing claim-safety entitlement reader. The store applies no status or
+   * science policy: it returns every non-noop run_analysis fact and leaves
+   * successful/failed/partial chronology to the existing selectors.
    */
   async readScenarioRunAnalysisFactsFor(
     scenarioId: string,
@@ -1994,6 +1996,15 @@ export class SupabaseSessionStore implements SessionStore {
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
           ? (row.payload as Record<string, unknown>)
           : {};
+      if (
+        Object.prototype.hasOwnProperty.call(payloadObj, 'noop') &&
+        payloadObj.noop !== row.noop
+      ) {
+        throw new SessionReadError(
+          'Scenario analysis-fact payload noop contradicts its indexed row',
+          { code: 'analysis_fact_corrupt' },
+        );
+      }
       const parsed = HandlerFactSchema.safeParse({
         ...payloadObj,
         noop: row.noop,

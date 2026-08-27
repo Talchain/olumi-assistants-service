@@ -158,6 +158,7 @@ function unstampedRunAnalysisFact(): Record<string, unknown> {
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
       graph_hash_at_run: READY_GRAPH_HASH,
@@ -269,13 +270,14 @@ function makeStore(): Record<string, unknown> {
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   };
   if (!scenarioFactReadAbsent) {
-    // SCENARIO-SCOPED: newest non-noop run_analysis fact across ALL turns,
+    // SCENARIO-SCOPED: the exact-count run_analysis page across ALL turns,
     // regardless of the window — exactly what the SQL does.
-    base.readNewestAnalysisFactFor = async () => {
+    base.readScenarioRunAnalysisFactsFor = async (_id: string, limit: number) => {
       if (scenarioFactReadFails) throw new Error('simulated scenario fact read failure');
-      const all = Object.values(factsByTurnRowId).flat();
-      const analyses = all.filter((f) => f.fact_type === 'run_analysis' && f.noop === false);
-      return analyses[0] ?? null;
+      const analyses = Object.values(factsByTurnRowId)
+        .flat()
+        .filter((fact) => fact.fact_type === 'run_analysis' && fact.noop === false);
+      return { facts: analyses.slice(0, limit), total_count: analyses.length };
     };
   }
   return base;
@@ -553,16 +555,16 @@ describe('claim safety — the permission is SCENARIO-scoped, not window-scoped'
     ).toBe('scenario_fact');
   });
 
-  it('BELT AND BRACES: a failed read on an UNtruncated window does NOT fail closed', async () => {
-    // Scope pin, both directions. The guard's whole justification is that
-    // truncation was PROVEN; a short conversation proves the opposite, so a
-    // degraded read there must degrade to today's honest `true`, not withhold.
+  it('a failed exact scenario read on an untruncated window still fails closed', async () => {
+    // Window completeness cannot license analysis authority: it is a separate
+    // query/LRU snapshot. With no readable exact carrier, an empty short window
+    // is ignorance rather than proof that no analysis exists.
     turnsNewestFirst = buildTurns(2).slice(0, 5);
     factsByTurnRowId = {};
     scenarioFactReadFails = true;
     const { body } = await postTurn(app, 'Where does this leave things?');
-    expect(body._diagnostic_trace?.claim_safety?.may_name_leading_option).toBe(true);
-    expect(body._diagnostic_trace?.claim_safety?.verdict_provenance).toBe('no_analysis_exists');
+    expect(body._diagnostic_trace?.claim_safety?.may_name_leading_option).toBe(false);
+    expect(body._diagnostic_trace?.claim_safety?.verdict_provenance).toBe('fail_closed_no_turn_context');
   });
 
   it('a store WITHOUT the scenario read is treated as degraded, never as assume-good', async () => {

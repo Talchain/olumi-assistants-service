@@ -326,9 +326,6 @@ import { collectInterventionControlledFactorIds } from './context/intervention-c
 import {
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
-  reconcileAnalysisSummaryWithEnrichment,
-  type FragileEdgeSource,
-  type TopDriverSource,
 } from './context/analysis-fallback.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import {
@@ -364,6 +361,7 @@ import {
 import {
   claimSafetyScopeFromContext,
   readMayNameLeadingOptionVerdict,
+  readMayNameLeadingOptionVerdictForTurn,
   // Whether the verdict's provenance PROVES an analysis exists. Three of the six
   // branches withhold BECAUSE they could not establish that, so the withheld copy
   // may not say "your most recent analysis" on them. Imported, never re-decided
@@ -492,10 +490,8 @@ import {
   type GraphStateIngress,
   type AnalysisStateIngress,
 } from './boundary/request-extensions.js';
-import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
 import type { UsageMetrics } from '../adapters/llm/types.js';
 import {
-  compactAnalysis,
   type AnalysisResponseSummary,
 } from '../orchestrator/context/analysis-compact.js';
 import {
@@ -1623,6 +1619,17 @@ export async function runTurnExecutor(
         f.fact_type === 'set_factor_value' ||
         f.fact_type === 'adjust_edge_strength'),
   ).length;
+  // One scenario-wide analysis authority, deliberately distinct from the
+  // ordinary bounded fact window above. Complete alone feeds reasoning;
+  // capped/degraded/omitted carriers fail weak. The current-turn run fact may
+  // be prepended after dispatch, but request analysis bytes never enter this
+  // chain.
+  const scenarioAnalysisFacts =
+    context.scenario_analysis_fact_set?.status === 'complete'
+      ? context.scenario_analysis_fact_set.facts
+      : [];
+  const scenarioAnalysisFactsReadOk =
+    context.scenario_analysis_fact_set?.status === 'complete';
   // V5 state-trust: freshness derivation. The PRE-dispatch derivation
   // (`routingFreshness`) is built from `context.prior_facts` and is used
   // to ground Sonnet's analysis projection. The POST-dispatch derivation
@@ -1723,7 +1730,7 @@ export async function runTurnExecutor(
   // ═══════════════════════════════════════════════════════════════════════════
   const claimSafetyScope = claimSafetyScopeFromContext(context);
   let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(
-    context.prior_facts,
+    scenarioAnalysisFacts,
     claimSafetyScope,
   );
   let mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
@@ -1816,7 +1823,7 @@ export async function runTurnExecutor(
           ? null
           : selectCanonicalAnalysisState({
               handlerFacts: [],
-              priorFacts: context.prior_facts,
+              priorFacts: scenarioAnalysisFacts,
               readiness: deriveCanonicalReadiness(
                 canonicalReadinessGraphForRun,
                 graphStateForTurn,
@@ -1837,9 +1844,7 @@ export async function runTurnExecutor(
               // thrown prior-fact read is indistinguishable from a scenario that
               // has never been analysed, and where `'none'` would be a positive
               // claim we cannot support.
-              ...(context.prior_facts_read_ok === undefined
-                ? {}
-                : { priorFactsReadOk: context.prior_facts_read_ok }),
+              priorFactsReadOk: scenarioAnalysisFactsReadOk,
             });
     }
     return nonExecuteCanonicalMemo ?? undefined;
@@ -2130,7 +2135,7 @@ export async function runTurnExecutor(
    * source that is not request-supplied.
    */
   let handlerFactsForCommit: readonly HandlerFact[] = [];
-  let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
+  let analysisStateSource: 'fallback' | 'absent' = 'absent';
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -2371,16 +2376,14 @@ export async function runTurnExecutor(
         ? extractGraphOptionIds(contextGraphForReasoning)
         : undefined;
     routingFreshness = deriveAnalysisFreshness(
-      context.prior_facts,
+      scenarioAnalysisFacts,
       currentAnalysisGraphHashForTurn,
       currentGraphOptionIdsForTurn,
       // PR #981 review P1b: ONE authority for one question. Threading the
       // degraded-read flag only into the canonical selector made a single turn
       // emit pack 'unknown' and turn_outcome 'none' simultaneously. Every raw
       // derivation over context.prior_facts now threads the same flag.
-      context.prior_facts_read_ok === undefined
-        ? undefined
-        : { priorFactsReadOk: context.prior_facts_read_ok },
+      { priorFactsReadOk: scenarioAnalysisFactsReadOk },
     );
     // Until the post-dispatch re-derivation runs, the wire-bound
     // `freshness` defaults to the routing view — this covers exit paths
@@ -2390,76 +2393,28 @@ export async function runTurnExecutor(
 
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
-    // Which shape produced the fragile edges / top drivers, for telemetry.
-    // Set on the request path (below); null on the fallback/absent paths —
-    // the fallback already reconciles both inside buildAnalysisFromPriorFacts.
-    let fragileEdgeSource: FragileEdgeSource | null = null;
-    let topDriverSource: TopDriverSource | null = null;
-    if (options.analysisState) {
-      // The body-supplied analysis_state arrives in the V2RunResponse shape:
-      // top-level `robustness`, `factor_sensitivity`, `option_comparison`,
-      // and NO per-option `results` (coerceIngressAnalysis leaves results
-      // empty). compactAnalysis therefore misses BOTH the top-level
-      // `robustness.fragile_edges` AND the top-level `factor_sensitivity[]`
-      // drivers; apply the SAME overrides the prior-facts fallback uses so
-      // the projection is identical on both paths. Without the drivers
-      // override, `top_drivers: []` failed the advice gate's
-      // `needs_top_driver` classes and a grounded question like "What would
-      // change the outcome?" fell through to the fresh-analysis recap copy.
-      // coerceIngressAnalysis preserves the top-level fields, so the coerced
-      // envelope doubles as the enrichment source. Per-option data still
-      // wins when the request carries it.
-      const coercedIngress = coerceIngressAnalysis(options.analysisState);
-      const ingressSummary = compactAnalysis(coercedIngress);
-      if (ingressSummary) {
-        // Lane 21 (P0-A): single composite seam shared with
-        // buildAnalysisFromPriorFacts — drivers + fragile-edge overrides plus
-        // the tipping / VOI / goal-fit signal attachment — so the ingress and
-        // prior-facts paths project identically by construction.
-        const reconciled = reconcileAnalysisSummaryWithEnrichment(
-          ingressSummary,
-          coercedIngress as unknown as Record<string, unknown>,
-        );
-        analysisSummary = reconciled.summary;
-        fragileEdgeSource = reconciled.fragile_edge_source;
-        topDriverSource = reconciled.top_driver_source;
-      }
-      analysisStateSource = 'request';
-      // Freshness verdict is independent of whether the request carries
-      // analysis_state — it is always derived from the prior-fact chain.
-      // We still set the legacy staleness reason field when freshness is
-      // not 'fresh' so the existing prefix path stays consistent until
-      // the call sites are removed in the next commit.
+    // Resolve option labels from the selected graph only for display. The
+    // analysis itself comes exclusively from the complete durable scenario
+    // fact set. Body `analysis_state` remains accepted at the wire for
+    // compatibility but cannot author reasoning, freshness, or prompt bytes.
+    const optionLabelSource = (contextGraphForReasoning?.nodes ?? [])
+      .filter((n) => (n as { kind?: unknown }).kind === 'option')
+      .map((n) => {
+        const node = n as { id: string; label?: unknown };
+        return {
+          id: node.id,
+          label: typeof node.label === 'string' ? node.label : null,
+        };
+      });
+    const fallback = buildAnalysisFromPriorFacts(
+      scenarioAnalysisFacts,
+      optionLabelSource,
+    );
+    if (fallback) {
+      analysisSummary = fallback;
+      analysisStateSource = 'fallback';
       if (freshness.freshness === 'stale' || freshness.freshness === 'unknown') {
         analysisStalenessReason = FALLBACK_STALENESS_REASON;
-      }
-    } else {
-      // Resolve option labels from the current graph so the fallback doesn't
-      // leak raw option_ids into Sonnet's user-facing prose. Filter to
-      // option nodes only; the fallback builder uses id → label lookups.
-      const optionLabelSource = (contextGraphForReasoning?.nodes ?? [])
-        .filter((n) => (n as { kind?: unknown }).kind === 'option')
-        .map((n) => {
-          const node = n as { id: string; label?: unknown };
-          return {
-            id: node.id,
-            label: typeof node.label === 'string' ? node.label : null,
-          };
-        });
-      const fallback = buildAnalysisFromPriorFacts(
-        context.prior_facts,
-        optionLabelSource,
-      );
-      if (fallback) {
-        analysisSummary = fallback;
-        analysisStateSource = 'fallback';
-        // Legacy staleness reason now driven by the freshness verdict —
-        // only set when stale or unknown, NEVER on fresh. Removes the
-        // P0 bug where every explain turn after run_analysis stamped
-        // the prefix.
-        if (freshness.freshness === 'stale' || freshness.freshness === 'unknown') {
-          analysisStalenessReason = FALLBACK_STALENESS_REASON;
-        }
       }
     }
 
@@ -2480,20 +2435,11 @@ export async function runTurnExecutor(
         dispatch_path: 'turn_executor_pre_handler',
       },
       {
-        prior_fact_count: context.prior_facts.length,
+        prior_fact_count: scenarioAnalysisFacts.length,
         analysis_state_source: analysisStateSource,
-        // Confirms the body-analysis_state fragile-edge fix in real traffic:
-        // `analysis_state_source: 'request'` + `fragile_edge_source:
-        // 'top_level'` means a request-supplied analysis_state had its fragile
-        // edges rescued from the top-level shape — the path that previously
-        // dropped them. Null off the request path.
-        fragile_edge_source: fragileEdgeSource,
-        // Same confirmation for the top-driver parity fix: `'top_level'`
-        // means a request-supplied analysis_state had its drivers rescued
-        // from the top-level `factor_sensitivity[]` shape — the gap that
-        // previously sent advice-gate `needs_top_driver` classes to the
-        // fresh-analysis recap copy. Null off the request path.
-        top_driver_source: topDriverSource,
+        request_analysis_state_present: options.analysisState != null,
+        fragile_edge_source: null,
+        top_driver_source: null,
       },
     );
     try {
@@ -2668,6 +2614,8 @@ export async function runTurnExecutor(
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
+        analysisFacts: scenarioAnalysisFacts,
+        analysisFactsReadOk: scenarioAnalysisFactsReadOk,
         // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
         // brief (`scenarios.brief_text`, loaded once per turn by
         // buildTurnContext in the same round trip as the graph). Projected
@@ -3008,7 +2956,7 @@ export async function runTurnExecutor(
       // grep-friendly; the constituent flags (`has_run_analysis_fact`,
       // `leading_option_populated`, `analysis_section_chars`) remain on
       // the same line for forensic detail.
-      const hasRunAnalysisFact = context.prior_facts.some(
+      const hasRunAnalysisFact = scenarioAnalysisFacts.some(
         (f) => f.fact_type === 'run_analysis',
       );
       const leadingOptionPopulated = !!contextPack.analysis?.leading_option;
@@ -3613,16 +3561,14 @@ export async function runTurnExecutor(
             }
           })();
           freshness = deriveAnalysisFreshness(
-            context.prior_facts,
+            scenarioAnalysisFacts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(outcome.mutatedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
-            context.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: context.prior_facts_read_ok },
+            { priorFactsReadOk: scenarioAnalysisFactsReadOk },
           );
           emit(TelemetryEvents.PendingActionConsumed, {
             request_id: requestId,
@@ -3877,16 +3823,14 @@ export async function runTurnExecutor(
             }
           })();
           freshness = deriveAnalysisFreshness(
-            context.prior_facts,
+            scenarioAnalysisFacts,
             postApplyHash,
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(lastExecuted.mutatedGraph)
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
-            context.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: context.prior_facts_read_ok },
+            { priorFactsReadOk: scenarioAnalysisFactsReadOk },
           );
           for (const ref of consumedRefs) {
             const consumedHold = holds.find((h) => h.chip_id === ref)!;
@@ -7145,7 +7089,7 @@ export async function runTurnExecutor(
       if (competingPreRoutesAllowedForRun && routingResult === undefined) {
         const runComparisonOutcome = tryRunComparisonGate({
           message: payload.message,
-          priorFacts: context.prior_facts,
+          priorFacts: scenarioAnalysisFacts,
           freshness: freshness?.freshness,
           // ROADMAP 1.233 — CLAIM-SAFETY GATE. `runComparisonOutcome
           // .assistant_text` was registered `ungated` by #713's drift ledger.
@@ -7519,7 +7463,7 @@ export async function runTurnExecutor(
         // the ANALYSIS — which is what makes it reach all five of the gate's
         // `robustnessVerdictFor` call sites without a per-composer parameter.
         // Key absent when there is nothing to disclose: byte-identical turns.
-        const defaultedForAdviceGate = pickLatestDefaultedAssumptions(context.prior_facts);
+        const defaultedForAdviceGate = pickLatestDefaultedAssumptions(scenarioAnalysisFacts);
         // ⚠ `leading_option` is re-stated after the spread ON PURPOSE. The two
         // branches of the base differ on its optionality, so spreading the union
         // widens it to `| undefined` and the literal stops satisfying
@@ -7576,13 +7520,13 @@ export async function runTurnExecutor(
           // aligned on the same single fact (no stale pre-edit drift).
           // Returns null when no enrichment is available; the gate
           // falls back to its projection-only behaviour.
-          decisionReview: pickLatestDecisionReview(context.prior_facts),
+          decisionReview: pickLatestDecisionReview(scenarioAnalysisFacts),
           // Science-to-reasoning bridge: the same selected analysis fact's
           // producer-ranked factor EVPPI identity + exact PLoT label, with an
           // optional same-factor Decision Review action. The label-backed
           // guidance remains live when configuration-gated Decision Review is
           // absent or soft-fails. Do not infer the deployed flag posture here.
-          factorEvppiGuidance: pickLatestFactorEvppiPriorityGuidance(context.prior_facts),
+          factorEvppiGuidance: pickLatestFactorEvppiPriorityGuidance(scenarioAnalysisFacts),
           // Raw robustness signals (`enrichment.robustness.level`,
           // `enrichment.robustness.near_tie.is_tie`) from the SAME fact
           // the freshness/projection layer selected. Lets the post-
@@ -7591,12 +7535,12 @@ export async function runTurnExecutor(
           // coerced. Null when no run_analysis fact / no robustness
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
-          rawRobustness: pickLatestRawRobustness(context.prior_facts),
+          rawRobustness: pickLatestRawRobustness(scenarioAnalysisFacts),
           // ROADMAP 2.278 — the same fact's flip evidence, so the gate's
           // fragility copy cannot claim the result could change when the
           // producer attested it cannot. Same canonical selector as the two
           // lines above; undefined ⇒ pre-2.278 copy, byte-identical.
-          flipClaimPosture: pickLatestFlipClaimPosture(context.prior_facts),
+          flipClaimPosture: pickLatestFlipClaimPosture(scenarioAnalysisFacts),
           // AI Harness capability 1 — UNCONDITIONAL since 2026-07-20 (O-7
           // wave 2: CEE_POST_ANALYSIS_LOOP_ENABLED deleted, live-true on
           // staging). Thread the already-derived canonical analysis state +
@@ -9238,7 +9182,10 @@ export async function runTurnExecutor(
             handlerId: action.handler_id,
             context: composeCtx,
             stage: context.stage,
-            hasAnalysis: options.analysisState != null,
+            // User-facing recovery reads only the complete scenario authority.
+            // Caller-supplied analysis_state remains accepted at the wire but
+            // cannot make an unsupported action sound analysis-aware.
+            hasAnalysis: selectRunAnalysisFact(scenarioAnalysisFacts) !== null,
           });
           recoveredResponse = unsupported.response;
           recoveredTemplateId = unsupported.templateId;
@@ -9635,7 +9582,7 @@ export async function runTurnExecutor(
         const verdict = validateExplanationAnswer(
           proposedHandlerId,
           action.explanation,
-          context.prior_facts,
+          scenarioAnalysisFacts,
         );
         if (!verdict.skip && verdict.payload) {
           explanationInvocationPayload = verdict.payload;
@@ -9714,8 +9661,8 @@ export async function runTurnExecutor(
       // set is empty or no entry is pinned, and re-summarises kept entries so
       // `overall_status` stays honest (a dropped sole-concrete entry demotes).
       const routedFlipSummary =
-        isExplanationHandler && analysisStateSource !== 'request'
-          ? pickLatestFlipSummary(context.prior_facts)
+        isExplanationHandler
+          ? pickLatestFlipSummary(scenarioAnalysisFacts)
           : undefined;
       const routedFlipSummaryFiltered =
         routedFlipSummary != null
@@ -9779,24 +9726,17 @@ export async function runTurnExecutor(
           // could shift which option leads" contradiction on a no-practical-flip
           // result.
           //
-          // SAME-SOURCE GUARANTEE (Codex review #2): `analysisProjection` is
-          // built from `contextPackForLog.analysis`, which on the request path
-          // (`analysisStateSource === 'request'`) comes from the body-supplied
-          // analysis_state, NOT prior facts. The prior-fact flip / robustness
-          // evidence could then describe a DIFFERENT run. So we only pair
-          // prior-fact evidence with a prior-fact-built projection; when the
-          // projection is request-sourced we withhold it and the composer falls
-          // back to the request projection's own band (consistent, no mix).
-          rawRobustness: isExplanationHandler && analysisStateSource !== 'request'
-            ? pickLatestRawRobustness(context.prior_facts)
+          // SAME-SOURCE GUARANTEE: both the projection and the additional
+          // evidence now originate from the scenario-wide canonical analysis
+          // carrier. Request analysis_state remains wire-compatible metadata
+          // and cannot enter either side of this reasoning pair.
+          rawRobustness: isExplanationHandler
+            ? pickLatestRawRobustness(scenarioAnalysisFacts)
             : undefined,
-          // ⭐ THE SAME SAME-RUN GUARD, DELIBERATELY DUPLICATED RATHER THAN
-          // WIDENED. Pairing a request-sourced projection with prior-fact
-          // evidence would let the disclosure describe a DIFFERENT run than the
-          // numbers it qualifies — the identical hazard the line above exists
-          // for, so it gets the identical condition.
-          defaultedAssumptions: isExplanationHandler && analysisStateSource !== 'request'
-            ? pickLatestDefaultedAssumptions(context.prior_facts)
+          // Same selected scenario fact as the evidence above; no request
+          // projection can be paired with a different durable run.
+          defaultedAssumptions: isExplanationHandler
+            ? pickLatestDefaultedAssumptions(scenarioAnalysisFacts)
             : undefined,
           flipSummary: routedFlipSummaryFiltered,
           flipTargetOption,
@@ -9804,8 +9744,8 @@ export async function runTurnExecutor(
           // the same same-source guard, so "is the target the current leader?"
           // is decided against the run the flip rows describe.
           analysisLeadingOptionId:
-            isExplanationHandler && analysisStateSource !== 'request'
-              ? pickLatestLeadingOptionId(context.prior_facts)
+            isExplanationHandler
+              ? pickLatestLeadingOptionId(scenarioAnalysisFacts)
               : null,
           // The turn's hoisted permission — one derivation, many read points.
           mayNameLeadingOption: mayNameLeadingOptionForRun,
@@ -10492,7 +10432,11 @@ export async function runTurnExecutor(
         proposedHandlerId,
         outcome: handlerOutcome,
         contextPack: contextPackForLog ?? null,
+        // The ordinary hot window is the only truthful mixed newest-first
+        // chronology. Scenario analyses are a separate authority input below;
+        // prefixing the two reads would fabricate run→mutation ordering.
         priorFacts: context.prior_facts,
+        priorAnalysisFacts: scenarioAnalysisFacts,
         handlerFacts: handlerFactsForCommit,
         requestId,
         scenarioId: context.session_id,
@@ -10619,19 +10563,24 @@ export async function runTurnExecutor(
       // hand-maintained mirror (CLAUDE.md trap #12).
       const unifiedFactsForPostHandler = [
         ...handlerFactsForCommit,
-        ...context.prior_facts,
+        ...scenarioAnalysisFacts,
       ];
+      const currentSuccessfulAnalysis = selectRunAnalysisFact(
+        handlerFactsForCommit,
+      );
+      const freshnessFactsForPostHandler =
+        currentSuccessfulAnalysis === null
+          ? scenarioAnalysisFacts
+          : handlerFactsForCommit;
       freshness = deriveAnalysisFreshness(
-        unifiedFactsForPostHandler,
+        freshnessFactsForPostHandler,
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
         // PR #981 review P1b: same flag, same question. Nearly always inert
         // here (this turn's own facts are first in the unified chain) — it
         // matters only when the handler produced no usable fact AND the prior
         // read degraded, where 'none' would again be an unsupported claim.
-        context.prior_facts_read_ok === undefined
-          ? undefined
-          : { priorFactsReadOk: context.prior_facts_read_ok },
+        { priorFactsReadOk: scenarioAnalysisFactsReadOk },
       );
       // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
       // declaration) over the SAME fact array and via the SAME canonical
@@ -10673,10 +10622,12 @@ export async function runTurnExecutor(
       // `false`. The fix would be silently undone on exactly the turns that
       // change the graph. Passing the same scope restores the superset property
       // that makes the unconditional assignment safe.
-      mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(
-        unifiedFactsForPostHandler,
-        claimSafetyScope,
-      );
+      mayNameLeadingOptionVerdictForRun =
+        readMayNameLeadingOptionVerdictForTurn({
+          currentFacts: handlerFactsForCommit,
+          priorAnalysisFacts: scenarioAnalysisFacts,
+          priorScope: claimSafetyScope,
+        });
       mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
       emitFreshnessTelemetry(
         freshness,
@@ -10686,7 +10637,7 @@ export async function runTurnExecutor(
           dispatch_path: 'turn_executor_post_handler',
         },
         {
-          prior_fact_count: context.prior_facts.length,
+          prior_fact_count: scenarioAnalysisFacts.length,
           current_turn_fact_count: handlerFactsForCommit.length,
         },
       );
@@ -10729,7 +10680,7 @@ export async function runTurnExecutor(
       );
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,
-        priorFacts: context.prior_facts,
+        priorFacts: scenarioAnalysisFacts,
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
         currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
@@ -10739,9 +10690,7 @@ export async function runTurnExecutor(
         // only for an execute turn that produced no usable run_analysis fact
         // AND could not read the prior chain — where `'none'` would again be
         // an unsupported claim rather than an honest `'unknown'`.
-        ...(context.prior_facts_read_ok === undefined
-          ? {}
-          : { priorFactsReadOk: context.prior_facts_read_ok }),
+        priorFactsReadOk: scenarioAnalysisFactsReadOk,
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
@@ -10791,7 +10740,7 @@ export async function runTurnExecutor(
         proposedHandlerId === 'what_would_flip' &&
         currentAnalysisGraphHashForTurn !== null
       ) {
-        const priorRun = selectRunAnalysisFact(context.prior_facts);
+        const priorRun = selectRunAnalysisFact(scenarioAnalysisFacts);
         const priorEnrichment = priorRun
           ? (priorRun.fact as { result?: { enrichment?: unknown } }).result?.enrichment
           : undefined;
@@ -10984,7 +10933,7 @@ export async function runTurnExecutor(
         // below carries: that array begins with THIS turn's run_analysis fact,
         // so deriving the previous lens from it would report every turn as a
         // repeat of itself. Already loaded for the turn — no extra DB read.
-        priorTurnFactsForLensHistory: context.prior_facts,
+        priorTurnFactsForLensHistory: scenarioAnalysisFacts,
         // PR 3 — thread lifecycle context so the composer can serve
         // Phase 3 blocks from prior_facts when the current turn produced
         // no run_analysis fact, or emit the stale-safe rerun coaching
@@ -11257,7 +11206,7 @@ export async function runTurnExecutor(
       // user always has a next step. No-op outside `analyse` stage.
       const coachWrapper = generatePostAnalysisCoaching({
         stage: context.stage,
-        priorFacts: context.prior_facts,
+        priorFacts: scenarioAnalysisFacts,
         freshness: freshness?.freshness ?? 'none',
         requestId,
         scenarioId: context.session_id,
@@ -11431,7 +11380,7 @@ export async function runTurnExecutor(
       // injects review-card-derived chips. Skipped outside `analyse`.
       const converseWrapper = generatePostAnalysisCoaching({
         stage: context.stage,
-        priorFacts: context.prior_facts,
+        priorFacts: scenarioAnalysisFacts,
         freshness: freshness?.freshness ?? 'none',
         requestId,
         scenarioId: context.session_id,
@@ -12755,11 +12704,9 @@ export async function runTurnExecutor(
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
     // SAME-RUN GUARD — see the note above. Never qualify request-sourced
     // numbers with fact-sourced defaults.
-    if (analysisStateSource === 'request') return;
-
     const defaulted = pickLatestDefaultedAssumptions([
       ...handlerFactsForCommit,
-      ...context.prior_facts,
+      ...scenarioAnalysisFacts,
     ]);
     if (defaulted === null) return;
 
@@ -13474,7 +13421,7 @@ export async function runTurnExecutor(
       // own `input.priorFacts` at routing time. Diagnostic only; the gate
       // remains the sole authority for the comparison itself.
       const rerunReadiness: FrameRerunReadiness = deriveRerunReadiness(
-        context.prior_facts,
+        scenarioAnalysisFacts,
         freshness.freshness,
       );
       try {
@@ -13771,12 +13718,10 @@ export async function runTurnExecutor(
     // + margin + drivers + robustness) beats an empty apology.
     //
     // Guards mirror the routed happy-path fallback (turn-executor.ts, EXECUTE
-    // branch): only fire on FRESH + present projection, and only pair prior-fact
-    // robustness / flip evidence with a prior-fact-built projection
-    // (`analysisStateSource !== 'request'`) so a request-sourced projection is
-    // never mixed with a different run's evidence (SAME-SOURCE GUARANTEE). The
-    // composers are the identical finaliser-safe ones used on the Sonnet-valid
-    // path, so no forbidden-phrase or ordering risk is introduced here.
+    // branch): only fire on FRESH + present projection, and pair only canonical
+    // scenario-fact evidence with that canonical projection. The composers are
+    // the identical finaliser-safe ones used on the Sonnet-valid path, so no
+    // forbidden-phrase or ordering risk is introduced here.
     //
     // ═════════════════════════════════════════════════════════════════════
     // ROADMAP 1.233 — CLAIM-SAFETY GATE ON THIS HELPER. Read before editing.
@@ -13817,25 +13762,14 @@ export async function runTurnExecutor(
       const projection =
         buildAnalysisProjectionSummary(contextPackForLog?.analysis ?? null) ?? undefined;
       if (mayNameLeadingOptionForRun && projection?.leading_option) {
-        // SAME-SOURCE GUARANTEE: `analysisStateSource === 'request'` iff the
-        // body carried `analysis_state` (see the request branch of
-        // buildTurnContext, which sets it under `if (options.analysisState)`).
-        // That local is block-scoped and out of reach here, so we read the
-        // identical condition off `options.analysisState` — the projection is
-        // request-sourced exactly when the body supplied it, and only then do we
-        // withhold the prior-fact robustness / flip evidence to avoid pairing a
-        // request run's projection with a different run's evidence.
-        const usePriorFactEvidence = !options.analysisState;
-        const rawRobustness = usePriorFactEvidence
-          ? pickLatestRawRobustness(context.prior_facts) ?? null
-          : null;
-        const defaultedAssumptions = usePriorFactEvidence
-          ? pickLatestDefaultedAssumptions(context.prior_facts) ?? null
-          : null;
+        // SAME-SOURCE GUARANTEE: projection and supporting evidence are both
+        // selected from the scenario-wide analysis carrier. Request
+        // analysis_state never becomes a reasoning source here.
+        const rawRobustness = pickLatestRawRobustness(scenarioAnalysisFacts) ?? null;
+        const defaultedAssumptions =
+          pickLatestDefaultedAssumptions(scenarioAnalysisFacts) ?? null;
         if (forcedAnalyticalIntent === 'what_would_flip') {
-          const flipSummary = usePriorFactEvidence
-            ? pickLatestFlipSummary(context.prior_facts) ?? null
-            : null;
+          const flipSummary = pickLatestFlipSummary(scenarioAnalysisFacts) ?? null;
           const flipSummaryFiltered =
             flipSummary != null
               ? filterFlipSummaryEntries(
@@ -14279,51 +14213,6 @@ function patchRunAnalysisDecisionReviewNull(
   const next = facts.slice();
   next[idx] = patched;
   return next;
-}
-
-/**
- * Narrow an ingress analysis payload into the V2RunResponseEnvelope shape
- * that compactAnalysis() consumes. The ingress schema only requires
- * `analysis_status`; compactAnalysis reads `meta`, `results`, `robustness`,
- * `factor_sensitivity`, etc. defensively. We fill required fields ONLY when
- * they are truly missing; when present but non-canonical we normalise into
- * the array shape compactAnalysis expects without lying to the type system
- * (review round 3 P1-2).
- */
-function coerceIngressAnalysis(a: AnalysisStateIngress): V2RunResponseEnvelope {
-  const raw = a as AnalysisStateIngress & {
-    meta?: V2RunResponseEnvelope['meta'];
-    results?: unknown;
-    [k: string]: unknown;
-  };
-  return {
-    ...raw,
-    meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
-    results: normaliseResults(raw.results),
-  };
-}
-
-/**
- * Convert an arbitrary `results` value into the `unknown[]` that
- * V2RunResponseEnvelope declares.
- *
- *   • array       → unchanged
- *   • object      → Object.values(...) — handles keyed compatibility
- *                   payloads (e.g. `{ opt_1: {...}, opt_2: {...} }`) so
- *                   data is preserved rather than discarded
- *   • missing     → []
- *   • primitive   → [] (meaningless shape; nothing to preserve)
- *
- * No type assertions. The caller can reason about the returned array
- * without guessing about the ingress shape.
- */
-function normaliseResults(raw: unknown): unknown[] {
-  if (raw === undefined || raw === null) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'object') {
-    return Object.values(raw as Record<string, unknown>);
-  }
-  return [];
 }
 
 function summariseRouting(result: RoutingResult): {

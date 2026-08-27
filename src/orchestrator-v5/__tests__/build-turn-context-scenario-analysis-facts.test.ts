@@ -73,7 +73,10 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       source: 'scenario',
       facts: [durable],
       total_count: 1,
+      newest_fact: durable,
     });
+    expect(context.newest_analysis_fact).toEqual(durable);
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
   });
 
   it('makes exact complete zero the only authoritative never-analysed state', async () => {
@@ -85,7 +88,10 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       status: 'complete',
       facts: [],
       total_count: 0,
+      newest_fact: null,
     });
+    expect(context.newest_analysis_fact).toBeNull();
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
     expect(context.persisted_analysis_freshness).toMatchObject({
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
@@ -117,7 +123,10 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       status: 'capped',
       facts: [],
       total_count: 37,
+      newest_fact: facts[0],
     });
+    expect(context.newest_analysis_fact).toEqual(facts[0]);
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
     expect(context.persisted_analysis_freshness).toMatchObject({
       freshness: 'unknown',
       reason: 'derivation_failed',
@@ -145,6 +154,8 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       reason: 'durable_unavailable',
     });
     expect(context.persisted_analysis_freshness.freshness).toBe('unknown');
+    expect(context.newest_analysis_fact).toBeNull();
+    expect(context.newest_analysis_fact_read_ok).toBe(false);
   });
 
   it('degrades a durable/hot split snapshot without merging either fact set', async () => {

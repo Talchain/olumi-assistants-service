@@ -160,6 +160,7 @@ function baseRunAnalysisFact(): Record<string, unknown> {
     fact_version: 1,
     noop: false,
     result: {
+      scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
       graph_hash_at_run: READY_GRAPH_HASH,
@@ -252,7 +253,7 @@ let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
  *
  * Two conditions, both from the store: `readOk === false` and
  * `windowTruncated === true`. `build-turn-context.ts:1037` returns
- * `{fact: null, readOk: false}` when the store has NO `readNewestAnalysisFactFor`
+ * a degraded carrier when the store has NO `readScenarioRunAnalysisFactsFor`
  * method at all ("absence of the method is the same as a failed read"), and
  * `windowTruncated` is `prior_turns_total > prior_turns.length` — so a high
  * `countTurns` against a one-turn window. With ZERO facts in the window as well,
@@ -270,7 +271,7 @@ function makeStore(): Record<string, unknown> {
       countTurns: async () => 25,
       readFactsFor: async () => [],
       readFactsWithTurnFor: async () => [],
-      // ⚠ `readNewestAnalysisFactFor` DELIBERATELY ABSENT — that is what makes
+      // ⚠ `readScenarioRunAnalysisFactsFor` DELIBERATELY ABSENT — that is what makes
       // `readOk` false without needing to throw.
       loadGraph: async () => READY_GRAPH,
       loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
@@ -295,9 +296,11 @@ function makeStore(): Record<string, unknown> {
           fact_created_at: new Date(Date.now() - 9_000_000).toISOString(),
         })),
       ),
-    readNewestAnalysisFactFor: async () => {
-      const all = Object.values(factsByTurnRowId).flat();
-      return all.find((f) => f.fact_type === 'run_analysis' && f.noop === false) ?? null;
+    readScenarioRunAnalysisFactsFor: async (_id: string, limit: number) => {
+      const analyses = Object.values(factsByTurnRowId)
+        .flat()
+        .filter((fact) => fact.fact_type === 'run_analysis' && fact.noop === false);
+      return { facts: analyses.slice(0, limit), total_count: analyses.length };
     },
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),

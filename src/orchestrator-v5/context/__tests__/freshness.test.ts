@@ -185,6 +185,31 @@ describe('deriveAnalysisFreshness — fresh', () => {
     expect(r.freshness).toBe('fresh');
     expect(r.graph_hash_at_run).toBe('new_hash_new_hash');
   });
+
+  it('orders parseable timestamps by represented instant, not lexical offset text', () => {
+    // Lexically 01:00 sorts after 00:30, but +02:00 makes the first instant
+    // 90 minutes OLDER. Refusal facts historically license parseable offset
+    // timestamps, so the selector must compare instants rather than assuming Z.
+    const lexicallyLaterButChronologicallyEarlier = mkRunAnalysisFact({
+      graph_hash_at_run: 'older_offset_hash',
+      computed_at: '2026-04-30T01:00:00+02:00',
+      status: 'computed',
+    });
+    const chronologicallyLater = mkRunAnalysisFact({
+      graph_hash_at_run: 'newer_utc_hash',
+      computed_at: '2026-04-30T00:30:00.000Z',
+      status: 'computed',
+    });
+
+    const r = deriveAnalysisFreshness(
+      [lexicallyLaterButChronologicallyEarlier, chronologicallyLater],
+      'newer_utc_hash',
+    );
+
+    expect(r.freshness).toBe('fresh');
+    expect(r.graph_hash_at_run).toBe('newer_utc_hash');
+    expect(r.computed_at).toBe('2026-04-30T00:30:00.000Z');
+  });
 });
 
 describe('deriveAnalysisFreshness — stale', () => {

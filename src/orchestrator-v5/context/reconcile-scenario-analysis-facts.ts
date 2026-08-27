@@ -38,11 +38,15 @@ export type ScenarioAnalysisFactSet =
       readonly source: 'scenario';
       readonly facts: readonly HandlerFact[];
       readonly total_count: number;
+      /** Database-order head for claim-safety only; null proves durable zero. */
+      readonly newest_fact: HandlerFact | null;
     }
   | {
       readonly status: 'capped';
       readonly facts: readonly [];
       readonly total_count: number;
+      /** Validated database-order head; capped facts remain unusable for reasoning. */
+      readonly newest_fact: HandlerFact;
     }
   | {
       readonly status: 'degraded';
@@ -82,6 +86,8 @@ interface ClassifiedHotFacts {
   readonly invalid: boolean;
 }
 
+type HotFactTypeClaim = 'run_analysis' | 'unrelated' | 'invalid';
+
 /**
  * Select one coherent scenario-level analysis fact set.
  *
@@ -104,10 +110,6 @@ export function reconcileScenarioAnalysisFacts(
       return degraded('durable_contract_invalid');
     }
 
-    if (durable.total_count > SCENARIO_ANALYSIS_FACT_CAP) {
-      return freezeCapped(durable.total_count);
-    }
-
     // These reads are not one database snapshot. A hot fact that is absent
     // from the complete durable page proves the page was already stale by the
     // time the window arrived; replacing the window would promote an older
@@ -117,6 +119,13 @@ export function reconcileScenarioAnalysisFacts(
     if (hot.invalid) {
       return degraded('hot_window_contract_invalid', durable.total_count);
     }
+    if (durable.total_count > SCENARIO_ANALYSIS_FACT_CAP) {
+      const newestFact = durableContract[0];
+      // A capped page has a validated 21-row lookahead by construction.
+      if (newestFact === undefined) return degraded('durable_contract_invalid');
+      return freezeCapped(durable.total_count, newestFact);
+    }
+
     if (!multisetIncludes(durableContract, hot.eligible)) {
       return degraded('snapshot_conflict', durable.total_count);
     }
@@ -187,12 +196,31 @@ function isJsonSafe(value: unknown, ancestors: Set<object>): boolean {
   }
   if (Object.getOwnPropertySymbols(object).length > 0) return false;
 
+  const descriptors = Object.getOwnPropertyDescriptors(object);
+  if (
+    Object.values(descriptors).some(
+      (descriptor) => descriptor.get !== undefined || descriptor.set !== undefined,
+    )
+  ) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const keys = Object.keys(value);
+    if (keys.length !== value.length) return false;
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, String(index))) {
+        return false;
+      }
+    }
+  }
+
   ancestors.add(object);
-  const valid = Array.isArray(value)
-    ? value.every((entry) => isJsonSafe(entry, ancestors))
-    : Object.keys(value as Record<string, unknown>).every((key) =>
-        isJsonSafe((value as Record<string, unknown>)[key], ancestors),
-      );
+  const enumerableValues = Object.entries(descriptors)
+    .filter(([, descriptor]) => descriptor.enumerable === true)
+    .map(([, descriptor]) => descriptor.value);
+  const valid = enumerableValues.every((entry) =>
+    isJsonSafe(entry, ancestors),
+  );
   ancestors.delete(object);
   return valid;
 }
@@ -239,59 +267,141 @@ function classifyHotFacts(
     // is not analysis authority and must not silently broaden this carrier into
     // a validator for the generic prior-fact channel. Only a row that claims
     // to be `run_analysis` enters this contract.
-    if (
-      candidate === null ||
-      typeof candidate !== 'object' ||
-      Array.isArray(candidate) ||
-      (candidate as { readonly fact_type?: unknown }).fact_type !==
-        'run_analysis'
-    ) {
-      continue;
-    }
-    const parsed = HandlerFactSchema.safeParse(candidate);
-    if (!parsed.success) {
-      invalid = true;
-      continue;
-    }
+    try {
+      if (
+        candidate === null ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      ) {
+        continue;
+      }
+      // Decide whether the row claims analysis authority from its own data
+      // descriptor only. This avoids both accessor execution and broadening
+      // this carrier into validation policy for unrelated hot-window facts.
+      // A hostile descriptor/proxy cannot prove itself unrelated, so it fails
+      // weak; a safely identified non-analysis fact is ignored even if its
+      // own payload contains values irrelevant to analysis reconciliation.
+      const claim = readHotFactTypeClaim(candidate);
+      if (claim === 'invalid') {
+        invalid = true;
+        continue;
+      }
+      if (claim === 'unrelated') continue;
+      if (!isJsonSafe(candidate, new Set<object>())) {
+        invalid = true;
+        continue;
+      }
+      const parsed = HandlerFactSchema.safeParse(candidate);
+      if (!parsed.success) {
+        invalid = true;
+        continue;
+      }
 
-    const fact = parsed.data;
-    if (fact.fact_type !== 'run_analysis') continue;
-    if (fact.noop) {
+      const fact = parsed.data;
+      if (fact.fact_type !== 'run_analysis') continue;
+      // A valid noop carries no analysis claim. The durable query excludes
+      // noop rows at the indexed boundary, so a noop in the ordinary hot
+      // window is irrelevant rather than a contradiction.
+      if (fact.noop) continue;
+      const eligibleFact = parseEligibleRunAnalysisFact(fact, expectedScenarioId);
+      if (eligibleFact === null) {
+        invalid = true;
+        continue;
+      }
+      eligible.push(eligibleFact);
+    } catch {
+      // Total fail-weak boundary for hostile proxies whose traps change after
+      // the descriptor preflight.
       invalid = true;
-      continue;
     }
-    const eligibleFact = parseEligibleRunAnalysisFact(fact, expectedScenarioId);
-    if (eligibleFact === null) {
-      invalid = true;
-      continue;
-    }
-    eligible.push(eligibleFact);
   }
 
   return { eligible: Object.freeze(eligible), invalid };
+}
+
+function readHotFactTypeClaim(candidate: object): HotFactTypeClaim {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(candidate, 'fact_type');
+    if (descriptor === undefined) return 'unrelated';
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
+      return 'invalid';
+    }
+    return descriptor.value === 'run_analysis' ? 'run_analysis' : 'unrelated';
+  } catch {
+    return 'invalid';
+  }
 }
 
 function parseEligibleRunAnalysisFact(
   candidate: unknown,
   expectedScenarioId: string,
 ): HandlerFact | null {
-  const parsed = HandlerFactSchema.safeParse(candidate);
-  if (!parsed.success) return null;
-  const fact = parsed.data;
-  if (fact.fact_type !== 'run_analysis' || fact.noop) return null;
+  try {
+    // Preflight before Zod reads any getter/proxy-backed property.
+    if (!isJsonSafe(candidate, new Set<object>())) return null;
+    const parsed = HandlerFactSchema.safeParse(candidate);
+    if (!parsed.success) return null;
+    const fact = parsed.data;
+    if (fact.fact_type !== 'run_analysis' || fact.noop) return null;
 
-  const result = fact.result;
-  if (
-    result === null ||
-    typeof result !== 'object' ||
-    Array.isArray(result) ||
-    (result as { readonly scenario_id?: unknown }).scenario_id !==
-      expectedScenarioId
-  ) {
+    const result = fact.result;
+    if (
+      result === null ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      (result as { readonly scenario_id?: unknown }).scenario_id !==
+        expectedScenarioId
+    ) {
+      return null;
+    }
+    if (!isJsonSafe(fact, new Set<object>())) return null;
+    if (!hasValidProducerSelectorFields(result as Record<string, unknown>)) {
+      return null;
+    }
+    return fact;
+  } catch {
+    // Contract inputs can be hostile test doubles even though persisted JSONB
+    // cannot. Reconciliation is a fail-weak authority boundary, never a turn
+    // exception surface.
     return null;
   }
-  if (!isJsonSafe(fact, new Set<object>())) return null;
-  return fact;
+}
+
+/**
+ * Validate fields the existing reasoning selectors consume when a producer
+ * supplied them. Legacy absence remains valid; malformed presence must not
+ * acquire authority merely because the broad HandlerFact schema accepts it.
+ */
+function hasValidProducerSelectorFields(result: Record<string, unknown>): boolean {
+  if (Object.prototype.hasOwnProperty.call(result, 'computed_at')) {
+    const computedAt = result.computed_at;
+    if (
+      typeof computedAt !== 'string' ||
+      computedAt.trim().length === 0 ||
+      !Number.isFinite(Date.parse(computedAt))
+    ) {
+      return false;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(result, 'graph_hash_at_run')) {
+    const graphHash = result.graph_hash_at_run;
+    if (typeof graphHash !== 'string' || graphHash.trim().length === 0) {
+      return false;
+    }
+  }
+
+  const enrichment = result.enrichment;
+  if (
+    enrichment !== null &&
+    typeof enrichment === 'object' &&
+    !Array.isArray(enrichment) &&
+    Object.prototype.hasOwnProperty.call(enrichment, 'analysis_status')
+  ) {
+    const status = (enrichment as Record<string, unknown>).analysis_status;
+    if (typeof status !== 'string' || status.trim().length === 0) return false;
+  }
+  return true;
 }
 
 function freezeComplete(
@@ -304,14 +414,19 @@ function freezeComplete(
     source,
     facts: Object.freeze([...facts]),
     total_count: totalCount,
+    newest_fact: facts[0] ?? null,
   });
 }
 
-function freezeCapped(totalCount: number): ScenarioAnalysisFactSet {
+function freezeCapped(
+  totalCount: number,
+  newestFact: HandlerFact,
+): ScenarioAnalysisFactSet {
   return Object.freeze({
     status: 'capped',
     facts: Object.freeze([]) as readonly [],
     total_count: totalCount,
+    newest_fact: newestFact,
   });
 }
 

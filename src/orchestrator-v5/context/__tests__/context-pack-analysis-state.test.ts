@@ -5,10 +5,10 @@
  * from the SAME canonical selector the chips / route summary use, with these
  * honest boundaries:
  *   - `canonicalState` input (M5 seam) is authoritative when present;
- *   - else best-effort from priorFacts + a raw-graph freshness hash;
+ *   - else best-effort from analysisFacts + a raw-graph freshness hash;
  *   - else (no raw graph — the production compacted path) `null`, never a
  *     misleadingly-stale verdict;
- *   - `priorFacts` omitted entirely → `null` + a visible diagnostic.
+ *   - `analysisFacts` omitted entirely → `null` + a visible diagnostic.
  * And that the resulting pack still validates against ContextPackSchema.
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -65,11 +65,14 @@ function runAnalysisFact(graphHash: string): RunAnalysisHandlerFact {
 }
 
 describe('ContextPack analysis_state — derivation', () => {
-  it('priorFacts + matching graph → fresh, usable for chips', () => {
+  it('analysisFacts + matching graph → fresh, usable for chips', () => {
+    const analysisFacts = [runAnalysisFact(HASH)];
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(HASH)],
+      priorFacts: analysisFacts,
+      analysisFacts,
+      analysisFactsReadOk: true,
       graph,
     });
     expect(pack.analysis_state).not.toBeNull();
@@ -78,11 +81,14 @@ describe('ContextPack analysis_state — derivation', () => {
     expect(pack.analysis_state!.requires_rerun).toBe(false);
   });
 
-  it('priorFacts + edited graph (hash mismatch) → stale, requires rerun, chips off', () => {
+  it('analysisFacts + edited graph (hash mismatch) → stale, requires rerun, chips off', () => {
+    const analysisFacts = [runAnalysisFact(HASH)];
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(HASH)],
+      priorFacts: analysisFacts,
+      analysisFacts,
+      analysisFactsReadOk: true,
       graph: editedGraph,
     });
     expect(pack.analysis_state!.freshness).toBe('stale');
@@ -95,30 +101,50 @@ describe('ContextPack analysis_state — derivation', () => {
       payload: PAYLOAD,
       priorTurns: [],
       priorFacts: [],
+      analysisFacts: [],
+      analysisFactsReadOk: true,
       graph,
     });
     expect(pack.analysis_state!.freshness).toBe('none');
     expect(pack.analysis_state!.usable_for_followup_context).toBe(false);
   });
 
-  it('priorFacts present but NO raw graph (compacted path) → analysis_state null (no false stale)', () => {
+  it('analysisFacts present but NO raw graph (compacted path) → analysis_state null (no false stale)', () => {
+    const analysisFacts = [runAnalysisFact(HASH)];
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(HASH)],
+      priorFacts: analysisFacts,
+      analysisFacts,
+      analysisFactsReadOk: true,
       // graph omitted — mirrors turn-executor passing `graph: undefined`
       // when a compactedGraph is used.
     });
     expect(pack.analysis_state).toBeNull();
   });
 
-  it('priorFacts omitted entirely → analysis_state null + visible diagnostic', () => {
+  it('analysisFacts omitted entirely → analysis_state null + visible diagnostic', () => {
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
     const pack = assembleContextPack({ payload: PAYLOAD, priorTurns: [], graph });
     expect(pack.analysis_state).toBeNull();
     const events = warnSpy.mock.calls.map((c) => (c[0] as { event?: string }).event);
     expect(events).toContain('context_pack.canonical_state_facts_absent');
     warnSpy.mockRestore();
+  });
+
+  it('does not recover a degraded scenario carrier from generic priorFacts', () => {
+    const pack = assembleContextPack({
+      payload: PAYLOAD,
+      priorTurns: [],
+      priorFacts: [runAnalysisFact(HASH)],
+      analysisFacts: [],
+      analysisFactsReadOk: false,
+      graph,
+    });
+    expect(pack.analysis_state).toMatchObject({
+      freshness: 'unknown',
+      freshness_reason: 'derivation_failed',
+    });
   });
 });
 
@@ -135,6 +161,8 @@ describe('ContextPack analysis_state — canonicalState input is authoritative (
       payload: PAYLOAD,
       priorTurns: [],
       priorFacts: [runAnalysisFact(HASH)],
+      analysisFacts: [runAnalysisFact(HASH)],
+      analysisFactsReadOk: true,
       graph, // matches HASH → would be fresh on the derivation path
       canonicalState: staleCanonical,
     });
@@ -172,10 +200,13 @@ describe('ContextPack — behaviour 9: AI-facing context populated together', ()
         after: { from: 'factor_a', to: 'factor_b' },
       },
     };
+    const analysisFacts = [runAnalysisFact(HASH)];
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [priorTurn as never],
-      priorFacts: [runAnalysisFact(HASH), mutationFact as never],
+      priorFacts: [...analysisFacts, mutationFact as never],
+      analysisFacts,
+      analysisFactsReadOk: true,
       graph,
     });
     expect(pack.graph.counts.nodes).toBeGreaterThan(0);
@@ -188,10 +219,13 @@ describe('ContextPack — behaviour 9: AI-facing context populated together', ()
 
 describe('ContextPack analysis_state — schema', () => {
   it('the assembled pack (with analysis_state) validates against ContextPackSchema', () => {
+    const analysisFacts = [runAnalysisFact(HASH)];
     const pack = assembleContextPack({
       payload: PAYLOAD,
       priorTurns: [],
-      priorFacts: [runAnalysisFact(HASH)],
+      priorFacts: analysisFacts,
+      analysisFacts,
+      analysisFactsReadOk: true,
       graph,
     });
     const parsed = ContextPackSchema.safeParse(pack);

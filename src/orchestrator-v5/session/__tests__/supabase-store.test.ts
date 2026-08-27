@@ -1309,6 +1309,33 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     });
   });
 
+  it('rejects a payload noop that contradicts the indexed non-noop row', async () => {
+    const { client } = makeClient({
+      selectResult: {
+        data: [
+          {
+            ...runAnalysisRow,
+            payload: { ...runAnalysisRow.payload, noop: true },
+          },
+        ],
+        error: null,
+        count: 1,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    await expect(
+      store.readScenarioRunAnalysisFactsFor(SCENARIO, 21),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'analysis_fact_corrupt',
+    });
+  });
+
   it('rejects an invalid lookahead before issuing a query', async () => {
     const { client, selectCalls } = makeClient();
     const store = new SupabaseSessionStore(

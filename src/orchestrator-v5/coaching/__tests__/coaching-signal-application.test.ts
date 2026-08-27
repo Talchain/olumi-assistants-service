@@ -81,6 +81,56 @@ function runOutcome(): SuccessfulHandlerOutcome {
   return { assistant_text: 'done', handler_facts: [runFact()], llm_calls_used: 0 };
 }
 
+function projectableRunFact(computedAt: string): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: 'opt-1',
+      summary: 'Ran analysis',
+      computed_at: computedAt,
+      graph_hash_at_run: 'aag_v1:test',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'not_applicable',
+      },
+      enrichment: {
+        analysis_status: 'completed',
+        results: [
+          {
+            option_id: 'opt-1',
+            option_label: 'Launch now',
+            win_probability: 0.62,
+            factor_sensitivity: [],
+          },
+          {
+            option_id: 'opt-2',
+            option_label: 'Wait',
+            win_probability: 0.38,
+            factor_sensitivity: [],
+          },
+        ],
+      },
+    },
+  } as unknown as HandlerFact;
+}
+
+function factorEditFact(label: string): HandlerFact {
+  return {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: false,
+    result: {
+      target_id: 'factor-churn',
+      status: 'applied',
+      before: { value: 1, raw_value: 1, label },
+      after: { value: 2, raw_value: 2, label },
+    },
+  } as unknown as HandlerFact;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -94,6 +144,7 @@ describe('applyCoachingSignal', () => {
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [],
+      priorAnalysisFacts: [],
       handlerFacts: facts,
       requestId: 'req-1',
       scenarioId: 'scen-a',
@@ -122,6 +173,7 @@ describe('applyCoachingSignal', () => {
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [runFact()],
+      priorAnalysisFacts: [runFact()],
       handlerFacts: facts,
       requestId: 'req-2',
       scenarioId: 'scen-a',
@@ -136,6 +188,34 @@ describe('applyCoachingSignal', () => {
     expect(appendLastCoachingSignalMock).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the hot mixed chronology intact for run -> mutation -> rerun attribution', () => {
+    const priorRun = projectableRunFact('2026-08-01T00:00:00.000Z');
+    const currentRun = projectableRunFact('2026-08-02T00:00:00.000Z');
+    const mutation = factorEditFact('Customer churn');
+
+    const out = applyCoachingSignal({
+      proposedHandlerId: 'run_analysis',
+      claimSafetyScope: SCOPE,
+      outcome: {
+        assistant_text: 'done',
+        handler_facts: [currentRun],
+        llm_calls_used: 0,
+      },
+      contextPack: null,
+      // The hot window is the only source with truthful cross-type ordering.
+      // Prefixing the independently ordered scenario analysis page would put
+      // `priorRun` at index 0 and silently erase this attribution.
+      priorFacts: [mutation, priorRun],
+      priorAnalysisFacts: [priorRun],
+      handlerFacts: [currentRun],
+      requestId: 'req-rerun-attribution',
+      scenarioId: 'scen-a',
+    });
+
+    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
+    expect(out.coachingText?.startsWith('Since you changed Customer churn, ')).toBe(true);
+  });
+
   it('no detection: returns nulls and the input facts untouched, no sidecar write', () => {
     const facts = [runFact()];
     const out = applyCoachingSignal({
@@ -144,6 +224,7 @@ describe('applyCoachingSignal', () => {
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [],
+      priorAnalysisFacts: [],
       handlerFacts: facts,
       requestId: 'req-3',
       scenarioId: 'scen-a',

@@ -83,11 +83,21 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => mockState.priorTurns,
     countTurns: async () => mockState.priorTurnsTotal,
     readFactsFor: async () => mockState.priorFacts,
-    readNewestAnalysisFactFor: async () => {
+    readScenarioRunAnalysisFactsFor: async () => {
       if (mockState.newestAnalysisFactReadError) {
         throw mockState.newestAnalysisFactReadError;
       }
-      return mockState.newestAnalysisFact;
+      const facts = mockState.newestAnalysisFact
+        ? [mockState.newestAnalysisFact]
+        : mockState.priorFacts.filter(
+            (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+          );
+      return { facts, total_count: facts.length };
+    },
+    // Obsolete compatibility port deliberately throws if production regresses
+    // to the former second query/snapshot.
+    readNewestAnalysisFactFor: async () => {
+      throw new Error('obsolete readNewestAnalysisFactFor must not be called');
     },
     invalidateScoped: async () => {
       mockState.invalidationCalls += 1;
@@ -882,7 +892,14 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       expect(pack.graph_context).toEqual({ status: expectedStatus });
       expect(pack.analysis).toBeNull();
       expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
-      expectNoCanonicalAuthorityWrite();
+      if (expectedStatus === 'provisional') {
+        // First-touch provisional adoption is a pre-existing, validated commit
+        // path. The request analysis still cannot become reasoning authority.
+        expect(mockState.appendWrites).toHaveLength(1);
+        expect(mockState.appendWrites[0]?.handler_facts).toEqual([]);
+      } else {
+        expectNoCanonicalAuthorityWrite();
+      }
     }
   );
 
@@ -945,38 +962,35 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expectNoCanonicalAuthorityWrite();
   });
 
-  it('genuinely data-absent body analysis_state (no drivers anywhere) now reaches the coach instead of the recap stub', async () => {
-    // ⚠ ROADMAP 2.229 — INVERTED, NOT DELETED. This case used to assert the
-    // OPPOSITE: `not.toHaveBeenCalled()` on the adapter and
-    // `toContain(RECAP_STUB_PREFIX)`, on the reasoning that "with no driver
-    // data the needs_top_driver class cannot compose, and the deterministic
-    // recap + chip is the honest fallback".
-    //
-    // That reasoning is exactly what the founder ruling overturned. The recap
-    // is a string constant with ZERO inputs; it is not "honest fallback", it
-    // is the absence of an answer. Data-absent is precisely the case where the
-    // coach — which sees the conversation and the graph, not just the analysis
-    // projection — has the best chance of saying something true. The guard
-    // that emitted the constant is retired and its module deleted, so this
-    // turn now falls through to `routeWithToolUse`.
-    //
-    // The part of the original claim that was about SAFETY is kept verbatim:
-    // no proposal is fabricated on a data-absent turn.
-    const adapter = recordingRoutingAdapter();
+  it('caller-only body analysis_state cannot change data-absent reasoning or recovery', async () => {
+    const withoutBodyAdapter = recordingRoutingAdapter();
+    const withoutBody = await runTurnExecutor(
+      mkPayload('What would change the outcome?'),
+      'req-no-body-analysis-state-thin',
+      {
+        routingAdapter: withoutBodyAdapter,
+        graphState: READY_GRAPH as never,
+      },
+    );
+
+    const withBodyAdapter = recordingRoutingAdapter();
     const thin = stagingShapedAnalysisState();
     delete thin.factor_sensitivity;
-    const result = await runTurnExecutor(
+    const withBody = await runTurnExecutor(
       mkPayload('What would change the outcome?'),
       'req-body-analysis-state-thin',
       {
-        routingAdapter: adapter,
+        routingAdapter: withBodyAdapter,
         graphState: READY_GRAPH as never,
         analysisState: thin as never,
       },
     );
 
-    expect(adapter.chatWithTools, 'a data-absent post-analysis turn must reach the coach').toHaveBeenCalled();
-    expect(result.response.assistant_text ?? '').not.toContain(RECAP_STUB_PREFIX);
-    expect(JSON.stringify(result.response)).not.toContain('apply_proposed_change');
+    expect(withBodyAdapter.chatWithTools.mock.calls).toHaveLength(
+      withoutBodyAdapter.chatWithTools.mock.calls.length,
+    );
+    expect(withBody.response).toEqual(withoutBody.response);
+    expect(withBody.response.assistant_text ?? '').not.toContain(RECAP_STUB_PREFIX);
+    expect(JSON.stringify(withBody.response)).not.toContain('apply_proposed_change');
   });
 });

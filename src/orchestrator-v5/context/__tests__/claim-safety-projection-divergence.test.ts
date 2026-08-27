@@ -437,23 +437,16 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
       scopeOf(FACT_A_SUCCESSFUL_WITHHELD),
     );
     expect(v.may_name_leading_option).toBe(false);
-    expect(v.provenance).toBe('fail_closed_projected_analysis');
+    expect(v.provenance).toBe('scenario_fact');
     expect(v.constraint_verdict_state).toBe('unevaluated');
   });
 
-  it('ARM B: CHARACTERISATION of the LEAK-direction residual — not a guarantee', () => {
-    // ⚠ THIS TEST ASSERTS A LEAK, DELIBERATELY, AND SAYS SO. It is a
-    // characterisation pin, not a blessing: it exists so the residual is
-    // WRITTEN DOWN and executed, and so that any change to it — a fix, or a
-    // widening — turns this red and forces a deliberate edit here.
+  it('ARM B: durable-head entitlement is narrowed against the actual projection', () => {
     //
     // The input: the window holds the older WITHHELD successful fact A, and the
-    // scope supplies a NEWER successful fact S that PERMITS. The union makes
-    // both selectors converge on S, so the conjunction is the identity and the
-    // verdict is `true` — while `buildAnalysisFromPriorFacts`, which sees only
-    // the bare window, projects A's withheld leader. Permission and content
-    // describe different analyses again, in the one input shape where the two
-    // arrays disagree.
+    // scope supplies the DB-order entitlement head S that PERMITS. The actual
+    // projection still comes from the supplied reasoning facts and carries A's
+    // WITHHELD leader, so the conjunction must withhold.
     //
     // WHY IT IS BELIEVED UNREACHABLE, stated as the premise it is so that it
     // can be checked rather than trusted: the window is the most recent N turns
@@ -484,14 +477,9 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
       [FACT_A_SUCCESSFUL_WITHHELD],
       scopeOf(S_NEWER_PERMITTED),
     );
-    expect(
-      v.may_name_leading_option,
-      'CHARACTERISATION, NOT A GUARANTEE: on this loader-impossible input the permission is ' +
-        '`true` while the bare-window projection still carries the WITHHELD analysis’s leader. ' +
-        'If you are reading this because the assertion went red, the residual has either been ' +
-        'fixed (make it `false` and delete this paragraph) or widened (do not).',
-    ).toBe(true);
-    expect(v.provenance).toBe('scenario_fact');
+    expect(v.may_name_leading_option).toBe(false);
+    expect(v.provenance).toBe('fail_closed_projected_analysis');
+    expect(v.constraint_verdict_state).toBe('unevaluated');
   });
 
   it('CONTROL: with the scope EMPTY the same window is unchanged', () => {

@@ -436,6 +436,27 @@ export function selectClaimBearingRunAnalysisFact(
 }
 
 /**
+ * Select the two genuinely different views of THIS turn's handler output.
+ *
+ * Same-turn output has an explicit precedence contract over durable history,
+ * so callers must not obtain these views by re-running the scenario-history
+ * selectors ad hoc in each surface. This one composition keeps the entitlement
+ * and display questions together while retaining their distinct eligibility
+ * rules. It does not merge or order durable facts.
+ */
+export function selectCurrentTurnRunAnalysisFacts(
+  currentFacts: readonly HandlerFact[],
+): {
+  readonly claimBearing: SelectedRunAnalysisFact | null;
+  readonly successful: SelectedRunAnalysisFact | null;
+} {
+  return {
+    claimBearing: selectClaimBearingRunAnalysisFact(currentFacts),
+    successful: selectRunAnalysisFact(currentFacts),
+  };
+}
+
+/**
  * ⭐ THE ONE ORDERING CORE. Every eligible `run_analysis` fact, newest-first.
  * `requireSuccessfulStatus` is the ONLY difference between the freshness and
  * entitlement selectors — the sort is shared, never copied.
@@ -473,14 +494,26 @@ function orderRunAnalysisFacts(
     candidates.push(view);
   }
 
-  // Stable sort by computed_at desc, putting facts without computed_at
-  // last. JavaScript Array.sort is stable in V8, so insertion order is
-  // preserved among facts that compare equal (same timestamp or both
-  // null) — and build-turn-context delivers newest-first, so the
-  // first equal-keyed fact is the freshest by insertion.
+  // Stable sort by the instant represented by computed_at desc, putting facts
+  // without computed_at last. Licensed refusal facts historically accepted any
+  // Date.parse-finite timestamp, not only canonical UTC-Z strings. Comparing
+  // those strings lexically can invert chronology across offsets, so compare
+  // epochs when both timestamps parse and preserve the old lexical fallback
+  // only for malformed legacy/direct inputs outside the validated carrier.
+  // JavaScript Array.sort is stable in V8, so insertion order is preserved
+  // among equal instants (or two nulls), and the database delivery order breaks
+  // true ties.
   candidates.sort((a, b) => {
     if (a.computed_at !== null && b.computed_at !== null) {
-      // Lexicographic ISO compare is correct for desc sort.
+      const aEpoch = Date.parse(a.computed_at);
+      const bEpoch = Date.parse(b.computed_at);
+      if (Number.isFinite(aEpoch) && Number.isFinite(bEpoch)) {
+        if (aEpoch < bEpoch) return 1;
+        if (aEpoch > bEpoch) return -1;
+        return 0;
+      }
+      // Preserve the pre-existing total order for malformed direct/legacy
+      // inputs; the scenario authority carrier rejects these before selection.
       if (a.computed_at < b.computed_at) return 1;
       if (a.computed_at > b.computed_at) return -1;
       return 0;

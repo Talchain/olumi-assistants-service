@@ -32,7 +32,12 @@ import {
   readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
-import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './freshness.js';
+import {
+  selectClaimBearingRunAnalysisFact,
+  selectCurrentTurnRunAnalysisFacts,
+  selectRunAnalysisFact,
+} from './freshness.js';
+import type { ScenarioAnalysisFactSet } from './reconcile-scenario-analysis-facts.js';
 
 /**
  * May a turn grounded in THIS fact array name a leading option?
@@ -464,14 +469,42 @@ export function readMayNameLeadingOptionVerdict(
   windowFacts: readonly HandlerFact[],
   scope: ClaimSafetyScenarioScope,
 ): MayNameLeadingOptionVerdict {
-  // The UNION, not a replacement. Replacing the array with `[S]` would let the
-  // eligibility filter drop S and hand back a `true` where the window held an
-  // older withheld fact — a `false → true` move, i.e. the exact direction the
-  // one-directionality proof above forbids.
-  const facts =
-    scope.newestAnalysisFact === null
-      ? windowFacts
-      : [...windowFacts, scope.newestAnalysisFact];
+  // A failed exact scenario read proves neither absence nor completeness. The
+  // bounded hot window cannot recover authority from a different query/LRU
+  // snapshot, even when it happens to contain a run_analysis fact. This is the
+  // same established no-turn-context provenance used for an unread scenario:
+  // no analysis-existence claim and no entitlement are minted.
+  if (!scope.readOk) {
+    return {
+      may_name_leading_option: false,
+      constraint_verdict_state: null,
+      provenance: scope.windowTruncated
+        ? 'fail_closed_truncated'
+        : 'fail_closed_no_turn_context',
+    };
+  }
+
+  // The exact-count scenario carrier is ordered by durable row chronology
+  // (`created_at DESC, id DESC`). Its validated head therefore owns the
+  // ENTITLEMENT question directly. Re-running the content/computed_at selector
+  // over the complete page would silently let an older database row with a
+  // later producer timestamp replace that head. Projection still applies the
+  // existing computed_at selector below, preserving its independent display
+  // semantics and the established conjunction between entitlement and what is
+  // shown.
+  if (scope.newestAnalysisFact !== null) {
+    const entitlement = readMayNameLeadingOptionVerdictForFact(
+      scope.newestAnalysisFact,
+    );
+    if (!entitlement.may_name_leading_option) return entitlement;
+    return narrowToProjectedAnalysis(
+      windowFacts,
+      scope.newestAnalysisFact,
+      entitlement,
+    );
+  }
+
+  const facts = windowFacts;
 
   // ⭐ THE ONE SELECTION, and it is the ENTITLEMENT selector — NOT the
   // freshness one. `selectRunAnalysisFact` filters out `partial`, `degraded`
@@ -502,29 +535,6 @@ export function readMayNameLeadingOptionVerdict(
     return narrowToProjectedAnalysis(facts, selected.fact, entitlement);
   }
 
-  // BELT AND BRACES — and it is a FALLBACK, not the mechanism. It requires
-  // `readOk === false`, so when the scenario-scoped read works this branch is
-  // UNREACHABLE by construction: a successful read either supplied S (⇒
-  // `selected !== null` above, unless S failed eligibility) or proved the
-  // scenario has no analysis at all. It exists for the degraded path, where
-  // CLAUDE.md's rule applies — where you cannot derive, FAIL LOUD on drift,
-  // never assume-good. `prior_turns_total` is already loaded (`countTurns`),
-  // so this costs no query.
-  //
-  // It over-restricts: a scenario that genuinely never ran an analysis but has
-  // >20 turns withholds while the store is degraded. That is the safe
-  // direction, and it is bounded by the degradation.
-  if (!scope.readOk && scope.windowTruncated) {
-    return {
-      may_name_leading_option: false,
-      // No fact was selected, so there is no state to report. `null` is the
-      // honest "not recorded" — inventing a cause for a withhold whose whole
-      // justification is that we could not look would be a fabricated one.
-      constraint_verdict_state: null,
-      provenance: 'fail_closed_truncated',
-    };
-  }
-
   // The genuinely honest `true`: no analysis can be grounded, so no claim can
   // leak. This must NOT become `false` — a scenario with no analysis has
   // nothing to withhold, and withholding there would convert the fail-closed
@@ -534,6 +544,45 @@ export function readMayNameLeadingOptionVerdict(
     constraint_verdict_state: null,
     provenance: 'no_analysis_exists',
   };
+}
+
+/**
+ * Read the turn-settled claim permission with an explicit same-turn arm.
+ *
+ * Durable history and current handler output have different chronology
+ * guarantees. Persisted facts retain their existing selector ordering, while
+ * a claim-bearing fact produced on this turn owns entitlement regardless of a
+ * skewed producer timestamp in durable history. A current successful fact is
+ * also the sole displayed projection; a current partial/refusal still narrows
+ * any durable successful projection. Keeping this composition here prevents
+ * TurnExecutor, chip-click and coaching from growing three subtly different
+ * precedence rules.
+ */
+export function readMayNameLeadingOptionVerdictForTurn(input: {
+  readonly currentFacts: readonly HandlerFact[];
+  readonly priorAnalysisFacts: readonly HandlerFact[];
+  readonly priorScope: ClaimSafetyScenarioScope;
+}): MayNameLeadingOptionVerdict {
+  const current = selectCurrentTurnRunAnalysisFacts(input.currentFacts);
+  const unifiedFacts = [
+    ...input.currentFacts,
+    ...input.priorAnalysisFacts,
+  ];
+
+  return readMayNameLeadingOptionVerdict(
+    current.claimBearing === null
+      ? unifiedFacts
+      : current.successful === null
+        ? unifiedFacts
+        : [current.successful.fact],
+    current.claimBearing === null
+      ? input.priorScope
+      : {
+          newestAnalysisFact: current.claimBearing.fact,
+          readOk: true,
+          windowTruncated: false,
+        },
+  );
 }
 
 /**
@@ -640,15 +689,23 @@ function narrowToProjectedAnalysis(
  * guard whose whole justification is that truncation was PROVEN.
  */
 export function claimSafetyScopeFromContext(context: {
+  readonly scenario_analysis_fact_set?: ScenarioAnalysisFactSet;
+  /** Legacy compatibility mirrors; never live entitlement authority. */
   readonly newest_analysis_fact?: HandlerFact | null;
   readonly newest_analysis_fact_read_ok?: boolean;
   readonly prior_turns_total?: number | null;
   readonly prior_turns: readonly unknown[];
 }): ClaimSafetyScenarioScope {
   const total = context.prior_turns_total;
+  const carrier = context.scenario_analysis_fact_set;
+  const carrierReadable =
+    carrier?.status === 'complete' || carrier?.status === 'capped';
   return {
-    newestAnalysisFact: context.newest_analysis_fact ?? null,
-    readOk: context.newest_analysis_fact_read_ok === true,
+    newestAnalysisFact: carrierReadable ? carrier.newest_fact : null,
+    // Missing legacy/direct carrier state is ignorance. Never fall back to the
+    // compatibility mirrors above: they can disagree with the discriminated
+    // carrier and would recreate a second entitlement authority.
+    readOk: carrierReadable,
     windowTruncated:
       typeof total === 'number' && total > context.prior_turns.length,
   };
