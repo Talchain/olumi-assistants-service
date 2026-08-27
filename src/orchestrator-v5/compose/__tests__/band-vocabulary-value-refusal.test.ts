@@ -476,6 +476,30 @@ describe('ROADMAP 2.384 — the anchor obeys BOTH of the blocker\'s conditions',
     expect(response.assistant_text).toContain('just now');
   });
 
+  it('CONJUNCT 1 is NOT symmetric — a label CONTAINING the display is not an echo', () => {
+    // ⚠ ADDED AFTER A MUTANT CAUGHT THE GAP: making `isLabelEcho` symmetric
+    // (either string containing the other) SURVIVED the suite, even though the
+    // predicate's own header names this exact hazard — "never when the label
+    // contains the candidate, which would discard valid qualitative band
+    // output". A documented hazard with no test is not guarded.
+    //
+    // Label "High Risk", display "High": the candidate does NOT contain the
+    // label, so it is a legitimate band and must survive. The symmetric
+    // version would strip it and silently delete the anchor on every factor
+    // whose label happens to start with a band word.
+    const bandInsideLabel: GraphLookup = {
+      findEntityById: () => ({ id: TARGET_ID, kind: 'node', label: 'High Risk' }),
+      listEntitiesByKind: () => [{ id: TARGET_ID, label: 'High Risk' }],
+      findFactorObservedState: () => ({ value: 0.7, display_value: 'High' }),
+    };
+    const { response } = composeValidationFailure(
+      paramInvalid(),
+      ctxWith(WITNESSED_MESSAGE, bandInsideLabel),
+      'frame',
+    );
+    expect(response.assistant_text).toContain('is High just now');
+  });
+
   it('CONJUNCT 2 (levelCameFromObservedState): declines when there is no observed value', () => {
     // {raw_value, display_value} but NO observed `value`. The blocker returns
     // the bare level here; the first version of this branch quoted "50,000",
