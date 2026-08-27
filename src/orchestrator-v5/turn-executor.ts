@@ -307,7 +307,7 @@ import {
   type ContextPackFocus,
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
-import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { compactSelectedGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { selectContextGraphSnapshot } from './context/context-graph-snapshot.js';
 import { projectGoalTargetRecord } from './context/goal-target-record.js';
 import { projectFactorValueRecord } from './context/factor-value-record.js';
@@ -2463,7 +2463,7 @@ export async function runTurnExecutor(
       // ContextPack uses the compact projection. `absent` falls through to the
       // assembler's empty-graph branch — Sonnet sees ContextPack.graph empty,
       // same as when the turn genuinely has no graph.
-      const compactOutcome = compactGraphForContextPack(contextGraphForReasoning, {
+      const compactOutcome = compactSelectedGraphForContextPack(contextGraphSelection, {
         requestId,
       });
       const compactedGraph =

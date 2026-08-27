@@ -163,6 +163,26 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
     expect(observation.routedUserMessage).not.toContain(kase.other_scenario.brief);
     expect(observation.routedUserMessage).not.toContain(kase.other_scenario.graph_label);
   });
+
+  it('represents a malformed persisted graph as unavailable, never canonical-empty', async () => {
+    const observation = await runFreshFacadeReturnSession(
+      DurableReturnSessionBackend.current(kase),
+      { mutant: 'malformed_persisted_graph' },
+    );
+
+    expect(observation.context.persistedGraphRead?.status).toBe('ok_present');
+    expect(observation.context.persistedGraph).toEqual({
+      nodes: 'MALFORMED-PERSISTED-GRAPH',
+      edges: [],
+    });
+    expect(observation.contextPack.graph_context).toEqual({ status: 'unavailable' });
+    expect(observation.contextPack.graph.nodes).toEqual([]);
+    expect(observation.contextPack.graph.edges).toEqual([]);
+    expect(observation.contextPack.display_graph.nodes).toEqual([]);
+    expect(observation.contextPack.display_graph.edges).toEqual([]);
+    expect(observation.routedUserMessage).toContain('"status": "unavailable"');
+    expect(observation.routedUserMessage).not.toContain('MALFORMED-PERSISTED-GRAPH');
+  });
 });
 
 describe('return-session continuity — degraded summary joins the preceding fallback', () => {
