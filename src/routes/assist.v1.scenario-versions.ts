@@ -123,6 +123,8 @@ import {
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
 } from "../orchestrator/route-v2-preflight.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import {
   getModelManagementService,
@@ -889,6 +891,102 @@ export default async function route(app: FastifyInstance) {
         turnClass: "direct_answer",
         source: "version_restore",
       });
+
+      // ── 7b. THE SHARED PERSISTENCE FLOOR — the CHECK half (C8) ───────────
+      // This route is the THIRD production `scenarios.graph` writer. Until this
+      // change it was the only one that did not enforce the terminal structural
+      // invariants: `projectGraphForPersistence` was imported here (`:125`) and
+      // `checkPersistedGraphInvariants` was not, so a stored version carrying a
+      // duplicate node id or a dangling edge endpoint was written back silently
+      // while the turn and registration paths refused exactly that, fail-closed.
+      // A restored graph is NOT self-evidently safe just because it was stored
+      // once: versions predate this floor, and the RPC's only content guard is
+      // emptiness.
+      //
+      // ⚠ THE CHECK ONLY — NOT `appendCheckedGraphWrite`. That function appends
+      // through `store.append`, and this path must not: its RPC owns graph +
+      // undo + version + head + event in one statement, and its CAS is
+      // UNCONDITIONAL where the `append_turn_atomic_*` family's is
+      // `p_cas_enforce DEFAULT FALSE`. Routing this through the floor's append
+      // would have DOWNGRADED a guarantee to close a gap. It is not a shortcut
+      // that this path keeps its own writer; it is the stronger of the two.
+      //
+      // BASELINE: `currentGraph`, the same server-read bytes the CAS above uses.
+      // `store.loadGraph` returns `null` — never `undefined` — so a fresh or
+      // empty scenario takes the ABSOLUTE branch and every violation counts as
+      // introduced, exactly as on the registration path. The observe-only
+      // degrade (`undefined`) is UNREACHABLE here: the base-read failure at
+      // step 6 returns `unavailable` and never arrives at this line. So this
+      // path always has a real baseline — stricter than the register route.
+      //
+      // Delta-scoping means a scenario whose CURRENT graph already carries the
+      // violation absorbs it and still restores. What is refused is making a
+      // clean scenario structurally WORSE.
+      //
+      // ⚠⚠ THIS IS A ONE-WAY DOOR, AND IT IS NOT "you can always get back".
+      // An earlier draft of this comment claimed exactly that; it is FALSE and
+      // the suite could not see it, because the absorption test above has no
+      // opposite-direction twin. Measured at the route:
+      //   · the RPC stores the PRE-RESTORE working graph as an undo version
+      //     VERBATIM AND UNCHECKED (`20260824200000:363-376`, label
+      //     'Before restore', provenance 'pre_restore'); and
+      //   · there is NO separate undo route — undo IS an ordinary restore
+      //     (zero `versions/undo` handlers in `src/`, measured with a firing
+      //     contrast control on the restore registration itself).
+      // So on a legacy-corrupt scenario: restoring a CLEAN version succeeds
+      // (nothing introduced), and the Undo it offers is then REFUSED 422,
+      // because the return leg introduces the violation the outward leg
+      // absorbed. The corruption is escapable exactly once, and not re-entrant.
+      //
+      // That is accepted, not overlooked: the alternative is writing a graph we
+      // know is structurally invalid, and the whole floor exists to refuse that.
+      // TWO HARMS CANNOT SHARE ONE WINDOW — "we refuse a corrupt write" and "the
+      // user can always get back" are DIFFERENT guarantees, and only the first
+      // is offered here. Pinned by the return-leg test in this route's suite so
+      // the asymmetry stays visible instead of being rediscovered as a bug.
+      try {
+        assertNoIntroducedGraphViolations({
+          graph: graphForStore,
+          identity: { scenario_id: ctx.scenarioId, turn_id: null, turn_class: null },
+          writesGraph: true,
+          baseGraphForInvariants: currentGraph,
+          source: "version_restore",
+        });
+      } catch (err) {
+        if (err instanceof PersistedGraphInvariantError) {
+          // 422, not 503 and not 409: the bytes can never succeed, so inviting a
+          // retry would be misleading. Same code and shape as the registration
+          // path's refusal — one vocabulary for one class of refusal.
+          log.warn(
+            {
+              event: "v5.scenario_versions.invariant_violation",
+              request_id: requestId,
+              scenario_id: ctx.scenarioId,
+              version_id: parsedBody.data.version_id,
+              introduced: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+            "Scenario versions — restore refused: this version introduces a structural violation; nothing written",
+          );
+          return invalid(
+            reply,
+            requestId,
+            "GRAPH_INVARIANT_VIOLATION",
+            "This version has a structural problem and was not restored.",
+            {
+              violations: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+          );
+        }
+        throw err;
+      }
 
       // ── 8. ONE RPC owns graph + undo + version + head + event ───────────
       const restored = await service.restoreVersionAtomic({

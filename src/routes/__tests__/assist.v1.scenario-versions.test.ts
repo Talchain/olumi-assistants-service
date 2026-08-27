@@ -1089,3 +1089,267 @@ describe("ordering — an unauthenticated caller learns nothing about payload va
     }
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIN 8 — C8: THE RESTORE TIER STANDS ON THE SHARED PERSISTENCE FLOOR'S CHECK
+//
+// This route is the THIRD production `scenarios.graph` writer. `commit.ts` and
+// `assist.v1.scenario-graph-register.ts` reach the terminal structural
+// invariants through `appendCheckedGraphWrite`; this one cannot, because its RPC
+// owns graph + undo + version + head + event in one statement AND its CAS is
+// unconditional where the turn family's is `p_cas_enforce DEFAULT FALSE`. So it
+// takes the CHECK half — `assertNoIntroducedGraphViolations` — and keeps its own
+// append. Before C8 it enforced nothing: a stored version carrying a duplicate
+// node id was written straight back.
+//
+// ⚠ EVERY ASSERTION HERE BINDS BY IDENTITY, never by a value predicate: the
+// refusal is matched on `details.code === "GRAPH_INVARIANT_VIOLATION"` AND the
+// named invariant code AND the offending entity id, and the no-write half is
+// `restoreVersionAtomic` not-called — not merely "a non-2xx".
+//
+// ⚠ MUTANT OBLIGATION (the discriminating pair): delete the
+// `assertNoIntroducedGraphViolations` call in `assist.v1.scenario-versions.ts`
+// and every refusal test below must RED. Break a DIFFERENT writer's check (the
+// `appendCheckedGraphWrite` call in `assist.v1.scenario-graph-register.ts`) and
+// they must all stay GREEN — that pair is what proves these bind to THIS path
+// rather than to the floor in general.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("POST /versions/restore — C8 persisted-graph invariants", () => {
+  /** A stored version whose graph carries a DUPLICATE node id (`n2` twice). */
+  const DUPLICATE_NODE_VERSION_GRAPH = {
+    nodes: [
+      { id: "n1", label: "Take the job", kind: "option" },
+      { id: "n2", label: "Commute time", kind: "factor" },
+      { id: "n2", label: "Commute time (again)", kind: "factor" },
+    ],
+    edges: [{
+      from: "n1",
+      to: "n2",
+      strength: { mean: 0.4, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: "positive",
+    }],
+  };
+
+  /** A stored version with an edge endpoint naming a node that does not exist. */
+  const DANGLING_EDGE_VERSION_GRAPH = {
+    nodes: [{ id: "n1", label: "Take the job", kind: "option" }],
+    edges: [{
+      from: "n1",
+      to: "n_missing",
+      strength: { mean: 0.4, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: "positive",
+    }],
+  };
+
+  const storedVersionIs = (graph: unknown) =>
+    getVersion.mockResolvedValue({
+      status: "ok",
+      value: { ...summary(), graph },
+    });
+
+  it("REFUSES a version that INTRODUCES a duplicate node id — 422, and NOTHING is written", async () => {
+    storedVersionIs(DUPLICATE_NODE_VERSION_GRAPH);
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(422);
+    const body = res.json();
+    expect(body.details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    // Bind to the SPECIFIC invariant and the SPECIFIC offending id — a generic
+    // 422 would pass a weaker assertion for entirely unrelated reasons.
+    expect(body.details.violations).toEqual([
+      expect.objectContaining({ code: "DUPLICATE_NODE_ID", entity_ids: ["n2"] }),
+    ]);
+    // THE POINT OF THE WHOLE CLOSURE: the atomic RPC never ran.
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("REFUSES a version whose edge endpoint names no node — 422, and NOTHING is written", async () => {
+    storedVersionIs(DANGLING_EDGE_VERSION_GRAPH);
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.violations).toEqual([
+      expect.objectContaining({
+        code: "EDGE_ENDPOINT_MISSING",
+        entity_ids: ["n_missing"],
+      }),
+    ]);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("ABSORBS a violation the CURRENT graph already carries — the OUTWARD leg", async () => {
+    // Delta-scoping: the check refuses making a scenario structurally WORSE, not
+    // restoring it to a state it is already in. ⚠ This is the OUTWARD leg ONLY —
+    // its opposite-direction twin (the return leg) is pinned below, and it does
+    // NOT succeed. Do not read this test as "a corrupt scenario stays freely
+    // restorable"; an earlier version of this name said exactly that and was
+    // false.
+    storedVersionIs(DUPLICATE_NODE_VERSION_GRAPH);
+    loadGraph.mockResolvedValue(DUPLICATE_NODE_VERSION_GRAPH);
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+  });
+
+  it("is ABSOLUTE on an empty scenario — `loadGraph` null is a baseline, NOT the observe-only degrade", async () => {
+    // `store.loadGraph` returns `null`, never `undefined`, and the floor's
+    // observe-only degrade keys on a STRICT `=== undefined`. A `?? undefined`
+    // anywhere on this path would silently convert this journey from
+    // fail-closed to write-anything, and every other test here would stay green.
+    storedVersionIs(DUPLICATE_NODE_VERSION_GRAPH);
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.violations).toEqual([
+      expect.objectContaining({ code: "DUPLICATE_NODE_ID" }),
+    ]);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("does NOT refuse on an OBSERVE-ONLY code — an unresolved goal_node_id still restores", async () => {
+    // The fail-closed set is exactly {DUPLICATE_NODE_ID, EDGE_ENDPOINT_MISSING,
+    // DUPLICATE_OPTION_ID}. Pinning the negative matters as much as the
+    // positive: over-refusing here would break restores the turn path allows,
+    // and no test above could see it.
+    storedVersionIs({ ...STORED_VERSION_GRAPH, goal_node_id: "n_absent" });
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // GATE 1 — WHICH BYTES DID THE CHECK SEE?
+  //
+  // ⚠ THE DEFECT THIS CLOSES WAS IN THIS VERY FILE. Every test above asserts
+  // what the **RPC** received; NONE asserted what the **CHECK** received. So
+  // swapping the check's argument `graphForStore` -> `parsedGraph.data` (raw,
+  // unprojected) left this suite GREEN 51/51 and the population pin GREEN 11/11.
+  // That is the C8 defect class itself — persisted bytes never checked, suite
+  // green — sitting inside the change that exists to close it.
+  //
+  // NON-EQUIVALENCE, MEASURED ON THE REAL MODULES (not argued):
+  //   `reconcileTopLevelOptionsFromNodes` pushes into `missing[]` per NODE with
+  //   NO dedup (`reconcile-top-level-options.ts:277-281`), so two option-kind
+  //   nodes sharing an id mirror TWICE into a PRESENT `options[]`:
+  //     CHECK(raw)       -> ["DUPLICATE_NODE_ID:n2"]
+  //     CHECK(projected) -> ["DUPLICATE_NODE_ID:n2", "DUPLICATE_OPTION_ID:n2"]
+  //   The second violation EXISTS ONLY AFTER PROJECTION. Asserting the exact
+  //   list is therefore positive proof of which bytes reached the check.
+  //   (`options: []` must be PRESENT — the pass is UPDATE-IF-PRESENT and an
+  //   absent `options` is left alone, which is why a simpler fixture cannot
+  //   discriminate.)
+  // ───────────────────────────────────────────────────────────────────────
+
+  it("the CHECK sees the PROJECTED bytes, not the raw stored version", async () => {
+    getVersion.mockResolvedValue({
+      status: "ok",
+      value: {
+        ...summary(),
+        graph: {
+          nodes: [
+            { id: "n1", label: "Take the job", kind: "option" },
+            { id: "n2", label: "Commute", kind: "option" },
+            { id: "n2", label: "Commute again", kind: "option" },
+          ],
+          edges: [],
+          options: [],
+        },
+      },
+    });
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(422);
+    // ⭐ DUPLICATE_OPTION_ID is unreachable from the raw stored graph — it is
+    // created by the projection pass. Its presence here is the assertion.
+    expect(res.json().details.violations).toEqual([
+      expect.objectContaining({ code: "DUPLICATE_NODE_ID", entity_ids: ["n2"] }),
+      expect.objectContaining({ code: "DUPLICATE_OPTION_ID", entity_ids: ["n2"] }),
+    ]);
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // GATE 2 — THE RETURN LEG. The opposite-direction twin of the absorption
+  // test, whose absence is why the suite could not see a false guarantee.
+  //
+  // The RPC stores the pre-restore working graph as an undo version VERBATIM
+  // AND UNCHECKED (`20260824200000:363-376`), and there is NO separate undo
+  // route — undo IS an ordinary restore. So the two legs are asymmetric, and
+  // this pins the asymmetry rather than pretending it away.
+  // ───────────────────────────────────────────────────────────────────────
+
+  it("ONE-WAY DOOR — escaping a corrupt scenario succeeds, and UNDOING that escape is REFUSED", async () => {
+    const CORRUPT = {
+      nodes: [
+        { id: "n1", label: "Take the job", kind: "option" },
+        { id: "n2", label: "Commute time", kind: "factor" },
+        { id: "n2", label: "Commute time (again)", kind: "factor" },
+      ],
+      edges: [],
+    };
+
+    // ── OUTWARD LEG: corrupt working graph, restore a CLEAN version ──
+    loadGraph.mockResolvedValue(CORRUPT);
+    getVersion.mockResolvedValue({
+      status: "ok",
+      value: { ...summary(), graph: STORED_VERSION_GRAPH },
+    });
+    const outward = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+    expect(outward.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+
+    // ── RETURN LEG: the working graph is now clean, and the undo version the
+    // RPC just captured is the CORRUPT pre-restore graph. Undo = restore it.
+    vi.clearAllMocks();
+    restoreVersionAtomic.mockResolvedValue({ status: "ok", value: {} });
+    loadGraph.mockResolvedValue(STORED_VERSION_GRAPH);
+    getVersion.mockResolvedValue({
+      status: "ok",
+      // 'Before restore' / provenance 'pre_restore' — the undo row's own shape.
+      value: { ...summary(), label: "Before restore", graph: CORRUPT },
+    });
+    const undo = await post(await buildApp(), "/versions/restore", {
+      version_id: VERSION_A,
+    });
+
+    // ⭐ THE ASYMMETRY, PINNED. Not a bug report — a stated limit. If this ever
+    // returns 200, either the undo capture became checked or the baseline
+    // semantics changed; both are decisions that must be made deliberately.
+    expect(undo.statusCode).toBe(422);
+    expect(undo.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL — the clean default version still restores, and the check ran on the PROJECTED bytes", async () => {
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+    // The bytes the check saw are the bytes the RPC received: same object, and
+    // nothing mutates between step 7b and step 8.
+    const sent = restoreVersionAtomic.mock.calls[0][0].graph;
+    expect(sent.nodes.map((n: { id: string }) => n.id)).toEqual(["n1", "n2"]);
+  });
+});

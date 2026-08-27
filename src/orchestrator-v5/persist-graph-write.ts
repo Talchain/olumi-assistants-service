@@ -3,10 +3,14 @@
  * two callers for WHAT is being persisted.
  *
  * ── WHY THIS MODULE EXISTS (C3 closure) ────────────────────────────────────
- * `scenarios.graph` has THREE production writers. TWO of them go through this
- * floor; the third does not, and saying so is the point — an earlier draft of
- * this header said "TWO production writers, not one", which is the same
- * false-absolute defect this module exists to refute, one remove down.
+ * `scenarios.graph` has THREE production writers. ALL THREE now stand on the
+ * INVARIANT CHECK; TWO of them also take the APPEND (C8, 27 Aug 2026). Saying
+ * exactly which half each one uses is the point — an earlier draft of this
+ * header said "TWO production writers, not one", which is the same
+ * false-absolute defect this module exists to refute, one remove down, and the
+ * draft after it said the third writer was simply "NOT ON THIS FLOOR" when what
+ * was true is that it could not take the floor's APPEND. The floor has two
+ * halves and they have different populations. Do not collapse them again.
  *
  * MANIFEST, measured at 87cb9f4f over every `.ts` file under `src/` plus all
  * 34 `.sql` files (written without a glob on purpose: the obvious spelling of
@@ -17,7 +21,8 @@
  *     no composed response, no referee, `response_emitted: false`.      ✅ here
  *   · `routes/assist.v1.scenario-versions.ts` — the RESTORE tier:
  *     `service.restoreVersionAtomic` → `restore_model_version_atomic_v1`
- *     → `UPDATE public.scenarios SET graph = p_graph`.       ❌ NOT ON THIS FLOOR
+ *     → `UPDATE public.scenarios SET graph = p_graph`.
+ *                                      ✅ CHECK ONLY — its own atomic RPC appends
  *   · `store_draft_graph` — zero production callers; the absence is guarded by
  *     `context/__tests__/graph-identity-guards.test.ts`.                    n/a
  *
@@ -26,12 +31,22 @@
  * :scenario_id/versions/restore`), `CEE_MODEL_VERSIONS_ENABLED` default ON
  * (`config/index.ts:1372`), and the RPC's only content guard is emptiness.
  * Restoring an older version carrying a duplicate node id into a currently-clean
- * scenario is an INTRODUCED violation by this floor's own delta definition —
- * refused on the two paths below, silently written on that one. Routing it here
- * is OUT OF SCOPE for C3 and materially larger: that RPC owns graph + undo +
- * version + head + event in a single statement.
+ * scenario is an INTRODUCED violation by this floor's own delta definition. C3
+ * left it silently written on that path; C8 refuses it, via
+ * `assertNoIntroducedGraphViolations` — the CHECK half, called by the route
+ * between its projection and its RPC. Its APPEND stays where it is, on purpose:
+ * that RPC owns graph + undo + version + head + event in a single statement AND
+ * its CAS is strictly stronger than the turn path's (see that function's JSDoc
+ * for the measurement). Converging it would have cost a guarantee.
  *
- * ⚠ HOW TO RE-DERIVE THIS LIST (do not trust the list — trust the sweep):
+ * ⭐ YOU NO LONGER HAVE TO RE-DERIVE THIS LIST BY HAND, AND YOU SHOULD NOT: it is
+ * pinned by execution in `__tests__/graph-writer-population.guard.test.ts`,
+ * which sweeps production TS **and** the migration SQL and REDs when a fourth
+ * writer appears by either route. This paragraph has been wrong twice; the pin
+ * is what stops there being a third time. If it goes red, read that file's
+ * header before editing anything here.
+ *
+ * ⚠ HOW IT RE-DERIVES THE LIST (the pin does this; kept here for readers):
  * `appendCheckedGraphWrite` and `store.append(` over `src/`, AND a `.sql` sweep
  * for `SET graph = p_graph`. Scope the SQL half carefully: a
  * `UPDATE public.scenarios` sweep MISSES the unqualified `UPDATE scenarios`
@@ -154,28 +169,82 @@ export interface CheckedGraphAppendParams {
 }
 
 /**
- * Enforce the terminal persisted-graph invariants on the bytes about to be
- * written, then append them. THE SINGLE CALL-GRAPH AUTHORITY for a
- * `scenarios.graph` write.
+ * Who is writing, for the log line only. `turn_id`/`turn_class` are OPTIONAL
+ * because the third writer is not a turn: the restore tier replaces the working
+ * graph outright and has no turn row to name (C8).
+ */
+export interface GraphWriteIdentity {
+  readonly scenario_id: string;
+  readonly turn_id?: string | null | undefined;
+  readonly turn_class?: string | null | undefined;
+}
+
+/** Params for the CHECK alone — no store, no append. */
+export interface GraphInvariantAssertionParams {
+  /**
+   * The exact bytes about to be persisted. Callers pass the SAME object they
+   * hand to their writer on the next line — see the module header on why the
+   * report is recomputed here and never passed in.
+   */
+  readonly graph: unknown;
+  readonly identity: GraphWriteIdentity;
+  readonly writesGraph: boolean;
+  /** Same three-state semantics as `CheckedGraphAppendParams`. Read its JSDoc. */
+  readonly baseGraphForInvariants?: unknown;
+  readonly source?: string | undefined;
+}
+
+/**
+ * THE CHECK, WITHOUT THE APPEND — the half of this floor that a writer owning
+ * its own atomic statement can still stand on.
+ *
+ * ── WHY THIS IS SPLIT OUT (C8 closure) ─────────────────────────────────────
+ * The module header above records that the restore tier
+ * (`routes/assist.v1.scenario-versions.ts` → `service.restoreVersionAtomic` →
+ * `restore_model_version_atomic_v1`) was NOT on this floor, and that routing it
+ * here was "materially larger: that RPC owns graph + undo + version + head +
+ * event in a single statement". That remains true, and it is why the fix is
+ * this split rather than a third `appendCheckedGraphWrite` caller.
+ *
+ * ⭐ THE DECISIVE MEASUREMENT, AND IT POINTS THE OTHER WAY FROM THE OBVIOUS FIX:
+ * the restore RPC's CAS is **STRICTLY STRONGER** than the turn path's, so
+ * converging it onto `store.append` would have COST a guarantee, not gained one.
+ *   · restore (`20260824200000:327-333`): an UNCONDITIONAL three-way compare
+ *     (stored hash, caller-supplied hash, and the full stored graph body), with
+ *     no flag and no bypass.
+ *   · the `append_turn_atomic_*` family reached through `store.append`:
+ *     `p_cas_enforce BOOLEAN DEFAULT FALSE` — the compare block is skipped
+ *     entirely unless a caller opts in (`20260717120000:133`/`:198`,
+ *     `20260731130000:143`/`:243`, `20260802120000:101`/`:206`,
+ *     `20260806120000:165`/`:308`).
+ * So the honest closure is: THE INVARIANT CHECK BELONGS ON THAT PATH, THE
+ * APPEND DOES NOT. Refusing more than needed is safe; a silent write is not.
+ * Nothing about either CAS is touched by this function.
+ *
+ * ⚠ SCOPE OF THE EVIDENCE FOR THE PARAGRAPH ABOVE: it rests on READING the
+ * migration SQL at this tip. No PL/pgSQL was executed to establish it, and every
+ * atomicity claim on that migration has rested on reading — stated so the claim
+ * is not read as stronger than it is.
  *
  * Throws `PersistedGraphInvariantError` when this write INTRODUCES a structural
- * violation — fail-closed, never a silent repair. Repairing here would put a
- * mutation AFTER the caller's hash was computed and recreate the ordering
- * defect this floor exists to close.
+ * violation — fail-closed, never a silent repair. Returns `void` on pass: the
+ * caller then performs its own write, and NOTHING may mutate the graph in
+ * between (the same obligation `appendCheckedGraphWrite` discharges structurally
+ * by appending on its own next line).
  */
-export async function appendCheckedGraphWrite(
-  params: CheckedGraphAppendParams,
-): Promise<SessionAppendOutcome> {
-  const { write, store, writesGraph, source } = params;
+export function assertNoIntroducedGraphViolations(
+  params: GraphInvariantAssertionParams,
+): void {
+  const { graph, identity, writesGraph, source } = params;
 
-  const persistedInvariants = checkPersistedGraphInvariants(write.graph, {
+  const persistedInvariants = checkPersistedGraphInvariants(graph, {
     baseGraph: params.baseGraphForInvariants,
   });
 
   const logBase = {
-    scenario_id: write.scenario_id,
-    turn_id: write.turn_id,
-    turn_class: write.turn_class,
+    scenario_id: identity.scenario_id,
+    turn_id: identity.turn_id,
+    turn_class: identity.turn_class,
     source,
   };
 
@@ -250,6 +319,38 @@ export async function appendCheckedGraphWrite(
       '[persist] persisted-graph invariants NOT evaluated — the graph has no nodes/edges arrays',
     );
   }
+}
+
+/**
+ * Enforce the terminal persisted-graph invariants on the bytes about to be
+ * written, then append them. THE SINGLE CALL-GRAPH AUTHORITY for a
+ * `scenarios.graph` write THAT GOES THROUGH `store.append` — which, measured at
+ * this tip, is every such write except the restore tier, whose own atomic RPC
+ * takes the check alone via `assertNoIntroducedGraphViolations` above.
+ *
+ * Throws `PersistedGraphInvariantError` when this write INTRODUCES a structural
+ * violation — fail-closed, never a silent repair. Repairing here would put a
+ * mutation AFTER the caller's hash was computed and recreate the ordering
+ * defect this floor exists to close.
+ */
+export async function appendCheckedGraphWrite(
+  params: CheckedGraphAppendParams,
+): Promise<SessionAppendOutcome> {
+  const { write, store, writesGraph, source } = params;
+
+  // The check runs on `write.graph` — the same object handed to `store.append`
+  // on the last line of this function, with nothing between them.
+  assertNoIntroducedGraphViolations({
+    graph: write.graph,
+    identity: {
+      scenario_id: write.scenario_id,
+      turn_id: write.turn_id,
+      turn_class: write.turn_class,
+    },
+    writesGraph,
+    baseGraphForInvariants: params.baseGraphForInvariants,
+    source,
+  });
 
   // Nothing mutates the graph between the check above and this line.
   return await store.append(write);
