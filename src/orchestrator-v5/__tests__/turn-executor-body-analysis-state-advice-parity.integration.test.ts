@@ -94,6 +94,16 @@ vi.mock('../session/index.js', () => ({
           );
       return { facts, total_count: facts.length };
     },
+    readRecentAppliedMutationFactsFor: async (_scenarioId: string, limit: number) =>
+      mockState.priorFacts
+        .filter(
+          (fact) =>
+            fact.fact_type === 'add_constraint' &&
+            fact.noop === false &&
+            (fact.result as Record<string, unknown> | undefined)?.status ===
+              'applied',
+        )
+        .slice(0, limit),
     // Obsolete compatibility port deliberately throws if production regresses
     // to the former second query/snapshot.
     readNewestAnalysisFactFor: async () => {
@@ -444,6 +454,28 @@ function makeCanonicalAuthorityRunAnalysisFact(
         ...enrichmentOverrides,
       },
       win_probabilities: { opt_status_quo: 0.82, opt_hire_local: 0.18 },
+    },
+  };
+}
+
+function makeAppliedConstraintFact(): Record<string, unknown> {
+  return {
+    fact_type: 'add_constraint' as const,
+    fact_version: 1 as const,
+    noop: false,
+    result: {
+      target_id: 'constraint-budget-cap',
+      status: 'applied',
+      before: null,
+      after: {
+        constraint_id: 'constraint-budget-cap',
+        node_id: 'fac_local_hire',
+        operator: '<=',
+        value: 50000,
+        label: 'Total hiring cost',
+        unit: 'GBP',
+        provenance: 'explicit',
+      },
     },
   };
 }
@@ -960,6 +992,37 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     });
     expect(prompt).toContain('DURABLE_DECISION_REVIEW_CANARY');
     expect(prompt).toContain('analysis-turn-outside-hot-window');
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('does not offer a first analysis after durable analysis leaves the hot window', async () => {
+    const canonicalFact = makeCanonicalAuthorityRunAnalysisFact();
+    const recentMutation = makeAppliedConstraintFact();
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [recentMutation];
+    mockState.newestAnalysisFact = canonicalFact;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      mkPayload('What changed?'),
+      'req-state-query-analysis-outside-hot-window',
+      {
+        routingAdapter: adapter,
+        graphState: CONFLICTING_REQUEST_GRAPH as never,
+      },
+    );
+
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.response.suggested_actions ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Run analysis',
+        }),
+      ]),
+    );
     expectNoCanonicalAuthorityWrite();
   });
 

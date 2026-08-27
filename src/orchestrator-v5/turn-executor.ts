@@ -7238,7 +7238,19 @@ export async function runTurnExecutor(
           // analysis logic deterministically.
           const stateQueryChips = composeStateQueryChip({
             recentChangeCount: contextPack.recent_changes.length,
-            priorFacts: context.prior_facts,
+            analysisHistory:
+              context.scenario_analysis_fact_set?.status === 'complete'
+                ? {
+                    status: 'complete',
+                    hasSuccessfulAnalysis:
+                      selectedScenarioAnalysisFact !== null,
+                  }
+                : {
+                    status:
+                      context.scenario_analysis_fact_set?.status === 'capped'
+                        ? 'capped'
+                        : 'degraded',
+                  },
             analysisFreshness: buildTurnOutcome()?.analysis_freshness,
             analysisReadyStatus: analysisReadyForTurn?.status,
             validationRegistry:

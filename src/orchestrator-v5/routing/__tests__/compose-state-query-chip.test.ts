@@ -20,46 +20,25 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
-
 import { composeStateQueryChip } from '../state-query-guard.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
 
-function addConstraintFact(opts: { noop?: boolean } = {}): HandlerFact {
-  return {
-    fact_type: 'add_constraint',
-    fact_version: 1,
-    noop: opts.noop ?? false,
-    result: {
-      target_id: 'gc-x',
-      status: opts.noop ? 'noop' : 'applied',
-      before: null,
-      after: { node_id: 'n', operator: '<=', value: 50000, label: 'Cost' },
-    },
-  };
-}
-
-function runAnalysisFact(): HandlerFact {
-  return {
-    fact_type: 'run_analysis',
-    fact_version: 1,
-    noop: false,
-    result: {
-      scenario_id: '00000000-0000-4000-8000-000000000001',
-      leading_option_id: 'opt-a',
-      summary: 'Prior',
-      win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
-    },
-  };
-}
+const COMPLETE_WITH_ANALYSIS = {
+  status: 'complete' as const,
+  hasSuccessfulAnalysis: true,
+};
+const COMPLETE_WITHOUT_ANALYSIS = {
+  status: 'complete' as const,
+  hasSuccessfulAnalysis: false,
+};
 
 describe('composeStateQueryChip', () => {
   it('emits "Run analysis again" when a prior run_analysis exists and freshness is stale', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact(), runAnalysisFact()],
+      analysisHistory: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'stale',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -72,7 +51,7 @@ describe('composeStateQueryChip', () => {
   it('emits "Run analysis" when no prior run_analysis exists and the model is ready', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact()],
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -85,7 +64,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when prior analysis is fresh', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact(), runAnalysisFact()],
+      analysisHistory: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'fresh',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -96,7 +75,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when the model is not structurally ready', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact()],
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'needs_user_input',
       validationRegistry: REGISTRY,
@@ -107,7 +86,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when recent_changes is empty', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 0,
-      priorFacts: [addConstraintFact()],
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
@@ -118,7 +97,7 @@ describe('composeStateQueryChip', () => {
   it('suppresses when run_analysis handler is not registered', () => {
     const chips = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact()],
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       // Empty registry → run_analysis not registered.
@@ -130,19 +109,44 @@ describe('composeStateQueryChip', () => {
   it('chip ids are namespaced as state_query so analytics can join them separately from the mutation-turn chip', () => {
     const stale = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact(), runAnalysisFact()],
+      analysisHistory: COMPLETE_WITH_ANALYSIS,
       analysisFreshness: 'stale',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
     });
     const fresh = composeStateQueryChip({
       recentChangeCount: 1,
-      priorFacts: [addConstraintFact()],
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
       analysisFreshness: 'none',
       analysisReadyStatus: 'ready',
       validationRegistry: REGISTRY,
     });
     expect(stale[0]!.id).toBe('chip_action_rerun_analysis_after_state_query');
     expect(fresh[0]!.id).toBe('chip_action_run_analysis_after_state_query');
+  });
+
+  it.each(['capped', 'degraded'] as const)(
+    'does not turn %s durable history into a first-run claim',
+    (status) => {
+      const chips = composeStateQueryChip({
+        recentChangeCount: 1,
+        analysisHistory: { status },
+        analysisFreshness: 'unknown',
+        analysisReadyStatus: 'ready',
+        validationRegistry: REGISTRY,
+      });
+      expect(chips).toEqual([]);
+    },
+  );
+
+  it('fails weak when complete-zero history contradicts a fresh verdict', () => {
+    const chips = composeStateQueryChip({
+      recentChangeCount: 1,
+      analysisHistory: COMPLETE_WITHOUT_ANALYSIS,
+      analysisFreshness: 'fresh',
+      analysisReadyStatus: 'ready',
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toEqual([]);
   });
 });
