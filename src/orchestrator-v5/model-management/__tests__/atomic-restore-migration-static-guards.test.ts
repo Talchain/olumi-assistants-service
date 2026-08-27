@@ -48,8 +48,17 @@ const appendV4Delegation = appendBody.match(
 );
 
 describe("C8-A atomic restore migration — authority and atomic structure", () => {
-  it("is explicitly unexecuted and additive, with mutation uniqueness + two hash carriers", () => {
-    expect(migration).toMatch(/NOT EXECUTED/);
+  it("records the migration as APPLIED, and is additive with mutation uniqueness + two hash carriers", () => {
+    // ⚠ CHANGED 2026-08-27. This test was titled "is explicitly unexecuted
+    // and additive" and asserted `toMatch(/NOT EXECUTED/)`. The migration was
+    // measured APPLIED on staging that day, so the title and the assertion were
+    // both false, and the assertion had become a trap: the header's correction
+    // block QUOTES the old "NOT EXECUTED" wording, so the original regex would
+    // still have passed while pinning nothing at all — a guard agreeing with
+    // itself. These two pins replace it and RED if the header ever reverts to
+    // claiming the file has not been run.
+    expect(migration).toMatch(/STATUS CORRECTED 2026-08-27/);
+    expect(migration).toMatch(/APPLIED 2026-08-27/);
     expect(oneLine).toMatch(
       /ADD COLUMN IF NOT EXISTS analysis_affecting_hash TEXT NULL/
     );

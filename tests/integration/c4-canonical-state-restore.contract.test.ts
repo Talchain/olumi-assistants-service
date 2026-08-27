@@ -1267,9 +1267,23 @@ describe.runIf(SHOULD_RUN)('C4 — canonical state: restore is all-or-nothing', 
      * go unnoticed.
      *
      * ⚠ NOT EXECUTED by the C8-A pass: this oracle needs a real Postgres and
-     * migration 20260824200000 is founder-gated and unapplied. These are
-     * derived from the migration's bytes, and want a real run before they are
-     * treated as witnessed.
+     * was not run. **THAT HALF STANDS** — these pins remain underived from any
+     * real execution.
+     *
+     * ⚠ CORRECTED 2026-08-27 — THE OTHER HALF WAS FALSE. This sentence used to
+     * continue "...and migration 20260824200000 is founder-gated and
+     * unapplied". Measured FALSE on 2026-08-27 against the live staging
+     * database: the C8 objects exist and both function bodies are md5-identical
+     * to this repo's migration file (full measurement, controls, and its scope
+     * limits — GRANT/REVOKE and RLS were NOT covered — in the STATUS CORRECTION
+     * block of
+     * supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql).
+     * So the reason these pins are unwitnessed is ONLY that this oracle has
+     * never been run against a real Postgres — never that the carrier is
+     * missing from staging.
+     *
+     * These are derived from the migration's bytes, and want a real run before
+     * they are treated as witnessed.
      */
     it('N1a: expected = NULL against a SET current hash — v4 and v5 BOTH accept (v5 delegates)', async () => {
       const a = await freshScenario(true);
