@@ -104,6 +104,19 @@ function subtractGraphContextDelta(pack: { graph_context?: unknown }): void {
   delete pack.graph_context;
 }
 
+/**
+ * Preserve the pre-durable-history budget golden while separately pinning the
+ * required fail-weak status carried by every finished ContextPack. Plain test
+ * arrays have no reconciled scenario-wide evidence, so they must be
+ * `degraded` rather than silently claiming there were no recent changes.
+ */
+function subtractRecentChangesStatusDelta(pack: {
+  recent_changes_status?: unknown;
+}): void {
+  expect(pack.recent_changes_status).toBe('degraded');
+  delete pack.recent_changes_status;
+}
+
 function assembleUnderBudgetPack() {
   return assembleContextPack({
     payload: BASE_PAYLOAD,
@@ -271,6 +284,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     delete displayAnalysis?.analysis_not_current_note;
     subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
     subtractGraphContextDelta(withoutFreshnessDisclosure);
+    subtractRecentChangesStatusDelta(withoutFreshnessDisclosure);
 
     expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
       UNDER_BUDGET_GOLDEN_SHA256,
@@ -365,6 +379,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     delete displayAnalysis?.analysis_not_current_note;
     subtractGoalsProjectionDelta(pack);
     subtractGraphContextDelta(pack);
+    subtractRecentChangesStatusDelta(pack);
     expect(sha256(JSON.stringify(pack))).toBe(UNDER_BUDGET_GOLDEN_SHA256);
 
     const ceilingCuts = emitSpy.mock.calls.filter(

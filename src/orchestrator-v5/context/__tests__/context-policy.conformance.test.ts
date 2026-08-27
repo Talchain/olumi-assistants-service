@@ -572,6 +572,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
       brief: 1_500, // enforced 2000 — under
       display_analysis: 3_200, // enforced 4000 — under
       graph_context: 22,
+      recent_changes_status: 10,
       display_graph: 6_000, // telemetry_only — not checked
     };
     expect(findContextPolicyDivergences('routing', clean)).toEqual({
@@ -651,12 +652,14 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
       findContextPolicyDivergences('routing', {
         brief: 500,
         graph_context: 22,
+        recent_changes_status: 10,
         display_graph: 1_200,
       }).missing_sections,
     ).toEqual([]);
     expect(
       findContextPolicyDivergences('routing', {
         brief: 500,
+        recent_changes_status: 10,
         display_graph: 1_200,
       }).missing_sections,
     ).toEqual(['graph_context']);
@@ -692,7 +695,12 @@ describe('runtime tripwire — emitContextPolicyDivergence (observe-only)', () =
     const { calls, logger } = fakeLogger();
     emitContextPolicyDivergence(
       'routing',
-      { brief: 100, display_analysis: 2_000, graph_context: 22 },
+      {
+        brief: 100,
+        display_analysis: 2_000,
+        graph_context: 22,
+        recent_changes_status: 10,
+      },
       5_000,
       'req-1',
       'scn-1',
