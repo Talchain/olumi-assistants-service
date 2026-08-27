@@ -207,6 +207,88 @@ describe('canonical baseline-option continuity', () => {
     );
   });
 
+  it('pins the exact pre-feature structural-fallback bytes for every marker source', () => {
+    const outcome = compactGraphForContextPack(
+      {
+        nodes: [
+          {
+            id: 'dup',
+            kind: 'option',
+            label: 'First',
+            is_baseline: false,
+            data: { is_baseline: true },
+          },
+          {
+            id: 'dup',
+            kind: 'option',
+            label: 'Second',
+            is_baseline: true,
+            data: { is_baseline: false },
+          },
+          {
+            id: 'factor',
+            kind: 'factor',
+            label: 'Factor',
+            data: { is_baseline: true },
+          },
+        ],
+        // Deliberately malformed for strict GraphV3: fallback authority must
+        // not change even with duplicate IDs and conflicting marker sources.
+        edges: [{ from: 'dup', to: 'factor' }],
+        options: [
+          {
+            id: 'dup',
+            label: 'Raw winner',
+            is_baseline: true,
+            rank: 1,
+          },
+        ],
+      } as GraphStateIngress,
+      { requestId: 'req-baseline-fallback-exact-bytes' },
+    );
+
+    expect(outcome).toEqual({
+      kind: 'compacted',
+      compact: {
+        nodes: [
+          {
+            id: 'dup',
+            kind: 'option',
+            label: 'First',
+            source: 'system',
+            provenance: 'ai_inferred',
+          },
+          {
+            id: 'dup',
+            kind: 'option',
+            label: 'Second',
+            source: 'system',
+            provenance: 'ai_inferred',
+          },
+          {
+            id: 'factor',
+            kind: 'factor',
+            label: 'Factor',
+            source: 'system',
+            provenance: 'ai_inferred',
+          },
+        ],
+        edges: [
+          {
+            from: 'dup',
+            to: 'factor',
+            strength: 0,
+            exists: 1,
+            provenance: 'ai_inferred',
+          },
+        ],
+        _node_count: 3,
+        _edge_count: 1,
+      },
+      via: 'structural_fallback',
+    });
+  });
+
   it('does not let one nested marker contaminate a duplicate-ID sibling', () => {
     const prompt = promptFromRawNodes([
       {

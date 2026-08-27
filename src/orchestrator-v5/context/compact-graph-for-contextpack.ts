@@ -97,7 +97,7 @@ export function compactGraphForContextPack(
     const fallback = toStructuralGraphV3(graphState);
     return {
       kind: 'compacted',
-      compact: compactGraph(fallback),
+      compact: withoutBaselineIdentity(compactGraph(fallback)),
       via: 'structural_fallback',
     };
   } catch (err) {
@@ -110,6 +110,24 @@ export function compactGraphForContextPack(
     );
     return { kind: 'absent' };
   }
+}
+
+/**
+ * Baseline identity is licensed only by the strict GraphV3 recovery above.
+ * Structural fallback is a degraded shape-preservation path and must remain
+ * byte-equivalent to its pre-baseline carrier, including when permissive input
+ * happens to contain a top-level marker that the shared compactor understands.
+ */
+function withoutBaselineIdentity(compact: GraphV3Compact): GraphV3Compact {
+  if (compact.nodes.every((node) => node.is_baseline === undefined)) return compact;
+  return {
+    ...compact,
+    nodes: compact.nodes.map((node) => {
+      const copy = { ...node };
+      Reflect.deleteProperty(copy, 'is_baseline');
+      return copy;
+    }),
+  };
 }
 
 /**
