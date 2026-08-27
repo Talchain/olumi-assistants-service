@@ -1,39 +1,62 @@
-# Cross-user isolation drift guard.
+# Cross-user isolation PROBE — manual, and self-scoped to migrations.
+#
+# ⚠ THE NAME IS LOAD-BEARING AND IT IS DELIBERATELY NOT "DRIFT GUARD".
+#   An earlier draft of this workflow was called "RLS isolation guard" and said
+#   it closed the gap that "a policy changed outside the repo would have been
+#   invisible here". It does not close that gap. Every automatic trigger below
+#   needs a REPOSITORY EVENT, and a policy changed outside the repo produces
+#   none — so with no `schedule:`, nothing fires unless a human runs it. Calling
+#   that a drift guard would tell a future session drift is being watched when
+#   it is not, and this programme has already lost one scheduler and recorded it
+#   as RUNNING for a month. What this IS: an on-demand, credential-free,
+#   two-real-identity probe of the deployed row policies, plus an automatic
+#   re-check whenever a migration lands on staging.
 #
 # The browser addresses `scenarios` rows by id alone, so the database's own row
-# policies are the only authority on that path. Those policies are
-# version-controlled (supabase/migrations/20260226010000_*.sql) but nothing
-# derived their DEPLOYED state, so a policy changed outside the repo would have
-# been invisible here. This job closes that gap.
+# policies are the only authority on that path, and nothing else in CI derives
+# their DEPLOYED state. That is what this measures.
 #
 # It needs NO secrets: it uses the public publishable key the deployed bundle
 # already serves to every visitor, and mints its own throwaway accounts.
 #
-# ⚠ It proves DEPLOYED BEHAVIOUR, not that the deployed policy came from the
-#   checked-in migration. See the script header before quoting it as evidence.
+# ⚠ It proves DEPLOYED BEHAVIOUR on the DIRECT browser→PostgREST door, not that
+#   the deployed policy came from the checked-in migration, and NOT the path
+#   CEE itself uses — that one holds the service-role key and bypasses row
+#   policies by construction. See the script header before quoting it as
+#   evidence for the cross-user criterion.
 #
 # ⚠ NO `schedule:` TRIGGER — DELIBERATE, DO NOT ADD ONE BACK CASUALLY.
 #   Two reasons, and both have to clear before a cron is defensible:
 #   1. This job WRITES to a live application database. The environment identity
 #      it writes to carries an unresolved question recorded in
 #      Docs/v5/security-data-floor-status.md §S3 (standing since 2026-05-30,
-#      with a runtime gate the repo itself declares still open). Unattended
-#      daily writes past an open gate are not a commitment to make on this PR.
+#      with a runtime gate the repo itself declares still open, and which that
+#      file states no code work can close — it is an admin verification plus a
+#      Paul decision). Unattended writes past an open gate are not a commitment
+#      to make from this lane.
 #   2. Every run leaves 2 auth identities behind permanently — deleting one
-#      needs the service-role key, which this guard refuses on principle (see
+#      needs the service-role key, which this probe refuses on principle (see
 #      the script header's BOUNDED RESIDUE block). Scheduling is what holds
 #      that rate down: human-initiated and self-scoped runs are a handful a
 #      year, a daily cron is 365+.
-#   Restore a cron only when §S3 closes, or point RLS_GUARD_SUPABASE_URL/_KEY
-#   at an affirmatively-identified throwaway project.
-name: RLS isolation guard
+#
+#   ⭐ RE-SURFACE TRIGGER (so this is a parked decision, not a lost one):
+#      WHEN Docs/v5/security-data-floor-status.md §S3 reaches a verdict other
+#      than `unknown-needs-admin-verification`, OR a throwaway Supabase project
+#      is affirmatively identified and set in RLS_GUARD_SUPABASE_URL/_KEY,
+#      THEN add `schedule: - cron: '17 6 * * 1'` (WEEKLY — ~104 identities/year,
+#      not 730) and restore the "drift guard" naming in this file, the script
+#      header and the job name, because it will then be true.
+#      Reason (2) is a RATE argument and weekly answers it; reason (1) is not,
+#      and only §S3 closes it.
+name: Cross-user isolation probe
 
 on:
   workflow_dispatch:
-  # Self-scoped: runs on a PR only when the guard itself changes, so a change to
-  # the guard is demonstrated in the runner BEFORE it is merged. It deliberately
+  # Self-scoped: runs on a PR only when the probe itself changes, so a change to
+  # the probe is demonstrated in the runner BEFORE it is merged. It deliberately
   # does NOT run on unrelated PRs — it asserts against the deployed environment,
-  # so it is a drift detector, not a PR gate.
+  # so it is an environment probe, not a PR gate.
   #
   # ⚠ REQUIRED AND `paths:`-FILTERED ARE MUTUALLY EXCLUSIVE. Recorded here so a
   #   future lane proposing to promote this to a required status check does not
@@ -72,8 +95,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No install step: the guard is dependency-free by design, so a broken
-      # lockfile can never turn a real drift signal into a skipped job.
+      # No install step: the probe is dependency-free by design, so a broken
+      # lockfile can never turn a real isolation signal into a skipped job.
       #
       # Exit codes are load-bearing: 0 = held · 1 = ISOLATION FAILED ·
       # 2 = could not run cleanly (transport, unresolvable target, residue).

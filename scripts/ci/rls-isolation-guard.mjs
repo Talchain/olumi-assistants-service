@@ -1,23 +1,50 @@
 #!/usr/bin/env node
 /**
- * CROSS-USER ISOLATION DRIFT GUARD — deployed behaviour, black-box, no secrets.
+ * CROSS-USER ISOLATION PROBE — deployed behaviour, black-box, no secrets.
  *
- * ── WHAT IT GUARDS ─────────────────────────────────────────────────────────
+ * ⚠ ── IT IS A PROBE, NOT A DRIFT GUARD. THE NAME IS THE HONEST ONE. ─────────
+ * An earlier draft of this file called itself a "drift guard" and opened by
+ * saying it closed the gap that "a policy changed OUTSIDE the repo would have
+ * been invisible to CI". It does not close that gap, and it cannot: there is no
+ * `schedule:` trigger (see the workflow, where the reasons are recorded), so
+ * every automatic run needs a REPOSITORY EVENT, and a policy changed outside
+ * the repo produces none. What actually runs it is a human clicking Run
+ * workflow, a PR touching these two files, or a migration landing on staging.
+ *
+ * That is worth having and it is not drift detection. This estate has already
+ * lost a scheduler once and recorded it as RUNNING for a month; a file that
+ * promises watching nobody does is how that happens again. The re-surface
+ * trigger for the automatic half is recorded in the workflow.
+ *
+ * ── WHAT IT ESTABLISHES ────────────────────────────────────────────────────
  * The browser addresses `scenarios` rows by `id` ALONE (`scenarioService.ts`:
  * loadScenario, setAnalysisRunning, saveTitle). On that path the database's own
- * row policies are the only authority. Those policies are version-controlled
- * (`supabase/migrations/20260226010000_scenario_schema_v2_0_1_hardening.sql`),
- * but nothing derived their DEPLOYED state — so a policy weakened outside the
- * repo would have been invisible to CI. This closes that.
+ * row policies are the only authority, and nothing else in CI derives their
+ * DEPLOYED state. This mints two real identities and attempts the read, so it
+ * settles by observation a question that inspecting rows cannot decide.
  *
  * ⚠ ── WHAT IT DOES **NOT** ESTABLISH, stated here so nobody over-reads it ───
  * It proves DEPLOYED BEHAVIOUR. It does NOT prove the deployed policy came from
  * the checked-in migration: a policy set by hand that happens to coincide would
- * pass this identically. Treat agreement between this guard and the migration
+ * pass this identically. Treat agreement between this probe and the migration
  * as two independent facts that agree, never as one fact.
  *
+ * ⚠ AND IT IS NOT THE DOOR THIS PRODUCT'S OWN SERVER USES. This measures the
+ * DIRECT browser → PostgREST door, where RLS is the only authority. CEE reaches
+ * the same table through `src/orchestrator-v5/session/index.ts:49`, which builds
+ * its Supabase client with the SERVICE-ROLE key and touches `.from('scenarios')`
+ * at five sites in `supabase-store.ts`. Service role BYPASSES row policies by
+ * construction, so a green run here is not evidence about that path — ownership
+ * there rests on a caller-supplied parameter and an application-level
+ * pre-flight, and that file carries its own `TODO(production)` to move it onto
+ * `auth.uid()`. Closing THAT question needs a two-real-user journey witness
+ * driven through the CEE turn path, which needs real credentials. Nobody should
+ * cite this probe as cover for the cross-user criterion as a whole.
+ *
  * It covers SELECT and UPDATE on `scenarios`. It does not cover DELETE as a
- * PROBE, other tables, or the SECURITY DEFINER RPC paths. (Cleanup below does
+ * PROBE, other tables, guest rows (`user_id IS NULL`, which `auth.uid() =
+ * user_id` never matches — a guest reading back its own draft is intended
+ * posture, not a leak), or the SECURITY DEFINER RPC paths. (Cleanup below does
  * assert its own DELETEs landed, but that is residue accounting, not a probe —
  * see the exit-code contract.)
  *
@@ -33,19 +60,22 @@
  * and mints its own throwaway accounts through open signup. It never reads a
  * service-role key, and never logs a token (sha256 prefixes only).
  *
- * ⚠ ── BOUNDED RESIDUE THIS GUARD LEAVES BEHIND, stated so it is never a ─────
+ * ⚠ ── BOUNDED RESIDUE THIS PROBE LEAVES BEHIND, stated so it is never a ─────
  *      surprise. A known and bounded residue is honest; an undocumented one is
  *      how owned rows come to resolve to no auth user.
  *
  *   PER RUN: 2 auth identities, created through open signup, NEVER DELETED.
  *   Scenario rows ARE deleted (and the deletion is asserted — see cleanup).
+ *   That includes the FORGED row, whose id is bound at `scenarioForged` for
+ *   exactly this reason: it only exists on a run where isolation has broken,
+ *   which is the run least able to afford a stranded row.
  *
  *   WHY NOT DELETED: removing an auth user requires the service-role key. This
- *   guard refuses that key on principle — a CI job holding the most dangerous
+ *   probe refuses that key on principle — a CI job holding the most dangerous
  *   credential in the estate to tidy up after itself is a worse trade than the
  *   residue. The rate is instead held down by SCHEDULING: there is no `schedule:`
  *   trigger, so runs are human-initiated (`workflow_dispatch`), or self-scoped
- *   to changes to this guard, or to `supabase/migrations/**` landing on staging.
+ *   to changes to this probe, or to `supabase/migrations/**` landing on staging.
  *   That is a handful of runs a year, not one a day.
  *
  *   ⚠ CONSEQUENCE FOR ANY LATER HAND-PURGE: `scenarios.user_id` has NO foreign
@@ -53,19 +83,29 @@
  *   deliberately by `supabase/migrations/20260422000000_v5_guest_mode_nullable_user_id.sql`
  *   for guest mode. So deleting these identities by hand will NOT cascade, and
  *   would turn any surviving row of theirs into an orphan. Purge rows first, or
- *   accept the identities. Identities from this guard are recognisable by the
+ *   accept the identities. Identities from this probe are recognisable by the
  *   `olumi-rls-guard+` local-part on an `@example.test` address.
  *
  * ── EXIT-CODE CONTRACT (load-bearing — a broken alarm gets ignored) ─────────
  *   0  every probe ran and held.
  *   1  ISOLATION FAILED — a probe positively observed cross-user access.
  *   2  COULD NOT RUN CLEANLY — target unresolvable, signup refused, a TRANSPORT
- *      error, an incomplete probe count, or residue this run could not clear.
- *   A network flake must never reach exit 1: "the guard could not run" and
+ *      error, a response the server DECLINED TO ANSWER, a failed positive
+ *      control, an incomplete probe count, or residue this run could not clear.
+ *   A network flake must never reach exit 1: "the probe could not run" and
  *   "user B read user A's row" are opposite facts and must not share a code.
  *
+ *   ⚠ THAT CONTRACT IS ENFORCED BY `data()`, NOT BY GOODWILL. `rest()` used to
+ *   report `count: null` for ANY non-array body, and the negative probes tested
+ *   `count === 0` — so `null === 0` was false and a 502 HTML page, an expired
+ *   token or a 429 each announced a cross-user read that never happened, on the
+ *   exit code reserved for a security klaxon. Every probe verdict is now gated
+ *   on a response the server actually answered; anything else is exit 2. The
+ *   forged INSERT is the sole exception and it is a MEASURED one, not an
+ *   assumed one — see `isPgError`.
+ *
  * ── IT FAILS LOUD WHEN IT CANNOT PROVE IT RAN ──────────────────────────────
- * A guard that silently skips is worse than no guard. Every probe increments a
+ * A probe that silently skips is worse than no probe. Every probe increments a
  * counter and the run REDs unless the counter matches EXPECTED_PROBES exactly.
  * The positive controls are inside the job: if this can no longer see or write
  * a row at all, it REDs rather than reporting a reassuring "nothing leaked".
@@ -79,18 +119,32 @@ const TIMEOUT_MS = 30000;
 
 let probesRun = 0;
 const fails = [];
+const brokenControls = [];
 const residue = [];
 const sha = (s, n = 16) => createHash('sha256').update(String(s)).digest('hex').slice(0, n);
 const log = (o) => console.log(JSON.stringify(o));
-function check(name, ok, detail) {
+/**
+ * `kind` decides WHICH failure this is, and therefore which exit code it earns.
+ *
+ *   'isolation' — the probe positively observed cross-user access. Exit 1.
+ *   'control'   — a POSITIVE control failed: this run could not read or write
+ *                 its OWN row, so it lost its observation point. That is "could
+ *                 not run cleanly" (exit 2), never "isolation failed" — nobody
+ *                 read anybody else's row. It still REDs; only the code changes.
+ *
+ * The CONTRAST control is deliberately 'isolation': if a fabricated id returns
+ * a row, the database handed this reader a row it does not own, and that IS a
+ * cross-user read.
+ */
+function check(name, ok, detail, kind = 'isolation') {
   probesRun += 1;
-  if (!ok) fails.push(name);
-  log({ probe: name, ok, ...detail });
+  if (!ok) (kind === 'control' ? brokenControls : fails).push(name);
+  log({ probe: name, ok, kind, ...detail });
 }
 
 /**
  * `die()` THROWS rather than calling process.exit(): process.exit() skips
- * `finally`, which would strand the guard's own rows on every abnormal path.
+ * `finally`, which would strand this run's own rows on every abnormal path.
  * Caught once at the bottom and turned into exit 2.
  */
 class Fatal extends Error {}
@@ -127,6 +181,11 @@ async function resolveTarget() {
 
 let target = null, A = null, B = null;
 const scenarioA = randomUUID(), scenarioB = randomUUID();
+// The forged row is minted with a BOUND id so `cleanup()` can reach it. See the
+// forged-INSERT probe: this row only ever exists when isolation has broken, and
+// that is precisely the run that must not strand it.
+const scenarioForged = randomUUID();
+let forgedRowExists = false;
 
 // ── Throwaway accounts, minted through open signup ─────────────────────────
 async function mint(label) {
@@ -148,11 +207,26 @@ async function mint(label) {
   const token = body?.access_token ?? body?.session?.access_token ?? null;
   const userId = body?.user?.id ?? null;
   if (res.status !== 200 || !token || !userId) {
-    die(`could not mint throwaway user ${label} — the guard cannot run`, { http: res.status, keys: body && typeof body === 'object' ? Object.keys(body) : null });
+    die(`could not mint throwaway user ${label} — this run cannot continue`, { http: res.status, keys: body && typeof body === 'object' ? Object.keys(body) : null });
   }
   log({ step: 'mint', label, userId, tokenSha256: sha(token) });
   return { email, userId, accessToken: token };
 }
+
+/**
+ * A PostgREST error body: `{code, details, hint, message}`. Used ONLY to
+ * recognise the forged INSERT's legitimate refusal, which is the one probe on
+ * this probe whose healthy answer is not a JSON array.
+ *
+ * DERIVED, not assumed: runner log for run 32970941736 (this probe, green, on
+ * the deployed database) records the forged INSERT as `http 403, rowsCreated
+ * null` while all seven other probes answered 200 with an array. So 403-with-an
+ * -error-object is the shape a healthy database refuses with, and it is the
+ * only non-array shape any probe verdict is allowed to rest on.
+ */
+const isPgError = (v) =>
+  v !== null && typeof v === 'object' && !Array.isArray(v) &&
+  (typeof v.message === 'string' || typeof v.code === 'string');
 
 const hdr = (u, extra = {}) => ({
   apikey: target.key, Authorization: `Bearer ${u.accessToken}`,
@@ -168,12 +242,51 @@ async function rest(method, path, user, body, extraHeaders = {}) {
     });
   } catch (e) {
     // TRANSPORT, not isolation. A DNS blip, a reset socket or a hung request
-    // must not be reported with the guard's own code for "isolation FAILED".
+    // must not be reported with this file's own code for "isolation FAILED".
     die(`transport error on ${method} ${path.split('?')[0]}: ${e?.name ?? e}`);
   }
   const text = await res.text();
   let rows = null; try { rows = JSON.parse(text); } catch { /* non-JSON */ }
-  return { http: res.status, rows, count: Array.isArray(rows) ? rows.length : null };
+  const ok2xx = res.status >= 200 && res.status < 300;
+  const dataResponse = ok2xx && Array.isArray(rows);
+  const policyRefusal = res.status === 403 && isPgError(rows);
+  return {
+    http: res.status,
+    rows,
+    // `count` is now defined ONLY on a response the server actually answered
+    // with data. It is `null` on every other shape — and `data()` below makes
+    // that null unreachable by any probe verdict, rather than letting
+    // `null === 0` decide one.
+    count: dataResponse ? rows.length : null,
+    dataResponse,
+    policyRefusal,
+    unanswered: !dataResponse && !policyRefusal,
+    bodyKind: Array.isArray(rows) ? 'array' : rows === null ? 'non-json' : 'object',
+    bodySha256: sha(text, 12),
+  };
+}
+
+/**
+ * THE SINGLE GATE BETWEEN A RESPONSE AND A PROBE VERDICT.
+ *
+ * A probe may only be judged on a response the server actually answered with
+ * data. Anything else — a gateway's HTML 502, a 401 because this run's own
+ * token was refused, a 429, a 404, an empty body — is the server declining to
+ * answer, and `die()`ing on it is what keeps exit 1 meaning what line 61 says
+ * it means. Called BEFORE `check()`, so a declined response never increments
+ * `probesRun`, never lands in `fails`, and can neither fake a pass nor fake an
+ * isolation failure.
+ *
+ * Without this, `count` was `null` on every such response and the four
+ * `count === 0` probes read `null === 0` as FALSE — announcing a cross-user
+ * read that never happened, on the exit code reserved for a security klaxon.
+ */
+function data(r, what) {
+  if (!r.dataResponse) {
+    die(`the server did not answer ${what} with a data response — this run cannot judge isolation`,
+      { http: r.http, bodyKind: r.bodyKind, bodySha256: r.bodySha256 });
+  }
+  return r;
 }
 
 /**
@@ -181,7 +294,7 @@ async function rest(method, path, user, body, extraHeaders = {}) {
  * abnormal paths where rows would otherwise be stranded.
  *
  * It ASSERTS the DELETE landed rather than discarding the result. That matters
- * because the DELETE policy is one this guard deliberately does not probe — in
+ * because the DELETE policy is one this file deliberately does not probe — in
  * a script whose whole premise is that deployed policies may have drifted. A
  * silently-swallowed 403 here would leave rows behind and report nothing.
  *
@@ -189,15 +302,17 @@ async function rest(method, path, user, body, extraHeaders = {}) {
  * unclearable residue is an exit-2 condition, and exit 1 always outranks it.
  */
 async function cleanup() {
-  for (const [label, id, user] of [['A', scenarioA, A], ['B', scenarioB, B]]) {
+  // `forged` is owned by B (that is what made it a forgery), so B is the
+  // identity that can delete it under `Users can delete own scenarios`.
+  for (const [label, id, user] of [['A', scenarioA, A], ['B', scenarioB, B], ['forged', scenarioForged, B]]) {
     if (user === null) continue; // never minted — nothing of ours can exist
     try {
       const del = await rest('DELETE', `/scenarios?id=eq.${id}`, user);
       const gone = await rest('GET', `/scenarios?id=eq.${id}&select=id`, user);
-      const ok = del.http >= 200 && del.http < 300 && gone.count === 0;
-      log({ step: 'cleanup', row: label, http: del.http, rowsDeleted: del.count, stillVisibleToOwner: gone.count, ok });
+      const ok = del.http >= 200 && del.http < 300 && gone.dataResponse && gone.count === 0;
+      log({ step: 'cleanup', row: label, http: del.http, rowsDeleted: del.count, stillVisibleToOwner: gone.count, readBackHttp: gone.http, ok });
       if (!ok) {
-        residue.push(`scenario ${label}: DELETE returned HTTP ${del.http}, ${gone.count} row(s) still visible to the owner`);
+        residue.push(`scenario ${label} (${id}): DELETE returned HTTP ${del.http}; owner read-back HTTP ${gone.http} showed ${gone.dataResponse ? `${gone.count} row(s) still visible` : 'no answerable response'}`);
       }
     } catch (e) {
       const why = e instanceof Fatal ? e.message : `${e?.name ?? e}`;
@@ -219,39 +334,52 @@ try {
   const insA = await rest('POST', '/scenarios', A, { id: scenarioA, user_id: A.userId, title: 'rls-guard A' });
   const insB = await rest('POST', '/scenarios', B, { id: scenarioB, user_id: B.userId, title: 'rls-guard B' });
   if (insA.count !== 1 || insB.count !== 1) {
-    die('could not create the guard’s own rows — it cannot observe anything, so this is not a pass', { insA: insA.http, insB: insB.http });
+    die('could not create this run’s own rows — it cannot observe anything, so this is not a pass', { insA: insA.http, insB: insB.http });
   }
-  check('POSITIVE CONTROL — a user can create a row it owns', true, { http: insA.http });
+  check('POSITIVE CONTROL — a user can create a row it owns', true, { http: insA.http }, 'control');
 
-  const forged = await rest('POST', '/scenarios', A, { id: randomUUID(), user_id: B.userId, title: 'rls-guard forged' });
-  check('a user cannot create a row owned by someone else', forged.count === 0 || forged.http >= 400,
-    { http: forged.http, rowsCreated: forged.count });
+  // The forged row's id is BOUND, not minted inline: on the one run where this
+  // INSERT succeeds — i.e. exactly when isolation has broken — the row must be
+  // deletable by `cleanup()`. An unbound id would strand a row owned by an
+  // identity nobody will delete, in a table with no FK to `auth.users`, on the
+  // most alarming run, while reporting `"residue":[]`.
+  const forged = await rest('POST', '/scenarios', A, { id: scenarioForged, user_id: B.userId, title: 'rls-guard forged' });
+  if (forged.unanswered) {
+    die('the server answered the forged INSERT with neither a data response nor a policy refusal',
+      { http: forged.http, bodyKind: forged.bodyKind, bodySha256: forged.bodySha256 });
+  }
+  // A 403 PostgREST refusal, or an answered INSERT that created nothing. NOT
+  // `http >= 400`, which passed this probe on any 502 — the same defect as G1
+  // pointing the other way, at a FALSE GREEN.
+  check('a user cannot create a row owned by someone else', forged.policyRefusal || forged.count === 0,
+    { http: forged.http, rowsCreated: forged.count, refusedByPolicy: forged.policyRefusal });
+  if (forged.dataResponse && forged.count > 0) forgedRowExists = true;
 
   // ── SELECT ───────────────────────────────────────────────────────────────
-  const selOther = await rest('GET', `/scenarios?id=eq.${scenarioB}&select=id,user_id`, A);
+  const selOther = data(await rest('GET', `/scenarios?id=eq.${scenarioB}&select=id,user_id`, A), 'the cross-user READ');
   check('a user cannot READ another user’s row', selOther.count === 0, { http: selOther.http, rows: selOther.count });
 
-  const selOwn = await rest('GET', `/scenarios?id=eq.${scenarioA}&select=id,user_id`, A);
+  const selOwn = data(await rest('GET', `/scenarios?id=eq.${scenarioA}&select=id,user_id`, A), 'the own-row READ');
   check('POSITIVE CONTROL — a user CAN read its own row', selOwn.count === 1,
-    { http: selOwn.http, rows: selOwn.count, ownerMatchesReader: selOwn.rows?.[0]?.user_id === A.userId });
+    { http: selOwn.http, rows: selOwn.count, ownerMatchesReader: selOwn.rows?.[0]?.user_id === A.userId }, 'control');
 
-  const selAbsent = await rest('GET', `/scenarios?id=eq.${randomUUID()}&select=id`, A);
+  const selAbsent = data(await rest('GET', `/scenarios?id=eq.${randomUUID()}&select=id`, A), 'the fabricated-id READ');
   check('CONTRAST CONTROL — a fabricated id returns nothing', selAbsent.count === 0, { http: selAbsent.http, rows: selAbsent.count });
 
   // ── UPDATE (per-command policies: a scoped SELECT is NOT evidence here) ──
   const MARKER = `rls-guard-${randomUUID().slice(0, 8)}`;
-  const updOther = await rest('PATCH', `/scenarios?id=eq.${scenarioB}`, A, { title: MARKER });
+  const updOther = data(await rest('PATCH', `/scenarios?id=eq.${scenarioB}`, A, { title: MARKER }), 'the cross-user WRITE');
   check('a user cannot WRITE another user’s row', updOther.count === 0, { http: updOther.http, rowsAffected: updOther.count });
 
-  const updStatus = await rest('PATCH', `/scenarios?id=eq.${scenarioB}`, A, { analysis_status: 'running' });
+  const updStatus = data(await rest('PATCH', `/scenarios?id=eq.${scenarioB}`, A, { analysis_status: 'running' }), 'the cross-user status WRITE');
   check('a user cannot write another user’s analysis status', updStatus.count === 0, { http: updStatus.http, rowsAffected: updStatus.count });
 
-  const updOwn = await rest('PATCH', `/scenarios?id=eq.${scenarioA}`, A, { title: `${MARKER}-own` });
-  check('POSITIVE CONTROL — a user CAN write its own row', updOwn.count === 1, { http: updOwn.http, rowsAffected: updOwn.count });
+  const updOwn = data(await rest('PATCH', `/scenarios?id=eq.${scenarioA}`, A, { title: `${MARKER}-own` }), 'the own-row WRITE');
+  check('POSITIVE CONTROL — a user CAN write its own row', updOwn.count === 1, { http: updOwn.http, rowsAffected: updOwn.count }, 'control');
 
   // Bind to the OUTCOME, read back as the owner — not to the write's status code.
-  const readBack = await rest('GET', `/scenarios?id=eq.${scenarioB}&select=title`, B);
-  if (readBack.count !== 1) die('could not read the second user’s own row back — the guard lost its observation point', { http: readBack.http });
+  const readBack = data(await rest('GET', `/scenarios?id=eq.${scenarioB}&select=title`, B), 'the owner read-back');
+  if (readBack.count !== 1) die('could not read the second user’s own row back — this run lost its observation point', { http: readBack.http });
   if (readBack.rows[0].title === MARKER) fails.push('the other user’s row WAS modified (read-back)');
 } catch (e) {
   // Fatal → "cannot run". Anything unexpected is also "cannot run", never
@@ -264,27 +392,33 @@ try {
 
 // ── Verdict — silence is not success ──────────────────────────────────────
 if (fatal === null && probesRun !== EXPECTED_PROBES) {
-  fatal = `ran ${probesRun} probes, expected ${EXPECTED_PROBES} — a guard that cannot prove it ran is not a pass`;
+  fatal = `ran ${probesRun} probes, expected ${EXPECTED_PROBES} — a probe that cannot prove it ran is not a pass`;
   log({ fatal });
 }
 log({
-  step: 'VERDICT', probesRun, failed: fails, fatal, residue,
-  limit: 'Proves DEPLOYED BEHAVIOUR only — not that the deployed policy came from the checked-in migration. Covers SELECT and UPDATE on scenarios; not DELETE, other tables, or the RPC paths.',
+  step: 'VERDICT', probesRun, failed: fails, brokenControls, fatal, residue, forgedRowCreated: forgedRowExists,
+  limit: 'Proves DEPLOYED BEHAVIOUR on the DIRECT browser→PostgREST door only — not that the deployed policy came from the checked-in migration, and NOT the path this product’s own server uses (that one holds the service-role key and bypasses these policies by construction). Covers SELECT and UPDATE on scenarios; not DELETE, other tables, guest rows, or the RPC paths.',
 });
 
+// Exit 1 outranks everything: a positive observation of cross-user access is
+// the one fact that must never be downgraded by a tidy-up problem.
 if (fails.length > 0) {
-  console.error(`\nRLS ISOLATION GUARD — FAILED (${fails.length}):\n` + fails.map((f) => `  · ${f}`).join('\n'));
+  console.error(`\nISOLATION PROBE — FAILED (${fails.length}):\n` + fails.map((f) => `  · ${f}`).join('\n'));
   if (residue.length > 0) console.error(`\n⚠ residue left behind:\n` + residue.map((r) => `  · ${r}`).join('\n'));
   process.exit(1);
 }
+if (brokenControls.length > 0 && fatal === null) {
+  fatal = `positive control(s) failed — this run could not read or write its OWN row, so it had no observation point: ${brokenControls.join('; ')}`;
+  log({ fatal });
+}
 if (fatal !== null) {
-  console.error(`\nRLS ISOLATION GUARD — HARD FAIL (could not run): ${fatal}`);
+  console.error(`\nISOLATION PROBE — HARD FAIL (could not run): ${fatal}`);
   if (residue.length > 0) console.error(`\n⚠ residue left behind:\n` + residue.map((r) => `  · ${r}`).join('\n'));
   process.exit(2);
 }
 if (residue.length > 0) {
-  console.error(`\nRLS ISOLATION GUARD — HARD FAIL: probes held, but this run could not clear its own rows:\n`
+  console.error(`\nISOLATION PROBE — HARD FAIL: probes held, but this run could not clear its own rows:\n`
     + residue.map((r) => `  · ${r}`).join('\n'));
   process.exit(2);
 }
-console.error(`\nRLS isolation guard: ${probesRun}/${EXPECTED_PROBES} probes ran, all held.`);
+console.error(`\ncross-user isolation probe: ${probesRun}/${EXPECTED_PROBES} probes ran, all held.`);
