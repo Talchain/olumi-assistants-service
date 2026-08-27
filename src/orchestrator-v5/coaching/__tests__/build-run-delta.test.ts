@@ -427,4 +427,76 @@ describe('buildRunDelta — the contract polices the producer', () => {
     expect(built.delta.edit_list).toBeUndefined();
     expect(built.delta.flip_thresholds).toEqual([]);
   });
+
+  /**
+   * ⭐ THE PIN THAT KEEPS THE TRANSPORT-ONLY CLAIM TRUE.
+   *
+   * `flip_thresholds` is a RATIFIED TIER-3 CLAIM-DENIED key
+   * (`compose/claim-safety-cage.ts` TIER3_LEAK_BLOCK_FIELDS). It is also
+   * transport-clean and REQUIRED by `RunDeltaObjectSchema` — a plain
+   * `z.array(...)`, verified by execution: omitting it fails to parse with
+   * `invalid_type: Required`, while the optional `edit_list` omits cleanly. So
+   * this producer MUST emit the key, and its whole claim-safety posture rests
+   * on one sentence: it transports the key and says nothing through it.
+   *
+   * That sentence was true by inspection and pinned by nothing. It is pinned
+   * here, across EVERY delta this suite can construct rather than on one
+   * fixture, so slice two cannot populate the array without turning this red
+   * and returning through claim-safety review (Brief 4 §9). An allow-list
+   * entry granted over an unpinned promise is a promise; over this it is a
+   * contract.
+   *
+   * ⚠ THE ASSERTION IS `[]`, NOT "no forbidden strings in it". A content check
+   * would be a guard shaped like the leak it fears and would pass the moment
+   * someone added a row it did not think to look for. Emptiness is the
+   * property that actually makes the claim posture true.
+   */
+  it('INVARIANT: flip_thresholds is EMPTY on every delta this suite can build', () => {
+    const builds = { ui: null, cee: null, plot: 'plot-1', isl: 'isl-1' };
+    const everyConstructibleDelta = [
+      // C2_unpaired (the factor-value-edit class), entitled and withheld.
+      build(pair(FVE_PRIOR, FVE_CURRENT)),
+      build(pair(FVE_PRIOR, FVE_CURRENT), false),
+      // C4_budget_drift.
+      build(pair(
+        fact({ options: OPTIONS_PRIOR, seed: '111', nSamples: 10_000, hash: 'hash-a', computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', nSamples: 5_000, hash: 'hash-a', computedAt: '2026-06-07T00:00:00.000Z' }),
+      )),
+      // C3_engine_drift.
+      build(pair(
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-1' }, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-2' }, computedAt: '2026-06-07T00:00:00.000Z' }),
+      )),
+      // C1_attributable (uncertainty-only edit, builds echo riding).
+      build(pair(
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, computedAt: '2026-06-07T00:00:00.000Z' }),
+      )),
+      // C0_identical.
+      build(pair(
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-07T00:00:00.000Z' }),
+      )),
+    ];
+
+    // The invariant is worthless if nothing was constructed — an "all of them
+    // are empty" assertion over an empty list passes by testing nothing
+    // (CLAUDE.md trap 13). Pin the count AND that every attribution case the
+    // producer can reach is represented.
+    const deltas = everyConstructibleDelta
+      .filter((r): r is Extract<typeof r, { kind: 'ok' }> => r.kind === 'ok')
+      .map((r) => r.delta);
+    expect(deltas).toHaveLength(6);
+    expect([...new Set(deltas.map((d) => d.attribution_case))].sort()).toEqual([
+      'C0_identical',
+      'C1_attributable',
+      'C2_unpaired',
+      'C3_engine_drift',
+      'C4_budget_drift',
+    ]);
+
+    for (const delta of deltas) {
+      expect(delta.flip_thresholds).toEqual([]);
+    }
+  });
 });
