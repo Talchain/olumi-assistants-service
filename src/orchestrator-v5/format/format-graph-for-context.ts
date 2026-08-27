@@ -104,6 +104,16 @@ export interface DisplaySafeEdge {
   /** Compactor-classified coefficient confidence; no raw std reaches the prompt. */
   readonly coefficient_confidence?: CompactCoefficientConfidence;
   readonly provenance?: CompactProvenance;
+  /**
+   * Emitted ONLY for `'bidirected'`. Without it the model-facing edge list shows
+   * a bidirected edge as an ordinary link while the option's `reaches` set
+   * correctly omits it — two contradictory Zone 2 facts with no datum to
+   * reconcile them, in the same false-negative direction as the witnessed
+   * defect. A bidirected edge is an unmeasured common cause, not a directed
+   * path; carrying the type lets the model see WHY it is not a route instead of
+   * inferring that the reachable set is wrong.
+   */
+  readonly edge_type?: 'bidirected';
 }
 
 export interface DisplaySafeOption {
@@ -204,6 +214,8 @@ interface RawEdgeShape {
    *  numeric magnitudes are non-negative). Ignored when the compact
    *  numeric `strength` is already signed. */
   readonly effect_direction?: unknown;
+  /** Non-default edge type from compactGraph; only 'bidirected' is emitted. */
+  readonly edge_type?: unknown;
   /** Closed compactor band emitted by compactGraph; raw std remains stripped. */
   readonly coefficient_confidence?: unknown;
   readonly provenance?: unknown;
@@ -549,6 +561,7 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
     relationship: string;
     coefficient_confidence?: CompactCoefficientConfidence;
     provenance?: CompactProvenance;
+    edge_type?: 'bidirected';
   } = {
     from,
     to,
@@ -562,6 +575,9 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
   }
   const provenance = asProvenance(raw.provenance);
   if (provenance !== undefined) edge.provenance = provenance;
+  // Only the non-default value is carried, and only verbatim: an unrecognised
+  // value is dropped rather than coerced, so this can never invent a type.
+  if (raw.edge_type === 'bidirected') edge.edge_type = 'bidirected';
   return edge;
 }
 

@@ -206,6 +206,57 @@ describe("compactGraph — per-option structural reachability", () => {
     expect(reachesOf(compactGraph(g), "opt_a")).toEqual(["fac_b", "fac_m", "fac_z"]);
   });
 
+  it("DANGLING_EDGE_TARGET_IS_NOT_A_REACHABLE_NODE — GraphV3 does not enforce referential integrity", () => {
+    // ⭐ THE CASE THE ORIGINAL CORPUS COULD NOT PRODUCE, WHICH IS WHY
+    // REACHES_DOES_NOT_INVENT_IDS BELOW WAS RUNNING WHERE IT COULD NOT FAIL.
+    // `edges[].to` is a bare string in GraphV3 — an edge to a node that does
+    // not exist passes STRICT parse on the canonical arm. Without the filter
+    // the traversal emits that id, the display layer finds no label and falls
+    // back to the raw id, and the model is handed a node that does not exist.
+    const g = graph(
+      [node("opt_a", "option"), node("fac_real", "factor")],
+      [edge("opt_a", "fac_real"), edge("fac_real", "fac_GHOST_NOT_A_NODE")],
+    );
+    const result = compactGraph(g);
+    expect(reachesOf(result, "opt_a")).toEqual(["fac_real"]);
+    expect(reachesOf(result, "opt_a")).not.toContain("fac_GHOST_NOT_A_NODE");
+  });
+
+  it("DANGLING_TARGET_DOES_NOT_TRUNCATE_THE_REST — the filter drops one entry, not the set", () => {
+    // The opposite-direction twin: a filter written too widely would silently
+    // shorten the set, which reads to the model as genuine non-reachability —
+    // the very defect this projection exists to remove.
+    const g = graph(
+      [node("opt_a", "option"), node("fac_x", "factor"), node("fac_y", "factor")],
+      [edge("opt_a", "fac_x"), edge("opt_a", "fac_y"), edge("opt_a", "fac_GHOST")],
+    );
+    expect(reachesOf(compactGraph(g), "opt_a")).toEqual(["fac_x", "fac_y"]);
+  });
+
+  it("BIDIRECTED_EDGE_CARRIES_ITS_TYPE_INTO_THE_COMPACT_EDGE — no contradictory pair", () => {
+    // Gate 1. `reaches` correctly excludes a bidirected edge; without the type
+    // on the edge itself the pack carried an edge that LOOKS like a link beside
+    // a reachable set that omits it, with no datum to reconcile them.
+    const g = graph(
+      [node("opt_a", "option"), node("fac_b", "factor")],
+      [edge("opt_a", "fac_b", { edge_type: "bidirected" })],
+    );
+    const result = compactGraph(g);
+    const e = result.edges.find((x) => x.from === "opt_a" && x.to === "fac_b");
+    expect(e).toBeDefined();
+    expect(e!.edge_type).toBe("bidirected");
+    expect(reachesOf(result, "opt_a")).toEqual([]);
+  });
+
+  it("DIRECTED_EDGE_OMITS_THE_TYPE — the default costs zero bytes", () => {
+    const g = graph(
+      [node("opt_a", "option"), node("fac_b", "factor")],
+      [edge("opt_a", "fac_b")],
+    );
+    const e = compactGraph(g).edges[0]!;
+    expect(e).not.toHaveProperty("edge_type");
+  });
+
   it("REACHES_DOES_NOT_INVENT_IDS — every entry is a node in the same graph", () => {
     const result = compactGraph(witnessedBerlinGraph());
     const ids = new Set(result.nodes.map((n) => n.id));

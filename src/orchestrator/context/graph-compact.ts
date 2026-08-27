@@ -123,6 +123,23 @@ export interface CompactEdge {
    *  Omitted when the compactor emits no confidence phrase or the edge is not
    *  interpreted as causal. */
   coefficient_confidence?: CompactCoefficientConfidence;
+  /**
+   * Emitted ONLY for `'bidirected'`; `'directed'` is the default and is omitted.
+   *
+   * ⚠ THIS EXISTS TO STOP THE FIX RE-CREATING A SMALLER VERSION OF THE DEFECT.
+   * `reaches` correctly excludes bidirected edges (they are unmeasured common
+   * causes, not directed paths). But without this field a bidirected edge
+   * appeared in the model-facing edge list as an ORDINARY edge, so the pack
+   * carried two contradictory Zone 2 facts — an edge that looks like a link,
+   * and a reachable set that omits it — with no datum to reconcile them, in
+   * the FALSE-NEGATIVE direction. The model can only see WHY the path is not
+   * a path if it can see the edge's type.
+   *
+   * Costs zero bytes on any graph with no bidirected edges, which is why it is
+   * carried rather than merely described in prose: the byte cost lands only on
+   * the graphs where the disambiguation is actually needed.
+   */
+  edge_type?: 'bidirected';
   /** Display-safe provenance projection. Mapped from edge.provenance.source.
    *  Unknown / absent values map to `'ai_inferred'`. */
   provenance?: CompactProvenance;
@@ -528,8 +545,18 @@ function buildPlainInterpretation(
 function buildOptionReachability(
   nodeId: string,
   edges: GraphV3T["edges"],
+  knownNodeIds: ReadonlySet<string>,
 ): string[] {
-  return collectDirectedReachable(nodeId, edges);
+  // ⚠ DANGLING EDGE TARGETS ARE DROPPED, AND THIS IS NOT DEFENSIVE PADDING.
+  // `GraphV3` does not enforce referential integrity between `edges[].to` and
+  // `nodes[].id`, so an edge to a non-existent node passes STRICT parse on the
+  // canonical arm. The traversal would then place that id in the reachable set,
+  // the display layer would find no label for it and fall back to the raw id,
+  // and the model would be handed a node that does not exist — an INVENTED
+  // element in the one projection added to stop invented topology.
+  // Filtering here (the only layer holding both the edges and the node list)
+  // keeps the set a claim about nodes the model can actually see.
+  return collectDirectedReachable(nodeId, edges).filter((id) => knownNodeIds.has(id));
 }
 
 // ============================================================================
@@ -556,6 +583,7 @@ function buildOptionReachability(
  * provenance (display-safe CompactProvenance — derived from edge.provenance.source),
  * _raw_provenance (raw provenance.source string for diagnostics).
  * Dropped per edge: strength.std, effect_direction, label, edge.provenance.reasoning.
+ * Kept per edge (non-default only): edge_type, emitted solely for 'bidirected'.
  *
  * Output is sorted: nodes by id, edges by from then to.
  */
@@ -563,9 +591,11 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
   // Build lookup maps for resolving factor IDs to labels and node kinds
   const labelMap = new Map<string, string>();
   const kindMap = new Map<string, string>();
+  const knownNodeIds = new Set<string>();
   for (const node of graph.nodes) {
     labelMap.set(node.id, node.label ?? node.id);
     kindMap.set(node.id, node.kind);
+    knownNodeIds.add(node.id);
   }
 
   const nodes: CompactNode[] = graph.nodes
@@ -677,7 +707,7 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
       if (node.kind === 'option') {
         // Structural reachability. ALWAYS emitted on an option (empty included)
         // so absence of the key means "not an option", never "not computed".
-        n.reaches = buildOptionReachability(node.id, graph.edges);
+        n.reaches = buildOptionReachability(node.id, graph.edges, knownNodeIds);
 
         const data = anyNode.data as Record<string, unknown> | undefined;
         if (data && typeof data.interventions === 'object' && data.interventions !== null) {
@@ -703,6 +733,12 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         strength: edge.strength?.mean ?? 0,
         exists: edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
       };
+
+      // Non-default only: `directed` is the default and is omitted, so a graph
+      // with no bidirected edges pays nothing for this field.
+      if ((edge as { edge_type?: unknown }).edge_type === 'bidirected') {
+        e.edge_type = 'bidirected';
+      }
 
       const interpretation = buildPlainInterpretation(edge, labelMap, kindMap);
       if (interpretation) {
