@@ -7,7 +7,8 @@
  * `runTurnExecutor` (proven at the boundary in
  * `orchestrator/__tests__/route-v2-chip-click-intent.test.ts`). Here we prove the
  * EXECUTOR half: given that option, the run-comparison gate is reached with
- * `forceIntent=true`, so the pill is answered by the REAL two-run `RunDelta`
+ * `forceIntent=true`, so the pill is answered by the REAL two-run
+ * `ContentSafeRunDelta`
  * WITHOUT depending on the free-text `classifyAnalyticalIntent` regex — and the
  * freshness fail-closed posture is untouched (stale → honest re-run, never a
  * comparison).

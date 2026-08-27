@@ -79,6 +79,7 @@
  */
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { config } from '../config/index.js';
 
@@ -95,6 +96,7 @@ import {
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
+import { buildRunDelta } from './coaching/build-run-delta.js';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -247,6 +249,26 @@ export interface FinaliserContext {
    * from the facts.
    */
   readonly autoRunInFlight?: { readonly startedAt: string };
+  /**
+   * THE CONSEQUENCE PRODUCER'S INPUT — the turn's already-loaded
+   * `prior_facts`, threaded so the finaliser can stamp the wire `run_delta`
+   * block (see `coaching/build-run-delta.ts`).
+   *
+   * ⚠ ABSENCE IS THE FAIL-CLOSED DIRECTION AND IS FULLY SUPPORTED. Exits that
+   * do not supply it stamp no `run_delta`, which the contract models
+   * explicitly: *"absent on every non-rerun turn AND on reruns produced before
+   * the producer shipped / where no prior fact exists; never defaulted, and a
+   * consumer renders NO delta card on absence."* So a call site that has no
+   * facts in scope simply omits this, and nothing downstream infers anything
+   * from the omission.
+   *
+   * It is READ here rather than re-derived: these are the same facts the
+   * turn's freshness verdict and claim-safety reads were taken from, so the
+   * delta cannot describe a run the rest of the response never saw
+   * (CLAUDE.md trap 12 — two derivations over different inputs are how one
+   * response contradicts itself).
+   */
+  readonly priorFacts?: readonly HandlerFact[];
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -337,8 +359,21 @@ export function finaliseV5Response(
   // fixture this lane wrote). Composed from values this turn already computed
   // — no engine call, no model call, no store read.
   const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
-  FINALISED_RESPONSES.add(withAnalysisState);
-  return withAnalysisState as FinalisedV5Response;
+  // THE RUN-OVER-RUN CONSEQUENCE (schemas 0.39.0 `OlumiResponseSchema.run_delta`).
+  // ADDITIVE BY CONSTRUCTION: adds at most one top-level key and rewrites none,
+  // so a consumer that ignores it sees byte-identical behaviour.
+  //
+  // `mayNameLeadingOption` is read from the ctx member that already exists for
+  // the leader-claim conjunction, and its documented absence semantics —
+  // "absence is read as NOT entitled, which is the fail-closed direction" — are
+  // exactly right here: a turn that cannot vouch for the permission emits a
+  // delta with no leader ids rather than one that names an option it may not.
+  //
+  // The producer is PURE and TOTAL: on anything it cannot honestly construct it
+  // returns a discriminated refusal and we stamp nothing.
+  const withRunDelta = attachRunDelta(withAnalysisState, ctx);
+  FINALISED_RESPONSES.add(withRunDelta);
+  return withRunDelta as FinalisedV5Response;
 }
 
 /**
@@ -480,6 +515,33 @@ function sanitiseEnrichmentBlocks(
   });
   if (!mutated) return response;
   return { ...asRecord, blocks: newBlocks } as OlumiResponse;
+}
+
+/**
+ * Stamp the run-over-run consequence, or nothing.
+ *
+ * ⚠ THE OMIT PATH IS THE DEFAULT AND IT IS NOT A DEGRADED STATE. The contract
+ * declares `run_delta` optional with explicit absence semantics, and the
+ * producer refuses — with a discriminated reason — on every pair it cannot
+ * honestly classify. Nothing here converts a refusal into a partial or
+ * placeholder block: a fabricated comparison is worse than an absent one, and
+ * an absent one is what the UI is already built to render.
+ *
+ * ⚠ NO `?? {}` / `?? 0` ANYWHERE ON THIS PATH. `priorFacts` absent means the
+ * exit had no facts in scope, not that there were none.
+ */
+function attachRunDelta(
+  response: OlumiResponse,
+  ctx: FinaliserContext,
+): OlumiResponse {
+  if (ctx.priorFacts === undefined) return response;
+  const built = buildRunDelta({
+    priorFacts: ctx.priorFacts,
+    // Fail-closed on absence, per this member's own documented semantics.
+    mayNameLeadingOption: ctx.mayNameLeadingOption === true,
+  });
+  if (built.kind !== 'ok') return response;
+  return { ...response, run_delta: built.delta };
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {

@@ -36,7 +36,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   compareRuns,
   projectRunFact,
-  type RunDelta,
+  type ContentSafeRunDelta,
 } from '../coaching/compare-runs.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
@@ -130,7 +130,7 @@ const EDIT_HANDLER_IDS = new Set([
  */
 export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
-  readonly runDelta?: RunDelta | null;
+  readonly runDelta?: ContentSafeRunDelta | null;
   /**
    * PR2 L2 — the authored change that landed between the two runs, or null.
    * Absent/null reproduces the pre-attribution copy BYTE-IDENTICALLY on every
@@ -188,7 +188,7 @@ function attributionPrefix(change: InterveningChange | null): string {
  * points only, no raw decimals, no IDs.
  */
 function composeRerunText(
-  delta: RunDelta | null,
+  delta: ContentSafeRunDelta | null,
   interveningChange: InterveningChange | null = null,
 ): string {
   if (delta === null || !delta.comparable) {
@@ -480,7 +480,7 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * a different "previous run" than the rest of the turn was reasoning about.
  */
 function buildRerunAcknowledgement(input: CoachingSignalInput): {
-  readonly delta: RunDelta | null;
+  readonly delta: ContentSafeRunDelta | null;
   readonly interveningChange: InterveningChange | null;
 } {
   const none = { delta: null, interveningChange: null } as const;
