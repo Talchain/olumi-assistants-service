@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { readIsBaseline } from '../../../cee/baseline-identity.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { buildUserMessage } from '../../routing/route-with-tool-use.js';
+import { projectContextPackReadiness } from '../../routing/readiness-summary.js';
+import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { compactGraphForContextPack } from '../compact-graph-for-contextpack.js';
 import { assembleContextPack } from '../context-pack-assembler.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
@@ -79,6 +82,30 @@ function observedOptions(prompt: string): Array<Record<string, unknown>> {
   );
 }
 
+function promptFromRawNodes(
+  nodes: GraphStateIngress['nodes'],
+  readiness?: NonNullable<ReturnType<typeof projectContextPackReadiness>>,
+): string {
+  const graph = { nodes, edges: [] } as GraphStateIngress;
+  const outcome = compactGraphForContextPack(graph, { requestId: 'req-raw-baseline-option' });
+  if (outcome.kind !== 'compacted' || outcome.via !== 'strict_parse') {
+    throw new Error(`expected strict compaction, got ${JSON.stringify(outcome)}`);
+  }
+  const pack = assembleContextPack({
+    payload: makeMessagePayload({
+      scenario_id: 'scen-raw-baseline-option',
+      message: 'What blocks the current approach?',
+    }),
+    priorTurns: [],
+    priorFacts: [],
+    graphContext: { status: 'canonical' },
+    graph,
+    compactedGraph: outcome.compact,
+    ...(readiness === undefined ? {} : { readiness }),
+  });
+  return buildUserMessage(pack, 'What blocks the current approach?');
+}
+
 type GraphContextStatus = 'canonical' | 'provisional' | 'unavailable';
 
 function promptFromConflictingRawOptions(status?: GraphContextStatus): string {
@@ -125,6 +152,91 @@ function promptFromConflictingRawOptions(status?: GraphContextStatus): string {
 }
 
 describe('canonical baseline-option continuity', () => {
+  it.each([
+    ['node false, producer data true', false, true],
+    ['node true, producer data false', true, false],
+  ] as const)(
+    'resolves %s through the single producer authority before strict parsing',
+    (_case, nodeFlag, dataFlag) => {
+      const rawOption = {
+        id: 'opt_current',
+        kind: 'option',
+        label: 'Current arrangement',
+        is_baseline: nodeFlag,
+        data: { is_baseline: dataFlag },
+      };
+      expect(readIsBaseline(rawOption)).toBe(true);
+
+      const prompt = promptFromRawNodes([
+        rawOption,
+        { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+      ] as GraphStateIngress['nodes']);
+      expect(observedOptionNodes(prompt).filter((node) => node.is_baseline === true)).toEqual([
+        expect.objectContaining({ id: 'opt_current' }),
+      ]);
+      expect(prompt).not.toContain('"data"');
+      expect(prompt).not.toContain('"is_baseline": false');
+    },
+  );
+
+  it('does not infer baseline identity from a status-quo label or a non-option marker', () => {
+    const prompt = promptFromRawNodes([
+      { id: 'opt_status_quo', kind: 'option', label: 'Status quo alternative' },
+      {
+        id: 'factor_marked',
+        kind: 'factor',
+        label: 'Marked factor',
+        is_baseline: true,
+        data: { is_baseline: true },
+      },
+    ] as GraphStateIngress['nodes']);
+
+    expect(observedOptionNodes(prompt).filter((node) => node.is_baseline === true)).toEqual([]);
+    expect(prompt).not.toContain('"is_baseline":true');
+  });
+
+  it('preserves every producer-attested marker and leaves #1148 readiness bytes unchanged', () => {
+    const readinessPayload = {
+      status: 'needs_user_input',
+      options: [],
+      repair_proposal: { kind: 'noop' },
+      readiness_issues: [
+        {
+          code: 'OPTION_VALUE_MISSING',
+          category: 'option_values',
+          repairability: 'human_input_required',
+          message: 'Producer-only blocker wording must not be re-authored here',
+          option_id: 'opt_a',
+          option_label: 'Current A',
+          factor_id: 'fac_cost',
+          factor_label: 'Cost',
+        },
+      ],
+    } as unknown as Parameters<typeof projectContextPackReadiness>[0];
+    const readiness = projectContextPackReadiness(readinessPayload)!;
+    const prompt = promptFromRawNodes(
+      [
+        {
+          id: 'opt_a',
+          kind: 'option',
+          label: 'Current A',
+          is_baseline: false,
+          data: { is_baseline: true },
+        },
+        { id: 'opt_b', kind: 'option', label: 'Current B', is_baseline: true },
+      ] as GraphStateIngress['nodes'],
+      readiness,
+    );
+    const pack = observeSerialisedPack(prompt);
+
+    expect(
+      observedOptionNodes(prompt)
+        .filter((node) => node.is_baseline === true)
+        .map((node) => node.id),
+    ).toEqual(['opt_a', 'opt_b']);
+    expect(pack.readiness).toEqual(readiness);
+  });
+
   it('moves the sole saved current-approach marker with the durable model fact', () => {
     const beforePrompt = promptForBaseline('opt_current');
     const afterPrompt = promptForBaseline('opt_change');

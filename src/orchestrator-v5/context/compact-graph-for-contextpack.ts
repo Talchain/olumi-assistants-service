@@ -23,6 +23,7 @@
  */
 
 import { log } from '../../utils/telemetry.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import {
   compactGraph,
@@ -82,7 +83,7 @@ export function compactGraphForContextPack(
   if (parsed.success) {
     return {
       kind: 'compacted',
-      compact: compactGraph(parsed.data),
+      compact: compactGraph(withProducerBaselineIdentity(parsed.data, graphState)),
       via: 'strict_parse',
     };
   }
@@ -168,6 +169,58 @@ export function isCanonicalStrictContextGraphCompaction(
 }
 
 /**
+ * GraphV3's strict projection intentionally removes the legacy `data` bag.
+ * Baseline identity is one of the few producer-attested facts that can still
+ * arrive on that surface, so resolve the estate's existing authority rule
+ * before parsing and carry only an explicit effective `true` onto the parsed
+ * option with the same ID. This is transport, not adjudication: labels and the
+ * ingress `options[]` index are never consulted, and every explicit marker is
+ * preserved.
+ */
+function withProducerBaselineIdentity(
+  parsed: GraphV3T,
+  raw: GraphStateIngress,
+): GraphV3T {
+  const baselineOptionIds = new Set<string>();
+
+  for (const candidate of raw.nodes) {
+    const node = candidate as {
+      readonly id?: unknown;
+      readonly kind?: unknown;
+      readonly is_baseline?: unknown;
+      readonly data?: unknown;
+    };
+    if (node.kind !== 'option' || typeof node.id !== 'string') continue;
+
+    const data =
+      typeof node.data === 'object' && node.data !== null
+        ? (node.data as { readonly is_baseline?: boolean })
+        : undefined;
+    if (
+      readIsBaseline({
+        ...(typeof node.is_baseline === 'boolean'
+          ? { is_baseline: node.is_baseline }
+          : {}),
+        ...(data === undefined ? {} : { data }),
+      }) === true
+    ) {
+      baselineOptionIds.add(node.id);
+    }
+  }
+
+  if (baselineOptionIds.size === 0) return parsed;
+
+  return {
+    ...parsed,
+    nodes: parsed.nodes.map((node) =>
+      node.kind === 'option' && baselineOptionIds.has(node.id)
+        ? { ...node, is_baseline: true }
+        : node,
+    ),
+  };
+}
+
+/**
  * Build a minimal GraphV3T-shaped object from a permissive ingress. Same
  * inert defaults as graphStateToGraphV3 in edit-graph-dispatch.ts — the
  * compactor consumes `kind`, `label`, and `observed_state.value`; everything
@@ -196,5 +249,5 @@ function toStructuralGraphV3(graphState: GraphStateIngress): GraphV3T {
     } as GraphV3T['edges'][number];
   });
 
-  return { nodes, edges };
+  return withProducerBaselineIdentity({ nodes, edges }, graphState);
 }
