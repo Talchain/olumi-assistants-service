@@ -14,6 +14,7 @@
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
+import { collectDirectedReachable } from "../../graph/reachability.js";
 
 // ============================================================================
 // Output Types
@@ -102,6 +103,13 @@ export interface CompactNode {
   uncertainty_drivers?: string[];
   /** Present only when uncertainty text was bounded or had to be withheld. */
   uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
+  /**
+   * Node ids this OPTION can reach by a directed path, sorted, excluding
+   * itself. Emitted on option nodes ONLY — and ALWAYS on them, empty array
+   * included. See {@link buildOptionReachability} for why, and for what this
+   * field does and does not claim.
+   */
+  reaches?: string[];
 }
 
 export interface CompactEdge {
@@ -435,6 +443,95 @@ function buildPlainInterpretation(
   };
 }
 
+/**
+ * ⭐⭐ THE STRUCTURAL REACHABLE SET FOR ONE OPTION — AND WHAT IT DOES NOT CLAIM.
+ *
+ * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
+ * Witnessed on the deployed build. The assistant said, of a graph carrying
+ * `Status Quo -> Berlin office investment` (mean 1.0, exists_p 1.0) then
+ * `-> Cash runway breach` (mean 0.5):
+ *
+ *   "…since the status quo and UK expansion routes don't run through cash
+ *    runway breach at all in your current structure."
+ *
+ * Every QUANTITY in that answer was correct. The TOPOLOGY was false, over a
+ * two-hop path whose first edge was certain.
+ *
+ * ⚠ IT WAS NOT A PROMPT FAILURE, AND PROMPTING HARDER IS WHAT HAD ALREADY BEEN
+ * TRIED. `orchestrator-cf-v28` rule 3 (GROUND) requires every claim to
+ * reference model data, and its STATE_GROUNDING block says to check Zone 2
+ * structured data before claiming what does or does not exist. The model DID
+ * check Zone 2. Zone 2 carried this compactor's FLAT EDGE LIST — `{from, to,
+ * strength, exists}` per edge, no paths, no reachability, no closure — so
+ * "which routes pass through X" was a question the product instructed it to
+ * answer from a surface that does not contain the answer.
+ *
+ * Supplying the derived answer is strictly stronger than caveating the claim:
+ * with the reachable set in the pack the false sentence CONTRADICTS Zone 2,
+ * and rule 1 (SAFETY) already forbids that. A caveat cannot make a false
+ * sentence ungroundable; a fact can.
+ *
+ * ── ⚠ WHAT THIS FIELD CLAIMS, EXACTLY ───────────────────────────────────────
+ * "There is a directed route in the model AS DRAWN." That is all. It is a
+ * claim about STRUCTURE, not about strength, sign, magnitude or certainty.
+ *
+ * ⭐ IT IS DELIBERATELY **NOT** GATED ON `exists_probability`, AND THE REASON
+ * IS THE DIRECTION OF THE HARM. `exists_probability` is stripped before the
+ * model sees anything (see the `compactGraph` doc block), so a reader might
+ * reasonably ask whether a route built over a low-probability edge should
+ * count. Gating it would be wrong twice over:
+ *
+ *   1. **It would manufacture false NEGATIVES, which is the defect being
+ *      fixed.** The witnessed harm was "these routes don't run through X at
+ *      all" — a wrongly-withheld path. Any threshold that drops an edge
+ *      re-creates exactly that sentence, now with the product's own authority
+ *      behind it. Wrongly asserting non-reachability is worse than wrongly
+ *      asserting reachability, because the model can qualify the second from
+ *      the strength bands it already has and cannot recover from the first.
+ *   2. **It would mint a second threshold authority** — a hand-tuned constant
+ *      governing which edges "really" exist, sitting beside the compactor's
+ *      existing magnitude and confidence bands and answerable to nothing.
+ *      That is the class this estate keeps paying for.
+ *
+ * An edge present in the graph IS a modelled relationship; `exists_probability`
+ * is uncertainty ABOUT it. Those are two questions, and this field answers only
+ * the first. Certainty along a path is a genuinely different question with a
+ * real producer already in the estate (ISL `path_decomposition`, whose
+ * `path_effect` is a signed product of per-edge coefficients) — it is
+ * request-gated, top-3-ranked and CEE requests it nowhere today, so it is the
+ * right long-term home for path MAGNITUDE and the wrong oracle for a
+ * reachability NEGATIVE. Rowed, not built here.
+ *
+ * ── OTHER DECISIONS, WRITTEN DOWN SO THEY ARE NOT RE-LITIGATED BY GUESS ─────
+ * · **Directed-only.** A bidirected edge is an unmeasured common cause, not a
+ *   causal path — the estate's declared position. The policy is applied by
+ *   importing `graph/reachability.ts`, the single kernel that exists BECAUSE
+ *   three hand-rolled forward-BFS twins once disagreed about it. This computes
+ *   at the compactor precisely because raw `edge_type` is still present here;
+ *   it is dropped from `CompactEdge`, so no downstream layer could apply the
+ *   policy correctly.
+ * · **Options only.** The witnessed claim is about which OPTION routes pass
+ *   through a node, and per-node closure on every node would be O(n²) prompt
+ *   text for a question nobody asked.
+ * · **Always emitted on options, empty array included.** An empty set is a
+ *   POSITIVE fact ("this option is a dead end") and the draft prompts already
+ *   forbid dead-end status-quo options. Omitting the key on an empty set would
+ *   make absence ambiguous between "reaches nothing" and "not computed" — the
+ *   standing absence-means-unknown trap.
+ * · **Unbounded, deliberately.** Every other bounded field here (uncertainty
+ *   drivers, descriptions) discloses its truncation in band. A reachable set is
+ *   bounded by the node count, which is already budgeted and already in the
+ *   pack as `_node_count`; a SILENTLY short set would read as a genuine
+ *   non-reachability, i.e. the original defect. If this ever needs a cap it
+ *   needs an in-band disclosure with it, never a bare slice.
+ */
+function buildOptionReachability(
+  nodeId: string,
+  edges: GraphV3T["edges"],
+): string[] {
+  return collectDirectedReachable(nodeId, edges);
+}
+
 // ============================================================================
 // Compact Graph
 // ============================================================================
@@ -578,6 +675,10 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
 
       // Intervention summary for option nodes with data.interventions
       if (node.kind === 'option') {
+        // Structural reachability. ALWAYS emitted on an option (empty included)
+        // so absence of the key means "not an option", never "not computed".
+        n.reaches = buildOptionReachability(node.id, graph.edges);
+
         const data = anyNode.data as Record<string, unknown> | undefined;
         if (data && typeof data.interventions === 'object' && data.interventions !== null) {
           const summary = buildInterventionSummary(

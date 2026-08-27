@@ -60,7 +60,26 @@
  * refactor's clothes.
  */
 
-import { isDirectedEdge, type EdgeT } from "../schemas/graph.js";
+import { isDirectedEdge, type EdgeTypeT } from "../schemas/graph.js";
+
+/**
+ * The structural minimum a reachability traversal reads off an edge.
+ *
+ * ⚠ WHY THIS IS NOT `EdgeT`. This kernel is consumed from both edge
+ * vocabularies in the estate — `schemas/graph.ts` `EdgeT` and `schemas/cee-v3.ts`
+ * `EdgeV3T` — which disagree about how strength is carried (`strength_mean` vs
+ * `strength: {mean,std}`) and agree about nothing else a traversal needs.
+ * Reachability reads exactly three fields, so the parameter names exactly those
+ * three. Both vocabularies remain assignable, and a V3 caller no longer has to
+ * launder itself through a double-cast to reach the one place the directed-edge
+ * policy lives — which was the only alternative, and is a growth class the
+ * required CI job ratchets.
+ */
+export interface ReachabilityEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly edge_type?: EdgeTypeT | undefined;
+}
 
 /**
  * Forward adjacency over DIRECTED edges only.
@@ -70,7 +89,7 @@ import { isDirectedEdge, type EdgeT } from "../schemas/graph.js";
  * re-deriving it — the whole point of this module.
  */
 export function buildDirectedForwardAdjacency(
-  edges: readonly EdgeT[],
+  edges: readonly ReachabilityEdge[],
 ): Map<string, string[]> {
   const forward = new Map<string, string[]>();
   for (const edge of edges) {
@@ -93,7 +112,7 @@ export function buildDirectedForwardAdjacency(
  */
 export function canReachAnyGoal(
   startId: string,
-  edges: readonly EdgeT[],
+  edges: readonly ReachabilityEdge[],
   goalIds: ReadonlySet<string>,
 ): boolean {
   const forward = buildDirectedForwardAdjacency(edges);
@@ -112,4 +131,45 @@ export function canReachAnyGoal(
     }
   }
   return false;
+}
+
+/**
+ * Every node `startId` can reach by a directed path, EXCLUDING `startId`.
+ *
+ * ── WHY THIS IS A SEPARATE NAME AND NOT A FLAG ON `canReachAnyGoal` ─────────
+ * This module's own rule: *"A caller that genuinely needs [different]
+ * connectivity is asking a different question and must say so in its own
+ * name, not by flipping a flag on this one."* `canReachAnyGoal` answers a
+ * BOOLEAN about a goal set; this answers WHICH NODES. Same traversal, same
+ * directed-only edge policy — one BFS shape in one module, so the fourth twin
+ * this module exists to prevent is not created.
+ *
+ * `startId` is excluded even when a cycle returns to it: the consumer asks
+ * "what does this option lead to", and listing the option among its own
+ * consequences is noise, not a fact.
+ *
+ * Returns ids SORTED, so the projection downstream is byte-deterministic —
+ * the same guarantee `compactGraph` gives for nodes and edges.
+ */
+export function collectDirectedReachable(
+  startId: string,
+  edges: readonly ReachabilityEdge[],
+): string[] {
+  const forward = buildDirectedForwardAdjacency(edges);
+
+  const visited = new Set<string>([startId]);
+  const queue: string[] = [startId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const next of forward.get(current) ?? []) {
+      if (!visited.has(next)) {
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+  }
+
+  visited.delete(startId);
+  return [...visited].sort((a, b) => a.localeCompare(b));
 }

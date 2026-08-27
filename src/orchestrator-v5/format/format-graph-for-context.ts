@@ -80,6 +80,17 @@ export interface DisplaySafeNode {
    * model-scale value through the display channel.
    */
   readonly display_value?: string;
+  /**
+   * Option nodes only: the elements this option leads to by a directed route
+   * in the model as drawn, in the user's own label vocabulary.
+   *
+   * Derived by the compactor from the shared reachability kernel — see
+   * `buildOptionReachability` in `orchestrator/context/graph-compact.ts` for the
+   * witnessed defect it closes and, in particular, for why it is NOT gated on
+   * `exists_probability`. It is a STRUCTURAL claim only: it carries no strength,
+   * no sign and no certainty.
+   */
+  readonly reaches?: readonly string[];
 }
 
 export interface DisplaySafeEdge {
@@ -149,6 +160,9 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
+  /** Compactor-derived structural reachable set (option nodes only): node ids
+   *  on the first pass, already-resolved labels on an idempotent re-projection. */
+  readonly reaches?: unknown;
   readonly uncertainty_drivers?: unknown;
   readonly uncertainty_drivers_disclosure?: unknown;
   /**
@@ -345,7 +359,10 @@ export function looksLikeRawDecimal(value: string): boolean {
   return /^-?[\d,]+(?:\.\d+)?$/.test(value);
 }
 
-function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
+function projectNode(
+  raw: RawNodeShape,
+  labelMap: ReadonlyMap<string, string>,
+): DisplaySafeNode | null {
   const id = asString(raw.id);
   const label = asString(raw.label);
   const kind = asString(raw.kind);
@@ -362,6 +379,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     uncertainty_drivers?: readonly string[];
     uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
+    reaches?: readonly string[];
   } = { id, label, kind };
   // One narrow authority: only a literal producer field on an option can
   // identify the saved current approach. Labels such as "status quo" are not
@@ -375,6 +393,23 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
+
+  // Structural reachability, resolved into the user's own vocabulary.
+  //
+  // ⚠ AN UNRESOLVABLE ENTRY FALLS BACK TO ITS OWN STRING RATHER THAN BEING
+  // DROPPED. A silently-shortened reachable set reads to the model as a genuine
+  // non-reachability, which is precisely the false claim this projection exists
+  // to remove — so the set may become less pretty, never shorter. (The same
+  // fallback makes re-projection idempotent: on a second pass the entries are
+  // already labels and resolve to themselves.)
+  //
+  // A malformed `reaches` is omitted rather than coerced: the producer is the
+  // compactor, and a non-array here means the field did not come from it.
+  if (Array.isArray(raw.reaches) && raw.reaches.every((entry) => typeof entry === 'string')) {
+    node.reaches = (raw.reaches as readonly string[]).map(
+      (entry) => labelMap.get(entry) ?? entry,
+    );
+  }
 
   // Producer-owned uncertainty only: the shared projector preserves exact
   // strings/order within its bounds and refuses conflicting permitted source
@@ -462,10 +497,31 @@ function resolveSignedStrength(raw: RawEdgeShape): number | null {
     magnitude = raw.strength_mean;
   }
   if (magnitude === null) return null;
-  // Apply effect_direction sign override only when supplied AND the
-  // magnitude is non-negative — canonical GraphV3T emits non-negative
-  // means with sign carried separately; legacy shapes may emit signed
-  // means without a separate direction.
+  // Apply effect_direction sign override only when supplied AND the magnitude
+  // is non-negative.
+  //
+  // ⚠⚠ THE JUSTIFICATION THAT USED TO SIT HERE WAS FALSE, AND IT NEARLY COST A
+  // LANE A DAY. It read: "canonical GraphV3T emits non-negative means with sign
+  // carried separately". **It does not.** `EdgeStrengthV3.mean` is declared
+  // "Signed linear coefficient [-1, +1]" (`schemas/cee-v3.ts`), `schemas/graph.ts`
+  // says "sign indicates direction", `deriveEffectDirection(mean) = mean >= 0`
+  // makes `effect_direction` a DERIVED RESTATEMENT of that sign, and the draft
+  // prompts instruct the model to the same rule.
+  //
+  // Why the correction is recorded rather than just made: a lane investigating a
+  // witnessed SIGN INVERSION in deployed narration read this comment, saw that
+  // `compactGraph` drops `effect_direction`, and concluded it had found a
+  // structural sign-loss seam on the production path. It had not — the compact
+  // numeric IS the signed mean, so the first branch above is correct and nothing
+  // is lost. The real cause lay elsewhere (the model composing signs along a
+  // PATH it had no derived reachability for). A comment that sends the next
+  // reader hunting a data-loss defect that does not exist is a live hazard, so
+  // the false sentence is removed and its refutation left in its place.
+  //
+  // The branch itself STAYS: legacy / `editCompactGraph`-like shapes may emit a
+  // non-negative `strength_mean` alongside an explicit `effect_direction`, and
+  // it costs nothing to honour that. It is a compatibility path, not the
+  // canonical contract.
   if (raw.effect_direction === 'negative' && magnitude >= 0) return -magnitude;
   return magnitude;
 }
@@ -602,7 +658,7 @@ export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
 
   const nodes: DisplaySafeNode[] = [];
   for (const node of raw.nodes as readonly RawNodeShape[]) {
-    const projected = projectNode(node);
+    const projected = projectNode(node, labelMap);
     if (projected !== null) nodes.push(projected);
   }
 
@@ -618,7 +674,7 @@ export function formatGraphForContext(raw: ContextPackGraph): DisplaySafeGraph {
   // dropped from `nodes` above, so the two arrays stay consistent.
   const goals: DisplaySafeNode[] = [];
   for (const goal of raw.goals as readonly RawNodeShape[]) {
-    const projected = projectNode(goal);
+    const projected = projectNode(goal, labelMap);
     if (projected !== null) goals.push(projected);
   }
 
