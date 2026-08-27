@@ -356,6 +356,13 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     ['What did that update do? Set membership is important.', 'set-noun'],
     ['What did that update do? Set membership is important to us.', 'set-noun-to-phrase'],
     ['What did that update do? Delete operations are irreversible.', 'delete-noun'],
+    ['What did that update do? Does it set churn to 5%?', 'set-question-present'],
+    ['What did that update do? Did it set churn to 5%?', 'set-question-past'],
+    ['What did that update do? It may set churn to 5%.', 'set-modal-may'],
+    ['What did that update do? It can reduce churn to 5%.', 'reduce-modal-can'],
+    ['What did that update do? The update may add another constraint.', 'add-modal-may'],
+    ['What did that update do? The update can delete the old option.', 'delete-modal-can'],
+    ['What did that update do? Delete operations can affect an option.', 'delete-observation'],
   ])(
     'a leading consequence question plus a hostile observation reaches the model but writes nothing: %s',
     async (message, caseId) => {
@@ -376,52 +383,64 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     },
   );
 
-  it('a concrete trailing edit independently authorises the same model-proposed write', async () => {
+  it('a concrete trailing add is preserved as an offer instead of being dropped or written immediately', async () => {
     const routingAdapter = witnessedAddConstraintAdapter();
 
-    await runTurnExecutor(
+    const { response } = await runTurnExecutor(
       payload('What did that update do? Add another constraint.'),
       'req-warrant-effect-concrete-edit',
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
     expect(routingAdapter.chatWithTools).toHaveBeenCalled();
-    expect(graphWrites()).toHaveLength(1);
-    expect(churnConstraints(graphWrites()[0]!.graph)).toHaveLength(1);
-    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(warrantEvents('step2_gate')).toHaveLength(1);
+    expect(response.suggested_actions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action_type: 'add_constraint' })]),
+    );
+    expect(response).not.toHaveProperty('model_version_receipt');
   });
 
-  it('a numeric trailing edit keeps value-mutation authority', async () => {
+  it('a concrete trailing value edit is preserved as an offer instead of being dropped or written immediately', async () => {
     const routingAdapter = witnessedSetFactorValueAdapter(5);
 
-    await runTurnExecutor(
+    const { response } = await runTurnExecutor(
       payload('What did that update do? Set churn to 5%.'),
       'req-warrant-effect-set-value',
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
     expect(routingAdapter.chatWithTools).toHaveBeenCalled();
-    expect(graphWrites()).toHaveLength(1);
-    expect(churnRawValue(graphWrites()[0]!.graph)).toBe(5);
-    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(warrantEvents('step2_gate')).toHaveLength(1);
+    expect(response.suggested_actions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action_type: 'set_factor_value' })]),
+    );
+    expect(response).not.toHaveProperty('model_version_receipt');
   });
 
   it.each([
     ['What did that update do? Add another constraint.', 'structural'],
     ['What did that update do? Churn must be at most 3%.', 'constraint'],
-  ])('a trailing %s edit keeps constraint-mutation authority', async (message, caseId) => {
+  ])('a trailing %s edit is preserved through the offer/confirm path', async (message, caseId) => {
     const routingAdapter = witnessedAddConstraintAdapter();
 
-    await runTurnExecutor(
+    const { response } = await runTurnExecutor(
       payload(message),
       `req-warrant-effect-${caseId}`,
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
     expect(routingAdapter.chatWithTools).toHaveBeenCalled();
-    expect(graphWrites()).toHaveLength(1);
-    expect(churnConstraints(graphWrites()[0]!.graph)).toHaveLength(1);
-    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(warrantEvents('step2_gate')).toHaveLength(1);
+    expect(response.suggested_actions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action_type: 'add_constraint' })]),
+    );
+    expect(response).not.toHaveProperty('model_version_receipt');
   });
 
   it('⭐ THE WITNESSED DEFECT (walk §J7) — the proposal is DEMOTED to a proposal chip and a persisted pending, not dropped', async () => {

@@ -255,16 +255,22 @@ const KNOWN_OPEN_GAPS: readonly string[] = [
   "Reduce churn to 0.02 and do not change the model.",];
 
 /**
- * A genuine trailing edit that now requires confirmation rather than receiving
- * an immediate write warrant. Before clause authority, this row was granted
- * only because the word "update" in the LEADING READ QUESTION satisfied the
- * broad edit door; the trailing "Replace …" clause independently satisfies
- * neither canonical concrete-mutation list. That cross-clause grant was not a
- * legitimate authority to preserve. The model may still offer the edit through
- * the existing propose-confirm path.
+ * Genuine trailing edits that now require confirmation rather than receiving
+ * an immediate write warrant. The deterministic carrier recognisers establish
+ * shape, but do not distinguish a command from a question, modal possibility,
+ * or observation. The protected model route therefore preserves these intents
+ * as typed proposals and the existing propose-confirm path supplies authority.
  */
 const LEADING_EFFECT_CONFIRMATION_ONLY: readonly string[] = [
-  "What did that update do? Replace the pricing factor with margin.",];
+  "What did that update do? Change the marketing budget to 50000.",
+  "What did that update do? Decrease pricing to 80.",
+  "What did that update do? Delete the churn factor.",
+  "What did that update do? Increase hiring cost to 0.9.",
+  "What did that update do? Lower churn to 0.02.",
+  "What did that update do? Raise the budget to 60000.",
+  "What did that update do? Remove the marketing constraint.",
+  "What did that update do? Replace the pricing factor with margin.",
+];
 
 /**
  * ⛔⛔ KNOWN-OPEN **LIE** — a retraction that still gets a warrant. THE PRICE OF
@@ -409,7 +415,7 @@ describe('mutation warrant consults the explicit veto', () => {
       ...KNOWN_OPEN_GAPS,
       ...LEADING_EFFECT_CONFIRMATION_ONLY,
     ].sort());
-    expect(gaps.length).toBe(5);
+    expect(gaps.length).toBe(12);
   });
 
   /**
@@ -477,13 +483,15 @@ describe('mutation warrant consults the explicit veto', () => {
    * invariant load-bearing rather than decorative: they are canonical hits that
    * ARE explicit vetoes, so they are exactly the rows an unguarded Term 0 forks.
    */
-  it('SUPERSET — every canonical hit gets a warrant, no exceptions', () => {
-    const canonical = CORPUS.filter((c) => hasMutationSignal(c.message));
+  it('SUPERSET — every canonical hit outside the confirmation-only compound class gets a warrant', () => {
+    const canonical = CORPUS
+      .filter((c) => hasMutationSignal(c.message))
+      .filter((c) => !LEADING_EFFECT_CONFIRMATION_ONLY.includes(c.message));
     // Pin the precondition AND its size: a corpus that quietly stopped containing
     // canonical hits would leave this loop asserting nothing, which is exactly
     // how the copy of this invariant in mutation-warrant.test.ts read as coverage
     // for 43 rows while executing zero times.
-    expect(canonical.length, 'canonical-hit rows drifted').toBe(22);
+    expect(canonical.length, 'immediate-warrant canonical-hit rows drifted').toBe(15);
 
     // The rows that make this test discriminating — canonical hits that are also
     // explicit vetoes. If this ever reads 0, the invariant above is vacuous

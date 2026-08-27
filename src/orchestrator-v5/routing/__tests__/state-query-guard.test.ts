@@ -9,13 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
-import { hasMutationSignal } from '../analytical-intent.js';
-import { decomposeEditMessage } from '../edit-part-decomposition.js';
-import { mentionsStructuralEditRequest } from '../mutation-language.js';
-import {
-  hasConstraintMutationSignal,
-  hasMutationWarrantSignal,
-} from '../mutation-warrant.js';
+import { hasMutationWarrantSignal } from '../mutation-warrant.js';
 import {
   isStateQueryQuestionShape,
   tryStateQueryGuard,
@@ -112,10 +106,10 @@ describe('tryStateQueryGuard', () => {
       );
     });
 
-    it('protects a compound effect question at the route while preserving an independent trailing warrant', () => {
+    it('protects a compound effect question at the route and fails closed at immediate-write authority', () => {
       const message = 'What did that update do? Add another option.';
       expect(isStateQueryQuestionShape(message)).toBe(true);
-      expect(hasMutationWarrantSignal(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
       expect(tryStateQueryGuard({
         message,
         contextPack: ctxWith([ADD_CONSTRAINT_50K]),
@@ -125,8 +119,8 @@ describe('tryStateQueryGuard', () => {
     it.each([
       'What did that update do? Add another option.',
       'What did that update do? Delete the old option.',
-    ])('preserves an existing whole-message mutation warrant for %s', (message) => {
-      expect(hasMutationWarrantSignal(message)).toBe(true);
+    ])('does not infer affirmative command mood from a carrier-shaped tail: %s', (message) => {
+      expect(hasMutationWarrantSignal(message)).toBe(false);
       expect(tryStateQueryGuard({
         message,
         contextPack: ctxWith([ADD_CONSTRAINT_50K]),
@@ -142,6 +136,13 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? Set membership is important.',
       'What did that update do? Set membership is important to us.',
       'What did that update do? Delete operations are irreversible.',
+      'What did that update do? Does it set churn to 5%?',
+      'What did that update do? Did it set churn to 5%?',
+      'What did that update do? It may set churn to 5%.',
+      'What did that update do? It can reduce churn to 5%.',
+      'What did that update do? The update may add another constraint.',
+      'What did that update do? The update can delete the old option.',
+      'What did that update do? Delete operations can affect an option.',
       'What did that update do? Rename nothing.',
       'What did that update do? Configure how?',
       'What did that update do? Rename it back? No, leave it.',
@@ -155,13 +156,13 @@ describe('tryStateQueryGuard', () => {
     });
 
     it.each([
-      ['What did that update do? Delete the old option.', true],
-      ['What did that update do? Rename the option to Enterprise Plus.', false],
-    ] as const)(
-      'keeps protective route suppression separate from whole-message warrant: %s',
-      (message, expectedWarrant) => {
+      'What did that update do? Delete the old option.',
+      'What did that update do? Rename the option to Enterprise Plus.',
+    ])(
+      'keeps protective route suppression while withholding immediate-write authority: %s',
+      (message) => {
         expect(isStateQueryQuestionShape(message)).toBe(true);
-        expect(hasMutationWarrantSignal(message)).toBe(expectedWarrant);
+        expect(hasMutationWarrantSignal(message)).toBe(false);
         expect(tryStateQueryGuard({
           message,
           contextPack: ctxWith([ADD_CONSTRAINT_50K]),
@@ -170,53 +171,27 @@ describe('tryStateQueryGuard', () => {
     );
 
     it.each([
-      'Set membership is important.',
-      'Set membership is important to us.',
-      'Delete operations are irreversible.',
-    ])('does not promote a broad lexical signal into carrier authority: %s', (tail) => {
-      // These all hit the broad mutation vocabulary used by legacy routing.
-      // None produces a target/value edit part, structural command, or numeric
-      // constraint through the established carrier parsers.
-      expect(hasMutationSignal(tail)).toBe(true);
-      expect(
-        decomposeEditMessage(tail).accountableParts.some(
-          (part) => part.kind === 'value' && part.namedTargets.length > 0,
-        ),
-      ).toBe(false);
-      expect(mentionsStructuralEditRequest(tail)).toBe(false);
-      expect(hasConstraintMutationSignal(tail)).toBe(false);
-    });
-
-    it('pins numeric D1 authority to a parsed target and value', () => {
-      const parts = decomposeEditMessage('Set churn to 5%.').accountableParts;
-      expect(parts).toHaveLength(1);
-      expect(parts[0]).toMatchObject({ kind: 'value', namedTargets: ['churn'] });
-    });
-
-    it.each([
-      'Delete the old option.',
-      'Add another constraint.',
-    ])('pins structural authority to the existing structural-intent parser: %s', (tail) => {
-      expect(mentionsStructuralEditRequest(tail)).toBe(true);
-      expect(hasMutationSignal(tail)).toBe(true);
-    });
-
-    it('pins numeric constraint authority to the existing constraint parser', () => {
-      expect(hasConstraintMutationSignal('Churn must be at most 3%.')).toBe(true);
-    });
-
-    it.each([
       'What did that update do? Set churn to 5%.',
       'What did that update do? Delete the old option.',
       'What did that update do? Add another constraint.',
       'What did that update do? Churn must be at most 3%.',
-    ])('preserves independent affirmative trailing authority: %s', (message) => {
+    ])('requires confirmation even for an apparently affirmative compound tail: %s', (message) => {
       expect(isStateQueryQuestionShape(message)).toBe(true);
-      expect(hasMutationWarrantSignal(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
       expect(tryStateQueryGuard({
         message,
         contextPack: ctxWith([ADD_CONSTRAINT_50K]),
       })).toEqual({ matched: false });
+    });
+
+    it.each([
+      'Set churn to 5%.',
+      'Delete the old option.',
+      'Add another constraint.',
+      'Churn must be at most 3%.',
+    ])('preserves standalone affirmative edit authority: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(hasMutationWarrantSignal(message)).toBe(true);
     });
 
     it('preserves an explicit trailing veto', () => {

@@ -70,8 +70,6 @@
 
 import { hasMutationSignal } from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
-import { decomposeEditMessage } from './edit-part-decomposition.js';
-import { mentionsStructuralEditRequest } from './mutation-language.js';
 import {
   isStateQueryQuestionShape,
   splitLeadingEditEffectQuestion,
@@ -298,35 +296,22 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  */
 export function hasMutationWarrantSignal(message: string): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
-  // A leading consequence question is read-only and cannot lend its edit noun
-  // to a trailing observation. Conversely, a trailing clause cannot turn the
-  // question into a write merely because it contains a broad edit-route verb.
-  // Require the isolated tail to be accepted by an existing carrier parser:
-  // numeric target/value decomposition, structural graph-edit intent, or the
-  // deontic numeric constraint parser. The broad lexical signal remains useful
-  // elsewhere but cannot authorise this split form. This is clause authority,
-  // not a new noun/mood classifier.
+  // A leading consequence question is read-only. No existing deterministic
+  // carrier admission proves that an isolated trailing clause is an
+  // affirmative command rather than a question, possibility, or observation:
+  // the value decomposer and structural recogniser deliberately identify
+  // carrier-shaped content, not grammatical authority. Consequently this
+  // compound class always fails closed at the immediate-write boundary.
+  //
+  // The protected route still lets the model reason over the whole message.
+  // When it forms a supported typed mutation proposal, the action-layer
+  // warrant demotion persists that proposal and offers its confirmation chip;
+  // a later product-minted confirmation is the existing authoritative path to
+  // execution. This avoids adding the lexical mood classifier that repeated
+  // reviews have falsified.
   const leadingEditEffect = splitLeadingEditEffectQuestion(message);
   if (leadingEditEffect !== null) {
-    const trailing = leadingEditEffect.trailingClause;
-    if (trailing === null) return false;
-    const parsedValueAuthority = decomposeEditMessage(trailing).accountableParts.some(
-      (part) => part.kind === 'value' && part.namedTargets.length > 0,
-    );
-    // The structural parser recognises a wider edit vocabulary than this
-    // warrant historically grants (for example `rename`). Intersect it with
-    // the existing canonical mutation signal so the parser supplies object /
-    // action structure without silently widening carrier authority.
-    const parsedStructuralAuthority =
-      mentionsStructuralEditRequest(trailing) && hasMutationSignal(trailing);
-    if (
-      !parsedValueAuthority &&
-      !parsedStructuralAuthority &&
-      !hasConstraintMutationSignal(trailing)
-    ) {
-      return false;
-    }
-    return hasMutationWarrantSignal(trailing);
+    return false;
   }
   // Term 0 — the user explicitly withheld authority AND no canonical mutation
   // signal survives the prohibition. The two negated conjuncts are not decoration:

@@ -527,6 +527,19 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         message: 'What did that update do? Delete operations are irreversible.',
         expectDispatch: false,
       },
+      ...[
+        'Does it set churn to 5%?',
+        'Did it set churn to 5%?',
+        'It may set churn to 5%.',
+        'It can reduce churn to 5%.',
+        'The update may add another constraint.',
+        'The update can delete the old option.',
+        'Delete operations can affect an option.',
+      ].map((tail) => ({
+        label: `protected modal/question observation: ${tail}`,
+        message: `What did that update do? ${tail}`,
+        expectDispatch: false,
+      })),
       {
         label: 'protected from direct edit dispatch: consequence question + concrete edit',
         message: 'What did that update do? Add another option.',
@@ -536,6 +549,11 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         label: 'protected from direct edit dispatch: consequence question + delete edit',
         message: 'What did that update do? Delete the old option.',
         expectDispatch: false,
+      },
+      {
+        label: 'standalone structural delete retains the existing edit carrier',
+        message: 'Delete the old option.',
+        expectDispatch: true,
       },
       {
         label: 'suppressed: consequence question + negated rename imperative',
@@ -845,6 +863,13 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
       'What did that update do? Set membership is important.',
       'What did that update do? Set membership is important to us.',
       'What did that update do? Delete operations are irreversible.',
+      'What did that update do? Does it set churn to 5%?',
+      'What did that update do? Did it set churn to 5%?',
+      'What did that update do? It may set churn to 5%.',
+      'What did that update do? It can reduce churn to 5%.',
+      'What did that update do? The update may add another constraint.',
+      'What did that update do? The update can delete the old option.',
+      'What did that update do? Delete operations can affect an option.',
       'What did that update do? Add another option.',
       'What did that update do? Delete the old option.',
     ])('a leading consequence question always reaches the protected TurnExecutor path: %s', async (message) => {
