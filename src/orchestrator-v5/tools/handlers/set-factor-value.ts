@@ -40,7 +40,7 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
-  canonicaliseUnit,
+  canonicaliseUnitForDisplay,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
@@ -164,8 +164,8 @@ function parseProposalValue(raw: unknown): ParsedValue {
     // so it can never be PERSISTED by `after.unit = parsed.unit ?? before.unit`.
     // `inputHasUnit` already treated `''` as no-unit; carrying `''` in `unit`
     // while saying "no unit" in `inputHasUnit` is the disagreement that let a
-    // `unit: ''` write through. See `canonicaliseUnit`.
-    const unit = canonicaliseUnit(obj.unit);
+    // `unit: ''` write through. See `canonicaliseUnitForDisplay`.
+    const unit = canonicaliseUnitForDisplay(obj.unit);
     return {
       numeric: obj.value,
       ...(unit !== undefined ? { unit } : {}),

@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  canonicaliseUnit,
+  canonicaliseUnitForDisplay,
   evaluateFactorValueProposal,
   evaluatePostOperatorFactorValue,
   type ProposalRejectionReason,
@@ -227,14 +227,14 @@ describe('the execute-time backstop applies the SAME gates', () => {
   });
 });
 
-describe('an empty / whitespace-only unit is NOT a unit (canonicaliseUnit)', () => {
+describe('an empty / whitespace-only unit is NOT a unit (canonicaliseUnitForDisplay)', () => {
   it('canonicalises the empty, whitespace-only and padded forms', () => {
-    expect(canonicaliseUnit(undefined)).toBeUndefined();
-    expect(canonicaliseUnit('')).toBeUndefined();
-    expect(canonicaliseUnit('   ')).toBeUndefined();
-    expect(canonicaliseUnit('\t\n')).toBeUndefined();
-    expect(canonicaliseUnit(' £ ')).toBe('£');
-    expect(canonicaliseUnit('%')).toBe('%');
+    expect(canonicaliseUnitForDisplay(undefined)).toBeUndefined();
+    expect(canonicaliseUnitForDisplay('')).toBeUndefined();
+    expect(canonicaliseUnitForDisplay('   ')).toBeUndefined();
+    expect(canonicaliseUnitForDisplay('\t\n')).toBeUndefined();
+    expect(canonicaliseUnitForDisplay(' £ ')).toBe('£');
+    expect(canonicaliseUnitForDisplay('%')).toBe('%');
   });
 
   it('a `unit: ""` proposal is treated as a BARE number, not a redeclaration', () => {

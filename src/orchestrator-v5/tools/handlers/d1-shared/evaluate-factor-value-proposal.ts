@@ -75,10 +75,39 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  * (reachable before any of this work) READS as unitless — which is what
  * retires the malformed-copy path rather than merely stopping new instances.
  */
-export function canonicaliseUnit(unit: string | undefined): string | undefined {
+export function canonicaliseUnitForDisplay(unit: string | undefined): string | undefined {
   if (unit === undefined) return undefined;
   const trimmed = unit.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * THE KEY TWO SPELLINGS ARE COMPARED ON — trimmed AND case-folded.
+ *
+ * ⚠ A DIFFERENT QUESTION FROM `canonicaliseUnitForDisplay`, AND THE TWO MUST NOT
+ * BE MERGED. That one answers "what do we PERSIST and SHOW?" and therefore keeps
+ * the user's own case; this one answers "are these the SAME UNIT?" and therefore
+ * folds it. They were one function called `canonicaliseUnit` until the C4 lane,
+ * and that single name is what produced the live defect below.
+ *
+ * MEASURED at 3ab35d34: a proposal in 'Months' against a factor stored as
+ * 'months' was refused `unit_mismatch` with the copy "This factor uses months;
+ * the value provided is in Months." — a refusal naming two strings a user reads
+ * as identical. PLoT's `classifyUnitCompatibility` reconciled the same pair, so
+ * the two services disagreed on the same input.
+ *
+ * ⚠ FOLDING CASE IS NOT LOOSENING THE GATE. It equates SPELLINGS of one unit and
+ * nothing else: 'months' vs 'weeks' (a 4.33x conversion) and the currency pair
+ * are still `unit_mismatch`, pinned as opposite-direction twins in
+ * `__tests__/unit-comparison-key.test.ts`. Never widen this to strip punctuation
+ * or match prefixes — that would bless a real rescale as a spelling.
+ *
+ * NOT for percent classification: a unit's IDENTITY and its SCALE CONVENTION are
+ * two more different questions. See `unit-percent-authority.ts`.
+ */
+export function unitComparisonKey(unit: string | undefined): string | undefined {
+  const display = canonicaliseUnitForDisplay(unit);
+  return display === undefined ? undefined : display.toLowerCase();
 }
 
 /**
@@ -376,13 +405,13 @@ function evaluateFactorValueProposalImpl(
 
   const operator: FactorValueOperator = rawOperator ?? 'set';
 
-  // An empty / whitespace-only unit is NOT a unit — see `canonicaliseUnit`.
+  // An empty / whitespace-only unit is NOT a unit — see `canonicaliseUnitForDisplay`.
   // Applied to the FACTOR's unit as well as the proposal's, so a factor already
   // carrying `''` reads as unitless here: that is what retires the malformed
   // `bare_ratio_on_unit_factor` copy ("not a value in .") and restores guard
   // 2c for such a factor, rather than only preventing new `''` writes.
-  const unit = canonicaliseUnit(rawUnit);
-  const factorUnit = canonicaliseUnit(rawFactorUnit);
+  const unit = canonicaliseUnitForDisplay(rawUnit);
+  const factorUnit = canonicaliseUnitForDisplay(rawFactorUnit);
 
   // 1. Structural: rawInput must be finite. Matches the
   //    "Value must be a finite number." guard at normalise-factor-value.ts:62.
@@ -417,12 +446,21 @@ function evaluateFactorValueProposalImpl(
   //     become a currency factor downstream. Brief: "If the unit is
   //     incompatible, ask a concise clarification."
   //
-  //     Strict string equality is sufficient: CQE's `mapCqeQuantityToProposalValue`
-  //     already canonicalises units (GBP→'£', percentage→'%', etc.) so
-  //     equivalent forms have already been normalised by the time the
-  //     proposal reaches this predicate. The factor's stored unit is
-  //     written by previous handler turns through the same mapping.
-  if (unit !== undefined && factorUnit !== undefined && unit !== factorUnit) {
+  //     ⚠ THE OLD JUSTIFICATION HERE WAS FALSE AND IS WITHDRAWN (C4 lane). It
+  //     read: "Strict string equality is sufficient: CQE's
+  //     `mapCqeQuantityToProposalValue` already canonicalises units ... so
+  //     equivalent forms have already been normalised by the time the proposal
+  //     reaches this predicate." That premise holds only for the CQE path. On
+  //     every other path a case variant reached this gate verbatim, so 'Months'
+  //     against a stored 'months' was REFUSED — and the refusal copy below
+  //     interpolates both, rendering "This factor uses months; the value
+  //     provided is in Months." Compared on the folded key since.
+  //
+  //     ⚠ THE COMPARISON FOLDS; THE COPY DOES NOT. `specific_issue` keeps the
+  //     DISPLAY forms so the user sees the strings they actually typed.
+  const unitKey = unitComparisonKey(unit);
+  const factorUnitKey = unitComparisonKey(factorUnit);
+  if (unitKey !== undefined && factorUnitKey !== undefined && unitKey !== factorUnitKey) {
     return {
       ok: false,
       reason: 'unit_mismatch',
