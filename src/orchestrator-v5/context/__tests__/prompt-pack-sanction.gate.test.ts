@@ -57,6 +57,7 @@ import {
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  FACTOR_VALUES_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -142,6 +143,29 @@ const CODE_OWNED_INSTRUCTIONS = [
   // the pack. It licences continuity while keeping historical framing below
   // the current Living Model and explicit current-user corrections.
   ['BRIEF_INSTRUCTION', BRIEF_INSTRUCTION],
+  // Factor value state. Emitted by the SAME condition that puts `factor_values`
+  // on the pack — same reasoning as its six siblings above. Registering it here
+  // is what puts it under the EMISSION check; PR #1122 shipped the FIELD with
+  // no instruction at all, and nothing in this file could see that, for the
+  // reason recorded immediately below.
+  //
+  // ⛔ THIS GATE CANNOT VOUCH FOR `factor_values`, AND MUST NEVER BE CITED AS
+  // IF IT COULD. `proseLeaves` only collects strings of FOUR OR MORE words, and
+  // this field's prose is factor LABELS — the maximal fixture's own are "Churn
+  // rate", "Onboarding time", "Support load", two words each. So `factor_values`
+  // scores ZERO prose leaves and THE GATE can never fire on it. Measured with
+  // contrast controls: `brief` and `older_relevant_facts` score 1 each and DO
+  // fire; `goal_target` also scores 0 and is registered anyway — which is the
+  // precedent, and the proof that registration is driven by EMISSION and corpus
+  // membership rather than by that threshold.
+  //
+  // ⛔ DO NOT "FIX" THIS BY LENGTHENING THE FIXTURE'S LABELS. Real factor labels
+  // are short; manufacturing four-word ones would make this gate green over
+  // prose the product does not produce — a guard agreeing with itself. The
+  // discrimination for this field lives in
+  // factor-values-instruction.route-level.test.ts, which asserts the block in
+  // the RENDERED PROMPT BYTES through the real turn chain.
+  ['FACTOR_VALUES_INSTRUCTION', FACTOR_VALUES_INSTRUCTION],
 ] as const satisfies ReadonlyArray<readonly [string, string]>;
 
 const MODEL_FACING_CORPUS = [

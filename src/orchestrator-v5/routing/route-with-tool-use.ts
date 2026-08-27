@@ -1297,6 +1297,19 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.focus !== undefined) {
     parts.push('', FOCUS_INSTRUCTION);
   }
+  // FACTOR VALUE STATE — CODE-OWNED, a sibling of the instructions above,
+  // appended by the SAME condition that puts `factor_values` on the pack.
+  // Absent key → no section → no instruction → byte-identity.
+  //
+  // ⚠ THIS BLOCK IS THE HALF PR #1122 DID NOT SHIP. The field alone leaves the
+  // model free to prefer the transcript — the failure `GOAL_TARGET_INSTRUCTION`
+  // names three blocks up — and the served V5 system prompt is an
+  // operator-managed PMS row, so a code-owned sanction is the only lever this
+  // repo holds. `undefined` here is UNKNOWN, never "nothing is missing": the
+  // instruction says so in the arm where it IS emitted.
+  if (contextPack.factor_values !== undefined) {
+    parts.push('', FACTOR_VALUES_INSTRUCTION);
+  }
   parts.push('', '## User turn', message);
   return parts.join('\n');
 }
@@ -1605,6 +1618,85 @@ export const FOCUS_INSTRUCTION = [
   '- If `focus.unresolved` is `not_in_model`, say plainly that what they selected is not in the model you can see.',
   '- If `focus.unresolved` is `could_not_check`, say that you could not read the model to check — never say the element is missing, because you do not know that.',
   '- A selection is what the user wants discussed. It is not an instruction to change the model: do not edit, add or remove anything on the strength of a selection alone.',
+].join('\n');
+
+/**
+ * FACTOR VALUE STATE — the record-vs-transcript boundary for "what still needs
+ * a value?", CODE-OWNED at this locus, a sibling of {@link FOCUS_INSTRUCTION},
+ * appended to the routing user message only when the `factor_values` section is
+ * on the pack. British English.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * Journey-witnessed 26 Aug 2026 (UI `08a30ab9` / CEE `5a2640a`), reproduced
+ * three times across three phrasings:
+ *
+ *     user: "Which factors still have no value? Please list them by name."
+ *     Olumi: "I don't have a way to see which individual factors are missing a
+ *             value from here, so I can't list them by name."
+ *
+ * That answer was TRUE — nothing model-facing carried value state — while the
+ * Model tab in the same session rendered "3 of 4 have no value yet" and named
+ * all three. PR #1122 closed the data half: `projectFactorValueRecord` now puts
+ * `factor_values` on the pack, and `buildUserMessage` serialises it.
+ *
+ * ⚠ THIS BLOCK IS THE OTHER HALF, AND IT SHIPPED WITHOUT IT. The field alone
+ * leaves the model free to prefer the transcript — the failure the
+ * `goal_target` sanction next door was written to name. The served V5 system
+ * prompt is an operator-managed PMS store row (see routing/prompt-loader.ts),
+ * not editable from this repo, so a code-owned block emitted by the SAME
+ * condition that puts the section on the pack is the only sanction available —
+ * and the only one that cannot drift from the projection, because both ship
+ * from this commit.
+ *
+ * ── WHY THE WORDING IS SHAPED THIS WAY ─────────────────────────────────────
+ * Three clauses are load-bearing, and each closes a way the field could be read
+ * back into the defect it was built to end:
+ *
+ *  · TWO AXES, NEVER COLLAPSED. `has_value` and `provenance` DISAGREE in the
+ *    real data — the witnessed model held factors that were "Not set" AND
+ *    badged as AI estimates. Reading "has an estimate" as "has a value" is the
+ *    original conflation, one level up.
+ *  · `provenance` IS AUTHORSHIP, NOT A USER-WRITE RECEIPT. `classifyValueSource`
+ *    maps BOTH `brief_extraction` and `explicit` to `user_stated`; the stricter
+ *    question is `isUserWriteReceipt`, a deliberately different predicate. So
+ *    the block must never license "the user typed this". This product has
+ *    already had to fix a surface claiming a user's own value as its invention;
+ *    claiming the model's extraction as the user's word is that defect with the
+ *    sign flipped.
+ *  · HONEST AT ZERO. `without_value_count: 0` is a POSITIVE claim — the graph
+ *    was read and every factor has a value — and must be SAYABLE. Encoding
+ *    "none missing" as an absence is exactly how the witnessed defect existed,
+ *    so an absent block is UNKNOWN and never "nothing is missing".
+ *
+ * Paul's standing rule is why the fourth bullet offers a route rather than
+ * stopping at a list: never leave the user an honest dead end.
+ *
+ * Exported for the byte-level serialisation tests and for the prompt↔pack
+ * sanction gate's model-facing corpus.
+ *
+ * ⚠ THE GATE CANNOT VOUCH FOR THIS FIELD. `prompt-pack-sanction.gate.test.ts`
+ * only flags a field as needing sanction when it carries a string of FOUR OR
+ * MORE words (`proseLeaves`, the >= 4 threshold). Factor labels are short —
+ * the gate's own fixture carries "Churn rate", "Onboarding time", "Support
+ * load", all two words — so `factor_values` scores zero prose leaves and THE
+ * GATE can never fire on it. Measured, with contrasts: `brief` and
+ * `older_relevant_facts` score 1 each; `goal_target` also scores 0 and is
+ * registered anyway. Registration is driven by the EMISSION check and corpus
+ * membership, not by that threshold. Never cite a green gate as evidence that
+ * a short-label slice is sanctioned, and do NOT lengthen the fixture's labels
+ * to make it fire — manufacturing prose the real labels do not have would fake
+ * the signal instead of closing the hole.
+ */
+export const FACTOR_VALUES_INSTRUCTION = [
+  '## Factor values (deterministic — authoritative)',
+  'The `factor_values` block above is the system’s verified answer to "which factors carry a value, and which do not?", read from the saved model itself. When the user asks what still needs a value, answer from this block — not from anything said earlier in this conversation.',
+  '- `has_value` and `provenance` are SEPARATE facts and must never be merged. `has_value` says whether a value is set at all; `provenance` says who authored the value that is there. A factor can carry NO value and still be marked as the model’s own estimate — such a factor still needs a value, and an estimate must never be described as one.',
+  '- `provenance` records a value’s stated authorship, not a receipt that the user typed it. Report it as where the value came from; never say the user entered, confirmed or approved a particular figure on the strength of this field alone.',
+  '- When `without_value_count` is 0, every factor listed here HAS a value — say so plainly. That is a positive finding, not a gap in what you can see, and must never be reported as being unable to tell.',
+  '- When it is above 0, name the factors whose `has_value` is false, using their labels as given, and offer to set them. Never give a number of unset factors that disagrees with this count, and never name a factor this block does not list.',
+  '- If `factors_omitted` is present, more factors exist than are listed: do not describe the list as complete, and do not answer a "how many" question by counting the entries you can see.',
+  '- If this block is absent, you do not know the value state — say what you can see and offer to check. Never read its absence as "nothing is missing".',
+  '- Never repeat the field names or the provenance tokens into user-facing text; state the substance in plain language.',
 ].join('\n');
 
 // -----------------------------------------------------------------------
