@@ -46,7 +46,7 @@ import { z } from 'zod';
 
 import { describeSchema } from '../compose/helpers.js';
 import {
-  canonicaliseUnit,
+  canonicaliseUnitForDisplay,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
   suggestExtendedCap,
@@ -919,8 +919,8 @@ function parseValueParameter(raw: unknown): ParsedValueParameter | null {
     // An empty / whitespace-only unit is NOT a unit. Canonicalised here so the
     // validator and the handler's `parseProposalValue` agree exactly (AC.1
     // parity) and so `''` can never reach the write path. See
-    // `canonicaliseUnit`.
-    const unit = canonicaliseUnit(typeof obj.unit === 'string' ? obj.unit : undefined);
+    // `canonicaliseUnitForDisplay`.
+    const unit = canonicaliseUnitForDisplay(typeof obj.unit === 'string' ? obj.unit : undefined);
     const cap = typeof obj.cap === 'number' ? obj.cap : undefined;
     return {
       numeric: obj.value,

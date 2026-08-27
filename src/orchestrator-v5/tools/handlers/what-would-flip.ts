@@ -144,10 +144,11 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
 
     // M1 (finish-line criterion 7) — OPTION-TARGETED ANSWER.
     //
-    // When the user named ONE option ("what would make Engage Offshore Partner
-    // win?"), the answer must be about THAT option. The deterministic composer
-    // below owns those turns, matching flip rows on `alternative_winner_id`, and
-    // returns a typed refusal when no tested row makes the named option lead.
+    // When the current words name ONE option, or one canonical selected option
+    // licenses a deictic follow-up ("what would make it win?"), the answer must
+    // be about THAT option. The deterministic composer below owns those turns,
+    // matching flip rows on `alternative_winner_id`, and returns a typed refusal
+    // when no tested row makes the addressed option lead.
     //
     // WHY IT OUTRANKS SONNET'S ANSWER TOO, not only the generic fallback. This
     // is the exact question shape whose honest answer is often "nothing in the

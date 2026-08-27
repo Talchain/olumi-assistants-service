@@ -8,14 +8,14 @@
  *
  * Also covers:
  * - Real Sonnet 4.6 draft graph output validation
- * - ProvenanceSource enum coverage
+ * - GraphEvidenceSource enum coverage
  * - Regression: existing valid fixtures still pass
  * - Diagnostic trace: llm_calls populated on error path
  */
 
 import { describe, it, expect } from "vitest";
 import { LLMDraftResponse, LLMEdge, LLMNode } from "../../src/adapters/llm/shared-schemas.js";
-import { ProvenanceSource, NodeKind, FactorCategory } from "../../src/schemas/graph.js";
+import { GraphEvidenceSource, NodeKind, FactorCategory } from "../../src/schemas/graph.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
 
 // =============================================================================
@@ -171,10 +171,10 @@ describe("Real Sonnet 4.6 draft graph output — Zod validation", () => {
 });
 
 // =============================================================================
-// 2. ProvenanceSource Enum Coverage
+// 2. GraphEvidenceSource Enum Coverage
 // =============================================================================
 
-describe("ProvenanceSource enum — covers all prompt-allowed values", () => {
+describe("GraphEvidenceSource enum — covers all prompt-allowed values", () => {
   const ALL_PROVENANCE_VALUES = [
     // Original set
     "document", "metric", "hypothesis", "engine", "synthetic",
@@ -184,15 +184,15 @@ describe("ProvenanceSource enum — covers all prompt-allowed values", () => {
 
   for (const value of ALL_PROVENANCE_VALUES) {
     it(`accepts '${value}'`, () => {
-      const result = ProvenanceSource.safeParse(value);
+      const result = GraphEvidenceSource.safeParse(value);
       expect(result.success).toBe(true);
     });
   }
 
   it("rejects unknown values", () => {
-    expect(ProvenanceSource.safeParse("unknown_source").success).toBe(false);
-    expect(ProvenanceSource.safeParse("").success).toBe(false);
-    expect(ProvenanceSource.safeParse(42).success).toBe(false);
+    expect(GraphEvidenceSource.safeParse("unknown_source").success).toBe(false);
+    expect(GraphEvidenceSource.safeParse("").success).toBe(false);
+    expect(GraphEvidenceSource.safeParse(42).success).toBe(false);
   });
 });
 
