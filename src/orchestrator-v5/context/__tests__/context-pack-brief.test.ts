@@ -42,6 +42,7 @@ import {
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
   routeWithToolUse,
+  RUN_DELTA_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 
 const BRIEF = 'Should we hire two senior engineers locally or engage an offshore partner? Budget is £250k and the decision is needed by Q3.';
@@ -138,6 +139,18 @@ function assembleWithCurrentModel(brief: string | undefined): ContextPack {
 }
 
 function subtractMandatoryAuthorityDelta(message: string): string {
+  // ⭐ THE THIRD MANDATORY BLOCK. `run_delta`'s licence is ALWAYS RENDERED (its
+  // load-bearing clause governs the turn where the field is ABSENT, which is
+  // the producer's default path), so it is subtracted here exactly like the two
+  // authority blocks below. Subtracting it is what keeps the HISTORICAL golden
+  // hash below unchanged — the point of this helper is that a new mandatory
+  // block must not force a re-pin of a hash captured to detect UNINTENDED
+  // drift. Asserted exactly-once first: a silent zero here would subtract
+  // nothing and quietly re-pin the golden to different bytes.
+  expect(message.split(RUN_DELTA_INSTRUCTION)).toHaveLength(2);
+  const withoutRunDelta = message.replace(`\n\n${RUN_DELTA_INSTRUCTION}`, '');
+  expect(withoutRunDelta).not.toBe(message);
+  message = withoutRunDelta;
   const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
@@ -282,7 +295,17 @@ describe('brief reaches the serialised routing prompt', () => {
     expect(withoutBrief).toContain('Improve enterprise renewal through product value');
     expect(withBrief.split(BRIEF_INSTRUCTION)).toHaveLength(2);
     expect(withoutBrief).not.toContain(BRIEF_INSTRUCTION);
-    expect(withBrief).toContain(`${BRIEF_INSTRUCTION}\n\n## User turn\n${CURRENT_TURN}`);
+    // ⚠ ADJACENCY PIN, UPDATED NOT LOOSENED. This asserted that the brief
+    // licence sits IMMEDIATELY before the user turn. `RUN_DELTA_INSTRUCTION` is
+    // now always rendered and trails every conditional block, so the exact
+    // neighbour changed. The property worth pinning is still exact adjacency —
+    // that the brief licence is the last CONDITIONAL block and nothing
+    // unaccounted-for sits between it and the turn — so the new mandatory
+    // neighbour is NAMED here rather than the assertion being softened to an
+    // index comparison.
+    expect(withBrief).toContain(
+      `${BRIEF_INSTRUCTION}\n\n${RUN_DELTA_INSTRUCTION}\n\n## User turn\n${CURRENT_TURN}`,
+    );
     expect(withoutBrief).toContain(`## User turn\n${CURRENT_TURN}`);
   });
 
