@@ -11,7 +11,10 @@ import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
 import { hasMutationWarrantSignal } from '../mutation-warrant.js';
 import {
+  containsEditEffectQuestion,
+  isCarrierLookingCompoundTail,
   isStateQueryQuestionShape,
+  splitLeadingEditEffectQuestion,
   tryStateQueryGuard,
 } from '../state-query-guard.js';
 
@@ -23,6 +26,20 @@ const ADD_CONSTRAINT_50K: RecentMutation = {
 
 function ctxWith(recent: readonly RecentMutation[]): Pick<ContextPack, 'recent_changes'> {
   return { recent_changes: recent };
+}
+
+function expectStructuralCompoundDelegatedReadOnly(message: string): void {
+  const split = splitLeadingEditEffectQuestion(message);
+  expect(split?.trailingClause).not.toBeNull();
+  if (split === null || split.trailingClause === null) {
+    throw new Error('expected structural compound tail');
+  }
+  expect(isCarrierLookingCompoundTail(split.trailingClause)).toBe(true);
+  const outcome = tryStateQueryGuard({
+    message,
+    contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+  });
+  expect(outcome).toEqual({ matched: false });
 }
 
 describe('tryStateQueryGuard', () => {
@@ -110,10 +127,56 @@ describe('tryStateQueryGuard', () => {
       const message = 'What did that update do? Add another option.';
       expect(isStateQueryQuestionShape(message)).toBe(true);
       expect(hasMutationWarrantSignal(message)).toBe(false);
-      expect(tryStateQueryGuard({
-        message,
-        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
-      })).toEqual({ matched: false });
+      expectStructuralCompoundDelegatedReadOnly(message);
+    });
+
+    it.each([
+      ['"What did that update do?" Add another option.', 'Add another option.'],
+      ['“What did that update do?” Add another option.', 'Add another option.'],
+      ['— What did that update do? Add another option.', 'Add another option.'],
+      ['- What did that update do? Add another option.', 'Add another option.'],
+      ['* What did that update do? Add another option.', 'Add another option.'],
+      ['+ What did that update do? Add another option.', 'Add another option.'],
+      ['1. What did that update do? Add another option.', 'Add another option.'],
+      ['• What did that update do? Add another option.', 'Add another option.'],
+      ["'What did that update do?' Add another option.", 'Add another option.'],
+      ['> What did that update do? Add another option.', 'Add another option.'],
+      ['> - What did that update do? Add another option.', 'Add another option.'],
+      ['>> What did that update do? Add another option.', 'Add another option.'],
+      ['>\nWHAT DID THAT UPDATE DO?!\nAdd another option.', 'Add another option.'],
+    ])('recognises bounded presentation decoration without lending write authority: %s', (message, tail) => {
+      expect(splitLeadingEditEffectQuestion(message)).toEqual({ trailingClause: tail });
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      expectStructuralCompoundDelegatedReadOnly(message);
+    });
+
+    it.each([
+      'Note: What did that update do? Add another option.',
+      'In summary, what did that update do? Add another option.',
+      '-What did that update do? Add another option.',
+      '>>> What did that update do? Add another option.',
+      '123. What did that update do? Add another option.',
+      '§ What did that update do? Add another option.',
+    ])('does not discard semantic or out-of-grammar prefixes: %s', (message) => {
+      expect(splitLeadingEditEffectQuestion(message)).toBeNull();
+      expect(containsEditEffectQuestion(message)).toBe(true);
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+    });
+
+    it.each([
+      '**What did that update do?** Add another option.',
+      '_What did that update do?_ Add another option.',
+      '`What did that update do?` Add another option.',
+      '# What did that update do? Add another option.',
+      '- [ ] What did that update do? Add another option.',
+      '"What did that update do?"Add another option.',
+      'Note: What did that update do? Add another option.',
+    ])('presentation or semantic prefixes can decline focused UX but never regain write warrant: %s', (message) => {
+      expect(containsEditEffectQuestion(message)).toBe(true);
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
     });
 
     it.each([
@@ -121,10 +184,7 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? Delete the old option.',
     ])('does not infer affirmative command mood from a carrier-shaped tail: %s', (message) => {
       expect(hasMutationWarrantSignal(message)).toBe(false);
-      expect(tryStateQueryGuard({
-        message,
-        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
-      })).toEqual({ matched: false });
+      expectStructuralCompoundDelegatedReadOnly(message);
     });
 
     it.each([
@@ -140,9 +200,6 @@ describe('tryStateQueryGuard', () => {
       'What did that update do? Did it set churn to 5%?',
       'What did that update do? It may set churn to 5%.',
       'What did that update do? It can reduce churn to 5%.',
-      'What did that update do? The update may add another constraint.',
-      'What did that update do? The update can delete the old option.',
-      'What did that update do? Delete operations can affect an option.',
       'What did that update do? Rename nothing.',
       'What did that update do? Configure how?',
       'What did that update do? Rename it back? No, leave it.',
@@ -156,26 +213,74 @@ describe('tryStateQueryGuard', () => {
     });
 
     it.each([
+      'What did that update do? The update may add another constraint.',
+      'What did that update do? The update can delete the old option.',
+      'What did that update do? Delete operations can affect an option.',
       'What did that update do? Delete the old option.',
       'What did that update do? Rename the option to Enterprise Plus.',
-    ])(
-      'keeps protective route suppression while withholding immediate-write authority: %s',
-      (message) => {
-        expect(isStateQueryQuestionShape(message)).toBe(true);
-        expect(hasMutationWarrantSignal(message)).toBe(false);
-        expect(tryStateQueryGuard({
-          message,
-          contextPack: ctxWith([ADD_CONSTRAINT_50K]),
-        })).toEqual({ matched: false });
-      },
-    );
+      'What did that update do? Add another constraint.',
+    ])('carrier-looking compound is classified for read-only consequence composition: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      expectStructuralCompoundDelegatedReadOnly(message);
+    });
+
+    it('uses the deterministic no-recent answer plus neutral no-write disclosure when no accepted receipt exists', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What did that update do? The update may add another constraint.',
+        contextPack: ctxWith([]),
+      });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'no_recent_changes' });
+      if (!outcome.matched) throw new Error('expected deterministic no-recent response');
+      expect(outcome.assistant_text).toMatch(/record of recent edits/i);
+      expect(outcome.assistant_text).toContain('carrier-looking clause');
+      expect(outcome.assistant_text).toContain('If you intended a model change');
+      expect(outcome.assistant_text).not.toMatch(/accepted update did/i);
+    });
+
+    it.each([
+      'What did that update do? I am worried about cost.',
+      '**What did that update do?** I am worried about cost.',
+      'Note: What did that update do? I am worried about cost.',
+    ])('owns every recognised no-receipt consequence question without model speculation: %s', (message) => {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctxWith([]) });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'no_recent_changes' });
+      if (!outcome.matched) throw new Error('expected deterministic no-recent response');
+      expect(outcome.assistant_text).toMatch(/record of recent edits/i);
+      expect(outcome.assistant_text).not.toContain('carrier-looking clause');
+    });
+
+    it('discloses a quantified unmapped constraint tail without granting it authority', () => {
+      const message = 'What did that update do? Cap churn at 3%.';
+      const split = splitLeadingEditEffectQuestion(message);
+      if (split === null || split.trailingClause === null) throw new Error('expected tail');
+      expect(isCarrierLookingCompoundTail(split.trailingClause)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      const outcome = tryStateQueryGuard({ message, contextPack: ctxWith([]) });
+      expect(outcome).toMatchObject({ matched: true, dispatch: 'no_recent_changes' });
+      if (!outcome.matched) throw new Error('expected deterministic no-recent response');
+      expect(outcome.assistant_text).toContain('carrier-looking clause');
+    });
 
     it.each([
       'What did that update do? Set churn to 5%.',
-      'What did that update do? Delete the old option.',
-      'What did that update do? Add another constraint.',
-      'What did that update do? Churn must be at most 3%.',
-    ])('requires confirmation even for an apparently affirmative compound tail: %s', (message) => {
+      'What did that update do? Link Customer Churn Rate to MRR.',
+    ])('detected carrier-shaped compound remains consequence-only without independent tail authority: %s', (message) => {
+      expect(isStateQueryQuestionShape(message)).toBe(true);
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      const split = splitLeadingEditEffectQuestion(message);
+      expect(split?.trailingClause).not.toBeNull();
+      if (split === null || split.trailingClause === null) throw new Error('expected tail');
+      expect(isCarrierLookingCompoundTail(split.trailingClause)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
+    it('keeps an existing numeric-constraint carrier consequence-only even when the disclosure detector is silent', () => {
+      const message = 'What did that update do? Churn must be at most 3%.';
+      expect(containsEditEffectQuestion(message)).toBe(true);
       expect(isStateQueryQuestionShape(message)).toBe(true);
       expect(hasMutationWarrantSignal(message)).toBe(false);
       expect(tryStateQueryGuard({
@@ -199,10 +304,7 @@ describe('tryStateQueryGuard', () => {
         'What did that update do? Rename the option, but do not change the model.';
       expect(isStateQueryQuestionShape(message)).toBe(true);
       expect(hasMutationWarrantSignal(message)).toBe(false);
-      expect(tryStateQueryGuard({
-        message,
-        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
-      })).toEqual({ matched: false });
+      expectStructuralCompoundDelegatedReadOnly(message);
     });
 
     it('preserves deterministic receipt readback for the neighbouring question', () => {

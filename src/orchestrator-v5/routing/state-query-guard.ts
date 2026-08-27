@@ -54,6 +54,8 @@ import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { decomposeEditMessage } from './edit-part-decomposition.js';
+import { mentionsStructuralEditRequest } from './mutation-language.js';
 import type { HandlerValidationRegistry } from './validator.js';
 
 export type StateQueryGuardOutcome =
@@ -136,8 +138,35 @@ export type StateQueryGuardOutcome =
  * reaches the existing grounded reasoning path instead of being answered with
  * the same one-line receipt as "what changed?".
  */
-const EDIT_EFFECT_QUESTION_LEAD =
-  /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
+// Bounded presentation wrappers copied from ordinary chat rendering: one
+// Markdown blockquote/list marker or em dash, optionally followed by one quote
+// opener. They carry no semantic authority and must not let a read question
+// bypass route protection. The bound prevents arbitrary prefix text from being
+// discarded as decoration (`Note: What did …` remains outside this class).
+const EDIT_EFFECT_PRESENTATION_PREFIX =
+  String.raw`(?:(?:>{1,2}\s+(?:(?:[-—*+•]|\d{1,2}[.)])\s+)?|(?:[-—*+•]|\d{1,2}[.)])\s+))?(?:["'“‘]\s*)?`;
+const EDIT_EFFECT_QUESTION_LEAD = new RegExp(
+  String.raw`^\s*${EDIT_EFFECT_PRESENTATION_PREFIX}what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b`,
+  'i',
+);
+const EDIT_EFFECT_QUESTION_ANYWHERE =
+  /what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
+
+/**
+ * Pure write-safety predicate for the exact accepted-edit consequence question.
+ *
+ * Unlike {@link splitLeadingEditEffectQuestion}, this is intentionally
+ * unanchored. Presentation or semantic prefixes may make the focused
+ * consequence UX inapplicable, but they must never restore mutation authority
+ * to a turn that contains this read-only question.
+ */
+export function containsEditEffectQuestion(message: string): boolean {
+  return EDIT_EFFECT_QUESTION_ANYWHERE.test(message);
+}
+
+export const CARRIER_LOOKING_COMPOUND_DISCLOSURE =
+  'I did not apply the carrier-looking clause in the second part of your ' +
+  'message. If you intended a model change, please send it as a separate instruction.';
 
 /**
  * Split a leading accepted-edit consequence question from the remainder of
@@ -157,10 +186,33 @@ export function splitLeadingEditEffectQuestion(
   if (match === null) return null;
   const trailing = message
     .slice(match[0].length)
-    .replace(/^[\s?!.,;:—-]+/, '')
+    .replace(/^[\s?!.,;:—\-"'“”‘’]+/, '')
     .replace(/^(?:and|then)\b[\s,;:—-]*/i, '')
     .trim();
   return { trailingClause: trailing.length > 0 ? trailing : null };
+}
+
+/**
+ * The broad structural recogniser intentionally detects carrier-looking text,
+ * including questions, modal possibilities and observations; it does not prove
+ * that the user requested a change. Once a leading consequence question has
+ * protected the whole message from direct edit-graph dispatch, this shape must
+ * therefore stay read-only and neutral about the user's intent.
+ *
+ * Reuse the existing carrier parsers only to decide whether the neutral
+ * no-write disclosure is useful. Their output grants no intent authority and
+ * does not make any compound tail eligible for immediate write or pending
+ * confirmation. No local noun or mood vocabulary is introduced here, and the
+ * disclosure says "if you intended" rather than upgrading a detected shape
+ * into a request.
+ */
+export function isCarrierLookingCompoundTail(tail: string): boolean {
+  const decomposition = decomposeEditMessage(tail);
+  return (
+    decomposition.accountableParts.length > 0 ||
+    decomposition.unmappedParts.length > 0 ||
+    mentionsStructuralEditRequest(tail)
+  );
 }
 
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
@@ -370,7 +422,7 @@ export function isStateQueryQuestionShape(message: string): boolean {
   // authorised edit, but that is decided at the action boundary from the tail
   // alone. Direct edit routing must never reinterpret a trailing observation
   // ("The increase in cost is worrying") as authority to mutate.
-  if (splitLeadingEditEffectQuestion(message) !== null) return true;
+  if (containsEditEffectQuestion(message)) return true;
 
   const briefAudit = isBriefAuditQuestion(message);
   const originQuestion = isStructureOriginQuestion(message);
@@ -567,6 +619,26 @@ export function tryStateQueryGuard(
 
   const recent = input.contextPack.recent_changes;
 
+  // No persisted receipt means there is no licensed accepted change for the
+  // model to explain. Own this outcome deterministically for the entire exact
+  // question class, irrespective of presentation wrappers or tail shape. A
+  // carrier-looking focused tail receives only the neutral scope disclosure;
+  // it gains neither write nor pending authority.
+  if (containsEditEffectQuestion(input.message) && recent.length === 0) {
+    const focused = splitLeadingEditEffectQuestion(input.message);
+    const discloseTail =
+      focused?.trailingClause !== null &&
+      focused?.trailingClause !== undefined &&
+      isCarrierLookingCompoundTail(focused.trailingClause);
+    return {
+      matched: true,
+      dispatch: 'no_recent_changes',
+      assistant_text: discloseTail
+        ? `${NO_RECENT_CHANGES_TEXT} ${CARRIER_LOOKING_COMPOUND_DISCLOSURE}`
+        : NO_RECENT_CHANGES_TEXT,
+    };
+  }
+
   // "What changed?" asks for a receipt. "What did that update do?" asks for
   // its consequence. Repeating the same receipt for both is context loss: the
   // pack already carries the canonical post-edit graph, recent receipt and
@@ -579,20 +651,17 @@ export function tryStateQueryGuard(
   // call. No new classifier, handler, or mutation permission is introduced.
   const leadingEditEffect = splitLeadingEditEffectQuestion(input.message);
   if (leadingEditEffect?.trailingClause === null) {
-    if (recent.length === 0) {
-      return {
-        matched: true,
-        dispatch: 'no_recent_changes',
-        assistant_text: NO_RECENT_CHANGES_TEXT,
-      };
-    }
     return { matched: false };
   }
-  // A compound consequence turn also belongs to the conversational path. This
-  // says nothing about mutation authority: a trailing statement, question,
-  // veto or genuine edit request is evaluated later by the existing route and
-  // action warrant gates. In particular, position alone never grants a write.
-  if (leadingEditEffect !== null) return { matched: false };
+  // Preserve the model-grounded consequence answer. The execution layer uses
+  // the exported carrier-looking classification to force this compound class
+  // through a read-only explanation carrier and append the deterministic,
+  // scope-limited tail disclosure. Intercepting here would discard the user's
+  // leading question and could make "nothing changed" contradict the accepted
+  // receipt it refers to.
+  if (leadingEditEffect !== null && leadingEditEffect.trailingClause !== null) {
+    return { matched: false };
+  }
 
   // Negative gate — cheapest of the session-edit arms. A message with an
   // imperative edit verb is almost always a fresh edit request, not a

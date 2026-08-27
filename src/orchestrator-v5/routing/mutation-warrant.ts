@@ -71,8 +71,8 @@
 import { hasMutationSignal } from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
 import {
+  containsEditEffectQuestion,
   isStateQueryQuestionShape,
-  splitLeadingEditEffectQuestion,
 } from './state-query-guard.js';
 import {
   EDIT_GRAPH_POSITIVE_REGEX,
@@ -309,8 +309,7 @@ export function hasMutationWarrantSignal(message: string): boolean {
   // a later product-minted confirmation is the existing authoritative path to
   // execution. This avoids adding the lexical mood classifier that repeated
   // reviews have falsified.
-  const leadingEditEffect = splitLeadingEditEffectQuestion(message);
-  if (leadingEditEffect !== null) {
+  if (containsEditEffectQuestion(message)) {
     return false;
   }
   // Term 0 — the user explicitly withheld authority AND no canonical mutation

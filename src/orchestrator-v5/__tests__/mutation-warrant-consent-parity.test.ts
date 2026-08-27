@@ -219,6 +219,42 @@ function witnessedSetFactorValueAdapter(value = 2) {
   };
 }
 
+function witnessedAdjustEdgeAdapter(strength = 0.8) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(async () =>
+        mkToolUseResult({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'adjust_edge_strength',
+            entity: {
+              id: 'f-churn->g-mrr',
+              kind: 'edge',
+              label: 'Customer Churn Rate -> MRR',
+              resolution_status: 'resolved',
+              resolution_method: 'label_match',
+            },
+            parameters: [{ name: 'strength', value: strength, source: 'user_explicit' }],
+            cited_context_fields: [],
+          },
+        }),
+      ),
+  };
+}
+
+function buildChurnGraphWithEdge(): GraphV3T {
+  return buildChurnGraph({
+    edges: [{
+      from: 'f-churn',
+      to: 'g-mrr',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'negative',
+    }],
+  });
+}
+
 /** Fails the test if the LLM is consulted at all. */
 function throwingRoutingAdapter() {
   return {
@@ -334,20 +370,22 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
   it('a non-request clause after an edit-effect question cannot authorise a model-proposed write', async () => {
     const routingAdapter = witnessedAddConstraintAdapter();
 
-    await runTurnExecutor(
+    const { response } = await runTurnExecutor(
       payload('What did that update do? Renames are risky.'),
       'req-warrant-effect-compound',
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
-    // The conversational guard correctly hands the compound turn to the model,
-    // but that handoff is not consent. Even a model-proposed execute-class
-    // mutation is stopped at the action boundary.
-    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    // With no accepted-change receipt, the deterministic guard owns the turn.
+    // It must not spend a model call, invent an edit record, or let the hostile
+    // adapter create a mutation proposal downstream.
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
-    expect(warrantEvents('step2_gate')).toHaveLength(1);
-    expect(warrantEvents('step2_gate')[0]!.data.handler_id).toBe('add_constraint');
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(response.assistant_text).toContain("I don't have a record of recent edits");
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response).not.toHaveProperty('model_version_receipt');
   });
 
   it.each([
@@ -360,11 +398,8 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
     ['What did that update do? Did it set churn to 5%?', 'set-question-past'],
     ['What did that update do? It may set churn to 5%.', 'set-modal-may'],
     ['What did that update do? It can reduce churn to 5%.', 'reduce-modal-can'],
-    ['What did that update do? The update may add another constraint.', 'add-modal-may'],
-    ['What did that update do? The update can delete the old option.', 'delete-modal-can'],
-    ['What did that update do? Delete operations can affect an option.', 'delete-observation'],
   ])(
-    'a leading consequence question plus a hostile observation reaches the model but writes nothing: %s',
+    'a leading consequence question with no receipt is answered deterministically and writes nothing: %s',
     async (message, caseId) => {
       const routingAdapter = witnessedAddConstraintAdapter();
 
@@ -374,16 +409,56 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
         { routingAdapter, graphState: buildChurnGraph() },
       );
 
-      expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+      expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
       expect(graphWrites()).toHaveLength(0);
       expect(persistedGraph).toBeNull();
-      expect(warrantEvents('step2_gate')).toHaveLength(1);
-      expect(warrantEvents('step2_gate')[0]!.data.handler_id).toBe('add_constraint');
+      expect(warrantEvents('step2_gate')).toHaveLength(0);
+      expect(result.response.assistant_text).toContain("I don't have a record of recent edits");
+      expect(result.response.suggested_actions ?? []).toHaveLength(0);
       expect(result.response).not.toHaveProperty('model_version_receipt');
     },
   );
 
-  it('a concrete trailing add is preserved as an offer instead of being dropped or written immediately', async () => {
+  it.each([
+    ['What did that update do? The update may add another constraint.', 'add-modal-may'],
+    ['What did that update do? The update can delete the old option.', 'delete-modal-can'],
+    ['What did that update do? Delete operations can affect an option.', 'delete-observation'],
+    ['"What did that update do?" Add another option.', 'quoted-option-add'],
+    ['“What did that update do?” Add another option.', 'curly-quoted-option-add'],
+    ['— What did that update do? Add another option.', 'dash-option-add'],
+    ['- What did that update do? Add another option.', 'list-option-add'],
+    ['* What did that update do? Add another option.', 'bullet-option-add'],
+    ['+ What did that update do? Add another option.', 'plus-option-add'],
+    ['1. What did that update do? Add another option.', 'numbered-option-add'],
+    ['• What did that update do? Add another option.', 'unicode-bullet-option-add'],
+    ["'What did that update do?' Add another option.", 'single-quote-option-add'],
+    ['> What did that update do? Add another option.', 'blockquote-option-add'],
+    ['> - What did that update do? Add another option.', 'nested-option-add'],
+    ['>> What did that update do? Add another option.', 'double-blockquote-option-add'],
+    ['>\nWHAT DID THAT UPDATE DO?!\nAdd another option.', 'multiline-option-add'],
+  ])('a structural compound gets an explicit clarification and no pending/write: %s', async (message, caseId) => {
+    const routingAdapter = witnessedAddConstraintAdapter();
+    const { response } = await runTurnExecutor(
+      payload(message),
+      `req-warrant-effect-structural-${caseId}`,
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(response.assistant_text).toMatch(
+      /I don't have a record of recent edits.*carrier-looking clause.*separate instruction/s,
+    );
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response).not.toHaveProperty('model_version_receipt');
+    const committedPendings = appendCalls.flatMap((c) =>
+      Array.isArray(c.pending_actions) ? c.pending_actions : [],
+    );
+    expect(committedPendings).toHaveLength(0);
+  });
+
+  it('an unsupported structural add is clarified rather than falsely offered', async () => {
     const routingAdapter = witnessedAddConstraintAdapter();
 
     const { response } = await runTurnExecutor(
@@ -392,17 +467,18 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
-    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
-    expect(warrantEvents('step2_gate')).toHaveLength(1);
-    expect(response.suggested_actions).toEqual(
-      expect.arrayContaining([expect.objectContaining({ action_type: 'add_constraint' })]),
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response.assistant_text).toMatch(
+      /I don't have a record of recent edits.*carrier-looking clause.*separate instruction/s,
     );
     expect(response).not.toHaveProperty('model_version_receipt');
   });
 
-  it('a concrete trailing value edit is preserved as an offer instead of being dropped or written immediately', async () => {
+  it('a carrier-looking value tail cannot mint an offer when no accepted-change receipt exists', async () => {
     const routingAdapter = witnessedSetFactorValueAdapter(5);
 
     const { response } = await runTurnExecutor(
@@ -411,20 +487,41 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
-    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
-    expect(warrantEvents('step2_gate')).toHaveLength(1);
-    expect(response.suggested_actions).toEqual(
-      expect.arrayContaining([expect.objectContaining({ action_type: 'set_factor_value' })]),
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response.assistant_text).toMatch(
+      /I don't have a record of recent edits.*carrier-looking clause.*separate instruction/s,
     );
     expect(response).not.toHaveProperty('model_version_receipt');
+    expect(appendCalls.flatMap((c) => c.pending_actions ?? [])).toHaveLength(0);
+  });
+
+  it('a carrier-looking edge tail cannot mint an offer when no accepted-change receipt exists', async () => {
+    const routingAdapter = witnessedAdjustEdgeAdapter(0.8);
+    const { response } = await runTurnExecutor(
+      payload('What did that update do? Link Customer Churn Rate to MRR.'),
+      'req-warrant-effect-edge',
+      { routingAdapter, graphState: buildChurnGraphWithEdge() },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(0);
+    expect(persistedGraph).toBeNull();
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response.assistant_text).toMatch(
+      /I don't have a record of recent edits.*carrier-looking clause.*separate instruction/s,
+    );
+    expect(response).not.toHaveProperty('model_version_receipt');
+    expect(appendCalls.flatMap((c) => c.pending_actions ?? [])).toHaveLength(0);
   });
 
   it.each([
-    ['What did that update do? Add another constraint.', 'structural'],
     ['What did that update do? Churn must be at most 3%.', 'constraint'],
-  ])('a trailing %s edit is preserved through the offer/confirm path', async (message, caseId) => {
+  ])('a trailing constraint-like clause cannot mint an offer without an accepted-change receipt: %s (%s)', async (message, caseId) => {
     const routingAdapter = witnessedAddConstraintAdapter();
 
     const { response } = await runTurnExecutor(
@@ -433,14 +530,14 @@ describe('INV-1 — a graph-mutating handler executes only on an affirmative mut
       { routingAdapter, graphState: buildChurnGraph() },
     );
 
-    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
-    expect(warrantEvents('step2_gate')).toHaveLength(1);
-    expect(response.suggested_actions).toEqual(
-      expect.arrayContaining([expect.objectContaining({ action_type: 'add_constraint' })]),
-    );
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response.assistant_text).toContain("I don't have a record of recent edits");
     expect(response).not.toHaveProperty('model_version_receipt');
+    expect(appendCalls.flatMap((c) => c.pending_actions ?? [])).toHaveLength(0);
   });
 
   it('⭐ THE WITNESSED DEFECT (walk §J7) — the proposal is DEMOTED to a proposal chip and a persisted pending, not dropped', async () => {

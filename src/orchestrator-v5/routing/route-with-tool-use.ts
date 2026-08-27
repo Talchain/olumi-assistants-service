@@ -564,7 +564,10 @@ export interface RouteWithToolUseOptions {
    * Why the route is forced.  The default preserves typed-pill prompt copy;
    * B2 uses the bounded analytical form after a mutating first election.
    */
-  readonly forcedExplanationReason?: 'typed_pill' | 'bounded_non_mutation';
+  readonly forcedExplanationReason?:
+    | 'typed_pill'
+    | 'bounded_non_mutation'
+    | 'compound_consequence_structural_tail';
 }
 
 export async function routeWithToolUse(
@@ -1326,8 +1329,17 @@ const FORCED_INTENT_QUESTION: Record<ForcedExplanationHandlerId, string> = {
  */
 export function buildForcedIntentDirective(
   handlerId: ForcedExplanationHandlerId,
-  reason: 'typed_pill' | 'bounded_non_mutation' = 'typed_pill',
+  reason:
+    | 'typed_pill'
+    | 'bounded_non_mutation'
+    | 'compound_consequence_structural_tail' = 'typed_pill',
 ): string {
+  if (reason === 'compound_consequence_structural_tail') {
+    return [
+      '## Requested answer (accepted-change consequence only)',
+      `Answer only the leading question about what the accepted update did, using the recent accepted-change record, any analysis facts actually present, and model structure only at the authority declared by graph_context.status. Treat graph structure as canonical only when that status is canonical; provisional is not saved or accepted state, and unavailable or absent must fail weak without substituting caller or transcript claims. The carrier-looking trailing clause is handled separately: do not infer that it is a request, and do not propose, apply, confirm, or claim to have applied it in this call. Call the olumi_action tool with handler_id "${handlerId}" and put your complete, plain-language consequence answer in the explanation.answer_text field. If the accepted-change consequence cannot be established from the supplied context, say exactly what is unavailable without substituting the trailing clause as model truth.`,
+    ].join('\n');
+  }
   if (reason === 'bounded_non_mutation') {
     return [
       '## Requested answer (non-mutating)',

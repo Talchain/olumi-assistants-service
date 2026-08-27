@@ -29,6 +29,7 @@ import {
   assembleContextPack,
   type ContextPack,
 } from '../../context/context-pack-assembler.js';
+import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import {
   routeWithToolUse,
   applyForcedExplanationHandler,
@@ -62,7 +63,9 @@ function priorTurn(n: number, userMessage: string): SessionTurnWithContent {
   } as unknown as SessionTurnWithContent;
 }
 
-function packWithConversation(): ContextPack {
+type GraphContextStatus = NonNullable<ContextPack['graph_context']>['status'];
+
+function packWithConversation(graphContextStatus?: GraphContextStatus): ContextPack {
   return assembleContextPack({
     payload: makeMessagePayload({
       turn_id: 't-forced',
@@ -70,6 +73,9 @@ function packWithConversation(): ContextPack {
       message: 'Explain these results.',
     }),
     priorTurns: [priorTurn(1, `I am deciding about ${CONVERSATION_SEED}.`)],
+    ...(graphContextStatus === undefined
+      ? {}
+      : { graphContext: { status: graphContextStatus } }),
   });
 }
 
@@ -167,6 +173,46 @@ describe('routeWithToolUse — F2 forced explanation intent', () => {
     // The forced-intent directive is present so the authored answer stays on-topic.
     expect(userContent).toContain('handler_id "explain_results"');
   });
+
+  it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
+    'sends the compound-consequence read-only directive with graph_context=%s in the actual adapter bytes',
+    async (status) => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([explanationToolUse('explain_from_structure', 'The accepted rename changed the option label while the adjacent model context remained the same.')]),
+        ),
+    };
+
+    await routeWithToolUse(
+      packWithConversation(status),
+      'What did that update do? Rename the option again.',
+      {
+        requestId: 'req-forced-compound-consequence',
+        adapter,
+        forcedExplanationHandlerId: 'explain_from_structure',
+        forcedExplanationReason: 'compound_consequence_structural_tail',
+      },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const args = adapter.chatWithTools.mock.calls[0]![0];
+    const userContent = String(args.messages[0]!.content);
+    const serialisedPack = observeSerialisedPack(userContent);
+    expect(serialisedPack.graph_context).toEqual({ status });
+    expect(userContent).toContain('accepted update did');
+    expect(userContent).toContain('recent accepted-change record');
+    expect(userContent).toContain('any analysis facts actually present');
+    expect(userContent).toContain('graph_context.status');
+    expect(userContent).toContain('canonical only when that status is canonical');
+    expect(userContent).toContain('provisional is not saved or accepted state');
+    expect(userContent).toContain('carrier-looking trailing clause is handled separately');
+    expect(userContent).toContain('do not infer that it is a request');
+    expect(userContent).not.toContain('did not authorise a model change');
+    expect(args.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
+    },
+  );
 
   it('PINS the proposal handler_id to the forced intent even when the model chose a different explanation handler', async () => {
     const adapter = {
@@ -297,5 +343,24 @@ describe('buildForcedIntentDirective', () => {
     expect(explain).toContain('answer_text');
     const flip = buildForcedIntentDirective('what_would_flip');
     expect(flip).toContain('handler_id "what_would_flip"');
+  });
+
+  it('pins compound consequence routing to the accepted update and keeps the structural tail non-mutating', () => {
+    const directive = buildForcedIntentDirective(
+      'explain_from_structure',
+      'compound_consequence_structural_tail',
+    );
+    expect(directive).toContain('accepted update did');
+    expect(directive).toContain('graph_context.status');
+    expect(directive).toContain('canonical only when that status is canonical');
+    expect(directive).toContain('provisional is not saved or accepted state');
+    expect(directive).toContain('unavailable or absent must fail weak');
+    expect(directive).toContain('recent accepted-change record');
+    expect(directive).toContain('any analysis facts actually present');
+    expect(directive).toContain('carrier-looking trailing clause is handled separately');
+    expect(directive).toContain('do not infer that it is a request');
+    expect(directive).toContain('do not propose, apply, confirm, or claim to have applied it');
+    expect(directive).toContain('handler_id "explain_from_structure"');
+    expect(directive).not.toContain('did not authorise a model change');
   });
 });
