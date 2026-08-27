@@ -137,6 +137,13 @@ describe('formatGraphForContext — option reachability projection', () => {
     const edges = [{ from: 'opt_a', to: 'fac_b', strength: 0.5, exists: 0.9, edge_type: 'bidirected' }];
     const out = formatGraphForContext(pack(nodes, edges));
     expect(out.edges[0]!.edge_type).toBe('bidirected');
+    // The type reaching the model is NECESSARY AND NOT SUFFICIENT. What the
+    // model echoes is the `relationship` STRING, and this fixture built the
+    // witnessed lie (strength 0.5 + bidirected -> "moderate positive link")
+    // while asserting past it. Pinned in full by the discriminating pair in
+    // the block below; asserted here so the fixture that CONSTRUCTS the lie
+    // can never again pass beside it.
+    expect(out.edges[0]!.relationship).not.toBe('moderate positive link');
   });
 
   it('UNRECOGNISED_EDGE_TYPE_IS_DROPPED_NOT_COERCED', () => {
@@ -147,6 +154,127 @@ describe('formatGraphForContext — option reachability projection', () => {
     const edges = [{ from: 'opt_a', to: 'fac_b', strength: 0.5, exists: 0.9, edge_type: 'sideways' }];
     const out = formatGraphForContext(pack(nodes, edges));
     expect(out.edges[0]).not.toHaveProperty('edge_type');
+  });
+
+  // ── The witnessed System-B defect: the PHRASE is the lie ──────────────────
+  //
+  // Deployed staging, 3 arms x 3 runs, topology verified from the PERSISTED
+  // graph. Arm C (bidirected bridge) produced a FALSE CAUSAL CLAIM 3/3:
+  //   "brand sentiment score has a direct link into quarterly profit. So the
+  //    pathway to your goal runs through brand perception"
+  // while the model held `edge_type:"bidirected"`. A bidirected edge denotes
+  // confounding / association — explicitly NOT a directed causal effect.
+  //
+  // Proximate cause: `relationshipPhrase` composed "moderate positive link"
+  // from the SIGNED STRENGTH ALONE and never read `edge_type`. The model
+  // echoed the string it was handed. The string is the lie.
+  //
+  // These are a DISCRIMINATING PAIR ON THE STRING. The two directed arms are
+  // load-bearing, not decoration: without them the suite cannot distinguish
+  // the correct remedy from blanket-suppression, which passes a
+  // bidirected-only assertion perfectly.
+
+  const CONFOUNDED_NODES = [
+    { id: 'fac_brand', kind: 'factor', label: 'Brand sentiment score' },
+    { id: 'fac_profit', kind: 'factor', label: 'Quarterly profit' },
+  ];
+
+  /** strength 0.5 — a USER-SET magnitude — with `edge_type` set, absent, or explicit. */
+  function confoundedPack(edgeType?: string): ContextPackGraph {
+    const edge: Record<string, unknown> = {
+      from: 'fac_brand',
+      to: 'fac_profit',
+      strength: 0.5,
+      exists: 0.9,
+    };
+    if (edgeType !== undefined) edge.edge_type = edgeType;
+    return pack(CONFOUNDED_NODES, [edge]);
+  }
+
+  function confoundedEdge(graph: ReturnType<typeof formatGraphForContext>) {
+    const found = graph.edges.find((e) => e.from === 'fac_brand' && e.to === 'fac_profit');
+    expect(found, 'the fac_brand->fac_profit edge must survive projection').toBeDefined();
+    return found!;
+  }
+
+  it('BIDIRECTED_RELATIONSHIP_IS_NOT_CAUSAL_LINK_LANGUAGE', () => {
+    const edge = confoundedEdge(formatGraphForContext(confoundedPack('bidirected')));
+    // Identity-bound to the edge by from/to, never by a value predicate.
+    // The exact string the deployed build handed the model:
+    expect(edge.relationship).not.toBe('moderate positive link');
+    // No directed-route language of any band or sign on a bidirected edge.
+    expect(edge.relationship).not.toMatch(/\blink\b/);
+    // The ratified in-repo predicate — defaults-v19.ts:76 and
+    // Prompts/canonical/draft_graph.txt:213. Not a newly minted vocabulary.
+    expect(edge.relationship).toContain('unmeasured common cause');
+    expect(edge.relationship).toContain('not a causal route');
+  });
+
+  it('BIDIRECTED_RELATIONSHIP_KEEPS_BAND_AND_SIGN', () => {
+    // Ruling: keep the band and the sign, carry the negation in the string.
+    // Dropping the descriptor (or normalising strength.mean to 0) would trade
+    // a false CAUSAL claim for a false SMALLNESS claim about a user-set 0.5 —
+    // the opposite-direction harm, and #1163's false-negative one level down.
+    const edge = confoundedEdge(formatGraphForContext(confoundedPack('bidirected')));
+    expect(edge.relationship).toContain('moderate');
+    expect(edge.relationship).toContain('positive');
+    expect(edge.relationship).not.toContain('negligible');
+  });
+
+  it('DIRECTED_EDGE_TYPE_ABSENT_KEEPS_ITS_LINK_PHRASE', () => {
+    // THE arm that kills a `!== 'directed'` / "absent means bidirected"
+    // detection. Prompts/canonical/draft_graph.txt:484 MANDATES omitting
+    // edge_type on directed edges ("do NOT emit edge_type on directed
+    // edges"), so the loose form's blast radius is every drafted edge in the
+    // estate. Detection must be `=== 'bidirected'`.
+    const edge = confoundedEdge(formatGraphForContext(confoundedPack(undefined)));
+    expect(edge.relationship).toBe('moderate positive link');
+    expect(edge).not.toHaveProperty('edge_type');
+  });
+
+  it('DIRECTED_EDGE_TYPE_EXPLICIT_KEEPS_ITS_LINK_PHRASE', () => {
+    // The arm that kills an `edge_type !== undefined` detection.
+    const edge = confoundedEdge(formatGraphForContext(confoundedPack('directed')));
+    expect(edge.relationship).toBe('moderate positive link');
+  });
+
+  it('BIDIRECTED_UNRECOGNISED_PHRASE_FALLS_BACK_WITHOUT_CAUSAL_LANGUAGE', () => {
+    // The projector's own documented threat model: a re-projected edge may
+    // carry unrecognised legacy prose ("strength of 0.55") which must not leak
+    // verbatim. On a BIDIRECTED edge the fallback must also not be directed
+    // language — "negligible link" would pack a causal-route word and a false
+    // smallness claim into one string. This is why the two allowlists are kept
+    // separate rather than unioned: the fallback has to know the family.
+    const graph = pack(CONFOUNDED_NODES, [
+      {
+        from: 'fac_brand',
+        to: 'fac_profit',
+        relationship: 'strength of 0.55',
+        edge_type: 'bidirected',
+      },
+    ]);
+    const edge = confoundedEdge(formatGraphForContext(graph));
+    expect(edge.relationship).not.toContain('strength of 0.55');
+    expect(edge.relationship).not.toMatch(/\blink\b/);
+    expect(edge.relationship).toContain('unmeasured common cause');
+    expect(edge.edge_type).toBe('bidirected');
+  });
+
+  it('IDEMPOTENT_REPROJECTION_PRESERVES_BIDIRECTED_PHRASE', () => {
+    // Measured hazard: a bidirected phrase absent from the projector's
+    // allowlist survives pass 1 and is REWRITTEN to "negligible link" on
+    // re-projection while `edge_type:"bidirected"` survives — a false
+    // SMALLNESS claim about a user-set 0.5, under a fully green suite.
+    // Re-projection has no numeric strength, so the phrase can only survive
+    // by being allowlisted.
+    const once = formatGraphForContext(confoundedPack('bidirected'));
+    const twice = formatGraphForContext(pack(once.nodes as unknown[], once.edges as unknown[]));
+    const first = confoundedEdge(once);
+    const second = confoundedEdge(twice);
+    expect(second.edge_type).toBe('bidirected');
+    expect(second.relationship).toBe(first.relationship);
+    expect(second.relationship).not.toBe('negligible link');
+    expect(second.relationship).toContain('unmeasured common cause');
   });
 
   it('REACHES_INTRODUCES_NO_RAW_NUMERICS — the projection contract still holds', () => {

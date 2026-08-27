@@ -34,10 +34,12 @@ import {
 } from '../../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
 import {
+  bidirectedRelationshipPhrase,
   formatGraphForContext,
   relationshipPhrase,
   type DisplaySafeGraph,
 } from '../format-graph-for-context.js';
+import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from '../influence-bands.js';
 import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
 
 function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
@@ -118,6 +120,103 @@ describe('relationshipPhrase', () => {
   it('crosses band boundaries inclusively at lower bound', () => {
     expect(relationshipPhrase(0.30)).toBe('moderate positive link');
     expect(relationshipPhrase(0.299)).toBe('weak positive link');
+  });
+});
+
+const COMMON_CAUSE = 'unmeasured common cause (not a causal route)';
+
+/** Two factors joined by one bidirected edge — the ratified factor<->factor shape. */
+function bidirectedGraph(strength: number): ContextPackGraph {
+  return {
+    nodes: [
+      { id: 'fac_a', kind: 'factor', label: 'Factor A' },
+      { id: 'fac_b', kind: 'factor', label: 'Factor B' },
+    ],
+    edges: [{ from: 'fac_a', to: 'fac_b', strength, exists: 0.9, edge_type: 'bidirected' }],
+    options: [],
+    goals: [],
+    constraints: [],
+    counts: { nodes: 2, edges: 1, options: 0, goals: 0, constraints: 0 },
+  } as unknown as ContextPackGraph;
+}
+
+describe('bidirectedRelationshipPhrase', () => {
+  it('keeps the band and the sign, and carries the negation in the predicate', () => {
+    expect(bidirectedRelationshipPhrase(0.5)).toBe(`moderate positive co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(0.85)).toBe(`strong positive co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.85)).toBe(`strong negative co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.25)).toBe(`weak negative co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(0.99)).toBe(`very strong positive co-movement, ${COMMON_CAUSE}`);
+  });
+
+  it('never emits directed-route language at any band or sign', () => {
+    for (const s of [-1, -0.85, -0.5, -0.25, -0.02, 0, 0.02, 0.25, 0.5, 0.85, 1]) {
+      expect(bidirectedRelationshipPhrase(s)).not.toMatch(/\blink\b/);
+      expect(bidirectedRelationshipPhrase(s)).toContain(COMMON_CAUSE);
+    }
+  });
+
+  it('shares the directed path band boundaries exactly — one source of truth', () => {
+    // Forking the band constants would let the two families disagree about
+    // where "moderate" starts. Both read influence-bands.ts.
+    expect(bidirectedRelationshipPhrase(0.30)).toContain('moderate');
+    expect(bidirectedRelationshipPhrase(0.299)).toContain('weak');
+    expect(bidirectedRelationshipPhrase(0.95)).toContain('very strong');
+  });
+
+  it('suppresses sign below the near-zero threshold, mirroring the directed path', () => {
+    expect(bidirectedRelationshipPhrase(0.02)).toBe(`negligible co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.02)).toBe(`negligible co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(0)).toBe(`negligible co-movement, ${COMMON_CAUSE}`);
+  });
+
+  it('handles non-finite strengths defensively', () => {
+    expect(bidirectedRelationshipPhrase(Number.NaN)).toBe(`negligible co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(Number.POSITIVE_INFINITY)).toBe(`negligible co-movement, ${COMMON_CAUSE}`);
+  });
+});
+
+describe('bidirected phrase allowlist — derived corpus, not a hand-maintained mirror', () => {
+  it('ALL_BIDIRECTED_BAND_PHRASES_SURVIVE_REPROJECTION', () => {
+    // Deriving the allowlist check from the list proves the copies AGREE; only
+    // a corpus notices the list is SHORT. Re-projection carries no numeric
+    // strength, so a band+sign missing from BIDIRECTED_RELATIONSHIP_PHRASES is
+    // silently rewritten to the negligible phrase on pass 2 — a false
+    // smallness claim under a green suite. This sweeps the whole signed band
+    // space and REDs if any member fails to round-trip.
+    const magnitudes = [0, 0.02, 0.049, 0.05, 0.1, 0.299, 0.3, 0.5, 0.69, 0.7, 0.85, 0.949, 0.95, 1];
+    const observed = new Set<string>();
+    const expected = new Set<string>();
+    for (const magnitude of magnitudes) {
+      for (const signed of [magnitude, -magnitude]) {
+        const abs = Math.abs(signed);
+        expected.add(
+          abs < NEAR_ZERO_INFLUENCE_THRESHOLD
+            ? 'negligible'
+            : `${bandFromMagnitude(abs)} ${signed < 0 ? 'negative' : 'positive'}`,
+        );
+
+        const once = formatGraphForContext(bidirectedGraph(signed));
+        const first = once.edges[0]!;
+        expect(first.relationship).toBe(bidirectedRelationshipPhrase(signed));
+
+        const twice = formatGraphForContext({
+          ...bidirectedGraph(signed),
+          nodes: once.nodes as unknown as ContextPackGraph['nodes'],
+          edges: once.edges as unknown as ContextPackGraph['edges'],
+        });
+        expect(
+          twice.edges[0]!.relationship,
+          `phrase for signed strength ${signed} is not allowlisted — re-projection rewrote it`,
+        ).toBe(first.relationship);
+        expect(twice.edges[0]!.edge_type).toBe('bidirected');
+        observed.add(first.relationship.split(' co-movement')[0]!);
+      }
+    }
+    // Positive control on the corpus itself: a sweep that exercised only one
+    // band would round-trip perfectly and prove nothing about completeness.
+    expect(expected.size).toBeGreaterThanOrEqual(9);
+    expect(observed).toEqual(expected);
   });
 });
 

@@ -98,8 +98,29 @@ export interface DisplaySafeEdge {
   readonly to: string;
   readonly from_label: string;
   readonly to_label: string;
-  /** Decision-language phrase: "moderate positive link", "strong negative link",
-   *  "very strong positive link", or "negligible link" for |strength| < 0.05. */
+  /**
+   * Decision-language phrase. Which FAMILY of phrase is emitted is decided by
+   * `edge_type`, and the two families are not interchangeable:
+   *
+   *   directed   (`edge_type` absent)      "moderate positive link",
+   *                                        "very strong negative link",
+   *                                        "negligible link" for |strength| < 0.05
+   *   bidirected (`edge_type: 'bidirected'`)
+   *                                        "moderate positive co-movement,
+   *                                         unmeasured common cause (not a causal route)"
+   *
+   * A bidirected edge MUST NOT be described with directed-route language. This
+   * field previously enumerated the directed family only, while `edge_type`
+   * below documented bidirected edges as "not a directed path" — two
+   * contradictory statements about one edge, and the projector implemented the
+   * first: `relationshipPhrase` composed the phrase from the SIGNED STRENGTH
+   * ALONE and never read `edge_type`. On deployed staging that produced a false
+   * causal claim 3/3 runs on a bidirected bridge ("brand sentiment score has a
+   * direct link into quarterly profit. So the pathway to your goal runs through
+   * brand perception") while the model held `edge_type: "bidirected"`. The model
+   * echoed the string it was handed; the string was the lie. Both families are
+   * now documented here and both are allowlisted, per family.
+   */
   readonly relationship: string;
   /** Compactor-classified coefficient confidence; no raw std reaches the prompt. */
   readonly coefficient_confidence?: CompactCoefficientConfidence;
@@ -248,16 +269,31 @@ function asCoefficientConfidence(
 }
 
 /**
- * Allowlist of phrases the formatter is permitted to emit on
- * `DisplaySafeEdge.relationship`. Pre-built once: every band × sign plus
- * the near-zero suppression phrase. Anything outside this set is treated
- * as an unsafe upstream string and dropped (defaults to "negligible link"
- * via the projectEdge fallback) — important when re-projecting an edge
- * carrying an unrecognised legacy `relationship` such as
- * `"strength of 0.55"`, which would otherwise leak verbatim.
+ * The qualifier every bidirected phrase carries.
+ *
+ * Wording is the RATIFIED in-repo vocabulary, not a newly minted predicate:
+ * `src/prompts/defaults-v19.ts:76` and `Prompts/canonical/draft_graph.txt:213`
+ * both define a bidirected edge as an *unmeasured common cause*. Both live
+ * there as prose INSIDE a prompt template literal, so there is no symbol to
+ * import into a pure display projector; the wording is reused verbatim so the
+ * model-facing string and the drafting instruction cannot drift apart.
  */
-const RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
-  'negligible link',
+const BIDIRECTED_COMMON_CAUSE_QUALIFIER = 'unmeasured common cause (not a causal route)';
+
+const NEGLIGIBLE_DIRECTED_PHRASE = 'negligible link';
+const NEGLIGIBLE_BIDIRECTED_PHRASE = `negligible co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`;
+
+/**
+ * Allowlist of phrases the formatter is permitted to emit on
+ * `DisplaySafeEdge.relationship` for a DIRECTED edge. Pre-built once: every
+ * band × sign plus the near-zero suppression phrase. Anything outside this set
+ * is treated as an unsafe upstream string and dropped (defaults to "negligible
+ * link" via the projectEdge fallback) — important when re-projecting an edge
+ * carrying an unrecognised legacy `relationship` such as `"strength of 0.55"`,
+ * which would otherwise leak verbatim.
+ */
+const DIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
+  NEGLIGIBLE_DIRECTED_PHRASE,
   'weak positive link',
   'weak negative link',
   'moderate positive link',
@@ -268,8 +304,41 @@ const RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
   'very strong negative link',
 ]);
 
-function asAllowedRelationship(value: unknown): string | undefined {
-  return typeof value === 'string' && RELATIONSHIP_PHRASES.has(value) ? value : undefined;
+/**
+ * The same allowlist for a BIDIRECTED edge — same bands, same signs, different
+ * predicate. It exists for two reasons, and the second is not optional:
+ *
+ *  1. Re-projection carries no numeric strength (`resolveSignedStrength`
+ *     returns null on a display-safe edge), so the phrase can ONLY survive a
+ *     second pass by being allowlisted. Measured: with the bidirected phrases
+ *     missing from any allowlist, pass 1 emits the correct phrase and pass 2
+ *     rewrites it to "negligible link" while `edge_type: "bidirected"`
+ *     survives — a false SMALLNESS claim about a user-set 0.5, under a fully
+ *     green suite. Pinned by IDEMPOTENT_REPROJECTION_PRESERVES_BIDIRECTED_PHRASE
+ *     and, across the whole band space, by
+ *     ALL_BIDIRECTED_BAND_PHRASES_SURVIVE_REPROJECTION.
+ *  2. The allowlists are kept SEPARATE, not unioned, so the check is
+ *     type-aware. A single union would let a bidirected edge re-project while
+ *     carrying a directed "…link" phrase — re-admitting the exact false causal
+ *     claim this projector was changed to remove — and would make the
+ *     unrecognised-string fallback emit directed language ("negligible link")
+ *     on a bidirected edge.
+ */
+const BIDIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
+  NEGLIGIBLE_BIDIRECTED_PHRASE,
+  `weak positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `weak negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `moderate positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `moderate negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `strong positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `strong negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `very strong positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `very strong negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+]);
+
+function asAllowedRelationship(value: unknown, isBidirected: boolean): string | undefined {
+  const allowed = isBidirected ? BIDIRECTED_RELATIONSHIP_PHRASES : DIRECTED_RELATIONSHIP_PHRASES;
+  return typeof value === 'string' && allowed.has(value) ? value : undefined;
 }
 
 /**
@@ -302,12 +371,42 @@ function extractNodeUnit(raw: RawNodeShape): string | undefined {
  *   0.02  → "negligible link"            (sign suppressed below NEAR_ZERO_INFLUENCE_THRESHOLD)
  */
 export function relationshipPhrase(signedStrength: number): string {
-  if (!Number.isFinite(signedStrength)) return 'negligible link';
+  if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_DIRECTED_PHRASE;
   const abs = Math.abs(signedStrength);
-  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'negligible link';
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_DIRECTED_PHRASE;
   const band = bandFromMagnitude(abs);
   const sign = signedStrength < 0 ? 'negative' : 'positive';
   return `${band} ${sign} link`;
+}
+
+/**
+ * The bidirected twin of `relationshipPhrase`.
+ *
+ * A bidirected edge denotes CONFOUNDING — an unmeasured common cause — and
+ * explicitly NOT a directed causal effect. `relationshipPhrase` derives its
+ * phrase from the signed strength alone, so it describes every edge as a
+ * causal "link"; handing that string to the model on a bidirected edge is what
+ * produced the witnessed false causal claim. This function keeps the SAME band
+ * and the SAME sign — a user-set 0.5 is still "moderate positive", because
+ * discarding the magnitude would trade a false causal claim for a false
+ * smallness claim, the opposite-direction harm — and carries the correction in
+ * the predicate instead:
+ *
+ *   0.50 → "moderate positive co-movement, unmeasured common cause (not a causal route)"
+ *  -0.85 → "strong negative co-movement, unmeasured common cause (not a causal route)"
+ *   0.02 → "negligible co-movement, unmeasured common cause (not a causal route)"
+ *
+ * Bands and the near-zero threshold come from the shared `influence-bands`
+ * module — the same source as the directed path — so the two families can
+ * never disagree about where a band boundary sits.
+ */
+export function bidirectedRelationshipPhrase(signedStrength: number): string {
+  if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_BIDIRECTED_PHRASE;
+  const abs = Math.abs(signedStrength);
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_BIDIRECTED_PHRASE;
+  const band = bandFromMagnitude(abs);
+  const sign = signedStrength < 0 ? 'negative' : 'positive';
+  return `${band} ${sign} co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`;
 }
 
 /**
@@ -543,16 +642,25 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
   const to = asString(raw.to);
   if (from === undefined || to === undefined) return null;
   const strength = resolveSignedStrength(raw);
+  // STRICT equality, never `!== 'directed'` and never "absent means
+  // bidirected". `Prompts/canonical/draft_graph.txt:484` MANDATES the opposite
+  // default — "edge_type defaults to 'directed' when omitted — so do NOT emit
+  // edge_type on directed edges" — so a loose test would reclassify
+  // essentially every drafted edge in the estate as a confounder. This is the
+  // same predicate `:580` below already uses to carry the type.
+  const isBidirected = raw.edge_type === 'bidirected';
   // Idempotency: re-projecting an already display-safe edge has no
   // numeric strength but carries an existing `relationship`. Preserve
-  // it ONLY when it is one of the formatter's allowlisted phrases —
-  // unknown strings (e.g. legacy `"strength of 0.55"` prose) MUST NOT
-  // pass through verbatim, since they would defeat the entire point of
-  // the display-safe projection. Unknown / missing → "negligible link".
-  const existingRelationship = asAllowedRelationship(raw.relationship);
+  // it ONLY when it is one of the formatter's allowlisted phrases FOR THAT
+  // EDGE TYPE — unknown strings (e.g. legacy `"strength of 0.55"` prose) MUST
+  // NOT pass through verbatim, since they would defeat the entire point of
+  // the display-safe projection, and a directed phrase must not survive onto
+  // a bidirected edge. Unknown / missing → the near-zero phrase of the
+  // matching family, so the fallback can never introduce causal language.
+  const existingRelationship = asAllowedRelationship(raw.relationship, isBidirected);
   const relationship = strength !== null
-    ? relationshipPhrase(strength)
-    : existingRelationship ?? 'negligible link';
+    ? (isBidirected ? bidirectedRelationshipPhrase(strength) : relationshipPhrase(strength))
+    : existingRelationship ?? (isBidirected ? NEGLIGIBLE_BIDIRECTED_PHRASE : NEGLIGIBLE_DIRECTED_PHRASE);
   const edge: {
     from: string;
     to: string;
@@ -577,7 +685,7 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
   if (provenance !== undefined) edge.provenance = provenance;
   // Only the non-default value is carried, and only verbatim: an unrecognised
   // value is dropped rather than coerced, so this can never invent a type.
-  if (raw.edge_type === 'bidirected') edge.edge_type = 'bidirected';
+  if (isBidirected) edge.edge_type = 'bidirected';
   return edge;
 }
 
