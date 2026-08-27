@@ -218,7 +218,10 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
-import { isBoundedNonMutationAnalyticalRequest } from '../orchestrator-v5/routing/mutation-warrant.js';
+import {
+  hasMutationWarrantSignal,
+  isBoundedNonMutationAnalyticalRequest,
+} from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
@@ -4776,7 +4779,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
     // State-query suppressor (behaviour #3): a question containing an edit verb
     // ("what did you just change?", "what did that update do?") must NOT edit.
-    const stateQuerySuppressed = isStateQueryQuestionShape(ingress.message);
+    const stateQuerySuppressed =
+      isStateQueryQuestionShape(ingress.message) &&
+      !hasMutationWarrantSignal(ingress.message);
     const configureOptionIntent =
       configureOptionDetection.matched &&
       !negativeEditRegexHit &&

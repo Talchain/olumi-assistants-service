@@ -141,6 +141,27 @@ const STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS: readonly RegExp[] = [
   /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\s*[?!.]*\s*$/i,
 ];
 
+const EDIT_EFFECT_QUESTION_LEAD =
+  /^\s*what\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
+
+/**
+ * Return only the text after a leading edit-consequence question.
+ *
+ * This is a structural split, not a mutation classifier. Callers that own
+ * mutation authority must evaluate the returned clause through their existing
+ * warrant policy; this module must not grow a second edit-verb list.
+ */
+export function editEffectTrailingClause(message: string): string | null {
+  const match = EDIT_EFFECT_QUESTION_LEAD.exec(message);
+  if (match === null) return null;
+  const trailing = message
+    .slice(match[0].length)
+    .replace(/^[\s?!.,;:—-]+/, '')
+    .replace(/^(?:and|then)\b[\s,;:—-]*/i, '')
+    .trim();
+  return trailing.length > 0 ? trailing : null;
+}
+
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // "what changed", "what's changed", "what has changed", "what just changed"
   /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i,
@@ -549,6 +570,10 @@ export function tryStateQueryGuard(
   if (STANDALONE_EDIT_EFFECT_QUESTION_PATTERNS.some((pat) => pat.test(input.message))) {
     return { matched: false };
   }
+  // A compound consequence turn is never owned by the one-line receipt guard.
+  // The route evaluates this trailing clause through the canonical mutation-
+  // warrant policy; if it is read-only, the model can answer both questions.
+  if (editEffectTrailingClause(input.message) !== null) return { matched: false };
 
   // Negative gate — cheapest of the session-edit arms. A message with an
   // imperative edit verb is almost always a fresh edit request, not a

@@ -108,6 +108,29 @@ describe('tryStateQueryGuard', () => {
       })).toEqual({ matched: false });
     });
 
+    it.each([
+      'What did that update do? Rename the option to Enterprise Plus.',
+      'What did that update do? Delete the old option.',
+      'What did that update do? Add another option.',
+      'What did that update do? Remove another option.',
+    ])('preserves the trailing mutation warrant for %s', (message) => {
+      expect(hasMutationWarrantSignal(message)).toBe(true);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
+    it('preserves an explicit trailing veto', () => {
+      const message =
+        'What did that update do? Rename the option, but do not change the model.';
+      expect(hasMutationWarrantSignal(message)).toBe(false);
+      expect(tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+      })).toEqual({ matched: false });
+    });
+
     it('preserves deterministic receipt readback for the neighbouring question', () => {
       const outcome = tryStateQueryGuard({
         message: 'What changed?',

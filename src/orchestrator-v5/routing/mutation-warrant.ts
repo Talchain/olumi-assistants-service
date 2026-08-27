@@ -70,7 +70,10 @@
 
 import { hasMutationSignal } from './analytical-intent.js';
 import { isAnalyticalQuestion } from './analytical-question-guard.js';
-import { isStateQueryQuestionShape } from './state-query-guard.js';
+import {
+  editEffectTrailingClause,
+  isStateQueryQuestionShape,
+} from './state-query-guard.js';
 import {
   EDIT_GRAPH_POSITIVE_REGEX,
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -309,6 +312,26 @@ export function hasMutationWarrantSignal(message: string): boolean {
     !hasConstraintMutationSignal(message)
   ) {
     return false;
+  }
+  // The leading clause asks about a committed edit and grants no authority.
+  // Evaluate only a trailing clause through this same warrant policy so a
+  // compound rename/delete is neither swallowed by the state-query guard nor
+  // granted by a duplicate lexical classifier. Apply the existing canonical,
+  // constraint and extension authorities to the clause itself: unlike the
+  // whole-message edit door, they do not let the leading question suppress an
+  // otherwise valid trailing instruction.
+  const editEffectRemainder = editEffectTrailingClause(message);
+  if (editEffectRemainder !== null) {
+    const beginsWithExistingExtension = WARRANT_EXTRA_EDIT_VERB_PATTERNS.some(
+      (pattern) => pattern.exec(editEffectRemainder)?.index === 0,
+    );
+    if (
+      hasMutationSignal(editEffectRemainder) ||
+      hasConstraintMutationSignal(editEffectRemainder) ||
+      beginsWithExistingExtension
+    ) {
+      return true;
+    }
   }
   if (hasMutationSignal(message)) return true;
   if (hasConstraintMutationSignal(message)) return true;
