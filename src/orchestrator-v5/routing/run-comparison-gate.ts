@@ -46,7 +46,7 @@ import {
   projectRunFact,
   selectTwoNewestRunAnalysisFacts,
   type LeaderIdentityBasis,
-  type RunDelta,
+  type ContentSafeRunDelta,
 } from '../coaching/compare-runs.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 // T1 claim safety (ROADMAP 1.233) — the ALARM's reader, for the module-load
@@ -467,7 +467,7 @@ function bandPhrase(level: string): string | null {
  *     they presuppose BOTH leaders and require BOTH permissions.
  */
 function composeComparison(
-  delta: RunDelta,
+  delta: ContentSafeRunDelta,
   authority: RunComparisonLeaderAuthority,
 ): string {
   const parts: string[] = [];

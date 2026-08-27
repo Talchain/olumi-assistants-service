@@ -3,7 +3,8 @@
  *
  * Inputs are stored server-side GraphV3 snapshots. The client supplies only
  * opaque model_versions ids. This module never calls an LLM and never treats
- * analysis-run RunDelta/`what_changed` as a model-history diff.
+ * analysis-run comparison (`ContentSafeRunDelta` / the wire `run_delta`) or
+ * `what_changed` as a model-history diff.
  */
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';

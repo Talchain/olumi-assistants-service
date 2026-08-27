@@ -57,7 +57,31 @@ export interface DriverRankChange {
  */
 export type LeaderIdentityBasis = 'option_id' | 'indeterminate';
 
-export interface RunDelta {
+/**
+ * ⚠⚠ TWO TYPES NAMED `RunDelta` USED TO EXIST ACROSS THIS BOUNDARY. THEY ANSWER
+ * DIFFERENT QUESTIONS AND MUST NEVER BE CONVERGED BY A "ONE AUTHORITY" SWEEP.
+ *
+ *   THIS TYPE (`ContentSafeRunDelta`, CEE-internal) answers:
+ *     "WHAT MAY THIS TURN SAY IN PROSE about the two newest runs?"
+ *   It is the redacted COPY INPUT for `run-comparison-gate.ts` and
+ *   `signals/coaching-signals.ts`. Labels the user already sees, closed-enum
+ *   directions, INTEGER percentage points. No ids, no raw 0.xx decimals —
+ *   because its consumers are prose paths behind
+ *   `compose/forbidden-user-facing-phrases.ts` (`RAW_DECIMAL_RE`).
+ *
+ *   `RunDelta` in `@talchain/schemas/boundary` (run-delta.ts) answers:
+ *     "WHAT DOES THE WIRE CARRY about the movement between two runs, and WHAT
+ *      IS THE PRODUCER ENTITLED TO CLAIM about it?"
+ *   It is the envelope block (`OlumiResponseSchema.run_delta`): option IDS,
+ *   0-1 probabilities, per-quantity noise verdicts, a pair-provenance record
+ *   and a C0-C4 attribution case whose preconditions the schema ENFORCES at
+ *   parse time. Built by `build-run-delta.ts`, never by this file.
+ *
+ * Neither supersedes the other. One is what we may SAY; the other is what we
+ * KNOW and can prove. Redacting the wire type would destroy the entitlements;
+ * widening this one would push raw decimals onto a prose egress path.
+ */
+export interface ContentSafeRunDelta {
   /** True when both runs have a usable leading-option label. */
   readonly comparable: boolean;
   readonly leading_option_changed: boolean;
@@ -346,7 +370,7 @@ export function compareRuns(
   priorRun: RunProjection,
   currentRun: RunProjection,
   controlledFactorIds?: ReadonlySet<string>,
-): RunDelta {
+): ContentSafeRunDelta {
   const prior = priorRun.summary;
   const current = currentRun.summary;
   const priorLabel = prior.winner.option_label.trim();
