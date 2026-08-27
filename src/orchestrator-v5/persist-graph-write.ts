@@ -39,7 +39,9 @@
  * `append_turn_atomic_v5` does not write `scenarios.graph` itself — it delegates
  * to `_v4` — so the whole v2..v5 family reaches the column through this floor.
  *
- * Those answer DIFFERENT QUESTIONS, so they are not merged: `commitDirectAnswer`
+ * THE FIRST TWO answer DIFFERENT QUESTIONS, so they are not merged (this is a
+ * statement about those two callers only — the restore tier is not "unmerged",
+ * it is simply NOT ON THIS FLOOR): `commitDirectAnswer`
  * requires an `OlumiResponse` and hardcodes `response_emitted: true`, and
  * manufacturing a synthetic response to satisfy it would persist exactly the
  * turn row BI-01 exists to forbid. Naming the two apart is the fix; aligning
