@@ -714,7 +714,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.persistedGraph = POST_EDIT_GRAPH;
       mockState.priorTurnsTotal = 41;
       mockState.durableMutationReadFails = true;
-      const adapter = callingRoutingAdapter(
+      const adapter = consequenceRoutingAdapter(
         'The saved cost link is stronger, but I cannot confirm the edit history is complete.',
       );
 

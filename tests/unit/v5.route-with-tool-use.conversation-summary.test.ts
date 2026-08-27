@@ -23,6 +23,7 @@ import {
   BRIEF_INSTRUCTION,
   buildUserMessage,
   GRAPH_CONTEXT_INSTRUCTION,
+  RECENT_CHANGES_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
 } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
@@ -92,23 +93,27 @@ function baselinePack(): ContextPack {
   });
 }
 
-/** Historical pre-S4 sha256. The mandatory graph-authority delta is removed
- * structurally before this is asserted, preserving the original evidence. */
+/** Historical pre-S4 sha256. The mandatory graph and saved-history authority
+ * deltas are removed structurally before this is asserted, preserving the
+ * original evidence while pinning both new authorities independently. */
 const PRE_CHANGE_SHA256 =
   '0b7ddf441acc5c9367ed845a7525b1bbe65f87087544e9324ff6764c282a6348';
 
-function subtractGraphAuthorityDelta(
+function subtractMandatoryAuthorityDelta(
   message: string,
   expectedStatus: 'canonical' | 'provisional' | 'absent' | 'unavailable',
 ): string {
-  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
   expect(jsonStart).toBeGreaterThan(-1);
   expect(jsonEnd).toBeGreaterThan(jsonStart);
   const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
   expect(parsed.graph_context).toEqual({ status: expectedStatus });
+  expect(parsed.recent_changes_status).toBe('degraded');
+  expect(message.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
   delete parsed.graph_context;
+  delete parsed.recent_changes_status;
   return (
     message.slice(0, jsonStart) +
     JSON.stringify(parsed, null, 2) +
@@ -141,9 +146,9 @@ describe('buildUserMessage — conversation_summary (S4-inject)', () => {
     expect(out).toContain('"status": "unavailable"');
     expect(out.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
     expect(out.split(BRIEF_INSTRUCTION)).toHaveLength(2);
-    const beforeGraphAuthority = subtractGraphAuthorityDelta(out, 'unavailable');
-    expect(beforeGraphAuthority.length).toBe(2535);
-    expect(createHash('sha256').update(beforeGraphAuthority).digest('hex')).toBe(
+    const beforeMandatoryAuthorities = subtractMandatoryAuthorityDelta(out, 'unavailable');
+    expect(beforeMandatoryAuthorities.length).toBe(2535);
+    expect(createHash('sha256').update(beforeMandatoryAuthorities).digest('hex')).toBe(
       PRE_CHANGE_SHA256,
     );
   });
