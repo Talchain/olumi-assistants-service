@@ -376,6 +376,27 @@ export interface SessionStore {
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFactWithTurn[]>;
   /**
+   * The scenario's newest successfully-applied mutation receipts, including
+   * receipts whose parent turns have fallen outside {@link readRecent}'s
+   * bounded conversation window.
+   *
+   * This is deliberately scenario-scoped and uncached. The session LRU is a
+   * process-local turn window, so it cannot establish that an older durable
+   * mutation did or did not happen after a cold return or on another instance.
+   * Production implementations must derive eligibility from the existing
+   * canonical mutation-receipt fact-type authority, require `noop = false`
+   * and `result.status = 'applied'`, and return newest-first with a stable tie
+   * break. A failed or malformed read must throw so callers can report a
+   * degraded history rather than silently treating it as no recent changes.
+   *
+   * Optional on the interface so existing test doubles are not forced to
+   * implement it. Production (`SupabaseSessionStore`) always does.
+   */
+  readRecentAppliedMutationFactsFor?(
+    scenarioId: string,
+    limit: number,
+  ): Promise<readonly HandlerFact[]>;
+  /**
    * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
    *
    * WHY THIS IS NOT A FLAVOUR OF {@link readFactsFor}. Every other fact read on
