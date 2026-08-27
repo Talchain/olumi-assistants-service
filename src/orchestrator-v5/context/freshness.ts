@@ -466,7 +466,7 @@ export function selectCurrentTurnRunAnalysisFacts(
  * total order for malformed legacy/direct inputs outside the validated
  * scenario carrier.
  */
-export function compareRunAnalysisComputedAtDesc(
+function compareRunAnalysisComputedAtDesc(
   a: string | null,
   b: string | null,
 ): number {

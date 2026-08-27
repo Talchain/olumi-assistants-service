@@ -214,6 +214,100 @@ describe('selectCanonicalAnalysisState — degraded prior-fact read', () => {
     expect(state.requiresRerun).toBe(false);
   });
 
+  it.each([
+    {
+      label: 'equal represented instants',
+      partialComputedAt: '2026-04-30T02:00:00+02:00',
+      successComputedAt: '2026-04-30T00:00:00.000Z',
+    },
+    {
+      label: 'missing producer timestamps',
+      partialComputedAt: null,
+      successComputedAt: null,
+    },
+  ])(
+    'preserves DB/input tie-break chronology for $label',
+    ({ partialComputedAt, successComputedAt }) => {
+      const partial = {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          graph_hash_at_run: HASH,
+          ...(partialComputedAt === null
+            ? {}
+            : { computed_at: partialComputedAt }),
+          enrichment: { analysis_status: 'partial' },
+        },
+      } as never;
+      const success = {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          graph_hash_at_run: HASH,
+          ...(successComputedAt === null
+            ? {}
+            : { computed_at: successComputedAt }),
+          enrichment: { analysis_status: 'computed' },
+        },
+      } as never;
+
+      // Equal/null computed_at values deliberately leave the DB-newest input
+      // row as the shared ordering tie-break. The partial row is first.
+      const state = selectCanonicalAnalysisState({
+        handlerFacts: [],
+        priorFacts: [partial, success],
+        currentGraphHash: HASH,
+        priorFactsReadOk: true,
+      });
+
+      expect(state.freshness).toBe('fresh');
+      expect(state.degraded_fact_status).toBe('partial');
+      expect(state.contradictions).toContain(
+        'fact_status_success_but_degraded_newer',
+      );
+      expect(state.usableForChips).toBe(false);
+      expect(state.requiresRerun).toBe(true);
+    },
+  );
+
+  it('does not degrade when an equal-instant success is the DB/input head', () => {
+    const success = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2026-04-30T00:00:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as never;
+    const partial = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        graph_hash_at_run: HASH,
+        computed_at: '2026-04-30T02:00:00+02:00',
+        enrichment: { analysis_status: 'partial' },
+      },
+    } as never;
+
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [success, partial],
+      currentGraphHash: HASH,
+      priorFactsReadOk: true,
+    });
+
+    expect(state.degraded_fact_status).toBeNull();
+    expect(state.contradictions).not.toContain(
+      'fact_status_success_but_degraded_newer',
+    );
+    expect(state.usableForChips).toBe(true);
+  });
+
   it.each(['partial', 'refused']) (
     'treats a current %s run as newer than a future-skewed durable success',
     (status) => {

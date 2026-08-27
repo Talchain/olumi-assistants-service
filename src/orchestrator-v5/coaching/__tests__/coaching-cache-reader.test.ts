@@ -32,6 +32,16 @@ function runAnalysisFact(enrichment?: Record<string, unknown>): HandlerFact {
   };
 }
 
+function factSources(
+  facts: readonly HandlerFact[],
+  selectedAnalysisFact: HandlerFact | null = facts[0] ?? null,
+) {
+  return {
+    selectedAnalysisFact,
+    analysisFactChronology: facts,
+  };
+}
+
 describe('readCoachingCache', () => {
   let dir: string;
 
@@ -50,7 +60,7 @@ describe('readCoachingCache', () => {
 
   it('returns the empty cache when no sources are present', async () => {
     const uniqueScenario = `scen-missing-${Date.now()}`;
-    const cache = await readCoachingCache(uniqueScenario, []);
+    const cache = await readCoachingCache(uniqueScenario, factSources([]));
     expect(cache).toEqual({
       draft_coaching: null,
       decision_review: null,
@@ -58,7 +68,7 @@ describe('readCoachingCache', () => {
     });
   });
 
-  it('populates decision_review from the most recent run_analysis fact with enrichment.decision_review', async () => {
+  it('populates decision_review from the selected run_analysis fact', async () => {
     const uniqueScenario = `scen-dr-${Date.now()}`;
     const dr = {
       produced_at: '2026-04-20T12:00:00.000Z',
@@ -70,31 +80,66 @@ describe('readCoachingCache', () => {
       runAnalysisFact({ some: 'other' }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.decision_review).toEqual(dr);
   });
 
-  it('picks the NEWEST decision_review when multiple run_analysis facts carry it (newest-first input order)', async () => {
-    // V5 review cycle 2: SupabaseSessionStore.readFactsFor now orders by
-    // created_at DESC, so priorFacts arrives newest-first. This test pins
-    // the forward-walk semantics so a future refactor that flipped the
-    // loop direction would fail loudly.
-    const uniqueScenario = `scen-dr-newest-${Date.now()}`;
-    const newestDr = {
+  it('binds decision_review to display selection rather than DB page order', async () => {
+    const uniqueScenario = `scen-dr-selected-${Date.now()}`;
+    const dbHeadDr = {
       produced_at: '2026-04-21T12:00:00.000Z',
-      narrative_summary: 'newest recommendation',
+      narrative_summary: 'DB_HEAD_REVIEW_MUST_NOT_REACH_PROMPT',
     };
-    const olderDr = {
+    const selectedDr = {
       produced_at: '2026-04-20T12:00:00.000Z',
-      narrative_summary: 'older recommendation',
+      narrative_summary: 'SELECTED_DISPLAY_REVIEW',
     };
     const facts: HandlerFact[] = [
-      runAnalysisFact({ decision_review: newestDr }),
-      runAnalysisFact({ decision_review: olderDr }),
+      runAnalysisFact({ decision_review: dbHeadDr }),
+      runAnalysisFact({ decision_review: selectedDr }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
-    expect(cache.decision_review).toEqual(newestDr);
+    const cache = await readCoachingCache(
+      uniqueScenario,
+      factSources(facts, facts[1]!),
+    );
+    expect(cache.decision_review).toEqual(selectedDr);
+  });
+
+  it('does not substitute another fact review when the selected fact has none', async () => {
+    const uniqueScenario = `scen-dr-withheld-${Date.now()}`;
+    const facts: HandlerFact[] = [
+      runAnalysisFact({
+        decision_review: {
+          produced_at: '2026-04-21T12:00:00.000Z',
+          narrative_summary: 'UNSELECTED_REVIEW',
+        },
+      }),
+      runAnalysisFact({ some: 'selected-without-review' }),
+    ];
+
+    const cache = await readCoachingCache(
+      uniqueScenario,
+      factSources(facts, facts[1]!),
+    );
+    expect(cache.decision_review).toBeNull();
+  });
+
+  it('fails weak for a selected-fact assertion detached from the chronology', async () => {
+    const uniqueScenario = `scen-dr-detached-${Date.now()}`;
+    const chronology = [runAnalysisFact({ some: 'persisted' })];
+    const detached = runAnalysisFact({
+      decision_review: {
+        produced_at: '2026-04-21T12:00:00.000Z',
+        narrative_summary: 'DETACHED_REVIEW_MUST_NOT_REACH_PROMPT',
+      },
+    });
+
+    const cache = await readCoachingCache(
+      uniqueScenario,
+      factSources(chronology, detached),
+    );
+    expect(cache.decision_review).toBeNull();
   });
 
   it('picks the NEWEST coaching_signal when multiple run_analysis facts carry one', async () => {
@@ -112,7 +157,7 @@ describe('readCoachingCache', () => {
       }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.last_coaching_signal?.turn_id).toBe('turn-newest');
   });
 
@@ -120,7 +165,7 @@ describe('readCoachingCache', () => {
     const uniqueScenario = `scen-no-dr-${Date.now()}`;
     const facts: HandlerFact[] = [runAnalysisFact()];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.decision_review).toBeNull();
   });
 
@@ -134,7 +179,7 @@ describe('readCoachingCache', () => {
       }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.last_coaching_signal).toEqual({
       signal_id: 'FIRST_ANALYSIS_COMPLETE',
       turn_id: 'turn-42',
@@ -152,7 +197,7 @@ describe('readCoachingCache', () => {
       }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.last_coaching_signal).toBeNull();
   });
 
@@ -171,7 +216,7 @@ describe('readCoachingCache', () => {
     await appendDraftCoaching(record, DEFAULT_DRAFT_COACHING_LOG_PATH);
 
     try {
-      const cache = await readCoachingCache(uniqueScenario, []);
+      const cache = await readCoachingCache(uniqueScenario, factSources([]));
       expect(cache.draft_coaching).toEqual(record);
     } finally {
       // Best-effort cleanup: unique scenario id means leftover records are
@@ -200,7 +245,7 @@ describe('readCoachingCache', () => {
       }),
     ];
 
-    const cache = await readCoachingCache(uniqueScenario, facts);
+    const cache = await readCoachingCache(uniqueScenario, factSources(facts));
     expect(cache.draft_coaching?.bias_signals).toEqual(draftRecord.bias_signals);
     // decision_review is null (no decision_review field on that enrichment):
     expect(cache.decision_review).toBeNull();
@@ -237,7 +282,10 @@ describe('readCoachingCache', () => {
       };
       await appendLastCoachingSignal(newerSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
 
-      const cache = await readCoachingCache(uniqueScenario, [olderFactFact]);
+      const cache = await readCoachingCache(
+        uniqueScenario,
+        factSources([olderFactFact]),
+      );
       expect(cache.last_coaching_signal?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
       expect(cache.last_coaching_signal?.turn_id).toBe('turn-newer');
     });
@@ -257,7 +305,10 @@ describe('readCoachingCache', () => {
       };
       await appendLastCoachingSignal(olderSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
 
-      const cache = await readCoachingCache(uniqueScenario, [newerFactFact]);
+      const cache = await readCoachingCache(
+        uniqueScenario,
+        factSources([newerFactFact]),
+      );
       expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
       expect(cache.last_coaching_signal?.turn_id).toBe('turn-fact');
     });
@@ -272,7 +323,7 @@ describe('readCoachingCache', () => {
       };
       await appendLastCoachingSignal(sidecarOnly, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
 
-      const cache = await readCoachingCache(uniqueScenario, []);
+      const cache = await readCoachingCache(uniqueScenario, factSources([]));
       expect(cache.last_coaching_signal?.signal_id).toBe('HIGH_SENSITIVITY_EDIT');
       expect(cache.last_coaching_signal?.turn_id).toBe('turn-edit');
     });
@@ -285,13 +336,16 @@ describe('readCoachingCache', () => {
         produced_at: '2026-04-20T08:00:00.000Z',
       });
 
-      const cache = await readCoachingCache(uniqueScenario, [fact]);
+      const cache = await readCoachingCache(
+        uniqueScenario,
+        factSources([fact]),
+      );
       expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
     });
 
     it('returns null when neither source has a signal for this scenario', async () => {
       const uniqueScenario = `scen-no-signal-${Date.now()}`;
-      const cache = await readCoachingCache(uniqueScenario, []);
+      const cache = await readCoachingCache(uniqueScenario, factSources([]));
       expect(cache.last_coaching_signal).toBeNull();
     });
   });

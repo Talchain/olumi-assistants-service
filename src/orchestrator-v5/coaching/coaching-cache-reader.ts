@@ -4,17 +4,19 @@
  * Sources:
  *  - draft_coaching: sidecar JSONL (logs/v5-draft-graph-coaching.jsonl),
  *    most recent record for scenario_id.
- *  - decision_review: most recent run_analysis HandlerFact with
- *    enrichment.decision_review present. Reached via priorFacts argument.
- *  - last_coaching_signal: merged from two sources and picked by newest
- *    produced_at:
+ *  - decision_review: the exact successful run_analysis HandlerFact selected
+ *    for the display-analysis projection. An older/differently ordered fact
+ *    is never substituted when the selected fact has no review.
+ *  - last_coaching_signal: merged from two sources:
  *      1. run_analysis handler facts (enrichment.coaching_signal_id).
- *         FIRST_ANALYSIS_COMPLETE attaches here.
+ *         FIRST_ANALYSIS_COMPLETE attaches here. The full validated scenario
+ *         chronology remains available independently of display selection.
  *      2. last-coaching-signal sidecar (per-scenario). Edit-handler signals
  *         (STALE_*, HIGH_SENSITIVITY_EDIT) write only here because edit
  *         HandlerFact variants have no enrichment field in the frozen
  *         schema.
- *    Merging by timestamp (not short-circuit) ensures an older
+ *    The validated fact page supplies its DB-newest signal; merging that with
+ *    the sidecar by produced_at (not short-circuit) ensures an older
  *    analysis-turn signal does not mask a newer edit-turn signal; this is
  *    review feedback P1.1.
  *
@@ -33,19 +35,35 @@ import {
   type LastCoachingSignal,
 } from './types.js';
 
+export interface CoachingAnalysisFactSources {
+  /** Exact fact selected for the model-facing analysis projection. */
+  readonly selectedAnalysisFact: HandlerFact | null;
+  /** Complete validated scenario chronology used only for coaching signals. */
+  readonly analysisFactChronology: readonly HandlerFact[];
+}
+
 /**
  * Read coaching state for a scenario. Safe: always resolves, never throws.
  */
 export async function readCoachingCache(
   scenarioId: string,
-  priorFacts: readonly HandlerFact[] = [],
+  sources: CoachingAnalysisFactSources,
 ): Promise<CoachingCache> {
   const [draft, sidecarSignal] = await Promise.all([
     readLatestDraftCoaching(scenarioId),
     readLatestLastCoachingSignal(scenarioId),
   ]);
-  const decisionReview = extractLatestDecisionReview(priorFacts);
-  const factSignal = extractLatestCoachingSignalFromFacts(priorFacts);
+  // The selected fact must come from the same complete chronology. A detached
+  // clone/direct caller cannot acquire Decision Review authority by assertion.
+  const selectedAnalysisFact =
+    sources.selectedAnalysisFact !== null &&
+    sources.analysisFactChronology.includes(sources.selectedAnalysisFact)
+      ? sources.selectedAnalysisFact
+      : null;
+  const decisionReview = extractSelectedDecisionReview(selectedAnalysisFact);
+  const factSignal = extractLatestCoachingSignalFromFacts(
+    sources.analysisFactChronology,
+  );
   const lastSignal = pickNewestSignal(factSignal, sidecarSignal);
 
   if (draft === null && decisionReview === null && lastSignal === null) {
@@ -60,38 +78,25 @@ export async function readCoachingCache(
 }
 
 /**
- * Walk facts newest-first to find the most recent run_analysis fact with
- * enrichment.decision_review set.
- *
- * Correctness note (V5 review cycle 2): `priorFacts` arrives newest-first
- * because `SupabaseSessionStore.readFactsFor` now applies
- * `ORDER BY created_at DESC`. The forward walk therefore returns the NEWEST
- * matching fact. An earlier revision of this function iterated backward
- * (`length - 1 → 0`) assuming facts were oldest-first; that assumption was
- * silently incorrect in production for two reasons: (a) `readFactsFor`
- * originally had no ORDER BY, so the order was undefined; (b) the upstream
- * caller passed `turn_id` into a row-id lookup, which made `priorFacts`
- * always empty. Both pre-existing bugs were fixed in cycle 2, and this
- * function's walk direction is now corrected to match the documented intent.
+ * Read Decision Review only from the exact fact selected for display. The
+ * selection itself is owned by the shared run-analysis selector; this reader
+ * must not create a second chronology by walking the database page.
  */
-function extractLatestDecisionReview(
-  facts: readonly HandlerFact[],
+function extractSelectedDecisionReview(
+  fact: HandlerFact | null,
 ): DecisionReviewOutput | null {
-  for (const fact of facts) {
-    if (fact.fact_type !== 'run_analysis') continue;
-    const enrichment = fact.result.enrichment;
-    if (enrichment === undefined) continue;
-    const dr = enrichment.decision_review;
-    if (isDecisionReviewOutput(dr)) return dr;
-  }
-  return null;
+  if (fact === null || fact.fact_type !== 'run_analysis') return null;
+  const enrichment = fact.result.enrichment;
+  if (enrichment === undefined) return null;
+  const dr = enrichment.decision_review;
+  return isDecisionReviewOutput(dr) ? dr : null;
 }
 
 /**
  * Walk facts newest-first for the most recent enrichment.coaching_signal_id.
  * Returns null for edit-handler turns (their fact shape has no enrichment).
- * Same correctness note as `extractLatestDecisionReview` — forward walk
- * over newest-first `priorFacts`.
+ * The scenario carrier is DB-created-at newest-first, so a forward walk keeps
+ * fact chronology independent of the computed_at selector used for display.
  */
 function extractLatestCoachingSignalFromFacts(
   facts: readonly HandlerFact[],

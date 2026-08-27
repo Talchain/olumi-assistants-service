@@ -63,8 +63,8 @@ import type {
   AnalysisReadyStatusT,
 } from '../../schemas/analysis-ready.js';
 import {
-  compareRunAnalysisComputedAtDesc,
   deriveAnalysisFreshness,
+  selectClaimBearingRunAnalysisFact,
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
   type FreshnessDerivation,
@@ -341,12 +341,6 @@ export interface SelectCanonicalAnalysisStateInput {
   readonly priorFactsReadOk?: boolean;
 }
 
-/** Defensive read of a fact's run-time `computed_at`. */
-function readComputedAt(fact: HandlerFact): string | null {
-  const result = (fact as { result?: { computed_at?: unknown } }).result;
-  return result && typeof result.computed_at === 'string' ? result.computed_at : null;
-}
-
 /**
  * Compose the canonical analysis state. Pure — no I/O, no telemetry.
  *
@@ -381,27 +375,24 @@ export function selectCanonicalAnalysisState(
       : { priorFactsReadOk: input.priorFactsReadOk },
   );
   const selected = selectRunAnalysisFact(reasoningFacts);
+  const newestClaimBearing = selectClaimBearingRunAnalysisFact(reasoningFacts);
   const currentDegraded = selectDegradedRunAnalysisFact(currentFacts);
   const degraded =
     currentSuccessful === null
       ? currentDegraded ?? selectDegradedRunAnalysisFact(priorFacts)
       : currentDegraded;
 
-  // A newer run failed/partial while an older success would be presented
-  // as current. Only provable when both timestamps are present. (Needs the
-  // raw facts, so it is computed here, not in the shared assembler.)
-  const degradedComputedAt = degraded ? readComputedAt(degraded.fact) : null;
+  // A newer run failed/partial while an older success would be presented as
+  // current. Ask the shared claim-bearing ordering for its head rather than
+  // comparing the independently filtered timestamps again. That preserves
+  // the database/array tie-break when two offsets represent the same instant
+  // or both producer timestamps are absent.
   const degradedNewerThanSelectedSuccess =
     degraded !== null &&
     selected !== null &&
     (currentDegraded !== null && currentSuccessful === null
       ? true
-      : degradedComputedAt !== null &&
-        selected.computed_at !== null &&
-        compareRunAnalysisComputedAtDesc(
-          degradedComputedAt,
-          selected.computed_at,
-        ) < 0);
+      : newestClaimBearing?.fact === degraded.fact);
 
   // Option-identity observability (diagnostic only). Recompute the verdict the
   // guard saw — a trivial set comparison — when the caller supplied current
