@@ -212,11 +212,22 @@ export function buildGraphLookup(
           unit?: unknown;
           cap?: unknown;
         };
+        // ROADMAP 2.384 — the display string lives on the NODE, not on
+        // `observed_state` (`set-factor-value.ts` writes `node.display_value`,
+        // and `analysis-ready.ts`'s `renderFactorCurrentLevel` reads
+        // `factorNode.display_value` at its first rung). Read it from the node
+        // and carry it verbatim; this adapter derives no display string of its
+        // own. An empty/whitespace string is treated as absent so a consumer
+        // can never quote "" at a user.
+        const nodeDisplay = (node as { display_value?: unknown }).display_value;
         const snapshot: FactorObservedStateSnapshot = {
           ...(typeof o.value === 'number' ? { value: o.value } : {}),
           ...(typeof o.raw_value === 'number' ? { raw_value: o.raw_value } : {}),
           ...(typeof o.unit === 'string' ? { unit: o.unit } : {}),
           ...(typeof o.cap === 'number' ? { cap: o.cap } : {}),
+          ...(typeof nodeDisplay === 'string' && nodeDisplay.trim().length > 0
+            ? { display_value: nodeDisplay }
+            : {}),
         };
         // Only index when at least one relevant field survived narrowing;
         // an empty snapshot tells the validator precheck nothing.
