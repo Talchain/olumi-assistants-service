@@ -102,6 +102,18 @@
  * Restore accepts NO client graph either: the bytes appended are the STORED
  * version's, re-validated against the GraphV3 contract before the atomic RPC.
  *
+ * ── UNDO IS A RESTORE, AND THE RETURN LEG IS ADMISSIBLE ────────────────────
+ * There is no undo route and there must not be one: undo is "restore the
+ * version the current head names as its undo pointer", so it produces the same
+ * version/hash/receipt/event truth as any other canonical mutation, and
+ * analysis/readiness respond to the restored canonical snapshot rather than to
+ * any client-side history. The structural floor's delta check had no concept
+ * for a target the scenario ALREADY HELD, which made restore a one-way door on
+ * a legacy-corrupt scenario; `isReturnLegRestore` names that case apart. It is
+ * an identity binding to exactly one version, it fails closed in every
+ * direction, and it is a REAL widening of what this route may write — all of
+ * which is argued at that function.
+ *
  * ── GUESTS ─────────────────────────────────────────────────────────────────
  * Guest (unowned) scenarios cannot hold server-side versions — DB-level
  * design, D3 Branch A (`owner_user_id NOT NULL`, SQLSTATE MV001). The service
@@ -124,7 +136,12 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
-import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
+import {
+  PersistedGraphInvariantError,
+  checkPersistedGraphInvariants,
+} from "../orchestrator-v5/persisted-graph-invariants.js";
+import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
+import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import {
   getModelManagementService,
@@ -210,6 +227,85 @@ const RestoreBodySchema = z.object({
   label: z.string().min(1).max(200).optional(),
   expected_graph_identity_hash: Sha256Hex.nullable(),
 });
+
+/**
+ * ── THE RETURN LEG: is this restore undoing the restore that is currently head?
+ *
+ * WHY THIS EXISTS. The persistence floor's check is DELTA-SCOPED: it refuses a
+ * write whose violations the CURRENT graph does not already carry
+ * (`persisted-graph-invariants.ts:195-260`). That predicate answers *"does the
+ * target carry violations the current graph doesn't?"*, and the guarantee it
+ * serves is *"don't make the scenario structurally worse"*.
+ *
+ * ⭐ THOSE ARE THE SAME QUESTION ONLY WHEN THE TARGET IS A **NEW** STATE. They
+ * diverge when the target is a state this scenario ALREADY HELD: returning
+ * there makes it exactly as bad as it was a moment ago, with the floor's own
+ * consent, so no "worse" is possible. The predicate is correct for the outward
+ * leg and simply had NO CONCEPT for the return leg — CLAUDE.md trap 21, two
+ * questions under one name. That gap made restore a ONE-WAY DOOR: on a
+ * legacy-corrupt scenario, restoring a clean version succeeded and the Undo it
+ * offered was refused 422, because the RPC stores the pre-restore working graph
+ * as an undo version verbatim (`20260824200000:397-410`) and there is NO
+ * separate undo route — undo IS an ordinary restore.
+ *
+ * WHAT THIS IS NOT. It is NOT "a `pre_restore` version may be restored". That
+ * would be a value predicate any legacy row could satisfy (trap 19) and would
+ * re-open the floor for every corrupt version this scenario ever held. The
+ * admission binds BY IDENTITY to exactly ONE version: the one the current head
+ * names as its own undo pointer.
+ *
+ * THE FOUR CONJUNCTS, and what each one refuses:
+ *  1. a head exists                    — nothing to have undone otherwise;
+ *  2. the head is itself a RESTORE     — a `user_save` head with a parent
+ *                                        pointer is not a restore to return from;
+ *  3. head.parent_version_id === the target — THE IDENTITY BINDING. The RPC sets
+ *     this to the undo version it captured (`20260824200000:429`), so this is
+ *     satisfiable one step back and nowhere else;
+ *  4. the working graph IS the head    — compared through the canonical identity
+ *     authority (value + full envelope), mirroring the RPC's own undo-reuse
+ *     predicate (`20260824200000:379-384`). If a turn has moved the graph on
+ *     since the restore, this is NOT a return to a held state — it would be
+ *     introducing old corruption into a graph that has since changed — and the
+ *     refusal stands.
+ *
+ * ⚠ EVERY FAILURE MODE FAILS CLOSED. An unreadable head, a null identity, a
+ * drifted projection/normaliser envelope: each returns `false`, which restores
+ * the pre-existing 422. The widening can only ever be granted by a positive
+ * match on all four conjuncts.
+ *
+ * ⚠ LEGACY LIMIT, STATED NOT SOFTENED: restore rows written by the pre-C8
+ * application sequence carry NULL `parent_version_id` (the C8 columns are
+ * additive). Their return leg stays refused, correctly — we cannot prove those
+ * are held states.
+ */
+export function isReturnLegRestore(params: {
+  readonly head: ModelVersionRecord | null;
+  readonly targetVersionId: string;
+  readonly currentGraph: unknown;
+}): boolean {
+  const { head, targetVersionId, currentGraph } = params;
+  if (head === null) return false;
+  if (head.provenance !== "restore") return false;
+  if (head.parent_version_id !== targetVersionId) return false;
+
+  // The identity authority, never a raw byte compare: the head's hash comes
+  // from the database and the working graph from `store.loadGraph`, so a
+  // JSON-shape comparison would be key-order sensitive across two different
+  // serialisation sources. `computeGraphIdentityHash` goes through
+  // `stableStringify` and carries the envelope that makes the value meaningful.
+  const currentIdentity = computeGraphIdentityHash(
+    currentGraph as GraphStateIngress | null | undefined,
+  );
+  if (currentIdentity === null) return false;
+
+  return (
+    currentIdentity.value === head.graph_identity_hash &&
+    currentIdentity.algorithm === head.hash_algorithm &&
+    currentIdentity.projection_version === head.identity_projection_version &&
+    currentIdentity.normaliser_version === head.identity_normaliser_version &&
+    currentIdentity.graph_schema_version === head.graph_schema_version
+  );
+}
 
 function summaryV2(row: ModelVersionSummary): ModelVersionSummaryV2Local | null {
   let actor: ModelVersionSummaryV2Local["actor"];
@@ -885,11 +981,30 @@ export default async function route(app: FastifyInstance) {
         return unavailable(reply, requestId, "The version could not be restored right now.");
       }
 
+      // ── 6b. Is this the RETURN LEG? — see `isReturnLegRestore` for the whole
+      // argument. Read the head through the service's existing scenario-scoped
+      // reader (it filters on BOTH `scenario_id` and `id`, so a pointer can only
+      // ever resolve to a version this scenario owns).
+      //
+      // ⚠ A HEAD-READ FAILURE IS NOT A RESTORE FAILURE. Any non-`ok` status
+      // yields `null`, `isReturnLegRestore` returns false, and the pre-existing
+      // fail-closed 422 stands. This read can only ever GRANT the widening, so
+      // it must never be able to refuse a restore that would otherwise succeed.
+      const headResult = await service.getCurrentVersion(ctx.scenarioId);
+      const head: ModelVersionRecord | null =
+        headResult.status === "ok" ? headResult.value : null;
+
       // ── 7. Normalise the stored target; still no client graph authority ──
       const graphForStore = projectGraphForPersistence(parsedGraph.data, {
         scenarioId: ctx.scenarioId,
         turnClass: "direct_answer",
         source: "version_restore",
+      });
+
+      const returnLeg = isReturnLegRestore({
+        head,
+        targetVersionId: parsedBody.data.version_id,
+        currentGraph,
       });
 
       // ── 7b. THE SHARED PERSISTENCE FLOOR — the CHECK half (C8) ───────────
@@ -923,69 +1038,118 @@ export default async function route(app: FastifyInstance) {
       // violation absorbs it and still restores. What is refused is making a
       // clean scenario structurally WORSE.
       //
-      // ⚠⚠ THIS IS A ONE-WAY DOOR, AND IT IS NOT "you can always get back".
-      // An earlier draft of this comment claimed exactly that; it is FALSE and
-      // the suite could not see it, because the absorption test above has no
-      // opposite-direction twin. Measured at the route:
+      // ⚠⚠ THIS WAS A ONE-WAY DOOR UNTIL THE RETURN-LEG BRANCH BELOW.
+      // An earlier draft of this comment claimed "you can always get back"; that
+      // was FALSE, and the suite could not see it because the absorption test
+      // above had no opposite-direction twin. Measured at the route:
       //   · the RPC stores the PRE-RESTORE working graph as an undo version
-      //     VERBATIM AND UNCHECKED (`20260824200000:363-376`, label
+      //     VERBATIM AND UNCHECKED (`20260824200000:397-410`, label
       //     'Before restore', provenance 'pre_restore'); and
       //   · there is NO separate undo route — undo IS an ordinary restore
       //     (zero `versions/undo` handlers in `src/`, measured with a firing
       //     contrast control on the restore registration itself).
-      // So on a legacy-corrupt scenario: restoring a CLEAN version succeeds
-      // (nothing introduced), and the Undo it offers is then REFUSED 422,
-      // because the return leg introduces the violation the outward leg
-      // absorbed. The corruption is escapable exactly once, and not re-entrant.
+      // So on a legacy-corrupt scenario, restoring a CLEAN version succeeded and
+      // the Undo it offered was REFUSED 422 — escapable exactly once, and not
+      // re-entrant.
       //
-      // That is accepted, not overlooked: the alternative is writing a graph we
-      // know is structurally invalid, and the whole floor exists to refuse that.
-      // TWO HARMS CANNOT SHARE ONE WINDOW — "we refuse a corrupt write" and "the
-      // user can always get back" are DIFFERENT guarantees, and only the first
-      // is offered here. Pinned by the return-leg test in this route's suite so
-      // the asymmetry stays visible instead of being rediscovered as a bug.
-      try {
-        assertNoIntroducedGraphViolations({
-          graph: graphForStore,
-          identity: { scenario_id: ctx.scenarioId, turn_id: null, turn_class: null },
-          writesGraph: true,
-          baseGraphForInvariants: currentGraph,
-          source: "version_restore",
+      // ⭐ WHAT CHANGED, AND WHICH OF THE TWO DELIBERATE DECISIONS THIS IS. The
+      // superseded pin named the only two ways out: *"either the undo capture
+      // became checked or the baseline semantics changed"*. THIS IS THE SECOND,
+      // and the first was considered and REJECTED. Checking the undo capture —
+      // i.e. refusing the whole outward restore when the pre-restore graph would
+      // be unreturnable — does not remove the trap, it INVERTS it: the user is
+      // then trapped INSIDE the corruption with no escape at all, and it
+      // reverses this estate's own written rationale that an absolute refusal on
+      // an already-invalid base *"would make the scenario permanently
+      // uneditable"* (`edit-graph.ts:2750-2755`, quoted in
+      // `persisted-graph-invariants.ts:199-204`).
+      //
+      // The baseline semantics changed instead, and NARROWLY: the delta check
+      // never had a concept for returning to a state the scenario ALREADY HELD
+      // (see `isReturnLegRestore`). It still refuses every NEW state that would
+      // make the scenario structurally worse — the outward-leg guarantee is
+      // untouched.
+      //
+      // ⚠ THE WIDENING, STATED PLAINLY BECAUSE IT IS REAL: a graph carrying a
+      // structural violation CAN now be written to `scenarios.graph` by this
+      // route, on one narrow branch. It is justified because those exact bytes
+      // WERE `scenarios.graph` a moment earlier and this floor permitted them
+      // there — we are undoing a write the floor allowed, not introducing one it
+      // refused. TWO HARMS CANNOT SHARE ONE WINDOW: "we refuse a corrupt write"
+      // and "the user can always get back" are DIFFERENT guarantees, and naming
+      // the return leg apart is what lets us keep both instead of trading one
+      // for the other.
+      if (returnLeg) {
+        // OBSERVE, DO NOT REFUSE. The admission decision was made by the
+        // identity binding above; re-running the delta here with a self-baseline
+        // would be a guard agreeing with itself. What this call is for is
+        // DISCLOSURE — "admitted knowingly" is the whole of Option B, and an
+        // unlogged widening is a silent one.
+        const admitted = checkPersistedGraphInvariants(graphForStore, {
+          baseGraph: currentGraph,
         });
-      } catch (err) {
-        if (err instanceof PersistedGraphInvariantError) {
-          // 422, not 503 and not 409: the bytes can never succeed, so inviting a
-          // retry would be misleading. Same code and shape as the registration
-          // path's refusal — one vocabulary for one class of refusal.
+        if (admitted.status === "violated") {
           log.warn(
             {
-              event: "v5.scenario_versions.invariant_violation",
+              event: "v5.scenario_versions.return_leg_admitted",
               request_id: requestId,
               scenario_id: ctx.scenarioId,
               version_id: parsedBody.data.version_id,
-              introduced: err.violations.map((v) => ({
+              head_version_id: head?.id ?? null,
+              admitted: admitted.violations.map((v) => ({
                 code: v.code,
                 count: v.count,
                 entity_ids: v.entity_ids,
               })),
             },
-            "Scenario versions — restore refused: this version introduces a structural violation; nothing written",
-          );
-          return invalid(
-            reply,
-            requestId,
-            "GRAPH_INVARIANT_VIOLATION",
-            "This version has a structural problem and was not restored.",
-            {
-              violations: err.violations.map((v) => ({
-                code: v.code,
-                count: v.count,
-                entity_ids: v.entity_ids,
-              })),
-            },
+            "Scenario versions — return leg: restoring a previously-held state that carries structural violations; admitted knowingly",
           );
         }
-        throw err;
+      } else {
+        try {
+          assertNoIntroducedGraphViolations({
+            graph: graphForStore,
+            identity: { scenario_id: ctx.scenarioId, turn_id: null, turn_class: null },
+            writesGraph: true,
+            baseGraphForInvariants: currentGraph,
+            source: "version_restore",
+          });
+        } catch (err) {
+          if (err instanceof PersistedGraphInvariantError) {
+            // 422, not 503 and not 409: the bytes can never succeed, so inviting
+            // a retry would be misleading. Same code and shape as the
+            // registration path's refusal — one vocabulary for one class of
+            // refusal.
+            log.warn(
+              {
+                event: "v5.scenario_versions.invariant_violation",
+                request_id: requestId,
+                scenario_id: ctx.scenarioId,
+                version_id: parsedBody.data.version_id,
+                introduced: err.violations.map((v) => ({
+                  code: v.code,
+                  count: v.count,
+                  entity_ids: v.entity_ids,
+                })),
+              },
+              "Scenario versions — restore refused: this version introduces a structural violation; nothing written",
+            );
+            return invalid(
+              reply,
+              requestId,
+              "GRAPH_INVARIANT_VIOLATION",
+              "This version has a structural problem and was not restored.",
+              {
+                violations: err.violations.map((v) => ({
+                  code: v.code,
+                  count: v.count,
+                  entity_ids: v.entity_ids,
+                })),
+              },
+            );
+          }
+          throw err;
+        }
       }
 
       // ── 8. ONE RPC owns graph + undo + version + head + event ───────────
