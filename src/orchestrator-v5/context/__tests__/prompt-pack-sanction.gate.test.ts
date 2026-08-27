@@ -53,10 +53,12 @@ import {
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
   FOCUS_INSTRUCTION,
+  FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
   READINESS_INSTRUCTION,
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  ANALYSIS_CONTEXT_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
@@ -126,6 +128,7 @@ function shortSha256(s: string): string {
  */
 const CODE_OWNED_INSTRUCTIONS = [
   ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
+  ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
   ['RECENT_CHANGES_INSTRUCTION', RECENT_CHANGES_INSTRUCTION],
   ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
   ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
@@ -133,6 +136,10 @@ const CODE_OWNED_INSTRUCTIONS = [
   // `focus` on the pack, so a field sanctioned only here is genuinely
   // sanctioned — the same reasoning as its two siblings above.
   ['FOCUS_INSTRUCTION', FOCUS_INSTRUCTION],
+  [
+    'FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION',
+    FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
+  ],
   // Readiness. Emitted by the SAME condition that puts `readiness` on the pack
   // — same reasoning as its three siblings above. The served PMS prompt cannot
   // sanction it (it is operator-managed and not editable from this repo), which
@@ -596,6 +603,11 @@ export function findUnpopulatedFields(pack: ContextPack): string[] {
   return Object.keys(ContextPackSchema.shape).filter((k) => !onPack.has(k));
 }
 
+function findUnpopulatedFieldsAcross(packs: readonly ContextPack[]): string[] {
+  const onPacks = new Set(packs.flatMap((pack) => Object.keys(pack)));
+  return Object.keys(ContextPackSchema.shape).filter((key) => !onPacks.has(key));
+}
+
 /** Hash-keyed waivers, applied uniformly to both discriminators. */
 function applyWaivers(found: string[], promptSha: string): string[] {
   return found.filter(
@@ -608,6 +620,13 @@ function applyWaivers(found: string[], promptSha: string): string[] {
 // ---------------------------------------------------------------------------
 
 const PACK = assembleMaximalPack();
+const UNAVAILABLE_PACK = assembleMaximalPack({
+  modelFacingClaimSafety: {
+    status: 'withheld',
+    constraintVerdictState: null,
+    provenance: 'fail_closed_unavailable',
+  },
+});
 /**
  * The message `buildUserMessage` ACTUALLY renders — kept, not discarded. The
  * gate previously parsed the pack out of this and threw the prompt away, which
@@ -615,7 +634,9 @@ const PACK = assembleMaximalPack();
  * did not contain (see EMISSION below).
  */
 const RENDERED = buildUserMessage(PACK, USER_MESSAGE);
+const UNAVAILABLE_RENDERED = buildUserMessage(UNAVAILABLE_PACK, USER_MESSAGE);
 const SERIALISED = observeSerialisedPack(RENDERED);
+const UNAVAILABLE_SERIALISED = observeSerialisedPack(UNAVAILABLE_RENDERED);
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
 
 describe('prompt ↔ pack sanction gate', () => {
@@ -626,7 +647,7 @@ describe('prompt ↔ pack sanction gate', () => {
   });
 
   it('FIXTURE_COMPLETENESS — the fixture populates every schema-declared key (this gate can never be blind)', () => {
-    const unpopulated = findUnpopulatedFields(PACK);
+    const unpopulated = findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK]);
     expect(
       unpopulated,
       `The gate's fixture does not populate ${unpopulated.join(', ')}. A field the fixture ` +
@@ -638,10 +659,14 @@ describe('prompt ↔ pack sanction gate', () => {
   it('SCHEMA_PARITY — the assembler emits no key the schema does not declare (.passthrough() drift)', () => {
     const declared = new Set(Object.keys(ContextPackSchema.shape));
     expect(Object.keys(PACK).filter((k) => !declared.has(k))).toEqual([]);
+    expect(Object.keys(UNAVAILABLE_PACK).filter((k) => !declared.has(k))).toEqual([]);
   });
 
   it('SERIALISER_PARITY — every schema key is either serialised to the model or deliberately stripped', () => {
-    const facing = new Set(Object.keys(SERIALISED));
+    const facing = new Set([
+      ...Object.keys(SERIALISED),
+      ...Object.keys(UNAVAILABLE_SERIALISED),
+    ]);
     expect(
       Object.keys(ContextPackSchema.shape).filter(
         (k) => !facing.has(k) && !(STRIPPED_BY_SERIALISER as readonly string[]).includes(k),
@@ -677,9 +702,10 @@ describe('prompt ↔ pack sanction gate', () => {
     ).toBeGreaterThan(0);
     expect(RENDERED).toContain('## ContextPack');
 
-    const missing = CODE_OWNED_INSTRUCTIONS.filter(([, text]) => !RENDERED.includes(text)).map(
-      ([name]) => name,
-    );
+    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}`;
+    const missing = CODE_OWNED_INSTRUCTIONS.filter(
+      ([, text]) => !renderedCorpus.includes(text),
+    ).map(([name]) => name);
     expect(
       missing,
       `These instructions are counted as SANCTIONING text by MODEL_FACING_CORPUS, but ` +
@@ -779,6 +805,122 @@ describe('prompt ↔ pack sanction gate', () => {
 
     expect(serialised.graph_context).toEqual({ status: 'unavailable' });
     expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  });
+
+  it('ANALYSIS AUTHORITY — exact unavailable marker and sanction travel together once', () => {
+    expect(UNAVAILABLE_SERIALISED.analysis_context).toEqual({
+      status: 'unavailable',
+    });
+    expect(UNAVAILABLE_RENDERED.split(ANALYSIS_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    expect(UNAVAILABLE_SERIALISED.analysis).toBeNull();
+    expect(UNAVAILABLE_SERIALISED.focus).toMatchObject({
+      elements: [
+        {
+          id: 'dec_hire',
+          analysis_link: 'analysis_unavailable',
+        },
+      ],
+    });
+    expect(JSON.stringify(UNAVAILABLE_SERIALISED.focus)).not.toContain(
+      'win_probability',
+    );
+    expect(UNAVAILABLE_RENDERED).toContain(
+      FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
+    );
+    expect(UNAVAILABLE_RENDERED).not.toContain(FOCUS_INSTRUCTION);
+    expect(FOCUS_INSTRUCTION).not.toContain('analysis_unavailable');
+    expect(UNAVAILABLE_RENDERED).not.toContain(
+      'nothing has been analysed',
+    );
+    expect(SERIALISED.analysis_context).toBeUndefined();
+    expect(RENDERED).not.toContain(ANALYSIS_CONTEXT_INSTRUCTION);
+  });
+
+  it('ANALYSIS AUTHORITY — legacy undefined coaching remains byte-equivalent to omission', () => {
+    const omitted = buildUserMessage(
+      { ...PACK, coaching_context: undefined },
+      USER_MESSAGE,
+    );
+    const { coaching_context: _coachingContext, ...withoutCoaching } = PACK;
+    void _coachingContext;
+    const absent = buildUserMessage(withoutCoaching as ContextPack, USER_MESSAGE);
+
+    expect(omitted).toBe(absent);
+    expect(omitted).not.toContain(COACHING_CONTEXT_INSTRUCTION);
+  });
+
+  it('ANALYSIS AUTHORITY — schema rejects broader statuses and extra members', () => {
+    const schema = ContextPackSchema.shape.analysis_context;
+    expect(schema.safeParse({ status: 'canonical' }).success).toBe(false);
+    expect(
+      schema.safeParse({ status: 'unavailable', reason: 'db_timeout' }).success,
+    ).toBe(false);
+    expect(schema.safeParse({ status: 'unavailable' }).success).toBe(true);
+  });
+
+  it('ANALYSIS AUTHORITY — schema rejects every contradictory unavailable prompt state', () => {
+    expect(ContextPackSchema.safeParse(UNAVAILABLE_PACK).success).toBe(true);
+
+    const displayContradiction = {
+      ...UNAVAILABLE_PACK,
+      display_analysis: { leading_option: { label: 'Forged leader' } },
+    };
+    expect(ContextPackSchema.safeParse(displayContradiction).success).toBe(
+      false,
+    );
+
+    const focusContradiction = {
+      ...UNAVAILABLE_PACK,
+      focus: {
+        ...UNAVAILABLE_PACK.focus!,
+        elements: [
+          {
+            ...UNAVAILABLE_PACK.focus!.elements[0]!,
+            analysis_link: 'analysis_unavailable' as const,
+            analysis: { win_probability: '83%' },
+          },
+        ],
+      },
+    };
+    expect(ContextPackSchema.safeParse(focusContradiction).success).toBe(false);
+
+    const healthyAbsenceContradiction = {
+      ...UNAVAILABLE_PACK,
+      focus: {
+        ...UNAVAILABLE_PACK.focus!,
+        elements: [
+          {
+            ...UNAVAILABLE_PACK.focus!.elements[0]!,
+            analysis_link: 'no_analysis' as const,
+            analysis: undefined,
+          },
+        ],
+      },
+    };
+    expect(ContextPackSchema.safeParse(healthyAbsenceContradiction).success).toBe(
+      false,
+    );
+
+    const missingMarker = {
+      ...UNAVAILABLE_PACK,
+      analysis_context: undefined,
+    };
+    expect(ContextPackSchema.safeParse(missingMarker).success).toBe(false);
+
+    const coachingContradiction = {
+      ...UNAVAILABLE_PACK,
+      coaching: {
+        ...UNAVAILABLE_PACK.coaching,
+        last_coaching_signal: {
+          signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          turn_id: 'turn-forged',
+          produced_at: '2026-08-27T09:00:00.000Z',
+        },
+      },
+    };
+    expect(ContextPackSchema.safeParse(coachingContradiction).success).toBe(
+      false,
+    );
   });
 
   it.each(['complete', 'capped', 'degraded'] as const)(
@@ -945,7 +1087,9 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     const thinPack = assembleMaximalPack({ brief: undefined });
     // Drives the GATE'S OWN function — so an always-pass mutation of it goes RED.
     expect(findUnpopulatedFields(thinPack)).toContain('brief');
-    // ...and the real fixture is complete, so the check discriminates both ways.
-    expect(findUnpopulatedFields(PACK)).toEqual([]);
+    // ...and the two realistic mutually-exclusive fixtures are complete in
+    // combination: healthy coaching and unavailable-analysis cannot share one
+    // model-facing prompt without creating a false absence claim.
+    expect(findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK])).toEqual([]);
   });
 });

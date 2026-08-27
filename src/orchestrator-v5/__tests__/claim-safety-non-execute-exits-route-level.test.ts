@@ -58,6 +58,7 @@ import { SIMPLIFY_CHANGE_CHIP_PROMPT } from '../routing/chip-simplify-intercept.
 // The WIRE gate's OWN replacement constant, so this file and the gate cannot
 // drift apart on the substituted copy (ROADMAP 2.149).
 import { WIRE_WITHHELD_LEADER_REPLACEMENT } from '../compose/leading-option-wire-enforcement.js';
+import { ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE } from '../compose/analysis-authority-unavailable-notice.js';
 // The PRODUCER's own coaching copy, so the canary below cannot drift from the
 // sentence it exists to protect (CLAUDE.md trap #12).
 import { COACHING_TEXT } from '../signals/coaching-signals.js';
@@ -404,6 +405,12 @@ function provenanceOnTheWire(body: Record<string, any>): unknown {
   return body._diagnostic_trace?.claim_safety?.verdict_provenance;
 }
 
+function unavailableEvents(): Array<{ name: string; data: Record<string, any> }> {
+  return events.filter(
+    (event) => event.name === TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
+  );
+}
+
 /**
  * `_diagnostic_trace` is flag-gated, and the trace IS the wire surface this
  * file measures the permission on — so the flag is SET for the file and
@@ -582,6 +589,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
       const { body } = await postTurn(app, MESSAGE, { withGraphState: false });
       expect(permissionOnTheWire(body)).toBe(true);
+      expect(unavailableEvents()).toEqual([]);
     });
   });
 
@@ -622,9 +630,68 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       // the arm above is a separate, passing case rather than the same one.
       turnReadFails = true;
       allReadsFail = true;
-      const { body } = await postTurn(app, 'Make the model better');
+      const { status, body } = await postTurn(app, 'Make the model better');
+      expect(status, JSON.stringify(body)).toBe(200);
       expect(permissionOnTheWire(body)).toBe(false);
       expect(provenanceOnTheWire(body)).toBe('fail_closed_unavailable');
+      expect(body.assistant_text).toContain(ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE);
+      expect(body.assistant_text.toLowerCase()).not.toContain('you have not run');
+      expect(body.assistant_text.toLowerCase()).not.toContain('no analysis');
+      expect(unavailableEvents()).toEqual([
+        {
+          name: TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
+          data: {
+            exit_path: 'edit_graph',
+            outcome: 'functional_preserved',
+          },
+        },
+      ]);
+    });
+
+    it('a fully degraded TurnExecutor answer discloses and counts the same state once', async () => {
+      // Keep the ordinary turn window readable so the request genuinely reaches
+      // TurnExecutor. The scenario-wide analysis page alone fails, while the
+      // readable window proves no fallback fact; this is the executor-shaped
+      // `fail_closed_unavailable` arm rather than the early-route arm above.
+      scenarioReadFails = true;
+      factsByTurnRowId = {};
+      const staleProseCanary = 'Use the saved analysis result as authoritative.';
+      routeWithToolUseMock.mockResolvedValueOnce(
+        converseTextOnly(staleProseCanary),
+      );
+      const { status, body } = await postTurn(app, 'Where does this leave things?');
+
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).toHaveBeenCalledTimes(1);
+      expect(provenanceOnTheWire(body)).toBe('fail_closed_unavailable');
+      expect(body.assistant_text).toBe(ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE);
+      expect(JSON.stringify(body)).not.toContain(staleProseCanary);
+      expect(body).not.toHaveProperty('_answer_shape');
+      expect(body).not.toHaveProperty('_reasoning');
+      expect(body).not.toHaveProperty('_grounded_selection');
+      expect(body.blocks).toEqual([]);
+      expect(body.suggested_actions).toEqual([]);
+      expect(body.insights).toEqual([]);
+      expect(body.analysis_ready?.freshness).toBe('unknown');
+      expect(body.analysis_ready?.freshness_reason).toBe('derivation_failed');
+      // Readiness may still truthfully block an unanalysable graph and has its
+      // own run-state precedence. The analysis-history claim must only avoid
+      // the false healthy-empty (`never_run`) arm here; the ready-graph pair
+      // below pins unknown_degraded/store_unreadable exactly.
+      expect(body.analysis_state?.run_state?.kind).not.toBe('never_run');
+      expect(JSON.stringify(body)).not.toContain('never_run');
+      expect(JSON.stringify(body)).not.toContain(
+        'no_successful_run_analysis_fact',
+      );
+      expect(unavailableEvents()).toEqual([
+        {
+          name: TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
+          data: {
+            exit_path: 'turn_executor',
+            outcome: 'substantive_replaced',
+          },
+        },
+      ]);
     });
 
     it('a SYSTEM EVENT withholds — the one family that cannot build a turn context', async () => {
@@ -702,6 +769,113 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
       const { body } = await postTurn(app, MESSAGE);
       expect(permissionOnTheWire(body)).toBe(true);
+    });
+
+    it('a functional edit receipt survives an unavailable analysis read and the limitation is appended', async () => {
+      scenarioReadFails = true;
+      factsByTurnRowId = {};
+      dispatchEditGraphMock.mockResolvedValueOnce({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        analysisReady: {
+          status: 'ready',
+          goal_node_id: 'goal_growth',
+          options: [],
+        },
+        freshness: {
+          freshness: 'none',
+          reason: 'no_successful_run_analysis_fact',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: READY_GRAPH_HASH,
+          computed_at: null,
+        },
+        response: {
+          response_version: 2,
+          assistant_text: EDIT_RECEIPT,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+
+      const { status, body } = await postTurn(app, MESSAGE);
+
+      expect(status).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+      expect(provenanceOnTheWire(body)).toBe('fail_closed_unavailable');
+      expect(body.assistant_text).toBe(
+        `${EDIT_RECEIPT}\n\n${ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE}`,
+      );
+      expect(body.blocks).toEqual([]);
+      expect(body).not.toHaveProperty('_answer_shape');
+      expect(body.analysis_ready?.freshness).toBe('unknown');
+      expect(body.analysis_ready?.freshness_reason).toBe('derivation_failed');
+      expect(body.analysis_state?.run_state).toEqual({
+        kind: 'unknown_degraded',
+        cause: 'store_unreadable',
+      });
+      expect(JSON.stringify(body)).not.toContain('never_run');
+      expect(JSON.stringify(body)).not.toContain(
+        'no_successful_run_analysis_fact',
+      );
+      expect(unavailableEvents()).toEqual([
+        {
+          name: TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
+          data: {
+            exit_path: 'edit_graph',
+            outcome: 'functional_preserved',
+          },
+        },
+      ]);
+    });
+
+    it('preserves the typed egress fallback and appends the unavailable limitation', async () => {
+      scenarioReadFails = true;
+      factsByTurnRowId = {};
+      const malformedCandidateCanary = 'malformed candidate canary';
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        response: {
+          response_version: 'NOT_TWO',
+          assistant_text: malformedCandidateCanary,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+
+      const { status, body } = await postTurn(app, MESSAGE);
+
+      expect(status).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+      // The typed fallback deliberately carries no diagnostic sidecars; the
+      // content-free exactly-once event below proves which source state drove
+      // the limitation without weakening the fallback envelope.
+      expect(body.assistant_text).toBe(
+        `The server produced a response that failed validation.\n\n${ANALYSIS_AUTHORITY_UNAVAILABLE_NOTICE}`,
+      );
+      expect(body.blocks).toEqual([
+        {
+          type: 'error',
+          error_code: 'EGRESS_CONTRACT_VIOLATION',
+          severity: 'error',
+        },
+      ]);
+      expect(JSON.stringify(body)).not.toContain(malformedCandidateCanary);
+      expect(body).not.toHaveProperty('_answer_shape');
+      expect(unavailableEvents()).toEqual([
+        {
+          name: TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
+          data: {
+            exit_path: 'edit_graph',
+            outcome: 'egress_fallback_preserved',
+          },
+        },
+      ]);
     });
 
     // ── THE EGRESS INTERACTION — the point of the whole exercise ───────────
@@ -1259,6 +1433,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       const { body } = await postTurn(app, MESSAGE);
       expect(provenanceOnTheWire(body)).toBe('scenario_fact');
       expect(body.assistant_text).not.toContain(LEADER_LABEL);
+      expect(unavailableEvents()).toEqual([]);
     });
 
     it('fail_closed_truncated — a withhold with NO fact selected still enforces', async () => {
@@ -1280,6 +1455,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(permissionOnTheWire(body)).toBe(false);
       expect(body.assistant_text).not.toContain(LEADER_LABEL);
       expect(body.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+      expect(unavailableEvents()).toEqual([]);
     });
 
     it('no_analysis_exists — the honest PERMIT, and the answer ships untouched', async () => {
@@ -1291,6 +1467,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(provenanceOnTheWire(body)).toBe('no_analysis_exists');
       expect(permissionOnTheWire(body)).toBe(true);
       expect(body.assistant_text).toBe(LEADER_ANSWER);
+      expect(unavailableEvents()).toEqual([]);
     });
   });
 
@@ -1338,6 +1515,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       const body = JSON.parse(res.body) as Record<string, any>;
       expect(res.statusCode).toBe(200);
       expect(provenanceOnTheWire(body)).toBe('fail_closed_no_turn_context');
+      expect(unavailableEvents()).toEqual([]);
       expect(
         events.filter(
           (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,

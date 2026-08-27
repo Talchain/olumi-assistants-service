@@ -112,7 +112,9 @@ export function readMayNameLeadingOptionForFacts(
  * and a `true` from "no analysis was in the array I was handed" were **the
  * same wire byte** — so no acceptance walk could build a valid control, and
  * the walk that tried reached for a turn-shape hypothesis its own data
- * refuted. Additive and diagnostic: nothing branches on it.
+ * refuted. The exact `fail_closed_unavailable` arm now also drives the
+ * model-facing unavailable marker and truthful egress copy; no consumer
+ * re-derives that state from the boolean.
  *
  *   - `scenario_fact`        — a `run_analysis` fact was selected (from the
  *                              window or from the scenario-scoped read) and

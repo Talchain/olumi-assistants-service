@@ -330,7 +330,9 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
 });
 
 /** The REAL serialiser, off the same module production calls. */
-const { buildUserMessage } = await import('../routing/route-with-tool-use.js');
+const { buildUserMessage, ANALYSIS_CONTEXT_INSTRUCTION } = await import(
+  '../routing/route-with-tool-use.js'
+);
 
 function converseTextOnly(text: string) {
   return {
@@ -352,7 +354,11 @@ function converseTextOnly(text: string) {
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
 
-async function postTurn(app: FastifyInstance, message: string) {
+async function postTurn(
+  app: FastifyInstance,
+  message: string,
+  selectedNodeIds: readonly string[] = [],
+) {
   const res = await app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -365,6 +371,14 @@ async function postTurn(app: FastifyInstance, message: string) {
       turn_class: 'clarify',
       source: 'composer',
       graph_state: READY_GRAPH,
+      ...(selectedNodeIds.length > 0
+        ? {
+            selected_elements: {
+              node_ids: selectedNodeIds,
+              edge_ids: [],
+            },
+          }
+        : {}),
     },
   });
   return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
@@ -531,10 +545,20 @@ describe('claim safety — the permission is SCENARIO-scoped, not window-scoped'
     // window IS truncated and only the working scenario read distinguishes
     // this case from the RED one above.
     factsByTurnRowId = {};
-    const { body } = await postTurn(app, 'Where does this leave things?');
+    const { body } = await postTurn(
+      app,
+      'Where does this leave things?',
+      ['opt_hire'],
+    );
     expect(body._diagnostic_trace?.claim_safety?.may_name_leading_option).toBe(true);
     expect(body._diagnostic_trace?.claim_safety?.verdict_provenance).toBe('no_analysis_exists');
-    expect(modelBytes('Where does this leave things?')).toContain(HISTORY_LEADER_CLAIM);
+    const bytes = modelBytes('Where does this leave things?');
+    expect(bytes).toContain(HISTORY_LEADER_CLAIM);
+    expect(packHandedToTheModel().analysis_context).toBeUndefined();
+    expect(packHandedToTheModel().focus.elements[0].analysis_link).toBe(
+      'no_analysis',
+    );
+    expect(bytes).not.toContain(ANALYSIS_CONTEXT_INSTRUCTION);
   });
 
   it('POSITIVE CONTROL: an in-window WITHHELD fact behaves exactly as before', async () => {
@@ -556,6 +580,10 @@ describe('claim safety — the permission is SCENARIO-scoped, not window-scoped'
     const { body } = await postTurn(app, 'Where does this leave things?');
     expect(body._diagnostic_trace?.claim_safety?.may_name_leading_option).toBe(false);
     expect(body._diagnostic_trace?.claim_safety?.verdict_provenance).toBe('fail_closed_truncated');
+    expect(packHandedToTheModel().analysis_context).toBeUndefined();
+    expect(modelBytes('Where does this leave things?')).not.toContain(
+      ANALYSIS_CONTEXT_INSTRUCTION,
+    );
   });
 
   it('BELT AND BRACES: it is the FALLBACK, not the mechanism — a working read never reaches it', async () => {
@@ -581,11 +609,36 @@ describe('claim safety — the permission is SCENARIO-scoped, not window-scoped'
     turnsNewestFirst = buildTurns(2).slice(0, 5);
     factsByTurnRowId = {};
     scenarioFactReadFails = true;
-    const { body } = await postTurn(app, 'Where does this leave things?');
+    const { body } = await postTurn(
+      app,
+      'Where does this leave things?',
+      ['opt_hire'],
+    );
     expect(body._diagnostic_trace?.claim_safety?.may_name_leading_option).toBe(false);
     expect(body._diagnostic_trace?.claim_safety?.verdict_provenance).toBe(
       'fail_closed_unavailable',
     );
+    expect(packHandedToTheModel().analysis_context).toEqual({
+      status: 'unavailable',
+    });
+    expect(packHandedToTheModel().analysis).toBeNull();
+    expect(packHandedToTheModel().focus).toMatchObject({
+      elements: [
+        {
+          id: 'opt_hire',
+          analysis_link: 'analysis_unavailable',
+        },
+      ],
+    });
+    const bytes = modelBytes('Where does this leave things?');
+    expect(bytes).toContain('"analysis_context": {');
+    expect(bytes).toContain('"status": "unavailable"');
+    expect(bytes.split(ANALYSIS_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    expect(bytes).not.toContain('fail_closed_unavailable');
+    expect(bytes).not.toContain('"coaching_context"');
+    expect(bytes).not.toContain('"analysis_link": "no_analysis"');
+    expect(bytes).not.toContain('nothing has been analysed');
+    expect(bytes).not.toContain(HISTORY_LEADER_CLAIM);
   });
 
   it('a store WITHOUT the scenario read is treated as degraded, never as assume-good', async () => {

@@ -53,7 +53,10 @@ import { analysisSummaryFixture, priorTurnsFixture } from './context-budget-fixt
 import type { CompactEdge, CompactNode, GraphV3Compact } from '../../../orchestrator/context/graph-compact.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import { measureModelFacingContextPackChars } from '../model-facing-context-pack.js';
-import { buildUserMessage } from '../../routing/route-with-tool-use.js';
+import {
+  ANALYSIS_CONTEXT_INSTRUCTION,
+  buildUserMessage,
+} from '../../routing/route-with-tool-use.js';
 
 const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
@@ -145,6 +148,58 @@ const OVERFLOW = { turns: CONTEXT_PACK_RECENT_TURNS_CAP, graphNodes: 10, labelCh
 const PATHOLOGICAL = { turns: CONTEXT_PACK_RECENT_TURNS_CAP, graphNodes: 20, labelChars: 700 } as const;
 
 describe('whole-pack context ceiling — overflow determinism (defect 3)', () => {
+  it('preserves the exact unavailable-analysis marker and sanction through a real ceiling cut', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: fatTurns(OVERFLOW.turns),
+      priorTurnsTotal: 40,
+      priorFacts: [],
+      brief: 'Should we expand into the EU next year, or consolidate at home?',
+      compactedGraph: bulkyCompactGraph(
+        OVERFLOW.graphNodes,
+        OVERFLOW.labelChars,
+      ),
+      compactedConstraints: null,
+      analysis: analysisSummaryFixture(),
+      coaching: {
+        draft_coaching: null,
+        decision_review: {
+          produced_at: '2026-08-27T09:00:00.000Z',
+          narrative_summary: 'UNAVAILABLE_REVIEW_CANARY',
+        },
+        last_coaching_signal: {
+          signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          turn_id: 'turn-analysis-canary',
+          produced_at: '2026-08-27T09:00:00.000Z',
+        },
+      },
+      modelFacingClaimSafety: {
+        status: 'withheld',
+        constraintVerdictState: null,
+        provenance: 'fail_closed_unavailable',
+      },
+    });
+
+    expect(ceilingEvents()).toHaveLength(1);
+    expect(pack.conversation.recent_turns.length).toBeLessThan(
+      CONTEXT_PACK_RECENT_TURNS_CAP,
+    );
+    expect(pack.analysis_context).toEqual({ status: 'unavailable' });
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
+    expect(measureModelFacingContextPackChars(pack)).toBeLessThanOrEqual(
+      TOTAL_BUDGET!,
+    );
+    const prompt = buildUserMessage(pack, 'same current message');
+    expect(prompt).toContain('"analysis_context": {');
+    expect(prompt.split(ANALYSIS_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    expect(prompt).not.toContain('UNAVAILABLE_REVIEW_CANARY');
+    expect(prompt).not.toContain('FIRST_ANALYSIS_COMPLETE');
+  });
+
   it('trims the verbatim conversation OLDEST-first until the pack fits the policy total', () => {
     // Precondition (trap #13b — a guard whose discrimination is unpinned is a
     // tautology): the SAME fixture with a 2-turn window must be UNDER budget,
@@ -515,6 +570,7 @@ describe('whole-pack context ceiling — authorised model bytes only', () => {
       modelFacingClaimSafety: {
         status: 'withheld',
         constraintVerdictState: 'unevaluated',
+        provenance: 'scenario_fact',
       },
     });
 

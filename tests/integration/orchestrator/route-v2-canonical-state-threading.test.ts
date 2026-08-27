@@ -13,6 +13,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import { ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS } from '../../../src/orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
 import { selectCanonicalAnalysisState } from '../../../src/orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
 
@@ -192,6 +193,45 @@ describe('route-v2 — canonical state hand-off (turn_executor exit)', () => {
     // Provenance: no canonicalState threaded → the partial route fallback.
     expect(body._context_summary.canonical_state_source).toBe('route_fallback');
   });
+
+  it.each([
+    [true, 'turn_executor'],
+    [false, 'route_fallback'],
+  ] as const)(
+    'unavailable projection preserves the actual canonical-state source (withCanonical=%s)',
+    async (withCanonical, expectedSource) => {
+      configHolder.cee.contextSummaryEnabled = true;
+      runTurnExecutorMock.mockResolvedValue({
+        ...mkRunResult({ withCanonical }),
+        answerKind: 'substantive' as const,
+        mayNameLeadingOption: false,
+        mayNameLeadingOptionProvenance: 'fail_closed_unavailable' as const,
+        freshness: {
+          freshness: 'none' as const,
+          reason: 'no_successful_run_analysis_fact' as const,
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: null,
+          computed_at: null,
+        },
+      });
+
+      const suffix = withCanonical ? '4' : '5';
+      const { status, body } = await postTurn(
+        app,
+        `88888888-8888-4888-8888-88888888880${suffix}`,
+      );
+
+      expect(status).toBe(200);
+      expect(body._context_summary.canonical_state_source).toBe(expectedSource);
+      expect(body._context_summary.analysis_state.freshness).toBe(
+        ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS.freshness,
+      );
+      expect(body._context_summary.analysis_state.freshness_reason).toBe(
+        ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS.reason,
+      );
+    },
+  );
 
   it('flag OFF → no `_context_summary` even with canonicalState present', async () => {
     configHolder.cee.contextSummaryEnabled = false;

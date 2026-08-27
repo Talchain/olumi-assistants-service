@@ -58,13 +58,16 @@ import { isRecommendableTypedOption } from '../tools/handlers/recommendable-opti
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import type { ContextPackGraphContext } from './context-graph-snapshot.js';
+import type { MayNameLeadingOptionProvenance } from './claim-safety-read.js';
 import { isCanonicalStrictContextGraphCompaction } from './compact-graph-for-contextpack.js';
 import { measureModelFacingContextPackChars } from './model-facing-context-pack.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import {
+  projectCoachingForUnavailableAnalysis,
   projectCoachingForWithheldClaim,
   projectDisplayAnalysisForWithheldClaim,
   projectFocusForWithheldClaim,
+  projectFocusForUnavailableAnalysis,
 } from './withheld-leader-projection.js';
 import {
   projectConversationForWithheldClaim,
@@ -416,6 +419,11 @@ export interface ContextPackConversation {
   readonly pending_confirmation: boolean;
 }
 
+/** Model-facing marker for the one persisted-analysis read failure arm. */
+export interface ContextPackAnalysisContext {
+  readonly status: 'unavailable';
+}
+
 export interface ContextPack {
   readonly version: typeof CONTEXT_PACK_VERSION;
   /**
@@ -451,6 +459,12 @@ export interface ContextPack {
    * or graph-read detail is model-facing.
    */
   readonly graph_context?: ContextPackGraphContext;
+  /**
+   * Exact fail-closed analysis-authority marker. Present only when the
+   * scenario-wide persisted analysis read could not be established. Absence
+   * makes no positive claim about whether analysis exists.
+   */
+  readonly analysis_context?: ContextPackAnalysisContext;
   readonly graph: ContextPackGraph;
   /**
    * Raw, handler-facing analysis projection. Carries float probabilities
@@ -784,6 +798,7 @@ export interface AssembleContextPackInput {
     | {
         readonly status: 'withheld';
         readonly constraintVerdictState: ConstraintVerdictState | null;
+        readonly provenance: MayNameLeadingOptionProvenance;
       };
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
@@ -1026,6 +1041,9 @@ export interface ContextPackFocusElement {
    *                         option-level comparative result is intentionally
    *                         withheld by the canonical claim-safety verdict;
    *                         no analysis values are attached.
+   *   · `analysis_unavailable` — persisted analysis history could not be
+   *                         established on this turn; no existence or
+   *                         freshness claim is licensed and no figures attach.
    *   · `no_analysis`     — no analysis on this turn to join against.
    */
   readonly analysis_link:
@@ -1034,6 +1052,7 @@ export interface ContextPackFocusElement {
     | 'ambiguous_label'
     | 'analysis_not_current'
     | 'analysis_withheld'
+    | 'analysis_unavailable'
     | 'no_analysis';
   /** Present IFF `analysis_link === 'linked'` and at least one value matched. */
   readonly analysis?: ContextPackFocusAnalysis;
@@ -1752,19 +1771,30 @@ export function assembleContextPackWithSummary(
   // its deterministic projection and never authors permission.
   const withholdModelFacingLeader =
     input.modelFacingClaimSafety?.status === 'withheld';
+  const modelFacingAnalysisContext: ContextPackAnalysisContext | undefined =
+    input.modelFacingClaimSafety?.status === 'withheld' &&
+    input.modelFacingClaimSafety.provenance === 'fail_closed_unavailable'
+      ? { status: 'unavailable' }
+      : undefined;
   const constraintVerdictState =
     input.modelFacingClaimSafety?.status === 'withheld'
       ? input.modelFacingClaimSafety.constraintVerdictState
       : null;
-  const modelFacingDisplayAnalysis = withholdModelFacingLeader
-    ? projectDisplayAnalysisForWithheldClaim(
-        displayAnalysis,
-        constraintVerdictState,
-      )
-    : displayAnalysis;
-  const modelFacingFocus = withholdModelFacingLeader
-    ? projectFocusForWithheldClaim(projectedFocus ?? undefined)
-    : projectedFocus ?? undefined;
+  const modelFacingDisplayAnalysis =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? null
+      : withholdModelFacingLeader
+        ? projectDisplayAnalysisForWithheldClaim(
+            displayAnalysis,
+            constraintVerdictState,
+          )
+        : displayAnalysis;
+  const modelFacingFocus =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? projectFocusForUnavailableAnalysis(projectedFocus ?? undefined)
+      : withholdModelFacingLeader
+        ? projectFocusForWithheldClaim(projectedFocus ?? undefined)
+        : projectedFocus ?? undefined;
   const modelFacingConversation = withholdModelFacingLeader
     ? projectConversationForWithheldClaim(conversation)
     : conversation;
@@ -1774,15 +1804,22 @@ export function assembleContextPackWithSummary(
       : withholdModelFacingLeader
         ? projectConversationSummaryForWithheldClaim(input.conversationSummary)
         : input.conversationSummary;
-  const modelFacingCoaching = withholdModelFacingLeader
-    ? projectCoachingForWithheldClaim(input.coaching ?? EMPTY_COACHING_CACHE)
-    : input.coaching ?? EMPTY_COACHING_CACHE;
+  const coaching = input.coaching ?? EMPTY_COACHING_CACHE;
+  const modelFacingCoaching =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? projectCoachingForUnavailableAnalysis(coaching)
+      : withholdModelFacingLeader
+        ? projectCoachingForWithheldClaim(coaching)
+        : coaching;
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
     ...(projectedBrief !== null ? { brief: projectedBrief } : {}),
     graph_context: graphContext,
+    ...(modelFacingAnalysisContext !== undefined
+      ? { analysis_context: modelFacingAnalysisContext }
+      : {}),
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
