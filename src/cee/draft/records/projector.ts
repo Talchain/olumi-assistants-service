@@ -1445,6 +1445,15 @@ interface ProjectedInterventionBinding {
   readonly unit?: string;
   readonly source: "brief_extraction" | "cee_hypothesis";
   readonly reasoning: string;
+  /**
+   * Marks a RECEIPT rather than an authority claim: the magnitude equals no
+   * cited stated figure, but figures were cited, so it is COMPOSED from the
+   * user's numbers. `intervention-extractor.ts` must keep its own brief-authority
+   * routes open across this flag — it reads the BRIEF TEXT, a different set from
+   * `stated_items`, and suppressing it withdrew attribution from numbers the user
+   * typed verbatim. See `V4InterventionBinding.composed_citation`.
+   */
+  readonly composed_citation?: true;
 }
 
 export interface CanonicalInterventionCandidate {
@@ -1630,16 +1639,69 @@ function bindDirectStatedMagnitude(args: {
 
   const bindingBasis = resolveDirectBindingBasis({ claim, claims, statedItems });
 
-  const matches = bindingBasis
+  const citedFigures = bindingBasis
     .filter((index) => Number.isInteger(index))
     .map((index) => ({ index, item: statedItems[index] }))
     .filter(
       (entry): entry is { index: number; item: DraftStatedItem } =>
-        entry.item !== undefined &&
-        entry.item.kind === "figure" &&
-        entry.item.value === claim.sets_to,
+        entry.item !== undefined && entry.item.kind === "figure",
     );
-  if (matches.length === 0) return undefined;
+
+  const matches = citedFigures.filter(({ item }) => item.value === claim.sets_to);
+
+  if (matches.length === 0) {
+    // ⭐⭐ A COMPOSED MAGNITUDE IS NOT A MODEL-CHOSEN ONE, AND THIS BRANCH USED
+    // TO DESTROY THE DIFFERENCE.
+    //
+    // `instruction.ts:244-249` asks for `sets_to` as the value the factor WOULD
+    // TAKE if the option were chosen, and sanctions deriving it from "a figure
+    // the user stated, OR A CHANGE THEY DESCRIBED". A described change composes:
+    // on a factor whose observed state is the current level, an option that
+    // "adds GBP 48,000 a year" to a "GBP 15,000 a year" baseline correctly sets
+    // it to 63,000. That value equals no single stated figure BY CONSTRUCTION,
+    // so exact-equality matching is guaranteed to miss it — for EVERY option
+    // whose brief figure is an increment over a non-zero baseline. Measured on
+    // scenario `c3b1bb17`, 27 Aug 2026: two of three options, both correct.
+    //
+    // Returning `undefined` here wrote no binding at all, which threw away the
+    // fact that the claim cited the user's own figures. Downstream, the
+    // extractor's fallback then said "this amount is not stated in the brief"
+    // and the product told the user their 48,000 was "not found in the model" —
+    // false, since it is a summand of the value on screen.
+    //
+    // ⛔ THE STAMP DOES NOT MOVE. `cee_hypothesis` is CORRECT: the composition
+    // is ours, not the user's, and wrongly claiming their authorship is worse
+    // than omitting our own. Only the RECEIPT changes, into the family
+    // `transforms/analysis-ready.ts` already gates its `ambiguous_value` /
+    // `confirm_value` ask on — so a live ask that was structurally blind to this
+    // case can finally see it. The product cannot know whether the user meant an
+    // increment or a total, and asking beats guessing in either direction
+    // (CLAUDE.md trap 22f).
+    if (citedFigures.length === 0) return undefined;
+    // A value that IS a stated figure somewhere keeps its existing route: the
+    // extractor may still earn it brief authority via `classifyAmountAgainstBrief`,
+    // and demoting it here would trade this defect for its mirror image.
+    if (statedItems.some((item) => item.kind === "figure" && item.value === claim.sets_to)) {
+      return undefined;
+    }
+    // ⚠ THE CITATION MAY NOT BE THE CLAIM'S OWN. `resolveDirectBindingBasis`
+    // falls back to the target factor's basis when the link carries none, so a
+    // receipt that always said "the claim composes it from" would credit the
+    // CLAIM with a citation the FACTOR made — a false attribution in the very
+    // sentence added to stop a false attribution. Name the actual citer.
+    const citedByClaim = [...new Set(claim.basis ?? [])].length > 0;
+    const citation = citedFigures
+      .map(({ index, item }) => `stated_items[${index}]=${item.value}`)
+      .join(", ");
+    return {
+      raw_value: claim.sets_to,
+      source: "cee_hypothesis",
+      composed_citation: true,
+      reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; ${claim.sets_to} is not itself a stated figure, and ${
+        citedByClaim ? "the claim composes it from" : "the target factor cites"
+      } ${citation}`,
+    };
+  }
 
   const verified = matches.filter(({ item }) =>
     bindingEarnsBriefClaim(

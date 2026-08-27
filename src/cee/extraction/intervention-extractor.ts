@@ -74,6 +74,27 @@ export interface V4InterventionBinding {
   unit?: string;
   source: "brief_extraction" | "cee_hypothesis";
   reasoning: string;
+  /**
+   * ⭐⭐ THIS BINDING IS A RECEIPT, NOT AN AUTHORITY CLAIM — and the flag exists
+   * because the two are gated identically and must not be.
+   *
+   * Set by the projector when a magnitude equals no cited stated figure but the
+   * claim (or its inheritable target-factor basis) cited figures anyway: the
+   * value is COMPOSED from the user's numbers rather than copied from one. The
+   * receipt exists so the live `confirm_value` ask can see the case.
+   *
+   * ⛔ It must NOT suppress this module's own brief-authority routes.
+   * `bindDirectStatedMagnitude` matches against `stated_items`;
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT. Those are DIFFERENT SETS,
+   * so a number the user typed verbatim can be absent from `stated_items` and
+   * still be genuinely stated — measured on the `"GBP 55,000"` spelling, which
+   * is the convention in the scenario that motivated this whole change. Gating
+   * the brief routes on mere presence of a binding withdrew attribution from a
+   * number the user wrote and asked them to confirm it: the F2 falsehood
+   * reopened from the other side, and a WORSE harm than the defect being fixed.
+   * (CLAUDE.md trap 21 — two questions under one condition.)
+   */
+  composed_citation?: true;
 }
 
 /**
@@ -1073,13 +1094,32 @@ function buildInterventionsFromV4Data(
       // The first version gated on `!statedInBrief`, which lumps the two together
       // — the invariant written against the failure mode instead of the spec
       // (CLAUDE.md trap 13d).
+      // ⭐⭐ A COMPOSED-CITATION RECEIPT MUST NOT WITHDRAW BRIEF AUTHORITY.
+      //
+      // Both routes below used to gate on `binding === undefined`, which asked
+      // "did the projector write anything?" when the question they mean is "may
+      // this value still earn the user's authorship?". Once the projector began
+      // recording a receipt for a COMPOSED magnitude, mere presence of a binding
+      // started suppressing both — and the two authorities read DIFFERENT SETS:
+      // the projector matches `stated_items`, `classifyAmountAgainstBrief` scans
+      // the BRIEF TEXT. Measured on the `"GBP 55,000"` spelling (the convention
+      // in the motivating scenario): a figure the user typed verbatim, absent
+      // from `stated_items`, went `brief_extraction`/high -> `cee_hypothesis`/low
+      // plus a confirm-value ask. That is the F2 falsehood reopened from the
+      // other side, and worse than the defect the receipt was added to fix —
+      // wrongly claiming a user's value is far worse than omitting one of ours.
+      // (CLAUDE.md trap 21: two questions under one condition; trap 13d: write
+      // the gate against the SPEC, not the shape the first case happened to take.)
+      const bindingWithholdsBriefRoutes =
+        binding !== undefined && binding.composed_citation !== true;
+
       const statedDenomination =
-        binding === undefined && verdict === "undecidable" && rawIsFinite
+        !bindingWithholdsBriefRoutes && verdict === "undecidable" && rawIsFinite
           ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText, unit)
           : null;
 
       const earnsBriefClaim =
-        binding === undefined && (statedInBrief || statedDenomination !== null);
+        !bindingWithholdsBriefRoutes && (statedInBrief || statedDenomination !== null);
 
       interventions[factorId] = {
         value,
@@ -1093,7 +1133,10 @@ function buildInterventionsFromV4Data(
         },
         value_confidence: earnsBriefClaim ? "high" : "low",
         reasoning:
-          binding?.reasoning ??
+          // A value that EARNS the brief claim must not carry the receipt's
+          // "not itself a stated figure" sentence — that would be a false
+          // statement about a number the user demonstrably wrote.
+          (earnsBriefClaim ? undefined : binding?.reasoning) ??
           (verdict === "stated"
             ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
             : statedDenomination !== null
