@@ -89,7 +89,6 @@ import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
 // it calls the one function turn-executor's two read points call.
 import {
   claimSafetyScopeFromContext,
-  readMayNameLeadingOptionVerdict,
   readMayNameLeadingOptionVerdictForTurn,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
@@ -1546,10 +1545,6 @@ export async function dispatchChipClickRunAnalysis(
       // produced run_analysis fact + prior chain, against the snapshot
       // graph. The chip-click rerun path is the user's escape hatch from
       // a stale verdict — its wire response MUST report fresh.
-      const postDispatchFacts: readonly HandlerFact[] = [
-        ...enrichedFacts,
-        ...scenarioAnalysisFacts,
-      ];
       const currentSuccessfulAnalysis = selectRunAnalysisFact(enrichedFacts);
       // Same-turn successful output is authoritative even when a durable
       // producer timestamp is skewed into the future. Without a current
