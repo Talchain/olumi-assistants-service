@@ -317,6 +317,10 @@ describe('resolveTargetOptionFromCanonicalContext — canonical selected referen
       'Could it win, over customers?',
       'What would make it win with enterprise buyers?',
       'What would make it win, with enterprise buyers?',
+      'What would make it win? With enterprise buyers, specifically.',
+      'Could it win? Over customers, I mean.',
+      'Could it win. Over customers, I mean.',
+      'What would make it win! I mean win over customers.',
       'What would make it become the top factor?',
     ]) {
       expect(

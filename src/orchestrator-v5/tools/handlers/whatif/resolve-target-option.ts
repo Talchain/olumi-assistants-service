@@ -200,7 +200,7 @@ function hasCrossKindIdentityCollision(graph: unknown): boolean {
 const OPTION_DEICTIC_REFERENCE =
   '(?:the selected (?:option|alternative|choice)|this (?:option|one)|that (?:option|one)|it|this|that)';
 const TERMINAL_OUTCOME_BOUNDARY =
-  '(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?!]|\\.(?=\\s|$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))';
+  '(?=\\s*(?:(?:instead|overall)\\s*)?(?:[?!.](?=\\s*$)|,(?=\\s*(?:if|when|under|given|without)\\b)|$|(?:if|when|under|given|without)\\b))';
 const TERMINAL_WIN_CUE =
   `win${TERMINAL_OUTCOME_BOUNDARY}`;
 const TERMINAL_OPTION_RANK_CUE =

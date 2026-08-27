@@ -840,6 +840,26 @@ describe('System B — selected canonical option referent continuity', () => {
         'req-referent-win-with',
         true,
       ],
+      [
+        'What would make it win? With enterprise buyers, specifically.',
+        'req-referent-win-question-continuation',
+        true,
+      ],
+      [
+        'Could it win? Over customers, I mean.',
+        'req-referent-win-over-continuation',
+        true,
+      ],
+      [
+        'Could it win. Over customers, I mean.',
+        'req-referent-win-period-continuation',
+        true,
+      ],
+      [
+        'What would make it win! I mean win over customers.',
+        'req-referent-win-exclamation-continuation',
+        true,
+      ],
     ] as const) {
       const result = await runTurnExecutor(mkPayload(message), requestId, {
         routingAdapter: { chatWithTools: vi.fn() } as never,
@@ -861,7 +881,7 @@ describe('System B — selected canonical option referent continuity', () => {
     const flipFacts = writes
       .flatMap((write) => write.handler_facts ?? [])
       .filter((fact) => fact.fact_type === 'what_would_flip');
-    expect(flipFacts).toHaveLength(5);
+    expect(flipFacts).toHaveLength(9);
     const controlFactBytes = JSON.stringify(flipFacts[0]!.result);
     for (const fact of flipFacts) {
       expect(fact.result?.answer_source).toBe('sonnet');
