@@ -49,10 +49,16 @@ import { fileURLToPath } from "node:url";
 
 import { NodeV3Schema, GraphV3Schema } from "@talchain/schemas";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { projectRecordsToGraph } from "../projector.js";
 import type { DraftRecordSet } from "../grammar.js";
-import { boundNodeLabel, NODE_LABEL_MAX_CHARS, NODE_LABEL_MIN_CHARS } from "../label-bound.js";
+import {
+  boundNodeLabel,
+  readStringBound,
+  NODE_LABEL_MAX_CHARS,
+  NODE_LABEL_MIN_CHARS,
+} from "../label-bound.js";
 import { enforceSingleGoal } from "../../../structure/index.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
 
@@ -130,6 +136,32 @@ describe("the instruments this suite reasons with can see what they claim to", (
     // finite limit, not `undefined` coerced into agreement with itself.
     expect(Number.isFinite(NODE_LABEL_MAX_CHARS)).toBe(true);
     expect(NODE_LABEL_MAX_CHARS).toBeGreaterThan(NODE_LABEL_MIN_CHARS);
+  });
+
+  /**
+   * ⭐⭐ THE DERIVATION IS FALSIFIABLE, NOT MERELY SELF-CONSISTENT (trap 12d).
+   *
+   * A guard derived from a list proves the copies AGREE and can never prove the
+   * list is RIGHT. `expect(NODE_LABEL_MAX_CHARS).toBe(200)` would be satisfied
+   * just as happily by a hardcoded `200` — the exact mirror this module exists
+   * to remove, passing the test written to prevent it. So the READER is aimed
+   * at a synthetic schema whose bounds are deliberately NOT the contract's: a
+   * constant cannot pass this, only a real read can.
+   */
+  it("READS the bound rather than agreeing with a remembered number", () => {
+    const synthetic = z.string().min(7).max(37);
+    expect(readStringBound(synthetic, "max")).toBe(37);
+    expect(readStringBound(synthetic, "min")).toBe(7);
+    // …and the synthetic bounds are genuinely different from the contract's,
+    // so a constant could not have produced both answers.
+    expect(37).not.toBe(NODE_LABEL_MAX_CHARS);
+    expect(7).not.toBe(NODE_LABEL_MIN_CHARS);
+  });
+
+  it("FAILS LOUD when a schema declares no such check, rather than defaulting", () => {
+    // A default here would silently restore the unbounded behaviour that
+    // deleted a user's reply, under a fully green suite.
+    expect(() => readStringBound(z.string(), "max")).toThrow(/declares no 'max' check/);
   });
 
   it("the governed corpus carries exactly one over-long label, and it is an OPTION not a goal", () => {
@@ -221,6 +253,66 @@ describe("an over-long brief sentence still produces a contract-valid graph", ()
     expect(node!.provenance!.label_authored).toBe(true);
     // Every visible character is still the user's own — nothing is invented.
     expect(quote.startsWith(node!.label.replace(/…$/, ""))).toBe(true);
+  });
+
+  /**
+   * ⭐ THE DISCRIMINATING PAIR for `label_authored`'s scope (trap 19/13b).
+   *
+   * `label_authored` means *the display string is OURS rather than the user's
+   * verbatim words*, and its contract is to sit BESIDE `source_quote` so a
+   * surface can say "you said: …". A shortened STATED label must earn it — the
+   * field would otherwise lie, because absent means "the label IS the user's
+   * own text". A shortened `ai_inferred` CLAIM label must NOT: it has no
+   * `source_quote`, so the badge would promise a verbatim that does not exist.
+   *
+   * Neither half alone shows the scoping is real. Both, in one projection, do.
+   */
+  it("badges a shortened STATED label as ours, and does NOT badge a shortened INFERRED one", () => {
+    const quote = governedOverlongQuote();
+    const brief = `We must decide. We could ${quote}. Or we could wait.`;
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow marketplace liquidity" },
+        { kind: "option", source_quote: quote },
+      ],
+      claims: [
+        // A model-authored label that is also over-long — same treatment, but
+        // it is the MODEL's text, not the user's.
+        { claim_kind: "factor", label: `${quote} across every segment`, basis: [1] },
+        {
+          claim_kind: "causal_link",
+          label: "the option moves the factor",
+          from_stated: 1,
+          to_claim: 0,
+          effect: "positive",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "the factor reaches the goal",
+          from_claim: 0,
+          to_stated: 0,
+          effect: "positive",
+        },
+      ],
+    };
+    const { projection } = driveTheRealChain(records, brief);
+
+    const stated = projection.graph.nodes.find((n) => n.provenance?.source_quote === quote);
+    const inferred = projection.graph.nodes.find(
+      (n) => n.provenance?.provenance_class === "ai_inferred" && n.label.length > 0 && n.kind === "factor",
+    );
+
+    // PIN THE PRECONDITION: both must actually have been shortened, or this
+    // test passes by testing nothing (trap 13b).
+    expect(stated, "the stated option node must exist").toBeDefined();
+    expect(inferred, "the inferred factor node must exist").toBeDefined();
+    expect(stated!.label.endsWith("…"), "the stated label must have been shortened").toBe(true);
+    expect(inferred!.label.endsWith("…"), "the inferred label must have been shortened").toBe(true);
+
+    // The discrimination itself.
+    expect(stated!.provenance!.label_authored).toBe(true);
+    expect(inferred!.provenance!.source_quote).toBeUndefined();
+    expect(inferred!.provenance!.label_authored).toBeUndefined();
   });
 
   it("the shortened label does not move the node's id — bounding runs AFTER every id is minted", () => {

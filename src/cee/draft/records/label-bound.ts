@@ -65,33 +65,46 @@
 import { NodeV3Schema } from "@talchain/schemas";
 
 /**
- * Read one `ZodString` check value out of the published schema, or throw.
+ * Read one `ZodString` check value off a schema, or throw.
  *
  * FAIL-LOUD BY DESIGN. Returning a default would reinstate the mirror this
  * derivation exists to abolish: a pin that stops declaring the check would
  * silently restore the unbounded behaviour that deleted a user's reply, and
  * every test here would keep passing.
+ *
+ * ⭐ EXPORTED SO THE DERIVATION ITSELF CAN BE FALSIFIED (trap 12d). A guard
+ * derived from a list proves the copies AGREE; it can never prove the list is
+ * RIGHT. Asserting only that `NODE_LABEL_MAX_CHARS === 200` would be satisfied
+ * just as happily by a hardcoded `200` — the exact mirror this module exists to
+ * remove. Pointing this reader at a SYNTHETIC schema with a different bound is
+ * what discriminates a real derivation from a constant that agrees with the
+ * contract today.
  */
-function publishedLabelCheck(kind: "min" | "max"): number {
-  const def = (NodeV3Schema.shape.label as { _def?: { checks?: readonly unknown[] } })._def;
+export function readStringBound(
+  schema: unknown,
+  kind: "min" | "max",
+  what = "a string schema",
+): number {
+  const def = (schema as { _def?: { checks?: readonly unknown[] } })._def;
   const checks = def?.checks ?? [];
   for (const check of checks) {
     const c = check as { kind?: string; value?: unknown };
     if (c.kind === kind && typeof c.value === "number") return c.value;
   }
   throw new Error(
-    `label-bound: the published NodeV3Schema.label declares no '${kind}' check. ` +
-      "The bound this module enforces is DERIVED from the contract and cannot be " +
-      "guessed; a pin that drops the check is a contract change that must be read, " +
-      "not defaulted.",
+    `label-bound: ${what} declares no '${kind}' check. The bound this module ` +
+      "enforces is DERIVED from the contract and cannot be guessed; a pin that " +
+      "drops the check is a contract change that must be read, not defaulted.",
   );
 }
 
+const LABEL = NodeV3Schema.shape.label;
+
 /** The published contract's own bound on `NodeV3.label`. Derived, never restated. */
-export const NODE_LABEL_MAX_CHARS = publishedLabelCheck("max");
+export const NODE_LABEL_MAX_CHARS = readStringBound(LABEL, "max", "the published NodeV3Schema.label");
 
 /** The published contract's own floor on `NodeV3.label`. */
-export const NODE_LABEL_MIN_CHARS = publishedLabelCheck("min");
+export const NODE_LABEL_MIN_CHARS = readStringBound(LABEL, "min", "the published NodeV3Schema.label");
 
 /**
  * U+2026, one UTF-16 code unit — so the arithmetic below is exact against the
