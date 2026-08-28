@@ -117,6 +117,21 @@ import {
   OBJECTIVE_CONTRADICTION_RE_SRC,
   OBJECTIVE_CONTRADICTION_MAX_CHARS,
 } from './objective-contradiction.js';
+// The FIFTH tail — "this analysis ran without a value for how X affects Y".
+// Same three pieces of plumbing as the four above, for the same reason.
+//
+// ⚠ UNLIKE the objective-contradiction tail, this one is registered in BOTH
+// TAIL_PATTERN and TEMPLATE_SUFFIX_ONLY_REGEX, and the difference is not an
+// oversight. That tail NAMES OPTIONS AS LEADING and therefore may never ride a
+// withheld turn. This one names an option only as the SUBJECT OF A GAP the user
+// left — it makes no comparative claim, no ranking claim and no leader claim —
+// so it is honest on a withheld turn and, more to the point, NEEDED there: a
+// turn that withheld its headline can still have run past unset option effects,
+// and that is precisely the user who is owed the sentence.
+import {
+  UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
+  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS,
+} from './unset-option-effect-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -266,7 +281,14 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // order) and can co-occur with all three above. Same rule: budgeted from the
   // builder's own worst case, never hand-estimated, so an honest disclosure
   // cannot knock the summary back to the locked template on length.
-  OBJECTIVE_CONTRADICTION_MAX_CHARS;
+  OBJECTIVE_CONTRADICTION_MAX_CHARS +
+  // The unset-option-effect tail rides after the objective-contradiction one
+  // (matching the handler's append order) and can co-occur with all four above:
+  // a run can hold a status quo, carry an unevaluated constraint, rank an
+  // incomplete candidate set, contradict the stated objective AND have run past
+  // an unset option effect. Same rule: budgeted from the builder's own worst
+  // case, never hand-estimated.
+  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -380,6 +402,34 @@ export interface AnalysisResultHeadlineInput {
    * structural `factor_id` only. Omitted / empty ⇒ no suppression.
    */
   readonly interventionControlledFactorIds?: ReadonlySet<string>;
+  /**
+   * ⭐ Factor ids the run had NO OPTION-EFFECT VALUE for — the named-driver half
+   * of the 2026-08-28 disclosure defect. Derived by
+   * `unset-option-effect-disclosure.ts::unsetOptionEffectFactorIds` from the
+   * SAME records the disclosure sentence is built from, so the sentence and this
+   * suppression can never disagree about which factors are unset.
+   *
+   * ⚠ A SEPARATE SET FROM {@link interventionControlledFactorIds}, DELIBERATELY.
+   * The two answer different questions — "is this factor a lever some option
+   * pulls?" versus "is this factor's effect one the user never gave a value
+   * for?" — and this estate's most expensive defect class is two authorities
+   * collapsed under one name (CLAUDE.md trap 21). They share the OMIT-NOT-
+   * SUBSTITUTE mechanism because the remedy is the same; they are not the same
+   * predicate and must not be merged.
+   *
+   * WHY OMIT RATHER THAN QUALIFY. `influence_score` is a real measure of the
+   * factor's influence on the OUTCOME, so "X is the strongest driver" is true
+   * in isolation. What is unlicensed is the `because`: the clause binds the
+   * driver to the WIN, and a factor an option does not move cannot be the reason
+   * that option came out ahead of another. Measured on staging 2026-08-28, 3 of
+   * 15 draws shipped exactly that sentence. Omitting lands on an EXISTING
+   * headline shape, so it needs no new grammar — and it matches the ratified
+   * option-controlled-lever rule directly below it, which omits for the
+   * structurally identical reason rather than naming a weaker driver.
+   *
+   * Keyed on structural `factor_id` only. Omitted / empty ⇒ no suppression.
+   */
+  readonly unsetOptionEffectFactorIds?: ReadonlySet<string>;
   /**
    * Trust-spine board #1 (CEE half). True when the leading option violates a
    * hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON — computed by the
@@ -559,7 +609,13 @@ export function describeAnalysisHeadline(
 }
 
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
-  const { enrichment, leading_option_id, status_kind, interventionControlledFactorIds } = input;
+  const {
+    enrichment,
+    leading_option_id,
+    status_kind,
+    interventionControlledFactorIds,
+    unsetOptionEffectFactorIds,
+  } = input;
 
   // Same-source resolution: the winner label, winner probability, and
   // runner-up probability ALL come from the SAME source array — one of
@@ -693,7 +749,11 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
 
   const winnerLabel = winner.label;
   const winnerProbability = winner.winnerProb;
-  const driverLabel = resolveTopDriverLabel(enrichment, interventionControlledFactorIds);
+  const driverLabel = resolveTopDriverLabel(
+    enrichment,
+    interventionControlledFactorIds,
+    unsetOptionEffectFactorIds,
+  );
   // Mission A (provisional_doctrine_v0): the caution candidate replaces the
   // bare fragile label. It is claim-safe by construction — a factor that is
   // option-pinned (sensitivity_score === 0 / zero_reason ===
@@ -1450,6 +1510,7 @@ interface DriverCandidate {
 function resolveTopDriverLabel(
   enrichment: Record<string, unknown>,
   controlledFactorIds?: ReadonlySet<string>,
+  unsetOptionEffectFactorIds?: ReadonlySet<string>,
 ): string | null {
   const arr = enrichment.factor_sensitivity;
   if (!Array.isArray(arr)) return null;
@@ -1492,12 +1553,28 @@ function resolveTopDriverLabel(
       // through to a weaker candidate.
       entry.zero_reason === 'intervention_override';
 
+    // ⭐ THE UNSET-EFFECT PREDICATE (2026-08-28). A SECOND question, kept under
+    // a second name: `isControlled` asks "is this factor a lever some option
+    // pulls?"; this asks "is this factor's effect one the user never gave a
+    // value for?". Same OMIT-NOT-SUBSTITUTE remedy, different question — and
+    // collapsing two questions into one predicate is CLAUDE.md trap 21.
+    //
+    // Matched on the SAME structural id as the controlled set (`node_id` first,
+    // mirroring compactAnalysis's `node_id ?? factor_id` precedence), so a
+    // factor is recognised whichever id a PLoT entry happens to carry. Never
+    // the label: a label match would join on a string two different factors can
+    // share.
+    const isUnsetEffect =
+      unsetOptionEffectFactorIds !== undefined &&
+      controlledMatchId.length > 0 &&
+      unsetOptionEffectFactorIds.has(controlledMatchId);
+
     const score = computeDriverScore(entry);
     if (score === null) continue;
     if (score > topScore) {
       topScore = score;
-      topControlled = isControlled;
-    } else if (score === topScore && isControlled) {
+      topControlled = isControlled || isUnsetEffect;
+    } else if (score === topScore && (isControlled || isUnsetEffect)) {
       // Tie at the top: if ANY equally-strongest driver is option-controlled,
       // treat the top as controlled — order-independent and conservative, so we
       // omit rather than present an equally-strong tunable driver as "the
@@ -1505,6 +1582,11 @@ function resolveTopDriverLabel(
       topControlled = true;
     }
     if (isControlled) continue; // never NAME an option-controlled lever
+    // …and never NAME a factor whose option effect was never set. The clause
+    // this label would land in is `because {X} is the strongest driver`, which
+    // binds the driver to the WIN — and a factor an option does not move cannot
+    // be the reason that option came out ahead of another.
+    if (isUnsetEffect) continue;
     // Mission A (provisional_doctrine_v0): a zero-score factor is not a
     // driver-of-change — never name it as "the strongest driver" (the
     // pre-doctrine code would name a sensitivity_score: 0 factor when all
@@ -1523,10 +1605,13 @@ function resolveTopDriverLabel(
       bestNamed = { label, score };
     }
   }
-  // If the raw strongest driver is option-controlled, omit the driver clause
-  // entirely (the headline falls to a no-driver shape) rather than present a
-  // weaker tunable driver as "the strongest". Once the producer fix lands,
-  // controlled levers are zero-sensitivity and never top, so the clause returns.
+  // If the raw strongest driver is option-controlled OR is a factor whose
+  // option effect was never set, omit the driver clause entirely (the headline
+  // falls to a no-driver shape) rather than present a weaker driver as "the
+  // strongest". Once the producer fix lands, controlled levers are
+  // zero-sensitivity and never top, so the clause returns; the unset-effect arm
+  // clears the moment the user sets the value, which is what the disclosure
+  // sentence riding the same turn asks them to do.
   if (topControlled) return null;
   return bestNamed?.label ?? null;
 }
@@ -1897,7 +1982,12 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // constraint-gap disclosure — mirroring
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}` in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?`;
+// The unset-option-effect disclosure composes LAST of all — after the
+// objective-contradiction tail — mirroring
+// `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
+// intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
+// in the run_analysis handler.
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?`;
 
 /**
  * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
@@ -1925,7 +2015,16 @@ const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
   // The tail belongs ONLY in TAIL_PATTERN, which is reached via a headline.
   // `run-analysis-objective-contradiction-wiring.test.ts` pins `template + tail`
   // as REJECTED so this cannot be "helpfully" re-added.
-  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?$`,
+  //
+  // ⭐ THE UNSET-OPTION-EFFECT TAIL *IS* REGISTERED HERE, and the contrast with
+  // the paragraph above is the whole reason both are spelled out. The test for
+  // this branch is not "does the tail name an option?" but "does the tail make
+  // a claim the withhold just denied?". The objective-contradiction tail asserts
+  // a LEADER, so `template + tail` is a composition the handler can never emit.
+  // This one asserts only that a value the user did not set was not set — true
+  // on a withheld turn, and the withheld turn is exactly where a user who ran
+  // past unset option effects most needs to be told.
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?$`,
 );
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
