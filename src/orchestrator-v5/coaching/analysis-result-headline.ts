@@ -1516,11 +1516,17 @@ function resolveTopDriverLabel(
   if (!Array.isArray(arr)) return null;
 
   let bestNamed: DriverCandidate | null = null;
-  // Track the RAW strongest driver (any control status) so we can omit the
+  // Track the RAW strongest driver (whatever its status) so we can omit the
   // driver clause when the genuine strongest is one we suppress — naming a
-  // weaker tunable driver as "the strongest driver" would be inaccurate.
+  // weaker driver as "the strongest driver" would be inaccurate.
+  //
+  // ⚠ RENAMED FROM `topControlled` (2026-08-28). It now means "the top driver
+  // is suppressed", and there are TWO independent reasons it can be: an
+  // option-controlled lever, or a factor whose option effect was never set. The
+  // old name asserted the first reason for a flag that carries either, which is
+  // how a reader concludes the second one is not handled here.
   let topScore = -Infinity;
-  let topControlled = false;
+  let topSuppressed = false;
   for (const raw of arr) {
     const entry = readRecord(raw);
     if (!entry) continue;
@@ -1573,13 +1579,13 @@ function resolveTopDriverLabel(
     if (score === null) continue;
     if (score > topScore) {
       topScore = score;
-      topControlled = isControlled || isUnsetEffect;
+      topSuppressed = isControlled || isUnsetEffect;
     } else if (score === topScore && (isControlled || isUnsetEffect)) {
       // Tie at the top: if ANY equally-strongest driver is option-controlled,
       // treat the top as controlled — order-independent and conservative, so we
       // omit rather than present an equally-strong tunable driver as "the
       // strongest".
-      topControlled = true;
+      topSuppressed = true;
     }
     if (isControlled) continue; // never NAME an option-controlled lever
     // …and never NAME a factor whose option effect was never set. The clause
@@ -1612,7 +1618,7 @@ function resolveTopDriverLabel(
   // zero-sensitivity and never top, so the clause returns; the unset-effect arm
   // clears the moment the user sets the value, which is what the disclosure
   // sentence riding the same turn asks them to do.
-  if (topControlled) return null;
+  if (topSuppressed) return null;
   return bestNamed?.label ?? null;
 }
 
