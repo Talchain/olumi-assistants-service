@@ -27,6 +27,7 @@ import {
 import {
   routeWithToolUse,
   COACHING_CONTEXT_INSTRUCTION,
+  DISPLAY_GRAPH_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
   RUN_DELTA_INSTRUCTION,
@@ -168,6 +169,8 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
       JSON.stringify(llmFacing, null, 2),
       '',
       GRAPH_CONTEXT_INSTRUCTION,
+      '',
+      DISPLAY_GRAPH_INSTRUCTION,
       '',
       RECENT_CHANGES_INSTRUCTION,
       '',
