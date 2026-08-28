@@ -347,7 +347,7 @@ describe('assembleContextPack', () => {
     const hot = makeAnalysis({
       winner: { option_id: 'opt-hot', option_label: 'HOT_POLICY_OPTION', win_probability: 0.61 },
       options: [
-        { option_id: 'opt-hot', option_label: 'HOT_POLICY_OPTION', win_probability: 0.61 },
+        { option_id: 'opt-hot', option_label: 'HOT_POLICY_OPTION', win_probability: 0.61, outcome_mean: 61000 },
       ],
       top_drivers: [
         { factor_id: 'factor-hot', factor_label: 'HOT_POLICY_DRIVER', sensitivity: 0.4, direction: 'positive' },
@@ -356,7 +356,7 @@ describe('assembleContextPack', () => {
     const durable = makeAnalysis({
       winner: { option_id: 'opt-durable', option_label: 'DURABLE_PROMPT_OPTION', win_probability: 0.83 },
       options: [
-        { option_id: 'opt-durable', option_label: 'DURABLE_PROMPT_OPTION', win_probability: 0.83 },
+        { option_id: 'opt-durable', option_label: 'DURABLE_PROMPT_OPTION', win_probability: 0.83, outcome_mean: 83000 },
       ],
       top_drivers: [
         { factor_id: 'factor-durable', factor_label: 'DURABLE_PROMPT_DRIVER', sensitivity: 0.7, direction: 'negative' },
