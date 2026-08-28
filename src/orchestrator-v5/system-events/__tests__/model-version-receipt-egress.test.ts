@@ -476,6 +476,20 @@ describe('system-event atomic model-version receipt egress', () => {
       // with itself: it would keep passing under a pin that cannot validate
       // receipts at all. Binding to the ISSUE PATH makes it fail whenever the
       // rejection stops being about the receipt's contents.
+      //
+      // ⭐ AMENDED 28 Aug 2026 (P0 egress degrade). THE GUARANTEE IS UNCHANGED;
+      // THE ASSERTION USED TO CONFLATE TWO QUESTIONS AND NOW SEPARATES THEM.
+      //   Q1 "does an invalid receipt reach the client?"  → must stay NO.
+      //   Q2 "does an invalid receipt destroy the reply?" → must become NO.
+      // `expect(egress.ok).toBe(false)` answered Q1 only by INFERENCE from total
+      // rejection — it never checked the receipt was absent. That conflation IS
+      // the P0: a 212-character node label (valid to the producer's own
+      // CEE-local `cee-v3.ts` GraphV3, invalid to the published `max(200)`)
+      // deleted a user's entire assistant reply on staging. `validateEgress`
+      // now DROPS a receipt-confined failure and ships the rest.
+      // Asserting the receipt's ABSENCE is strictly stronger than the old
+      // verdict check for this test's own stated purpose, and the issue-path
+      // assertion below — the half its docblock calls load-bearing — is intact.
       const egress = validateEgress(
         {
           ...MINIMAL_RESPONSE,
@@ -484,7 +498,15 @@ describe('system-event atomic model-version receipt egress', () => {
         'req-egress-bad-receipt',
       );
 
-      expect(egress.ok).toBe(false);
+      // Q1: the invalid receipt does not reach the wire — asserted directly.
+      expect(egress.ok).toBe(true);
+      if (!egress.ok) return;
+      expect(
+        Object.prototype.hasOwnProperty.call(egress.value, 'model_version_receipt'),
+      ).toBe(false);
+      // Q2: and the reply the user came for survives.
+      expect(egress.value.assistant_text).toBe(MINIMAL_RESPONSE.assistant_text);
+      // Unchanged: the rejection was about the RECEIPT's contents, not the root.
       const paths = (lastEgressIssues() as Array<{ path?: string }>).map((i) => i.path ?? '');
       expect(paths.some((p) => p.startsWith('model_version_receipt'))).toBe(true);
     });
