@@ -228,7 +228,20 @@ describe('buildStructureProjectionSummary', () => {
       relationshipDetailStatus: 'unavailable',
     });
     expect(summary.relationship_detail_status).toBe('unavailable');
-    expect(summary.top_causal_links).toEqual([]);
+    // ⭐ THE INVARIANT IS "NO STRENGTH", NOT "NO STRUCTURE" (the title's own
+    // words). This assertion read `toEqual([])` from #1184 until the collapse
+    // it caused was measured: a non-strict turn dropped every directed link
+    // and the generic explanation fell to a single refusal sentence, while
+    // `named_factor_pathways` two lines below kept projecting the SAME
+    // connector without its strength. Presence and direction survive a
+    // withheld snapshot; the quantity does not, and that is what is asserted.
+    expect(summary.top_causal_links).toEqual([
+      {
+        label_from: 'Demand Signal',
+        label_to: 'Growth Goal',
+        edge_type: 'directed',
+      },
+    ]);
     expect(summary.named_factor_pathways).toEqual([
       {
         label_from: 'Demand Signal',
@@ -322,7 +335,16 @@ describe('buildStructureProjectionSummary', () => {
       { relationshipDetailStatus: 'canonical_strict' },
     );
     expect(conflict.relationship_detail_status).toBe('unavailable');
-    expect(conflict.top_causal_links).toEqual([]);
+    // Conflicting twins disagree about STRENGTH and interpretation; they agree
+    // the directed connector exists and which way it points. So the detail
+    // status demotes and the quantity is withheld — but the topology claim is
+    // uncontested and is still safe to state. Asserting the absence of
+    // `strength` is the invariant the previous `toEqual([])` was standing in
+    // for, and it fails for a reason a reader can name.
+    expect(conflict.top_causal_links).toEqual([
+      { label_from: 'Demand', label_to: 'Growth', edge_type: 'directed' },
+    ]);
+    expect('strength' in conflict.top_causal_links[0]).toBe(false);
   });
 
   it('normalises bidirected endpoint order before detecting semantic twins', () => {
