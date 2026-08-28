@@ -1618,8 +1618,22 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // and a slot appended BEFORE the intake one composes a summary the egress
     // allowlist rejects, leaving the user with the bare template and no error
     // anywhere in the system.
+    //
+    // The unset-option-effect disclosure (2026-08-28) adds a FIFTH slot,
+    // appended after the objective-contradiction one. Same treatment for the
+    // same reasons: the `gated` stance is unaffected — `summary` is still
+    // "withheld-able headline, else a locked template" — and the pin is UPDATED
+    // RATHER THAN LOOSENED, so a future reordering stays visible here.
+    //
+    // ⚠ AND THE PIN EARNED ITS KEEP A THIRD TIME: this line is what caught the
+    // fifth slot, in the lane's own required-gate run, before review. Note the
+    // ordering constraint it protects is real for THIS slot too — the
+    // unset-effect tail sits LAST in `analysis-result-headline.ts`'s
+    // TAIL_PATTERN, so appending it anywhere earlier here would compose a
+    // summary the egress allowlist rejects and the user would silently receive
+    // the bare template.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather
