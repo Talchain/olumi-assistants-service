@@ -294,22 +294,36 @@ export async function authorizeScenarioOwnership(
     // ⚠ THIS ALARM IS NO LONGER REACHABLE FROM THE SCENARIO ROUTES, BY
     // CONSTRUCTION — and it still looks live, which is why this note exists.
     //
-    // All three /assist/v1/scenarios/* call sites now pass
-    // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE (a literal null), so
-    // `claimedUserId !== null` is UNSATISFIABLE for them and the mismatch can
-    // never fire on those six endpoints again. Only the turn and Stop routes,
-    // which still pass a parsed body id, can reach it.
+    // All three /assist/v1/scenarios/* call sites pass
+    // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE (a literal null) and supply NO
+    // observation, so `observed !== null` is UNSATISFIABLE for them and the
+    // mismatch can never fire on those six endpoints. Only the turn and Stop
+    // routes, which pass `authority.observedClaim`, can reach it.
     //
     // One argument was answering two questions — "who owns this?" and "is this
     // caller misrepresenting itself?" — and removing it as an ownership input
-    // silently removed the second (CLAUDE.md trap 21). Recorded rather than
-    // repaired: splitting them needs an observation-only parameter on this
-    // shared function, which is a change to the turn/Stop seam this PR
-    // deliberately does not touch.
+    // silently removed the second (CLAUDE.md trap 21).
     //
-    // NOT OVERSTATED: only the COMPARISON is lost. The B1 boundary log still
-    // emits `user_id_present` per request, so the presence of a body-supplied
-    // id on a scenario call remains observable.
+    // ⚠ THE DEFERRAL THAT USED TO SIT HERE IS RETIRED, AND LEAVING IT WOULD BE
+    //   THE DEFECT IT DESCRIBED. It read: "Recorded rather than repaired:
+    //   splitting them needs an observation-only parameter on this shared
+    //   function, which is a change to the turn/Stop seam this PR deliberately
+    //   does not touch." That is now FALSE on both clauses — this PR does touch
+    //   that seam, and the parameter exists (see `observedClaim` above). An
+    //   honest note becomes a false one by being left behind after the thing it
+    //   defers gets done.
+    //
+    // WHAT REMAINS TRUE, AND IS ROWED RATHER THAN DONE HERE: the three scenario
+    // routes could now close this the same way — they already call
+    // `parseRequestExtensions`, so the raw claim is in hand and only needs
+    // passing as the fifth argument. That is deliberately NOT done in this PR:
+    // it is six endpoints' worth of behaviour change on surfaces this lane has
+    // not otherwise touched, and "while we're here" work is prohibited. The
+    // MECHANISM now exists; the application is a separate, rowed change.
+    //
+    // NOT OVERSTATED: only the COMPARISON is lost there. The B1 boundary log
+    // still emits `user_id_present` per request, so the presence of a
+    // body-supplied id on a scenario call remains observable.
     // ⚠ COMPARES `observed`, NOT `claimedUserId`. On the turn and Stop routes
     // `claimedUserId` has already been through admissibility and is null for
     // every non-HMAC caller, so comparing it would make this alarm dead code

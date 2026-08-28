@@ -220,6 +220,23 @@ describe('the carve-out table is COMPLETE, and widening it is a deliberate act',
     }
   });
 
+  it('every carve-out shares one scope — the resolver matches on BASIS ALONE', () => {
+    // ⚠ A COUPLING GUARD, NOT A STYLE CHECK. `resolveOwnershipAuthority`
+    // selects a row by `basis` and never consults `scope`, so `scope` is
+    // documentation the code does not enforce. That is sound ONLY while every
+    // row carries the same scope: the moment a second row narrows its scope to
+    // one route, the resolver would apply it everywhere and the field would
+    // become an active lie rather than an inert one.
+    //
+    // Asserting the invariant that makes today's shortcut safe is cheaper and
+    // more honest than either enforcing scope in the resolver (widening the
+    // change) or writing a comment nobody executes. If this REDs, the fix is to
+    // make the resolver route-aware — not to relax the assertion.
+    const scopes = OWNERSHIP_CLAIM_CARVE_OUTS.map((c) => [...c.scope].sort().join('|'));
+    expect(scopes.length).toBeGreaterThan(0);
+    expect(new Set(scopes).size).toBe(1);
+  });
+
   it('no carve-out claims a scope beyond the two turn routes', () => {
     // The three /assist/v1/scenarios/* routes pass the sentinel unconditionally
     // and must not acquire a carve-out by a table edit alone.

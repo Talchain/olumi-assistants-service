@@ -249,6 +249,31 @@ describe('runPreFlight — flag ON', () => {
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, JWT_SUB);
     // …and was still observed.
     expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtIdentityMismatch');
+
+    // ── THE ALARM MUST REPORT THE OBSERVED CLAIM, NOT THE RESOLVED IDENTITY ──
+    // Asserting only that the event FIRES leaves the payload unpinned, and the
+    // payload is the entire content of the alarm. Sourcing
+    // `claimed_user_id_prefix` from `identity.userId` instead of `observed`
+    // still fires, still passes a fires-only assertion, and emits an event
+    // whose two prefixes are IDENTICAL — an alarm that goes off while saying
+    // nothing. Measured: that mutation survived 59/59 green before this
+    // assertion existed.
+    //
+    // The second expectation is the load-bearing one. Equality alone could be
+    // satisfied by a payload that happens to match; asserting the prefix is NOT
+    // the verified subject's is what makes the two sources distinguishable, and
+    // it is only meaningful because the fixtures genuinely differ in their
+    // first 8 characters (`bbbbbbbb…` vs `dddddddd…`) — a discrimination this
+    // test would silently lose if either fixture changed.
+    const mismatch = emitSpy.mock.calls.find((c) => c[0] === 'UserJwtIdentityMismatch');
+    expect(mismatch, 'mismatch event not emitted').toBeDefined();
+    const payload = mismatch?.[1] as {
+      claimed_user_id_prefix?: string;
+      verified_user_id_prefix?: string;
+    };
+    expect(payload.claimed_user_id_prefix).toBe(BODY_USER_ID.slice(0, 8));
+    expect(payload.claimed_user_id_prefix).not.toBe(JWT_SUB.slice(0, 8));
+    expect(payload.verified_user_id_prefix).toBe(JWT_SUB.slice(0, 8));
   });
 
   it('valid JWT with no body user_id: identity derived from sub, no mismatch telemetry', async () => {
