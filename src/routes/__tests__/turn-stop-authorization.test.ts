@@ -30,6 +30,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { FastifyRequest } from "fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { attachCallerContext } from "../../context/index.js";
+
 const STAGING_ORIGIN = "https://staging--olumi.netlify.app";
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const TURN = "dcfc3b50-03b0-4b74-bc56-6dd0ce1531d7";
@@ -92,8 +94,29 @@ const { classifyTurnFence } = await import(
 );
 
 /** A minimal request: the handler reads only `body` and `headers`. */
+/**
+ * A SHARED-KEY caller: authenticated (the auth plugin let it through) but not
+ * individually identified. No caller context is attached, which is exactly
+ * what `admissibleClaimedUserId` sees for a request that did not authenticate
+ * by HMAC — so any body `user_id` it sends is discarded.
+ */
 function req(body: unknown, headers: Record<string, string> = {}): FastifyRequest {
   return { body, headers } as unknown as FastifyRequest;
+}
+
+/**
+ * A VERIFIED HMAC service caller — the documented carve-out
+ * (`user-identity.ts`), and the only kind of caller entitled to name the user
+ * it is acting as.
+ *
+ * `attachCallerContext` is the REAL function rather than a hand-set property,
+ * so if the shape the auth plugin writes ever moves, these tests move with it
+ * instead of pinning a shape nothing produces.
+ */
+function hmacReq(body: unknown, headers: Record<string, string> = {}): FastifyRequest {
+  const request = req(body, headers);
+  attachCallerContext(request, { keyId: "turn-stop-suite-hmac", hmacAuth: true });
+  return request;
 }
 
 beforeEach(() => {
@@ -208,20 +231,45 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
     }
   });
 
-  // POSITIVE CONTROL for the test above: the same forged body, sent to the
-  // HANDLER directly, still authorizes. Without this the test above could pass
-  // because the handler had stopped honouring body identity entirely — a
-  // different change with a different blast radius (it would break the
-  // documented service-caller carve-out). This pins that the strip is a
-  // PROXY-boundary policy, exactly as intended, and that the two paths differ.
-  it("POSITIVE CONTROL: the same forged body DOES authorize when sent straight to the handler (service seam unchanged)", async () => {
+  // ⚠ RE-AIMED 28 Aug 2026 — THIS CONTROL'S ORIGINAL CLAIM IS NO LONGER TRUE,
+  //   AND THAT IS THE POINT OF THE CHANGE IT WAS WATCHING FOR.
+  //
+  // It read: "the same forged body DOES authorize when sent straight to the
+  // handler (service seam unchanged)", and it existed to catch a handler that
+  // had "stopped honouring body identity entirely — a different change with a
+  // different blast radius". That change has now been made deliberately: a
+  // staging IDOR was witnessed on 28 Aug in which an anonymous browser reached
+  // `/orchestrate/v2/turn` through an edge route that injected the shared
+  // assist key, named a victim's `user_id` in the body, and ran a turn on their
+  // owned scenario.
+  //
+  // The control is not deleted, because the concern behind it is still live:
+  // the carve-out must survive for GENUINE service callers. So it becomes the
+  // DISCRIMINATING PAIR it should always have been. One caller, one scenario,
+  // one forged body, two auth postures, two different answers — which is the
+  // only shape that can tell a binding apart from a blanket lockout.
+  it("a SHARED-KEY caller's forged body user_id does NOT authorize a Stop", async () => {
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
     const reply = await recordExplicitTurnStop(
       req({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
+      "req-shared-key-forged",
+    );
+    expect(reply.status).toBe(404);
+    expect(markTurnStopped).not.toHaveBeenCalled();
+    // The claim was discarded BEFORE the ownership comparison: the oracle was
+    // asked about an anonymous caller, not about OWNER.
+    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, null);
+  });
+
+  it("POSITIVE CONTROL: the same body DOES authorize for a VERIFIED HMAC caller (carve-out preserved)", async () => {
+    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    const reply = await recordExplicitTurnStop(
+      hmacReq({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
       "req-service-seam-carveout",
     );
     expect(reply.status).toBe(200);
     expect(markTurnStopped).toHaveBeenCalled();
+    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
   });
 
   // The ownership ORACLE being down must not open the door. Fail CLOSED, and
@@ -383,10 +431,15 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
     expect(markTurnStopped).toHaveBeenCalledWith(SCENARIO, TURN);
   });
 
+  // A service caller acting FOR the owner. Uses `hmacReq` because a body
+  // `user_id` is only an ownership input from a verified HMAC caller; the
+  // shared-key form of this exact request is the refusal case above, and the
+  // owner's OWN browser Stop is the verified-JWT case further down (which
+  // sends no body identity at all and is unaffected by the admissibility rule).
   it("the OWNER of an owned scenario can stop their own admitted turn", async () => {
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
     const reply = await recordExplicitTurnStop(
-      req({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
+      hmacReq({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
       "req-owner",
     );
     expect(reply.status).toBe(200);

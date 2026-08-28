@@ -65,6 +65,7 @@ import {
   type ParsedRequestExtensions,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
+import { getCallerContext } from '../context/index.js';
 import {
   buildSignInRequiredError,
   resolveUserIdentity,
@@ -217,6 +218,62 @@ export async function resolveVerifiedIdentityOrRefuse(
  */
 export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
 
+/**
+ * Is this caller entitled to assert WHO IT IS ACTING AS via a body `user_id`?
+ *
+ * ── THE QUESTION THIS ANSWERS, AND THE ONE IT DOES NOT ─────────────────────
+ * `authorizeScenarioOwnership` answers "does this identity own this
+ * scenario?". This answers a different and prior question: "may this caller
+ * NAME an identity at all?". They were one question until now, which is how
+ * the hole below survived — CLAUDE.md trap 21, two concepts under one name.
+ * Keeping them apart is the point of this helper existing rather than another
+ * conjunct inside the ownership function.
+ *
+ * ── THE HOLE THIS CLOSES (witnessed on staging, 28 Aug 2026) ───────────────
+ * `POST /bff/orchestrate/v2/turn` with NO Authorization header and a body of
+ * `{scenario_id: <A's>, user_id: <A's sub>}` returned 200 and ran a full turn
+ * on user A's owned scenario. The discriminating control — the same request
+ * with a DIFFERENT `user_id` — returned 422 `scenario_owned_by_other_user`,
+ * so the acceptance was specifically the ownership hole and not a permissive
+ * route. The edge injected the shared assist key server-side, so an anonymous
+ * browser inherited a full-trust service credential, and
+ * `effectiveUserId = claimedUserId` did the rest.
+ *
+ * The browser-reachable half is closed at the edge (UI #927 — /bff/orchestrate/*
+ * now 404s). This closes the CEE half so the hole cannot be re-inherited by a
+ * future edge route, a new proxy, or a caller that simply holds the key.
+ *
+ * ── WHY HMAC IS THE LINE ───────────────────────────────────────────────────
+ * The assist key is a SHARED bearer credential: everything holding it is
+ * indistinguishable, so "the caller said so" is worth exactly as much as the
+ * key's distribution, which is not an authorization argument. An HMAC caller
+ * signs a per-request canonical string over method+path+body with a secret it
+ * never transmits, so it is a genuinely identified service. `user-identity.ts`
+ * already documents the service carve-out as being for such callers; this
+ * makes the code agree with that sentence.
+ *
+ * ⚠ `hmacAuth` WAS FORGEABLE UNTIL THIS PR — see `plugins/auth.ts`. An empty
+ *   `x-olumi-signature: ""` header set it true with no verification, which
+ *   would have made this predicate bypassable by one header and turned the
+ *   whole control into guarantee theatre. It is repaired in the same commit,
+ *   deliberately: a control and the input it trusts are one change, not two.
+ *   `hmacAuth` had NO behavioural reader in src/ before this — it fed
+ *   telemetry only — so this is its first load-bearing use and the repair is
+ *   what makes it load-bearing-worthy.
+ *
+ * Returns the sentinel (null) rather than throwing: an inadmissible claim is
+ * not an error, it is simply not an ownership input. A caller that names an
+ * identity it may not name is treated exactly as one that named none — which
+ * on an OWNED scenario is a refusal, and on a GUEST scenario is unchanged.
+ */
+export function admissibleClaimedUserId(
+  req: FastifyRequest,
+  parsedUserId: string | null,
+): string | null {
+  const hmacAuthenticated = getCallerContext(req)?.hmacAuth === true;
+  return hmacAuthenticated ? parsedUserId : CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE;
+}
+
 export async function authorizeScenarioOwnership(
   scenarioId: string,
   claimedUserId: string | null,
@@ -315,7 +372,9 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
   // `authorizeScenarioOwnership` above; the Stop route calls the same function.
   const owned = await authorizeScenarioOwnership(
     ingress.value.scenario_id,
-    extensions.value.userId,
+    // Admissibility is decided BEFORE ownership: a shared-key caller may not
+    // name the identity it acts as. See `admissibleClaimedUserId`.
+    admissibleClaimedUserId(req, extensions.value.userId),
     identity,
     requestId,
   );
