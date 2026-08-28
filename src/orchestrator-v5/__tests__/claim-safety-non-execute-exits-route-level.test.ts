@@ -115,6 +115,44 @@ const READY_GRAPH = {
 
 const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH as never);
 
+const CURRENT_ANALYSIS_READY = {
+  status: 'ready',
+  goal_node_id: 'goal_growth',
+  options: [],
+} as const;
+
+const CURRENT_ANALYSIS_FRESHNESS = {
+  freshness: 'fresh',
+  reason: 'graph_hash_match',
+  selected_fact_index: 0,
+  graph_hash_at_run: READY_GRAPH_HASH,
+  current_graph_hash: READY_GRAPH_HASH,
+  computed_at: '2026-08-28T12:00:00.000Z',
+} as const;
+
+function responseWithCurrentSeparatedAnalysis(assistantText: string) {
+  return {
+    response_version: 2,
+    assistant_text: assistantText,
+    blocks: [
+      {
+        type: 'analysis_result',
+        summary: 'Comparison complete',
+        leading_option_id: 'opt_hire',
+        enrichment: {
+          robustness: {
+            level: 'high',
+            near_tie: { is_tie: false },
+          },
+        },
+      },
+    ],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: 'analyse',
+  };
+}
+
 /** The scenario's analysis fact, carrying a real leading option. */
 function baseRunAnalysisFact(): Record<string, unknown> {
   return {
@@ -902,28 +940,36 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     const LEADER_SENTENCE = `For context, ${LEADER_LABEL} leads at 72% against ${RUNNER_LABEL} at 28%.`;
     const LEADER_ANSWER = `${RECEIPT_SENTENCE} ${LEADER_SENTENCE}`;
 
-    function mockEditAnswer(assistantText: string): void {
+    function mockEditAnswer(assistantText: string, currentLeaderLicensed = false): void {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
         // The gate reads this for the option ROSTER only. A `graph: null` mock
         // would silently disarm enforcement and every RED below would pass by
         // testing nothing — the exits under test all ship a real graph.
         graph: READY_GRAPH,
-        response: {
-          response_version: 2,
-          assistant_text: assistantText,
-          blocks: [],
-          suggested_actions: [],
-          insights: [],
-          stage_indicator: 'analyse',
-        },
+        ...(currentLeaderLicensed
+          ? {
+              analysisReady: CURRENT_ANALYSIS_READY,
+              freshness: CURRENT_ANALYSIS_FRESHNESS,
+              response: responseWithCurrentSeparatedAnalysis(assistantText),
+            }
+          : {
+              response: {
+                response_version: 2,
+                assistant_text: assistantText,
+                blocks: [],
+                suggested_actions: [],
+                insights: [],
+                stage_indicator: 'analyse',
+              },
+            }),
       });
     }
 
     it('⭐ THE HARM, END TO END: the withheld leader claim NO LONGER SHIPS at the main edit exit', async () => {
       // ⭐ THE FLAGSHIP. This is the exact body the 28 Jul live confirmation
       // caught, at the exact exit that produced it, under the exact fixture.
-      mockEditAnswer(LEADER_ANSWER);
+      mockEditAnswer(LEADER_ANSWER, true);
       const { status, body } = await postTurn(app, MESSAGE);
       expect(status).toBe(200);
 
@@ -968,7 +1014,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       // A blanket `false` at these exits — the failure mode #737's own header
       // warns about — would turn this arm red, which is exactly its job.
       factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
-      mockEditAnswer(LEADER_ANSWER);
+      mockEditAnswer(LEADER_ANSWER, true);
       const { body } = await postTurn(app, MESSAGE);
       expect(
         body.assistant_text,
@@ -1112,18 +1158,13 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         outcome: 'ok',
         graph: READY_GRAPH,
         mayNameLeadingOption: opts.mayName,
+        analysisReady: CURRENT_ANALYSIS_READY,
+        freshness: CURRENT_ANALYSIS_FRESHNESS,
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
         // describe exists to pin. A `functional` chip answer never shapes.
         answerKind: 'substantive',
-        response: {
-          response_version: 2,
-          assistant_text: opts.text,
-          blocks: [],
-          suggested_actions: [],
-          insights: [],
-          stage_indicator: 'analyse',
-        },
+        response: responseWithCurrentSeparatedAnalysis(opts.text),
       });
     }
 
@@ -1323,6 +1364,13 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
 
     it('PERMIT-WINS: the permitted twin ships it BYTE-IDENTICAL', async () => {
       factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        analysisReady: CURRENT_ANALYSIS_READY,
+        freshness: CURRENT_ANALYSIS_FRESHNESS,
+        response: responseWithCurrentSeparatedAnalysis(DISTRIBUTED),
+      });
       const { body } = await postTurn(app, MESSAGE);
       expect(body.assistant_text).toBe(DISTRIBUTED);
     });
@@ -1362,14 +1410,9 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
         graph: READY_GRAPH,
-        response: {
-          response_version: 2,
-          assistant_text: wrapped,
-          blocks: [],
-          suggested_actions: [],
-          insights: [],
-          stage_indicator: 'analyse',
-        },
+        analysisReady: CURRENT_ANALYSIS_READY,
+        freshness: CURRENT_ANALYSIS_FRESHNESS,
+        response: responseWithCurrentSeparatedAnalysis(wrapped),
       });
       const { body } = await postTurn(app, MESSAGE);
       expect(body.assistant_text).toBe(wrapped);
@@ -1458,15 +1501,18 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(unavailableEvents()).toEqual([]);
     });
 
-    it('no_analysis_exists — the honest PERMIT, and the answer ships untouched', async () => {
-      // The permitted control on a DIFFERENT provenance from the one above: a
-      // scenario with no analysis has nothing to withhold, and a gate that fired
-      // here would suppress prose on every fresh scenario in the product.
+    it('no_analysis_exists cannot license fabricated analysis ranking prose', async () => {
+      // The turn-level entitlement correctly says no constraint verdict exists
+      // to withhold. That is not a scientific licence to invent a 72% leader:
+      // the final run state is not `complete_current`, so the wire authority
+      // must still remove the designation.
       factsByTurnRowId = {};
       const { body } = await postTurn(app, MESSAGE);
       expect(provenanceOnTheWire(body)).toBe('no_analysis_exists');
       expect(permissionOnTheWire(body)).toBe(true);
-      expect(body.assistant_text).toBe(LEADER_ANSWER);
+      expect(body.analysis_state?.run_state?.kind).not.toBe('complete_current');
+      expect(body.assistant_text).not.toContain(LEADER_LABEL);
+      expect(body.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
       expect(unavailableEvents()).toEqual([]);
     });
   });

@@ -149,6 +149,7 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { readFinalLeaderClaimPermission } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import {
   ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
   enforceAnalysisAuthorityUnavailableAtEgress,
@@ -1579,8 +1580,10 @@ async function sendFinalised200(
   // type-branded and grep-gated, and every exit already threads a REAL verdict
   // (#737 / ROADMAP 1.233 — no literal survives, pinned by
   // `claim-safety-non-execute-exits-route-level.test.ts`'s drift guard). So the
-  // guard consumes `ctx.mayNameLeadingOption` and covers every exit by
-  // construction, including exits that do not exist yet.
+  // guard consumes the final response's `analysis_state.leader_claim` object
+  // and covers every exit by construction, including exits that do not exist
+  // yet. The earlier `ctx.mayNameLeadingOption` is entitlement only; it cannot
+  // overrule the final separation-aware licence or current-run requirement.
   //
   // ORDERING — THREE CONSTRAINTS, ALL SATISFIED AT THIS LINE:
   //   1. AFTER every pass that can edit user-facing prose. `compose/
@@ -1602,10 +1605,11 @@ async function sendFinalised200(
   // `sanitiseOlumiResponseForEgress` exists to catch. Re-finalising is still
   // required: the spread breaks WeakSet membership (the finaliser brand).
   // ═══════════════════════════════════════════════════════════════════════════
+  const finalLeaderClaimPermitted = readFinalLeaderClaimPermission(wireBody);
   const wireEnforcement = enforceLeadingOptionClaimsAtWire(wireBody, {
     requestId,
     exitPath,
-    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    mayNameLeadingOption: finalLeaderClaimPermitted,
     // Read ONLY for the option ROSTER — "which options exist", never "which one
     // leads". The gate enters only when the prose NAMES one of this scenario's
     // own options, which is what spares "sales leads improved" and every other
@@ -1748,9 +1752,9 @@ async function sendFinalised200(
   // (`enforceLeadingOptionClaimsAtWire`), which is unconditional, per-field and
   // per-sentence. See the guard module's docstring.
   //
-  // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
-  // every sanitiser call on this path (it is passed to each of them from this
-  // ctx, unmodified), so the permission the alarm is armed with is unchanged.
+  // The alarm reads the final response authority again after every possible
+  // wire-body rewrite. This keeps the scan bound to the exact object the user
+  // receives and fails closed if a future rewrite drops or malforms the state.
   //
   // ⚠ WHAT THIS ALARM MEASURES CHANGED ON 2026-07-31 (ROADMAP 2.149), AND THE
   // CHANGE IS RECORDED HERE RATHER THAN LEFT FOR A DASHBOARD READER TO DISCOVER
@@ -1783,7 +1787,7 @@ async function sendFinalised200(
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,
     exitPath,
-    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    mayNameLeadingOption: readFinalLeaderClaimPermission(wireBody),
   });
   // Count the client-visible fail-closed outcome at the same exactly-once seam
   // as the response. Derivation-level reads may retry or recover, so emitting

@@ -58,6 +58,7 @@ vi.mock('../../../config/index.js', () => ({
 
 import {
   composeAnalysisStateV1,
+  readFinalLeaderClaimPermission,
   WITHHELD_SEPARATION_UNAVAILABLE,
 } from '../analysis-state-v1.js';
 import {
@@ -217,6 +218,47 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     expect(textAssertsLeadingOption(String(result.response.assistant_text))).toBe(false);
   });
 
+  it('FINAL LICENCE WINS: entitlement true cannot overrule a near-tie response', () => {
+    const canonical: any = {
+      status: 'ready',
+      usableForProse: true,
+      usableForChips: true,
+      usableForFollowupContext: true,
+      requiresRerun: false,
+      blockedUnusable: false,
+      contradictions: [],
+    };
+    const analysisState = composeAnalysisStateV1({
+      canonical,
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'low', near_tie_is_tie: true },
+    } as any);
+    const mountedPhrase = 'go through a reseller partner is only just ahead.';
+    const response = {
+      ...responseWith(mountedPhrase),
+      analysis_state: analysisState,
+    };
+
+    expect(analysisState?.leader_claim).toMatchObject({
+      permitted: false,
+      withheld_reason: 'options_do_not_separate',
+      separation: 'near_tie',
+    });
+    expect(textAssertsLeadingOption(mountedPhrase)).toBe(true);
+
+    const result = enforceLeadingOptionClaimsAtWire(response as any, {
+      requestId: 'r-near-tie-final-licence',
+      exitPath: 'turn_executor',
+      // The route now reads this value from the final response rather than
+      // reusing the earlier entitlement (`true`).
+      mayNameLeadingOption: readFinalLeaderClaimPermission(response),
+      graph: GRAPH_WITH_ROSTER,
+    } as any);
+
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('only just ahead');
+  });
+
   // ── THE ARMED CONTROL. Without it a pass above is indistinguishable from an
   //    enforcer that fires on everything.
   it('ARMED CONTROL: a real graph still arms the gate (unchanged behaviour)', () => {
@@ -348,6 +390,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       // construction; if this assertion ever fails, the class has reopened.
       const span = source.slice(source.indexOf('enforceLeadingOptionClaimsAtWire('));
       const args = span.slice(0, span.indexOf('});') + 3);
+      expect(args).toContain('mayNameLeadingOption: finalLeaderClaimPermitted');
       expect(args).toContain('graph: ctx.graph');
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });

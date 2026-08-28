@@ -206,7 +206,12 @@ describe('E2: skipping the clone of dropped blobs is BYTE-IDENTICAL', () => {
 describe('E1: the Layer-3 scan happens ONCE, on the bytes that ship', () => {
   it('the guard is armed at the send point in sendFinalised200', () => {
     expect(ROUTE_V2).toContain('guardLeadingOptionClaimsAtEgress(wireBody, {');
-    expect(ROUTE_V2).toContain('mayNameLeadingOption: ctx.mayNameLeadingOption,');
+    const guardAt = ROUTE_V2.indexOf('guardLeadingOptionClaimsAtEgress(wireBody, {');
+    const guardCall = ROUTE_V2.slice(guardAt, ROUTE_V2.indexOf('});', guardAt) + 3);
+    expect(guardCall).toContain(
+      'mayNameLeadingOption: readFinalLeaderClaimPermission(',
+    );
+    expect(guardCall).not.toContain('mayNameLeadingOption: ctx.mayNameLeadingOption');
   });
 
   it('the guard call DISCARDS its return value — the byte-neutrality claim itself', () => {
