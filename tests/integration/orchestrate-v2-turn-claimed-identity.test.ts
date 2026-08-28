@@ -247,6 +247,40 @@ describe("/orchestrate/v2/turn — caller-asserted identity is inadmissible on a
     expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: null });
   });
 
+  // ── CASE 2b — A PRESENT-BUT-INVALID SIGNATURE MUST NOT ADMIT EITHER ───────
+  // Case 2 covers the EMPTY header, which is the shape that was actually
+  // forgeable. This covers the other half of the input space: a header that is
+  // well-formed, non-empty, and simply wrong. The two travel different code
+  // paths and only one of them was ever measured.
+  //
+  // An empty signature is FALSY, so it skips the early return and lands on the
+  // API-key branch. A non-empty wrong signature is TRUTHY, so it defers to
+  // real HMAC verification, FAILS it, and falls through to the API-key
+  // fallback. Both must end at `hmacAuth: false` — but they arrive there by
+  // different branches, and a fix that only corrected the falsy branch would
+  // leave this one wherever it was. Testing one and assuming the other is how
+  // a corpus comes to share the code's blind spot (CLAUDE.md trap 13d).
+  it("REFUSES an assist-key caller with a PRESENT-BUT-INVALID signature", async () => {
+    const body = JSON.stringify(turnBody(SCENARIO_OWNED, OWNER));
+    const headers = hmacHeaders("POST", TURN_URL, body);
+    const res = await app.inject({
+      method: "POST",
+      url: TURN_URL,
+      headers: {
+        ...headers,
+        // Same length and alphabet as a real signature — the failure must come
+        // from VERIFICATION, not from a shape check upstream of it.
+        "x-olumi-signature": "f".repeat(64),
+        "x-olumi-assist-key": ASSIST_KEY,
+      },
+      payload: body,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(refusalReason(res.payload)).toBe("scenario_requires_authenticated_owner");
+    expect(ensureCalls[0]).toEqual({ scenarioId: SCENARIO_OWNED, userId: null });
+  });
+
   // ── CASE 3 — OVER-CORRECTION CONTROL: the documented carve-out SURVIVES ───
   // A genuinely HMAC-signed service caller is a identified service, not a
   // shared bearer token, and `user-identity.ts` documents that such a caller

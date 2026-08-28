@@ -65,7 +65,7 @@ import {
   type ParsedRequestExtensions,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
-import { getCallerContext } from '../context/index.js';
+import { resolveOwnershipAuthority } from './ownership-authority.js';
 import {
   buildSignInRequiredError,
   resolveUserIdentity,
@@ -265,13 +265,22 @@ export const CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE: string | null = null;
  * not an error, it is simply not an ownership input. A caller that names an
  * identity it may not name is treated exactly as one that named none — which
  * on an OWNED scenario is a refusal, and on a GUEST scenario is unchanged.
+ *
+ * ── THE RULE ITSELF LIVES IN `ownership-authority.ts` ──────────────────────
+ * This is now a thin accessor over `resolveOwnershipAuthority`, which states
+ * the rule canonically: authority is DENIED unless a named carve-out row
+ * admits it, and each row carries its own reason as data. This function keeps
+ * the `string | null` shape for the call sites and tests that already bind to
+ * it; anything needing the REASON should call the resolver directly, because
+ * this shape necessarily throws the reason away.
  */
 export function admissibleClaimedUserId(
   req: FastifyRequest,
   parsedUserId: string | null,
+  identity: UserIdentityResolution = { mode: 'off' },
 ): string | null {
-  const hmacAuthenticated = getCallerContext(req)?.hmacAuth === true;
-  return hmacAuthenticated ? parsedUserId : CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE;
+  const authority = resolveOwnershipAuthority(req, parsedUserId, identity);
+  return authority.claimAdmitted ? authority.userId : CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE;
 }
 
 export async function authorizeScenarioOwnership(
@@ -279,10 +288,55 @@ export async function authorizeScenarioOwnership(
   claimedUserId: string | null,
   identity: UserIdentityResolution,
   requestId: string,
+  /**
+   * OBSERVATION ONLY — the body `user_id` AS SENT, before admissibility.
+   * NEVER an ownership input; it exists solely to keep the misrepresentation
+   * alarm alive.
+   *
+   * ── WHY THIS PARAMETER HAD TO BE ADDED (a defect in the first cut) ────────
+   * Gating admissibility at the CALL SITE — passing `admissibleClaimedUserId(…)`
+   * in place of the parsed id — discarded the claim before this function ever
+   * saw it. That closed the hole and, in the same motion, silently deleted the
+   * `UserJwtIdentityMismatch` alarm from the only two routes still able to
+   * reach it: after the change, `claimedUserId !== null` became unsatisfiable
+   * for every non-HMAC caller on all five call sites, so a browser presenting
+   * a valid JWT and a DISAGREEING body `user_id` produced no signal at all.
+   *
+   * The comment below already recorded this loss for the three scenario routes
+   * and deferred the repair on the grounds that fixing it "needs an
+   * observation-only parameter on this shared function, which is a change to
+   * the turn/Stop seam this PR deliberately does not touch". That PR now DOES
+   * touch that seam, so the deferral expired and the parameter is here.
+   *
+   * `undefined` means NOT SUPPLIED and preserves the legacy behaviour exactly
+   * (fall back to `claimedUserId`), which is what keeps the three scenario
+   * routes and the direct unit tests unmoved. An explicit `null` means
+   * "supplied, and there was no claim" — a different statement.
+   */
+  observedClaim?: string | null,
 ): Promise<
   | { readonly ok: true; readonly effectiveUserId: string | null }
   | { readonly ok: false; readonly reason: string }
 > {
+  const observed = observedClaim === undefined ? claimedUserId : observedClaim;
+
+  // A claim was made and DISCARDED. This is the attack signature the
+  // admissibility rule exists to stop, and it is worth a line even though the
+  // request may go on to succeed harmlessly on a guest scenario. Logged at
+  // WARN because a caller naming an identity it may not name is an
+  // operational event, not a debugging detail.
+  if (observed !== null && observed !== claimedUserId && identity.mode !== 'verified') {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        claimed_user_id_prefix: observed.slice(0, 8),
+        identity_mode: identity.mode,
+      },
+      'V5 pre-flight: caller-asserted user_id discarded — caller is not entitled to name an identity',
+    );
+  }
+
   let effectiveUserId = claimedUserId;
   if (identity.mode === 'verified') {
     // ⚠ THIS ALARM IS NO LONGER REACHABLE FROM THE SCENARIO ROUTES, BY
@@ -304,16 +358,21 @@ export async function authorizeScenarioOwnership(
     // NOT OVERSTATED: only the COMPARISON is lost. The B1 boundary log still
     // emits `user_id_present` per request, so the presence of a body-supplied
     // id on a scenario call remains observable.
-    if (claimedUserId !== null && claimedUserId !== identity.userId) {
+    // ⚠ COMPARES `observed`, NOT `claimedUserId`. On the turn and Stop routes
+    // `claimedUserId` has already been through admissibility and is null for
+    // every non-HMAC caller, so comparing it would make this alarm dead code
+    // on exactly the surfaces that can still be misrepresented. `observed` is
+    // the body id as sent, which is the thing whose disagreement is the signal.
+    if (observed !== null && observed !== identity.userId) {
       emit(TelemetryEvents.UserJwtIdentityMismatch, {
         request_id: requestId,
-        claimed_user_id_prefix: claimedUserId.slice(0, 8),
+        claimed_user_id_prefix: observed.slice(0, 8),
         verified_user_id_prefix: identity.userId.slice(0, 8),
       });
       log.warn(
         {
           request_id: requestId,
-          claimed_user_id_prefix: claimedUserId.slice(0, 8),
+          claimed_user_id_prefix: observed.slice(0, 8),
           verified_user_id_prefix: identity.userId.slice(0, 8),
         },
         'V5 pre-flight: caller-supplied user_id differs from verified JWT sub — using verified identity',
@@ -370,13 +429,17 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
 
   // Step 3 — effective identity + scenario ownership. See
   // `authorizeScenarioOwnership` above; the Stop route calls the same function.
+  // Admissibility is decided BEFORE ownership, and by the canonical rule in
+  // `ownership-authority.ts`: a shared-key caller may not name the identity it
+  // acts as. The raw claim travels alongside as an OBSERVATION so discarding
+  // it does not also discard the alarm that it was made.
+  const authority = resolveOwnershipAuthority(req, extensions.value.userId, identity);
   const owned = await authorizeScenarioOwnership(
     ingress.value.scenario_id,
-    // Admissibility is decided BEFORE ownership: a shared-key caller may not
-    // name the identity it acts as. See `admissibleClaimedUserId`.
-    admissibleClaimedUserId(req, extensions.value.userId),
+    authority.claimAdmitted ? authority.userId : CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
     identity,
     requestId,
+    authority.observedClaim,
   );
   if (!owned.ok) {
     const preflightError: BoundaryError = {

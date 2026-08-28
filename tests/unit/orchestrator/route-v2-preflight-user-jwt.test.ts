@@ -201,9 +201,18 @@ describe('runPreFlight — flag ON', () => {
   // Uses an HMAC caller so the body claim is ADMISSIBLE and therefore actually
   // reaches the comparison. That is the whole subject of this pin: when a claim
   // could have been honoured, the verified `sub` still wins, and the discrepancy
-  // is reported. For a shared-key caller the claim is discarded before this
-  // point, so the mismatch event does not fire — see the note in
-  // `admissibleClaimedUserId` on the observability delta.
+  // is reported.
+  //
+  // ⚠ THE SENTENCE THAT USED TO END THIS COMMENT IS NOW FALSE, AND ITS BEING
+  //   TRUE WAS A DEFECT. It read: "For a shared-key caller the claim is
+  //   discarded before this point, so the mismatch event does not fire." That
+  //   was an accurate description of the first cut of the admissibility fix,
+  //   and it describes a SECURITY SIGNAL that the fix silently deleted —
+  //   gating at the call site removed the claim from the only two routes that
+  //   could still reach the alarm. `authorizeScenarioOwnership` now takes the
+  //   raw claim as an OBSERVATION-ONLY argument, so the alarm survives the
+  //   discard. The shared-key case is pinned immediately below, and it is the
+  //   case that would have gone unobserved.
   it('valid JWT: identity derived from sub; client body user_id IGNORED (mismatch telemetry only)', async () => {
     const req = makeHmacReq(makeBody(BODY_USER_ID), {
       authorization: `Bearer ${await forgeJwt()}`,
@@ -215,6 +224,30 @@ describe('runPreFlight — flag ON', () => {
     if (!result.ok) throw new Error('unreachable');
     expect(result.context.extensions.userId).toBe(JWT_SUB);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, JWT_SUB);
+    expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtIdentityMismatch');
+  });
+
+  // ── THE MISREPRESENTATION ALARM SURVIVES THE DISCARD ──────────────────────
+  // A SHARED-KEY caller (no HMAC) presenting a VALID JWT whose `sub` DISAGREES
+  // with the body `user_id`. Two things must both hold, and they pull in
+  // opposite directions:
+  //   · the claim must NOT be honoured — the store is asked about the JWT sub;
+  //   · the claim must still be REPORTED — a client naming a different user is
+  //     the signal, and it is exactly as interesting when the caller was not
+  //     entitled to name anyone.
+  // Asserting only the first would leave a silently-blind alarm looking fixed.
+  it('shared-key caller, valid JWT, DISAGREEING body user_id: sub wins AND the mismatch still fires', async () => {
+    const req = makeReq(makeBody(BODY_USER_ID), {
+      authorization: `Bearer ${await forgeJwt()}`,
+    });
+
+    const result = await runPreFlight(req as never);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    // The claim was NOT honoured.
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, JWT_SUB);
+    // …and was still observed.
     expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtIdentityMismatch');
   });
 

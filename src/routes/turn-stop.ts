@@ -93,8 +93,8 @@
 import type { FastifyRequest } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
+import { resolveOwnershipAuthority } from "../orchestrator/ownership-authority.js";
 import {
-  admissibleClaimedUserId,
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
@@ -324,14 +324,17 @@ export async function recordExplicitTurnStop(
       return stopRefusedReply(requestId);
     }
 
+    // Same canonical rule as the turn rung, from the same module — the two
+    // rungs must not drift on WHO MAY CLAIM an identity any more than they may
+    // drift on who owns a scenario. The raw claim rides along as an
+    // observation so the misrepresentation alarm survives the discard.
+    const authority = resolveOwnershipAuthority(req, extensions.value.userId, resolved.identity);
     const owned = await authorizeScenarioOwnership(
       scenarioId,
-      // Same admissibility rule as the turn rung, from the same helper — the
-      // two rungs must not drift on WHO MAY CLAIM an identity any more than
-      // they may drift on who owns a scenario.
-      admissibleClaimedUserId(req, extensions.value.userId),
+      authority.claimAdmitted ? authority.userId : null,
       resolved.identity,
       requestId,
+      authority.observedClaim,
     );
     if (!owned.ok) {
       // Every ownership reason collapses to the ONE refusal — including
