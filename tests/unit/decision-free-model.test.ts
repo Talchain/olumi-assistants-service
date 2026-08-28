@@ -410,12 +410,23 @@ describe('decision-free model — the honesty layer', () => {
     expect(ids).toContain('change_channel_explore_paths');
   });
 
+  /**
+   * `coverage` is optional on CEEQualityMeta, so read it through a helper that
+   * PINS ITS OWN PRECONDITION: a comparison against `undefined` would be a
+   * guard agreeing with itself.
+   */
+  const coverageOf = (q: { coverage?: number }): number => {
+    expect(q.coverage).toBeDefined();
+    expect(typeof q.coverage).toBe('number');
+    return q.coverage as number;
+  };
+
   it('QUALITY: the zero-option coverage penalty does not apply to a deliberate map', () => {
     const base = { confidence: 0.8, engineIssueCount: 0, ceeIssues: [] };
     const free = computeQuality({ ...base, graph: decisionFreeV1 as never });
     const real = computeQuality({ ...base, graph: decisionWithNoOptions as never });
     // Same outcome/risk profile on both, so coverage differs ONLY by the penalty.
-    expect(free.coverage).toBeGreaterThan(real.coverage);
+    expect(coverageOf(free)).toBeGreaterThan(coverageOf(real));
   });
 
   it('QUALITY TWIN: the penalty still bites a decision that genuinely lost its options', () => {
@@ -434,7 +445,7 @@ describe('decision-free model — the honesty layer', () => {
       } as never,
     });
     const real = computeQuality({ ...base, graph: decisionWithNoOptions as never });
-    expect(real.coverage).toBeLessThan(withOptions.coverage);
+    expect(coverageOf(real)).toBeLessThan(coverageOf(withOptions));
   });
 });
 
