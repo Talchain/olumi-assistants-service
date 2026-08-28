@@ -5664,7 +5664,38 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // `structural-edit-deadline-plumbing.test.ts`.
           requestStartMs: routeStartedAt,
         });
-        if (!eg.commitPerformed) {
+        // ⭐ THE EDIT LANE IS NON-TERMINAL WHEN IT RESOLVED NOTHING.
+        //
+        // `editIntentDetected` (computed ~2,700 lines above) claims a turn on a
+        // bare edit VERB, in a module that never reads run facts — so
+        // "Did my edit change which option comes out ahead?" was answered
+        // "Which option should I update?" and `runTurnExecutor`, where the
+        // context pack and therefore `run_delta` live, was never reached.
+        // When the dispatch applied nothing, proposed nothing, and had NO
+        // alternatives to offer, it hands the turn back and we fall through.
+        //
+        // ⚠ THIS BRANCH MUST STAY ABOVE THE `!commitPerformed` 500. The
+        // hand-back is returned PRE-COMMIT, so it necessarily carries
+        // `commitPerformed: false` — the same field the boundary error keys on.
+        // Below the 500 this would be unreachable; the two conditions answer
+        // DIFFERENT questions ("did the commit fail?" vs "did the lane decline
+        // the turn?") and must not be merged.
+        //
+        // ⛔ Only the flag may fall through. `graph === null` alone must NOT: a
+        // GM-blocked or goal-target-withheld mutation also returns a null graph
+        // and is a REAL edit that has already committed.
+        if (eg.unresolvedClarificationFellThrough === true) {
+          emit(TelemetryEvents.V5EditGraphUnresolvedClarificationFallthrough, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: 'fell_through:bare_clarification',
+          });
+          // Deliberately NO return — control leaves the edit block and reaches
+          // the single `runTurnExecutor` call site. The intervening guards
+          // (process-meta intake, frame-no-brief) both require `stage==='frame'`
+          // with an unpopulated canvas, and this population has a populated
+          // graph by construction (`isEditGraphShape`), so they cannot claim it.
+        } else if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
             reason: 'edit_graph_commit_failed',
@@ -5674,25 +5705,26 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
+        } else {
+          return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
+            analysisReady: eg.analysisReady,
+            graph: eg.graph,
+            // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+            // the permission belongs to the fact this response DISPLAYS, not to
+            // whether this turn ran an analysis. See turn-claim-safety.ts.
+            ...(await claimSafety.forExit()),
+            // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
+            // functional (add-option / edit confirmation) and must ship plain.
+            answerKind: 'functional',
+            ...(eg.freshness ? { freshness: eg.freshness } : {}),
+            // S3-L6 / F-5: edit-lane LLM call → `_diagnostic_trace.llm_calls[]`.
+            ...(eg.editLlmCall ? { editLlmCall: eg.editLlmCall } : {}),
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            userMessage: ingress.message,
+          });
         }
-        return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
-          analysisReady: eg.analysisReady,
-          graph: eg.graph,
-          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
-          // the permission belongs to the fact this response DISPLAYS, not to
-          // whether this turn ran an analysis. See turn-claim-safety.ts.
-          ...(await claimSafety.forExit()),
-          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
-          // functional (add-option / edit confirmation) and must ship plain.
-          answerKind: 'functional',
-          ...(eg.freshness ? { freshness: eg.freshness } : {}),
-          // S3-L6 / F-5: edit-lane LLM call → `_diagnostic_trace.llm_calls[]`.
-          ...(eg.editLlmCall ? { editLlmCall: eg.editLlmCall } : {}),
-          requestStartedAt: routeStartedAt,
-          scenarioId: ingress.scenario_id,
-          turnId: ingress.turn_id,
-        userMessage: ingress.message,
-        });
       } catch (err) {
         log.error(
           {

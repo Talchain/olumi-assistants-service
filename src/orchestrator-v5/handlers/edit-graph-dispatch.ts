@@ -1246,6 +1246,36 @@ export interface DispatchEditGraphResult {
    * `extractEditLlmCallTelemetry`.
    */
   readonly editLlmCall?: EditGraphLlmCallTelemetry;
+  /**
+   * ⭐ THE EDIT LANE IS NON-TERMINAL WHEN IT RESOLVED NOTHING.
+   *
+   * `true` when this dispatch applied nothing, proposed nothing, and could do
+   * no more than ask "which one?" with NO alternatives to offer — the
+   * `resolutionMode === 'clarify'` branch whose target resolution carried an
+   * empty alternatives list. Route-v2 treats it as a hand-back: it does NOT
+   * return the edit 200, and the turn falls through to `runTurnExecutor`, which
+   * holds the context pack and therefore `run_delta`.
+   *
+   * ⚠ WHY THIS IS RETURNED **PRE-COMMIT**, and it is the whole reason the flag
+   * exists rather than route-v2 inspecting `graph`/`commitPerformed`: this
+   * function commits via `commitDirectAnswer` below, and `runTurnExecutor`
+   * commits too. A fall-through decided AFTER that commit would write TWO turn
+   * rows for ONE turn — fail-open, silent, no exception, green suite. So the
+   * early return happens BEFORE the commit region and this result carries
+   * `commitPerformed: false` with nothing persisted. Route-v2's fall-through
+   * branch therefore sits ABOVE its `!commitPerformed` 500.
+   *
+   * ⛔ DELIBERATELY NARROW, and derived from the PRODUCER rather than
+   * re-asserted: `pendingClarification` is assigned at exactly ONE site
+   * (`orchestrator/tools/edit-graph.ts:2033/2045`) and its `candidate_labels`
+   * IS `targetResolution.alternatives.map(a => a.label)`. Of the thirteen
+   * `appliedGraph: null` returns in that file, exactly one sets it — so this
+   * condition is provably exhaustive AND provably narrow. Ambiguous GENUINE
+   * edits that resolve alternatives keep their current route: they get a useful
+   * "Which option: A or B?" with chips, and that is worth more than a run
+   * delta. Absent (never `false`) on every other exit.
+   */
+  readonly unresolvedClarificationFellThrough?: true;
 }
 
 /**
@@ -2551,6 +2581,50 @@ export async function dispatchEditGraph(
 
   try {
   let response = editResultToOlumiResponse(editResult, payload);
+
+  // ⭐ CLAIM-THEN-STARVE EXIT — hand the turn back BEFORE committing.
+  //
+  // `orchestrator/tools/edit-graph.ts:2054` already states the rule this
+  // enforces: "a deterministic claim must either fully handle the turn OR fall
+  // through to the more capable path. It must never claim-then-starve." The
+  // clarify branch with NO alternatives is exactly a claim-then-starve: it
+  // applied nothing, proposed nothing, and can only emit
+  // `buildClarificationQuestion` with an empty list — the bare "Which option
+  // should I update?" with zero chips. Route-v2 claimed the turn on a bare edit
+  // VERB ~2,700 lines before anything could consult run facts, so a comparative
+  // question was being answered by a module that never reads them.
+  //
+  // ⚠ THIS RETURN MUST STAY ABOVE THE COMMIT REGION. `commitDirectAnswer` runs
+  // below and `runTurnExecutor` commits as well; deciding this after the commit
+  // would write TWO turn rows for ONE turn — fail-open and silent. Nothing is
+  // persisted on this path, so the result carries `commitPerformed: false`.
+  //
+  // ⛔ NARROWNESS IS LOAD-BEARING and comes from the producer, not from a new
+  // predicate. `pendingClarification` has exactly ONE assignment site and its
+  // `candidate_labels` IS the alternatives list, so this selects the clarify
+  // branch with zero alternatives and nothing else. The `appliedGraph === null`
+  // conjunct is a FAIL-CLOSED belt, not a second concept: the one site that
+  // sets `pendingClarification` also sets `appliedGraph: null`, so it cannot
+  // change behaviour today — but if a future branch ever attaches a
+  // clarification to an APPLIED mutation, this keeps the current route rather
+  // than discarding a real edit.
+  if (
+    editResult.pendingClarification != null
+    && editResult.pendingClarification.candidate_labels.length === 0
+    && editResult.appliedGraph === null
+  ) {
+    // Honest per-turn telemetry: this WAS a clarify, it simply did not end the
+    // turn. Matches the `ev.outcome = 'clarify'` sites below. The outer
+    // `finally` emits the single per-turn edit event on this path too.
+    ev.outcome = 'clarify';
+    return {
+      response,
+      commitPerformed: false,
+      graph: null,
+      unresolvedClarificationFellThrough: true,
+      ...(editLlmCall ? { editLlmCall } : {}),
+    };
+  }
 
   // V5 H5 (Codex round-2 P1) — unified mutation predicate.
   // `isSuccessfulAppliedMutation()` is the single source of truth
