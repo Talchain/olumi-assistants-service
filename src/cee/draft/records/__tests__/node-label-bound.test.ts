@@ -315,6 +315,72 @@ describe("an over-long brief sentence still produces a contract-valid graph", ()
     expect(inferred!.provenance!.label_authored).toBeUndefined();
   });
 
+  /**
+   * ⭐⭐ THE ONE DOWNSTREAM COUPLING THAT COULD BITE, MEASURED RATHER THAN
+   * REASONED ABOUT.
+   *
+   * `projector.ts:2164-2170` warns that option labels are not authored because
+   * `transforms/schema-v3.ts:1188` binds an option's provenance ON ITS LABEL
+   * (`bindOptionLabelToBrief`), so changing one could flip `from_brief` →
+   * `ai_inferred` — re-badging the user's OWN option as something the AI made
+   * up. That would be a worse defect than the one this lane fixes.
+   *
+   * It does not happen, and the reason is structural: every records-projected
+   * node carries a typed record provenance, so `projectNodeProvenance` takes the
+   * typed branch and `continue`s at `:1185`, BEFORE the label binding at `:1188`
+   * is ever reached. But "I read the branch order" is not evidence (trap 16) —
+   * this drives the real transform and reads the wire-shaped verdict.
+   */
+  it("shortening an option's label does NOT flip its provenance badge", () => {
+    const quote = governedOverlongQuote();
+    const brief = `We must grow. We could ${quote}. Or cut prices.`;
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow marketplace liquidity" },
+        { kind: "option", source_quote: quote },
+        { kind: "option", source_quote: "cut prices" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Match Quality", basis: [1] },
+        {
+          claim_kind: "causal_link",
+          label: "matching moves match quality",
+          from_stated: 1,
+          to_claim: 0,
+          effect: "positive",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "match quality reaches the goal",
+          from_claim: 0,
+          to_stated: 0,
+          effect: "positive",
+        },
+      ],
+    };
+    const { v3 } = driveTheRealChain(records, brief);
+    const options = (v3.graph as { nodes: readonly Record<string, unknown>[] }).nodes.filter(
+      (n) => n.kind === "option",
+    );
+
+    const shortened = options.find((n) => String(n.label).endsWith("…"));
+    const ordinary = options.find((n) => !String(n.label).endsWith("…"));
+
+    // PIN BOTH PRECONDITIONS, or the comparison below is between two nothings.
+    expect(shortened, "one option must have been shortened").toBeDefined();
+    expect(ordinary, "one option must NOT have been shortened").toBeDefined();
+
+    // ⭐ THE DISCRIMINATION: the shortened option keeps the SAME badge as the
+    // untouched one. A single-armed assertion could not tell "correct" from
+    // "both are ai_inferred".
+    expect(shortened!.provenance).toBe("from_brief");
+    expect(ordinary!.provenance).toBe("from_brief");
+    // …and the verbatim reached the wire in full, which is what the badge means.
+    expect(String(shortened!.source_quote)).toBe(quote);
+    expect(shortened!.label_authored).toBe(true);
+    expect(ordinary!.label_authored).toBeUndefined();
+  });
+
   it("the shortened label does not move the node's id — bounding runs AFTER every id is minted", () => {
     const { projection } = driveTheRealChain(records(), brief);
     const quote = governedOverlongQuote();
