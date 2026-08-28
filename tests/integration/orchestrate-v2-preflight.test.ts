@@ -197,7 +197,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     // `tests/integration/orchestrate-v2-turn-claimed-identity.test.ts`.
     //
     // Since a body `user_id` is only admissible from a VERIFIED HMAC caller
-    // (`admissibleClaimedUserId`, route-v2-preflight.ts), and this app is a
+    // (`resolveOwnershipAuthority`, ownership-authority.ts), and this app is a
     // bare Fastify with NO auth plugin, every request here would otherwise
     // arrive with no caller context and its `user_id` discarded — so the
     // upsert cases would all collapse into the anonymous branch and this suite

@@ -61,7 +61,7 @@ function makeReq(body: unknown): { body: unknown; headers: Record<string, string
 /**
  * A verified HMAC service caller. Needed wherever a case depends on a body
  * `user_id` actually reaching the ownership decision: from a shared-key caller
- * it is discarded (`admissibleClaimedUserId`), so a cross-tenant MISMATCH could
+ * it is discarded (`resolveOwnershipAuthority`), so a cross-tenant MISMATCH could
  * never arise and the envelope under test would never be produced.
  */
 function makeHmacReq(body: unknown): { body: unknown; headers: Record<string, string> } {

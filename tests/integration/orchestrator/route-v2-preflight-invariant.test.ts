@@ -157,7 +157,7 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
     // This suite's subject is the INVARIANT "pre-flight runs exactly once per
     // dispatch branch", and several branches assert the identity the oracle was
     // asked about. A body `user_id` is only admissible from a verified HMAC
-    // caller (`admissibleClaimedUserId`), and this bare app has no auth plugin,
+    // caller (`resolveOwnershipAuthority`), and this bare app has no auth plugin,
     // so without this the claims would all be discarded and the identity
     // assertions would silently stop describing anything. Declared explicitly
     // so the assumption is visible rather than ambient.

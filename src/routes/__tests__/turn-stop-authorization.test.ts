@@ -97,7 +97,7 @@ const { classifyTurnFence } = await import(
 /**
  * A SHARED-KEY caller: authenticated (the auth plugin let it through) but not
  * individually identified. No caller context is attached, which is exactly
- * what `admissibleClaimedUserId` sees for a request that did not authenticate
+ * what `resolveOwnershipAuthority` sees for a request that did not authenticate
  * by HMAC — so any body `user_id` it sends is discarded.
  */
 function req(body: unknown, headers: Record<string, string> = {}): FastifyRequest {

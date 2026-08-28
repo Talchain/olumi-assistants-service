@@ -113,7 +113,7 @@ function makeBody(userId?: string): Record<string, unknown> {
 
 /**
  * A SHARED-KEY caller: past the auth plugin, but not individually identified.
- * No caller context, so `admissibleClaimedUserId` discards any body `user_id`.
+ * No caller context, so `resolveOwnershipAuthority` discards any body `user_id`.
  */
 function makeReq(
   body: unknown,
@@ -124,7 +124,7 @@ function makeReq(
 
 /**
  * A VERIFIED HMAC service caller — the only kind entitled to name the user it
- * acts as (`admissibleClaimedUserId`, route-v2-preflight.ts). Several pins in
+ * acts as (`resolveOwnershipAuthority`, ownership-authority.ts). Several pins in
  * this file are about what happens to an ADMITTED claim (does the verified sub
  * override it? does the mismatch telemetry fire?), and those questions only
  * exist for a caller whose claim is admissible in the first place.

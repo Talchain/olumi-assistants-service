@@ -308,7 +308,7 @@ export async function recordExplicitTurnStop(
     // ⚠ WITH THE FLAG OFF (staging today) IT IS NO LONGER AUTOMATICALLY THE
     //   IDENTITY. This comment used to end "it IS the identity, exactly as on
     //   a turn", which was true and was the IDOR: a shared-assist-key caller
-    //   named whoever it liked. `admissibleClaimedUserId` now gates it on
+    //   named whoever it liked. `resolveOwnershipAuthority` now gates it on
     //   VERIFIED HMAC auth at both rungs, so on the flag-off path a shared-key
     //   caller's claim is discarded and it is treated as anonymous.
     const extensions = parseRequestExtensions(body, requestId);
