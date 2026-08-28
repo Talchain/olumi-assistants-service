@@ -199,6 +199,9 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(prompt).toContain('"context_budget": {');
     expect(prompt).toContain('"section": "graph"');
     expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
+    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
+      'This disclosure does not change `graph_context` or `analysis_context` authority',
+    );
   });
 
   it('emits v5.context_truncation with disclosed:true for a budget trim', () => {
@@ -253,6 +256,9 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(prompt).toContain('"context_budget": {');
     expect(prompt).toContain('"section": "analysis"');
     expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
+    expect(prompt).toContain(
+      'This disclosure does not change `graph_context` or `analysis_context` authority',
+    );
   });
 
   it('positive control: an under-budget context is untrimmed, unmarked, and byte-identical to base', () => {

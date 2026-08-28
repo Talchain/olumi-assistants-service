@@ -861,6 +861,9 @@ describe('prompt ↔ pack sanction gate', () => {
     expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
       'omitted detail is withheld or unknown, never evidence that the omitted facts do not exist',
     );
+    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
+      'This disclosure does not change `graph_context` or `analysis_context` authority',
+    );
   });
 
   it('ANALYSIS AUTHORITY — legacy undefined coaching remains byte-equivalent to omission', () => {

@@ -154,6 +154,12 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
       'The sole additional multi-hop authority is `reaches` on an option node',
     );
     expect(DISPLAY_GRAPH_INSTRUCTION).toContain(
+      'A listed target label must match exactly one node label; zero or multiple matches make that reachability claim ambiguous and unknown',
+    );
+    expect(DISPLAY_GRAPH_INSTRUCTION).toContain(
+      'An absent or malformed list makes reachability unknown, and no other prose may fill it',
+    );
+    expect(DISPLAY_GRAPH_INSTRUCTION).toContain(
       'Node array order, labels, descriptions, conversation and other prose do not create topology',
     );
     expect(DISPLAY_GRAPH_INSTRUCTION).toContain(
@@ -379,6 +385,31 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
     expect(prompt).toContain('node order or the last matching label must never resolve it');
   });
 
+  it('marks label-based reachability ambiguous when the target label is not unique', () => {
+    const duplicateLabelNodes: readonly RawNode[] = [
+      {
+        id: 'option_current',
+        kind: 'option',
+        label: 'Continue current approach',
+        reaches: ['goal_growth_primary'],
+      },
+      { id: 'goal_growth_primary', kind: 'goal', label: 'Sustainable growth' },
+      { id: 'goal_growth_secondary', kind: 'goal', label: 'Sustainable growth' },
+    ];
+    const { graph, prompt } = render(graphWith([], duplicateLabelNodes));
+
+    expect(graph.nodes.filter((node) => node.label === 'Sustainable growth')).toHaveLength(2);
+    expect(graph.nodes.find((node) => node.id === 'option_current')?.reaches).toEqual([
+      'Sustainable growth',
+    ]);
+    expect(prompt).toContain(
+      'A listed target label must match exactly one node label; zero or multiple matches make that reachability claim ambiguous and unknown',
+    );
+    expect(prompt).toContain(
+      'node order, kind or identifiers must not select a target',
+    );
+  });
+
   it('marks conflicting repeated edge signs unknown instead of choosing by array order', () => {
     const { graph, prompt } = render(
       graphWith([
@@ -411,10 +442,36 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
       { id: 'option_current', label: 'Continue current approach' },
     ]);
     expect(prompt).toContain(
-      'Only `graph_context.status: canonical` licenses describing it as the saved baseline',
+      'Only `graph_context.status: canonical` licenses describing the single marked option as the saved baseline',
     );
     expect(prompt).toContain(
       'The marker never identifies a winner, recommendation, preference or analysis result',
+    );
+  });
+
+  it('makes multiple producer baseline markers conflicting instead of selecting by order', () => {
+    const conflictingBaselineNodes: readonly RawNode[] = [
+      {
+        id: 'option_current',
+        kind: 'option',
+        label: 'Continue current approach',
+        is_baseline: true,
+      },
+      {
+        id: 'option_alternative',
+        kind: 'option',
+        label: 'Alternative approach',
+        is_baseline: true,
+      },
+    ];
+    const { graph, prompt } = render(graphWith([], conflictingBaselineNodes));
+
+    expect(graph.nodes.filter((node) => node.is_baseline === true)).toHaveLength(2);
+    expect(prompt).toContain(
+      'multiple markers are conflicting and make the baseline unknown',
+    );
+    expect(prompt).toContain(
+      'Never select one by array order, label, kind or conversation',
     );
   });
 
