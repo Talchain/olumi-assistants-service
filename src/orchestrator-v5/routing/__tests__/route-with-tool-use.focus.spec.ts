@@ -31,6 +31,7 @@ import { resolveTurnSelection, type TurnSelection } from '../../build-turn-conte
 import { assembleContextPack, type ContextPack } from '../../context/context-pack-assembler.js';
 import {
   buildUserMessage,
+  DISPLAY_GRAPH_INSTRUCTION,
   FOCUS_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
@@ -155,7 +156,7 @@ function subtractMandatoryAuthorityDelta(message: string): string {
   const withoutRunDelta = message.replace(`\n\n${RUN_DELTA_INSTRUCTION}`, '');
   expect(withoutRunDelta).not.toBe(message);
   message = withoutRunDelta;
-  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${DISPLAY_GRAPH_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
   expect(jsonStart).toBeGreaterThan(-1);
@@ -164,6 +165,7 @@ function subtractMandatoryAuthorityDelta(message: string): string {
   expect(parsed.graph_context).toEqual({ status: 'canonical' });
   expect(parsed.recent_changes_status).toBe('degraded');
   expect(message.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  expect(message.split(DISPLAY_GRAPH_INSTRUCTION)).toHaveLength(2);
   expect(message.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
   delete parsed.graph_context;
   delete parsed.recent_changes_status;
