@@ -5691,10 +5691,39 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             outcome: 'fell_through:bare_clarification',
           });
           // Deliberately NO return — control leaves the edit block and reaches
-          // the single `runTurnExecutor` call site. The intervening guards
-          // (process-meta intake, frame-no-brief) both require `stage==='frame'`
-          // with an unpopulated canvas, and this population has a populated
-          // graph by construction (`isEditGraphShape`), so they cannot claim it.
+          // the single `runTurnExecutor` call site.
+          //
+          // ⚠⚠ THE REASON ORIGINALLY WRITTEN HERE WAS FALSE. It said the two
+          // intervening guards (process-meta intake :5777, frame-no-brief
+          // :5898) "cannot claim it" because this population "has a populated
+          // graph by construction (`isEditGraphShape`)". That is wrong, and
+          // wrong over the WRONG OBJECT: `isEditGraphShape` (:5517) gates on
+          // `effectiveGraphState` = `resolvedGraphState ?? extensions.graphState`
+          // (:5516), while BOTH guards test `isPopulatedIngressGraph(
+          // extensions.graphState)`. `resolvedGraphState` is assigned ONLY in
+          // the reload branch, which runs only where `extensions.graphState ==
+          // null` — so on a reloaded turn the two are MUTUALLY EXCLUSIVE and
+          // the cited invariant is exactly inverted. Corrected in place rather
+          // than deleted: the next reader would otherwise re-derive from it.
+          //
+          // What actually holds, stated by case:
+          //  1. `stage !== 'frame'` (the witnessed population is `analyse`) —
+          //     both guards carry `stage === 'frame'`, so neither can claim.
+          //  2. `stage === 'frame'` WITH `extensions.graphState` present —
+          //     `isPopulatedIngressGraph` excludes both.
+          //  3. `stage === 'frame'`, ingress graph ABSENT, graph RELOADED (the
+          //     case the false reason hid): frame-no-brief is excluded by
+          //     `openFrameIntakeDeferredToCanonicalLane`, set at :4237 off the
+          //     SAME `loadPersistedGraphOnce()` memo this lane's reload uses —
+          //     ~1,450 lines above its consumer, cited nowhere else, and BOUND
+          //     BY NO TEST. Real protection, but remote: treat it as load-
+          //     bearing when editing either site.
+          //     ⚠ Process-meta intake is NOT covered by that memo. It is
+          //     excluded only when the message is not `isProcessMetaIntake`-
+          //     shaped, which is NOT guaranteed by construction — it is an
+          //     observation (a probe on the divergent shape returned
+          //     `exit_path: 'turn_executor'`), not a proof. Case 3 has zero
+          //     test coverage; see the PR body's carried rows.
         } else if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',

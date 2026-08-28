@@ -50,10 +50,20 @@
  *    → 'a bare clarification ... reaches the turn executor' REDs.
  *  - widen the fall-through to any `graph === null`
  *    → 'a resolved edit still exits at edit_graph' REDs.
- *  - move the dispatch's early return to AFTER `commitDirectAnswer`
- *    → 'commits EXACTLY ONCE' REDs (two appends).
  *  - place the route-v2 fall-through branch BELOW the `!commitPerformed` 500
  *    → 'a bare clarification ... reaches the turn executor' REDs (500).
+ *
+ * ⚠ A CLAIM PREVIOUSLY LISTED HERE WAS UNACHIEVABLE AND HAS BEEN REMOVED: that
+ * moving the dispatch's early return to AFTER `commitDirectAnswer` would RED
+ * 'commits EXACTLY ONCE' in THIS file. It cannot. `dispatchEditGraph` is mocked
+ * here, so no mutation of the real dispatch can change anything this file
+ * observes, and its commit count can only ever see the EXECUTOR's commit. The
+ * double-commit hazard is pinned where it actually lives —
+ * `handlers/__tests__/edit-graph-dispatch-unresolved-clarification-fallthrough.test.ts`,
+ * which counts `commitDirectAnswer` directly (0 on the fall-through, 1 on both
+ * non-fall-through cases). The count asserted below is still worth keeping: it
+ * pins that a fall-through yields exactly one commit GIVEN a non-committing
+ * dispatch. It is half the guarantee, and only half.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
