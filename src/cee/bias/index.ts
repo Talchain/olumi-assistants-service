@@ -10,6 +10,7 @@ import {
   detectStatusQuoBias,
 } from "./detectors.js";
 import { config } from "../../config/index.js";
+import { isDecisionFreeShape } from "../../validators/decision-free-shape.js";
 
 type CEEBiasFindingV1 = components["schemas"]["CEEBiasFindingV1"];
 type CEEBiasCheckRequestV1 = components["schemas"]["CEEBiasCheckRequestV1"];
@@ -94,7 +95,29 @@ export function detectBiases(graph: GraphV1, archetype?: ArchetypeMeta | null): 
   const actionCount = actionNodes.length;
 
   // Selection bias: zero or one option defined in the graph
-  if (optionCount <= 1) {
+  //
+  // ⭐ NOT FOR THE DELIBERATE EXPLORATORY MAP. This finding asserts
+  // *"Graph defines no decision options; this may hide alternative choices"* at
+  // HIGH severity with evidenceStrength 1.0 — maximum confidence. For a user who
+  // explicitly asked NOT to jump to an answer, that premise is simply FALSE:
+  // no alternative choices are being hidden, because nothing is being chosen
+  // between. It is the product scolding them for doing what they asked to do,
+  // and it is the very next link after the validator suppression — a fix that
+  // admitted the model and then shipped this sentence would have moved the
+  // dishonesty rather than removed it.
+  //
+  // SUPPRESSED, not downgraded. Lowering severity keeps a false sentence on
+  // screen at lower volume; the sentence is wrong at any volume.
+  //
+  // The `optionCount === 1` arm and the `optionCount === 0 && decisions >= 1`
+  // case are UNTOUCHED — in both of those a decision genuinely exists and the
+  // missing alternatives are a real finding.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: getNodesByKind(graph, "decision").length,
+    optionCount,
+  });
+
+  if (optionCount <= 1 && !decisionFree) {
     const severity: "low" | "medium" | "high" = optionCount === 0 ? "high" : "medium";
     // High confidence when zero options, medium when single option
     const evidenceStrength = optionCount === 0 ? 1.0 : 0.7;

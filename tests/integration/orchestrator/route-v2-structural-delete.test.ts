@@ -932,11 +932,33 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
     const issues = (body.analysis_ready.readiness_issues as Array<{ code: string }>).map(
       (i) => i.code,
     );
-    // DISCRIMINATING, not incidental: this code is ABSENT from the pre-delete
-    // graph's own assessment (2 options) and PRESENT here (0 options). So the
-    // verdict provably re-derived from the post-delete bytes rather than being
-    // carried over.
-    expect(issues).toContain('FEWER_THAN_TWO_OPTIONS');
+    // ⚠ BEHAVIOUR CHANGED HERE, DELIBERATELY — read this before "fixing" it.
+    //
+    // This used to assert `FEWER_THAN_TWO_OPTIONS`. Deleting BOTH options from
+    // this fixture leaves zero options AND zero decisions (⚠ this graph never
+    // had a decision node — see the fixture), which is the DECISION-FREE SHAPE,
+    // and that shape is now admitted so an open brief can produce a model at all
+    // (`validators/decision-free-shape.ts`).
+    //
+    // The discrimination this test owns is preserved, inverted: these codes are
+    // PRESENT in the pre-delete assessment (measured: `NO_DECISION`,
+    // `OPTION_NO_FACTOR_EDGES` x2, `UNREACHABLE_CONTROLLABLE_FACTOR`,
+    // `OPTION_NEEDS_MAPPING` x2, status `blocked`) and ABSENT here, and the
+    // status MOVES `blocked` -> `needs_user_mapping`. A verdict carried over
+    // from the pre-delete graph could not produce either.
+    //
+    // ⚠ THE RESIDUAL, STATED RATHER THAN HIDDEN: shape alone cannot tell
+    // "the user asked for a map" from "the user deleted their last option" —
+    // both land on zero/zero. On the DRAFT path the two are the same fact (the
+    // projector mints a decision iff options exist), but THIS FIXTURE DISPROVES
+    // that biconditional for persisted graphs: it carries two options and no
+    // decision. Distinguishing them needs provenance carried from draft time,
+    // not a shape predicate. What is NOT at risk either way: the model is still
+    // reported not-ready, and the Run gate still refuses with
+    // `no_options_defined`, so nothing tells the user this is analysable.
+    expect(issues).not.toContain('FEWER_THAN_TWO_OPTIONS');
+    expect(issues).not.toContain('NO_DECISION');
+    expect(body.analysis_ready.status).toBe('needs_user_mapping');
     // P6 — the delete REMOVES obligations rather than manufacturing them: the
     // per-option "choose the missing effect value" asks for the deleted options
     // are gone, not re-asked against nodes that no longer exist.

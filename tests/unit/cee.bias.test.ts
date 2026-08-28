@@ -30,7 +30,18 @@ describe("CEE bias helper - detectBiases", () => {
   });
 
   it("emits selection bias when there are zero or one options", () => {
-    const graphZero = makeGraph({ nodes: [{ id: "g1", kind: "goal" } as any] });
+    // ⚠ THE DECISION NODE IS LOAD-BEARING. A graph with no decision AND no
+    // options is the deliberate exploratory map, for which this finding is
+    // suppressed by design (`validators/decision-free-shape.ts`) — its premise
+    // ("this may hide alternative choices") is false when nothing is being
+    // chosen between. What this test owns is the REAL defect: a decision that
+    // exists while its options do not.
+    const graphZero = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "d1", kind: "decision" } as any,
+      ],
+    });
     const zeroFindings = detectBiases(graphZero, null);
     const selectionZero = zeroFindings.find((f) => f.id === "selection_low_option_count");
     expect(selectionZero).toBeDefined();
@@ -47,6 +58,14 @@ describe("CEE bias helper - detectBiases", () => {
     const selectionOne = oneFindings.find((f) => f.id === "selection_low_option_count");
     expect(selectionOne).toBeDefined();
     expect(selectionOne!.severity).toBe("medium");
+  });
+
+  it("does NOT emit selection bias for a deliberate decision-free map", () => {
+    // No decision and no options — the user asked to map the situation, not to
+    // choose. Telling them they are hiding alternative choices is false.
+    const graphFree = makeGraph({ nodes: [{ id: "g1", kind: "goal" } as any] });
+    const findings = detectBiases(graphFree, null);
+    expect(findings.find((f) => f.id === "selection_low_option_count")).toBeUndefined();
   });
 
   it("emits measurement bias when risks or outcomes are missing", () => {

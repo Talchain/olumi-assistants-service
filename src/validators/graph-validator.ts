@@ -12,6 +12,7 @@ import { log } from "../utils/telemetry.js";
 import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/graph.js";
 import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
+import { isDecisionFreeShape } from "./decision-free-shape.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -347,13 +348,31 @@ function validateStructural(
 
   // MISSING_DECISION: Exactly 1 decision node
   const decisions = nodeMap.byKind.get("decision") ?? [];
+  const options = nodeMap.byKind.get("option") ?? [];
+
+  // ⭐ THE DELIBERATE EXPLORATORY MAP. A brief with nothing being chosen between
+  // ("I want to map out what is going on rather than jump to an answer") has no
+  // decision AND no options, and both cardinality errors below would fire on it
+  // — together they were the 422 that refused those users a model at all.
+  //
+  // The predicate is EXACT and is the single authority in
+  // `decision-free-shape.ts`; see that file for why the two adjacent shapes
+  // (`options>0, decisions===0` and `decisions>=1, options<2`) must keep
+  // erroring, and for the 48-cell corpus that pins every other cell unchanged.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: decisions.length,
+    optionCount: options.length,
+  });
+
   if (decisions.length === 0) {
-    issues.push({
-      code: "MISSING_DECISION",
-      severity: "error",
-      message: "Graph must have exactly 1 decision node",
-      context: { decisionCount: 0 },
-    });
+    if (!decisionFree) {
+      issues.push({
+        code: "MISSING_DECISION",
+        severity: "error",
+        message: "Graph must have exactly 1 decision node",
+        context: { decisionCount: 0 },
+      });
+    }
   } else if (decisions.length > 1) {
     issues.push({
       code: "MISSING_DECISION",
@@ -364,14 +383,20 @@ function validateStructural(
   }
 
   // INSUFFICIENT_OPTIONS: 2-6 options
-  const options = nodeMap.byKind.get("option") ?? [];
+  // (`options` is hoisted above, next to `decisions`, because the decision-free
+  // predicate is a conjunction over BOTH counts.)
   if (options.length < MIN_OPTIONS) {
-    issues.push({
-      code: "INSUFFICIENT_OPTIONS",
-      severity: "error",
-      message: `Graph must have at least ${MIN_OPTIONS} options, found ${options.length}`,
-      context: { optionCount: options.length, min: MIN_OPTIONS },
-    });
+    // Suppressed ONLY for the deliberate exploratory map. A decision that exists
+    // with fewer than two options is still an error: that user IS choosing, and
+    // a choice with one alternative is not a comparison.
+    if (!decisionFree) {
+      issues.push({
+        code: "INSUFFICIENT_OPTIONS",
+        severity: "error",
+        message: `Graph must have at least ${MIN_OPTIONS} options, found ${options.length}`,
+        context: { optionCount: options.length, min: MIN_OPTIONS },
+      });
+    }
   } else if (options.length > MAX_OPTIONS) {
     issues.push({
       code: "INSUFFICIENT_OPTIONS",
@@ -559,65 +584,103 @@ function validateReachability(
   const decisions = nodeMap.byKind.get("decision") ?? [];
   const goals = nodeMap.byKind.get("goal") ?? [];
 
-  if (decisions.length === 0 || goals.length === 0) {
-    // Can't check reachability without decision and goal
+  // ⭐⭐ THE EARLY RETURN IS SPLIT, AND THE SPLIT IS LOAD-BEARING.
+  //
+  // This used to be `if (decisions.length === 0 || goals.length === 0) return`,
+  // which was harmless only while a decision-free graph was refused outright.
+  // Now that the deliberate exploratory map is ADMITTED, that single return
+  // would have handed those users a model with NO CONNECTIVITY ENFORCEMENT AT
+  // ALL — trading a 422 for a silently disconnected graph, which is the worse
+  // of the two failures because nothing reports it.
+  //
+  // The two checks below answer DIFFERENT questions and need different roots
+  // (platform trap 21 — two questions under one predicate):
+  //   - UNREACHABLE_FROM_DECISION is a FORWARD BFS from the decision. With no
+  //     decision there is no root and the question is meaningless, so it stays
+  //     skipped.
+  //   - NO_PATH_TO_GOAL is a REVERSE BFS from the GOAL. It never reads the
+  //     decision, so it is fully answerable without one and MUST still fire.
+  //
+  // ⚠ AND THE SPLIT IS SCOPED TO THE CLASS BEING ADMITTED, not to "no decision".
+  // The first version of this ran NO_PATH_TO_GOAL for EVERY decision-less graph,
+  // which is wider than this change needs and perturbs a shape that is already
+  // refused: `options > 0 && decisions === 0` is real in persisted graphs here
+  // and is blocked by MISSING_DECISION regardless. Widening it there bought no
+  // enforcement and broke the deterministic sweep's Step-8 discrimination
+  // (`cee.no-path-to-goal-duplicate-suppression.test.ts`), which relies on the
+  // validator staying silent so its own proactive entry is the only one.
+  // Exactly one cell moves in this tier too.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: decisions.length,
+    optionCount: (nodeMap.byKind.get("option") ?? []).length,
+  });
+
+  // Only the goal is structurally required for this tier; `MISSING_GOAL` owns
+  // the no-goal failure.
+  if (goals.length === 0) {
+    return { errors, infoIssues };
+  }
+  if (decisions.length === 0 && !decisionFree) {
+    // Unchanged prior behaviour for the already-refused shape.
     return { errors, infoIssues };
   }
 
-  const decisionId = decisions[0].id;
   const goalId = goals[0].id;
 
-  // Forward BFS from decision
-  const reachableFromDecision = bfsForward([decisionId], adjacency);
-
-  // Reverse BFS from goal (nodes that can reach goal)
+  // Reverse BFS from goal (nodes that can reach goal) — needs no decision.
   const canReachGoal = bfsReverse([goalId], adjacency);
 
   // UNREACHABLE_FROM_DECISION: Must be reachable from decision
   // Exception: observable/external factors may be exogenous roots IF they have path to goal
   // Exception: outcome/risk nodes are exempt (emit info instead of error)
-  for (const node of graph.nodes) {
-    if (node.kind === "decision" || node.kind === "goal") continue;
+  if (decisions.length > 0) {
+    // Forward BFS from decision.
+    const reachableFromDecision = bfsForward([decisions[0].id], adjacency);
+    for (const node of graph.nodes) {
+      if (node.kind === "decision" || node.kind === "goal") continue;
 
-    if (!reachableFromDecision.has(node.id)) {
-      // Check exemption for exogenous factors
-      const factorInfo = factorCategories.get(node.id);
-      const isExogenousFactor =
-        factorInfo &&
-        (factorInfo.category === "observable" || factorInfo.category === "external");
+      if (!reachableFromDecision.has(node.id)) {
+        // Check exemption for exogenous factors
+        const factorInfo = factorCategories.get(node.id);
+        const isExogenousFactor =
+          factorInfo &&
+          (factorInfo.category === "observable" || factorInfo.category === "external");
 
-      if (isExogenousFactor && canReachGoal.has(node.id)) {
-        // Exempted: exogenous factor with path to goal
-        continue;
-      }
+        if (isExogenousFactor && canReachGoal.has(node.id)) {
+          // Exempted: exogenous factor with path to goal
+          continue;
+        }
 
-      // Exempt outcome/risk nodes: emit info instead of error
-      if ((node.kind === "outcome" || node.kind === "risk") && canReachGoal.has(node.id)) {
-        // Determine exemption reason: exogenous (has ancestors outside decision path) vs isolated
-        const ancestors = adjacency.reverse.get(node.id) ?? [];
-        const reason = ancestors.length > 0 ? "exogenous" : "isolated";
+        // Exempt outcome/risk nodes: emit info instead of error
+        if ((node.kind === "outcome" || node.kind === "risk") && canReachGoal.has(node.id)) {
+          // Determine exemption reason: exogenous (has ancestors outside decision path) vs isolated
+          const ancestors = adjacency.reverse.get(node.id) ?? [];
+          const reason = ancestors.length > 0 ? "exogenous" : "isolated";
 
-        infoIssues.push({
-          code: "EXEMPT_UNREACHABLE_OUTCOME_RISK",
-          severity: "info",
-          message: `Outcome/risk "${node.label ?? node.id}" has no controllable path from decision — decision influence is limited`,
+          infoIssues.push({
+            code: "EXEMPT_UNREACHABLE_OUTCOME_RISK",
+            severity: "info",
+            message: `Outcome/risk "${node.label ?? node.id}" has no controllable path from decision — decision influence is limited`,
+            path: validatorNodePath(node.id),
+            context: { kind: node.kind, nodeId: node.id, reason },
+          });
+          continue;
+        }
+
+        errors.push({
+          code: "UNREACHABLE_FROM_DECISION",
+          severity: "error",
+          message: `Node "${node.id}" is not reachable from decision`,
           path: validatorNodePath(node.id),
-          context: { kind: node.kind, nodeId: node.id, reason },
+          context: { kind: node.kind },
         });
-        continue;
       }
-
-      errors.push({
-        code: "UNREACHABLE_FROM_DECISION",
-        severity: "error",
-        message: `Node "${node.id}" is not reachable from decision`,
-        path: validatorNodePath(node.id),
-        context: { kind: node.kind },
-      });
     }
   }
 
   // NO_PATH_TO_GOAL: All nodes (except decision) must reach goal
+  // Runs unconditionally — the reverse BFS above is rooted at the GOAL, so this
+  // is exactly as answerable for a decision-free map as for any other graph.
   for (const node of graph.nodes) {
     if (node.kind === "decision") continue; // Exempt decision from reverse check
 

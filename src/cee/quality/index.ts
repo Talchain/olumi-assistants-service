@@ -1,6 +1,7 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { summariseValidationIssues } from "../validation/classifier.js";
+import { isDecisionFreeShape } from "../../validators/decision-free-shape.js";
 
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
@@ -76,9 +77,25 @@ export function computeQuality(inputs: QualityInputs): CEEQualityMeta {
   const structure = clampScore(structureBase);
 
   // Coverage: start from 6, reward multiple options and presence of risks/outcomes.
+  //
+  // ⭐ THE ZERO-OPTION PENALTY DOES NOT APPLY TO THE DELIBERATE EXPLORATORY MAP.
+  // "Coverage" asks how well the OPTION SPACE is covered. A model with no
+  // decision has no option space, so docking it two points is a category error —
+  // it scores the user down for the shape they deliberately asked for, and that
+  // score is user-visible.
+  //
+  // NEUTRAL, not a bonus: the decision-free map is not rewarded for having no
+  // options, it is simply not punished for a dimension that does not apply. This
+  // mirrors the existing `optionCount === 1` neutral arm rather than inventing a
+  // new scoring rule.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: countNodesByKind(graph, "decision"),
+    optionCount,
+  });
+
   let coverageBase = 6;
   if (optionCount === 0) {
-    coverageBase -= 2;
+    if (!decisionFree) coverageBase -= 2;
   } else if (optionCount === 1) {
     coverageBase += 0; // neutral
   } else if (optionCount >= 2 && optionCount <= 6) {
