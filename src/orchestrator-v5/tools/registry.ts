@@ -80,6 +80,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { ProposalAction } from '../routing/types.js';
+import type { StructuralPairEvidence } from '../routing/structural-pair-evidence.js';
 import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
 import type { EnrichedTurnContext } from '../build-turn-context.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
@@ -310,6 +311,12 @@ export interface HandlerInvocation {
    * top causal links, named-factor pathway entries, goal label.
    */
   readonly structureProjection?: StructureProjectionSummary;
+  /**
+   * Canonical, identity-resolved evidence for an explicit two-element
+   * structural question. When present, `explain_from_structure` renders this
+   * deterministic evidence instead of trusting free-form topology prose.
+   */
+  readonly structuralPairEvidence?: StructuralPairEvidence;
   /**
    * V5 D1: per-turn graph (post-fallback selection between
    * `options.graphState` and persisted scenarios.graph). Mutation

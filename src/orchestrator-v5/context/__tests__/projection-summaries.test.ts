@@ -32,6 +32,7 @@ function makeGraph(
     from: string;
     to: string;
     strength: number;
+    edge_type?: 'bidirected';
     plain_interpretation?: string;
   }>,
 ): ContextPackGraph {
@@ -135,7 +136,9 @@ describe('buildStructureProjectionSummary', () => {
         { from: 'f1', to: 'f2', strength: 0.3 },
       ],
     );
-    const summary = buildStructureProjectionSummary(graph);
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
     expect(summary.goal_label).toBe('Q3 Throughput');
     expect(summary.factor_count).toBe(3);
     expect(summary.option_count).toBe(1);
@@ -163,6 +166,7 @@ describe('buildStructureProjectionSummary', () => {
     );
     const summary = buildStructureProjectionSummary(graph, {
       messageText: 'How does Engineering Capacity affect this decision?',
+      relationshipDetailStatus: 'canonical_strict',
     });
     expect(summary.named_factor_label).toBe('Engineering Capacity');
     expect(summary.named_factor_pathways).toHaveLength(2);
@@ -195,7 +199,9 @@ describe('buildStructureProjectionSummary', () => {
         { from: 'unknown_id', to: 'g1', strength: 0.9 },
       ],
     );
-    const summary = buildStructureProjectionSummary(graph);
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
     expect(summary.top_causal_links).toHaveLength(1);
     expect(summary.top_causal_links[0].label_from).toBe('Real Factor');
   });
@@ -207,5 +213,134 @@ describe('buildStructureProjectionSummary', () => {
     expect(summary.top_causal_links).toEqual([]);
     expect(summary.factor_count).toBe(0);
     expect(summary.option_count).toBe(0);
+  });
+
+  it('withholds strength ranking when strict canonical detail is unavailable', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Demand Signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [{ from: 'f1', to: 'g1', strength: 0 }],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Demand Signal connect to Growth Goal?',
+      relationshipDetailStatus: 'unavailable',
+    });
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    expect(summary.top_causal_links).toEqual([]);
+    expect(summary.named_factor_pathways).toEqual([
+      {
+        label_from: 'Demand Signal',
+        label_to: 'Growth Goal',
+        edge_type: 'directed',
+      },
+    ]);
+  });
+
+  it('does not rank a bidirected connector as causal and preserves its type for fallback', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Brand Sentiment' },
+        { id: 'g1', kind: 'goal', label: 'Quarterly Profit' },
+      ],
+      [{ from: 'f1', to: 'g1', strength: 0.5, edge_type: 'bidirected' }],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Brand Sentiment relate to Quarterly Profit?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.top_causal_links).toEqual([]);
+    expect(summary.named_factor_pathways[0]).toMatchObject({
+      edge_type: 'bidirected',
+      strength: 0.5,
+    });
+  });
+
+  it('fails weak rather than selecting a duplicate factor label by graph order', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Shared Signal' },
+        { id: 'f2', kind: 'factor', label: 'Shared Signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f2', to: 'g1', strength: -0.7 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Shared Signal affect Growth Goal?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.named_factor_ambiguous).toBe(true);
+    expect(summary.named_factor_label).toBeUndefined();
+    expect(summary.named_factor_pathways).toEqual([]);
+  });
+
+  it('fails weak on duplicate labels for a generic ranking question too', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Shared Signal' },
+        { id: 'f2', kind: 'factor', label: 'shared-signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.9 },
+        { from: 'f2', to: 'g1', strength: -0.8 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'What most influences my model?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    expect(summary.top_causal_links).toEqual([]);
+  });
+
+  it('deduplicates exact connector twins and fails weak on conflicting twins', () => {
+    const nodes = [
+      { id: 'f1', kind: 'factor', label: 'Demand' },
+      { id: 'g1', kind: 'goal', label: 'Growth' },
+    ];
+    const exact = buildStructureProjectionSummary(
+      makeGraph(nodes, [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f1', to: 'g1', strength: 0.7 },
+      ]),
+      { relationshipDetailStatus: 'canonical_strict' },
+    );
+    expect(exact.relationship_detail_status).toBe('canonical_strict');
+    expect(exact.top_causal_links).toHaveLength(1);
+
+    const conflict = buildStructureProjectionSummary(
+      makeGraph(nodes, [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f1', to: 'g1', strength: -0.7 },
+      ]),
+      { relationshipDetailStatus: 'canonical_strict' },
+    );
+    expect(conflict.relationship_detail_status).toBe('unavailable');
+    expect(conflict.top_causal_links).toEqual([]);
+  });
+
+  it('normalises bidirected endpoint order before detecting semantic twins', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Demand' },
+        { id: 'f2', kind: 'factor', label: 'Sentiment' },
+      ],
+      [
+        { from: 'f1', to: 'f2', edge_type: 'bidirected', strength: 0.4 },
+        { from: 'f2', to: 'f1', edge_type: 'bidirected', strength: -0.4 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
+
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    expect(summary.top_causal_links).toEqual([]);
   });
 });

@@ -47,7 +47,10 @@ import type {
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
-import { composeExplainFromStructureFallback } from './explanation-fallback.js';
+import {
+  composeExplainFromStructureFallback,
+  composeStructuralPairEvidenceAnswer,
+} from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
@@ -70,11 +73,23 @@ export function createExplainFromStructureHandler(): HandlerFn {
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
-    const assistantText = sonnetValid
-      ? explanation!.answer_text
-      : composeExplainFromStructureFallback(invocation.structureProjection, {
-          canRunAnalysis,
-        });
+    const hasStructuralPairEvidence = invocation.structuralPairEvidence !== undefined;
+    // A valid authored answer is licensed only when the router explicitly
+    // classified the question as the open-ended `general` arm. Direct-link and
+    // reachability questions are answered from canonical typed evidence; an
+    // old/malformed omission fails weak to the deterministic projection. This
+    // keeps old wire payloads parseable without allowing absence to bypass the
+    // topology authority introduced for the mounted failure.
+    const mayUseAuthoredGeneralAnswer =
+      invocation.proposal?.structure_query?.kind === 'general';
+    const useSonnetAnswer = sonnetValid && mayUseAuthoredGeneralAnswer;
+    const assistantText = hasStructuralPairEvidence
+      ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
+      : useSonnetAnswer
+        ? explanation!.answer_text
+        : composeExplainFromStructureFallback(invocation.structureProjection, {
+            canRunAnalysis,
+          });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -82,8 +97,11 @@ export function createExplainFromStructureHandler(): HandlerFn {
       noop: true,
       result: {
         option_count: optionCount,
-        answer_source: sonnetValid ? 'sonnet' : 'deterministic_fallback',
-        fallback_reason: sonnetValid
+        answer_source:
+          useSonnetAnswer && !hasStructuralPairEvidence ? 'sonnet' : 'deterministic_fallback',
+        fallback_reason: hasStructuralPairEvidence
+          ? null
+          : useSonnetAnswer
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,

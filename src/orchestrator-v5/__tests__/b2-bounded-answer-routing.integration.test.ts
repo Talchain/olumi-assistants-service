@@ -11,6 +11,7 @@ import type {
 } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
+import { createExplainFromStructureHandler } from '../tools/handlers/explain-from-structure.js';
 
 const writes: Array<Record<string, unknown>> = [];
 let persistedGraph: unknown = null;
@@ -150,6 +151,7 @@ function mutatingThenAnsweringAdapter(answer: string) {
           },
           parameters: [],
           cited_context_fields: ['graph.nodes', 'graph.edges'],
+          structure_query: { kind: 'general' },
           explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
         },
       });
@@ -192,6 +194,7 @@ function runThenAnsweringAdapter(answer: string) {
           },
           parameters: [],
           cited_context_fields: ['graph.nodes', 'graph.edges'],
+          structure_query: { kind: 'general' },
           explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
         },
       });
@@ -200,7 +203,13 @@ function runThenAnsweringAdapter(answer: string) {
   return { chatWithTools };
 }
 
-function answeringAdapter(answer: string) {
+function answeringAdapter(
+  answer: string,
+  structureQuery?:
+    | { kind: 'general' }
+    | { kind: 'direct_relationship'; element_ids: [string, string] }
+    | { kind: 'reachability'; source_element_id: string; target_element_id: string },
+) {
   return {
     chatWithTools: vi.fn(async (): Promise<ChatWithToolsResult> => toolResult({
       intent_class: 'execute',
@@ -215,6 +224,7 @@ function answeringAdapter(answer: string) {
         },
         parameters: [],
         cited_context_fields: ['graph.nodes', 'graph.edges'],
+        structure_query: structureQuery ?? { kind: 'general' as const },
         explanation: { answer_text: answer, cited_fields: ['graph.nodes', 'graph.edges'] },
       },
     })),
@@ -309,6 +319,38 @@ describe('B2 real executor convergence', () => {
     expect(response.assistant_text).not.toMatch(/say the word|setting .* would help/i);
     expect(response.suggested_actions ?? []).toEqual([]);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('does not persist a hidden proposal from bounded read-only answer prose', async () => {
+    const capturableAnswer =
+      'Competitor response is worth monitoring as an unresolved risk. Would you like me to add competitor response as a risk?';
+    const adapter = answeringAdapter(capturableAnswer);
+    const { handlers, mutationSpy, explanationSpy } = registry();
+
+    const { response } = await runTurnExecutor(
+      payload(PRODUCT_CHALLENGE),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+      },
+    );
+
+    expect(response.assistant_text).toBe(capturableAnswer);
+    expect(mutationSpy).not.toHaveBeenCalled();
+    expect(explanationSpy).toHaveBeenCalledTimes(1);
+    expect(response.suggested_actions ?? []).toEqual([]);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+    expect(
+      writes.flatMap((write) =>
+        Array.isArray(write.pending_actions)
+          ? (write.pending_actions as Array<{ action?: { kind?: unknown } }>).map(
+              (pending) => pending.action?.kind,
+            )
+          : [],
+      ),
+    ).not.toContain('proposed_concept');
   });
 
   it('answers a safety question before run_analysis and does not execute the run', async () => {
@@ -453,5 +495,121 @@ describe('B2 real executor convergence', () => {
     expect(response.assistant_text).not.toMatch(/latest analysis attempt|latest run attempt/i);
     expect(response.suggested_actions ?? []).toEqual([]);
     expect(mutationSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses canonical identity-pair evidence instead of a valid but directionally wrong Sonnet answer', async () => {
+    const wrongAnswer =
+      'Reach 1,500 paid teams directly influences Sales Rep Adoption Rate, so the saved relationship runs from the goal back to the adoption factor.';
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'direct_relationship',
+      element_ids: ['goal', 'adoption'],
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const message =
+      'Using only the saved Living Model, describe the relationship between Reach 1,500 paid teams and Sales Rep Adoption Rate. State which influences which.';
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toContain(
+      'from Sales Rep Adoption Rate to Reach 1,500 paid teams, not the reverse',
+    );
+    expect(response.assistant_text).not.toContain(
+      'from the goal back to the adoption factor',
+    );
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('does not compose a path between two factors when the canonical model lists no direct connector', async () => {
+    const wrongAnswer =
+      'Sales Rep Adoption Rate reaches Team Capacity Consumed through the shared paid-team goal, so the model establishes an indirect path between them.';
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'direct_relationship',
+      element_ids: ['adoption', 'capacity'],
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const message =
+      'Is there a direct connector between Sales Rep Adoption Rate and Team Capacity Consumed, or only a path through another model element?';
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toContain('lists no direct connector');
+    expect(response.assistant_text).toContain(
+      'does not decide the separate reachability question',
+    );
+    expect(response.assistant_text).not.toContain('shared paid-team goal');
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('uses the separate canonical reachability carrier without claiming a direct connector', async () => {
+    const wrongAnswer =
+      'Replace CRM cannot reach Reach 1,500 paid teams because there is no direct connector between them.';
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'reachability',
+      source_element_id: 'opt_new',
+      target_element_id: 'goal',
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const message =
+      'Can Replace CRM reach Reach 1,500 paid teams through the saved directed model?';
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toContain(
+      'Replace CRM can reach Reach 1,500 paid teams',
+    );
+    expect(response.assistant_text).toContain('does not state');
+    expect(response.assistant_text).not.toContain('cannot reach');
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'Compare Sales Rep Adoption Rate and Team Capacity Consumed as strategic priorities.',
+      'Sales Rep Adoption Rate and Team Capacity Consumed deserve different priority judgements; this answer compares their roles without asserting a direct connector.',
+    ],
+    [
+      'What assumptions support Sales Rep Adoption Rate and Team Capacity Consumed?',
+      'The assumptions supporting Sales Rep Adoption Rate and Team Capacity Consumed should be reviewed separately; naming both does not establish a relationship between them.',
+    ],
+    [
+      'Summarise the evidence for Sales Rep Adoption Rate and Team Capacity Consumed.',
+      'The available evidence for Sales Rep Adoption Rate and Team Capacity Consumed needs separate treatment; their joint mention is not evidence of a connector.',
+    ],
+    [
+      'Which is more uncertain: Sales Rep Adoption Rate or Team Capacity Consumed?',
+      'The current question compares uncertainty around Sales Rep Adoption Rate and Team Capacity Consumed; it does not ask for or establish a direct relationship.',
+    ],
+  ])('does not turn two named elements into relationship intent: %s', async (message, answer) => {
+    const adapter = answeringAdapter(answer);
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toBe(answer);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 });

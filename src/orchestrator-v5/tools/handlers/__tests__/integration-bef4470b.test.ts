@@ -268,11 +268,12 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
 //      via the invalid path)
 
 const HIRING_STRUCTURE_PROJECTION: StructureProjectionSummary = {
+  relationship_detail_status: 'canonical_strict',
   goal_label: 'Hire the best candidate',
   top_causal_links: [
-    { label_from: 'Salary cost', label_to: 'Hire the best candidate', strength: -0.55 },
-    { label_from: 'Code quality', label_to: 'Hire the best candidate', strength: 0.62 },
-    { label_from: 'Ramp-up time', label_to: 'Hire the best candidate', strength: -0.41 },
+    { label_from: 'Salary cost', label_to: 'Hire the best candidate', edge_type: 'directed', strength: -0.55 },
+    { label_from: 'Code quality', label_to: 'Hire the best candidate', edge_type: 'directed', strength: 0.62 },
+    { label_from: 'Ramp-up time', label_to: 'Hire the best candidate', edge_type: 'directed', strength: -0.41 },
   ],
   named_factor_label: undefined,
   named_factor_pathways: [],
@@ -319,6 +320,7 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
       },
       parameters: [],
       cited_context_fields: [],
+      structure_query: { kind: 'general' },
       explanation: { answer_text: validAnswer },
     };
     const invocation = {
