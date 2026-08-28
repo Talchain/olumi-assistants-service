@@ -27,6 +27,7 @@ import { readLatestDraftCoaching } from './draft-coaching-log.js';
 import { readLatestLastCoachingSignal } from './last-coaching-signal-log.js';
 import {
   isReconciledScenarioAnalysisFactSet,
+  isScenarioAnalysisReasoningAuthority,
   isoInstantOrderKey,
   type ScenarioAnalysisFactSet,
 } from '../context/reconcile-scenario-analysis-facts.js';
@@ -50,12 +51,16 @@ export async function readCoachingCache(
     readLatestDraftCoaching(scenarioId),
     readLatestLastCoachingSignal(scenarioId),
   ]);
-  const completeAnalysisFactSet =
+  // Attestation first (a direct caller must not manufacture authority), then
+  // the reasoning-authority allow-list. `capped` qualifies: it is a validated
+  // durable page carrying the newest bounded window, and its newest fact is
+  // exactly the analysis whose Decision Review the user is looking at.
+  const authoritativeAnalysisFactSet =
     isReconciledScenarioAnalysisFactSet(analysisFactSet, scenarioId) &&
-    analysisFactSet.status === 'complete'
+    isScenarioAnalysisReasoningAuthority(analysisFactSet)
       ? analysisFactSet
       : null;
-  const analysisFactChronology = completeAnalysisFactSet?.facts ?? [];
+  const analysisFactChronology = authoritativeAnalysisFactSet?.facts ?? [];
   const selectedAnalysisFact =
     selectRunAnalysisFact(analysisFactChronology)?.fact ?? null;
   const decisionReview = extractSelectedDecisionReview(selectedAnalysisFact);
