@@ -14,6 +14,7 @@ import {
   type DurableScenarioAnalysisFactRead,
 } from '../reconcile-scenario-analysis-facts.js';
 import { readMayNameLeadingOptionVerdict } from '../claim-safety-read.js';
+import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
 import {
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
@@ -219,20 +220,61 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
   });
 
-  it('calls a validated 21-row lookahead capped and exposes no selectable prefix', () => {
+  it('calls a validated 21-row lookahead capped and retains the newest bounded window', () => {
     const facts = Array.from(
       { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
       (_, index) => analysisFact(`fact-${index}`),
     );
     const result = reconcile({ durableRead: durable(facts, 37) });
 
-    expect(result).toEqual({ status: 'capped', facts: [], total_count: 37 });
-    expect(selectRunAnalysisFact(result.facts)).toBeNull();
-    expect(selectDegradedRunAnalysisFact(result.facts)).toBeNull();
+    // The cap is a WALL on how much history may be reasoned over, not an
+    // instruction to forget. A capped set carries the newest CAP facts and
+    // discloses the wall through `status`; it never claims completeness.
+    expect(result).toEqual({
+      status: 'capped',
+      facts: facts.slice(0, SCENARIO_ANALYSIS_FACT_CAP),
+      total_count: 37,
+    });
+    expect(result.facts).toHaveLength(SCENARIO_ANALYSIS_FACT_CAP);
+    expect(selectRunAnalysisFact(result.facts)?.fact).toEqual(facts[0]);
+    expect(selectDegradedRunAnalysisFact(result.facts)?.fact).toEqual(facts[0]);
     expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
       fact: facts[0],
       readOk: true,
     });
+  });
+
+  it('keeps the durable analysis chain readable on the 21st lifetime run', () => {
+    // THE REGRESSION THIS PINS (PR #1170, 2026-08-28). `freezeCapped` returned
+    // `facts: []`, so the 21st analysis on a scenario converted the model-facing
+    // fact set to EMPTY — and because facts are never pruned, `total_count` only
+    // grows and the state never heals. Every later turn on that scenario saw no
+    // analysis, forever, while the wire freshness badge (derived from the hot
+    // turn window) still read `fresh`.
+    const newest = analysisFact('run-21', {
+      computedAt: '2026-08-27T12:00:20.000Z',
+    });
+    const older = Array.from({ length: SCENARIO_ANALYSIS_FACT_CAP }, (_, index) =>
+      analysisFact(`run-${SCENARIO_ANALYSIS_FACT_CAP - index}`, {
+        computedAt: `2026-08-27T12:00:${String(19 - index).padStart(2, '0')}.000Z`,
+      }),
+    );
+    const page = [newest, ...older];
+    expect(page).toHaveLength(SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT);
+
+    const result = reconcile({
+      durableRead: durable(page, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT),
+    });
+
+    expect(result.status).toBe('capped');
+    // A usable suffix reaches the reasoning consumers, and the newest fact is
+    // the one they select — the same property `complete` already guarantees.
+    expect(result.facts).toHaveLength(SCENARIO_ANALYSIS_FACT_CAP);
+    expect(selectRunAnalysisFact(result.facts)?.fact).toEqual(newest);
+    expect(buildAnalysisFromPriorFacts(result.facts, [])).not.toBeNull();
+    // The 21st row is the one the wall removes, and it is the OLDEST — the
+    // model loses the tail of its history, never its current analysis.
+    expect(result.facts).not.toContainEqual(older[older.length - 1]);
   });
 
   it.each(['partial', 'failed'])(
