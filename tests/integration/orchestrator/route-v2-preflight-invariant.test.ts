@@ -25,6 +25,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
+import { attachCallerContext } from '../../../src/context/index.js';
+
 // Capture ensureScenarioExists as a vi.fn spy — unlike the inline arrow
 // used by other route-v2 tests, a vi.fn exposes `.mock.calls` so we can
 // assert the call count and argument shape per branch.
@@ -152,6 +154,16 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
 
   beforeAll(async () => {
     app = Fastify();
+    // This suite's subject is the INVARIANT "pre-flight runs exactly once per
+    // dispatch branch", and several branches assert the identity the oracle was
+    // asked about. A body `user_id` is only admissible from a verified HMAC
+    // caller (`admissibleClaimedUserId`), and this bare app has no auth plugin,
+    // so without this the claims would all be discarded and the identity
+    // assertions would silently stop describing anything. Declared explicitly
+    // so the assumption is visible rather than ambient.
+    app.addHook('onRequest', async (req) => {
+      attachCallerContext(req, { keyId: 'preflight-invariant-suite', hmacAuth: true });
+    });
     await ceeOrchestratorRouteV2(app);
     await app.ready();
   });
