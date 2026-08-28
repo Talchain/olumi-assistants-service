@@ -58,6 +58,7 @@ import {
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  DISPLAY_GRAPH_INSTRUCTION,
   ANALYSIS_CONTEXT_INSTRUCTION,
   CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
@@ -129,6 +130,11 @@ function shortSha256(s: string): string {
  */
 const CODE_OWNED_INSTRUCTIONS = [
   ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
+  // Display-safe Living Model structure. Emitted by the SAME condition that
+  // serialises the projected `graph`, so relationship identity, direction,
+  // sign, bidirected semantics and baseline meaning cannot drift from an
+  // operator-managed prompt.
+  ['DISPLAY_GRAPH_INSTRUCTION', DISPLAY_GRAPH_INSTRUCTION],
   ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
   // Prompt coverage. Emitted by the SAME condition that serialises
   // `context_budget`, so a reduced graph/analysis projection cannot be read as

@@ -1208,6 +1208,15 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // legacy omission is normalised above to `unavailable`, so absence can never
   // mean permission to trust caller or conversational graph claims.
   parts.push('', GRAPH_CONTEXT_INSTRUCTION);
+  // LIVING MODEL STRUCTURE — CODE-OWNED and co-located with the exact
+  // model-facing `graph` projection. The projection carries safe relationship
+  // phrases, but those bytes alone do not tell the model that endpoint identity,
+  // direction and edge type are binding — or that node order/prose cannot fill
+  // a missing edge. A legacy/direct pack with no display graph gets neither the
+  // field nor this licence.
+  if (llmFacing.graph !== undefined) {
+    parts.push('', DISPLAY_GRAPH_INSTRUCTION);
+  }
   // Persisted-analysis authority is a conditional exact-failure marker. It is
   // not defaulted: absence says nothing about whether an analysis exists. The
   // marker and this interpretation are emitted by the same condition.
@@ -1462,6 +1471,30 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
   '- `absent`: no Living Model exists yet. Do not reconstruct one from conversation or claim that a model fact is recorded.',
   '- `unavailable`: canonical model state could not be established. Do not substitute caller input, conversation or summaries as model truth, and do not turn this into a claim that no model exists.',
   '- Never expose this status token, graph identifiers, read failures or internal field names to the user; express only the warranted substance in plain language.',
+].join('\n');
+
+/**
+ * Exact interpretation contract for the display-safe Living Model projection.
+ *
+ * The formatter already removes raw coefficients and emits closed relationship
+ * phrases. This instruction does not derive topology or science; it constrains
+ * the routing model to the identities and relationship semantics that survived
+ * that projection. It is conditional on the same `graph` value the model sees,
+ * so a missing projection cannot acquire authority from instruction text alone.
+ */
+export const DISPLAY_GRAPH_INSTRUCTION = [
+  '## Living Model structure (deterministic grounding)',
+  'Use the `graph` block only as the structured Living Model projection selected for this turn; `graph_context` separately states whether that projection is canonical, provisional, absent or unavailable.',
+  '- A direct relationship is usable only when it is explicitly listed in `graph.edges` and its exact `from` and `to` identities are both present in `graph.nodes`. An unlisted, malformed or dangling direct relationship is unknown or withheld, never evidence for a connection.',
+  '- Node identities must be unique. If an id appears on more than one node, every edge or `reaches` join involving that id is ambiguous and unknown; node order or the last matching label must never resolve it.',
+  '- If repeated edges with the same `from`, `to` and `edge_type` disagree about the `relationship` phrase, the relationship and its sign are conflicting and unknown. Never choose one by array order. Exact duplicate edges count as one listed relationship, not stronger evidence.',
+  '- An edge with no `edge_type` is directed from `from` to `to`. Preserve that direction and any explicitly positive or negative `relationship` phrase exactly. Never reverse it, swap its sign or compose an unlisted path.',
+  '- Exact fail-weak exception: `negligible link` and `negligible co-movement` do not license a near-zero magnitude or sign because this prompt does not distinguish a strict coefficient from a structural-fallback default. The listed endpoints and `edge_type` remain usable: a directed edge retains its `from`-to-`to` direction, while a bidirected edge retains no causal direction. Describe strength as unavailable rather than small.',
+  '- `edge_type: bidirected` describes non-causal co-movement or an unmeasured common cause. It is not a causal route: never invent a direction from its stored `from` and `to` positions.',
+  '- The sole additional multi-hop authority is `reaches` on an option node. Each listed target licences only that the option has a structural directed route to the named target; it does not identify a direct edge, intermediate path, sign, strength, confidence or analysis consequence. Do not compose a path from edges yourself, and never treat a bidirected edge as contributing to `reaches`. A present empty list means that option is a structural dead end. An absent or malformed list makes reachability unknown, and no other prose may fill it.',
+  '- Node array order, labels, descriptions, conversation and other prose do not create topology. Do not infer an edge or route from adjacency, wording or narrative sequence.',
+  '- `is_baseline: true` on an option node identifies the baseline or current approach within this projection. Only `graph_context.status: canonical` licenses describing it as the saved baseline; provisional structure is not saved or accepted. The marker never identifies a winner, recommendation, preference or analysis result.',
+  '- Never expose internal field names or identifiers to the user; express only the warranted structure in plain language.',
 ].join('\n');
 
 /**
