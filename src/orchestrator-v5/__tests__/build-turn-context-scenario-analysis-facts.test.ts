@@ -3,7 +3,10 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 
 import { buildTurnContext } from '../build-turn-context.js';
-import { SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../context/reconcile-scenario-analysis-facts.js';
+import {
+  SCENARIO_ANALYSIS_FACT_CAP,
+  SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+} from '../context/reconcile-scenario-analysis-facts.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { SessionReadError, type SessionStore } from '../session/store.js';
 import { makeMessagePayload } from './fixtures.js';
@@ -17,6 +20,7 @@ const PAYLOAD = makeMessagePayload({
 function analysisFact(
   label: string,
   computedAt = '2026-08-27T12:00:00.000Z',
+  analysisStatus = 'computed',
 ): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -27,7 +31,7 @@ function analysisFact(
       leading_option_id: `option-${label}`,
       summary: `Analysis ${label}`,
       computed_at: computedAt,
-      enrichment: { analysis_status: 'computed' },
+      enrichment: { analysis_status: analysisStatus },
     },
   };
 }
@@ -162,6 +166,56 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       'derivation_failed',
     );
     expect(context.persisted_analysis_freshness?.selected_fact_index).toBe(0);
+  });
+
+  it('does not let a bounded window mint a "never analysed" verdict', async () => {
+    // ⚠ TWO QUESTIONS, SIMILAR NAMES (CLAUDE.md trap 21), and this is the
+    // discriminating fixture that keeps them apart. Every fact in the window
+    // is `failed`, so no SUCCESSFUL fact is selectable — and the answer now
+    // depends entirely on which question `priorFactsReadOk` is taken to
+    // answer. The durable READ succeeded (claim safety proves it below), but
+    // the SET is bounded: an older successful analysis may sit behind the
+    // wall, so `none / no_successful_run_analysis_fact` — the vocabulary's
+    // "this scenario has never been analysed" — is unsupportable here.
+    // Promoting `capped` into `scenarioAnalysisFactsReadOk` produces exactly
+    // that false claim, and this test is what REDs when someone does.
+    const facts = Array.from(
+      { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
+      (_, index) =>
+        analysisFact(
+          String(index),
+          new Date(Date.UTC(2026, 7, 27, 12, 0, 59 - index)).toISOString(),
+          'failed',
+        ),
+    );
+    const store = {
+      ...createNoopSessionStore(),
+      readScenarioRunAnalysisFactsFor: async () => ({
+        facts: facts.map(identifiedAnalysisFact),
+        total_count: 37,
+      }),
+    };
+
+    const context = await buildTurnContext(PAYLOAD, 'request-capped-failed', {
+      sessionStore: store,
+    });
+
+    expect(context.scenario_analysis_fact_set?.status).toBe('capped');
+    expect(context.scenario_analysis_fact_set?.facts).toHaveLength(
+      SCENARIO_ANALYSIS_FACT_CAP,
+    );
+    // The read itself DID succeed — that is the other question, and its answer
+    // is unchanged.
+    expect(context.newest_analysis_fact).toEqual(facts[0]);
+    expect(context.newest_analysis_fact_read_ok).toBe(true);
+    // `unknown` is the honest verdict: freshness could not be derived over the
+    // whole scenario. (The `derivation_failed` reason code reads as a
+    // store error and is imprecise for this path — pre-existing, pinned here
+    // so a future correction is a deliberate change and not a silent one.)
+    expect(context.persisted_analysis_freshness).toMatchObject({
+      freshness: 'unknown',
+      reason: 'derivation_failed',
+    });
   });
 
   it('fails weak when the scenario port is omitted instead of falling back to hot facts', async () => {

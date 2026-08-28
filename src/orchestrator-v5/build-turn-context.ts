@@ -72,7 +72,6 @@ import {
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
-  isScenarioAnalysisReasoningAuthority,
   readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
@@ -772,14 +771,20 @@ export async function buildTurnContext(
     scenarioAnalysisFactSet,
     payload.scenario_id,
   );
+  // A `capped` carrier now supplies the newest bounded window here, so no gate
+  // is needed for the FACTS — `degraded` still carries `[]` by construction.
   const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;
-  // `capped` is a validated durable page carrying the newest bounded window,
-  // so the read DID succeed and its facts ARE the analysis being reasoned
-  // about. Only `degraded` proves nothing was read, and only that may collapse
-  // these consumers to "this scenario has never been analysed".
-  const scenarioAnalysisFactsReadOk = isScenarioAnalysisReasoningAuthority(
-    scenarioAnalysisFactSet,
-  );
+  // ⚠ TWO QUESTIONS, SIMILAR NAMES (CLAUDE.md trap 21) — DO NOT "align" this
+  // with the reconciler's claim-safety `readOk`, which is `true` for `capped`.
+  // That one answers "did we read the database-newest row?". THIS one is
+  // consulted by `deriveAnalysisFreshness` ONLY when no fact is selected, so
+  // it answers "is ABSENCE within this set authoritative?" — and under
+  // `capped` it is not, because unread history sits behind the wall. Promoting
+  // `capped` here would turn "no successful fact in the newest 20" into
+  // `none / no_successful_run_analysis_fact`, a positive "this scenario has
+  // never been analysed" claim that clears state downstream
+  // (`chip-generator.ts:135` branches on it). Only `complete` earns it.
+  const scenarioAnalysisFactsReadOk = scenarioAnalysisFactSet.status === 'complete';
   if (scenarioAnalysisFactSet.status !== 'complete') {
     log.warn(
       {

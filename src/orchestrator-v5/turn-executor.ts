@@ -2361,18 +2361,20 @@ export async function runTurnExecutor(
         ? scenarioAnalysisFactSet
         : undefined;
     // `complete` and `capped` both rest on a validated durable page and both
-    // carry real facts; only `degraded` (or an absent carrier) proves nothing
-    // was read. Admitting `capped` here is what stops the 21st lifetime run on
-    // a scenario silently deleting the model's analysis for good.
-    // `promptAnalysisFactSet` is an outer `let`, so bind the narrowed carrier
-    // once rather than re-testing it — an aliased boolean would not narrow it.
+    // carry real facts, so both may FEED reasoning. Admitting `capped` here is
+    // what stops the 21st lifetime run on a scenario silently deleting the
+    // model's analysis for good. `promptAnalysisFactSet` is an outer `let`, so
+    // bind the narrowed carrier once — an aliased boolean would not narrow it.
     const analysisAuthority = isScenarioAnalysisReasoningAuthority(
       promptAnalysisFactSet,
     )
       ? promptAnalysisFactSet
       : undefined;
     scenarioAnalysisFacts = analysisAuthority?.facts ?? [];
-    scenarioAnalysisFactsReadOk = analysisAuthority !== undefined;
+    // ⚠ NOT the same question — see the trap-21 note at the `buildTurnContext`
+    // twin. This flag is read only on ABSENCE, and absence within a bounded
+    // window proves nothing about the history behind the wall.
+    scenarioAnalysisFactsReadOk = analysisAuthority?.status === 'complete';
 
     // ==================================================================
     // STEP 1 — ORIENT
