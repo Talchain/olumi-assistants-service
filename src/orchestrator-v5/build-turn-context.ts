@@ -72,6 +72,7 @@ import {
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+  isScenarioAnalysisReasoningAuthority,
   readScenarioAnalysisClaimSafetyFact,
   reconcileScenarioAnalysisFacts,
   type DurableScenarioAnalysisFactRead,
@@ -772,7 +773,13 @@ export async function buildTurnContext(
     payload.scenario_id,
   );
   const scenarioAnalysisFacts = scenarioAnalysisFactSet.facts;
-  const scenarioAnalysisFactsReadOk = scenarioAnalysisFactSet.status === 'complete';
+  // `capped` is a validated durable page carrying the newest bounded window,
+  // so the read DID succeed and its facts ARE the analysis being reasoned
+  // about. Only `degraded` proves nothing was read, and only that may collapse
+  // these consumers to "this scenario has never been analysed".
+  const scenarioAnalysisFactsReadOk = isScenarioAnalysisReasoningAuthority(
+    scenarioAnalysisFactSet,
+  );
   if (scenarioAnalysisFactSet.status !== 'complete') {
     log.warn(
       {
@@ -789,7 +796,7 @@ export async function buildTurnContext(
           (fact) => fact.fact_type === 'run_analysis',
         ).length,
       },
-      'V5 buildTurnContext: scenario analysis fact set cannot author reasoning state',
+      'V5 buildTurnContext: scenario analysis fact set is not the complete record',
     );
   }
   // V5 Phase 1 brief persistence: load the persisted brief_text alongside

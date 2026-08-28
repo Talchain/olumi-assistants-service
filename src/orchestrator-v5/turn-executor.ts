@@ -343,7 +343,10 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
-import { isReconciledScenarioAnalysisFactSet } from './context/reconcile-scenario-analysis-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  isScenarioAnalysisReasoningAuthority,
+} from './context/reconcile-scenario-analysis-facts.js';
 import {
   buildAnalysisRefusalFact,
   isAnalysisRefusalContinuityCause,
@@ -2357,12 +2360,19 @@ export async function runTurnExecutor(
       contextGraphSelection.status === 'canonical'
         ? scenarioAnalysisFactSet
         : undefined;
-    scenarioAnalysisFacts =
-      promptAnalysisFactSet?.status === 'complete'
-        ? promptAnalysisFactSet.facts
-        : [];
-    scenarioAnalysisFactsReadOk =
-      promptAnalysisFactSet?.status === 'complete';
+    // `complete` and `capped` both rest on a validated durable page and both
+    // carry real facts; only `degraded` (or an absent carrier) proves nothing
+    // was read. Admitting `capped` here is what stops the 21st lifetime run on
+    // a scenario silently deleting the model's analysis for good.
+    // `promptAnalysisFactSet` is an outer `let`, so bind the narrowed carrier
+    // once rather than re-testing it — an aliased boolean would not narrow it.
+    const analysisAuthority = isScenarioAnalysisReasoningAuthority(
+      promptAnalysisFactSet,
+    )
+      ? promptAnalysisFactSet
+      : undefined;
+    scenarioAnalysisFacts = analysisAuthority?.facts ?? [];
+    scenarioAnalysisFactsReadOk = analysisAuthority !== undefined;
 
     // ==================================================================
     // STEP 1 — ORIENT

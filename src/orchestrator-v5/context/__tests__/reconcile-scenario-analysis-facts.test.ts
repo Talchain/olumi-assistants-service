@@ -237,7 +237,20 @@ describe('reconcileScenarioAnalysisFacts', () => {
     });
     expect(result.facts).toHaveLength(SCENARIO_ANALYSIS_FACT_CAP);
     expect(selectRunAnalysisFact(result.facts)?.fact).toEqual(facts[0]);
-    expect(selectDegradedRunAnalysisFact(result.facts)?.fact).toEqual(facts[0]);
+    // These fixtures carry NO analysis_status, which is the legacy-SUCCESS
+    // case, so the degraded selector is correctly silent — and silent for that
+    // reason, not because the window is empty. POSITIVE CONTROL below proves
+    // the selector can see a presence in the retained window (trap 13).
+    expect(selectDegradedRunAnalysisFact(result.facts)).toBeNull();
+    const degradedPage = [
+      analysisFact('newest-degraded', { status: 'failed' }),
+      ...facts.slice(1),
+    ];
+    const degradedResult = reconcile({ durableRead: durable(degradedPage, 37) });
+    expect(degradedResult.status).toBe('capped');
+    expect(selectDegradedRunAnalysisFact(degradedResult.facts)?.fact).toEqual(
+      degradedPage[0],
+    );
     expect(readScenarioAnalysisClaimSafetyFact(result, SCENARIO)).toEqual({
       fact: facts[0],
       readOk: true,

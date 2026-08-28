@@ -181,14 +181,14 @@ describe('readCoachingCache', () => {
   });
 
   it.each(['capped', 'degraded'] as const)(
-    'fails weak for a reconciler-attested %s scenario fact set',
+    'reads a reconciler-attested %s scenario fact set per its authority',
     async (status) => {
       const uniqueScenario = randomUUID();
-      const canaryFact = {
+      const scenarioReviewFact = {
         ...runAnalysisFact({
           decision_review: {
             produced_at: '2026-04-21T12:00:00.000Z',
-            narrative_summary: 'UNLICENSED_REVIEW_CANARY',
+            narrative_summary: 'SCENARIO_REVIEW_CANARY',
           },
           coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
           coaching_signal_turn_id: 'unlicensed-signal-turn',
@@ -200,7 +200,7 @@ describe('readCoachingCache', () => {
           enrichment: {
             decision_review: {
               produced_at: '2026-04-21T12:00:00.000Z',
-              narrative_summary: 'UNLICENSED_REVIEW_CANARY',
+              narrative_summary: 'SCENARIO_REVIEW_CANARY',
             },
             coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
             coaching_signal_turn_id: 'unlicensed-signal-turn',
@@ -212,7 +212,7 @@ describe('readCoachingCache', () => {
         status === 'degraded'
           ? reconcileScenarioAnalysisFacts({
               scenarioId: uniqueScenario,
-              hotWindowFacts: [canaryFact],
+              hotWindowFacts: [scenarioReviewFact],
               durableRead: { status: 'degraded', reason: 'unavailable' },
             })
           : reconcileScenarioAnalysisFacts({
@@ -225,7 +225,7 @@ describe('readCoachingCache', () => {
                 query_limit: 21,
                 total_count: 21,
                 facts: Array.from({ length: 21 }, (_, index) => ({
-                  fact: canaryFact,
+                  fact: scenarioReviewFact,
                   fact_row_id: `capped-analysis-fact-${index}`,
                   fact_created_at: `2026-04-21T11:${String(59 - index).padStart(2, '0')}:00.000Z`,
                 })),
@@ -234,8 +234,27 @@ describe('readCoachingCache', () => {
 
       expect(carrier.status).toBe(status);
       const cache = await readCoachingCache(uniqueScenario, carrier);
-      expect(cache.decision_review).toBeNull();
-      expect(cache.last_coaching_signal).toBeNull();
+
+      if (status === 'degraded') {
+        // Nothing was read. Absence is not evidence, so coaching stays silent.
+        expect(cache.decision_review).toBeNull();
+        expect(cache.last_coaching_signal).toBeNull();
+        return;
+      }
+
+      // `capped` is a VALIDATED durable page whose newest row is the analysis
+      // the user is looking at — it is bounded, not unread. Withholding the
+      // review here is what made the assistant deny an analysis the UI was
+      // simultaneously reporting as fresh, from the 21st run onward.
+      expect(cache.decision_review).toEqual({
+        produced_at: '2026-04-21T12:00:00.000Z',
+        narrative_summary: 'SCENARIO_REVIEW_CANARY',
+      });
+      expect(cache.last_coaching_signal).toEqual({
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'unlicensed-signal-turn',
+        produced_at: '2026-04-21T12:00:00.000Z',
+      });
     },
   );
 

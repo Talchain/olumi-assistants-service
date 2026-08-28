@@ -118,13 +118,17 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
     });
   });
 
-  it('does not feed a capped durable prefix to analysis consumers', async () => {
+  it('feeds the newest bounded window of a capped durable page to analysis consumers', async () => {
+    // Chronology and persisted row order agree, as they do in production: row
+    // 0 is both the newest `fact_created_at` (59 - index) and the newest
+    // `computed_at`, so the reconciler's window and the display selector
+    // cannot disagree about which fact is current.
     const facts = Array.from(
       { length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT },
       (_, index) =>
         analysisFact(
           String(index),
-          new Date(Date.UTC(2026, 7, 27, 12, 0, index)).toISOString(),
+          new Date(Date.UTC(2026, 7, 27, 12, 0, 59 - index)).toISOString(),
         ),
     );
     const store = {
@@ -139,17 +143,25 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
       sessionStore: store,
     });
 
+    // THE REGRESSION THIS PINS (PR #1170, 2026-08-28). This asserted
+    // `facts: []` and a `derivation_failed` freshness — i.e. the 21st lifetime
+    // analysis run on a scenario permanently converted the model-facing fact
+    // set to EMPTY, because run_analysis facts are never pruned and
+    // `total_count` only grows.
     expect(context.scenario_analysis_fact_set).toEqual({
       status: 'capped',
-      facts: [],
+      facts: facts.slice(0, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT - 1),
       total_count: 37,
     });
     expect(context.newest_analysis_fact).toEqual(facts[0]);
     expect(context.newest_analysis_fact_read_ok).toBe(true);
-    expect(context.persisted_analysis_freshness).toMatchObject({
-      freshness: 'unknown',
-      reason: 'derivation_failed',
-    });
+    // A fact WAS read, so the derivation runs and the hash comparison decides.
+    // `derivation_failed` — this store has no analysis at all — must not be
+    // the answer any more.
+    expect(context.persisted_analysis_freshness?.reason).not.toBe(
+      'derivation_failed',
+    );
+    expect(context.persisted_analysis_freshness?.selected_fact_index).toBe(0);
   });
 
   it('fails weak when the scenario port is omitted instead of falling back to hot facts', async () => {
