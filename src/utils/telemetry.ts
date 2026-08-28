@@ -1632,6 +1632,23 @@ export const TelemetryEvents = {
   V5EditGraphNoPersistedGraphFallthrough:
     "v5.edit_graph.no_persisted_graph_fallthrough",
 
+  // The edit lane claimed a turn it could not resolve, and handed it back.
+  // `editIntentDetected` fires on a bare edit VERB ~2,700 lines before anything
+  // can consult run facts, so a comparative question ("Did my edit change which
+  // option comes out ahead?") was answered "Which option should I update?" by a
+  // module that never reads run facts. When the target resolution carried NO
+  // alternatives — a bare question with no chips, nothing applied and nothing
+  // proposed — the dispatch now returns PRE-COMMIT and the route falls through
+  // to the turn executor, where the context pack (and therefore `run_delta`)
+  // lives. This event is what keeps the class observable: it is the rate at
+  // which the edit lane claims traffic it cannot serve, which is a
+  // routing-quality signal worth watching even though it is no longer a
+  // dead-end. Payload: { request_id, scenario_id, outcome } — routing keys and
+  // the `fell_through:<reason>` outcome only; NO message text (privacy
+  // contract R-004).
+  V5EditGraphUnresolvedClarificationFallthrough:
+    "v5.edit_graph.unresolved_clarification_fallthrough",
+
   // V5 A4 corrective path — bare add-risk request clarified without an LLM
   // call or graph mutation. Payload: { request_id, scenario_id, latency_ms,
   // label_length }. The label itself is intentionally not emitted.

@@ -589,6 +589,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
         V5EditGraphPartAccounting: "v5.edit_graph.part_accounting",
         V5EditGraphTurn: "v5.edit_graph.turn",
+        V5EditGraphUnresolvedClarificationFallthrough:
+          "v5.edit_graph.unresolved_clarification_fallthrough",
         // V5 link-safe response floor — headline Case-E + chip floor.
         V5HeadlineFellBack: "v5.headline.fell_back",
         V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
@@ -1431,6 +1433,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // empty canvas at frame stage. Diagnostic-only (no Datadog metric in
         // emit()); routing keys + message_length only, never message text.
         TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough,
+        // The edit lane's OTHER hand-back: it claimed a turn on a bare edit
+        // verb, could resolve nothing, and returned pre-commit so the turn
+        // reaches the executor (where `run_delta` lives). Diagnostic-only, on
+        // exactly the same footing as its sibling above — structured logs are
+        // the operational signal; no Datadog mapping until a dashboard picks
+        // the routing-quality rate up.
+        TelemetryEvents.V5EditGraphUnresolvedClarificationFallthrough,
         // V5 Phase 1 brief persistence — diagnostic signal that the
         // user-supplied brief exceeded MAX_BRIEF_TEXT_LENGTH and was
         // truncated by normaliseBriefText. Operators can alert on a
@@ -2425,6 +2434,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.option_effect_write_resolved",
         "v5.edit_graph.option_effect_ask_emitted",
         "v5.edit_graph.option_effect_label_collision",
+        // ⭐ The edit lane is non-terminal when it resolved nothing — the
+        // hand-back's observability. Deliberate frozen-registry addition per
+        // the registry discipline.
+        "v5.edit_graph.unresolved_clarification_fallthrough",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
