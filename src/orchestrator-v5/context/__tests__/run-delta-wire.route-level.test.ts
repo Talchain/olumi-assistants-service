@@ -46,62 +46,15 @@ import {
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { buildRunDelta } from '../../coaching/build-run-delta.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
+import { PRESENT_PAIR, REFUSED_PAIR } from './run-delta-fixtures.js';
 
 const MESSAGE = 'should I be worried about that?';
 
 /**
- * A persisted `run_analysis` fact carrying the four PRODUCER ECHOES the
- * producer requires (`seed_used`, `graph_hash_at_run`, `_meta.builds`,
- * `n_samples`) plus the run's own leader-claim verdict. Shaped from the
- * measured probe that established the pre-change absence.
+ * Fact fixtures live in ./run-delta-fixtures.ts — shared with the
+ * turn-executor-level suite that pins the same wire one hop upstream, so
+ * the two cannot drift apart silently.
  */
-function fact(
-  options: readonly { id: string; win: number }[],
-  seed: string,
-  hash: string,
-  at: string,
-  mayName = true,
-): HandlerFact {
-  return {
-    fact_type: 'run_analysis',
-    noop: false,
-    result: {
-      enrichment: {
-        analysis_status: 'completed',
-        results: options.map((o) => ({
-          option_id: o.id,
-          option_label: o.id === 'opt-a' ? 'Offshore partner' : 'Hire locally',
-          win_probability: o.win,
-        })),
-        meta: { seed_used: seed, n_samples: 10_000 },
-        _meta: { builds: { plot: 'p1', isl: 'i1' } },
-      },
-      computed_at: at,
-      graph_hash_at_run: hash,
-      constraint_verdict: {
-        may_name_leading_option: mayName,
-        constraint_verdict_state: 'evaluated_feasible' as const,
-      },
-    },
-  } as unknown as HandlerFact;
-}
-
-/** A genuine pair: the leader flips opt-a → opt-b across an edit (hashes differ). */
-const PRESENT_PAIR: readonly HandlerFact[] = [
-  fact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', '2026-06-07T00:00:00.000Z'),
-  fact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', '2026-06-06T00:00:00.000Z'),
-];
-
-/**
- * A pair the producer REFUSES: exactly ONE successful run in the window, so
- * `selectTwoNewestRunAnalysisFacts` returns null → `insufficient_runs`.
- *
- * Deliberately the SAME fact object as the present pair's newest member, so the
- * two arms differ in ONE property — whether a comparable pair exists — and not
- * in option ids, labels, seeds or any other content. A refusal arm that also
- * changed the labels could pass by carrying no recognisable content at all.
- */
-const REFUSED_PAIR: readonly HandlerFact[] = [PRESENT_PAIR[0]!];
 
 function render(priorFacts: readonly HandlerFact[]): {
   prompt: string;

@@ -2716,8 +2716,25 @@ export async function runTurnExecutor(
         // Deleting it does NOT remove the delta — `mayNameLeadingOption` is
         // fail-closed (`=== true`) in the assembler — it silently strips the
         // leader ids from it, which is the quieter and more dangerous failure.
-        // Neutering it MUST turn the leader arm of
-        // context/__tests__/run-delta-wire.route-level.test.ts red.
+        // Neutering it MUST turn
+        // __tests__/run-delta-leader-wire.turn-executor.test.ts red.
+        //
+        // ⚠ CORRECTED — THIS COMMENT PREVIOUSLY NAMED THE WRONG SUITE, AND THE
+        // CLAIM WAS FALSE. It said neutering this line must red
+        // `context/__tests__/run-delta-wire.route-level.test.ts`. That suite
+        // calls `assembleContextPack` DIRECTLY with its own literal
+        // `mayNameLeadingOption` and never routes through turn-executor, so it
+        // is structurally incapable of observing this line. Measured: replacing
+        // the threaded value with `false` left it, and every other seam suite
+        // reached for, fully GREEN. The wire this comment described as guarded
+        // was UNGUARDED for the whole time the comment stood.
+        //
+        // A false claim about a guard is worse than no claim: it is what teaches
+        // the next reader to stop looking. The named suite above now exists,
+        // drives the real `runTurnExecutor`, and is pinned by a discriminating
+        // mutant pair — neutering THIS site REDs it, neutering the finaliser's
+        // `mayNameLeadingOption` site leaves it GREEN — so it is bound to this
+        // call site by identity rather than merely sensitive to something.
         //
         // ⭐ THE ENTRY VALUE IS THE CORRECT AUTHORITY HERE, NOT AN
         // APPROXIMATION OF THE POST-HANDLER ONE. `mayNameLeadingOptionForRun`
