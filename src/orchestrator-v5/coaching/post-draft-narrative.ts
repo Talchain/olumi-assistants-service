@@ -288,6 +288,21 @@ interface NodeLite {
   readonly id?: string;
   readonly kind?: string;
   readonly label?: string;
+  /**
+   * TRUE when the producer authored this node's display label rather than
+   * carrying the user's own words. On a `decision` node this is the only
+   * signal available here that the projector managed to derive a decision
+   * STATEMENT from the brief at all — see {@link hasProvisionalDecision}.
+   *
+   * ⚠ NODE LEVEL, NOT `provenance.label_authored`. The projector writes the
+   * flag into a structured provenance OBJECT, but `NodeV3.provenance` is a
+   * bare string enum (`schemas/cee-v3.ts:255`) and `NodeV3` strips undeclared
+   * keys; `projectNodeProvenance` (`transforms/schema-v3.ts:1183`) lifts the
+   * flag to node level, where `cee-v3.ts:284` declares it and it survives to
+   * this builder. Reading it off `provenance` here would read a property off a
+   * string and yield `undefined` on every draft.
+   */
+  readonly label_authored?: boolean;
   readonly observed_state?: {
     readonly uncertainty_drivers?: readonly string[];
   };
@@ -518,9 +533,14 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
 
-  const confirmSentence = buildConfirmSentence(goalLabel);
+  // The projector mints a decision node from whatever options exist, so its
+  // presence says nothing about the brief. An UNAUTHORED label is the signal
+  // that no decision could be derived from what the user actually wrote.
+  const provisionalDecision = hasProvisionalDecision(nodes);
 
-  const optionsBlock = buildOptionsBlock(options);
+  const confirmSentence = buildConfirmSentence(goalLabel, provisionalDecision);
+
+  const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
   const tradeOffBullet = buildTradeOffBullet(factors, risks);
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
@@ -811,21 +831,51 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
  * defensive against a second caller arriving, which is exactly when a
  * `for ""` opener would ship.
  */
-function buildConfirmSentence(goalLabel: string | null): string {
+function buildConfirmSentence(goalLabel: string | null, provisionalDecision = false): string {
+  // ── THE OPEN-BRIEF OPENER ──────────────────────────────────────────────────
+  // Every clause below is a claim about something this builder can see:
+  //   "I've built a first model"          — nodes.length > 0 is checked above.
+  //   "for <goal>"                        — a goal node's own label.
+  //   "couldn't pin down a single
+  //    decision in your brief"            — exactly what an unauthored decision
+  //                                         label means: `deriveDecisionLabel`
+  //                                         declined rather than guessed.
+  //   "I've framed one provisionally"     — the decision node exists; the
+  //                                         projector minted it deterministically.
+  //
+  // ⚠ THE NEGATIVE IS ABOUT OUR EXTRACTION, NOT ABOUT THEIR BRIEF. "Your brief
+  // didn't contain a decision" would be a negative claim about the user's own
+  // input that this builder cannot support — the brief may well pose one we
+  // failed to read (the known negation gap does exactly that). "I couldn't pin
+  // down" is true either way, and it is the fail-safe direction for this class
+  // of claim.
+  //
+  // ⚠ IT DOES NOT PROMISE A DECISION-FREE MODEL. The product cannot express
+  // one, so copy implying the decision could be dropped would be a second lie.
+  // The sentence says a decision WAS framed, and marks it provisional.
+  const trimmedGoal = goalLabel?.trim() ?? '';
+  const hasWholeQuotation =
+    trimmedGoal.length > 0 &&
+    elideLabelAtWordBoundary(trimmedGoal, MAX_GOAL_CHARS) === trimmedGoal;
+
+  if (provisionalDecision) {
+    return hasWholeQuotation
+      ? `I've built a first model for "${trimmedGoal}". I couldn't pin down a single decision in your brief, so I've framed one provisionally.`
+      : "I've built a first model from your brief. I couldn't pin down a single decision in it, so I've framed one provisionally.";
+  }
+
   if (!goalLabel) {
     return "I've built a first decision model from your brief.";
   }
-  const trimmed = goalLabel.trim();
-  if (trimmed.length === 0) {
+  if (trimmedGoal.length === 0) {
     return "I've built a first decision model from your brief.";
   }
   // Ask the canonical elider whether a whole quotation exists. It returns the
   // trimmed label unchanged iff nothing had to be removed.
-  const safe = elideLabelAtWordBoundary(trimmed, MAX_GOAL_CHARS);
-  if (safe !== trimmed) {
+  if (!hasWholeQuotation) {
     return "I've built a first decision model from your brief.";
   }
-  return `I've built a first decision model for "${trimmed}".`;
+  return `I've built a first decision model for "${trimmedGoal}".`;
 }
 
 /**
@@ -836,19 +886,32 @@ function buildConfirmSentence(goalLabel: string | null): string {
  * `• Other variants are on the canvas.` bullet so the reader sees the
  * spread without enumerating every variant.
  */
-function buildOptionsBlock(options: readonly string[]): string | null {
+function buildOptionsBlock(
+  options: readonly string[],
+  provisionalDecision = false,
+): string | null {
   if (options.length === 0) return null;
   const trimmed = options.map((label) => elideLabelAtWordBoundary(label, MAX_LABEL_CHARS));
+
+  // ⚠ THE OPTIONS ARE NEVER WITHHELD, ONLY RE-TITLED. They are rendered on the
+  // user's canvas either way; a narrative that omitted them while the canvas
+  // showed them would be a second false claim, not a fix for the first.
+  //
+  // "Options compared" asserts two things that are untrue of an open brief:
+  // that these are alternatives the user chose between, and that a comparison
+  // has happened. On the provisional path the heading asserts only where they
+  // are — which is verifiable by looking at the screen.
+  const heading = provisionalDecision ? 'Options on the canvas' : 'Options compared';
 
   if (trimmed.length === 1) {
     return `The model so far includes one route: ${trimmed[0]}.`;
   }
   if (trimmed.length <= MAX_NAMED_OPTIONS) {
-    return renderBulletSection('Options compared', trimmed);
+    return renderBulletSection(heading, trimmed);
   }
   // 5+ options — name the first three, signal that more exist on canvas.
   const named = trimmed.slice(0, MAX_LISTED_WHEN_OVER);
-  return renderBulletSection('Options compared', [
+  return renderBulletSection(heading, [
     ...named,
     'Other variants are on the canvas.',
   ]);
@@ -1320,6 +1383,89 @@ function stripBulletLabel(bullet: string): string {
 }
 
 // ----- data accessors -------------------------------------------------------
+
+/**
+ * The generic label `deriveDecisionLabel` falls back to when it declines to
+ * author a decision statement (`objective-label.ts:807`). Mirrored here because
+ * the narrative cannot import the projector's draft-records layer; the mirror is
+ * held honest by a test that calls `deriveDecisionLabel` itself and asserts this
+ * exact string, so drift REDs rather than silently disabling the gate.
+ */
+const UNAUTHORED_DECISION_LABEL = 'Decision';
+
+/**
+ * TRUE when the model carries a decision node whose label the projector could
+ * NOT derive from the brief — i.e. the decision exists because the pipeline
+ * always mints one, not because the user posed one.
+ *
+ * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+ * Measured: three open strategic briefs, each explicitly disclaiming a choice
+ * between fixed options, were each organised as 1 decision + 3-5 options, and
+ * the narrative announced "I've built a first decision model from your brief"
+ * over an "Options compared" block. A genuine-decision control was clean, so
+ * the product ALWAYS decides rather than deciding appropriately.
+ *
+ * ⚠ THE MODEL SHAPE IS NOT FIXED HERE AND CANNOT BE. `option` is the records
+ * grammar's only bucket for "a thing under consideration"
+ * (`grammar.ts:172`), the decision node is minted deterministically from
+ * whatever options exist (`projector.ts:3207-3282`), and a decision-free model
+ * is not expressible — `graph-validator.ts:348-382` raises `MISSING_DECISION`
+ * and `INSUFFICIENT_OPTIONS` at ERROR severity and
+ * `analysis-ready-helper.ts:1487` forces `needs_user_input` below two options.
+ * Changing that is a `NodeKind` contract train across four repos. This gate
+ * changes only the CLAIM the product makes about the model it built.
+ *
+ * ⚠ SCOPED TO AN EXISTING DECISION NODE, not to the flag's absence. A graph
+ * with no decision node has had nothing framed provisionally, so saying so
+ * would be a fresh false claim in the opposite direction.
+ *
+ * ⚠⚠ TWO SIGNALS, NOT ONE — AND THE SECOND IS WHAT STOPS THIS OVER-FIRING.
+ * `label_authored` alone is NOT sufficient. The field is documented
+ * RESPONSE-ONLY and "recomputed from the source node on every response"
+ * (`cee-v3.ts:250-254`), so a hand-built, user-edited or round-tripped graph
+ * can carry a perfectly good decision — "Launch product?" — with no flag on
+ * it. Gating on the flag alone told that user "I couldn't pin down a single
+ * decision in your brief", which is a NEW false claim in place of the old one.
+ * (Caught by an existing integration fixture, not by this lane's own tests,
+ * whose control set the flag explicitly and so could not see the class.)
+ *
+ * The producer's actual signature for "could not derive" is BOTH: the flag
+ * absent AND the label left as the generic placeholder. `deriveDecisionLabel`
+ * returns exactly `{ label: "Decision", authored: false }` when nothing yields
+ * a faithful statement (`objective-label.ts:807`) — derived there, not assumed
+ * here, and pinned by a test that calls that producer directly so this
+ * constant cannot silently drift out of agreement with it.
+ *
+ * If that literal ever changes, this gate STOPS FIRING and the copy reverts to
+ * today's wording — the safe direction: a lost hedge, never a fresh lie.
+ *
+ * ⚠ KNOWN GAP, STATED RATHER THAN PAPERED OVER: this catches the cases where
+ * `deriveDecisionLabel` DECLINED to author. It does NOT catch a brief whose
+ * disclaimer was itself run through the sentence-stripper into a confident
+ * label (observed: a decision labelled "Choose Between Fixed Options Yet",
+ * authored from a NEGATED sentence). Those set `label_authored` and are
+ * indistinguishable here — the fix for that class belongs in
+ * `deriveDecisionLabel`'s handling of negation, upstream of this file.
+ *
+ * ⚠ RESIDUAL — THE OTHER OPENER IS UNGOVERNED. This whole builder is bypassed
+ * when the model's own coaching summary passes the copy gate AND readiness is
+ * exactly `ready` (`:459-466`), in which case the LLM's sentences ship
+ * verbatim and nothing here can vet them. All four turns in which this defect
+ * was captured took the deterministic path, so this is the right site for what
+ * was witnessed — but a model-authored summary asserting a decision on an open
+ * brief would still ship, and is UNMEASURED for this defect.
+ */
+function hasProvisionalDecision(nodes: readonly NodeLite[]): boolean {
+  for (const n of nodes) {
+    if (n.kind !== 'decision') continue;
+    // The FIRST decision node is authoritative: the projector mints exactly one.
+    return (
+      n.label_authored !== true &&
+      n.label?.trim() === UNAUTHORED_DECISION_LABEL
+    );
+  }
+  return false;
+}
 
 function findGoalLabel(nodes: readonly NodeLite[]): string | null {
   for (const n of nodes) {
