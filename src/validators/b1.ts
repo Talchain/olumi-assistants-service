@@ -115,6 +115,22 @@ export function validateIngress(payload: unknown, request_id: string): IngressRe
   return { ok: false, error: candidate };
 }
 
+/**
+ * The ONLY top-level key this boundary will drop to rescue a reply.
+ *
+ * It qualifies on three counts, and a candidate that fails any one of them does
+ * not belong here: (1) it is `.optional()` in the published contract, so its
+ * absence is a state consumers already handle rather than a shape they have
+ * never seen; (2) no user-facing surface renders it, so a user cannot perceive
+ * the loss; (3) it is ADDITIVE — nothing downstream derives correctness from
+ * its presence. Adding a second entry is a contract decision.
+ */
+const DEGRADABLE_EGRESS_FIELD = 'model_version_receipt' as const;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 export interface EgressOk { ok: true; value: OlumiResponse }
 export interface EgressFail { ok: false; fallback: OlumiResponse }
 export type EgressResult = EgressOk | EgressFail;
@@ -214,6 +230,75 @@ export function validateEgress(response: unknown, request_id: string): EgressRes
   }
 
   const issues = trimIssues(parsed.error.issues);
+
+  // ⭐ DEGRADE ONE OPTIONAL CARRIER RATHER THAN DELETE THE WHOLE REPLY.
+  //
+  // WITNESSED ON STAGING 28 Aug 2026 (build 674a4f2a): an ordinary open brief
+  // drafted a 16-node graph that rendered on the canvas, and the user's entire
+  // assistant reply was replaced by 'The server produced a response that failed
+  // validation.' The sole Zod issue was
+  // `model_version_receipt.graph.nodes.0.label` — "at most 200 character(s)" —
+  // on a 212-character goal label CEE had copied verbatim from a brief
+  // sentence. Re-driven the same day with a long goal sentence: reproduced on
+  // consecutive turns, 258-character label.
+  //
+  // WHY THE PRODUCER AND THIS VALIDATOR DISAGREE (two schemas, one name —
+  // CLAUDE.md trap 21). The receipt's own admissibility gate is
+  // `model-management/mutation-receipt.ts:68` `GraphVerbatim`, which
+  // superRefines against `GraphV3` from CEE-LOCAL `schemas/cee-v3.ts`, whose
+  // `NodeV3.label` is a bare `z.string()` (`cee-v3.ts:162`) — UNBOUNDED. This
+  // boundary validates against the PUBLISHED `GraphV3Schema`, whose
+  // `NodeV3Schema.label` is `.min(1).max(200)` (`@talchain/schemas` 0.50.0,
+  // `dist/graph.js:259`). So CEE mints a receipt its own validator accepts and
+  // this one rejects, in the same request. `mutation-receipt.ts` states the
+  // rule it breaks — "The ADMISSIBILITY question must be the same one the
+  // version carrier asked" — and closed the gap for `strength.std` only.
+  //
+  // ⚠ THIS IS NOT A RELAXATION. The retry runs the SAME `OlumiResponseSchema`.
+  // Nothing unvalidated leaves: the offending carrier is DELETED and the
+  // remainder must pass identically. Any issue outside `model_version_receipt`
+  // still takes the hard fallback below, unchanged.
+  //
+  // ⚠ WHY THIS KEY AND NO OTHER. `model_version_receipt` is `.optional()` in
+  // the published contract, so its absence is a contract-valid state every
+  // consumer already handles, and no user-facing surface renders it — a user
+  // loses nothing they can see. `blocks`, `analysis_ready` and the rest ARE the
+  // product. This list stays exactly one key long; widening it is a contract
+  // decision, not a robustness tweak.
+  //
+  // ⚠ THIS IS THE INTERIM. The durable fix is to stop minting >200-character
+  // labels at the producer, which must land BEFORE the durable commit because
+  // changing a label changes `full_hash`.
+  const receiptOnly =
+    parsed.error.issues.length > 0 &&
+    parsed.error.issues.every((i) => i.path[0] === DEGRADABLE_EGRESS_FIELD) &&
+    isPlainObject(response) &&
+    Object.prototype.hasOwnProperty.call(response, DEGRADABLE_EGRESS_FIELD);
+  if (receiptOnly) {
+    // Shallow copy minus the carrier. Every surviving value is passed by
+    // REFERENCE, so this stays a gate and not a transform — a Zod rebuild here
+    // would re-open the `edge_type` hash/payload fork documented above.
+    const { [DEGRADABLE_EGRESS_FIELD]: _dropped, ...withoutReceipt } =
+      response as Record<string, unknown>;
+    const retry = OlumiResponseSchema.safeParse(withoutReceipt);
+    if (retry.success) {
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'egress',
+        validator: EGRESS_VALIDATOR_NAME,
+        contract_version: CONTRACT_VERSION,
+        pass: true,
+        degraded_field: DEGRADABLE_EGRESS_FIELD,
+        issue_count: issues.length,
+        issues,
+        request_id,
+      });
+      return { ok: true, value: withoutReceipt as OlumiResponse };
+    }
+    // Dropping the carrier did not rescue it — fall through to the hard
+    // fallback rather than shipping a second, differently-broken response.
+  }
+
   emit(TelemetryEvents.BoundaryValidation, {
     boundary: 'B1',
     direction: 'egress',
