@@ -33,7 +33,10 @@ import { OlumiResponseSchema, AnalysisStateV1Schema } from '@talchain/schemas/bo
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { finaliseV5Response } from '../response-finaliser.js';
-import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
+import {
+  composeAnalysisStateV1,
+  readFinalLeaderClaimPermission,
+} from '../compose/analysis-state-v1.js';
 import {
   clampRefusalFreshness,
   type AnalysisReadyPayload,
@@ -470,6 +473,7 @@ describe('analysis_state.leader_claim', () => {
     });
     const claim = stateOf(body).leader_claim as Record<string, unknown>;
     expect(claim.permitted).toBe(true);
+    expect(readFinalLeaderClaimPermission(body)).toBe(true);
     expect('withheld_reason' in claim).toBe(false);
     expect(claim.separation).toBe('separated');
   });
@@ -482,6 +486,7 @@ describe('analysis_state.leader_claim', () => {
     });
     const claim = stateOf(body).leader_claim as Record<string, unknown>;
     expect(claim.permitted).toBe(false);
+    expect(readFinalLeaderClaimPermission(body)).toBe(false);
     expect(claim.withheld_reason).toBe('options_do_not_separate');
     expect(claim.separation).toBe('near_tie');
   });
@@ -511,6 +516,42 @@ describe('analysis_state.leader_claim', () => {
     expect(claim.permitted).toBe(false);
     expect(claim.withheld_reason).toBe('separation_unavailable');
     expect('separation' in claim).toBe(false);
+    expect(readFinalLeaderClaimPermission(body)).toBe(false);
+  });
+
+  it.each(['complete_stale', 'running', 'refused', 'never_run', 'unknown'] as const)(
+    'does not license a leader from a %s run even when leader_claim.permitted=true',
+    (kind) => {
+      expect(
+        readFinalLeaderClaimPermission({
+          analysis_state: {
+            run_state: { kind },
+            leader_claim: { permitted: true },
+          },
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it('fails closed on an unknown withholding reason even when the run is current', () => {
+    expect(
+      readFinalLeaderClaimPermission({
+        analysis_state: {
+          run_state: { kind: 'complete_current' },
+          leader_claim: { permitted: false, withheld_reason: 'future_unknown_reason' },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('fails closed when the final response licence is absent or malformed', () => {
+    expect(readFinalLeaderClaimPermission({})).toBe(false);
+    expect(readFinalLeaderClaimPermission({ analysis_state: null })).toBe(false);
+    expect(
+      readFinalLeaderClaimPermission({
+        analysis_state: { leader_claim: { permitted: 'true' } },
+      }),
+    ).toBe(false);
   });
 });
 
@@ -889,11 +930,16 @@ describe('analysis_state on an exit with NO analysis context (ROADMAP 2.1264)', 
     // Proves the reason is derived from WHICH half failed rather than being a
     // constant on the no-context path. Both halves of the conjunction are
     // therefore live here, not only on analysis-carrying turns.
-    const claim = stateOf(
-      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: true }),
-    ).leader_claim as Record<string, unknown>;
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: true,
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
     expect(claim.permitted).toBe(false);
     expect(claim.withheld_reason).toBe('separation_unavailable');
+    expect((stateOf(body).run_state as Record<string, unknown>).kind).not.toBe(
+      'complete_current',
+    );
+    expect(readFinalLeaderClaimPermission(body)).toBe(false);
   });
 
   it('does NOT synthesise an analysis_ready block — the two stamps stay independent', () => {

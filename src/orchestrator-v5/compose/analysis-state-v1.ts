@@ -670,3 +670,25 @@ export function readRawRobustnessFromResponseBody(
   }
   return null;
 }
+
+/**
+ * Read the final, consumer-visible leader-claim licence from a response.
+ *
+ * This is deliberately a reader of the already-composed wire authority, not a
+ * second derivation from entitlement, robustness or analysis payloads. The
+ * response contract permits ranked leader prose only when BOTH this final
+ * licence is true and the final run is current. An earlier broader entitlement
+ * cannot overrule either conjunct at composition or egress. Missing or
+ * malformed state fails closed: absence is not permission.
+ */
+export function readFinalLeaderClaimPermission(response: unknown): boolean {
+  if (response == null || typeof response !== 'object') return false;
+  const analysisState = (response as { readonly analysis_state?: unknown }).analysis_state;
+  if (analysisState == null || typeof analysisState !== 'object') return false;
+  const runState = (analysisState as { readonly run_state?: unknown }).run_state;
+  if (runState == null || typeof runState !== 'object') return false;
+  if ((runState as { readonly kind?: unknown }).kind !== 'complete_current') return false;
+  const leaderClaim = (analysisState as { readonly leader_claim?: unknown }).leader_claim;
+  if (leaderClaim == null || typeof leaderClaim !== 'object') return false;
+  return (leaderClaim as { readonly permitted?: unknown }).permitted === true;
+}
