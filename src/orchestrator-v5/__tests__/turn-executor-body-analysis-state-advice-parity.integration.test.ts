@@ -1392,6 +1392,52 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expectNoCanonicalAuthorityWrite();
   });
 
+  it('does not let a capped window mint a "never analysed" verdict at the prompt', async () => {
+    // ⚠ THE TURN-EXECUTOR TWIN of the buildTurnContext trap-21 guard. Same two
+    // questions, same similar names, a different call site — and CLAUDE.md's
+    // own warning is that a harm closed at one site and reopened at its
+    // neighbour shows up in neither site's tests. Every fact here is `failed`,
+    // so no SUCCESSFUL fact is selectable and the verdict depends entirely on
+    // whether `capped` is allowed to make ABSENCE authoritative. It must not
+    // be: unread history sits behind the wall, so `none` — the vocabulary's
+    // "this scenario has never been analysed" — would be a claim we cannot
+    // support. `unknown` is the honest answer.
+    const facts = Array.from({ length: 21 }, (_, index) => {
+      const fact = makeCanonicalAuthorityFactWithPromptCanaries();
+      const result = fact.result as Record<string, unknown>;
+      result.computed_at = new Date(
+        Date.now() - (index + 1) * 60_000,
+      ).toISOString();
+      result.enrichment = {
+        ...(result.enrichment as Record<string, unknown>),
+        analysis_status: 'failed',
+      };
+      return fact;
+    });
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [facts[0]!];
+    mockState.newestAnalysisFact = facts[0]!;
+    mockState.scenarioAnalysisFactsOverride = facts;
+    mockState.scenarioAnalysisTotalCountOverride = 21;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-history-capped-all-failed',
+      { routingAdapter: adapter, graphState: CONFLICTING_REQUEST_GRAPH as never },
+    );
+
+    const pack = observeSerialisedPack(capturedRoutingPrompt(adapter));
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: false,
+      freshness: 'unknown',
+      usable_for_prose: false,
+    });
+    expectNoCanonicalAuthorityWrite();
+  });
+
   it('caller-only body analysis_state cannot change canonical reasoning or recovery', async () => {
     const message = 'Continue the strategic reasoning from the saved model.';
     const withoutBodyAdapter = recordingRoutingAdapter();
