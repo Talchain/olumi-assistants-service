@@ -1308,7 +1308,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expectNoCanonicalAuthorityWrite();
   });
 
-  it('fails weak at the real prompt boundary when scenario-wide analysis history is capped', async () => {
+  it('reasons from the newest DURABLE window when scenario-wide analysis history is capped', async () => {
     const facts = Array.from({ length: 21 }, (_, index) => {
       const fact = makeCanonicalAuthorityFactWithPromptCanaries();
       const result = fact.result as Record<string, unknown>;
@@ -1318,8 +1318,8 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       return fact;
     });
     // Keep a known hot fact and the separate newest-fact entitlement read
-    // successful. Neither may upgrade a capped scenario snapshot into prompt
-    // reasoning authority.
+    // successful. A capped page is BOUNDED, not unread — but the request-only
+    // graph/analysis bytes must still never become reasoning authority.
     mockState.priorTurns = recentNonAnalysisTurns(20);
     mockState.priorTurnsTotal = 41;
     mockState.priorFacts = [facts[0]!];
@@ -1342,22 +1342,99 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
     const prompt = capturedRoutingPrompt(adapter);
     const pack = observeSerialisedPack(prompt);
+    const analysis = pack.analysis as {
+      leading_option?: { label?: string };
+      top_drivers?: Array<{ label?: string }>;
+    } | null;
+    const coaching = pack.coaching as {
+      decision_review?: { narrative_summary?: string } | null;
+      last_coaching_signal?: { turn_id?: string } | null;
+    };
     expect(pack.graph_context).toEqual({ status: 'canonical' });
-    expect(pack.analysis).toBeNull();
-    expect(pack.coaching).toEqual({
-      draft_coaching: null,
-      decision_review: null,
-      last_coaching_signal: null,
+
+    // THE REGRESSION THIS PINS (PR #1170, 2026-08-28). Every assertion in this
+    // block previously ran in the NEGATIVE: `analysis: null`, all-null
+    // coaching, `analysis_present: false`. That is what the model received on
+    // the 21st lifetime analysis run of a scenario — and on every run after
+    // it, forever, because run_analysis facts are never pruned. Meanwhile the
+    // wire freshness badge, derived from the separate hot turn window, still
+    // read `fresh`: the UI said the analysis was current while the assistant
+    // said it could not see one.
+    expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
+    expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
+    expect(coaching.decision_review?.narrative_summary).toBe(
+      DURABLE_DECISION_REVIEW_CANARY,
+    );
+    expect(coaching.last_coaching_signal?.turn_id).toBe(
+      DURABLE_COACHING_TURN_CANARY,
+    );
+    // ⭐ THE SELF-CONTRADICTION, CLOSED AT THE SOURCE. `freshness` here is the
+    // PROMPT-side derivation over the durable scenario set; the wire/UI badge
+    // is a SECOND derivation over the hot turn window (`turn-executor.ts`
+    // `routingFreshness`). With the capped set emptied, the prompt side read
+    // `unknown` while the badge read `fresh` — the UI said the analysis was
+    // current and the assistant said it could not see one. Both derivations
+    // now select the same newest fact, so they agree by construction rather
+    // than by a third reconciling authority.
+    expect(pack.coaching_context).toMatchObject({
+      analysis_present: true,
+      freshness: 'fresh',
+      usable_for_prose: true,
+      usable_for_chips: true,
     });
+    expect(prompt).toContain(DURABLE_DECISION_REVIEW_CANARY);
+    expect(prompt).toContain(DURABLE_COACHING_TURN_CANARY);
+
+    // THE PROPERTY THAT MUST SURVIVE, and the discrimination that makes the
+    // assertions above mean something: the DURABLE page authored this prompt,
+    // not the caller's conflicting request graph/analysis_state.
+    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('does not let a capped window mint a "never analysed" verdict at the prompt', async () => {
+    // ⚠ THE TURN-EXECUTOR TWIN of the buildTurnContext trap-21 guard. Same two
+    // questions, same similar names, a different call site — and CLAUDE.md's
+    // own warning is that a harm closed at one site and reopened at its
+    // neighbour shows up in neither site's tests. Every fact here is `failed`,
+    // so no SUCCESSFUL fact is selectable and the verdict depends entirely on
+    // whether `capped` is allowed to make ABSENCE authoritative. It must not
+    // be: unread history sits behind the wall, so `none` — the vocabulary's
+    // "this scenario has never been analysed" — would be a claim we cannot
+    // support. `unknown` is the honest answer.
+    const facts = Array.from({ length: 21 }, (_, index) => {
+      const fact = makeCanonicalAuthorityFactWithPromptCanaries();
+      const result = fact.result as Record<string, unknown>;
+      result.computed_at = new Date(
+        Date.now() - (index + 1) * 60_000,
+      ).toISOString();
+      result.enrichment = {
+        ...(result.enrichment as Record<string, unknown>),
+        analysis_status: 'failed',
+      };
+      return fact;
+    });
+    mockState.priorTurns = recentNonAnalysisTurns(20);
+    mockState.priorTurnsTotal = 41;
+    mockState.priorFacts = [facts[0]!];
+    mockState.newestAnalysisFact = facts[0]!;
+    mockState.scenarioAnalysisFactsOverride = facts;
+    mockState.scenarioAnalysisTotalCountOverride = 21;
+    mockState.persistedGraph = CANONICAL_AUTHORITY_GRAPH;
+
+    const adapter = recordingRoutingAdapter();
+    await runTurnExecutor(
+      mkPayload('Continue the strategic reasoning from the saved model.'),
+      'req-analysis-history-capped-all-failed',
+      { routingAdapter: adapter, graphState: CONFLICTING_REQUEST_GRAPH as never },
+    );
+
+    const pack = observeSerialisedPack(capturedRoutingPrompt(adapter));
     expect(pack.coaching_context).toMatchObject({
       analysis_present: false,
       freshness: 'unknown',
       usable_for_prose: false,
     });
-    expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);
-    expect(prompt).not.toContain(CANONICAL_DRIVER_LABEL);
-    expect(prompt).not.toContain(DURABLE_DECISION_REVIEW_CANARY);
-    expect(prompt).not.toContain(DURABLE_COACHING_TURN_CANARY);
     expectNoCanonicalAuthorityWrite();
   });
 
