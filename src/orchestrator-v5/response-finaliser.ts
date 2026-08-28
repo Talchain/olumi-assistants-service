@@ -94,6 +94,7 @@ import {
   NO_ANALYSIS_CONTEXT_DERIVATION,
   readRawRobustnessFromResponseBody,
 } from './compose/analysis-state-v1.js';
+import type { RawRobustnessSignals } from './coaching/pick-raw-robustness.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta } from './coaching/build-run-delta.js';
@@ -206,6 +207,21 @@ export interface FinaliserContext {
    * which is the fail-closed direction.
    */
   readonly mayNameLeadingOption?: boolean;
+  /**
+   * The raw robustness selected from the SAME canonical run-analysis fact as
+   * this turn's freshness verdict. TurnExecutor supplies it only when that
+   * fact is current; stale, degraded and absent states supply `null`.
+   *
+   * This is a fallback for later reasoning turns that carry no analysis-result
+   * block. When a body does carry an analysis result, the body and selected
+   * fact must agree exactly; omission, malformed bytes or disagreement fails
+   * weak rather than mixing two run authorities. This does not consult
+   * arbitrary history.
+   *
+   * Optional for direct/legacy finaliser callers. Omission fails weakly to no
+   * separation evidence; it can never license a categorical designation.
+   */
+  readonly rawRobustness?: RawRobustnessSignals | null;
   /**
    * The turn context's PERSISTED-GRAPH freshness derivation, carried to every
    * non-execute exit by `claimSafety.forExit()` (see `TurnExitStamp`).
@@ -456,10 +472,12 @@ function attachAnalysisState(
     freshness: ctx.freshness,
     readiness: ctx.analysisReady,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
-    // Read from the body as it will ship, not from the fact: when the
-    // withheld-claim projection has redacted `near_tie`, the separation half
-    // is genuinely unknown to the consumer and `leader_claim` must say so.
-    rawRobustness: readRawRobustnessFromResponseBody(response),
+    // A block-less current follow-up may use the exact selected-fact carrier.
+    // Once an analysis-result block is present, its robustness must agree with
+    // that carrier; body omission, malformed bytes or disagreement fails weak.
+    // This prevents one run from supplying freshness while another supplies
+    // the separation verdict.
+    rawRobustness: rawRobustnessForAnalysisState(response, ctx.rawRobustness),
     // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's
     // precedence and its timestamp validation.
     ...(ctx.autoRunInFlight !== undefined
@@ -468,6 +486,41 @@ function attachAnalysisState(
   });
   if (analysisState === undefined) return response;
   return { ...response, analysis_state: analysisState };
+}
+
+/**
+ * Resolve robustness without mixing two analysis authorities inside one
+ * response. A block-less response may use only the already-selected current
+ * fact's evidence. A response carrying exactly one analysis-result block uses
+ * body evidence only when it is valid and, if a fact carrier also exists,
+ * byte-semantically equal. Everything else degrades to `null`; omission alone
+ * never upgrades caller or transcript bytes.
+ */
+function rawRobustnessForAnalysisState(
+  response: unknown,
+  canonicalFactRobustness: RawRobustnessSignals | null | undefined,
+): RawRobustnessSignals | null {
+  const blocks =
+    response != null && typeof response === 'object'
+      ? (response as { readonly blocks?: unknown }).blocks
+      : undefined;
+  const analysisBlockCount = Array.isArray(blocks)
+    ? blocks.filter(
+        (block) =>
+          block != null &&
+          typeof block === 'object' &&
+          (block as { readonly type?: unknown }).type === 'analysis_result',
+      ).length
+    : 0;
+  if (analysisBlockCount === 0) return canonicalFactRobustness ?? null;
+  if (analysisBlockCount !== 1) return null;
+  const fromBody = readRawRobustnessFromResponseBody(response);
+  if (fromBody === null) return null;
+  if (canonicalFactRobustness == null) return fromBody;
+  return fromBody.level === canonicalFactRobustness.level &&
+    fromBody.near_tie_is_tie === canonicalFactRobustness.near_tie_is_tie
+    ? fromBody
+    : null;
 }
 
 function sanitiseEnrichmentBlocks(

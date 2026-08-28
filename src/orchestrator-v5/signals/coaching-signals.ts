@@ -120,10 +120,11 @@ const EDIT_HANDLER_IDS = new Set([
 /**
  * ⚠ EXPORTED 2026-07-31 (ROADMAP 2.149) SO A CANARY CAN USE THE PRODUCTION COPY.
  *
- * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed — it says
- * "explore the leading option", which trips the shared leader vocabulary and
- * DESIGNATES NOTHING. The wire gate has the same exposure at a new address, and
- * its canary must assert against THIS constant rather than a paraphrase: a
+ * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed while
+ * suppressing a wider receipt. It does assert that a leading option exists, so
+ * final egress now removes this exact typed signal when the composed licence is
+ * withheld while retaining unrelated receipt/evidence bytes. Its canary must
+ * assert against THIS constant rather than a paraphrase: a
  * paraphrase proves the gate spares a sentence the test author wrote, which is
  * the one sentence that never changes. Reword the copy and the canary follows it
  * in the same commit (CLAUDE.md trap #12).

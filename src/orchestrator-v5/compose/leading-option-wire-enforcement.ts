@@ -46,10 +46,10 @@
  * preference — it is the #755 first-cut failure class, restated:
  *
  *   #755's first cut replaced the WHOLE answer at 39 executor exits. It
- *   destroyed a `run_analysis` receipt whose coaching sentence merely mentioned
- *   "the leading option" (`FIRST_ANALYSIS_COMPLETE`) — designating nothing —
- *   and took an honest compound-edit disclosure down with it. Two pre-existing
- *   tests caught it. `turn-executor.ts:10017-10054` records the whole episode.
+ *   destroyed a whole `run_analysis` receipt while trying to suppress its
+ *   typed `FIRST_ANALYSIS_COMPLETE` leader nudge. The current gate removes that
+ *   exact code-owned sentence when final permission is false, while preserving
+ *   independently licensed analysis evidence and the surrounding receipt.
  *
  * The in-repo instruction is explicit (`leading-option-egress-guard.ts`, the
  * closing comment of `guardLeadingOptionClaimsAtEgress`): the drop *"must be
@@ -58,11 +58,12 @@
  * per-sentence, using the same splitter the model-INPUT gate uses
  * (`compose/redactable-units.ts`).
  *
- * PERMIT-WINS IS THE FIRST LINE, not an afterthought. `mayNameLeadingOption ===
- * true` returns the input BY REFERENCE. Over-suppression is a failure here, not
- * a safe default: a blanket `false` at these exits would suppress leader prose
- * on every scenario that legitimately permits it, which is a WORSE product
- * defect than the one being fixed.
+ * PERMIT-WINS IS THE FIRST LINE, not an afterthought. A consistent final
+ * `analysis_state` with `run_state.kind === 'complete_current'` and
+ * `leader_claim.permitted === true` returns the input BY REFERENCE.
+ * Over-suppression is a failure here, not a safe default: a blanket refusal at
+ * these exits would suppress leader prose on every scenario that legitimately
+ * permits it, which is a WORSE product defect than the one being fixed.
  *
  * IT MAKES NO CURRENCY CLAIM AND NO EXISTENCE CLAIM. The four substitution
  * inputs a RICH withheld explanation needs — `constraint_verdict_state`, the
@@ -91,9 +92,15 @@
  *   This is #755's canary class — an honest receipt destroyed by a guard —
  *   reopened at a new address.
  *
- *   LEAK. A distributed claim defeats sentence surgery: "Hire Marketing Manager
- *   is strong. It leads at 72%." The vocabulary sits in unit 2 and the NAME in
- *   unit 1, so surgery removed unit 2 and shipped the designation.
+ *   DISTRIBUTED CLAIM. A claim can put the canonical NAME in one unit and the
+ *   vocabulary in another: "Hire Marketing Manager is strong. It leads at
+ *   72%." When no current analysis evidence is licensed, the field-level
+ *   canonical-name anchor licenses removal of the vocabulary-bearing unit. In
+ *   an evidence-only current state, however, the same shape is indistinguishable
+ *   at this seam from recorded losing-option evidence ("Keep what we have ... It
+ *   only comes out ahead in a tiny fraction"). Evidence-only deletion therefore
+ *   requires name and designation in the same unit; the alarm reports any
+ *   distributed residue instead of this rail inventing a referent.
  *
  * THE CRITERION THAT CLOSES BOTH. Enforcement needs TWO independent facts, and
  * neither alone is sufficient:
@@ -101,28 +108,23 @@
  *   1. A CLAIM IS PRESENT — `textAssertsLeadingOption` at FIELD level (not unit
  *      level: a claim that straddles a sentence split must still count).
  *   2. A DESIGNATION IS POSSIBLE — the field NAMES one of the scenario's own
- *      options. Vocabulary with no option name designates nobody: "one option
- *      leads" is not a claim about which. No name ⇒ ship unchanged, and the
- *      Layer-3 alarm observes it.
+ *      options. Unstructured vocabulary with no option name cannot establish
+ *      which option was designated, so it ships unchanged and the Layer-3
+ *      alarm observes it. The exact code-owned FIRST_ANALYSIS_COMPLETE signal
+ *      is the bounded exception: it asserts that a leader exists and is removed
+ *      by exact identity rather than natural-language inference.
  *
  * Rule 2 is what spares the whole "sales leads" class, and it does NOT re-derive
  * "who is leading" (which would be a second authority beside the verdict —
  * CLAUDE.md trap #12). It derives only WHICH OPTIONS EXIST, from the graph the
  * exit is already shipping. Those are different questions.
  *
- * Then, having entered, the residual is POST-CHECKED and escalated stepwise —
- * because removing the vocabulary unit is exactly what leaves a distributed
- * claim's naming half behind. See {@link projectField}.
- *
- * ⚠ THE COST OF ESCALATION, PRICED RATHER THAN HIDDEN. On a field that both
- * names an option AND asserts a leader, escalation removes the NAME-BEARING
- * units too — so an edit receipt in such an answer ("Added a risk to Hire
- * Marketing Manager. It leads at 72%.") loses the receipt as well as the claim.
- * That is a real cost and it is pinned by a test rather than discovered later.
- * It is also NOT worse than the estate's proven design: #755's chokepoint
- * replaces the WHOLE answer on exactly these inputs. This gate is strictly more
- * conservative everywhere else — a receipt with no leader vocabulary, or leader
- * vocabulary with no option name, is untouched.
+ * After surgery, cleanliness means no remaining designation in a strict
+ * withheld state, and no remaining co-located name+designation in an
+ * evidence-only state. A bare canonical option name may be a receipt or ordinary
+ * evidence and survives. This is the corpus-derived correction: the prior
+ * zero-name postcondition destroyed truthful qualified responses, while a
+ * field-wide evidence-only pass destroyed a truthful losing-option explanation.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ SCOPE — STATED, NOT IMPLIED. A chokepoint that claims to cover "the wire"
@@ -188,8 +190,11 @@
 
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { FinalLeaderClaimEgressPolicy } from './analysis-state-v1.js';
+import type { RawOptionComparisonSignal } from '../coaching/pick-raw-robustness.js';
+import { COACHING_TEXT } from '../signals/coaching-signals.js';
 import { textAssertsLeadingOption, textNamesLeadingOption } from './leading-option-egress-guard.js';
-import { replaceAssertingUnits } from './redactable-units.js';
+import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
 
 /**
@@ -206,6 +211,7 @@ import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-
  * no existence claim, no cause — the three things the route seam cannot know.
  */
 export const WIRE_WITHHELD_LEADER_REPLACEMENT = WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.trim();
+const FIRST_ANALYSIS_COMPLETE_TEXT = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
 
 /**
  * The prose fields this gate edits. TWO, and the list is short on purpose — see
@@ -223,20 +229,10 @@ export type WireEnforcementMode =
   /** The normal path: only the vocabulary-bearing sentence(s) were replaced. */
   | 'surgical'
   /**
-   * The DISTRIBUTED-CLAIM path. Surgery removed the vocabulary, and the residual
-   * STILL named the option — "Hire Marketing Manager is strong. It leads at
-   * 72%." So the name-bearing units went too. This is the mode that closes the
-   * leak sentence surgery trades away, and it is the mode that costs a receipt
-   * when one shares a field with a leader claim.
-   */
-  | 'surgical_escalated'
-  /**
-   * LAST RESORT. Two escalations and the residual still names or asserts. Now
-   * NAME-GATED: it cannot fire on a field that never named an option, which is
-   * what previously let ordinary prose reach it through a straddling match.
-   * Separately coded precisely so it can never be mistaken for the normal path
-   * on a dashboard: a non-trivial rate here means the splitter and the readers
-   * disagree and the splitter needs work, not that the gate is doing its job.
+   * Defensive last resort. Field-level evidence entered the gate but no
+   * redactable unit removed the residual designation (for example, vocabulary
+   * straddled a soft-wrap boundary). Keeping it explicit makes that splitter
+   * disagreement fail closed and observable.
    */
   | 'whole_field';
 
@@ -266,8 +262,8 @@ function escapeForRegExp(value: string): string {
  * the reader would have had to decide WHO IS LEADING — a second authority beside
  * the constraint verdict (CLAUDE.md trap #12). This function decides only WHICH
  * OPTIONS EXIST. It never ranks them, never reads a win probability, and never
- * consults an analysis fact. The permission still comes from one place:
- * `ctx.mayNameLeadingOption`.
+ * consults an analysis fact. Designation permission still comes from one place:
+ * the final composed `analysis_state.leader_claim`.
  *
  * Shape read defensively, mirroring the in-repo precedent at
  * `turn-executor.ts:1900-1907` (filter to `kind === 'option'`, take `label` only
@@ -359,6 +355,233 @@ export function textNamesAnOption(value: string, roster: readonly string[]): boo
 }
 
 /**
+ * The only model-authored comparative form retained when the final authority
+ * withholds a categorical designation.
+ *
+ * This is deliberately not another leader vocabulary. It recognises the data
+ * side of the shared contract's data-vs-designation boundary: an exact
+ * canonical option identity + label, the exact percentage rendered from the
+ * final producer-attested `option_comparison[].win_probability`, and a
+ * reason-appropriate disclosure in the SAME redactable unit. The matched span
+ * is masked and the shared leader reader is run over the residual; any
+ * additional categorical language therefore keeps the unit enforceable.
+ *
+ * A model-authored label or number can never self-license. Ambiguous/duplicate
+ * identities, a mismatched label, an invented percentage, or a disclosure in a
+ * neighbouring sentence all fail closed for the evidence carve-out.
+ */
+const QUALIFIED_NEAR_TIE_DISCLOSURE =
+  /\b(?:close call|effectively tied|too close|no clear (?:winner|leader)|options? (?:do|does) not separate|not settled|not yet robust|within (?:the )?model uncertainty|could shift)\b/i;
+
+const CONSTRAINT_WITHHELD_DISCLOSURE =
+  /\b(?:constraint(?:s| verdict)? (?:withhold|withholds|do not license|does not license|prevent|prevents) (?:a |the )?(?:leader|leading option|recommendation)|(?:leader|leading option|recommendation) (?:is|remains) withheld (?:by|because of) (?:the )?constraints?)\b/i;
+
+const SEPARATION_UNAVAILABLE_DISCLOSURE =
+  /\b(?:(?:the )?analysis (?:did not|could not|has not) establish whether (?:the )?options? separate|option separation (?:was|is|remains) (?:not established|unavailable|unknown)|whether (?:the )?options? separate (?:was|is|remains) (?:not established|unavailable|unknown))\b/i;
+
+const LICENSED_EVIDENCE_SENTINEL = '#';
+
+interface CanonicalOptionIdentity {
+  readonly id: string;
+  readonly label: string;
+}
+
+interface AttestedComparison {
+  readonly id: string;
+  readonly label: string;
+  readonly renderedPercent: number;
+}
+
+function nonEmptyTrimmedString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function optionIdentitiesFromGraph(graph: unknown): readonly CanonicalOptionIdentity[] | null {
+  const nodes = (graph as { readonly nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(nodes)) return null;
+  const identities: CanonicalOptionIdentity[] = [];
+  for (const raw of nodes) {
+    if (raw == null || typeof raw !== 'object') continue;
+    const node = raw as { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
+    if (node.kind !== 'option') continue;
+    const id = nonEmptyTrimmedString(node.id);
+    const label = nonEmptyTrimmedString(node.label);
+    if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
+    identities.push({ id, label });
+  }
+  return identities;
+}
+
+function optionIdentitiesFromAnalysisReady(
+  analysisReady: unknown,
+): readonly CanonicalOptionIdentity[] | null {
+  const options = (analysisReady as { readonly options?: unknown } | null | undefined)?.options;
+  if (!Array.isArray(options)) return null;
+  const identities: CanonicalOptionIdentity[] = [];
+  for (const raw of options) {
+    if (raw == null || typeof raw !== 'object') return null;
+    const option = raw as {
+      readonly option_id?: unknown;
+      readonly id?: unknown;
+      readonly label?: unknown;
+    };
+    const id = nonEmptyTrimmedString(option.option_id) ?? nonEmptyTrimmedString(option.id);
+    const label = nonEmptyTrimmedString(option.label);
+    if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
+    identities.push({ id, label });
+  }
+  return identities;
+}
+
+function uniqueOptionIdentities(
+  identities: readonly CanonicalOptionIdentity[] | null,
+): readonly CanonicalOptionIdentity[] | null {
+  if (identities === null || identities.length === 0) return null;
+  const ids = new Set<string>();
+  const labels = new Set<string>();
+  for (const identity of identities) {
+    const foldedLabel = identity.label.toLocaleLowerCase('en-US');
+    if (ids.has(identity.id) || labels.has(foldedLabel)) return null;
+    ids.add(identity.id);
+    labels.add(foldedLabel);
+  }
+  return identities;
+}
+
+function canonicalOptionIdentities(
+  graph: unknown,
+  analysisReady: unknown,
+): readonly CanonicalOptionIdentity[] | null {
+  const graphNodes = (graph as { readonly nodes?: unknown } | null | undefined)?.nodes;
+  if (graph !== null && graph !== undefined) {
+    // A present graph is the canonical identity source. If it is empty,
+    // malformed or ambiguous, fail closed; a readiness payload must never
+    // repair or overrule a present canonical graph for evidence licensing.
+    if (!Array.isArray(graphNodes)) return null;
+    return uniqueOptionIdentities(optionIdentitiesFromGraph(graph));
+  }
+  return uniqueOptionIdentities(optionIdentitiesFromAnalysisReady(analysisReady));
+}
+
+function readAttestedComparisons(
+  response: OlumiResponse,
+  graph: unknown,
+  analysisReady: unknown,
+  selectedFactComparisons: readonly RawOptionComparisonSignal[] | null | undefined,
+): readonly AttestedComparison[] {
+  // Evidence must be joined to the same fact that supplied final freshness.
+  // A validated body is not enough: it can still be a projection of a
+  // different run. Absence therefore withholds the carve-out rather than
+  // treating arbitrary response bytes as producer authority.
+  if (selectedFactComparisons == null || selectedFactComparisons.length === 0) return [];
+  const identities = canonicalOptionIdentities(graph, analysisReady);
+  if (identities === null) return [];
+  const identityById = new Map(identities.map((identity) => [identity.id, identity]));
+
+  const blocks = (response as { readonly blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks)) return [];
+  const analysisBlocks = blocks.filter(
+    (block) =>
+      block !== null &&
+      typeof block === 'object' &&
+      (block as { readonly type?: unknown }).type === 'analysis_result',
+  );
+  if (analysisBlocks.length !== 1) return [];
+  const enrichment = (analysisBlocks[0] as { readonly enrichment?: unknown }).enrichment;
+  if (enrichment === null || typeof enrichment !== 'object') return [];
+  const comparison = (enrichment as { readonly option_comparison?: unknown }).option_comparison;
+  if (!Array.isArray(comparison) || comparison.length === 0) return [];
+  if (comparison.length !== selectedFactComparisons.length) return [];
+
+  const attested: AttestedComparison[] = [];
+  const seenIds = new Set<string>();
+  for (const [index, raw] of comparison.entries()) {
+    if (raw === null || typeof raw !== 'object') return [];
+    const row = raw as {
+      readonly option_id?: unknown;
+      readonly option_label?: unknown;
+      readonly win_probability?: unknown;
+    };
+    const id = nonEmptyTrimmedString(row.option_id);
+    const label = nonEmptyTrimmedString(row.option_label);
+    const probability = row.win_probability;
+    const selected = selectedFactComparisons[index];
+    const canonical = id === null ? undefined : identityById.get(id);
+    if (
+      id === null ||
+      label === null ||
+      canonical === undefined ||
+      canonical.label !== label ||
+      seenIds.has(id) ||
+      typeof probability !== 'number' ||
+      !Number.isFinite(probability) ||
+      probability < 0 ||
+      probability > 1 ||
+      selected === undefined ||
+      selected.option_id !== id ||
+      selected.option_label !== label ||
+      selected.win_probability !== probability
+    ) {
+      return [];
+    }
+    seenIds.add(id);
+    attested.push({ id, label, renderedPercent: Math.round(probability * 100) });
+  }
+  return attested;
+}
+
+function disclosureForPolicy(policy: FinalLeaderClaimEgressPolicy): RegExp | null {
+  switch (policy) {
+    case 'evidence_only_options_do_not_separate':
+      return QUALIFIED_NEAR_TIE_DISCLOSURE;
+    case 'evidence_only_constraint_verdict_withheld':
+      return CONSTRAINT_WITHHELD_DISCLOSURE;
+    case 'evidence_only_separation_unavailable':
+      return SEPARATION_UNAVAILABLE_DISCLOSURE;
+    default:
+      return null;
+  }
+}
+
+function maskAttestedEvidence(
+  value: string,
+  policy: FinalLeaderClaimEgressPolicy,
+  attested: readonly AttestedComparison[],
+): string {
+  const disclosure = disclosureForPolicy(policy);
+  if (disclosure === null || attested.length === 0) return value;
+  let changed = false;
+  const masked = splitIntoRedactableUnits(value).map((unit) => {
+    if (!disclosure.test(unit)) return unit;
+    let next = unit;
+    let unitChanged = false;
+    for (const evidence of attested) {
+      const labelPattern = escapeForRegExp(evidence.label).replace(/\s+/g, '\\s+');
+      const measuredComparison = new RegExp(
+        `(?<![\\p{L}\\p{N}_])${labelPattern}(?![\\p{L}\\p{N}_])` +
+          `\\s+(?:came|comes?)\\s+out\\s+ahead\\s+in\\s+${evidence.renderedPercent}%` +
+          `\\s+of\\s+(?:runs|simulations)(?:\\s+of\\s+this\\s+model)?`,
+        'giu',
+      );
+      const replaced = next.replace(measuredComparison, LICENSED_EVIDENCE_SENTINEL);
+      if (replaced !== next) unitChanged = true;
+      next = replaced;
+    }
+    if (unitChanged) {
+      changed = true;
+      // The caveat is part of the licensed evidence unit. Mask it for the
+      // designation reader as well: phrases such as “no clear leader” and “the
+      // constraint verdict withholds a leading option” contain the shared
+      // vocabulary but assert the opposite of a designation. The output bytes
+      // are untouched; this is only the residual inspected by the guard.
+      next = next.replace(disclosure, LICENSED_EVIDENCE_SENTINEL);
+    }
+    return next;
+  });
+  return changed ? masked.join('') : value;
+}
+
+/**
  * ⚠ WHY THIS IS AN EXACT TOKEN SEQUENCE AND NOT A FUZZY / PARTIAL MATCH — an
  * ARCHITECT CALL, recorded so the next reader does not "fix" it into the defect
  * it is avoiding. (ROADMAP 2.149, adjudicated 31 Jul.)
@@ -389,12 +612,14 @@ export interface WireLeaderClaimEnforcementOpts {
   readonly requestId: string;
   readonly exitPath: string;
   /**
-   * The turn's OWN answer to "may a leading option be named", threaded from
-   * `sendFinalised200`'s ctx — the SAME value the Layer-3 alarm is armed with,
-   * and never re-derived here (CLAUDE.md trap #12). `true` ⇒ this gate is a
-   * by-reference no-op.
+   * The response's final answer to "may a categorical leading option be
+   * designated", read from the final composed `analysis_state` at
+   * `sendFinalised200` and never re-derived here (CLAUDE.md trap #12).
+   * `designation_permitted` ⇒ a by-reference no-op. Evidence-only policies
+   * permit only exact producer-attested comparisons with a truthful same-unit
+   * caveat; they never permit categorical designation.
    */
-  readonly mayNameLeadingOption: boolean;
+  readonly leaderClaimPolicy: FinalLeaderClaimEgressPolicy;
   /**
    * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
    * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
@@ -441,6 +666,12 @@ export interface WireLeaderClaimEnforcementOpts {
    * is present, so we do not delete the user's prose.
    */
   readonly analysisReady?: unknown;
+  /**
+   * Exact option comparisons from the SAME run-analysis fact selected by final
+   * freshness. Required for the numerical-evidence carve-out; absence or any
+   * body disagreement fails weak to no evidence licence.
+   */
+  readonly selectedFactComparisons?: readonly RawOptionComparisonSignal[] | null;
 }
 
 export interface WireLeaderClaimEnforcementResult {
@@ -473,17 +704,18 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
  * |               |                 | "leading option" designate nobody         |
  * | YES           | YES             | ENTER: surgery, then post-check           |
  *
- * "Claim present" is read at FIELD level, deliberately: a claim that straddles a
- * sentence split ("the leading\noption") trips no single unit, and a unit-level
- * entry test would miss exactly the case the escalation exists for.
+ * "Claim present" and "canonical name present" are read at FIELD level. Strict
+ * withheld states then remove every designation-bearing unit. Evidence-only
+ * states remove only units where canonical identity and designation co-occur;
+ * that is the narrowest distinction this unstructured seam can prove without
+ * fabricating a cross-sentence referent.
  *
  * ⭐ THE POST-CHECK, and why the residual is re-read at all. Removing the
- * vocabulary unit is precisely what leaves a distributed claim's naming half
- * behind. So after each pass the residual must satisfy BOTH:
- *   - it asserts no leader (`textAssertsLeadingOption` — the ENFORCER reader),
- *   - it names no option (`textNamesAnOption`).
- * Failing either escalates: first the name-bearing units go too, then, if the
- * residual STILL fails, the whole field.
+ * vocabulary unit can leave a distributed claim behind. So after each pass the
+ * residual must assert no unlicensed designation. A bare option name is NOT
+ * contamination: it may be a receipt, a losing-option comparison, or ordinary
+ * model evidence. Requiring zero names here was the corpus-proven
+ * over-suppression defect.
  *
  * ⚠ THE POST-CHECK DELIBERATELY DOES NOT USE `textNamesLeadingOption` (the wide
  * ALARM reader), and the review shape that proposed it is refuted here rather
@@ -505,39 +737,46 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
 function projectField(
   value: string,
   roster: readonly string[],
+  policy: FinalLeaderClaimEgressPolicy,
+  attested: readonly AttestedComparison[],
 ): { text: string; mode: WireEnforcementMode } | null {
   if (typeof value !== 'string' || value.length === 0) return null;
-  // (1) A CLAIM IS PRESENT — field level, so a straddling match still counts.
-  if (!textAssertsLeadingOption(value)) return null;
+  const withoutLicensedEvidence = (candidate: string): string =>
+    maskAttestedEvidence(candidate, policy, attested);
+  const assertsUnlicensedDesignation = (candidate: string): boolean =>
+    textAssertsLeadingOption(withoutLicensedEvidence(candidate));
+  const isEvidenceOnly = policy.startsWith('evidence_only_');
+  const shouldRemoveUnit = (unit: string): boolean =>
+    assertsUnlicensedDesignation(unit) &&
+    // Identity is established from the ORIGINAL unit. Masking the measured
+    // comparison removes its canonical label as well as its numbers; reading
+    // identity from that masked residual would let a same-unit pronoun claim
+    // piggyback on licensed evidence ("...close call; it still leads").
+    (!isEvidenceOnly || textNamesAnOption(unit, roster));
+  // (1) A CLAIM IS PRESENT — field level, so distributed and wrapped claims
+  //     cannot evade the deleting arm merely by splitting name from vocabulary.
+  if (!assertsUnlicensedDesignation(value)) return null;
   // (2) A DESIGNATION IS POSSIBLE — the field names one of this scenario's own
   //     options. Vocabulary with no name designates nobody.
   if (!textNamesAnOption(value, roster)) return null;
-
+  // (3) Evidence-only turns preserve distributed evidence. If no single unit
+  //     proves identity + designation, this deleting rail stands down and the
+  //     observe-only alarm retains the residue for producer repair.
+  if (isEvidenceOnly && !splitIntoRedactableUnits(value).some(shouldRemoveUnit)) return null;
   const isClean = (candidate: string): boolean =>
-    !textAssertsLeadingOption(candidate) && !textNamesAnOption(candidate, roster);
+    isEvidenceOnly
+      ? !splitIntoRedactableUnits(candidate).some(shouldRemoveUnit)
+      : !assertsUnlicensedDesignation(candidate);
 
   const surgical = replaceAssertingUnits(
     value,
-    textAssertsLeadingOption,
+    shouldRemoveUnit,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
   if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
 
-  // ⚠ ESCALATION RUNS FROM THE ORIGINAL VALUE, NOT FROM `surgical`. Running it
-  // over the surgical output leaves the replacement sentence sitting in the text
-  // as ORDINARY PROSE — it neither asserts nor names, so the collapse logic
-  // cannot see it as a replacement, and a name-bearing neighbour that is
-  // replaced next lands the SAME sentence twice in a row ("No single option can
-  // be put forward yet. No single option can be put forward yet."). Re-deriving
-  // from the original makes the two removals one contiguous run, which is
-  // exactly what the collapse rule is for.
-  const escalated = replaceAssertingUnits(
-    value,
-    (unit) => textAssertsLeadingOption(unit) || textNamesAnOption(unit, roster),
-    WIRE_WITHHELD_LEADER_REPLACEMENT,
-  );
-  if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
-
+  // Defensive only: if the field-level reader still sees a designation after
+  // surgery, do not ship the unresolved field.
   return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
 }
 
@@ -558,9 +797,34 @@ export function enforceLeadingOptionClaimsAtWire(
   // PERMIT-WINS. Byte-identical, by reference, first line — same short-circuit
   // shape as the alarm (`guardLeadingOptionClaimsAtEgress`) and the finalise
   // chokepoint (`turn-executor.ts:10016`).
-  if (opts.mayNameLeadingOption) return unchanged(response);
+  if (opts.leaderClaimPolicy === 'designation_permitted') return unchanged(response);
 
   try {
+    // This is a typed, code-owned coaching signal, so its exact bytes can be
+    // removed without guessing at natural language. Unlike ordinary generic
+    // vocabulary, it affirmatively tells the user that a leading option
+    // exists. Final `permitted=false` therefore suppresses it even though it
+    // names no roster option. The source constant is imported directly so a
+    // copy change and its enforcement cannot drift apart.
+    const typedSignalProjection = (value: string): string =>
+      value.includes(FIRST_ANALYSIS_COMPLETE_TEXT)
+        ? value.replaceAll(FIRST_ANALYSIS_COMPLETE_TEXT, WIRE_WITHHELD_LEADER_REPLACEMENT)
+        : value;
+    let next = response;
+    const editedFields = new Set<WireEnforcedProseField>();
+    const projectedAnswer = typedSignalProjection(response.assistant_text);
+    if (projectedAnswer !== response.assistant_text) {
+      editedFields.add('assistant_text');
+      next = { ...next, assistant_text: projectedAnswer };
+    }
+    if (typeof response.framing_question === 'string') {
+      const projectedFraming = typedSignalProjection(response.framing_question);
+      if (projectedFraming !== response.framing_question) {
+        editedFields.add('framing_question');
+        next = { ...next, framing_question: projectedFraming };
+      }
+    }
+
     // GRAPH FIRST, READINESS AS THE FALLBACK. The graph is the richer source and
     // stays primary so nothing changes on the exits that already had one; the
     // readiness payload is consulted ONLY when the graph yields no roster, which
@@ -577,9 +841,9 @@ export function enforceLeadingOptionClaimsAtWire(
       // into theatre: a reader of the dashboard must be able to see the
       // difference between "nothing to do" and "could not look".
       const couldHaveMattered =
-        textAssertsLeadingOption(response.assistant_text) ||
-        (typeof response.framing_question === 'string' &&
-          textAssertsLeadingOption(response.framing_question));
+        textAssertsLeadingOption(next.assistant_text) ||
+        (typeof next.framing_question === 'string' &&
+          textAssertsLeadingOption(next.framing_question));
       if (couldHaveMattered) {
         emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
           request_id: opts.requestId,
@@ -590,44 +854,74 @@ export function enforceLeadingOptionClaimsAtWire(
           projected_length: 0,
         });
       }
-      return unchanged(response);
+      if (editedFields.size === 0) return unchanged(response);
+      const fields = [...editedFields].sort();
+      emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
+        request_id: opts.requestId,
+        exit_path: opts.exitPath,
+        edited_fields: fields.join(','),
+        mode: 'surgical',
+        original_length: fields.reduce(
+          (sum, field) => sum + (field === 'assistant_text'
+            ? response.assistant_text.length
+            : response.framing_question?.length ?? 0),
+          0,
+        ),
+        projected_length: fields.reduce(
+          (sum, field) => sum + (field === 'assistant_text'
+            ? next.assistant_text.length
+            : next.framing_question?.length ?? 0),
+          0,
+        ),
+      });
+      return { response: next, changed: true, editedFields: fields };
     }
+    const attestedComparisons = readAttestedComparisons(
+      next,
+      opts.graph,
+      opts.analysisReady,
+      opts.selectedFactComparisons,
+    );
 
-    const editedFields: WireEnforcedProseField[] = [];
-    // The LOUDEST mode wins the report: `whole_field` over `surgical_escalated`
-    // over `surgical`. A field edited surgically must never mask a sibling field
-    // that needed the last resort.
+    // The LOUDEST mode wins the report. A field edited surgically must never
+    // mask a sibling field that needed the defensive last resort.
     let modes: WireEnforcementMode = 'surgical';
     const escalate = (mode: WireEnforcementMode): void => {
       if (mode === 'whole_field') modes = 'whole_field';
-      else if (mode === 'surgical_escalated' && modes === 'surgical') modes = 'surgical_escalated';
     };
-    let originalLength = 0;
-    let projectedLength = 0;
-    let next = response;
-
-    const answer = projectField(response.assistant_text, roster);
+    const answer = projectField(
+      next.assistant_text,
+      roster,
+      opts.leaderClaimPolicy,
+      attestedComparisons,
+    );
     if (answer !== null) {
-      originalLength += response.assistant_text.length;
-      projectedLength += answer.text.length;
       escalate(answer.mode);
-      editedFields.push('assistant_text');
+      editedFields.add('assistant_text');
       next = { ...next, assistant_text: answer.text };
     }
 
-    const framing = response.framing_question;
+    const framing = next.framing_question;
     if (typeof framing === 'string') {
-      const projected = projectField(framing, roster);
+      const projected = projectField(
+        framing,
+        roster,
+        opts.leaderClaimPolicy,
+        attestedComparisons,
+      );
       if (projected !== null) {
-        originalLength += framing.length;
-        projectedLength += projected.text.length;
         escalate(projected.mode);
-        editedFields.push('framing_question');
+        editedFields.add('framing_question');
         next = { ...next, framing_question: projected.text };
       }
     }
 
-    if (editedFields.length === 0) return unchanged(response);
+    if (editedFields.size === 0) return unchanged(response);
+    const fields = [...editedFields].sort();
+    const lengthFor = (body: OlumiResponse, field: WireEnforcedProseField): number =>
+      field === 'assistant_text'
+        ? body.assistant_text.length
+        : body.framing_question?.length ?? 0;
 
     emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
       request_id: opts.requestId,
@@ -635,13 +929,13 @@ export function enforceLeadingOptionClaimsAtWire(
       // Bounded field names and a bounded mode. LENGTHS only, never the matched
       // prose: this is the claim-safety boundary and the prose is the user's own
       // decision content.
-      edited_fields: [...editedFields].sort().join(','),
+      edited_fields: fields.join(','),
       mode: modes,
-      original_length: originalLength,
-      projected_length: projectedLength,
+      original_length: fields.reduce((sum, field) => sum + lengthFor(response, field), 0),
+      projected_length: fields.reduce((sum, field) => sum + lengthFor(next, field), 0),
     });
 
-    return { response: next, changed: true, editedFields };
+    return { response: next, changed: true, editedFields: fields };
   } catch (err) {
     log.error(
       {

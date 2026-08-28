@@ -58,7 +58,7 @@ vi.mock('../../../config/index.js', () => ({
 
 import {
   composeAnalysisStateV1,
-  readFinalLeaderClaimPermission,
+  readFinalLeaderClaimEgressPolicy,
   WITHHELD_SEPARATION_UNAVAILABLE,
 } from '../analysis-state-v1.js';
 import {
@@ -208,7 +208,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-null-graph',
       exitPath: 'edit_graph',
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
       graph: null,
       analysisReady: ANALYSIS_READY,
     } as any);
@@ -251,7 +251,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       exitPath: 'turn_executor',
       // The route now reads this value from the final response rather than
       // reusing the earlier entitlement (`true`).
-      mayNameLeadingOption: readFinalLeaderClaimPermission(response),
+      leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(response),
       graph: GRAPH_WITH_ROSTER,
     } as any);
 
@@ -265,7 +265,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-real-graph',
       exitPath: 'turn_executor',
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
       graph: GRAPH_WITH_ROSTER,
     } as any);
     expect(result.changed).toBe(true);
@@ -320,7 +320,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-both-sources-disjoint',
       exitPath: 'turn_executor',
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
       graph: GRAPH_WITH_ROSTER,
       analysisReady: DISJOINT_READY,
     } as any);
@@ -340,7 +340,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const permitted = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-permitted',
       exitPath: 'turn_executor',
-      mayNameLeadingOption: true,
+      leaderClaimPolicy: 'designation_permitted',
       graph: null,
       analysisReady: ANALYSIS_READY,
     } as any);
@@ -352,7 +352,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
       requestId: 'r-no-roster',
       exitPath: 'clarify_v2',
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
       graph: null,
       analysisReady: { status: 'blocked', goal_node_id: '', options: [] },
     } as any);
@@ -366,7 +366,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       {
         requestId: 'r-innocent',
         exitPath: 'edit_graph',
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
         graph: null,
         analysisReady: ANALYSIS_READY,
       } as any,
@@ -390,7 +390,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       // construction; if this assertion ever fails, the class has reopened.
       const span = source.slice(source.indexOf('enforceLeadingOptionClaimsAtWire('));
       const args = span.slice(0, span.indexOf('});') + 3);
-      expect(args).toContain('mayNameLeadingOption: finalLeaderClaimPermitted');
+      expect(args).toContain('leaderClaimPolicy: finalLeaderClaimPolicy');
       expect(args).toContain('graph: ctx.graph');
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });

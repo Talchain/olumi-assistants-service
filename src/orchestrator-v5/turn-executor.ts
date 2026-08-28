@@ -427,7 +427,11 @@ import {
 } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
-import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
+import {
+  pickLatestRawRobustness,
+  readOptionComparisonsFromRunAnalysisFact,
+  readRawRobustnessFromRunAnalysisFact,
+} from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
@@ -519,6 +523,19 @@ import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
+  /**
+   * Producer-attested robustness from the SAME selected run-analysis fact as
+   * `freshness`, surfaced for final `analysis_state` composition on later
+   * reasoning turns that carry no new analysis-result block. `null` means the
+   * selected analysis is stale/unavailable or supplied no usable signal.
+   */
+  rawRobustness: import('./coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
+  /**
+   * Exact comparisons from the same selected fact as `rawRobustness`. Final
+   * wire enforcement uses this only to prove that numerical body evidence and
+   * final analysis authority describe one run.
+   */
+  rawOptionComparisons?: readonly import('./coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
   /**
    * T1 claim safety — may this turn NAME a leading option?
    *
@@ -13620,8 +13637,30 @@ export async function runTurnExecutor(
         answerFinalText.length > 0 &&
         answerFinalText === functionalAnswerText);
     const answerKind: AnswerKind = isFunctionalAnswer ? 'functional' : 'substantive';
+    // Resolve robustness from the EXACT fact selected by the final freshness
+    // derivation. `selected_fact_index` is positional authority over the exact
+    // array supplied to `deriveAnalysisFreshness`; re-running the newest-fact
+    // selector here would be a second, merely-agreeing source. This carrier is
+    // intentionally scoped to the existing final-wire/hot-window authority;
+    // the separate durable ContextPack carrier remains prompt-only and the
+    // >20-history convergence exit remains explicit.
+    const finalAnalysisFacts = unifiedFactsAtExit ?? context.prior_facts;
+    const selectedFinalAnalysisFact =
+      freshness?.freshness === 'fresh' && freshness.selected_fact_index !== null
+        ? finalAnalysisFacts[freshness.selected_fact_index]
+        : undefined;
+    const rawRobustnessForRun = readRawRobustnessFromRunAnalysisFact(
+      selectedFinalAnalysisFact,
+    );
+    const rawOptionComparisonsForRun = readOptionComparisonsFromRunAnalysisFact(
+      selectedFinalAnalysisFact,
+    );
     return {
       response,
+      // Same fact array and same freshness gate as the final canonical verdict.
+      // No independent selection or request-state fallback is introduced.
+      rawRobustness: rawRobustnessForRun,
+      rawOptionComparisons: rawOptionComparisonsForRun,
       // T1 claim safety — READ (never derived here, CLAUDE.md trap #12) at
       // TURN ENTRY from the persisted verdict, and refined post-dispatch on
       // execute turns. ROADMAP 1.233: before the hoist this was the `true`

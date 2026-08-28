@@ -35,8 +35,23 @@ import { selectRunAnalysisFact } from '../context/freshness.js';
 export interface RawRobustnessSignals {
   /** Raw `enrichment.robustness.level` string when present (lower-cased). */
   readonly level: string | null;
-  /** Raw `enrichment.robustness.near_tie.is_tie === true` flag — strong override. */
-  readonly near_tie_is_tie: boolean;
+  /**
+   * Raw `enrichment.robustness.near_tie.is_tie` when the producer supplied a
+   * boolean. `null` means the separation judgement is unavailable; it must
+   * never collapse to `false` (which positively means the options separate).
+   */
+  readonly near_tie_is_tie: boolean | null;
+}
+
+/**
+ * The only comparison fields the final wire gate may license as measured
+ * evidence. They are carried from the exact fact selected by freshness so an
+ * arbitrary analysis-result block cannot borrow another run's authority.
+ */
+export interface RawOptionComparisonSignal {
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly win_probability: number;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -76,9 +91,10 @@ export function readRawRobustnessSignals(
     : null;
 
   const nearTie = asObject(robustness['near_tie']);
-  const near_tie_is_tie = nearTie !== null && nearTie['is_tie'] === true;
+  const rawIsTie = nearTie?.['is_tie'];
+  const near_tie_is_tie = typeof rawIsTie === 'boolean' ? rawIsTie : null;
 
-  if (level === null && !near_tie_is_tie) return null;
+  if (level === null && near_tie_is_tie === null) return null;
   return { level, near_tie_is_tie };
 }
 
@@ -87,11 +103,70 @@ export function pickLatestRawRobustness(
 ): RawRobustnessSignals | null {
   const selected = selectRunAnalysisFact(priorFacts);
   if (selected === null) return null;
-  const fact = selected.fact;
+  return readRawRobustnessFromRunAnalysisFact(selected.fact);
+}
+
+/**
+ * Project the two licensed robustness signals from ONE already-selected
+ * run-analysis fact.
+ *
+ * This is deliberately separate from {@link pickLatestRawRobustness}. Callers
+ * that already hold a freshness derivation must resolve its
+ * `selected_fact_index` against the exact array used for that derivation and
+ * pass that fact here. Re-running the newest-fact selector would create a
+ * second, merely-agreeing authority for which run supplied the signals.
+ */
+export function readRawRobustnessFromRunAnalysisFact(
+  fact: HandlerFact | undefined,
+): RawRobustnessSignals | null {
+  if (fact === undefined) return null;
   if (fact.fact_type !== 'run_analysis') return null;
   const enrichment = asObject(fact.result.enrichment);
   if (enrichment === null) return null;
   // Delegate: ONE normaliser, so the V4 and V5 addresses can never disagree
   // about what `near_tie.is_tie` means.
   return readRawRobustnessSignals(enrichment['robustness']);
+}
+
+/**
+ * Project an exact, bounded comparison carrier from one already-selected fact.
+ * Any malformed row invalidates the whole set; partial evidence must not mint
+ * permission for the rows that happened to parse.
+ */
+export function readOptionComparisonsFromRunAnalysisFact(
+  fact: HandlerFact | undefined,
+): readonly RawOptionComparisonSignal[] | null {
+  if (fact === undefined || fact.fact_type !== 'run_analysis') return null;
+  const enrichment = asObject(fact.result.enrichment);
+  const rawComparison = enrichment?.['option_comparison'];
+  if (!Array.isArray(rawComparison) || rawComparison.length === 0) return null;
+  const out: RawOptionComparisonSignal[] = [];
+  const ids = new Set<string>();
+  for (const raw of rawComparison) {
+    const row = asObject(raw);
+    if (row === null) return null;
+    const option_id =
+      typeof row['option_id'] === 'string' && row['option_id'].trim().length > 0
+        ? row['option_id'].trim()
+        : null;
+    const option_label =
+      typeof row['option_label'] === 'string' && row['option_label'].trim().length > 0
+        ? row['option_label'].trim()
+        : null;
+    const win_probability = row['win_probability'];
+    if (
+      option_id === null ||
+      option_label === null ||
+      ids.has(option_id) ||
+      typeof win_probability !== 'number' ||
+      !Number.isFinite(win_probability) ||
+      win_probability < 0 ||
+      win_probability > 1
+    ) {
+      return null;
+    }
+    ids.add(option_id);
+    out.push({ option_id, option_label, win_probability });
+  }
+  return out;
 }

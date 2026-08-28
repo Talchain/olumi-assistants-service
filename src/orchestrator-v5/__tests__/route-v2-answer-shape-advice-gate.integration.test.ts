@@ -40,6 +40,29 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `scenario-analysis-${index}`,
+        turn_id: String(mockState.priorTurns[index]?.id ?? `prior-turn-${index}`),
+        fact_created_at:
+          typeof (fact.result as { computed_at?: unknown })?.computed_at === 'string'
+            ? (fact.result as { computed_at: string }).computed_at
+            : new Date(Date.now() - 60_000).toISOString(),
+      })),
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockState.priorFacts
+        .filter((fact) => fact.fact_type === 'run_analysis' && fact.noop !== true)
+        .map((fact, index) => ({
+          fact,
+          fact_row_id: `scenario-analysis-${index}`,
+          fact_created_at:
+            typeof (fact.result as { computed_at?: unknown })?.computed_at === 'string'
+              ? (fact.result as { computed_at: string }).computed_at
+              : new Date(Date.now() - 60_000).toISOString(),
+        }));
+      return { facts, total_count: facts.length };
+    },
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
@@ -60,12 +83,15 @@ const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const READY_GRAPH = {
   nodes: [
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
+    { id: 'decision_team', kind: 'decision', label: 'How to expand delivery capacity' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
-    { id: 'fac_market', kind: 'factor', label: 'Market demand' },
+    { id: 'fac_market', kind: 'factor', label: 'Market demand', category: 'external', prior: { distribution: 'uniform', range_min: 0.2, range_max: 0.8 } },
     { id: 'opt_hire', kind: 'option', label: 'Hire', interventions: { fac_capacity: 1 } },
     { id: 'opt_status_quo', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
   ],
   edges: [
+    { from: 'decision_team', to: 'opt_hire', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'decision_team', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_hire', to: 'fac_capacity', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_status_quo', to: 'fac_capacity', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_capacity', to: 'goal_q3', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
@@ -120,6 +146,7 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
           { factor_id: 'fac_capacity', factor_label: 'Capacity', sensitivity: 0.6, influence_score: 0.6, direction: 'positive' },
           { factor_id: 'fac_market', factor_label: 'Market demand', sensitivity: 0.5, influence_score: 0.5, direction: 'negative' },
         ],
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         robustness_synthesis: { overall_assessment: 'moderate' },
       },
       win_probabilities: { opt_hire: 0.72, opt_status_quo: 0.28 },
@@ -196,7 +223,7 @@ describe('route-v2 — `_answer_shape` on the REAL post-analysis advice-gate ans
     // projection prose naming the leading option), not an LLM turn.
     expect(typeof body.assistant_text).toBe('string');
     expect(body.assistant_text.length).toBeGreaterThan(0);
-    expect(body.assistant_text).toContain('Hire');
+    expect(body.assistant_text, JSON.stringify(body.analysis_state)).toContain('Hire');
 
     // THE FIX: the deterministic post-analysis answer now ships `_answer_shape`.
     expect(body._answer_shape, 'advice-gate answer must ship _answer_shape').toBeDefined();

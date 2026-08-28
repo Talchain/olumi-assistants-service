@@ -209,6 +209,10 @@ function priorRunAnalysisFact(mayName: boolean): Record<string, unknown> {
             direction: 'positive',
           },
         ],
+        // A leader-designation control must establish BOTH halves of the final
+        // AnalysisState licence. `mayName` supplies constraint entitlement;
+        // this producer signal establishes that the options separate.
+        robustness: { level: 'high', near_tie: { is_tie: false } },
       },
       win_probabilities: { opt_hire: 0.72, opt_hold: 0.28 },
     },

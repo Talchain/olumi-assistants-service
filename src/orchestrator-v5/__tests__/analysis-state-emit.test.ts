@@ -175,7 +175,9 @@ function baseResponse(opts: ResponseOpts = {}): OlumiResponse {
                 ...(opts.robustnessLevel !== undefined
                   ? { level: opts.robustnessLevel }
                   : {}),
-                near_tie: { is_tie: opts.nearTieIsTie === true },
+                ...(opts.nearTieIsTie !== undefined
+                  ? { near_tie: { is_tie: opts.nearTieIsTie } }
+                  : {}),
               },
             },
           },
@@ -198,6 +200,7 @@ function finalise(
     /** Declared by every route exit; `null` means no graph was in scope. */
     graph?: unknown;
     mayNameLeadingOption?: boolean;
+    rawRobustness?: { level: string | null; near_tie_is_tie: boolean | null } | null;
   },
 ): Record<string, unknown> {
   return finaliseV5Response(response, ctx as FinaliserCtx) as unknown as Record<
@@ -517,6 +520,109 @@ describe('analysis_state.leader_claim', () => {
     expect(claim.withheld_reason).toBe('separation_unavailable');
     expect('separation' in claim).toBe(false);
     expect(readFinalLeaderClaimPermission(body)).toBe(false);
+  });
+
+  it('uses the exact selected-fact carrier on a block-less current follow-up', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: false },
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim).toMatchObject({ permitted: true, separation: 'separated' });
+    expect(readFinalLeaderClaimPermission(body)).toBe(true);
+  });
+
+  it('fails weak when response-body robustness disagrees with the selected-fact carrier', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'low', nearTieIsTie: true }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: false },
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim).toMatchObject({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
+    expect('separation' in claim).toBe(false);
+    expect(readFinalLeaderClaimPermission(body)).toBe(false);
+  });
+
+  it('uses robustness when the response body and selected fact agree exactly', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'low', nearTieIsTie: true }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'low', near_tie_is_tie: true },
+    });
+    expect(stateOf(body).leader_claim).toMatchObject({
+      permitted: false,
+      withheld_reason: 'options_do_not_separate',
+      separation: 'near_tie',
+    });
+  });
+
+  it('does not resurrect selected-fact robustness when an analysis block omits it', () => {
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: false },
+    });
+    expect(stateOf(body).leader_claim).toEqual({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
+  });
+
+  it('does not resurrect selected-fact robustness through malformed body robustness', () => {
+    const input = baseResponse({ robustnessLevel: 'high', nearTieIsTie: false }) as unknown as {
+      blocks: Array<{ enrichment: { robustness: unknown } }>;
+    };
+    input.blocks[0]!.enrichment.robustness = 'malformed';
+    const body = finalise(input as unknown as OlumiResponse, {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: false },
+    });
+    expect(stateOf(body).leader_claim).toEqual({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
+  });
+
+  it('does not turn aggregate level without an is_tie judgement into separation', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'high' }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect(stateOf(body).leader_claim).toEqual({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
+    expect(stateOf(body).robustness).toEqual({ aggregate_level: 'high' });
+  });
+
+  it('fails weak when multiple analysis blocks make body robustness ambiguous', () => {
+    const first = baseResponse({ robustnessLevel: 'high', nearTieIsTie: false });
+    const block = (first.blocks as unknown[])[0];
+    const body = finalise(
+      { ...first, blocks: [block, block] } as OlumiResponse,
+      {
+        analysisReady: readyPayload(),
+        freshness: freshDerivation(),
+        mayNameLeadingOption: true,
+        rawRobustness: { level: 'high', near_tie_is_tie: false },
+      },
+    );
+    expect(stateOf(body).leader_claim).toEqual({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
   });
 
   it.each(['complete_stale', 'running', 'refused', 'never_run', 'unknown'] as const)(

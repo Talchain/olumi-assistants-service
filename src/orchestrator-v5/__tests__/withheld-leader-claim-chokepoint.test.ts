@@ -171,6 +171,9 @@ function baseRunAnalysisFact(): Record<string, unknown> {
           { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.72, outcome_mean: 0.5 },
           { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.28, outcome_mean: 0.3 },
         ],
+        // The permitted twin is a genuine FINAL licence, not entitlement-only:
+        // this establishes the separation half read by AnalysisState.
+        robustness: { level: 'high', near_tie: { is_tie: false } },
       },
       win_probabilities: { opt_hire: 0.72, opt_hold: 0.28 },
     },

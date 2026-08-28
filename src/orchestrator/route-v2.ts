@@ -149,7 +149,10 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
-import { readFinalLeaderClaimPermission } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import {
+  readFinalLeaderClaimEgressPolicy,
+  readFinalLeaderClaimPermission,
+} from '../orchestrator-v5/compose/analysis-state-v1.js';
 import {
   ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
   enforceAnalysisAuthorityUnavailableAtEgress,
@@ -812,6 +815,14 @@ async function sendFinalised200(
      */
     readonly canonicalState?: CanonicalAnalysisState;
     /**
+     * Current canonical run-analysis robustness for final `analysis_state`.
+     * TurnExecutor derives this from the same selected fact/freshness basis as
+     * its answer; other exits omit and therefore fail weakly.
+     */
+    readonly rawRobustness?: import('../orchestrator-v5/coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
+    /** Comparisons from the same selected fact; numerical evidence fails weak without it. */
+    readonly rawOptionComparisons?: readonly import('../orchestrator-v5/coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
+    /**
      * T4 Slice 2 — the turn-executor's once-per-turn canonical context frame.
      * When present, the flag-gated context-summary diagnostic is projected
      * from the frame ALONE (`contextSummaryFromFrame`) instead of being
@@ -971,6 +982,11 @@ async function sendFinalised200(
   const finaliserContext = analysisAuthorityUnavailable
     ? {
         ...ctx,
+        // Persisted analysis could not be established. Historical robustness
+        // must not survive the same fail-closed projection and manufacture a
+        // separation verdict beside an unavailable canonical read.
+        rawRobustness: null,
+        rawOptionComparisons: null,
         freshness: ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
         canonicalState: canonicalStateFromFreshness(
           ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
@@ -1158,7 +1174,10 @@ async function sendFinalised200(
       )
     : finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        finaliserContext,
+        // A typed egress fallback describes validation failure, not the
+        // historical run. Never attach a separation verdict to that error
+        // envelope from the candidate response's context.
+        { ...finaliserContext, rawRobustness: null },
       );
   if (!egress.ok) {
     log.error(
@@ -1605,11 +1624,11 @@ async function sendFinalised200(
   // `sanitiseOlumiResponseForEgress` exists to catch. Re-finalising is still
   // required: the spread breaks WeakSet membership (the finaliser brand).
   // ═══════════════════════════════════════════════════════════════════════════
-  const finalLeaderClaimPermitted = readFinalLeaderClaimPermission(wireBody);
+  const finalLeaderClaimPolicy = readFinalLeaderClaimEgressPolicy(wireBody);
   const wireEnforcement = enforceLeadingOptionClaimsAtWire(wireBody, {
     requestId,
     exitPath,
-    mayNameLeadingOption: finalLeaderClaimPermitted,
+    leaderClaimPolicy: finalLeaderClaimPolicy,
     // Read ONLY for the option ROSTER — "which options exist", never "which one
     // leads". The gate enters only when the prose NAMES one of this scenario's
     // own options, which is what spares "sales leads improved" and every other
@@ -1635,6 +1654,9 @@ async function sendFinalised200(
     // `compose/__tests__/leader-roster-fallback.test.ts` RED if that stops
     // being true.
     analysisReady: ctx.analysisReady,
+    selectedFactComparisons: egress.ok
+      ? finaliserContext.rawOptionComparisons ?? null
+      : null,
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =
@@ -6333,6 +6355,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // it supersedes the route's freshness-derived partial state (adds
       // degraded detection + contradictions over the unified fact chain).
       ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
+      rawRobustness: run.rawRobustness,
+      rawOptionComparisons: run.rawOptionComparisons ?? null,
       // T4 Slice 2: the once-per-turn canonical context frame. When present,
       // the context-summary diagnostic is projected from the frame alone.
       ...(run.frame ? { frame: run.frame } : {}),

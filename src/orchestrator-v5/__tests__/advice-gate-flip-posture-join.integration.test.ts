@@ -36,6 +36,29 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `scenario-analysis-${index}`,
+        turn_id: String(mockState.priorTurns[index]?.id ?? `prior-turn-${index}`),
+        fact_created_at:
+          typeof (fact.result as { computed_at?: unknown })?.computed_at === 'string'
+            ? (fact.result as { computed_at: string }).computed_at
+            : new Date(Date.now() - 60_000).toISOString(),
+      })),
+    readScenarioRunAnalysisFactsFor: async () => {
+      const facts = mockState.priorFacts
+        .filter((fact) => fact.fact_type === 'run_analysis' && fact.noop !== true)
+        .map((fact, index) => ({
+          fact,
+          fact_row_id: `scenario-analysis-${index}`,
+          fact_created_at:
+            typeof (fact.result as { computed_at?: unknown })?.computed_at === 'string'
+              ? (fact.result as { computed_at: string }).computed_at
+              : new Date(Date.now() - 60_000).toISOString(),
+        }));
+      return { facts, total_count: facts.length };
+    },
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
@@ -55,12 +78,15 @@ const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const READY_GRAPH = {
   nodes: [
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
+    { id: 'decision_team', kind: 'decision', label: 'How to expand delivery capacity' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
-    { id: 'fac_market', kind: 'factor', label: 'Market demand' },
+    { id: 'fac_market', kind: 'factor', label: 'Market demand', category: 'external', prior: { distribution: 'uniform', range_min: 0.2, range_max: 0.8 } },
     { id: 'opt_hire', kind: 'option', label: 'Hire', interventions: { fac_capacity: 1 } },
     { id: 'opt_status_quo', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
   ],
   edges: [
+    { from: 'decision_team', to: 'opt_hire', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'decision_team', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_hire', to: 'fac_capacity', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_status_quo', to: 'fac_capacity', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_capacity', to: 'goal_q3', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
@@ -104,7 +130,7 @@ function makeFreshRunAnalysisFact(opts: { attestedNoFlip: boolean }): Record<str
     ],
     robustness_synthesis: { overall_assessment: 'moderate' },
     // Raw fragile signal → the gate's fragile branch (the branch under test).
-    robustness: { level: 'very_low', is_robust: false },
+    robustness: { level: 'very_low', is_robust: false, near_tie: { is_tie: false } },
   };
   if (opts.attestedNoFlip) enrichment.flip_thresholds = ATTESTED_FLIP_THRESHOLDS;
   return {

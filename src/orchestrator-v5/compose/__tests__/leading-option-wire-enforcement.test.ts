@@ -28,6 +28,7 @@ import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
 } from '../leading-option-egress-guard.js';
+import { readFinalLeaderClaimEgressPolicy } from '../analysis-state-v1.js';
 import { splitIntoRedactableUnits, replaceAssertingUnits } from '../redactable-units.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from '../withheld-explanation-answer.js';
 
@@ -47,6 +48,32 @@ function envelope(assistantText: string, extra: Record<string, unknown> = {}): O
   } as OlumiResponse;
 }
 
+function envelopeWithAttestedComparison(
+  assistantText: string,
+  winProbability = 0.5,
+  comparisonOverride?: readonly Record<string, unknown>[],
+): OlumiResponse {
+  return envelope(assistantText, {
+    blocks: [
+      {
+        type: 'analysis_result',
+        enrichment: {
+          option_comparison:
+            comparisonOverride ??
+            [
+              {
+                option_id: 'opt_hire',
+                option_label: LEADER,
+                win_probability: winProbability,
+              },
+              { option_id: 'opt_hold', option_label: 'Hold', win_probability: 1 - winProbability },
+            ],
+        },
+      },
+    ],
+  });
+}
+
 /**
  * The scenario's own graph — the ONLY thing this gate reads it for is the option
  * ROSTER ("which options exist"), never a ranking. Without it the gate stands
@@ -62,7 +89,19 @@ const ROSTER_GRAPH = {
   edges: [],
 };
 
-const OPTS = { requestId: 'req-2149', exitPath: 'edit_graph' as const, graph: ROSTER_GRAPH };
+function selectedComparisons(winProbability = 0.5) {
+  return [
+    { option_id: 'opt_hire', option_label: LEADER, win_probability: winProbability },
+    { option_id: 'opt_hold', option_label: 'Hold', win_probability: 1 - winProbability },
+  ] as const;
+}
+
+const OPTS = {
+  requestId: 'req-2149',
+  exitPath: 'edit_graph' as const,
+  graph: ROSTER_GRAPH,
+  selectedFactComparisons: selectedComparisons(),
+};
 
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
 beforeEach(() => {
@@ -80,7 +119,7 @@ describe('PERMIT-WINS — the first line, and the one that must never regress', 
     const input = envelope(`${RECEIPT} ${CLAIM}`);
     const result = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: true,
+      leaderClaimPolicy: 'designation_permitted',
     });
     expect(result.response).toBe(input);
     expect(result.changed).toBe(false);
@@ -93,7 +132,7 @@ describe('PERMIT-WINS — the first line, and the one that must never regress', 
     // "this gate does nothing at all".
     const result = enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(result.changed).toBe(true);
     expect(result.editedFields).toEqual(['assistant_text']);
@@ -103,7 +142,7 @@ describe('PERMIT-WINS — the first line, and the one that must never regress', 
     const input = envelope('Added the risk. Higher capacity leads to faster delivery.');
     const result = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(
       result.response,
@@ -112,11 +151,346 @@ describe('PERMIT-WINS — the first line, and the one that must never regress', 
   });
 });
 
+describe('FINAL AUTHORITY — designation and independently attested evidence are distinct', () => {
+  const completeCurrent = { kind: 'complete_current', computed_at: '2026-08-28T12:00:00Z' };
+
+  function policyFor(leaderClaim: Record<string, unknown>, runState = completeCurrent) {
+    return readFinalLeaderClaimEgressPolicy({
+      analysis_state: { run_state: runState, leader_claim: leaderClaim },
+    });
+  }
+
+  it('licenses a designation only for a current, separated, internally consistent final claim', () => {
+    expect(policyFor({ permitted: true, separation: 'separated' })).toBe(
+      'designation_permitted',
+    );
+  });
+
+  it('maps each valid withheld reason to an evidence-only policy', () => {
+    expect(
+      policyFor({
+        permitted: false,
+        withheld_reason: 'options_do_not_separate',
+        separation: 'near_tie',
+      }),
+    ).toBe('evidence_only_options_do_not_separate');
+    expect(
+      policyFor({
+        permitted: false,
+        withheld_reason: 'constraint_verdict_withheld',
+        separation: 'separated',
+      }),
+    ).toBe('evidence_only_constraint_verdict_withheld');
+    expect(
+      policyFor({ permitted: false, withheld_reason: 'separation_unavailable' }),
+    ).toBe('evidence_only_separation_unavailable');
+  });
+
+  it('fails closed on contradictory, malformed, absent and non-current final authority', () => {
+    expect(
+      policyFor({
+        permitted: true,
+        withheld_reason: 'options_do_not_separate',
+        separation: 'near_tie',
+      }),
+    ).toBe('designation_withheld');
+    expect(
+      policyFor({ permitted: true }),
+      'the shared contract makes separation optional; permitted is already the composed conjunction',
+    ).toBe('designation_permitted');
+    expect(policyFor({ permitted: true, separation: 'near_tie' })).toBe(
+      'designation_withheld',
+    );
+    expect(policyFor({ permitted: false, withheld_reason: 'unknown_reason' })).toBe(
+      'designation_withheld',
+    );
+    expect(readFinalLeaderClaimEgressPolicy({})).toBe('designation_withheld');
+    expect(
+      policyFor({ permitted: true, separation: 'separated' }, { kind: 'complete_stale' }),
+    ).toBe('designation_withheld');
+    expect(
+      policyFor({ permitted: true, separation: 'separated' }, { kind: 'running' }),
+    ).toBe('designation_withheld');
+    expect(
+      policyFor({ permitted: true, separation: 'separated' }, { kind: 'refused' }),
+    ).toBe('designation_withheld');
+  });
+});
+
+describe('EVIDENCE-ONLY — exact producer data survives without becoming a designation', () => {
+  const nearTieEvidence =
+    `${LEADER} came out ahead in 50% of runs of this model, but this is a close call.`;
+
+  it('keeps exact producer-attested near-tie evidence and its same-unit qualification', () => {
+    const input = envelopeWithAttestedComparison(nearTieEvidence, 0.5);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it('removes a categorical designation while retaining a separate attested near-tie sentence', () => {
+    const input = envelopeWithAttestedComparison(
+      `${LEADER} is the leading option. ${nearTieEvidence}`,
+      0.5,
+    );
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('is the leading option');
+    expect(result.response.assistant_text).toContain(nearTieEvidence);
+  });
+
+  it.each([
+    '; it is still the leading option.',
+    ' — and it still leads.',
+  ])(
+    'does not let a same-unit pronoun designation piggyback on licensed evidence: %s',
+    (suffix) => {
+      const text = nearTieEvidence.replace(/\.$/, suffix);
+      const input = envelopeWithAttestedComparison(text, 0.5);
+      const result = enforceLeadingOptionClaimsAtWire(input, {
+        ...OPTS,
+        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      });
+      expect(result.changed).toBe(true);
+      expect(result.response.assistant_text).not.toMatch(/leading option|still leads/i);
+    },
+  );
+
+  it('preserves the recorded losing-option explanation instead of resolving its pronoun as a leader', () => {
+    // Exact load-bearing excerpt from
+    // olumi-docs/.../20260827T073839Z-fresh-extended-439216-raw/step-T6_FLIP.json.
+    // The field names a canonical option, but the comparative unit describes it
+    // as a distant third. Field-wide vocabulary deletion removed the whole unit.
+    const losingEvidence =
+      'Keep what we have is a long way off the pace, so this would take more than a small nudge ' +
+      'to flip.\n\n• **It is currently a distant third.** It only comes out ahead in a tiny ' +
+      'fraction of simulations, well behind both HubSpot options, so the case for it rests on ' +
+      'the other two options underperforming badly rather than on its own strengths.';
+    const graph = {
+      nodes: [
+        { id: 'opt_hubspot', kind: 'option', label: 'replace our current CRM with HubSpot next quarter' },
+        { id: 'opt_keep', kind: 'option', label: 'Keep what we have' },
+        { id: 'opt_pilot', kind: 'option', label: 'Phased HubSpot Pilot' },
+      ],
+      edges: [],
+    };
+    const input = envelope(losingEvidence);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      graph,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it('removes the typed first-analysis leader nudge while preserving near-tie evidence', () => {
+    const text =
+      `${nearTieEvidence}\n\nYour first analysis is ready. Take a moment to explore the leading ` +
+      'option and the factors shaping it before acting on the result.';
+    const input = envelopeWithAttestedComparison(text, 0.5);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).toContain(nearTieEvidence);
+    expect(result.response.assistant_text).not.toContain('explore the leading option');
+  });
+
+  it('states the evidence-only ceiling: a distributed pronoun is observed, not guessed at egress', () => {
+    const text = `${LEADER} is strong. It leads at 72%.`;
+    const input = envelopeWithAttestedComparison(text, 0.5);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+
+    const strict = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'designation_withheld',
+    });
+    expect(strict.changed).toBe(true);
+    expect(strict.response.assistant_text).not.toContain('leads at 72%');
+  });
+
+  it('preserves attested evidence under a constraint-withheld caveat without inventing a tie', () => {
+    const text =
+      `${LEADER} came out ahead in 62% of runs of this model, while the constraint verdict ` +
+      'withholds a leading option.';
+    const input = envelopeWithAttestedComparison(text, 0.62);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_constraint_verdict_withheld',
+      selectedFactComparisons: selectedComparisons(0.62),
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+    expect(result.response.assistant_text).not.toContain('close call');
+  });
+
+  it('preserves attested evidence when separation was not established without inventing a tie', () => {
+    const text =
+      `${LEADER} came out ahead in 62% of runs of this model, but the analysis did not ` +
+      'establish whether the options separate.';
+    const input = envelopeWithAttestedComparison(text, 0.62);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_separation_unavailable',
+      selectedFactComparisons: selectedComparisons(0.62),
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+    expect(result.response.assistant_text).not.toContain('effectively tied');
+  });
+
+  it('RED control: a changed percentage cannot self-license', () => {
+    const mutated = nearTieEvidence.replace('50%', '51%');
+    expect(mutated).not.toBe(nearTieEvidence);
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(mutated, 0.5),
+      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('51%');
+  });
+
+  it('RED control: qualification in another sentence cannot license the comparison', () => {
+    const mutated = nearTieEvidence.replace(', but this is a close call.', '. It is a close call.');
+    expect(splitIntoRedactableUnits(mutated)).toHaveLength(2);
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(mutated, 0.5),
+      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('50%');
+    expect(result.response.assistant_text).toContain('It is a close call.');
+  });
+
+  it('RED control: response comparisons cannot borrow a different selected fact', () => {
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
+      {
+        ...OPTS,
+        selectedFactComparisons: selectedComparisons(0.51),
+        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('50%');
+  });
+
+  it('RED control: absent selected-fact comparisons cannot license body evidence', () => {
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
+      {
+        ...OPTS,
+        selectedFactComparisons: null,
+        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('50%');
+  });
+
+  it('fails closed on a present malformed graph instead of falling back to readiness identity', () => {
+    const analysisReady = {
+      options: [
+        { option_id: 'opt_hire', label: LEADER },
+        { option_id: 'opt_hold', label: 'Hold' },
+      ],
+    };
+    const malformed = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence),
+      {
+        ...OPTS,
+        graph: { nodes: 'malformed' },
+        analysisReady,
+        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      },
+    );
+    expect(malformed.changed).toBe(true);
+    expect(malformed.response.assistant_text).not.toContain('50%');
+
+    const absentGraph = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence),
+      {
+        ...OPTS,
+        graph: null,
+        analysisReady,
+        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      },
+    );
+    expect(absentGraph.changed).toBe(false);
+  });
+
+  it.each([
+    [
+      'mismatched canonical label',
+      [
+        { option_id: 'opt_hire', option_label: 'Invented label', win_probability: 0.5 },
+        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
+      ],
+    ],
+    [
+      'duplicate producer identity',
+      [
+        { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
+        { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
+      ],
+    ],
+    [
+      'malformed producer probability',
+      [
+        { option_id: 'opt_hire', option_label: LEADER, win_probability: 2 },
+        { option_id: 'opt_hold', option_label: 'Hold', win_probability: -1 },
+      ],
+    ],
+  ])('RED control: %s fails closed for evidence', (_label, comparison) => {
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence, 0.5, comparison),
+      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('50%');
+  });
+
+  it('a stale/refused/malformed policy cannot reuse otherwise exact evidence', () => {
+    const result = enforceLeadingOptionClaimsAtWire(
+      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
+      { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('50%');
+  });
+
+  it('GREEN control: unrelated structured fields cannot change the evidence verdict', () => {
+    const input = {
+      ...envelopeWithAttestedComparison(nearTieEvidence, 0.5),
+      suggested_actions: [{ action: 'inspect_assumptions', label: 'Inspect assumptions' }],
+    } as OlumiResponse;
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+});
+
 describe('SURGERY — only the offending unit goes', () => {
   it('the surviving sentence is byte-identical and the claim is gone', () => {
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const text = response.assistant_text;
     expect(text.startsWith(RECEIPT)).toBe(true);
@@ -130,7 +504,7 @@ describe('SURGERY — only the offending unit goes', () => {
     const after = 'The gap is not stable across the runs.';
     const { response } = enforceLeadingOptionClaimsAtWire(
       envelope(`${before} ${CLAIM} ${after}`),
-      { ...OPTS, mayNameLeadingOption: false },
+      { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
     );
     expect(response.assistant_text).toContain(before);
     expect(response.assistant_text).toContain(after);
@@ -146,7 +520,7 @@ describe('SURGERY — only the offending unit goes', () => {
     ].join('\n');
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(answer), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const lines = response.assistant_text.split('\n');
     expect(lines).toHaveLength(3);
@@ -159,7 +533,7 @@ describe('SURGERY — only the offending unit goes', () => {
     const answer = `${LEADER} leads at 72%. ${LEADER} comes out ahead. ${LEADER} performs best.`;
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(answer), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const occurrences =
       response.assistant_text.split(WIRE_WITHHELD_LEADER_REPLACEMENT).length - 1;
@@ -172,7 +546,7 @@ describe('SURGERY — only the offending unit goes', () => {
     // because this gate runs downstream of it.
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(CLAIM), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(response.assistant_text.length).toBeGreaterThan(0);
     expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
@@ -181,11 +555,11 @@ describe('SURGERY — only the offending unit goes', () => {
   it('IDEMPOTENT: a second pass over the output changes nothing', () => {
     const once = enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const twice = enforceLeadingOptionClaimsAtWire(once.response, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(twice.changed).toBe(false);
     expect(twice.response).toBe(once.response);
@@ -196,7 +570,7 @@ describe('framing_question — the second covered surface', () => {
   it('is projected, and reported separately from the answer', () => {
     const { response, editedFields } = enforceLeadingOptionClaimsAtWire(
       envelope(RECEIPT, { framing_question: `Should you take ${LEADER}, which leads at 72%?` }),
-      { ...OPTS, mayNameLeadingOption: false },
+      { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
     );
     expect(editedFields).toEqual(['framing_question']);
     expect(
@@ -209,7 +583,7 @@ describe('framing_question — the second covered surface', () => {
   it('an absent framing_question is not invented', () => {
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect('framing_question' in (response as Record<string, unknown>)).toBe(false);
   });
@@ -232,7 +606,7 @@ describe('the whole_field LAST RESORT — bounded, coded, and not the normal pat
 
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(straddling), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
 
@@ -259,7 +633,7 @@ describe('the whole_field LAST RESORT — bounded, coded, and not the normal pat
     const input = envelope(wrapped);
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed).toBe(false);
     expect(response).toBe(input);
@@ -268,7 +642,7 @@ describe('the whole_field LAST RESORT — bounded, coded, and not the normal pat
   it('and the ordinary case is NOT coded whole_field', () => {
     enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const emitted = events.filter(
       (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
@@ -281,7 +655,7 @@ describe('TELEMETRY carries no decision content', () => {
   it('lengths and bounded names only — never the matched prose', () => {
     enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const emitted = events.filter(
       (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
@@ -358,34 +732,31 @@ describe('residual (a) — the enforcer is NEVER wider than the alarm', () => {
   });
 });
 
-describe('⭐ P1-LEAK — the DISTRIBUTED claim, verbatim from the adversarial review', () => {
-  // ⭐ RED-FIRST, AND IT WAS RED ON THE FIRST CUT OF THIS GATE. Sentence surgery
-  // removes the unit carrying the VOCABULARY and ships the unit carrying the
-  // NAME — so the designation survives in two halves. The review reproduced this
-  // end to end and showed the #755 executor chokepoint suppresses the same input
-  // completely, i.e. the estate's proven design covers what surgery traded away.
+describe('⭐ DESIGNATION, NOT NAMES — distributed prose loses only the asserting unit', () => {
+  // A field-level name plus a later pronoun can form a designation, but once the
+  // asserting unit is removed the earlier descriptive unit is not itself a
+  // leader claim. Requiring every option name to disappear destroyed truthful
+  // losing-option evidence in the recorded corpus.
   const DISTRIBUTED = `${LEADER} is strong. It leads at 72%.`;
 
-  it('the naming half does NOT ship', () => {
+  it('the designation does not ship while the non-designating name survives', () => {
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
-    expect(
-      response.assistant_text,
-      'surgery removed the vocabulary and left the NAME — the claim survives distributed',
-    ).not.toContain(LEADER);
+    expect(response.assistant_text).toContain(`${LEADER} is strong.`);
+    expect(response.assistant_text).not.toContain('leads at 72%');
   });
 
-  it('and it is reported as an ESCALATION, not as ordinary surgery', () => {
+  it('is ordinary surgery, not name-deleting escalation', () => {
     enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     const emitted = events.filter(
       (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
     );
-    expect(emitted[0]!.data['mode']).toBe('surgical_escalated');
+    expect(emitted[0]!.data['mode']).toBe('surgical');
   });
 
   it('INSTRUMENT: the permitted twin ships the distributed claim intact', () => {
@@ -393,18 +764,19 @@ describe('⭐ P1-LEAK — the DISTRIBUTED claim, verbatim from the adversarial r
     // mean this fixture never carried one.
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
       ...OPTS,
-      mayNameLeadingOption: true,
+      leaderClaimPolicy: 'designation_permitted',
     });
     expect(response.assistant_text).toBe(DISTRIBUTED);
   });
 
-  it('a pronoun-free distributed claim is closed too', () => {
+  it('a pronoun-free designation is removed without deleting earlier evidence', () => {
     const spread = `${LEADER} came through well. The gap is real. That option comes out ahead.`;
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(spread), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
-    expect(response.assistant_text).not.toContain(LEADER);
+    expect(response.assistant_text).toContain(`${LEADER} came through well.`);
+    expect(response.assistant_text).toContain('The gap is real.');
     expect(response.assistant_text).not.toContain('comes out ahead');
   });
 });
@@ -428,7 +800,7 @@ describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () =
     const input = envelope(text);
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed, 'no option is named, so no designation is possible').toBe(false);
     expect(response).toBe(input);
@@ -465,25 +837,19 @@ describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () =
     const input = envelope(`Added a risk to ${LEADER}.`);
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed).toBe(false);
     expect(response).toBe(input);
   });
 
-  it('⚠ PRICED, NOT HIDDEN: a receipt SHARING a field with a leader claim IS lost', () => {
-    // ⚠ THIS ARM EXISTS TO MAKE A COST VISIBLE, NOT TO BLESS IT. When a field
-    // both names an option and asserts a leader, escalation removes the
-    // name-bearing units — including an honest receipt. That is the price of
-    // closing the distributed leak, it is NOT worse than #755's chokepoint
-    // (which replaces the whole answer on exactly this input), and it must be a
-    // deliberate, reviewable decision rather than something discovered on
-    // staging. If this arm is ever "fixed", the P1-LEAK arms above go red.
+  it('preserves an honest receipt sharing a field with a separate leader claim', () => {
     const { response } = enforceLeadingOptionClaimsAtWire(
       envelope(`Added a risk to ${LEADER}. It leads at 72%.`),
-      { ...OPTS, mayNameLeadingOption: false },
+      { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
     );
-    expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    expect(response.assistant_text).toContain(`Added a risk to ${LEADER}.`);
+    expect(response.assistant_text).not.toContain('leads at 72%');
   });
 });
 
@@ -493,7 +859,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
       graph: null,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed, 'no roster ⇒ no designation can be established ⇒ do not delete prose').toBe(
       false,
@@ -512,7 +878,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
     enforceLeadingOptionClaimsAtWire(envelope(RECEIPT), {
       ...OPTS,
       graph: null,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(
       events.filter((e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire),
@@ -550,7 +916,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
     const input = envelope('We are holding the household budget. The lead time is fine.');
     const { changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed).toBe(false);
   });
@@ -578,7 +944,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
       const wrapped = 'Hire Marketing\nManager leads at 72%.';
       const { response, changed } = enforceLeadingOptionClaimsAtWire(envelope(wrapped), {
         ...OPTS,
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
       });
       expect(changed, 'the name spans a soft wrap — it must still be recognised at field level').toBe(
         true,
@@ -595,7 +961,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
       // closes it, this arm changes deliberately.
       const { response } = enforceLeadingOptionClaimsAtWire(
         envelope('Hire Marketing\nManager leads at 72%.'),
-        { ...OPTS, mayNameLeadingOption: false },
+        { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
       );
       expect(response.assistant_text).toBe(
         `Hire Marketing\n${WIRE_WITHHELD_LEADER_REPLACEMENT}`,
@@ -605,7 +971,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
     it('a name wholly WITHIN one line keeps the receipt (surgical, no fragment)', () => {
       const { response, changed } = enforceLeadingOptionClaimsAtWire(
         envelope(`Added the risk. ${LEADER} leads at 72%.`),
-        { ...OPTS, mayNameLeadingOption: false },
+        { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
       );
       expect(changed).toBe(true);
       expect(response.assistant_text.startsWith('Added the risk.')).toBe(true);
@@ -616,7 +982,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
       const spaced = 'Hire Marketing   Manager leads at 72%.';
       const { changed } = enforceLeadingOptionClaimsAtWire(envelope(spaced), {
         ...OPTS,
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
       });
       expect(changed).toBe(true);
     });
@@ -626,7 +992,7 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
       const input = envelope(wrapped);
       const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
         ...OPTS,
-        mayNameLeadingOption: true,
+        leaderClaimPolicy: 'designation_permitted',
       });
       expect(changed).toBe(false);
       expect(response).toBe(input);
@@ -670,7 +1036,7 @@ describe('REFUTED — why the post-check does NOT use the wide ALARM reader', ()
 
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(text), {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(
       response.assistant_text,
@@ -701,7 +1067,7 @@ describe('SCOPE — stated, asserted, and not implied by which arms exist', () =
     });
     const { response, changed } = enforceLeadingOptionClaimsAtWire(withBlock, {
       ...OPTS,
-      mayNameLeadingOption: false,
+      leaderClaimPolicy: 'designation_withheld',
     });
     expect(changed).toBe(false);
     expect(response).toBe(withBlock);
@@ -769,7 +1135,7 @@ describe('the shared unit machinery is SHARED, not copied', () => {
 
       const { response } = enforceLeadingOptionClaimsAtWire(envelope(claimWithAbbrev), {
         ...OPTS,
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
       });
       expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
       expect(
@@ -787,7 +1153,7 @@ describe('the shared unit machinery is SHARED, not copied', () => {
       const glued = `${LEADER} leads at 72%. ${LEADER} comes out ahead. Done.`;
       const { response } = enforceLeadingOptionClaimsAtWire(envelope(glued), {
         ...OPTS,
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
       });
       expect(response.assistant_text).not.toContain('yet.Done');
       expect(response.assistant_text).toBe(`${WIRE_WITHHELD_LEADER_REPLACEMENT} Done.`);
@@ -797,7 +1163,7 @@ describe('the shared unit machinery is SHARED, not copied', () => {
       const glued = `${LEADER} leads at 72%. ${LEADER} comes out ahead. Done.`;
       const { response } = enforceLeadingOptionClaimsAtWire(envelope(glued), {
         ...OPTS,
-        mayNameLeadingOption: false,
+        leaderClaimPolicy: 'designation_withheld',
       });
       const occurrences =
         response.assistant_text.split(WIRE_WITHHELD_LEADER_REPLACEMENT).length - 1;

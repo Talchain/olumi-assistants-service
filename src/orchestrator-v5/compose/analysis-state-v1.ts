@@ -13,10 +13,11 @@
  * value the turn had already computed — the canonical analysis state
  * (`context/canonical-analysis-state.ts`), the freshness derivation, the
  * readiness payload, the constraint-feasibility entitlement, and the engine's
- * own robustness signals as they appear on the wire. No LLM call, no engine
- * call, no store read, no graph walk. That is a deliberate constraint, not an
- * accident of scope: a composed verdict that re-derives its inputs would be a
- * seventh authority rather than the single one.
+ * own robustness signals from either this response body or the exact current
+ * run-analysis fact already selected by final freshness. No LLM call, no
+ * engine call, no store read, no graph walk. That is a deliberate constraint,
+ * not an accident of scope: a composed verdict that re-derives its inputs
+ * would be a seventh authority rather than the single one.
  *
  * ─── PRODUCER OF RECORD, per contract member ────────────────────────────────
  *
@@ -33,7 +34,8 @@
  *                        `mayNameLeadingOption`, already required on every V5
  *                        exit and read fail-closed) ∧ the engine's own
  *                        `near_tie` separation
- *   robustness           the engine's `enrichment.robustness` as it ships
+ *   robustness           the engine's `enrichment.robustness` from this body,
+ *                        else the exact current fact selected by freshness
  *   the five predicates  CanonicalAnalysisState — copied, never recomputed
  *   contradictions       CanonicalAnalysisState.contradictions
  *
@@ -87,44 +89,20 @@
  * L-C. `leader_claim.permitted` FAILS CLOSED when the separation half is
  *      unknown, carrying `withheld_reason: 'separation_unavailable'`. The
  *      contract defines `permitted` as a conjunction true only when BOTH
- *      halves hold, and an unknown half is not a held half. CONSEQUENCE, named
- *      here because step 7 is where it bites: on a turn that displays a PRIOR
- *      analysis without re-shipping its `analysis_result` block, the separation
- *      half is unreadable at this seam, so `permitted` is false.
+ *      halves hold, and an unknown half is not a held half.
  *
- *      ⚠⚠ THIS LIMIT'S LICENCE HAS LAPSED, AND THE OLD TEXT IS CORRECTED RATHER
- *      THAN DELETED (trap 14). It used to end: "Nothing consumes this field
- *      yet; a UI conjunct built on it (step 7) must first settle whether the
- *      separation verdict should be persisted with the fact."
+ *      A response-body analysis result is the first source. A block-less
+ *      deterministic follow-up may use the robustness carried by the exact
+ *      current run-analysis fact already selected by final freshness. That
+ *      carrier is positional and hot/final-wire scoped: stale, unavailable,
+ *      malformed or unselected facts supply nothing, and it is NOT a durable
+ *      >20-history authority. Durable convergence remains a separate exit.
  *
- *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
- *      (2026-08-26), contrast control in the same run:
- *        - `canvas/state/analysisStateSelector.ts:671` reads
- *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
- *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
- *          QUESTION WAS SETTLED. It was built. The question was not settled.
- *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
- *          nearby `:863` cited in the first draft of this note is the GUARD,
- *          not the emission — a review measured the emission at `:872`. Both
- *          numbers are UI-repo line numbers this CEE module cannot verify at
- *          build time, so the durable reference is the emitted string below,
- *          not either line) emits
- *          `withheld_leader_claim_with_named_conditional_winner` on exactly
- *          this payload; its own `:408` records it is "NOT YET ENFORCED in the
- *          Compare tab". The detector for this defect exists and is dark.
- *
- *      A DOCUMENTED LIMIT WHOSE ENABLING CONDITION LAPSED IS WORSE THAN AN
- *      UNDOCUMENTED ONE, because it reads as considered. The condition that
- *      would void it was named precisely and nothing re-surfaced it when it
- *      fired.
- *
- *      RE-STATED ENABLING CONDITION, so the next lane inherits a live one:
- *      this limit is acceptable ONLY while consumers treat
- *      `separation_unavailable` as NOT EVALUATED (see
- *      `LEADER_CLAIM_REASON_KINDS`) rather than as a withheld permission. A3
- *      currently does NOT — it reads `permitted` as a permission. Closing that,
- *      and turning on the dark detector, is ROWED to a UI lane; this producer
- *      is deliberately non-breaking for the current readers.
+ *      Egress then distinguishes DESIGNATION from EVIDENCE. `permitted=true`
+ *      licenses categorical designation only on `complete_current`. A valid
+ *      withheld reason may retain an exact producer-attested numerical
+ *      comparison with a same-unit qualification; it never upgrades that
+ *      comparison into “Option A is the leader”.
  * L-D. The three DISCLOSED LIMITS the contract itself pins (L1 permitted vs
  *      withheld_reason, L2 usability vs run_state, L3 contradictions semantics)
  *      stay disclosed. This producer invents no cross-field rule the
@@ -177,10 +155,11 @@ export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
  *
  *   - `constraint_verdict_withheld` / `options_do_not_separate` mean
  *     **WE LOOKED AND DECLINED**. A leader must not be named.
- *   - `separation_unavailable` means **WE DID NOT LOOK.** The separation half
- *     was unreadable at this seam (see L-C). It is an ABSENCE OF EVIDENCE, and
- *     it carries no verdict about whether a leader may be named — the
- *     entitlement question is answered elsewhere, by CEE's claim-safety read.
+ *   - `separation_unavailable` means **WE DID NOT ESTABLISH SEPARATION.** It is
+ *     not evidence of a tie, but it also cannot license a categorical leader:
+ *     the final contract requires both entitlement and established separation.
+ *     Independently attested numerical evidence may remain available without
+ *     upgrading that absence into a designation.
  *
  * Collapsing those two into "withheld" is what makes the capture look like a
  * contradiction, and it is the read a consumer makes by default because the
@@ -188,13 +167,12 @@ export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
  * declaration of which it means, so a consumer never has to infer it from the
  * code string.
  *
- * ⚠ THIS DOES NOT ALIGN THE TWO AUTHORITIES, DELIBERATELY. `permitted` and
- * `may_name_leading_option` answer DIFFERENT questions — "are both halves
- * provable on this payload?" versus "is this turn entitled?" — and making one
- * call the other is exactly how the #709/#737 defect was created (one PR added
- * a display-scoped conjunct to a verdict-scoped predicate, and nothing in the
- * code or the names said the questions differed). Naming the concepts apart is
- * the fix; reconciling their defaults is the trap.
+ * `may_name_leading_option` remains the entitlement INPUT; `permitted` is the
+ * final designation authority after combining that input with separation. A
+ * final consumer must not let the earlier, broader input resurrect permission.
+ * The reason classification below remains useful for truthful copy:
+ * `not_evaluated` is not the same claim as `withheld`, even though neither
+ * licenses a categorical designation.
  */
 export type LeaderClaimReasonKind = 'not_evaluated' | 'withheld' | 'unknown';
 
@@ -400,7 +378,10 @@ export interface AnalysisStateComposeInput {
    * explicit `true` is read as "not entitled".
    */
   readonly mayNameLeadingOption?: boolean;
-  /** The engine's own robustness signals as they appear on this turn's wire. */
+  /**
+   * The engine's robustness from this response body, or from the exact current
+   * run-analysis fact selected by the final freshness derivation.
+   */
   readonly rawRobustness: RawRobustnessSignals | null;
   /**
    * ROADMAP 2.1271 — THE ONE PRODUCER OF `run_state.kind === 'running'`.
@@ -571,8 +552,9 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
 function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
   const entitled = input.mayNameLeadingOption === true;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
-  const separationKnown = raw !== null;
-  const separates = separationKnown && !raw.near_tie_is_tie;
+  const tie = raw?.near_tie_is_tie ?? null;
+  const separationKnown = typeof tie === 'boolean';
+  const separates = tie === false;
 
   const claim: {
     permitted: boolean;
@@ -593,7 +575,7 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
   // ABSENCE IS DISTINCT: omitted means no separation statement was computed,
   // never "the options do not separate".
   if (separationKnown) {
-    claim.separation = raw.near_tie_is_tie ? SEPARATION_NEAR_TIE : SEPARATION_SEPARATED;
+    claim.separation = tie ? SEPARATION_NEAR_TIE : SEPARATION_SEPARATED;
   }
   return claim;
 }
@@ -659,16 +641,20 @@ export function readRawRobustnessFromResponseBody(
   if (response == null || typeof response !== 'object') return null;
   const blocks = (response as { blocks?: unknown }).blocks;
   if (!Array.isArray(blocks)) return null;
-  for (const block of blocks) {
-    if (block == null || typeof block !== 'object') continue;
-    const enrichment = (block as { enrichment?: unknown }).enrichment;
-    if (enrichment == null || typeof enrichment !== 'object') continue;
-    const signals = readRawRobustnessSignals(
-      (enrichment as Record<string, unknown>)['robustness'],
-    );
-    if (signals !== null) return signals;
-  }
-  return null;
+  const analysisBlocks = blocks.filter(
+    (block): block is Record<string, unknown> =>
+      block != null &&
+      typeof block === 'object' &&
+      (block as { readonly type?: unknown }).type === 'analysis_result',
+  );
+  // More than one analysis block is an ambiguous wire authority. A caller may
+  // not select whichever robustness object happens to appear first.
+  if (analysisBlocks.length !== 1) return null;
+  const enrichment = analysisBlocks[0]?.['enrichment'];
+  if (enrichment == null || typeof enrichment !== 'object') return null;
+  return readRawRobustnessSignals(
+    (enrichment as Record<string, unknown>)['robustness'],
+  );
 }
 
 /**
@@ -682,13 +668,69 @@ export function readRawRobustnessFromResponseBody(
  * malformed state fails closed: absence is not permission.
  */
 export function readFinalLeaderClaimPermission(response: unknown): boolean {
-  if (response == null || typeof response !== 'object') return false;
+  return readFinalLeaderClaimEgressPolicy(response) === 'designation_permitted';
+}
+
+/**
+ * The final wire policy for leader language.
+ *
+ * The response contract distinguishes a categorical designation from the
+ * underlying measured data. A near-tie therefore does not license “Option A is
+ * the leader”, but a precisely quantified comparison may still be shown when
+ * the same unit truthfully discloses why designation is unavailable. The three
+ * valid non-permitted reason states are kept distinct so egress never invents a
+ * tie, a constraint reason or an unavailable-separation conclusion. Stale,
+ * non-current, contradictory or unreadable state has no evidence carve-out at
+ * this boundary.
+ */
+export type FinalLeaderClaimEgressPolicy =
+  | 'designation_permitted'
+  | 'evidence_only_options_do_not_separate'
+  | 'evidence_only_constraint_verdict_withheld'
+  | 'evidence_only_separation_unavailable'
+  | 'designation_withheld';
+
+export function readFinalLeaderClaimEgressPolicy(
+  response: unknown,
+): FinalLeaderClaimEgressPolicy {
+  if (response == null || typeof response !== 'object') return 'designation_withheld';
   const analysisState = (response as { readonly analysis_state?: unknown }).analysis_state;
-  if (analysisState == null || typeof analysisState !== 'object') return false;
+  if (analysisState == null || typeof analysisState !== 'object') {
+    return 'designation_withheld';
+  }
   const runState = (analysisState as { readonly run_state?: unknown }).run_state;
-  if (runState == null || typeof runState !== 'object') return false;
-  if ((runState as { readonly kind?: unknown }).kind !== 'complete_current') return false;
+  if (runState == null || typeof runState !== 'object') return 'designation_withheld';
+  if ((runState as { readonly kind?: unknown }).kind !== 'complete_current') {
+    return 'designation_withheld';
+  }
   const leaderClaim = (analysisState as { readonly leader_claim?: unknown }).leader_claim;
-  if (leaderClaim == null || typeof leaderClaim !== 'object') return false;
-  return (leaderClaim as { readonly permitted?: unknown }).permitted === true;
+  if (leaderClaim == null || typeof leaderClaim !== 'object') {
+    return 'designation_withheld';
+  }
+  const permitted = (leaderClaim as { readonly permitted?: unknown }).permitted;
+  const withheldReason = (leaderClaim as { readonly withheld_reason?: unknown }).withheld_reason;
+  const separation = (leaderClaim as { readonly separation?: unknown }).separation;
+  if (
+    permitted === true &&
+    withheldReason === undefined &&
+    (separation === undefined || separation === SEPARATION_SEPARATED)
+  ) {
+    return 'designation_permitted';
+  }
+  if (permitted !== false) return 'designation_withheld';
+  if (withheldReason === WITHHELD_NEAR_TIE && separation === SEPARATION_NEAR_TIE) {
+    return 'evidence_only_options_do_not_separate';
+  }
+  if (
+    withheldReason === WITHHELD_CONSTRAINT_VERDICT &&
+    (separation === undefined ||
+      separation === SEPARATION_NEAR_TIE ||
+      separation === SEPARATION_SEPARATED)
+  ) {
+    return 'evidence_only_constraint_verdict_withheld';
+  }
+  if (withheldReason === WITHHELD_SEPARATION_UNAVAILABLE && separation === undefined) {
+    return 'evidence_only_separation_unavailable';
+  }
+  return 'designation_withheld';
 }
