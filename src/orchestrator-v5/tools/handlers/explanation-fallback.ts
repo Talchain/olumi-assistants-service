@@ -867,7 +867,7 @@ export function composeStructuralPairEvidenceAnswer(
   if (evidence.status === 'ambiguous') {
     return (
       'I cannot establish two unique Living Model elements from that wording, so I cannot safely state a direct relationship, direction, sign or indirect route. ' +
-      'Name or select the two elements more precisely and I can check them.'
+      'Name the two elements more precisely and I can check them.'
     );
   }
   if (evidence.status === 'direct') {
@@ -929,7 +929,7 @@ export function composeExplainFromStructureFallback(
   if (projection.named_factor_ambiguous === true) {
     return (
       'I cannot establish one unique Living Model factor from that wording, so I will not choose a connector by label or model order. ' +
-      'Name or select the intended factor more precisely and I can explain its saved structure.'
+      'Name the intended factor more precisely and I can explain its saved structure.'
     );
   }
 
@@ -951,6 +951,43 @@ export function composeExplainFromStructureFallback(
         'Its sign, magnitude and confidence are unavailable in this turn, so I will not rank or extend it into a path.'
       );
     }
+    // ⭐ THE GENERIC MIDDLE RUNG — the same licensing split the named-factor
+    // rung above already makes, for a turn that named no factor. Without it a
+    // provisional / structural-fallback / trimmed turn dropped straight to the
+    // flat refusal below, even when the saved model plainly contained directed
+    // connectors we are entitled to describe.
+    //
+    // What is licensed here: that a connector EXISTS and which way it points.
+    // What is not: its sign, magnitude, confidence, any ranking between
+    // connectors, and any claim that nothing else exists. `strength` is
+    // deliberately NOT READ on this path, so a drifting producer cannot leak a
+    // quantity through it, and the list is presented as a list rather than an
+    // ordering (the projection's non-strict order is label-stable, not
+    // strength-ranked).
+    const licensedStructure = projection.top_causal_links
+      .filter((link) => link.edge_type === 'directed')
+      .slice(0, 2);
+    const leadStructure = licensedStructure[0];
+    if (leadStructure !== undefined) {
+      const structureSentences = [
+        `The available Living Model structure includes a direct, directed connector from ${leadStructure.label_from} to ${leadStructure.label_to}.`,
+      ];
+      const alsoStructure = licensedStructure[1];
+      if (alsoStructure !== undefined) {
+        structureSentences.push(
+          `It also includes a direct, directed connector from ${alsoStructure.label_from} to ${alsoStructure.label_to}.`,
+        );
+        structureSentences.push(
+          'Their sign, magnitude and confidence are unavailable in this turn, so I will not rank them or extend them into a path.',
+        );
+      } else {
+        structureSentences.push(
+          'Its sign, magnitude and confidence are unavailable in this turn, so I will not rank it or extend it into a path.',
+        );
+      }
+      return structureSentences.join(' ');
+    }
+
     return (
       'The available Living Model structure does not carry licensed relationship detail in this turn. ' +
       'I will not infer causal direction, sign, strength or a pathway from incomplete structural data.'

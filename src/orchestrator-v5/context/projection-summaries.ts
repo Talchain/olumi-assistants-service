@@ -138,6 +138,27 @@ function isMinimalEdge(v: unknown): v is MinimalEdge {
   return typeof r.from === 'string' && typeof r.to === 'string' && typeof r.strength === 'number';
 }
 
+/**
+ * The single ordering authority for both projected link lists.
+ *
+ * Rank by |strength| when BOTH links carry one — that is the only condition
+ * under which a magnitude comparison is licensed. Otherwise fall back to a
+ * stable label/type order, which is deterministic without asserting that the
+ * first entry is the biggest. `named_factor_pathways` has always used this
+ * rule; `top_causal_links` used a strength-only comparator and therefore had
+ * to DROP every link whose strength was withheld. Deriving both from one
+ * function keeps the two lists from drifting apart again.
+ */
+function compareStructureLinks(a: StructureLink, b: StructureLink): number {
+  if (a.strength !== undefined && b.strength !== undefined) {
+    const byMagnitude = Math.abs(b.strength) - Math.abs(a.strength);
+    if (byMagnitude !== 0) return byMagnitude;
+  }
+  return [a.label_from, a.label_to, a.edge_type]
+    .join('\u0000')
+    .localeCompare([b.label_from, b.label_to, b.edge_type].join('\u0000'));
+}
+
 export function buildStructureProjectionSummary(
   graph: ContextPackGraph,
   options: {
@@ -218,12 +239,21 @@ export function buildStructureProjectionSummary(
     });
   }
 
+  // ⭐ DIRECTEDNESS IS LICENSED UNDER NON-STRICT DETAIL; MAGNITUDE IS NOT.
+  // This filter previously also required `strength !== undefined`, which is
+  // only ever populated under `canonical_strict`. The effect was that every
+  // provisional / structural-fallback / graph-trimmed turn projected an EMPTY
+  // list and the generic explanation collapsed to a single refusal sentence —
+  // while the named-factor list beside it kept projecting the same connectors
+  // without their strength. Presence and direction of a saved connector
+  // survive a withheld or trimmed snapshot (trimming removes, it never
+  // invents); sign, magnitude and confidence do not. Withholding the QUANTITY
+  // is the invariant, and it is enforced where the quantity is attached
+  // (`strictDetails` above), not by discarding the structure.
   const topCausalLinks = linksWithLabels
-    .filter((link): link is StructureLink & { readonly strength: number } =>
-      link.edge_type === 'directed' && link.strength !== undefined,
-    )
+    .filter((link) => link.edge_type === 'directed')
     .slice()
-    .sort((a, b) => Math.abs(b.strength) - Math.abs(a.strength))
+    .sort(compareStructureLinks)
     .slice(0, STRUCTURE_LINK_CAP);
 
   let namedFactorLabel: string | undefined;
@@ -239,8 +269,20 @@ export function buildStructureProjectionSummary(
       ? []
       : resolveProseEntityRefs(lookup, labelIndex, options.messageText)
           .filter((ref) => nodes.find((node) => node.id === ref.id)?.kind === 'factor');
-    if (factorRefs.length > 1) namedFactorAmbiguous = true;
-    const namedNode = factorRefs.length === 1
+    // ⭐ TWO SITUATIONS, NOT ONE — and collapsing them is what made
+    // "How do Engineering Capacity and Hiring Cost compare?" refuse.
+    //   · ONE phrase owned by TWO ids  → genuinely ambiguous. Refusing is
+    //     correct, and `hasAmbiguousProseEntityReference` above (plus the
+    //     duplicate-node-id check) is the authority that decides it.
+    //   · TWO distinct phrases each owned by ONE id → not ambiguous at all.
+    //     The user named two things precisely, and telling them to "name the
+    //     intended factor more precisely" is false as well as unhelpful.
+    // `resolveProseEntityRefs` returns refs ORDERED BY FIRST MENTION IN THE
+    // PROSE and deduped by id, so the first entry is the factor the user led
+    // with. Focusing on it is exactly what this branch already does for a
+    // single ref — no new shape, no new prose, and no claim that the answer
+    // covers the other named factors.
+    const namedNode = factorRefs.length > 0
       ? nodes.find((node) => node.id === factorRefs[0]?.id) ?? null
       : null;
     if (namedNode) {
@@ -262,15 +304,7 @@ export function buildStructureProjectionSummary(
           };
         })
         .filter((l): l is StructureLink => l !== null)
-        .sort((a, b) => {
-          if (a.strength !== undefined && b.strength !== undefined) {
-            const byMagnitude = Math.abs(b.strength) - Math.abs(a.strength);
-            if (byMagnitude !== 0) return byMagnitude;
-          }
-          return [a.label_from, a.label_to, a.edge_type]
-            .join('\u0000')
-            .localeCompare([b.label_from, b.label_to, b.edge_type].join('\u0000'));
-        })
+        .sort(compareStructureLinks)
         .slice(0, NAMED_FACTOR_LINK_CAP);
     }
   }
