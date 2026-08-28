@@ -57,6 +57,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 // calls. A hand-written regex here would let the test and the guard drift, and
 // the test would go green on a guard that had stopped matching (trap #12).
 import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
+import { WIRE_WITHHELD_LEADER_REPLACEMENT } from '../compose/leading-option-wire-enforcement.js';
 import {
   WITHHELD_EXPLANATION_OPENING,
   WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN,
@@ -454,7 +455,7 @@ function eventsNamed(name: string) {
 }
 
 /** The CHOKEPOINT guard's only observable. */
-const CHOKEPOINT_EVENT = TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise;
+const CHOKEPOINT_EVENT = TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire;
 /** The IN-FLOW gate's only observable — the branch discriminator. */
 const IN_FLOW_GATE_EVENT = TelemetryEvents.V5WithheldExplanationAnswerProjected;
 
@@ -589,7 +590,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         expect(
           finalText,
           'and it must be REPLACED with the withheld copy, not merely blanked',
-        ).toContain(WITHHELD_EXPLANATION_OPENING);
+        ).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
       });
 
       it('the chokepoint reports itself, tagged as an exit the in-flow gate could not cover', async () => {
@@ -597,7 +598,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         await postTurn(app, NEUTRAL_MESSAGE);
         const fired = eventsNamed(CHOKEPOINT_EVENT);
         expect(fired, 'the guard must be observable, or a live walk is the only instrument again').toHaveLength(1);
-        expect(fired[0]?.data.dispatch_path).toBe('turn_executor_finalise');
+        expect(fired[0]?.data.exit_path).toBe('turn_executor');
         // No `in_flow_gate_eligible` / `handler_id` assertion: both were removed
         // from the payload as structural constants under this guard's scope. A
         // field that cannot vary is not evidence, and asserting one is how a
@@ -782,7 +783,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       expect(unverified.text).not.toBe(verified.text);
     });
 
-    it('END-TO-END: on a VERIFIED-CURRENT turn the currency sentence reaches the wire', async () => {
+    it('END-TO-END: final wire authority removes the designation without inventing currency', async () => {
       // The route-level half of the property — the direction that IS reachable
       // through a non-execute exit. Confirms the unit arms above are describing
       // the same code path a real turn takes, not a function nobody calls.
@@ -793,9 +794,10 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       const finalText = String(body.assistant_text ?? '');
       expect(
         finalText,
-        'on a verified-current turn the currency assertion is TRUE and must survive — the fix is a gate, not a deletion',
-      ).toContain(WITHHELD_EXPLANATION_OPENING);
+        'the final wire authority must leave a truthful non-empty withheld explanation',
+      ).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
       expect(finalText).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(finalText).not.toContain(WITHHELD_EXPLANATION_OPENING);
       expect(textAssertsLeadingOption(finalText)).toBe(false);
     });
 

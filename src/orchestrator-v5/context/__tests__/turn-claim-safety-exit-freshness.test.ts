@@ -113,6 +113,65 @@ describe('createTurnClaimSafetyResolver — exitFreshness production', () => {
     expect(stamp.exitFreshness?.freshness).toBe('stale');
   });
 
+  it('carries evidence from the exact freshness-selected fact', async () => {
+    const own = derivation({ selected_fact_index: 1 });
+    const canonicalGraph = {
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Growth' },
+        { id: 'opt_a', kind: 'option', label: 'Canonical Plan' },
+      ],
+      edges: [],
+    };
+    const decoyFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: PAYLOAD.scenario_id,
+        leading_option_id: 'opt_a',
+        summary: 'Older result',
+        enrichment: {
+          robustness: { level: 'high', near_tie: { is_tie: false } },
+          option_comparison: [
+            { option_id: 'opt_a', option_label: 'Canonical Plan', win_probability: 0.9 },
+          ],
+        },
+      },
+    };
+    const selectedFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: PAYLOAD.scenario_id,
+        leading_option_id: 'opt_a',
+        summary: 'Current result',
+        enrichment: {
+          robustness: { level: 'low', near_tie: { is_tie: true } },
+          option_comparison: [
+            { option_id: 'opt_a', option_label: 'Canonical Plan', win_probability: 0.5 },
+          ],
+        },
+      },
+    };
+    buildTurnContext.mockResolvedValue({
+      ...(contextWith(own) as object),
+      persistedGraph: canonicalGraph,
+      scenario_analysis_fact_set: {
+        status: 'complete',
+        facts: [decoyFact, selectedFact],
+        total_count: 2,
+      },
+    });
+
+    const stamp = await createTurnClaimSafetyResolver(PAYLOAD, 'req-ef-canonical').forExit();
+    expect(stamp.exitReasoningGraph).toBe(canonicalGraph);
+    expect(stamp.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
+    expect(stamp.rawOptionComparisons).toEqual([
+      { option_id: 'opt_a', option_label: 'Canonical Plan', win_probability: 0.5 },
+    ]);
+  });
+
   it('a THROWN context read reports derivation_failed — and NEVER "none"', async () => {
     buildTurnContext.mockRejectedValue(new SessionBoom('store unreachable'));
     const stamp = await createTurnClaimSafetyResolver(PAYLOAD, 'req-ef-3').forExit();
@@ -128,6 +187,9 @@ describe('createTurnClaimSafetyResolver — exitFreshness production', () => {
     // It carries no fact and no hashes — there is nothing to report.
     expect(stamp.exitFreshness!.selected_fact_index).toBeNull();
     expect(stamp.exitFreshness!.computed_at).toBeNull();
+    expect(stamp.rawRobustness).toBeNull();
+    expect(stamp.rawOptionComparisons).toBeNull();
+    expect(stamp.exitReasoningGraph).toBeNull();
   });
 
   it('the claim-safety half still FAILS CLOSED on a thrown read', async () => {
@@ -145,6 +207,7 @@ describe('createTurnClaimSafetyResolver — exitFreshness production', () => {
     // is what licenses the no-analysis-context verdict.
     const stamp = await createTurnClaimSafetyResolver(null, 'req-ef-5').forExit();
     expect('exitFreshness' in stamp).toBe(false);
+    expect('exitReasoningGraph' in stamp).toBe(false);
     expect(buildTurnContext).not.toHaveBeenCalled();
   });
 

@@ -186,6 +186,54 @@ describe('edit-graph-dispatch — analysisReady surfacing (response-finaliser br
     expect((ar as { computed_at?: string }).computed_at).toBeUndefined();
   });
 
+  it('persists the same fail-weak leader projection that it returns on an edit exit', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue({
+      ...appliedResult(),
+      assistantText: 'Launch now is the leading option. Edge updated.',
+    });
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
+      commitOk() as Awaited<ReturnType<typeof commitDirectAnswer>>,
+    );
+
+    const out = await dispatchEditGraph({
+      payload: payload(),
+      requestId: 'req-edit-precommit-leader-projection',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+      // The edit route cannot prove that the turn-entry robustness/comparison
+      // row is the same authority as the post-edit graph. It therefore passes
+      // no designation licence into this pre-commit seam even though an older
+      // constraint verdict permitted naming a leader.
+      exitAuthority: {
+        mayNameLeadingOption: true,
+        mayNameLeadingOptionProvenance: 'scenario_fact',
+        rawRobustness: null,
+        rawOptionComparisons: null,
+        exitReasoningGraph: POST_EDIT_GRAPH as never,
+        exitFreshness: {
+          freshness: 'fresh',
+          reason: 'graph_hash_match',
+          selected_fact_index: 0,
+          graph_hash_at_run: 'pre-edit-hash',
+          current_graph_hash: 'pre-edit-hash',
+          computed_at: '2026-08-28T12:00:00.000Z',
+        },
+      },
+    });
+
+    const committedResponse = (
+      commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>
+    ).mock.calls[0]?.[0];
+    // `draft_graph` is the established post-commit applied-graph receipt and
+    // therefore cannot exist on the append input. Every other response byte,
+    // including the projected prose, must be identical.
+    const { draft_graph: _postCommitReceipt, ...wireWithoutGraphReceipt } = out.response;
+    expect(committedResponse).toEqual(wireWithoutGraphReceipt);
+    expect(out.response.assistant_text).toContain('Edge updated.');
+    expect(out.response.assistant_text).not.toContain('Launch now is the leading option');
+  });
+
   // ⚠ L16 SCOPE CORRECTION — read the title, it is narrower than it was.
   //
   // This case used to be titled "rejected edit surfaces no analysisReady — UI

@@ -59,7 +59,7 @@ import {
 } from './phase3-blocks.js';
 import { selectLens, type LensId } from './lens-selector.js';
 import type { JudgementSignals } from './judgement-signals.js';
-import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+import { mayDesignateLeadingOptionForFact } from './leader-designation-license.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 /**
@@ -489,7 +489,7 @@ function buildRunAnalysisDirective(
   // that says "point at the leader" must not be emitted by the turn that just
   // declined to name one. The enrichment projection leak
   // (compose/withheld-claim-projection.ts) was the user-visible half.
-  if (!mayNameLeadingOptionForFact(fact)) {
+  if (!mayDesignateLeadingOptionForFact(fact)) {
     return suppressDirective('run_analysis', 'leading_option_claim_withheld');
   }
   const highlight = buildRecommendedOptionUiDirective(fact, lookup);

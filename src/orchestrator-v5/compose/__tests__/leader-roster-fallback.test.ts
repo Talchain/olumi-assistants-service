@@ -1,5 +1,5 @@
 /**
- * ⭐ THE WITHHELD-LEADER GATE STANDS DOWN ON 74% OF EXITS, AND SHIPS THE LIE.
+ * ⭐ BEFORE THIS FIX, THE WITHHELD-LEADER GATE STOOD DOWN ON 74% OF EXITS.
  *
  * THE HARM, reproduced at the module seam before this fix: on a turn whose
  * record correctly says `leader_claim {permitted:false, withheld_reason:
@@ -334,6 +334,36 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     expect(textAssertsLeadingOption(String(result.response.assistant_text))).toBe(false);
   });
 
+  it.each([
+    ['malformed', { nodes: 'not-an-array' }],
+    ['empty', { nodes: [], edges: [] }],
+  ])('PRESENT %s graph cannot be repaired by a stale readiness roster', (_label, graph) => {
+    const input = responseWith(LEADER_PROSE);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      requestId: `r-present-${_label}-graph`,
+      exitPath: 'turn_executor',
+      leaderClaimPolicy: 'designation_withheld',
+      graph,
+      analysisReady: ANALYSIS_READY,
+    } as any);
+
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it('ABSENT graph still uses readiness as the bounded fallback', () => {
+    const result = enforceLeadingOptionClaimsAtWire(responseWith(LEADER_PROSE), {
+      requestId: 'r-absent-graph-readiness-fallback',
+      exitPath: 'turn_executor',
+      leaderClaimPolicy: 'designation_withheld',
+      graph: null,
+      analysisReady: ANALYSIS_READY,
+    } as any);
+
+    expect(result.changed).toBe(true);
+    expect(textAssertsLeadingOption(String(result.response.assistant_text))).toBe(false);
+  });
+
   // ── THE OPPOSITE TWIN. A gate that withholds everything is not a fix, it is a
   //    different defect — and it is the failure mode that has bitten repeatedly.
   it('OPPOSITE TWIN: a PERMITTED claim keeps its leader, roster or no roster', () => {
@@ -391,7 +421,10 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       const span = source.slice(source.indexOf('enforceLeadingOptionClaimsAtWire('));
       const args = span.slice(0, span.indexOf('});') + 3);
       expect(args).toContain('leaderClaimPolicy: finalLeaderClaimPolicy');
-      expect(args).toContain('graph: ctx.graph');
+      expect(args).toContain("hasOwnProperty.call(wireFinaliserContext, 'reasoningGraph')");
+      expect(args).toContain('wireFinaliserContext.reasoningGraph');
+      expect(args).toContain(': ctx.graph');
+      expect(args).toContain('wireFinaliserContext.exitReasoningGraph');
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });
 

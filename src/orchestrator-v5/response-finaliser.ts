@@ -92,6 +92,7 @@ import {
 import {
   composeAnalysisStateV1,
   NO_ANALYSIS_CONTEXT_DERIVATION,
+  readFinalLeaderClaimPermission,
   readRawRobustnessFromResponseBody,
 } from './compose/analysis-state-v1.js';
 import type { RawRobustnessSignals } from './coaching/pick-raw-robustness.js';
@@ -492,9 +493,9 @@ function attachAnalysisState(
  * Resolve robustness without mixing two analysis authorities inside one
  * response. A block-less response may use only the already-selected current
  * fact's evidence. A response carrying exactly one analysis-result block uses
- * body evidence only when it is valid and, if a fact carrier also exists,
- * byte-semantically equal. Everything else degrades to `null`; omission alone
- * never upgrades caller or transcript bytes.
+ * body evidence only when it is valid and byte-semantically equal to the exact
+ * selected-fact carrier. Everything else degrades to `null`; response copy can
+ * never attest itself and omission never upgrades caller or transcript bytes.
  */
 function rawRobustnessForAnalysisState(
   response: unknown,
@@ -516,7 +517,9 @@ function rawRobustnessForAnalysisState(
   if (analysisBlockCount !== 1) return null;
   const fromBody = readRawRobustnessFromResponseBody(response);
   if (fromBody === null) return null;
-  if (canonicalFactRobustness == null) return fromBody;
+  // A response block cannot attest itself. Analysis-result evidence is usable
+  // only when the exact freshness-selected fact supplied the same signals.
+  if (canonicalFactRobustness == null) return null;
   return fromBody.level === canonicalFactRobustness.level &&
     fromBody.near_tie_is_tie === canonicalFactRobustness.near_tie_is_tie
     ? fromBody
@@ -592,6 +595,11 @@ function attachRunDelta(
     priorFacts: ctx.priorFacts,
     // Fail-closed on absence, per this member's own documented semantics.
     mayNameLeadingOption: ctx.mayNameLeadingOption === true,
+    // Read the already-composed consumer-visible authority. Earlier turn
+    // entitlement cannot resurrect a current designation that final
+    // freshness/separation/constraint truth withholds.
+    currentLeaderDesignationPermitted:
+      readFinalLeaderClaimPermission(response),
   });
   if (built.kind !== 'ok') return response;
   return { ...response, run_delta: built.delta };

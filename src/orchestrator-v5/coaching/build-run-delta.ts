@@ -61,7 +61,7 @@ import {
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
-import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { mayDesignateLeadingOptionForFact } from '../compose/leader-designation-license.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
 
@@ -498,6 +498,14 @@ function noiseVerdictForProportions(
 export function buildRunDelta(input: {
   readonly priorFacts: readonly HandlerFact[];
   readonly mayNameLeadingOption: boolean;
+  /**
+   * Whether the FINAL/current response authority permits a present-tense
+   * leader designation. Required so a stale, running, refused or malformed
+   * current state cannot borrow the selected fact's historical entitlement.
+   * This conjunct applies only to the current side; the prior side is judged
+   * by its own persisted fact.
+   */
+  readonly currentLeaderDesignationPermitted: boolean;
 }): BuildRunDeltaResult {
   const pair = selectTwoNewestRunAnalysisFacts(input.priorFacts);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
@@ -527,16 +535,19 @@ export function buildRunDelta(input: {
   }
 
   // ── Leader ────────────────────────────────────────────────────────────────
-  // An id travels ONLY when this turn AND that run's own persisted verdict both
-  // entitle the claim. The contract's absence semantics are explicit: *"ABSENCE
-  // of an id means 'no entitled leader claim on that side', never 'no leader
-  // existed'; a consumer must not name one."*
+  // An id travels ONLY when this turn AND that run's own persisted constraint
+  // verdict AND producer-attested separation all entitle a categorical leader
+  // designation. We do not infer separation from the probability rows here.
+  // The contract's absence semantics are explicit: *"ABSENCE of an id means
+  // 'no entitled leader claim on that side', never 'no leader existed'; a
+  // consumer must not name one."*
   const priorEntitled =
     input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option;
+    && mayDesignateLeadingOptionForFact(pair.prior);
   const currentEntitled =
     input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option;
+    && input.currentLeaderDesignationPermitted
+    && mayDesignateLeadingOptionForFact(pair.current);
 
   const priorLeaderId = priorEntitled ? priorProjection.leader_option_id : null;
   const currentLeaderId = currentEntitled ? currentProjection.leader_option_id : null;

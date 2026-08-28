@@ -473,6 +473,7 @@ describe('analysis_state.leader_claim', () => {
       analysisReady: readyPayload(),
       freshness: freshDerivation(),
       mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: false },
     });
     const claim = stateOf(body).leader_claim as Record<string, unknown>;
     expect(claim.permitted).toBe(true);
@@ -486,6 +487,7 @@ describe('analysis_state.leader_claim', () => {
       analysisReady: readyPayload(),
       freshness: freshDerivation(),
       mayNameLeadingOption: true,
+      rawRobustness: { level: 'low', near_tie_is_tie: true },
     });
     const claim = stateOf(body).leader_claim as Record<string, unknown>;
     expect(claim.permitted).toBe(false);
@@ -599,6 +601,7 @@ describe('analysis_state.leader_claim', () => {
       analysisReady: readyPayload(),
       freshness: freshDerivation(),
       mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: null },
     });
     expect(stateOf(body).leader_claim).toEqual({
       permitted: false,
@@ -669,6 +672,7 @@ describe('analysis_state.robustness', () => {
       analysisReady: readyPayload(),
       freshness: freshDerivation(),
       mayNameLeadingOption: true,
+      rawRobustness: { level: 'high', near_tie_is_tie: null },
     });
     expect((stateOf(body).robustness as Record<string, unknown>).aggregate_level).toBe(
       'high',

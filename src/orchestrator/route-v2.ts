@@ -717,6 +717,10 @@ async function sendFinalised200(
   ctx: {
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
+    /** Graph identity used by AI reasoning; explicit null forbids request fallback. */
+    readonly reasoningGraph?: GraphV3T | null;
+    /** Persisted resolver snapshot used only when this exit has no graph of its own. */
+    readonly exitReasoningGraph?: GraphV3T | null;
     /** V5 state-trust freshness derivation. Threaded into the finaliser
      *  so the analysisReady payload carries freshness fields and
      *  computed_at reflects the selected fact's timestamp. Populated on
@@ -823,6 +827,13 @@ async function sendFinalised200(
     /** Comparisons from the same selected fact; numerical evidence fails weak without it. */
     readonly rawOptionComparisons?: readonly import('../orchestrator-v5/coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
     /**
+     * Persisted turn-entry freshness carried by the lazy non-execute resolver.
+     * It is deliberately distinct from a dispatch's own `freshness`: positions
+     * are array-relative and the fact row id is not exposed, so equal hashes
+     * and timestamps cannot prove two independently loaded rows are identical.
+     */
+    readonly exitFreshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
+    /**
      * T4 Slice 2 — the turn-executor's once-per-turn canonical context frame.
      * When present, the flag-gated context-summary diagnostic is projected
      * from the frame ALONE (`contextSummaryFromFrame`) instead of being
@@ -903,8 +914,8 @@ async function sendFinalised200(
      *
      * `false` means the constraint verdict withheld the claim, so any copy on
      * the envelope naming or presuming a leader contradicts the turn's own
-     * confirmation. Threaded straight to the egress sanitiser, which reports it
-     * (observe-only) — see `orchestrator-v5/compose/leading-option-egress-guard.ts`.
+     * confirmation. Threaded through final response composition to the wire
+     * projector; the separate egress alarm remains observe-only.
      *
      * REQUIRED, same rationale as `userMessage` above: every dispatch path must
      * state the permission, so no path can disarm the guard by omission.
@@ -979,9 +990,30 @@ async function sendFinalised200(
   const canonicalStateSourceForSummary = ctx.canonicalState
     ? 'turn_executor'
     : 'route_fallback';
+  // A graph-bearing non-execute dispatch may carry its own post-operation
+  // freshness while the lazy exit resolver read a different snapshot. Never
+  // mix those authorities. Even byte-equal hash/timestamp/index fields are not
+  // a fact identity: tied rows can appear in different orders in independently
+  // loaded arrays, and selected_fact_index is explicitly array-relative. Until
+  // a dispatcher carries evidence from its own selected fact (or an immutable
+  // fact id exists), dual-source exits fail weak for robustness/comparisons.
+  const carriesOneAuthoritativeEvidenceSnapshot =
+    // Dispatch-owned carriers (TurnExecutor and successful run-analysis chip)
+    // come from the exact fact array used for this dispatch's freshness.
+    (ctx.freshness?.freshness === 'fresh' && ctx.exitFreshness === undefined) ||
+    // The lazy resolver is authoritative only on a graphless early exit: its
+    // persisted graph, freshness and selected-fact carriers came from one
+    // buildTurnContext read. A graph-bearing response may represent a newer
+    // dispatch result and therefore cannot borrow the turn-entry carriers.
+    (ctx.freshness === undefined &&
+      ctx.graph === null &&
+      ctx.exitFreshness?.freshness === 'fresh');
+  const coherentSnapshotContext = carriesOneAuthoritativeEvidenceSnapshot
+    ? ctx
+    : { ...ctx, rawRobustness: null, rawOptionComparisons: null };
   const finaliserContext = analysisAuthorityUnavailable
     ? {
-        ...ctx,
+        ...coherentSnapshotContext,
         // Persisted analysis could not be established. Historical robustness
         // must not survive the same fail-closed projection and manufacture a
         // separation verdict beside an unavailable canonical read.
@@ -993,7 +1025,7 @@ async function sendFinalised200(
           ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
         ),
       }
-    : ctx;
+    : coherentSnapshotContext;
   let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
     'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
@@ -1167,17 +1199,24 @@ async function sendFinalised200(
     mayNameLeadingOption: ctx.mayNameLeadingOption,
   });
   const egress = validateEgress(candidateSanitised, requestId);
+  // One fail-weak context for every post-validation pass. A typed fallback is
+  // not evidence about the historical run, and later re-finalisation must not
+  // resurrect either robustness or comparison authority from the rejected
+  // candidate.
+  const wireFinaliserContext = egress.ok
+    ? finaliserContext
+    : { ...finaliserContext, rawRobustness: null, rawOptionComparisons: null };
   let wireBody = egress.ok
     ? finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        finaliserContext,
+        wireFinaliserContext,
       )
     : finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         // A typed egress fallback describes validation failure, not the
         // historical run. Never attach a separation verdict to that error
         // envelope from the candidate response's context.
-        { ...finaliserContext, rawRobustness: null },
+        wireFinaliserContext,
       );
   if (!egress.ok) {
     log.error(
@@ -1206,7 +1245,7 @@ async function sendFinalised200(
               `${DRAFT_LOSS_NOTICE}\n\n${projected.response.assistant_text ?? ''}`.trimEnd(),
           }
         : projected.response;
-    wireBody = finaliseV5Response(responseWithStandingDraftLoss, finaliserContext);
+    wireBody = finaliseV5Response(responseWithStandingDraftLoss, wireFinaliserContext);
   }
   // Re-attach `_timings` post-validation only on the success path AND
   // only when BOTH gates pass:
@@ -1250,7 +1289,7 @@ async function sendFinalised200(
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      finaliserContext,
+      wireFinaliserContext,
     );
   }
   // Re-attach `_diagnostic_trace` post-validation on the success path AND
@@ -1321,7 +1360,7 @@ async function sendFinalised200(
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      finaliserContext,
+      wireFinaliserContext,
     );
   }
   // Re-attach `_context_summary` post-validation on the success path AND
@@ -1391,7 +1430,7 @@ async function sendFinalised200(
       };
       wireBody = finaliseV5Response(
         sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        finaliserContext,
+        wireFinaliserContext,
       );
     }
   }
@@ -1417,7 +1456,7 @@ async function sendFinalised200(
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      finaliserContext,
+      wireFinaliserContext,
     );
   }
   // Re-attach `_answer_shape` post-validation on the success path (ROADMAP
@@ -1455,7 +1494,7 @@ async function sendFinalised200(
     };
     const withShape = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      finaliserContext,
+      wireFinaliserContext,
     );
     const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
     const finalText =
@@ -1536,7 +1575,7 @@ async function sendFinalised200(
       };
       const withSynth = finaliseV5Response(
         sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        finaliserContext,
+        wireFinaliserContext,
       );
       const synthFinalText =
         typeof withSynth.assistant_text === 'string' ? withSynth.assistant_text : '';
@@ -1632,21 +1671,31 @@ async function sendFinalised200(
     // Read ONLY for the option ROSTER — "which options exist", never "which one
     // leads". The gate enters only when the prose NAMES one of this scenario's
     // own options, which is what spares "sales leads improved" and every other
-    // ordinary use of the shared vocabulary. `null` here disarms the gate for
-    // this turn and is REPORTED, not silent — see the opts docstring.
-    graph: ctx.graph,
-    // ⭐ THE ROSTER FALLBACK, AND IT IS THE MAJORITY PATH — NOT A CORNER.
-    // `graph: null` disarmed this gate on 17 of the 23 `sendFinalised200` exits
-    // (measured at `0d070df0` with the balanced-paren scan in
-    // `__tests__/route-egress-analysis-state-freshness.drift.test.ts`; a FLOOR,
-    // because the other six pass nullable expressions — `turnGraph` is
-    // `GraphV3T | null`). On every one of those a withheld leader claim shipped
-    // intact while the record correctly said `permitted:false`.
+    // ordinary use of the shared vocabulary. The fallback chain deliberately
+    // tries the canonical reasoning/exit/readiness snapshots before a final
+    // `null`; only a final `null` leaves the roster unavailable, and that state
+    // is REPORTED rather than silently treated as permission.
+    graph:
+      ctx.graph !== null
+        ? ctx.graph
+        : Object.prototype.hasOwnProperty.call(wireFinaliserContext, 'reasoningGraph')
+          ? wireFinaliserContext.reasoningGraph ?? null
+          : Object.prototype.hasOwnProperty.call(
+                wireFinaliserContext,
+                'exitReasoningGraph',
+              )
+            ? wireFinaliserContext.exitReasoningGraph ?? null
+            : ctx.graph,
+    // READINESS IS AN ABSENT-GRAPH FALLBACK, NOT THE NORMAL AUTHORITY. Most
+    // graphless early exits now receive `exitReasoningGraph` from the same
+    // persisted resolver snapshot that supplied their freshness. Readiness is
+    // consulted only when no reasoning/dispatch/persisted graph is available.
+    // A present but unusable graph never falls through to readiness: stale
+    // projection bytes must not repair canonical identity.
     //
-    // Same read as the graph: WHICH OPTIONS EXIST, never which one leads. The
-    // verdict above (`mayNameLeadingOption`) is untouched and still owns that
-    // question — this only gives the gate the names it needs to act on the
-    // answer it already has.
+    // Both sources answer only WHICH OPTIONS EXIST, never which one leads. The
+    // final composed policy above owns the designation question; this supplies
+    // only the names needed to enforce that answer.
     //
     // Threaded HERE, at the one call site every exit funnels through, so a new
     // dispatch family inherits it by construction rather than by anyone
@@ -1655,7 +1704,7 @@ async function sendFinalised200(
     // being true.
     analysisReady: ctx.analysisReady,
     selectedFactComparisons: egress.ok
-      ? finaliserContext.rawOptionComparisons ?? null
+      ? wireFinaliserContext.rawOptionComparisons ?? null
       : null,
   });
   if (wireEnforcement.changed) {
@@ -1691,7 +1740,7 @@ async function sendFinalised200(
       }
       projected = withoutShape;
     }
-    wireBody = finaliseV5Response(projected, finaliserContext);
+    wireBody = finaliseV5Response(projected, wireFinaliserContext);
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // SELECTION-AWARE ANSWERING (hop 4b) — re-attach `_grounded_selection`.
@@ -1731,7 +1780,7 @@ async function sendFinalised200(
       _grounded_selection: ctx.groundedSelection,
     };
     // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
-    wireBody = finaliseV5Response(augmented, finaliserContext);
+    wireBody = finaliseV5Response(augmented, wireFinaliserContext);
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
@@ -1784,12 +1833,12 @@ async function sendFinalised200(
   //
   // The ENFORCING wire gate now runs immediately above, so this scan reports
   // the RESIDUE THAT STILL SHIPS, not everything the producers emitted. The
-  // enforcer covers `assistant_text` and `framing_question`; block prose,
-  // enrichment blobs and structured key designations are producer-owned
-  // (`compose/withheld-claim-projection.ts`) and are NOT edited here — so a hit
-  // on this alarm after 2.149 names a surface the wire gate does not cover, or
-  // a phrasing the wide ALARM reader sees and the narrow ENFORCER reader
-  // deliberately spares. Both are real signal; neither is the old signal.
+  // enforcer covers top-level prose plus typed `analysis_result` designation
+  // fields and their licensed enrichment projection. Other arbitrary block
+  // prose remains producer-owned, so a hit after 2.149 names either a surface
+  // the wire gate does not cover or a phrasing the wide ALARM reader sees and
+  // the narrow ENFORCER reader deliberately spares. Both are real signal;
+  // neither is the old signal.
   //
   // WHY THE ALARM RUNS SECOND AND NOT FIRST. Two reasons, and only the first is
   // about doctrine:
@@ -2969,6 +3018,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // derive one fails to compile instead of failing open.
           mayNameLeadingOption: cc.mayNameLeadingOption,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          // Same post-dispatch fact selected by `cc.freshness`; the final
+          // analysis-state/wire gate must not re-author evidence from body copy.
+          rawRobustness: cc.rawRobustness,
+          rawOptionComparisons: cc.rawOptionComparisons,
+          reasoningGraph: cc.graph,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
           // answer's declared kind, DEFAULTING to 'functional' when the dispatch
           // did not declare one. Post-inversion an omitted kind would SHAPE, so a
@@ -5731,6 +5785,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // See Docs/v5/v5-cordon.md §2 for trigger conditions and replacement
       // plan (per-mutation handlers + Workstream 2 apply_proposed_change).
       try {
+        // One memoised turn-entry authority for BOTH the dispatch-owned durable
+        // row and this route's final wire projection. Calling `forExit()` a
+        // second time would be memoised today, but carrying one object makes
+        // the identity of the evidence explicit and reviewable.
+        const editExitAuthority = await claimSafety.forExit();
         // graphState confirmed non-null by the `isEditGraphShape` guard.
         // Pass ingress types through directly — the dispatcher owns the
         // conversion to V4 internal envelopes (see graphStateToGraphV3 and
@@ -5766,6 +5825,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // difference as a 5.0s kill. Removing it is caught by
           // `structural-edit-deadline-plumbing.test.ts`.
           requestStartMs: routeStartedAt,
+          exitAuthority: editExitAuthority,
         });
         // ⭐ THE EDIT LANE IS NON-TERMINAL WHEN IT RESOLVED NOTHING.
         //
@@ -5844,7 +5904,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
             // the permission belongs to the fact this response DISPLAYS, not to
             // whether this turn ran an analysis. See turn-claim-safety.ts.
-            ...(await claimSafety.forExit()),
+            ...editExitAuthority,
             // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
             // functional (add-option / edit confirmation) and must ship plain.
             answerKind: 'functional',
@@ -6292,16 +6352,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(500).send(boundaryError);
     }
 
-    // Egress label-resolution graph. Prefer the AUTHORITATIVE graph the turn
-    // actually reasoned over (`run.effectiveGraph` = request graphState parsed,
-    // or the persisted-graph fallback the executor loaded when the request
-    // omitted graphState) so the wire egress sanitiser resolves entity-id
-    // labels against the SAME graph the durable assistant-text scrub used at
-    // commit — stored text and wire text cannot diverge. Fall back to a local
-    // parse of the ingress graphState only if the executor surfaced nothing
-    // (defensive; `effectiveGraph` is always set by `finalizeRun`). Parse
-    // failure / no graph → null; the sanitiser uses prefix-aware generic
-    // wording without throwing.
+    // Egress label-resolution graph. TurnExecutor binds this to the graph used
+    // for durable assistant text: a successfully committed graph after a write,
+    // otherwise the ContextPack-selected reasoning snapshot. Request bytes are
+    // not a read-only fallback once that authority has been established.
+    // `undefined` is retained only for legacy/mocked results.
     const turnGraph: GraphV3T | null =
       run.effectiveGraph !== undefined
         ? run.effectiveGraph
@@ -6357,6 +6412,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
       rawRobustness: run.rawRobustness,
       rawOptionComparisons: run.rawOptionComparisons ?? null,
+      reasoningGraph: run.reasoningGraph,
       // T4 Slice 2: the once-per-turn canonical context frame. When present,
       // the context-summary diagnostic is projected from the frame alone.
       ...(run.frame ? { frame: run.frame } : {}),

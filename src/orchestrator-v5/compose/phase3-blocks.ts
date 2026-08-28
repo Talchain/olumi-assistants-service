@@ -87,6 +87,7 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { deriveCompanionValueClaimSafe } from './companion-claim-safe.js';
 // ROADMAP 2.1024 — the offer text + its composability gates, in a pure leaf the
 // SELECTOR can also import (it cannot import this module: config/telemetry side
 // effects, and a cycle). One definition, two consumers.
@@ -173,7 +174,7 @@ import {
   selectFactorEvppiPriorityGuidance,
   type FactorEvppiPriorityGuidanceDecision,
 } from '../coaching/select-factor-evppi.js';
-import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+import { mayDesignateLeadingOptionForFact } from './leader-designation-license.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 const FACTOR_EVPPI_SOURCE_HANDLER = 'run_analysis';
@@ -1476,39 +1477,11 @@ export function composeCagedField<T>(
  * legitimately-computed value. A NEW allow-listed field with no entry here fails
  * CLOSED (deny), the safe default for a claim-safety cage.
  */
-const COMPANION_VALUE_SCHEMAS: Readonly<Record<string, (value: unknown) => boolean>> = Object.freeze({
-  // A confidence tier LABEL — a non-empty, non-whitespace string.
-  confidence_tier: (value) => typeof value === 'string' && value.trim().length > 0,
-  // A non-empty array of factor-sensitivity rows, each an object bearing a
-  // non-empty string `factor_id`. Rejects `[]` and `[{}]`.
-  factor_sensitivity: (value) =>
-    Array.isArray(value) &&
-    value.length > 0 &&
-    value.every((row) => {
-      const r = readRecord(row);
-      return r !== null && typeof r.factor_id === 'string' && r.factor_id.length > 0;
-    }),
-  // A non-empty object. Rejects `{}`, scalars and arrays.
-  robustness: (value) => {
-    const r = readRecord(value);
-    return r !== null && Object.keys(r).length > 0;
-  },
-});
-
 export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
-  const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
-  if (enrichment === null) return false;
-  const status = enrichment[`${field}_status`];
-  // Fail CLOSED on ANY present status, not only a string one (egress-F2,
-  // 2026-07-24). A present-but-malformed `<field>_status` (object/number/bool —
-  // e.g. an upstream enrichment drift to `{state:'computed'}`) must DENY, not
-  // fall through to the value branch and read as claim-safe. Only a genuinely
-  // absent status defers to the strict per-field value schema below.
-  if (status !== undefined) return status === 'computed';
-  // F9: absent status ⇒ validate the VALUE against its strict field schema
-  // (never the old loose non-null/non-empty-array heuristic).
-  const validate = COMPANION_VALUE_SCHEMAS[field];
-  return validate !== undefined && validate(enrichment[field]);
+  return deriveCompanionValueClaimSafe(
+    (fact.result as Record<string, unknown>).enrichment,
+    field,
+  );
 }
 
 /**
@@ -2038,7 +2011,7 @@ export function buildLensSurface(
   // rather than restated (`mayNameLeadingOptionForFact`, the per-fact leaf): one
   // pure function of one fact, evaluated twice, cannot disagree with itself. A
   // hand-copied kind list here would be the mirror class instead.
-  if (offer !== null && mayNameLeadingOptionForFact(fact)) {
+  if (offer !== null && mayDesignateLeadingOptionForFact(fact)) {
     emit(TelemetryEvents.V5FragileEdgeOfferEmitted, {
       // The fulfilment FAMILY, not a wire field: the composed prompt routes
       // through `edit_graph` to the registered `adjust_edge_strength` handler.

@@ -186,7 +186,10 @@ function productionShapedFact(overrides: FactOverrides = {}): RunAnalysisHandler
           ],
         }
       : {}),
-    robustness: { level: 'moderate' },
+    // Constraint feasibility and producer separation are independent. These
+    // positive construction fixtures explicitly license both.
+    robustness_status: 'computed',
+    robustness: { level: 'moderate', near_tie: { is_tie: false } },
     ...(overrides.withDecisionReview === false ? {} : { decision_review: DECISION_REVIEW }),
     ...(overrides.withEnrichmentGraph !== undefined
       ? { graph: overrides.withEnrichmentGraph }

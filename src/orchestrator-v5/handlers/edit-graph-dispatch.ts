@@ -31,6 +31,10 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import type { TurnExitStamp } from '../context/turn-claim-safety.js';
+import { finaliseV5Response } from '../response-finaliser.js';
+import { readFinalLeaderClaimEgressPolicy } from '../compose/analysis-state-v1.js';
+import { projectLeaderClaimForDurableCommit } from '../compose/leading-option-wire-enforcement.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,
@@ -1209,6 +1213,13 @@ export interface DispatchEditGraphParams {
    * one missing pair; no other caller may pass it.
    */
   readonly editInstructionOverride?: string;
+  /**
+   * One memoised turn-entry authority snapshot supplied by the route. It is
+   * used only to make the pre-commit assistant row obey the same final leader
+   * policy as route egress; the edit dispatcher does not re-read or re-derive
+   * this authority.
+   */
+  readonly exitAuthority?: TurnExitStamp;
 }
 
 export interface DispatchEditGraphResult {
@@ -4577,6 +4588,37 @@ export async function dispatchEditGraph(
       turnId: payload.turn_id,
       site: 'edit_graph_dispatch',
     });
+    if (params.exitAuthority !== undefined) {
+      // This dispatch owns its commit, so route-level projection alone would
+      // leave a categorical designation in durable conversation history after
+      // the wire removed it. The route intentionally treats dispatch freshness
+      // plus a separately loaded exit snapshot as two authorities and therefore
+      // supplies no robustness/comparison licence. Mirror that exact fail-weak
+      // posture before append; do not attempt to prove two rows identical from
+      // hash/timestamp equality.
+      const authorityEnvelope = finaliseV5Response(response, {
+        analysisReady,
+        freshness,
+        ...(params.exitAuthority.exitFreshness !== undefined
+          ? { exitFreshness: params.exitAuthority.exitFreshness }
+          : {}),
+        graph: graphForCommit !== undefined ? editResult.appliedGraph ?? null : null,
+        mayNameLeadingOption: params.exitAuthority.mayNameLeadingOption,
+        rawRobustness: null,
+      });
+      const contentGraph =
+        graphForCommit !== undefined
+          ? editResult.appliedGraph ?? null
+          : params.exitAuthority.exitReasoningGraph ?? null;
+      response = projectLeaderClaimForDurableCommit(response, {
+        requestId,
+        exitPath: 'edit_graph',
+        graph: contentGraph,
+        analysisReady,
+        selectedFactComparisons: null,
+        leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelope),
+      }).response;
+    }
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -4643,7 +4685,10 @@ export async function dispatchEditGraph(
       // SAME graph the route egress uses for this exit — `graphForCommit` (the
       // post-edit appliedGraph on a successful mutation, else undefined → the
       // egress is graph-free too), keeping stored == wire.
-      contentGraph: graphForCommit,
+      contentGraph:
+        graphForCommit !== undefined
+          ? editResult.appliedGraph ?? graphForCommit
+          : params.exitAuthority?.exitReasoningGraph ?? null,
     });
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse

@@ -66,6 +66,8 @@ function makeFact(
       win_probabilities: { 'Option A': 0.62, 'Option B': 0.38 },
       summary: 'Option A currently leads.',
       enrichment: {
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         option_comparison: [
           { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
         ],
@@ -112,7 +114,7 @@ const ARGS_BASE = {
 };
 
 describe('decision-record capture — claim verdict stamped from the projected fact', () => {
-  it('stamps a WITHHELD verdict on the captured record event', async () => {
+  it('does not persist a decision record when the constraint verdict withholds designation', async () => {
     await recordDecisionRecordForCommit({
       ...ARGS_BASE,
       fact: makeFact({
@@ -121,9 +123,10 @@ describe('decision-record capture — claim verdict stamped from the projected f
       }),
     });
 
-    expect(createRecord).toHaveBeenCalledTimes(1);
+    expect(createRecord).not.toHaveBeenCalled();
     const data = captureEvent();
-    expect(data.status).toBe('ok');
+    expect(data.status).toBe('skipped');
+    expect(data.skip_reason).toBe('leader_designation_withheld');
     expect(data.may_name_leading_option).toBe(false);
     expect(data.constraint_verdict_state).toBe('evaluated_infeasible');
     expect(data.claim_verdict_provenance).toBe('scenario_fact');
@@ -141,6 +144,27 @@ describe('decision-record capture — claim verdict stamped from the projected f
     const data = captureEvent();
     expect(data.may_name_leading_option).toBe(true);
     expect(data.constraint_verdict_state).toBe('evaluated_feasible');
+  });
+
+  it('does not persist a categorical choice when a constraint-permitted fact is a producer-attested near tie', async () => {
+    const fact = makeFact({
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    });
+    fact.result.enrichment = {
+      ...fact.result.enrichment,
+      robustness_status: 'computed',
+      robustness: { near_tie: { is_tie: true } },
+    };
+
+    await recordDecisionRecordForCommit({ ...ARGS_BASE, fact });
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(captureEvent()).toMatchObject({
+      status: 'skipped',
+      skip_reason: 'leader_designation_withheld',
+      may_name_leading_option: true,
+    });
   });
 
   it('fails CLOSED on an unstamped fact — an unknown verdict is not a permitted one', async () => {

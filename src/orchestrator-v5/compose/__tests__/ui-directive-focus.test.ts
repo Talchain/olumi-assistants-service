@@ -80,6 +80,8 @@ function dominantFact(overrides: { leadingOptionId?: string | null; noop?: boole
           may_name_leading_option: true,
           constraint_verdict_state: 'evaluated_feasible',
         },
+        robustness_status: 'computed',
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         factor_sensitivity: [
           { factor_id: 'fac_a', influence_score: 0.8, influence_rank: 1, confidence: 0.9 },
           { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 },
@@ -115,6 +117,8 @@ function healthyFact(): HandlerFact {
           may_name_leading_option: true,
           constraint_verdict_state: 'evaluated_feasible',
         },
+        robustness_status: 'computed',
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         // Three balanced factors — no single one exceeds the 50% dominance
         // share, so NO lens fires (the genuine no-lens case).
         factor_sensitivity: [

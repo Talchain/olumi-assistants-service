@@ -74,7 +74,8 @@ describe('raw-robustness → gate integration (contract)', () => {
     const rawRobustness = pickLatestRawRobustness(priorFacts);
     expect(rawRobustness).toEqual({
       level: 'very_low',
-      near_tie_is_tie: false,
+      // Absence is UNKNOWN, never permission to invent a producer verdict.
+      near_tie_is_tie: null,
     });
 
     const analysis: AdviceGateAnalysis = {
@@ -242,10 +243,10 @@ describe('turn-executor call-site — rawRobustness wiring', () => {
     // The import must be present — otherwise the wiring expression below
     // would not even compile, but pinning it here makes the dependency
     // explicit at the test layer.
-    const importLine = activeLines.find((line) =>
-      /import\s*\{\s*pickLatestRawRobustness\s*\}\s*from\s*['"]\.\/coaching\/pick-raw-robustness\.js['"]/.test(line),
+    const importBlock = source.match(
+      /import\s*\{[^}]*\bpickLatestRawRobustness\b[^}]*\}\s*from\s*['"]\.\/coaching\/pick-raw-robustness\.js['"]/s,
     );
-    expect(importLine, 'pickLatestRawRobustness import missing from turn-executor.ts').toBeDefined();
+    expect(importBlock, 'pickLatestRawRobustness import missing from turn-executor.ts').not.toBeNull();
 
     // The literal wiring expression on a non-comment line. If any of
     // these tokens is changed (key renamed, helper renamed, argument

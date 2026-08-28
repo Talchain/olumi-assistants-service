@@ -71,6 +71,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
 import type { MayNameLeadingOptionVerdict } from '../context/claim-safety-read.js';
+import { mayDesignateLeadingOptionForFact } from '../compose/leader-designation-license.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   AUTO_CAPTURE_RECORD_ID_NAMESPACE,
@@ -132,6 +133,7 @@ export type DecisionRecordSkipReason =
   | 'missing_graph_hash'
   | 'missing_computed_at'
   | 'no_leading_option'
+  | 'leader_designation_withheld'
   | 'no_option_label'
   | 'empty_summary';
 
@@ -394,6 +396,22 @@ export async function recordDecisionRecordForCommit(
         'DecisionRecords — capture skipped (fact carries no recordable decision; designed skip, not a fault)',
       );
       emitCaptureEvent(args, claimVerdict, { status: 'skipped', skip_reason: built.reason });
+      return;
+    }
+    // An auto-captured decision record persists `chosen_option_*` as durable
+    // reasoning memory. Constraint entitlement alone is insufficient: the
+    // exact producer fact must also attest that the options separate. A
+    // near-tie/unavailable separation may retain numerical evidence on the
+    // response, but it must never become a categorical durable choice.
+    if (!mayDesignateLeadingOptionForFact(args.fact)) {
+      log.debug(
+        { scenario_id: args.scenarioId, turn_id: args.turnId },
+        'DecisionRecords — capture skipped (final fact does not license a leader designation)',
+      );
+      emitCaptureEvent(args, claimVerdict, {
+        status: 'skipped',
+        skip_reason: 'leader_designation_withheld',
+      });
       return;
     }
     if (built.analysisSummaryDropped) {

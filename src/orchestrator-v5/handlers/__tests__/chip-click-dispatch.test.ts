@@ -102,6 +102,7 @@ import {
   isDeterministicChipClickActionType,
   DETERMINISTIC_CHIP_ACTION_TYPES,
 } from '../chip-click-dispatch.js';
+import { finaliseV5Response } from '../../response-finaliser.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -495,6 +496,92 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     expect((chips[0] as { action_type?: string }).action_type).toBe('explain_results');
     expect(chips[1]!.id).toBe('chip_action_what_would_flip');
     expect((chips[1] as { action_type?: string }).action_type).toBe('what_would_flip');
+  });
+
+  it('carries robustness and comparisons from the exact post-dispatch fact selected by freshness', async () => {
+    // A non-analysis fact at index 0 proves selection is tied to the exact
+    // freshness-selected occurrence without creating a second analysis block.
+    // Multiple blocks deliberately make final separation unavailable, which
+    // would test the wrong withholding arm.
+    const decoy: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: false,
+      result: { precondition_unmet: false, option_count: 2 },
+    };
+    const selected = makeRunAnalysisFact({
+      robustness: { level: 'low', near_tie: { is_tie: true } },
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.5 },
+      ],
+    });
+    // The selected row is deliberately NOT index 0. A carrier that simply
+    // read postDispatchFacts[0] would see no analysis evidence.
+    (selected.result as Record<string, unknown>).computed_at = '2026-08-16T05:00:00.000Z';
+    (selected.result as Record<string, unknown>).leading_option_id = 'opt_a';
+    (selected.result as Record<string, unknown>).win_probabilities = {
+      opt_a: 0.5,
+      opt_b: 0.5,
+    };
+    (selected.result as Record<string, unknown>).constraint_verdict = {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    };
+    runAnalysisHandlerMock.mockResolvedValue({
+      assistant_text: 'Ran analysis.',
+      handler_facts: [decoy, selected],
+      llm_calls_used: 0,
+    });
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-selected-fact-evidence',
+    });
+
+    expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') return;
+    expect(out.freshness?.selected_fact_index).toBe(1);
+    expect(out.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
+    expect(out.rawOptionComparisons).toEqual([
+      { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
+      { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.5 },
+    ]);
+    const committedResponse = commitDirectAnswerMock.mock.calls[0]?.[0];
+    expect(committedResponse).toEqual(out.response);
+    const analysisBlocks = out.response.blocks.filter(
+      (block) => block.type === 'analysis_result',
+    );
+    expect(analysisBlocks).toHaveLength(1);
+    expect(
+      analysisBlocks.map((block) =>
+        block.type === 'analysis_result' ? block.leading_option_id : undefined,
+      ),
+    ).toEqual([null]);
+    // Suppressing the designation must not destroy either run's producer
+    // evidence. In particular the exact selected near-tie probabilities still
+    // reach the same durable bytes the dispatcher returns to the caller.
+    expect(analysisBlocks[0]).toMatchObject({
+      win_probabilities: { opt_a: 0.5, opt_b: 0.5 },
+      enrichment: {
+        option_comparison: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.5 },
+        ],
+      },
+    });
+    const finalEnvelope = finaliseV5Response(out.response, {
+      analysisReady: out.analysisReady,
+      freshness: out.freshness,
+      mayNameLeadingOption: out.mayNameLeadingOption,
+      rawRobustness: out.rawRobustness,
+      graph: out.graph,
+    });
+    expect(finalEnvelope.analysis_state?.leader_claim).toEqual({
+      permitted: false,
+      separation: 'near_tie',
+      withheld_reason: 'options_do_not_separate',
+    });
   });
 
   it('emits the "What should we validate?" prompt chip from current-turn EVPPI identity plus exact factor label', async () => {

@@ -51,15 +51,14 @@ import type { LensId } from './compose/lens-selector.js';
 // T1 claim safety — the SINGLE owner of "may a leading option be named" is
 // `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
 // persisted on the fact there. This funnel READS that verdict; it does not
-// re-derive (CLAUDE.md trap #12). `mayNameLeadingOptionForFact` is the one
-// per-fact accessor, so the block funnel and the transport projection cannot
-// read it two different ways.
+// re-derive (CLAUDE.md trap #12). The final designation accessor combines that
+// persisted entitlement with producer-attested separation; it never infers a
+// tie from local probabilities.
 import {
   buildDiscussedEntityUiDirective,
   buildFocusInspectorDirective,
 } from './compose/ui-directive.js';
 import {
-  mayNameLeadingOptionForFact,
   projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
   // E2 — imported so the clone-skip is DERIVED from the projection's own frozen
@@ -68,6 +67,7 @@ import {
   // free; a local literal here would silently keep cloning it.
   WITHHELD_DROPPED_ENRICHMENT_BLOBS,
 } from './compose/withheld-claim-projection.js';
+import { mayDesignateLeadingOptionForFact } from './compose/leader-designation-license.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -679,7 +679,7 @@ function buildBlocksFromFacts(
     const mayNameLeadingOption =
       runAnalysisFact === undefined
         ? true
-        : mayNameLeadingOptionForFact(runAnalysisFact as RunAnalysisHandlerFact);
+        : mayDesignateLeadingOptionForFact(runAnalysisFact as RunAnalysisHandlerFact);
     const directive = buildDiscussedEntityUiDirective(blocks, mayNameLeadingOption);
     if (directive !== null) {
       blocks.push(directive);
@@ -1176,7 +1176,7 @@ export function buildAnalysisResultBlock(
   // read — see compose/withheld-claim-projection.ts for what is dropped, why
   // `decision_review` goes whole while `decision_brief` does not, and why the
   // honest variant is ABSENCE rather than synthesised copy.
-  const mayNameLeadingOption = mayNameLeadingOptionForFact(fact);
+  const mayNameLeadingOption = mayDesignateLeadingOptionForFact(fact);
   // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
   // drop-set is a frozen module constant, so on a withheld turn the blobs that
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
@@ -1448,7 +1448,7 @@ function rebuildPhase3BlocksFresh(
   // withheld turn the suggestion is dropped by the filter below. A companion
   // that survived would be a structured decision-science artefact standing alone
   // on exactly the turn whose disclosure says no option can be put forward.
-  if (mayNameLeadingOptionForFact(fact)) {
+  if (mayDesignateLeadingOptionForFact(fact)) {
     // Observability at the WIRE decision, not at construction: a companion that
     // survived its builder but was dropped here would otherwise be reported as
     // emitted on precisely the turns where it was suppressed.

@@ -31,6 +31,8 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { selectRunAnalysisFact } from '../context/freshness.js';
+import { deriveCompanionValueClaimSafe } from '../compose/companion-claim-safe.js';
+import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 
 export interface RawRobustnessSignals {
   /** Raw `enrichment.robustness.level` string when present (lower-cased). */
@@ -123,6 +125,7 @@ export function readRawRobustnessFromRunAnalysisFact(
   if (fact.fact_type !== 'run_analysis') return null;
   const enrichment = asObject(fact.result.enrichment);
   if (enrichment === null) return null;
+  if (!deriveCompanionValueClaimSafe(enrichment, 'robustness')) return null;
   // Delegate: ONE normaliser, so the V4 and V5 addresses can never disagree
   // about what `near_tie.is_tie` means.
   return readRawRobustnessSignals(enrichment['robustness']);
@@ -138,6 +141,16 @@ export function readOptionComparisonsFromRunAnalysisFact(
 ): readonly RawOptionComparisonSignal[] | null {
   if (fact === undefined || fact.fact_type !== 'run_analysis') return null;
   const enrichment = asObject(fact.result.enrichment);
+  if (enrichment === null) return null;
+  // Feature-level status is a whole-set authority. Absent remains the
+  // sanctioned legacy shape; any present non-computed value fails closed.
+  if (
+    !isRecommendableOption({
+      status: enrichment['option_comparison_status'],
+    })
+  ) {
+    return null;
+  }
   const rawComparison = enrichment?.['option_comparison'];
   if (!Array.isArray(rawComparison) || rawComparison.length === 0) return null;
   const out: RawOptionComparisonSignal[] = [];
@@ -145,13 +158,22 @@ export function readOptionComparisonsFromRunAnalysisFact(
   for (const raw of rawComparison) {
     const row = asObject(raw);
     if (row === null) return null;
+    // Reuse the ONE shared per-option status authority. A failed/skipped row's
+    // probability is not scientific evidence even when every scalar parses.
+    if (!isRecommendableOption(row)) return null;
+    const rawOptionId = row['option_id'];
     const option_id =
-      typeof row['option_id'] === 'string' && row['option_id'].trim().length > 0
-        ? row['option_id'].trim()
+      typeof rawOptionId === 'string' &&
+      rawOptionId.length > 0 &&
+      rawOptionId === rawOptionId.trim()
+        ? rawOptionId
         : null;
+    const rawOptionLabel = row['option_label'];
     const option_label =
-      typeof row['option_label'] === 'string' && row['option_label'].trim().length > 0
-        ? row['option_label'].trim()
+      typeof rawOptionLabel === 'string' &&
+      rawOptionLabel.length > 0 &&
+      rawOptionLabel === rawOptionLabel.trim()
+        ? rawOptionLabel
         : null;
     const win_probability = row['win_probability'];
     if (

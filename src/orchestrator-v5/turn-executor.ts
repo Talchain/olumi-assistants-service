@@ -395,6 +395,11 @@ import {
 // use. Two same-named predicates is how this estate got burned before
 // (CLAUDE.md trap #12) — this is a call, not a copy.
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
+import {
+  readFinalLeaderClaimEgressPolicy,
+} from './compose/analysis-state-v1.js';
+import { projectLeaderClaimForDurableCommit } from './compose/leading-option-wire-enforcement.js';
+import { finaliseV5Response } from './response-finaliser.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -536,14 +541,15 @@ export interface TurnExecutorRunResult {
    * final analysis authority describe one run.
    */
   rawOptionComparisons?: readonly import('./coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
+  /** Canonical/provisional graph selected for AI reasoning identity at egress. */
+  reasoningGraph: GraphV3T | null;
   /**
    * T1 claim safety — may this turn NAME a leading option?
    *
    * `false` means the constraint verdict withheld the claim, so any copy on
    * `response` that names or presumes a leader contradicts the turn's own
-   * confirmation. Threaded to `sendFinalised200` → `EgressSanitiseOpts` so the
-   * layer-3 guard can measure the residue (observe-only; see
-   * `compose/leading-option-egress-guard.ts`).
+   * confirmation. Threaded to final response composition and then the wire
+   * projector; the independent layer-3 guard still measures any residue.
    *
    * READ from the stamp the run_analysis handler persisted on the fact, never
    * re-derived (CLAUDE.md trap #12).
@@ -657,10 +663,10 @@ export interface TurnExecutorRunResult {
    */
   frame?: CanonicalContextFrame;
   /**
-   * V5 egress/commit carrier: the strict GraphV3 used for entity-label
-   * sanitisation and durable assistant text. It is deliberately separate from
-   * the four-state ContextPack reasoning selector below; route-v2 consumes it
-   * only for response finalisation. Null when no strict egress graph exists.
+   * V5 final content graph used for entity-label sanitisation and durable
+   * assistant text. It is the committed graph after a successful write;
+   * otherwise it is the four-state selector's reasoning snapshot. Null when no
+   * strict content graph exists.
    */
   effectiveGraph?: GraphV3T | null;
   /**
@@ -1516,8 +1522,56 @@ export async function runTurnExecutor(
       const commitMeta = zeroSelectionProjection.applied
         ? { ...meta, pending_actions: [] }
         : meta;
-      result = await commitDirectAnswer(
+      const graphWritePlanned = graphWasProvided(commitMeta.graph);
+      const contentGraphForCommit = graphWritePlanned
+        ? effectiveTurnGraph
+        : reasoningGraphSelectionEstablished
+          ? reasoningTurnGraph
+          : effectiveTurnGraph;
+      // Durable conversation truth must be projected from the SAME final
+      // separation-aware authority as the wire. The old order persisted the
+      // earlier constraint-only answer here, then route egress could discover
+      // a near tie and remove the categorical designation. That left a false
+      // canonical assistant row behind for return-session reasoning.
+      const finalAnalysisFactsForCommit = unifiedFactsAtExit ?? context.prior_facts;
+      const selectedAnalysisFactForCommit =
+        reasoningGraphIsCanonical &&
+        freshness?.freshness === 'fresh' &&
+        freshness.selected_fact_index !== null
+          ? finalAnalysisFactsForCommit[freshness.selected_fact_index]
+          : undefined;
+      const rawRobustnessForCommit = readRawRobustnessFromRunAnalysisFact(
+        selectedAnalysisFactForCommit,
+      );
+      const rawComparisonsForCommit = readOptionComparisonsFromRunAnalysisFact(
+        selectedAnalysisFactForCommit,
+      );
+      const canonicalStateForCommit =
+        canonicalStateForRun ??
+        (freshness !== null ? canonicalStateForNonExecute() : undefined);
+      const authorityEnvelopeForCommit = finaliseV5Response(
         zeroSelectionProjection.response,
+        {
+          canonicalState: canonicalStateForCommit,
+          analysisReady: analysisReadyForTurn,
+          ...(freshness !== null ? { freshness } : {}),
+          mayNameLeadingOption: mayNameLeadingOptionForRun,
+          rawRobustness: rawRobustnessForCommit,
+        },
+      );
+      const durableResponse = projectLeaderClaimForDurableCommit(
+        zeroSelectionProjection.response,
+        {
+        requestId,
+        exitPath: 'turn_executor',
+        leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelopeForCommit),
+        graph: contentGraphForCommit,
+        analysisReady: analysisReadyForTurn,
+        selectedFactComparisons: rawComparisonsForCommit,
+        },
+      ).response;
+      result = await commitDirectAnswer(
+        durableResponse,
         {
           // Injected BEFORE ...meta so a call site could still override; no
           // current call site does (the wrapper's server-read derivation is
@@ -1539,14 +1593,15 @@ export async function runTurnExecutor(
           // decision-brief shape gate (undefined on non-qualifying turns —
           // the RPC then leaves brief_text untouched).
           briefText: meta.briefText ?? briefSeedForTurn,
-          // Existing durable/wire label-resolution carrier. This remains the
-          // strict egress graph and deliberately does not claim to be the
-          // ContextPack reasoning authority selected later in ORIENT.
-          contentGraph: effectiveTurnGraph,
+          // One label authority for durable text and eventual wire output. A
+          // real graph write uses the graph being committed; a read-only turn
+          // uses the ContextPack-selected snapshot, never stale request bytes.
+          contentGraph: contentGraphForCommit,
         },
         store,
       );
       zeroResolvedSelectionGuardAppliedAtCommit = zeroSelectionProjection.applied;
+      if (result.graphPersisted) graphWriteCommittedForTurn = true;
       zeroResolvedSelectionMutationReceiptPersistedAtCommit =
         mutationReceiptCandidate && result.graphPersisted;
     } catch (error) {
@@ -2142,6 +2197,16 @@ export async function runTurnExecutor(
   // concern. Keeping the two explicit avoids expanding this binding into
   // route, output-safety, persistence, or canonical-mutation ownership.
   let effectiveTurnGraph: GraphV3T | null = null;
+  // Read-only AI authority. Kept separate from `effectiveTurnGraph`, which is
+  // request/commit oriented and may legitimately be newer or stale while a
+  // canonical persisted graph still governs reasoning.
+  let reasoningTurnGraph: GraphV3T | null = null;
+  // Final response/durable-text authority. Once the four-state selector runs,
+  // read-only turns use that snapshot; only a graph that actually commits in
+  // this turn may supersede it.
+  let reasoningGraphSelectionEstablished = false;
+  let reasoningGraphIsCanonical = false;
+  let graphWriteCommittedForTurn = false;
   // ROADMAP 1.42 — VERBATIM reasoning captured from the real LLM routing
   // call, hoisted to outer scope (same reason as the fields above) so
   // `finalizeRun` — declared OUTSIDE the try block below — can read it.
@@ -2369,6 +2434,9 @@ export async function runTurnExecutor(
       requestGraph: options.graphState,
     });
     const contextGraphForReasoning = contextGraphSelection.graph;
+    reasoningTurnGraph = contextGraphForReasoning;
+    reasoningGraphSelectionEstablished = true;
+    reasoningGraphIsCanonical = contextGraphSelection.status === 'canonical';
     // Persisted analysis is licensed only beside a valid persisted canonical
     // graph. An orphaned durable fact must not reactivate a provisional request
     // graph (even on a matching hash), and an unavailable graph read must not
@@ -13015,15 +13083,14 @@ export async function runTurnExecutor(
     //   "Your first analysis is ready. Take a moment to explore the leading
     //    option and the factors shaping it before acting on the result."
     //
-    // — `signals/coaching-signals.ts` FIRST_ANALYSIS_COMPLETE. That sentence
-    // trips `leading_option` in the shared vocabulary and DESIGNATES NOTHING:
-    // no option named, no probability, no ranking. The unscoped guard replaced
-    // the whole receipt with withheld copy, destroying both the analysis
-    // confirmation AND the honest compound-edit disclosure ("haven't applied
-    // the other change yet ('Sales Budget')") sitting in the same string. That
-    // is a strictly worse outcome than the phrase it removed, and it is the
-    // over-suppression failure this estate treats as a defect, not a safe
-    // default.
+    // — `signals/coaching-signals.ts` FIRST_ANALYSIS_COMPLETE. The sentence is
+    // a categorical designation even though it names no option: it tells the
+    // user a "leading option" exists. The first cut still enforced it wrongly:
+    // it replaced the WHOLE receipt, destroying the analysis confirmation and
+    // the honest compound-edit disclosure ("haven't applied the other change
+    // yet ('Sales Budget')") sitting beside it. The route's final wire gate now
+    // recognises this exact code-owned sentence and replaces only those bytes;
+    // this coarser executor guard remains scoped away from receipts.
     //
     // ⚠ THE DIVERGENCE THIS PARAGRAPH USED TO DESCRIBE IS CLOSED (ROADMAP
     // 2.804) — and the record is kept rather than deleted, because the shape of
@@ -13048,11 +13115,11 @@ export async function runTurnExecutor(
     // carries the leader id while the prose withholds it. Pre-existing, out of
     // scope for 2.804, rowed as ROADMAP 2.844.
     //
-    // What still stands, and is the
-    // reason this guard stays scoped: the fail-closed default is right for a
-    // PERMISSION and dangerous as a licence to DELETE a whole answer — which is
-    // precisely why the finaliser must not overrule a producer that has already
-    // consulted its own gate.
+    // What still stands, and is the reason THIS guard stays scoped: a fail-
+    // closed permission is not a licence for this coarse whole-answer path to
+    // destroy a receipt. Final response authority is enforced later at the one
+    // route egress seam, where exact typed copy and redactable units permit a
+    // surgical correction.
     //
     // SO: this guard owns the exits where NO producer-side verdict gate exists
     // — the turns that dispatched no execute-intent handler at all. That is the
@@ -13080,17 +13147,11 @@ export async function runTurnExecutor(
     //   - the in-flow explanation gate covers `EXPLANATION_HANDLER_IDS` only:
     //     `explain_from_structure`, `explain_results`, `what_would_flip`.
     //
-    // THE TRUE COVERAGE, and the gap named rather than papered over:
-    //   `run_analysis`                → producer gate (the FIRST_ANALYSIS_COMPLETE
-    //                                   signal) — and note it reads a DIFFERENT
-    //                                   authority than this guard does (the
-    //                                   handler-outcome channel, not the fact
-    //                                   chain), so the two can disagree.
-    //   the three explanation handlers → the in-flow gate at `:8210`.
-    //   ⛔ `set_factor_value` / `add_constraint` / `adjust_edge_strength`
-    //      receipts → NO leader-claim enforcement at all. Only the observe-only
-    //      Layer-3 alarm at `route-v2.ts` scans them, and observe-only changes
-    //      not one byte.
+    // EXECUTOR-LOCAL COVERAGE remains deliberately narrow: `run_analysis` has
+    // its producer gate and the three explanation handlers have the in-flow
+    // gate. The three mutation receipts do not pass through either local gate;
+    // the single final-wire authority in `route-v2.ts` covers them after final
+    // response analysis_state composition.
     //
     // ⚠ THAT GAP SET IS **THREE**, DERIVED — and an earlier revision of this
     // comment said FIVE by adding `edit_graph` / `draft_graph`. Corrected at the
@@ -13103,14 +13164,10 @@ export async function runTurnExecutor(
     // direction for sizing the work that closes it — 7 = 1 + 3 + 3, and the
     // arithmetic is the check.
     //
-    // The three-handler gap is real, is NOT closed by this PR, and is not
-    // closable from here: those receipts are producer-gated territory and this
-    // finaliser must not overrule a producer (the paragraph above is what
-    // happens when it does). Rowed programme-side (2.149) as route-level
-    // claim-safety work, together with the `sendFinalised200` exits that never
-    // reach this function at all. A reader who needs "is a leader claim
-    // reachable on a mutation receipt?" should go there, not infer safety from
-    // this guard's existence.
+    // That three-handler gap is real only at THIS executor-local guard. The
+    // central route finaliser supplies the last-line enforcement without
+    // pretending mutation receipts are explanation handlers or duplicating
+    // their producers.
     // ═══════════════════════════════════════════════════════════════════════
     if (proposedHandlerIdForOutcome !== null) return;
     const assistantText = response.assistant_text;
@@ -13646,7 +13703,9 @@ export async function runTurnExecutor(
     // >20-history convergence exit remains explicit.
     const finalAnalysisFacts = unifiedFactsAtExit ?? context.prior_facts;
     const selectedFinalAnalysisFact =
-      freshness?.freshness === 'fresh' && freshness.selected_fact_index !== null
+      reasoningGraphIsCanonical &&
+      freshness?.freshness === 'fresh' &&
+      freshness.selected_fact_index !== null
         ? finalAnalysisFacts[freshness.selected_fact_index]
         : undefined;
     const rawRobustnessForRun = readRawRobustnessFromRunAnalysisFact(
@@ -13661,6 +13720,7 @@ export async function runTurnExecutor(
       // No independent selection or request-state fallback is introduced.
       rawRobustness: rawRobustnessForRun,
       rawOptionComparisons: rawOptionComparisonsForRun,
+      reasoningGraph: reasoningTurnGraph,
       // T1 claim safety — READ (never derived here, CLAUDE.md trap #12) at
       // TURN ENTRY from the persisted verdict, and refined post-dispatch on
       // execute turns. ROADMAP 1.233: before the hoist this was the `true`
@@ -13693,9 +13753,14 @@ export async function runTurnExecutor(
       // T4 Slice 2: the once-per-turn canonical frame (see above). Absent ⇒
       // honest "not observed"; route consumers fall back to the partial path.
       ...(frameForRun ? { frame: frameForRun } : {}),
-      // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
-      // so wire label resolution matches the durable-text scrub at commit.
-      effectiveGraph: effectiveTurnGraph,
+      // The same graph authority commitTurn used for durable-text scrubbing.
+      // Successful writes advance it; read-only turns use the selected
+      // canonical/provisional snapshot and never stale request bytes.
+      effectiveGraph: graphWriteCommittedForTurn
+        ? effectiveTurnGraph
+        : reasoningGraphSelectionEstablished
+          ? reasoningTurnGraph
+          : effectiveTurnGraph,
       // Observability: expose the fully-populated per-stage timings (total_ms,
       // routing_llm_ms, tokens, routing model/prompt identity) so route-v2 can
       // thread them into the flag-gated minimal diagnostic trace. Only present

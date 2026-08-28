@@ -48,6 +48,7 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import { observeSerialisedPack } from '../context/__tests__/observe-serialised-pack.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { PRESENT_PAIR } from '../context/__tests__/run-delta-fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 
@@ -59,8 +60,49 @@ const GRAPH = {
     { id: 'opt-a', kind: 'option', label: 'Offshore partner' },
     { id: 'opt-b', kind: 'option', label: 'Hire locally' },
   ],
-  edges: [{ from: 'fac_budget', to: 'goal_growth', strength: 0.6 }],
+  edges: [
+    {
+      from: 'fac_budget',
+      to: 'goal_growth',
+      edge_type: 'directed',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+  ],
+  goal_node_id: 'goal_growth',
 };
+
+const CURRENT_GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH as never);
+/**
+ * The current fact must be the exact fresh fact selected for this canonical
+ * graph. The shared pair deliberately uses illustrative hashes; this route
+ * fixture replaces only the current echo with the real computed hash so a
+ * stale response cannot accidentally satisfy the positive wire assertion.
+ */
+const TURN_PRESENT_PAIR = [
+  {
+    ...PRESENT_PAIR[0]!,
+    fact_version: 1,
+    result: {
+      ...PRESENT_PAIR[0]!.result,
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt-b',
+      summary: 'Hire locally is ahead in the current run.',
+      graph_hash_at_run: CURRENT_GRAPH_HASH,
+    },
+  },
+  {
+    ...PRESENT_PAIR[1]!,
+    fact_version: 1,
+    result: {
+      ...PRESENT_PAIR[1]!.result,
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt-a',
+      summary: 'Offshore partner was ahead in the prior run.',
+    },
+  },
+] as const;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -86,8 +128,29 @@ vi.mock('../session/index.js', () => ({
     ],
     // THE ONE THING THIS SUITE VARIES: the persisted fact chain the turn's
     // leader-claim entitlement and the run_delta pair are both derived from.
-    readFactsFor: async () => PRESENT_PAIR,
-    readFactsWithTurnFor: async () => [],
+    readFactsFor: async () => TURN_PRESENT_PAIR,
+    readFactsWithTurnFor: async () =>
+      TURN_PRESENT_PAIR.map((fact, index) => ({
+        fact,
+        fact_row_id: `run-fact-row-${index}`,
+        turn_id: index === 0 ? 'mock-prior-run-row' : 'mock-older-run-row',
+        fact_created_at:
+          (fact.result as { computed_at?: string }).computed_at ??
+          '2026-06-06T00:00:00.000Z',
+      })),
+    // The current production authority is the uncached scenario-wide page,
+    // not the hot turn window. Supply the exact same ordered pair so the test
+    // proves currentness through the real durable reconciliation path.
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: TURN_PRESENT_PAIR.map((fact, index) => ({
+        fact,
+        fact_row_id: `run-fact-row-${index}`,
+        fact_created_at:
+          (fact.result as { computed_at?: string }).computed_at ??
+          '2026-06-06T00:00:00.000Z',
+      })),
+      total_count: TURN_PRESENT_PAIR.length,
+    }),
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async () => undefined,
@@ -160,7 +223,11 @@ describe('run_delta leader ids survive the turn-executor → assembler hop', () 
    * derivable, and that it is a LEADER CHANGE, before asserting it arrives.
    */
   it('PRECONDITION — the fixture pair yields a derivable leader change', () => {
-    const built = buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true });
+    const built = buildRunDelta({
+      priorFacts: TURN_PRESENT_PAIR,
+      mayNameLeadingOption: true,
+      currentLeaderDesignationPermitted: true,
+    });
     expect(built.kind, 'the pair must be derivable or this suite is vacuous').toBe('ok');
     if (built.kind !== 'ok') throw new Error('unreachable');
     expect(built.delta.leader.changed, 'the pair must carry a REAL leader change').toBe(true);

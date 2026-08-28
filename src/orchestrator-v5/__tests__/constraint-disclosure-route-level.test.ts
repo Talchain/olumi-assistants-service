@@ -659,7 +659,10 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // `evaluated_feasible`, the leading option may be named, and NO disclosure
     // is appended. If this ever goes red, the fix below is costing users a
     // recommendation on healthy runs.
-    plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+    plotResponse = plotEnvelope({
+      constraintKey: 'constraint_out_total_cost_max',
+      withRobustness: true,
+    });
     return runAnalysisTurn(app).then((turn) => {
       expect(turn.status).toBe(200);
       // ⚠ NEGATIVE CONTROL RE-DERIVED (ROADMAP 2.675, CLAUDE.md trap 13b). This
@@ -849,7 +852,10 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
     // `evaluated_feasible`, so a fix that simply deleted all coaching fails.
 
     it('evaluated_feasible, FIRST run: the coaching copy IS still present', () => {
-      plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+      plotResponse = plotEnvelope({
+        constraintKey: 'constraint_out_total_cost_max',
+        withRobustness: true,
+      });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
         expect(turn.coaching).toMatch(/explore the leading option/i);
@@ -861,7 +867,10 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       // is asserted ABSENT, so a fixture that silently fell back to the
       // first-run signal fails here instead of passing the withhold assertions
       // below for the wrong reason.
-      plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+      plotResponse = plotEnvelope({
+        constraintKey: 'constraint_out_total_cost_max',
+        withRobustness: true,
+      });
       seedPriorRun();
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
@@ -987,6 +996,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
       plotResponse = plotEnvelope({
         constraintKey: 'constraint_out_total_cost_max',
         withDecisionReview: true,
+        withRobustness: true,
       });
       const turn = await runAnalysisTurn(app);
       expect(turn.status).toBe(200);
@@ -1004,6 +1014,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
       plotResponse = plotEnvelope({
         constraintKey: 'constraint_out_total_cost_max',
         withDecisionReview: true,
+        withRobustness: true,
       });
       const turn = await runAnalysisTurn(app);
       expect(cardKinds(turn.raw)).toContain('assumption');
@@ -1929,6 +1940,38 @@ const WALK_DEADLINE_CONSTRAINT = {
 };
 
 /**
+ * R2's positive-control graph must be genuinely analysis-ready. The shared
+ * READY_GRAPH intentionally has no decision node, so using it here would make
+ * the final AnalysisState blocked/NO_DECISION and could never prove that a
+ * licensed, separated leader survives the final wire authority.
+ */
+const R2_ANALYSIS_READY_GRAPH = {
+  ...READY_GRAPH,
+  nodes: [
+    ...READY_GRAPH.nodes,
+    { id: 'dec_growth', kind: 'decision', label: 'Growth approach' },
+  ],
+  edges: [
+    {
+      from: 'dec_growth',
+      to: 'opt_hire',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_growth',
+      to: 'opt_hold',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    ...READY_GRAPH.edges,
+  ],
+  goal_constraints: [WALK_DEADLINE_CONSTRAINT],
+};
+
+/**
  * PLoT's disclosure of the drop, in the shape `FilteredConstraintRecord`
  * declares at the pinned deployed SHA `eb73c6a9`
  * (`plot-lite-service/src/types/engine-v3.ts:348`), attached to `_meta` exactly
@@ -1973,26 +2016,35 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     priorFacts = [];
     // Opt in: the scenario's ONLY ratified constraint is the minted deadline,
     // which is exactly the walk's state.
-    activeGraph = { ...READY_GRAPH, goal_constraints: [WALK_DEADLINE_CONSTRAINT] };
+    activeGraph = R2_ANALYSIS_READY_GRAPH;
     activeRatifiedConstraints = [WALK_DEADLINE_CONSTRAINT];
-    plotResponse = withFilteredConstraints(plotEnvelope({}), [TEMPORAL_FILTER_RECORD]);
+    plotResponse = withFilteredConstraints(
+      plotEnvelope({ withRobustness: true }),
+      [TEMPORAL_FILTER_RECORD],
+    );
   });
   afterEach(() => {
     setTestSink(null);
     vi.clearAllMocks();
   });
 
-  it('the leader is NAMED on the wire — `leading_option_id` is non-null', async () => {
-    // The whole defect in one assertion. On the four failing walk runs this
-    // field was `null` while `win_probabilities` showed a top-2 gap of 0.27,
-    // 0.30 and 0.33 — roughly 3× the tie threshold.
+  it('a current separated leader remains named on the wire', async () => {
+    // Positive control for the final authority: this graph has a real decision
+    // and the producer attests both feasibility and separation, so the final
+    // AnalysisState must license the designation rather than merely carry
+    // numerical evidence.
     const turn = await runAnalysisTurn(app);
     expect(turn.status).toBe(200);
     const body = JSON.parse(turn.raw) as Record<string, any>;
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block).toBeDefined();
+    expect(body.analysis_state.run_state.kind).toBe('complete_current');
+    expect(body.analysis_state.leader_claim).toMatchObject({
+      permitted: true,
+      separation: 'separated',
+    });
+    expect(body.analysis_state.leader_claim).not.toHaveProperty('withheld_reason');
     expect(block.leading_option_id).toBe('opt_hire');
-    expect(block.leading_option_id).not.toBeNull();
   });
 
   it('and the three untruths are GONE from the bytes the user receives', async () => {

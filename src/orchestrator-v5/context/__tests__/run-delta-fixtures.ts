@@ -31,6 +31,10 @@ export function runAnalysisFact(
     result: {
       enrichment: {
         analysis_status: 'completed',
+        // Positive leader fixtures must explicitly attest separation. Constraint
+        // feasibility alone is not a categorical leader licence.
+        robustness_status: 'computed',
+        robustness: { level: 'high', near_tie: { is_tie: false } },
         results: options.map((o) => ({
           option_id: o.id,
           option_label: o.id === 'opt-a' ? 'Offshore partner' : 'Hire locally',

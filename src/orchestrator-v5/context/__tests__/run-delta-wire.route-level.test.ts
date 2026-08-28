@@ -67,6 +67,16 @@ function render(priorFacts: readonly HandlerFact[]): {
     priorFactsReadOk: true,
     graphContext: { status: 'canonical' },
     mayNameLeadingOption: true,
+    coachingContext: {
+      analysis_present: true,
+      freshness: 'fresh',
+      readiness_status: 'ready',
+      rerun_required: false,
+      usable_for_prose: true,
+      usable_for_chips: true,
+      blocked: false,
+      actionable_blocker_count: 0,
+    },
   });
   const prompt = buildUserMessage(pack, MESSAGE);
   return { prompt, serialised: observeSerialisedPack(prompt) };
@@ -82,12 +92,20 @@ describe('run_delta reaches the rendered routing prompt', () => {
    * FIRST, and prove the refused pair is genuinely refused.
    */
   it('PRECONDITION — the producer accepts the present pair and refuses the other', () => {
-    const ok = buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true });
+    const ok = buildRunDelta({
+      priorFacts: PRESENT_PAIR,
+      mayNameLeadingOption: true,
+      currentLeaderDesignationPermitted: true,
+    });
     expect(ok.kind, 'the present pair must be derivable or this suite is vacuous').toBe('ok');
     if (ok.kind !== 'ok') throw new Error('unreachable');
     expect(ok.delta.leader.changed, 'the pair must carry a REAL consequence').toBe(true);
 
-    const refused = buildRunDelta({ priorFacts: REFUSED_PAIR, mayNameLeadingOption: true });
+    const refused = buildRunDelta({
+      priorFacts: REFUSED_PAIR,
+      mayNameLeadingOption: true,
+      currentLeaderDesignationPermitted: true,
+    });
     expect(refused.kind, 'the refused pair must be REFUSED or the absence arm is vacuous').toBe('none');
     if (refused.kind !== 'none') throw new Error('unreachable');
     expect(refused.reason).toBe('insufficient_runs');

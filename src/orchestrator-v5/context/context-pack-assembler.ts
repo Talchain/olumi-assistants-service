@@ -1704,6 +1704,12 @@ export function assembleContextPackWithSummary(
       : buildRunDelta({
           priorFacts: input.priorFacts,
           mayNameLeadingOption: input.mayNameLeadingOption === true,
+          // ContextPack is built before a final response exists. Canonical
+          // freshness is therefore the current-only authority: stale,
+          // unavailable or omitted freshness may retain historical evidence
+          // but cannot designate a current leader.
+          currentLeaderDesignationPermitted:
+            input.coachingContext?.freshness === 'fresh',
         });
   // Strip the frozen-empty `flip_thresholds` — see the projection comment and
   // `ContextPackRunDeltaSchema`. Destructured rather than deleted so a wire

@@ -96,11 +96,12 @@
  *   vocabulary in another: "Hire Marketing Manager is strong. It leads at
  *   72%." When no current analysis evidence is licensed, the field-level
  *   canonical-name anchor licenses removal of the vocabulary-bearing unit. In
- *   an evidence-only current state, however, the same shape is indistinguishable
- *   at this seam from recorded losing-option evidence ("Keep what we have ... It
- *   only comes out ahead in a tiny fraction"). Evidence-only deletion therefore
- *   requires name and designation in the same unit; the alarm reports any
- *   distributed residue instead of this rail inventing a referent.
+ *   an evidence-only current state, however, the same shape can resemble
+ *   recorded losing-option evidence ("Keep what we have ... It only comes out
+ *   ahead in a tiny fraction"). Evidence-only deletion therefore requires name
+ *   and designation in the same unit, or an exact canonical-joined comparison
+ *   set from which this rail can build deterministic evidence-only copy. With
+ *   neither, it stands down rather than inventing a referent.
  *
  * THE CRITERION THAT CLOSES BOTH. Enforcement needs TWO independent facts, and
  * neither alone is sufficient:
@@ -131,9 +132,9 @@
  * and quietly covers less is the guarantee-theatre class this programme hunts.
  *
  *   COVERED   `assistant_text` and `framing_question` — the two top-level
- *             unbounded prose surfaces, both rendered VERBATIM by the UI, and
- *             the surfaces that carry the model-authored ANSWER on all three
- *             model-text-capable pre-executor exits.
+ *             unbounded prose surfaces — plus the typed `analysis_result`
+ *             block. The structured block reuses the producer's existing
+ *             withheld projection rather than maintaining a second key list.
  *
  * ⚠⚠ THE CEILING — READ THIS BEFORE QUOTING THE HEADLINE. What this gate closes
  * is BOUNDED on THREE axes, and the headline must name all three or it over-reads
@@ -176,26 +177,28 @@
  * longer ships".
  *
  * ── The seam's own exclusions (structural, not the ceiling above) ──
- *     - `blocks[].{title,body,signal,summary,…}` and every enrichment blob:
- *       PRODUCER-owned (`compose/withheld-claim-projection.ts`). A second,
- *       wire-level structured projection is a second authority over one question
- *       (trap #12). The alarm keeps observing them.
- *     - STRUCTURED key designations (`leading_option_id`, …): no prose "unit" to
- *       be surgical about; the producer already nulls them.
+ *     - Non-analysis block prose remains producer-owned. The typed
+ *       `analysis_result` block is aligned here because final separation
+ *       authority can be stricter than the fact's earlier constraint verdict.
  *     - `_reasoning`: verbatim, ruled to bypass the cage (ROADMAP 1.42).
  *     - SSE MID-STREAM frames: ship before `sendFinalised200` exists.
  *     - The three execute-intent receipts: EXECUTOR-side (`turn-executor.ts`).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
+import { types as nodeUtilTypes } from 'node:util';
+
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { FinalLeaderClaimEgressPolicy } from './analysis-state-v1.js';
 import type { RawOptionComparisonSignal } from '../coaching/pick-raw-robustness.js';
+import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 import { COACHING_TEXT } from '../signals/coaching-signals.js';
 import { textAssertsLeadingOption, textNamesLeadingOption } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
+import { sanitiseUserFacingText } from '../../orchestrator/shared/output-safety.js';
+import { projectTransportEnrichmentForWithheldClaim } from './withheld-claim-projection.js';
 
 /**
  * The sentence that replaces one offending unit.
@@ -223,6 +226,9 @@ const FIRST_ANALYSIS_COMPLETE_TEXT = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
  */
 export const WIRE_ENFORCED_PROSE_FIELDS = ['assistant_text', 'framing_question'] as const;
 type WireEnforcedProseField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
+export const WIRE_ENFORCED_STRUCTURED_FIELDS = ['analysis_result'] as const;
+type WireEnforcedStructuredField = (typeof WIRE_ENFORCED_STRUCTURED_FIELDS)[number];
+type WireEnforcedField = WireEnforcedProseField | WireEnforcedStructuredField;
 
 /** How the designation was removed. Bounded — this is the telemetry cardinality. */
 export type WireEnforcementMode =
@@ -371,10 +377,10 @@ export function textNamesAnOption(value: string, roster: readonly string[]): boo
  * neighbouring sentence all fail closed for the evidence carve-out.
  */
 const QUALIFIED_NEAR_TIE_DISCLOSURE =
-  /\b(?:close call|effectively tied|too close|no clear (?:winner|leader)|options? (?:do|does) not separate|not settled|not yet robust|within (?:the )?model uncertainty|could shift)\b/i;
+  /\b(?:(?:this|it|the (?:result|comparison|ranking|order)|the options?) (?:is|are|remain|remains) (?:still )?(?:a close call|effectively tied|too close|not settled|not yet robust|within (?:the )?model uncertainty)|the analysis treats (?:this|the (?:result|comparison)) as (?:a close call|effectively tied|too close)|there is no clear (?:winner|leader)|options? (?:do|does) not separate|(?:the )?(?:result|ranking|order|options?) could shift)\b/i;
 
 const CONSTRAINT_WITHHELD_DISCLOSURE =
-  /\b(?:constraint(?:s| verdict)? (?:withhold|withholds|do not license|does not license|prevent|prevents) (?:a |the )?(?:leader|leading option|recommendation)|(?:leader|leading option|recommendation) (?:is|remains) withheld (?:by|because of) (?:the )?constraints?)\b/i;
+  /\b(?:(?:the )?constraint(?:s| verdict)? (?:withhold|withholds|do not license|does not license|prevent|prevents) (?:a |the )?(?:leader|leading option|recommendation)|(?:leader|leading option|recommendation) (?:is|remains) withheld (?:by|because of) (?:the )?constraints?)\b/i;
 
 const SEPARATION_UNAVAILABLE_DISCLOSURE =
   /\b(?:(?:the )?analysis (?:did not|could not|has not) establish whether (?:the )?options? separate|option separation (?:was|is|remains) (?:not established|unavailable|unknown)|whether (?:the )?options? separate (?:was|is|remains) (?:not established|unavailable|unknown))\b/i;
@@ -392,8 +398,11 @@ interface AttestedComparison {
   readonly renderedPercent: number;
 }
 
-function nonEmptyTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+function exactNonEmptyIdentity(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
+    return null;
+  }
+  return value;
 }
 
 function optionIdentitiesFromGraph(graph: unknown): readonly CanonicalOptionIdentity[] | null {
@@ -404,8 +413,8 @@ function optionIdentitiesFromGraph(graph: unknown): readonly CanonicalOptionIden
     if (raw == null || typeof raw !== 'object') continue;
     const node = raw as { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
     if (node.kind !== 'option') continue;
-    const id = nonEmptyTrimmedString(node.id);
-    const label = nonEmptyTrimmedString(node.label);
+    const id = exactNonEmptyIdentity(node.id);
+    const label = exactNonEmptyIdentity(node.label);
     if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
     identities.push({ id, label });
   }
@@ -425,8 +434,8 @@ function optionIdentitiesFromAnalysisReady(
       readonly id?: unknown;
       readonly label?: unknown;
     };
-    const id = nonEmptyTrimmedString(option.option_id) ?? nonEmptyTrimmedString(option.id);
-    const label = nonEmptyTrimmedString(option.label);
+    const id = exactNonEmptyIdentity(option.option_id) ?? exactNonEmptyIdentity(option.id);
+    const label = exactNonEmptyIdentity(option.label);
     if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
     identities.push({ id, label });
   }
@@ -478,6 +487,34 @@ function readAttestedComparisons(
   if (identities === null) return [];
   const identityById = new Map(identities.map((identity) => [identity.id, identity]));
 
+  // The selected fact is sufficient authority for a blockless follow-up: the
+  // turn may discuss the current analysis without re-shipping its structured
+  // analysis_result block. Join every selected comparison to the current
+  // canonical roster first; no model-authored label or number can self-license.
+  const selectedAttested: AttestedComparison[] = [];
+  const selectedIds = new Set<string>();
+  for (const selected of selectedFactComparisons) {
+    const id = exactNonEmptyIdentity(selected.option_id);
+    const label = exactNonEmptyIdentity(selected.option_label);
+    const canonical = id === null ? undefined : identityById.get(id);
+    const probability = selected.win_probability;
+    if (
+      id === null ||
+      label === null ||
+      canonical === undefined ||
+      canonical.label !== label ||
+      selectedIds.has(id) ||
+      typeof probability !== 'number' ||
+      !Number.isFinite(probability) ||
+      probability < 0 ||
+      probability > 1
+    ) {
+      return [];
+    }
+    selectedIds.add(id);
+    selectedAttested.push({ id, label, renderedPercent: Math.round(probability * 100) });
+  }
+
   const blocks = (response as { readonly blocks?: unknown }).blocks;
   if (!Array.isArray(blocks)) return [];
   const analysisBlocks = blocks.filter(
@@ -486,10 +523,26 @@ function readAttestedComparisons(
       typeof block === 'object' &&
       (block as { readonly type?: unknown }).type === 'analysis_result',
   );
+  // A blockless follow-up uses the exact canonical-joined selected fact above.
+  // A present block is an additional claim surface and must agree exactly;
+  // multiple blocks are ambiguous and fail weak.
+  if (analysisBlocks.length === 0) return selectedAttested;
   if (analysisBlocks.length !== 1) return [];
   const enrichment = (analysisBlocks[0] as { readonly enrichment?: unknown }).enrichment;
   if (enrichment === null || typeof enrichment !== 'object') return [];
-  const comparison = (enrichment as { readonly option_comparison?: unknown }).option_comparison;
+  const enrichmentRecord = enrichment as Record<string, unknown>;
+  // A present analysis block is itself a claim surface. Its feature-level
+  // status must therefore be independently recommendable before its scalar
+  // rows can corroborate the selected canonical fact. Exact numbers cannot
+  // rehabilitate an explicitly failed/skipped comparison computation.
+  if (
+    !isRecommendableOption({
+      status: enrichmentRecord['option_comparison_status'],
+    })
+  ) {
+    return [];
+  }
+  const comparison = enrichmentRecord['option_comparison'];
   if (!Array.isArray(comparison) || comparison.length === 0) return [];
   if (comparison.length !== selectedFactComparisons.length) return [];
 
@@ -501,15 +554,17 @@ function readAttestedComparisons(
       readonly option_id?: unknown;
       readonly option_label?: unknown;
       readonly win_probability?: unknown;
+      readonly status?: unknown;
     };
-    const id = nonEmptyTrimmedString(row.option_id);
-    const label = nonEmptyTrimmedString(row.option_label);
+    const id = exactNonEmptyIdentity(row.option_id);
+    const label = exactNonEmptyIdentity(row.option_label);
     const probability = row.win_probability;
     const selected = selectedFactComparisons[index];
     const canonical = id === null ? undefined : identityById.get(id);
     if (
       id === null ||
       label === null ||
+      !isRecommendableOption(row as Record<string, unknown>) ||
       canonical === undefined ||
       canonical.label !== label ||
       seenIds.has(id) ||
@@ -543,6 +598,67 @@ function disclosureForPolicy(policy: FinalLeaderClaimEgressPolicy): RegExp | nul
   }
 }
 
+/**
+ * Deterministic evidence-only replacement for an unstructured field whose
+ * option identity and leader vocabulary are split across redactable units.
+ *
+ * The wire gate must not guess whether a pronoun in a later sentence refers to
+ * the named option. When the exact freshness-selected comparison set has
+ * already joined the canonical roster, however, it can preserve those typed
+ * measurements without preserving the ambiguous model prose. This is not a
+ * second analytical authority: ordering, labels and values all come from the
+ * selected producer fact, and the final policy supplies only its already-
+ * composed disclosure.
+ */
+function deterministicEvidenceSummary(
+  policy: FinalLeaderClaimEgressPolicy,
+  attested: readonly AttestedComparison[],
+): string | null {
+  if (attested.length === 0) return null;
+  const measurements = attested
+    .map(
+      ({ label, renderedPercent }) =>
+        `${label} came out ahead in ${renderedPercent}% of runs of this model`,
+    )
+    .join('; ');
+  switch (policy) {
+    case 'evidence_only_options_do_not_separate':
+      return `${measurements}. The options do not separate.`;
+    case 'evidence_only_constraint_verdict_withheld':
+      return `${measurements}. The constraint verdict withholds a leading option.`;
+    case 'evidence_only_separation_unavailable':
+      return `${measurements}. The analysis did not establish whether the options separate.`;
+    default:
+      return null;
+  }
+}
+
+function hasAffirmativeTerminalDisclosure(
+  unit: string,
+  measuredComparisonEnd: number,
+  disclosure: RegExp,
+): boolean {
+  const tail = unit.slice(measuredComparisonEnd);
+  const match = disclosure.exec(tail);
+  if (match === null || match.index === undefined) return false;
+  const prefix = tail.slice(0, match.index);
+  // The disclosure must be the direct conjunct following the exact measured
+  // comparison. Arbitrary prose before it can negate/retract the apparent
+  // caveat ("but it is not true that this is a close call").
+  if (
+    !/^\s*(?:[,;:\u2014-]\s*)?(?:(?:but|while|although|and|yet|because)\s+)?$/iu.test(
+      prefix,
+    )
+  ) {
+    return false;
+  }
+  const suffix = tail.slice(match.index + match[0].length).trim();
+  // A question or any trailing clause can retract/qualify the apparent
+  // disclosure ("close call? No", "close call, incorrectly"). Only an
+  // affirmative terminal statement licenses the evidence carve-out.
+  return suffix.length === 0 || /^[.!]+$/u.test(suffix);
+}
+
 function maskAttestedEvidence(
   value: string,
   policy: FinalLeaderClaimEgressPolicy,
@@ -552,7 +668,6 @@ function maskAttestedEvidence(
   if (disclosure === null || attested.length === 0) return value;
   let changed = false;
   const masked = splitIntoRedactableUnits(value).map((unit) => {
-    if (!disclosure.test(unit)) return unit;
     let next = unit;
     let unitChanged = false;
     for (const evidence of attested) {
@@ -563,6 +678,18 @@ function maskAttestedEvidence(
           `\\s+of\\s+(?:runs|simulations)(?:\\s+of\\s+this\\s+model)?`,
         'giu',
       );
+      const measuredMatch = measuredComparison.exec(unit);
+      if (
+        measuredMatch === null ||
+        measuredMatch.index === undefined ||
+        !hasAffirmativeTerminalDisclosure(
+          unit,
+          measuredMatch.index + measuredMatch[0].length,
+          disclosure,
+        )
+      ) {
+        continue;
+      }
       const replaced = next.replace(measuredComparison, LICENSED_EVIDENCE_SENTINEL);
       if (replaced !== next) unitChanged = true;
       next = replaced;
@@ -616,34 +743,26 @@ export interface WireLeaderClaimEnforcementOpts {
    * designated", read from the final composed `analysis_state` at
    * `sendFinalised200` and never re-derived here (CLAUDE.md trap #12).
    * `designation_permitted` ⇒ a by-reference no-op. Evidence-only policies
-   * permit only exact producer-attested comparisons with a truthful same-unit
-   * caveat; they never permit categorical designation.
+   * permit exact producer-attested comparisons with a truthful same-unit caveat
+   * or deterministic copy from the exact selected comparison set; they never
+   * permit categorical designation.
    */
   readonly leaderClaimPolicy: FinalLeaderClaimEgressPolicy;
   /**
-   * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
-   * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
-   * derivation of the verdict.
+   * The authoritative reasoning/dispatch graph selected at the route's final
+   * egress seam, read ONLY for the option ROSTER — see
+   * {@link optionRosterFromGraph} for why that is not a second derivation of
+   * the verdict.
    *
    * Typed `unknown` on purpose: this module lives in `compose/` and must not
    * take a dependency on the route's `GraphV3T` alias to read two fields
    * defensively.
    *
-   * ⚠ A NULL GRAPH MEANS NO ROSTER MEANS NO ENFORCEMENT, and the hole is real:
-   * MOST of `route-v2.ts`'s exits pass `graph: null`. No ratio and no line
-   * numbers are written here, and that is deliberate — this sentence has
-   * carried "13 of 19", then "15 of 21", and both went stale within days, while
-   * the line references beside them (`:2420`, `:3520`, `:4192`, `:4650`) had
-   * drifted to different code entirely. A figure re-typed is a mirror re-armed
-   * (trap 12). The population, the split, and which exits thread a real graph
-   * are all enumerated by
-   * `__tests__/route-egress-analysis-state-freshness.drift.test.ts` — read it.
-   * QUALITATIVELY, and this is the part that does not drift: the graph-less
-   * exits are the deterministic-copy ones, while the model-text-capable exits
-   * (`chip_click` ok, `draft_graph`, the MAIN edit exit) and the executor exit
-   * thread a real graph. But a dispatch that returns a null graph on some branch disarms this
-   * gate for that turn, so the stand-down is REPORTED
-   * (`mode: 'roster_unavailable'`) rather than silent.
+   * A null graph may use the response's readiness roster below. A PRESENT
+   * graph is authoritative even when malformed, ambiguous or empty: readiness
+   * must not repair it, because that would let a stale projection decide which
+   * option name to delete. Such a present-but-unusable graph stands down loudly
+   * (`mode: 'roster_unavailable'`).
    *
    * It is the same epistemic position as "no option name in the field": we
    * cannot establish that a designation is present, so we do not delete the
@@ -652,13 +771,11 @@ export interface WireLeaderClaimEnforcementOpts {
   readonly graph: unknown;
   /**
    * The `analysis_ready` payload this exit is shipping (`ctx.analysisReady`),
-   * read ONLY for the option ROSTER when {@link graph} yields none — see
+   * read ONLY for the option ROSTER when {@link graph} is absent — see
    * {@link optionRosterFromAnalysisReady}.
    *
-   * ⭐ THIS IS WHAT CLOSES THE HOLE THE `graph` DOCSTRING ABOVE DESCRIBES. That
-   * note is retained verbatim because it is still true of the graph reader; it
-   * is no longer the last word on whether the gate can act, because a graph-less
-   * exit that carries a readiness payload now has a roster after all.
+   * A graph-less exit that carries readiness can therefore still enforce. A
+   * present graph never falls through to this secondary source.
    *
    * Optional, and absence is honest: an exit carrying NEITHER a graph NOR a
    * readiness payload still stands down (`mode: 'roster_unavailable'`), because
@@ -668,8 +785,9 @@ export interface WireLeaderClaimEnforcementOpts {
   readonly analysisReady?: unknown;
   /**
    * Exact option comparisons from the SAME run-analysis fact selected by final
-   * freshness. Required for the numerical-evidence carve-out; absence or any
-   * body disagreement fails weak to no evidence licence.
+   * freshness. Required for the numerical-evidence carve-out; absence, or any
+   * disagreement in a present analysis-result body, fails weak to no evidence
+   * licence. A blockless follow-up can use the selected fact alone.
    */
   readonly selectedFactComparisons?: readonly RawOptionComparisonSignal[] | null;
 }
@@ -679,8 +797,8 @@ export interface WireLeaderClaimEnforcementResult {
   readonly response: OlumiResponse;
   /** True only when at least one field's bytes changed. */
   readonly changed: boolean;
-  /** Which covered fields were edited. Bounded by {@link WIRE_ENFORCED_PROSE_FIELDS}. */
-  readonly editedFields: readonly WireEnforcedProseField[];
+  /** Which covered fields were edited. Both sets are closed, exported contracts. */
+  readonly editedFields: readonly WireEnforcedField[];
 }
 
 function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
@@ -706,9 +824,10 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
  *
  * "Claim present" and "canonical name present" are read at FIELD level. Strict
  * withheld states then remove every designation-bearing unit. Evidence-only
- * states remove only units where canonical identity and designation co-occur;
- * that is the narrowest distinction this unstructured seam can prove without
- * fabricating a cross-sentence referent.
+ * states remove only units where canonical identity and designation co-occur.
+ * If identity and designation are distributed across units, the gate never
+ * invents a pronoun referent: it replaces the field only when exact selected-
+ * fact comparisons can produce a deterministic evidence-only summary.
  *
  * ⭐ THE POST-CHECK, and why the residual is re-read at all. Removing the
  * vocabulary unit can leave a distributed claim behind. So after each pass the
@@ -759,10 +878,15 @@ function projectField(
   // (2) A DESIGNATION IS POSSIBLE — the field names one of this scenario's own
   //     options. Vocabulary with no name designates nobody.
   if (!textNamesAnOption(value, roster)) return null;
-  // (3) Evidence-only turns preserve distributed evidence. If no single unit
-  //     proves identity + designation, this deleting rail stands down and the
-  //     observe-only alarm retains the residue for producer repair.
-  if (isEvidenceOnly && !splitIntoRedactableUnits(value).some(shouldRemoveUnit)) return null;
+  // (3) Evidence-only turns preserve distributed evidence without preserving
+  //     an ambiguous distributed designation. If no single unit proves
+  //     identity + designation, use the exact selected-fact comparison set as
+  //     a typed fallback. With no such authority, stand down and let the alarm
+  //     retain the residue for producer repair rather than guessing.
+  if (isEvidenceOnly && !splitIntoRedactableUnits(value).some(shouldRemoveUnit)) {
+    const fallback = deterministicEvidenceSummary(policy, attested);
+    return fallback === null ? null : { text: fallback, mode: 'whole_field' };
+  }
   const isClean = (candidate: string): boolean =>
     isEvidenceOnly
       ? !splitIntoRedactableUnits(candidate).some(shouldRemoveUnit)
@@ -778,6 +902,217 @@ function projectField(
   // Defensive only: if the field-level reader still sees a designation after
   // surgery, do not ship the unresolved field.
   return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
+}
+
+/**
+ * Align the structured analysis block with the same final designation policy.
+ * `leading_option_id` is nulled, and the existing producer-owned withheld
+ * projection removes leader-designating members from nested enrichment while
+ * retaining independent numerical evidence. The block summary uses the same
+ * evidence-preserving projector as the user-facing fields; without a usable
+ * roster, only an unambiguous leader assertion is replaced.
+ */
+function projectAnalysisResultBlocks(
+  response: OlumiResponse,
+  roster: readonly string[],
+  policy: FinalLeaderClaimEgressPolicy,
+  attested: readonly AttestedComparison[],
+): OlumiResponse | null {
+  if (!Array.isArray(response.blocks) || response.blocks.length === 0) return null;
+  let changed = false;
+  const blocks = response.blocks.map((block) => {
+    if (block.type !== 'analysis_result') return block;
+    let projected = block;
+    if (block.leading_option_id !== null && block.leading_option_id !== undefined) {
+      projected = { ...projected, leading_option_id: null };
+      changed = true;
+    }
+    if (block.enrichment !== undefined) {
+      let projectedEnrichment: Record<string, unknown> | undefined;
+      try {
+        // Snapshot permissive input exactly once into inert enumerable data.
+        // The projector and equality check then operate only on this snapshot,
+        // never on a potentially stateful Proxy/getter/toJSON object.
+        const enrichmentSnapshot = snapshotEnumerableData(
+          block.enrichment,
+        );
+        projectedEnrichment = projectTransportEnrichmentForWithheldClaim(
+          enrichmentSnapshot.value as Record<string, unknown>,
+        );
+        if (
+          !enrichmentSnapshot.untrustedIdentity &&
+          sameProjectionData(projectedEnrichment, enrichmentSnapshot.value)
+        ) {
+          projectedEnrichment = block.enrichment as Record<string, unknown>;
+        }
+      } catch {
+        // A hostile permissive subtree must not make the entire final authority
+        // fail open. Omit this optional enrichment while still nulling the typed
+        // designation and projecting the summary.
+        projectedEnrichment = undefined;
+      }
+      // A stateful Proxy can present harmless keys to one inspection and reveal
+      // a designation during later JSON serialisation, so its inert projection
+      // is always installed. Ordinary plain data whose projection is unchanged
+      // retains exact response identity. Permit-wins remains the first-line
+      // no-op for all input classes.
+      const { enrichment: _removed, ...withoutEnrichment } = projected;
+      if (projectedEnrichment !== block.enrichment) {
+        projected =
+          projectedEnrichment === undefined
+            ? withoutEnrichment
+            : { ...withoutEnrichment, enrichment: projectedEnrichment };
+        changed = true;
+      }
+    }
+    if (typeof block.summary === 'string' && block.summary.length > 0) {
+      const summaryProjection =
+        roster.length > 0
+          ? projectField(block.summary, roster, policy, attested)
+          : textAssertsLeadingOption(block.summary)
+            ? { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' as const }
+            : null;
+      if (summaryProjection !== null && summaryProjection.text !== block.summary) {
+        projected = { ...projected, summary: summaryProjection.text };
+        changed = true;
+      }
+    }
+    return projected;
+  });
+  return changed ? { ...response, blocks } : null;
+}
+
+/**
+ * Copy enumerable JSON-like data without invoking accessors or user hooks.
+ * Cycles, functions, symbols, BigInt, exotic prototypes and accessors are not
+ * safe optional enrichment at the final authority boundary and make the
+ * caller omit the subtree. `Object.getOwnPropertyDescriptors` is deliberately
+ * the sole own-key inspection of an input object; stateful Proxies cannot make
+ * a later comparison fail open because comparisons see only the plain copy.
+ */
+interface EnumerableDataSnapshot {
+  readonly value: unknown;
+  readonly untrustedIdentity: boolean;
+}
+
+function snapshotEnumerableData(
+  value: unknown,
+  ancestors = new WeakSet<object>(),
+): EnumerableDataSnapshot {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return { value, untrustedIdentity: false };
+  }
+  if (typeof value !== 'object') throw new TypeError('non_data_value');
+  if (ancestors.has(value)) throw new TypeError('cyclic_value');
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    prototype !== Object.prototype &&
+    prototype !== null &&
+    prototype !== Array.prototype
+  ) {
+    throw new TypeError('exotic_prototype');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const ownToJson = descriptors['toJSON'];
+  if (ownToJson !== undefined) throw new TypeError('custom_to_json');
+  ancestors.add(value);
+  try {
+    let untrustedIdentity = nodeUtilTypes.isProxy(value);
+    const out: Record<string, unknown> | unknown[] = Array.isArray(value)
+      ? []
+      : Object.create(null) as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== 'string') {
+        if (descriptors[key]?.enumerable === true) throw new TypeError('symbol_key');
+        continue;
+      }
+      const descriptor = descriptors[key];
+      if (descriptor?.enumerable !== true) continue;
+      if (!('value' in descriptor)) throw new TypeError('accessor_value');
+      const nested = snapshotEnumerableData(descriptor.value, ancestors);
+      untrustedIdentity ||= nested.untrustedIdentity;
+      Object.defineProperty(out, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: nested.value,
+      });
+    }
+    return { value: out, untrustedIdentity };
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+/** Compare only inert snapshots/projector output; never call this on wire input. */
+function sameProjectionData(
+  left: unknown,
+  right: unknown,
+  seen = new WeakMap<object, object>(),
+): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== 'object' ||
+    typeof right !== 'object' ||
+    Array.isArray(left) !== Array.isArray(right)
+  ) {
+    return false;
+  }
+  const prior = seen.get(left);
+  if (prior !== undefined) return prior === right;
+  seen.set(left, right);
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let index = 0; index < leftKeys.length; index += 1) {
+    const key = leftKeys[index]!;
+    if (rightKeys[index] !== key) return false;
+    if (
+      !sameProjectionData(
+        (left as Record<string, unknown>)[key],
+        (right as Record<string, unknown>)[key],
+        seen,
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Pre-commit companion to the route chokepoint. It resolves raw entity ids in
+ * exactly the fields the leader projector reads, then applies the same final
+ * policy. This keeps durable conversation rows from retaining a designation
+ * the eventual wire removes, without running the full egress pipeline early.
+ */
+export function projectLeaderClaimForDurableCommit(
+  response: OlumiResponse,
+  opts: WireLeaderClaimEnforcementOpts,
+): WireLeaderClaimEnforcementResult {
+  const label = (value: string): string =>
+    sanitiseUserFacingText(value, opts.graph as never).text;
+  const labelledBlocks = response.blocks.map((block) =>
+    block.type === 'analysis_result' && typeof block.summary === 'string'
+      ? { ...block, summary: label(block.summary) }
+      : block,
+  );
+  const labelled: OlumiResponse = {
+    ...response,
+    assistant_text: label(response.assistant_text),
+    ...(typeof response.framing_question === 'string'
+      ? { framing_question: label(response.framing_question) }
+      : {}),
+    blocks: labelledBlocks,
+  };
+  return enforceLeadingOptionClaimsAtWire(labelled, opts);
 }
 
 /**
@@ -811,7 +1146,7 @@ export function enforceLeadingOptionClaimsAtWire(
         ? value.replaceAll(FIRST_ANALYSIS_COMPLETE_TEXT, WIRE_WITHHELD_LEADER_REPLACEMENT)
         : value;
     let next = response;
-    const editedFields = new Set<WireEnforcedProseField>();
+    const editedFields = new Set<WireEnforcedField>();
     const projectedAnswer = typedSignalProjection(response.assistant_text);
     if (projectedAnswer !== response.assistant_text) {
       editedFields.add('assistant_text');
@@ -825,21 +1160,49 @@ export function enforceLeadingOptionClaimsAtWire(
       }
     }
 
-    // GRAPH FIRST, READINESS AS THE FALLBACK. The graph is the richer source and
-    // stays primary so nothing changes on the exits that already had one; the
-    // readiness payload is consulted ONLY when the graph yields no roster, which
-    // is the graph-less majority of exits. Neither source supplies a verdict —
-    // both answer only "which options exist".
+    // PRESENT GRAPH OR ABSENT GRAPH — never "graph yielded nothing, so repair it
+    // from readiness". A present graph is the canonical roster authority even
+    // when it is empty/malformed/ambiguous; falling through would let a stale
+    // readiness projection delete prose about identities the graph does not
+    // establish. Neither source supplies a verdict — both answer only "which
+    // options exist".
     const graphRoster = optionRosterFromGraph(opts.graph);
     const roster =
-      graphRoster.length > 0 ? graphRoster : optionRosterFromAnalysisReady(opts.analysisReady);
+      opts.graph === null || opts.graph === undefined
+        ? optionRosterFromAnalysisReady(opts.analysisReady)
+        : graphRoster;
+    const attestedComparisons = readAttestedComparisons(
+      next,
+      opts.graph,
+      opts.analysisReady,
+      opts.selectedFactComparisons,
+    );
+    const projectedBlocks = projectAnalysisResultBlocks(
+      next,
+      roster,
+      opts.leaderClaimPolicy,
+      attestedComparisons,
+    );
+    if (projectedBlocks !== null) {
+      editedFields.add('analysis_result');
+      next = projectedBlocks;
+    }
+    const lengthFor = (body: OlumiResponse, field: WireEnforcedField): number => {
+      if (field === 'assistant_text') return body.assistant_text.length;
+      if (field === 'framing_question') return body.framing_question?.length ?? 0;
+      try {
+        return JSON.stringify(
+          body.blocks.filter((block) => block.type === 'analysis_result'),
+        ).length;
+      } catch {
+        return 0;
+      }
+    };
 
     if (roster.length === 0) {
-      // STAND DOWN, LOUDLY. Without a roster the gate cannot establish that any
-      // designation is possible, so deleting prose would be a guess. Reported
-      // rather than silent, because a silent stand-down is how a guarantee turns
-      // into theatre: a reader of the dashboard must be able to see the
-      // difference between "nothing to do" and "could not look".
+      // STAND DOWN, LOUDLY, for free response prose. Structured analysis
+      // designations above remain enforceable from their own typed fields even
+      // without a roster; arbitrary assistant prose does not.
       const couldHaveMattered =
         textAssertsLeadingOption(next.assistant_text) ||
         (typeof next.framing_question === 'string' &&
@@ -861,27 +1224,11 @@ export function enforceLeadingOptionClaimsAtWire(
         exit_path: opts.exitPath,
         edited_fields: fields.join(','),
         mode: 'surgical',
-        original_length: fields.reduce(
-          (sum, field) => sum + (field === 'assistant_text'
-            ? response.assistant_text.length
-            : response.framing_question?.length ?? 0),
-          0,
-        ),
-        projected_length: fields.reduce(
-          (sum, field) => sum + (field === 'assistant_text'
-            ? next.assistant_text.length
-            : next.framing_question?.length ?? 0),
-          0,
-        ),
+        original_length: fields.reduce((sum, field) => sum + lengthFor(response, field), 0),
+        projected_length: fields.reduce((sum, field) => sum + lengthFor(next, field), 0),
       });
       return { response: next, changed: true, editedFields: fields };
     }
-    const attestedComparisons = readAttestedComparisons(
-      next,
-      opts.graph,
-      opts.analysisReady,
-      opts.selectedFactComparisons,
-    );
 
     // The LOUDEST mode wins the report. A field edited surgically must never
     // mask a sibling field that needed the defensive last resort.
@@ -918,10 +1265,6 @@ export function enforceLeadingOptionClaimsAtWire(
 
     if (editedFields.size === 0) return unchanged(response);
     const fields = [...editedFields].sort();
-    const lengthFor = (body: OlumiResponse, field: WireEnforcedProseField): number =>
-      field === 'assistant_text'
-        ? body.assistant_text.length
-        : body.framing_question?.length ?? 0;
 
     emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
       request_id: opts.requestId,

@@ -167,6 +167,10 @@ function baseRunAnalysisFact(): Record<string, unknown> {
       computed_at: new Date(Date.now() - 9_000_000).toISOString(),
       enrichment: {
         analysis_status: 'completed',
+        robustness: {
+          level: 'high',
+          near_tie: { is_tie: false },
+        },
         option_comparison: [
           { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.72, outcome_mean: 0.5 },
           { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.28, outcome_mean: 0.3 },
@@ -940,7 +944,11 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     const LEADER_SENTENCE = `For context, ${LEADER_LABEL} leads at 72% against ${RUNNER_LABEL} at 28%.`;
     const LEADER_ANSWER = `${RECEIPT_SENTENCE} ${LEADER_SENTENCE}`;
 
-    function mockEditAnswer(assistantText: string, currentLeaderLicensed = false): void {
+    function mockEditAnswer(
+      assistantText: string,
+      currentLeaderLicensed = false,
+      freshnessOverride: typeof CURRENT_ANALYSIS_FRESHNESS | null = CURRENT_ANALYSIS_FRESHNESS,
+    ): void {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
         // The gate reads this for the option ROSTER only. A `graph: null` mock
@@ -950,7 +958,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         ...(currentLeaderLicensed
           ? {
               analysisReady: CURRENT_ANALYSIS_READY,
-              freshness: CURRENT_ANALYSIS_FRESHNESS,
+              ...(freshnessOverride === null ? {} : { freshness: freshnessOverride }),
               response: responseWithCurrentSeparatedAnalysis(assistantText),
             }
           : {
@@ -1005,31 +1013,79 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(text.length).toBeGreaterThan(WIRE_WITHHELD_LEADER_REPLACEMENT.length);
     });
 
-    it('PERMIT-WINS: identical prose on a PERMITTED scenario ships BYTE-IDENTICAL', async () => {
-      // ⭐ THE OVER-SUPPRESSION CONTROL, AND SIMULTANEOUSLY THE POSITIVE CONTROL
-      // FOR THE TWO ARMS ABOVE (trap #13): it proves this drive really can carry
-      // the designation to the wire, so "the designation is absent" upstairs is
-      // measuring suppression rather than a fixture that never had one.
-      //
-      // A blanket `false` at these exits — the failure mode #737's own header
-      // warns about — would turn this arm red, which is exactly its job.
-      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
-      mockEditAnswer(LEADER_ANSWER, true);
+    it('POST-COMMIT ROSTER: the edit result graph outranks the turn-entry graph', async () => {
+      const renamedLabel = 'New Canonical Plan';
+      const committedGraph = {
+        ...READY_GRAPH,
+        nodes: READY_GRAPH.nodes.map((node) =>
+          node.id === 'opt_hire' ? { ...node, label: renamedLabel } : node,
+        ),
+      };
+      dispatchEditGraphMock.mockResolvedValueOnce({
+        commitPerformed: true,
+        graph: committedGraph,
+        response: {
+          response_version: 2,
+          assistant_text: `Added the risk. ${renamedLabel} leads at 72%.`,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+
+      const { body } = await postTurn(app, MESSAGE);
+
+      expect(
+        body.assistant_text,
+        'using the older exitReasoningGraph roster would fail to recognise the newly committed label',
+      ).not.toContain(renamedLabel);
+      expect(body.assistant_text).toContain('Added the risk.');
+    });
+
+    it('DUAL-SOURCE FAILS WEAK: equal freshness fields cannot license edit prose from another read', async () => {
+      // A previous PERMIT-WINS control claimed this edit response was licensed
+      // because both independent reads described the same hash/timestamp. That
+      // is not a fact identity: tied rows with different robustness/comparisons
+      // can occupy index 0 in differently ordered arrays. The edit dispatcher
+      // does not carry the exact selected fact, so this graph-bearing exit must
+      // fail weak even when every comparable freshness field is equal.
+      const permittedFact = permittedRunAnalysisFact();
+      const computedAt = (permittedFact.result as Record<string, unknown>)
+        .computed_at as string;
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedFact] };
+      mockEditAnswer(LEADER_ANSWER, true, {
+        ...CURRENT_ANALYSIS_FRESHNESS,
+        computed_at: computedAt,
+      });
       const { body } = await postTurn(app, MESSAGE);
       expect(
         body.assistant_text,
-        'a permitted scenario must reach the user with its prose untouched, to the byte',
-      ).toBe(LEADER_ANSWER);
-      expect(
-        events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress),
-        'a permitted scenario must not trip the alarm — identical prose, opposite verdict',
-      ).toEqual([]);
+        'a separate resolver read cannot license designation or numerical evidence for this dispatch',
+      ).not.toContain(LEADER_LABEL);
       expect(
         events.filter(
           (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
         ),
-        'the wire gate must not even run on a permitted turn',
-      ).toEqual([]);
+        'the final wire authority must visibly neutralise the unprovable designation',
+      ).toHaveLength(1);
+    });
+
+    it('GRAPH-BEARING RESOLVER-ONLY FAILS WEAK: turn-entry evidence cannot license a dispatch graph', async () => {
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
+      // The response carries analysis bytes, but the edit dispatcher supplies
+      // no own freshness/evidence carrier. The only raw evidence available is
+      // the turn-entry resolver's, while `graph` is a dispatch result. Mixing
+      // those snapshots would make a newer graph borrow an older analysis.
+      mockEditAnswer(LEADER_ANSWER, true, null);
+
+      const { body } = await postTurn(app, MESSAGE);
+
+      expect(body.assistant_text).not.toContain(LEADER_LABEL);
+      expect(body.analysis_state?.leader_claim).toMatchObject({
+        permitted: false,
+        withheld_reason: 'separation_unavailable',
+      });
     });
 
     it('a withheld turn whose answer designates NOTHING ships BYTE-IDENTICAL', async () => {
@@ -1160,6 +1216,11 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         mayNameLeadingOption: opts.mayName,
         analysisReady: CURRENT_ANALYSIS_READY,
         freshness: CURRENT_ANALYSIS_FRESHNESS,
+        rawRobustness: { level: 'high', near_tie_is_tie: false },
+        rawOptionComparisons: [
+          { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.72 },
+          { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.28 },
+        ],
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
         // describe exists to pin. A `functional` chip answer never shapes.
@@ -1224,6 +1285,55 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       ).toContain('not stable across the runs');
     });
 
+    it('the real chip route preserves exact selected-fact near-tie evidence and its qualification', async () => {
+      const nearTieEvidence =
+        `${LEADER_LABEL} came out ahead in 50% of runs of this model, but this is a close call.`;
+      dispatchDeterministicChipClickMock.mockResolvedValue({
+        outcome: 'ok',
+        graph: READY_GRAPH,
+        // The constraint layer permits a designation; the producer's exact
+        // near-tie signal is what narrows the final policy to evidence-only.
+        mayNameLeadingOption: true,
+        analysisReady: CURRENT_ANALYSIS_READY,
+        freshness: CURRENT_ANALYSIS_FRESHNESS,
+        rawRobustness: { level: 'low', near_tie_is_tie: true },
+        rawOptionComparisons: [
+          { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.5 },
+          { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.5 },
+        ],
+        answerKind: 'substantive',
+        response: {
+          response_version: 2,
+          assistant_text: nearTieEvidence,
+          blocks: [
+            {
+              type: 'analysis_result',
+              summary: 'The options do not separate.',
+              leading_option_id: 'opt_hire',
+              enrichment: {
+                robustness: { level: 'low', near_tie: { is_tie: true } },
+                option_comparison: [
+                  { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.5 },
+                  { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.5 },
+                ],
+              },
+            },
+          ],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+
+      const { status, body } = await postChip(app);
+      expect(status).toBe(200);
+      expect(body.assistant_text).toBe(nearTieEvidence);
+      expect(body.analysis_state.leader_claim).toMatchObject({
+        permitted: false,
+        withheld_reason: 'options_do_not_separate',
+      });
+    });
+
     it('⭐ `_answer_shape` is ABSENT whenever the gate edited the answer', async () => {
       // ⭐ THE SIDECAR PIN (derivation §3(b)). `_answer_shape` RECONSTRUCTS the
       // answer verbatim — `deriveAnswerTextFromShape` rejoins headline, bullets
@@ -1278,18 +1388,19 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       return postTurn(app, MESSAGE);
     }
 
-    it("⭐ the #755 receipt — production copy, trips the vocabulary, designates NOTHING", async () => {
+    it('⭐ the typed first-analysis nudge is removed when final authority withholds designation', async () => {
       // ⭐ THE EXACT SENTENCE #755's FIRST CUT DESTROYED, imported from the
       // producer so a reword cannot silently decouple this test from it.
-      // "explore the leading option" trips the shared vocabulary and names no
-      // option, so it must reach the user untouched.
+      // Although it names no option, "the leading option" still asserts that a
+      // leader exists. The final authority therefore replaces this exact typed
+      // nudge without deleting unrelated receipt/evidence text.
       const receipt = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
       const { status, body } = await driveEditWith(receipt);
       expect(status).toBe(200);
       expect(
         body.assistant_text,
-        'the wire gate destroyed an honest receipt — this is #755 rebuilt at a new address',
-      ).toBe(receipt);
+        'the wire shipped a typed leading-option designation after final authority withheld it',
+      ).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
     });
 
     it('INSTRUMENT: that receipt really does trip the deleting reader', async () => {
@@ -1345,21 +1456,23 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       });
     });
 
-    it('the naming half is gone from the wire', async () => {
+    it('the designation is gone while the independent option statement survives', async () => {
       const { status, body } = await postTurn(app, MESSAGE);
       expect(status).toBe(200);
       expect(
         body.assistant_text,
-        'the vocabulary was removed and the NAME shipped — the claim survives distributed',
-      ).not.toContain(LEADER_LABEL);
+        'the independent statement was destroyed while removing the categorical designation',
+      ).toContain(`${LEADER_LABEL} is strong.`);
+      expect(body.assistant_text).not.toContain('It leads at 72%');
+      expect(body.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
     });
 
-    it('and the escalation is visible on the dashboard', async () => {
+    it('and the bounded surgical removal is visible on the dashboard', async () => {
       await postTurn(app, MESSAGE);
       const emitted = events.filter(
         (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
       );
-      expect(emitted[0]!.data['mode']).toBe('surgical_escalated');
+      expect(emitted[0]!.data['mode']).toBe('surgical');
     });
 
     it('PERMIT-WINS: the permitted twin ships it BYTE-IDENTICAL', async () => {

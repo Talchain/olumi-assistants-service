@@ -200,6 +200,38 @@ describe('readRawRobustnessFromRunAnalysisFact', () => {
       } as unknown as HandlerFact),
     ).toBeNull();
   });
+
+  it.each(['error', 'skipped', 'unavailable', { state: 'computed' }])(
+    'rejects a present non-computed robustness companion status (%j)',
+    (robustness_status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        robustness_status,
+        robustness: { level: 'high', near_tie: { is_tie: false } },
+      };
+      expect(
+        readRawRobustnessFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toBeNull();
+    },
+  );
+
+  it.each([undefined, 'computed'])(
+    'accepts the sanctioned legacy/computed robustness companion status (%s)',
+    (robustness_status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        ...(robustness_status === undefined ? {} : { robustness_status }),
+        robustness: { level: 'high', near_tie: { is_tie: false } },
+      };
+      expect(
+        readRawRobustnessFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toEqual({ level: 'high', near_tie_is_tie: false });
+    },
+  );
 });
 
 describe('readOptionComparisonsFromRunAnalysisFact', () => {
@@ -226,6 +258,8 @@ describe('readOptionComparisonsFromRunAnalysisFact', () => {
     [{ option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
       { option_id: 'opt-a', option_label: 'A again', win_probability: 0.4 }],
     [{ option_id: 'opt-a', option_label: '', win_probability: 0.6 }],
+    [{ option_id: ' opt-a', option_label: 'A', win_probability: 0.6 }],
+    [{ option_id: 'opt-a', option_label: 'A ', win_probability: 0.6 }],
   ])('fails weak for a malformed or ambiguous comparison set', (option_comparison) => {
     const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
       result: Record<string, unknown>;
@@ -235,4 +269,83 @@ describe('readOptionComparisonsFromRunAnalysisFact', () => {
       readOptionComparisonsFromRunAnalysisFact(fact as unknown as HandlerFact),
     ).toBeNull();
   });
+
+  it.each(['error', 'skipped', 'unavailable', { state: 'computed' }])(
+    'rejects a present non-computed comparison envelope status (%j)',
+    (option_comparison_status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        option_comparison_status,
+        option_comparison: [
+          { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+        ],
+      };
+      expect(
+        readOptionComparisonsFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toBeNull();
+    },
+  );
+
+  it.each([undefined, 'computed'])(
+    'accepts the sanctioned legacy/computed comparison envelope status (%s)',
+    (option_comparison_status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        ...(option_comparison_status === undefined
+          ? {}
+          : { option_comparison_status }),
+        option_comparison: [
+          { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+        ],
+      };
+      expect(
+        readOptionComparisonsFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toEqual([{ option_id: 'opt-a', option_label: 'A', win_probability: 0.6 }]);
+    },
+  );
+
+  it.each(['error', 'skipped', 'unavailable', null])(
+    'rejects an individually non-recommendable comparison row (%j)',
+    (status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        option_comparison_status: 'computed',
+        option_comparison: [
+          { option_id: 'opt-a', option_label: 'A', win_probability: 0.99, status },
+        ],
+      };
+      expect(
+        readOptionComparisonsFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toBeNull();
+    },
+  );
+
+  it.each([undefined, 'computed'])(
+    'accepts an individually legacy/computed comparison row (%s)',
+    (status) => {
+      const fact = runAnalysisFact({ id: 'opt-a' }) as unknown as {
+        result: Record<string, unknown>;
+      };
+      fact.result.enrichment = {
+        option_comparison_status: 'computed',
+        option_comparison: [
+          {
+            option_id: 'opt-a',
+            option_label: 'A',
+            win_probability: 0.6,
+            ...(status === undefined ? {} : { status }),
+          },
+        ],
+      };
+      expect(
+        readOptionComparisonsFromRunAnalysisFact(fact as unknown as HandlerFact),
+      ).toEqual([{ option_id: 'opt-a', option_label: 'A', win_probability: 0.6 }]);
+    },
+  );
 });

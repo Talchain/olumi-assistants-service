@@ -110,6 +110,12 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
+import {
+  readOptionComparisonsFromRunAnalysisFact,
+  readRawRobustnessFromRunAnalysisFact,
+  type RawOptionComparisonSignal,
+  type RawRobustnessSignals,
+} from '../coaching/pick-raw-robustness.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
@@ -123,6 +129,9 @@ import {
 import { isRecoverableHandlerCause } from '../compose/recoverable-handler-causes.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import type { ComposeContext } from '../compose/types.js';
+import { finaliseV5Response } from '../response-finaliser.js';
+import { readFinalLeaderClaimEgressPolicy } from '../compose/analysis-state-v1.js';
+import { projectLeaderClaimForDurableCommit } from '../compose/leading-option-wire-enforcement.js';
 
 /**
  * Note on ingress state (graphState / analysisState):
@@ -286,6 +295,10 @@ export type DispatchChipClickRunAnalysisResult =
        *  just-produced run_analysis fact and the snapshot graph so the
        *  rerun chip-click wire response carries `freshness === 'fresh'`. */
       readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
+      /** Robustness from the exact post-dispatch fact selected by freshness. */
+      readonly rawRobustness: RawRobustnessSignals | null;
+      /** Option comparisons from that same selected fact; never body-derived. */
+      readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
       /** ROADMAP 2.73 Fix C — decision_review call attribution for the
        *  chip-click path (mirrors #476's executor wiring). Present ONLY
        *  when the timings/trace gate is on AND the enricher's LLM call
@@ -1474,6 +1487,58 @@ export async function dispatchChipClickRunAnalysis(
       }
     }
 
+    // Derive the final analysis authority before persistence. The route later
+    // stamps the same carriers onto the wire response; committing first would
+    // leave the conversation row with a designation the final response removes.
+    const postDispatchFacts: readonly HandlerFact[] = [
+      ...enrichedFacts,
+      ...context.prior_facts,
+    ];
+    const freshness = deriveChipClickFreshness(
+      cachedSnapshot,
+      postDispatchFacts,
+      context.prior_facts_read_ok,
+    );
+    const selectedPostDispatchFact =
+      freshness.freshness === 'fresh' && freshness.selected_fact_index !== null
+        ? postDispatchFacts[freshness.selected_fact_index]
+        : undefined;
+    const rawRobustness = readRawRobustnessFromRunAnalysisFact(selectedPostDispatchFact);
+    const rawOptionComparisons = readOptionComparisonsFromRunAnalysisFact(
+      selectedPostDispatchFact,
+    );
+    const mayNameLeadingOption = readMayNameLeadingOptionVerdict(
+      postDispatchFacts,
+      claimSafetyScopeFromContext(context),
+    ).may_name_leading_option;
+    const authorityEnvelopeForCommit = finaliseV5Response(response, {
+      analysisReady,
+      freshness,
+      mayNameLeadingOption,
+      rawRobustness,
+      graph: snapshotGraph,
+    });
+    response = projectLeaderClaimForDurableCommit(response, {
+      requestId,
+      exitPath: 'chip_click_run_analysis_precommit',
+      graph: snapshotGraph,
+      analysisReady,
+      selectedFactComparisons: rawOptionComparisons,
+      leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelopeForCommit),
+    }).response;
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'chip_click_run_analysis',
+      },
+      {
+        prior_fact_count: context.prior_facts.length,
+        current_turn_fact_count: enrichedFacts.length,
+      },
+    );
+
     log.info(
       {
         event: 'v5_fact_chain_commit',
@@ -1532,35 +1597,6 @@ export async function dispatchChipClickRunAnalysis(
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,
       });
-      // V5 state-trust: derive freshness POST-dispatch using the just-
-      // produced run_analysis fact + prior chain, against the snapshot
-      // graph. The chip-click rerun path is the user's escape hatch from
-      // a stale verdict — its wire response MUST report fresh.
-      const postDispatchFacts: readonly HandlerFact[] = [
-        ...enrichedFacts,
-        ...context.prior_facts,
-      ];
-      // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
-      // selected first), but it matters for a rerun that produced no usable
-      // run_analysis fact AND could not read the prior chain.
-      const freshness = deriveChipClickFreshness(
-        cachedSnapshot,
-        postDispatchFacts,
-        context.prior_facts_read_ok,
-      );
-      emitFreshnessTelemetry(
-        freshness,
-        {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          dispatch_path: 'chip_click_run_analysis',
-        },
-        {
-          prior_fact_count: context.prior_facts.length,
-          current_turn_fact_count: enrichedFacts.length,
-        },
-      );
-
       return {
         outcome: 'ok',
         response,
@@ -1568,6 +1604,8 @@ export async function dispatchChipClickRunAnalysis(
         analysisReady,
         graph: snapshotGraph,
         freshness,
+        rawRobustness,
+        rawOptionComparisons,
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
@@ -1606,10 +1644,7 @@ export async function dispatchChipClickRunAnalysis(
         // down. `enrichedFacts` usually carries this turn's fresh analysis and
         // masks the difference; on a degraded analysis it does not, and that is
         // precisely the turn you least want reading a stale-window `true`.
-        mayNameLeadingOption: readMayNameLeadingOptionVerdict(
-          [...enrichedFacts, ...context.prior_facts],
-          claimSafetyScopeFromContext(context),
-        ).may_name_leading_option,
+        mayNameLeadingOption,
       };
     } catch (err) {
       log.error(

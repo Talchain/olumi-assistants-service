@@ -142,6 +142,10 @@ function makeMockResult() {
       stage_indicator: 'analyse' as const,
     },
     commitPerformed: true,
+    graph: null,
+    mayNameLeadingOption: false,
+    rawRobustness: null,
+    rawOptionComparisons: null,
   };
 }
 

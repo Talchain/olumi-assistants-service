@@ -143,6 +143,46 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
       expect(readRawRobustnessFromResponseBody(FRESH_BODY)).not.toBeNull();
     });
 
+    it.each(['error', 'skipped', 'unavailable', { state: 'computed' }])(
+      'a failed/malformed body companion status cannot attest separation (%j)',
+      (robustness_status) => {
+        const body = {
+          ...FRESH_BODY,
+          blocks: [
+            {
+              type: 'analysis_result',
+              enrichment: {
+                robustness_status,
+                robustness: { level: 'high', near_tie: { is_tie: false } },
+              },
+            },
+          ],
+        };
+        expect(readRawRobustnessFromResponseBody(body)).toBeNull();
+        expect(compose(body, true).leader_claim.permitted).toBe(false);
+      },
+    );
+
+    it.each([undefined, 'computed'])(
+      'a sanctioned legacy/computed body companion status may attest separation (%s)',
+      (robustness_status) => {
+        const body = {
+          ...FRESH_BODY,
+          blocks: [
+            {
+              type: 'analysis_result',
+              enrichment: {
+                ...(robustness_status === undefined ? {} : { robustness_status }),
+                robustness: { level: 'high', near_tie: { is_tie: false } },
+              },
+            },
+          ],
+        };
+        expect(readRawRobustnessFromResponseBody(body)).not.toBeNull();
+        expect(compose(body, true).leader_claim.permitted).toBe(true);
+      },
+    );
+
     it('DISCRIMINATION CONTROL — A1 and A2 AGREE on a payload that carries separation', () => {
       // Proves the disagreement above is a property of the STALE payload, not
       // a constant this file would report for any input (trap 20: a probe that

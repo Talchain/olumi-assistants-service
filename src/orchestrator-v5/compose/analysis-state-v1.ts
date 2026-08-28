@@ -124,6 +124,7 @@ import type { CanonicalAnalysisState } from '../context/canonical-analysis-state
 import type { FreshnessDerivation } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import { deriveCompanionValueClaimSafe } from './companion-claim-safe.js';
 
 /**
  * The readiness status this producer emits when the turn supplied no readiness
@@ -652,6 +653,7 @@ export function readRawRobustnessFromResponseBody(
   if (analysisBlocks.length !== 1) return null;
   const enrichment = analysisBlocks[0]?.['enrichment'];
   if (enrichment == null || typeof enrichment !== 'object') return null;
+  if (!deriveCompanionValueClaimSafe(enrichment, 'robustness')) return null;
   return readRawRobustnessSignals(
     (enrichment as Record<string, unknown>)['robustness'],
   );

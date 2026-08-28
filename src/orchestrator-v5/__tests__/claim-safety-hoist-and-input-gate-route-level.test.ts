@@ -44,12 +44,11 @@
  *      live walk."
  *
  * That was true while the ONLY output-side mechanism on a non-execute exit was
- * the observe-only Layer-3 alarm. It stopped being true when claim safety was
- * enforced at the `finalizeRun` chokepoint: on a non-execute exit the leader
- * claim is now REPLACED before the response leaves the executor, so the
- * converse output being leader-free is an in-repo, byte-level property. It is
- * asserted directly below, and exhaustively across converse / coach / clarify
- * in `withheld-leader-claim-chokepoint.test.ts`.
+ * the observe-only Layer-3 alarm. It stopped being true when the central route
+ * finaliser began enforcing the final composed response authority: the claim is
+ * now projected before the HTTP body ships, so the converse output being
+ * leader-free is an in-repo, byte-level property. It is asserted directly
+ * below and across converse / coach / clarify in the chokepoint suite.
  *
  * Leaving the old sentence in place would have been the trap-14 shape — a
  * label that was honest when written and false when read. The live walk is
@@ -624,13 +623,12 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       // alarm ... and therefore FIRES".
       // ═════════════════════════════════════════════════════════════════════
       const neutralised = events.filter(
-        (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise,
+        (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
       );
       expect(
         neutralised.length,
-        'the withheld converse exit must reach the finaliser with the REAL permission, and the ' +
-          'chokepoint guard must act on it exactly once. ZERO means the permission arrived as the ' +
-          'pre-hoist `true` default (the licensed no-op) or the chokepoint guard is gone.',
+        'the withheld converse exit must reach final wire authority with the composed prohibition, ' +
+          'and the wire gate must act exactly once. ZERO means final authority was not enforced.',
       ).toBe(1);
 
       // ⭐ AND THE PROPERTY THE OLD CAVEAT SAID WAS UNPROVABLE IN-REPO: the
@@ -655,7 +653,7 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       //
       // Its silence here is CAUSED, and the cause is pinned two assertions up:
       // `findLeaderClaims` on the wire bytes is empty, so the observe-only
-      // scan has nothing to report. If a future change stops the chokepoint
+      // scan has nothing to report. If a future change stops the wire projector
       // substituting, `findLeaderClaims` goes non-empty and this expectation
       // flips too — the two are read off the SAME scanner, so they cannot
       // drift into agreeing for different reasons.

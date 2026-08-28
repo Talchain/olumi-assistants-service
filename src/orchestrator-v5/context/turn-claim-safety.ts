@@ -69,11 +69,11 @@
  *     braces rather than load-bearing — but it is what makes "one derivation
  *     per turn" true by construction rather than by call-graph audit.
  *
- * ⭐ FAIL-CLOSED WHERE THIS MODULE DECIDES — AND IT IS CHEAP HERE, because the
- * egress guard is OBSERVE-ONLY today (it reports hits and returns the response
- * un-cloned). A spurious `false` buys a scan and maybe a log line and cannot
- * alter a wire byte; a spurious `true` disarms the alarm on a real leak. The
- * asymmetry is not close, so this module never answers `true` on its own.
+ * ⭐ FAIL-CLOSED WHERE THIS MODULE DECIDES. The result contributes to final
+ * composed analysis authority, and the final wire gate can alter a categorical
+ * designation when that authority withholds it. A spurious `true` would license
+ * a real leak; a spurious `false` can suppress a designation, so the selected-
+ * fact and final-state controls must accompany every fail-closed arm.
  *
  * ⭐ A DEGRADED STORE NOW WITHHOLDS IN THE ONE CANONICAL DERIVATION. Measured,
  * not assumed:
@@ -98,6 +98,7 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { GraphV3T } from '../../schemas/cee-v3.js';
 
 import { buildTurnContext } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
@@ -107,6 +108,12 @@ import {
 } from './claim-safety-read.js';
 import type { MayNameLeadingOptionVerdict } from './claim-safety-read.js';
 import type { FreshnessDerivation } from './freshness.js';
+import {
+  readOptionComparisonsFromRunAnalysisFact,
+  readRawRobustnessFromRunAnalysisFact,
+  type RawOptionComparisonSignal,
+  type RawRobustnessSignals,
+} from '../coaching/pick-raw-robustness.js';
 
 /**
  * The fields a non-execute `sendFinalised200` exit must state, all derived from
@@ -132,6 +139,12 @@ import type { FreshnessDerivation } from './freshness.js';
 export interface TurnExitStamp {
   readonly mayNameLeadingOption: boolean;
   readonly mayNameLeadingOptionProvenance: MayNameLeadingOptionVerdict['provenance'];
+  /** Robustness from the same scenario fact selected by exit freshness. */
+  readonly rawRobustness: RawRobustnessSignals | null;
+  /** Comparisons from that same selected fact; never reconstructed from body copy. */
+  readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
+  /** Persisted reasoning graph from this resolver snapshot, for graphless exits only. */
+  readonly exitReasoningGraph?: GraphV3T | null;
   /**
    * The turn context's persisted-graph analysis-freshness derivation, for the
    * `analysis_state` stamped at this exit.
@@ -192,6 +205,9 @@ const CONTEXT_READ_FAILED_DERIVATION: FreshnessDerivation = Object.freeze({
 interface ResolvedTurnExit {
   readonly verdict: MayNameLeadingOptionVerdict;
   readonly freshness?: FreshnessDerivation;
+  readonly rawRobustness: RawRobustnessSignals | null;
+  readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
+  readonly reasoningGraph?: GraphV3T | null;
 }
 
 export interface TurnClaimSafetyResolver {
@@ -222,9 +238,21 @@ export function createTurnClaimSafetyResolver(
   async function resolve(): Promise<ResolvedTurnExit> {
     // No payload ⇒ nothing was looked at. NO freshness is carried, which is
     // distinct from a read that looked and found nothing.
-    if (payload === null) return { verdict: NO_TURN_CONTEXT_VERDICT };
+    if (payload === null) {
+      return {
+        verdict: NO_TURN_CONTEXT_VERDICT,
+        rawRobustness: null,
+        rawOptionComparisons: null,
+      };
+    }
     try {
       const context = await buildTurnContext(payload, requestId);
+      const freshness = context.persisted_analysis_freshness;
+      const scenarioAnalysisFacts = context.scenario_analysis_fact_set?.facts ?? [];
+      const selectedFact =
+        freshness.freshness === 'fresh' && freshness.selected_fact_index !== null
+          ? scenarioAnalysisFacts[freshness.selected_fact_index]
+          : undefined;
       // THE canonical derivation — the same two arguments the execute path
       // passes at `turn-executor.ts`. Nothing is re-derived or mirrored here.
       return {
@@ -235,7 +263,10 @@ export function createTurnClaimSafetyResolver(
         // NOT a second derivation: the context computed this from the same
         // facts, the same persisted-graph hash and the same degraded-read flag
         // it hands `deriveCoachingState`. Read, never recomputed (trap 12).
-        freshness: context.persisted_analysis_freshness,
+        freshness,
+        rawRobustness: readRawRobustnessFromRunAnalysisFact(selectedFact),
+        rawOptionComparisons: readOptionComparisonsFromRunAnalysisFact(selectedFact),
+        reasoningGraph: context.persistedGraph,
       };
     } catch (err) {
       // FAIL CLOSED and SAY SO. A swallowed read failure that returned `true`
@@ -257,7 +288,13 @@ export function createTurnClaimSafetyResolver(
       // SAY WHICH KIND OF IGNORANCE THIS IS. The verdict fails closed as before;
       // the freshness reports a FAILED read rather than letting the exit's
       // `analysis_state` claim no graph was in scope.
-      return { verdict: NO_TURN_CONTEXT_VERDICT, freshness: CONTEXT_READ_FAILED_DERIVATION };
+      return {
+        verdict: NO_TURN_CONTEXT_VERDICT,
+        freshness: CONTEXT_READ_FAILED_DERIVATION,
+        rawRobustness: null,
+        rawOptionComparisons: null,
+        reasoningGraph: null,
+      };
     }
   }
 
@@ -268,6 +305,11 @@ export function createTurnClaimSafetyResolver(
       return {
         mayNameLeadingOption: resolved.verdict.may_name_leading_option,
         mayNameLeadingOptionProvenance: resolved.verdict.provenance,
+        rawRobustness: resolved.rawRobustness,
+        rawOptionComparisons: resolved.rawOptionComparisons,
+        ...(resolved.reasoningGraph !== undefined
+          ? { exitReasoningGraph: resolved.reasoningGraph }
+          : {}),
         // Spread conditionally: an exit with no derivation carries NO key, so
         // "not read" stays distinguishable from every derived verdict.
         ...(resolved.freshness !== undefined ? { exitFreshness: resolved.freshness } : {}),

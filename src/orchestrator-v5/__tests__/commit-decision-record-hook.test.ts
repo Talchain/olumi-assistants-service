@@ -80,6 +80,8 @@ function makeRunAnalysisFact(overrides?: {
       win_probabilities: { 'Option A': 0.62, 'Option B': 0.38 },
       summary: SUMMARY,
       enrichment: {
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         option_comparison: [
           { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
           { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
@@ -87,6 +89,10 @@ function makeRunAnalysisFact(overrides?: {
       },
       graph_hash_at_run: HASH_AT_RUN,
       computed_at: COMPUTED_AT,
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
       ...(overrides?.result ?? {}),
     },
   };
@@ -250,6 +256,8 @@ describe('flag ON — happy path', () => {
         makeRunAnalysisFact({
           result: {
             enrichment: {
+              robustness_status: 'computed',
+              robustness: { near_tie: { is_tie: false } },
               option_comparison: [
                 { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
               ],

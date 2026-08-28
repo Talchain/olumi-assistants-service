@@ -35,6 +35,8 @@ interface FactSpec {
   readonly computedAt?: string;
   readonly builds?: Record<string, string | null> | null;
   readonly entitled?: boolean;
+  /** Producer-attested option separation. `null` means unavailable. */
+  readonly nearTie?: boolean | null;
 }
 
 /**
@@ -55,6 +57,15 @@ function fact(spec: FactSpec): HandlerFact {
 
   const enrichment: Record<string, unknown> = {
     analysis_status: 'completed',
+    ...(spec.nearTie === null
+      ? {}
+      : {
+          robustness_status: 'computed',
+          robustness: {
+            level: 'high',
+            near_tie: { is_tie: spec.nearTie ?? false },
+          },
+        }),
     results: spec.options.map((o) => ({
       ...(o.id !== undefined ? { option_id: o.id } : {}),
       ...(o.label !== undefined ? { option_label: o.label } : {}),
@@ -95,8 +106,16 @@ function pair(prior: HandlerFact, current: HandlerFact): HandlerFact[] {
   return [current, prior];
 }
 
-function build(facts: readonly HandlerFact[], mayName = true) {
-  return buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayName });
+function build(
+  facts: readonly HandlerFact[],
+  mayName = true,
+  currentLeaderDesignationPermitted = true,
+) {
+  return buildRunDelta({
+    priorFacts: facts,
+    mayNameLeadingOption: mayName,
+    currentLeaderDesignationPermitted,
+  });
 }
 
 /**
@@ -380,6 +399,72 @@ describe('buildRunDelta — leader entitlement', () => {
     if (built.kind !== 'ok') return;
     expect(built.delta.leader.prior_leading_option_id).toBeUndefined();
     expect(built.delta.leader.current_leading_option_id).toBe('opt-b');
+    expect(built.delta.leader.changed).toBe(false);
+  });
+
+  it('omits only the CURRENT categorical id when its producer attests a near tie, preserving numerical evidence', () => {
+    const currentNearTie = fact({
+      options: OPTIONS_CURRENT,
+      seed: '222',
+      hash: 'hash-b',
+      nearTie: true,
+      computedAt: '2026-06-07T00:00:00.000Z',
+    });
+    const built = build(pair(FVE_PRIOR, currentNearTie));
+    expect(built.kind).toBe('ok');
+    if (built.kind !== 'ok') return;
+    expect(built.delta.leader).toMatchObject({
+      prior_leading_option_id: 'opt-a',
+      changed: false,
+    });
+    expect(built.delta.leader.current_leading_option_id).toBeUndefined();
+    expect(built.delta.win_probabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ option_id: 'opt-a', prior: 0.62, current: 0.45 }),
+        expect.objectContaining({ option_id: 'opt-b', prior: 0.38, current: 0.55 }),
+      ]),
+    );
+  });
+
+  it('omits only the PRIOR categorical id when its producer attests a near tie', () => {
+    const priorNearTie = fact({
+      options: OPTIONS_PRIOR,
+      seed: '111',
+      hash: 'hash-a',
+      nearTie: true,
+      computedAt: '2026-06-06T00:00:00.000Z',
+    });
+    const built = build(pair(priorNearTie, FVE_CURRENT));
+    expect(built.kind).toBe('ok');
+    if (built.kind !== 'ok') return;
+    expect(built.delta.leader.prior_leading_option_id).toBeUndefined();
+    expect(built.delta.leader.current_leading_option_id).toBe('opt-b');
+    expect(built.delta.leader.changed).toBe(false);
+  });
+
+  it('current final authority withholds only the current id and cannot erase separately licensed numerical evidence', () => {
+    const built = build(pair(FVE_PRIOR, FVE_CURRENT), true, false);
+    expect(built.kind).toBe('ok');
+    if (built.kind !== 'ok') return;
+    expect(built.delta.leader.prior_leading_option_id).toBe('opt-a');
+    expect(built.delta.leader.current_leading_option_id).toBeUndefined();
+    expect(built.delta.leader.changed).toBe(false);
+    expect(built.delta.win_probabilities).toHaveLength(2);
+  });
+
+  it('fails weak on absent producer separation rather than borrowing the constraint verdict', () => {
+    const currentWithoutSeparation = fact({
+      options: OPTIONS_CURRENT,
+      seed: '222',
+      hash: 'hash-b',
+      nearTie: null,
+      computedAt: '2026-06-07T00:00:00.000Z',
+    });
+    const built = build(pair(FVE_PRIOR, currentWithoutSeparation));
+    expect(built.kind).toBe('ok');
+    if (built.kind !== 'ok') return;
+    expect(built.delta.leader.prior_leading_option_id).toBe('opt-a');
+    expect(built.delta.leader.current_leading_option_id).toBeUndefined();
     expect(built.delta.leader.changed).toBe(false);
   });
 

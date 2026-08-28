@@ -29,6 +29,9 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { finaliseV5Response } from '../response-finaliser.js';
+import { readFinalLeaderClaimEgressPolicy } from '../compose/analysis-state-v1.js';
+import { enforceLeadingOptionClaimsAtWire } from '../compose/leading-option-wire-enforcement.js';
+import { sanitiseOlumiResponseForEgress } from '../compose/output-safety.js';
 import { GRAPH_CONTEXT_INSTRUCTION } from '../routing/route-with-tool-use.js';
 import type {
   ChatWithToolsArgs,
@@ -45,7 +48,10 @@ import { vi } from 'vitest';
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write: Record<string, unknown>) => {
+      (global as Record<string, unknown>).__test_last_append = write;
+      return { id: 'mock-row-id' };
+    },
     readRecent: async () => (global as Record<string, unknown>).__test_prior_turns ?? [],
     readFactsFor: async () =>
       (global as Record<string, unknown>).__test_prior_facts ?? [],
@@ -99,6 +105,7 @@ vi.mock('../session/index.js', () => ({
     delete (global as Record<string, unknown>).__test_prior_turns;
     delete (global as Record<string, unknown>).__test_prior_facts;
     delete (global as Record<string, unknown>).__test_persisted_graph;
+    delete (global as Record<string, unknown>).__test_last_append;
   },
 }));
 
@@ -337,6 +344,31 @@ function installPriorRunAnalysisFact(graphHashAtRun: string): void {
   ];
 }
 
+function installSeparatedPriorRunAnalysisFact(graphHashAtRun: string): void {
+  installPriorRunAnalysisFact(graphHashAtRun);
+  const facts = (global as Record<string, unknown>).__test_prior_facts as Array<{
+    result: Record<string, unknown>;
+  }>;
+  facts[0]!.result.constraint_verdict = {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+  };
+  facts[0]!.result.enrichment = {
+    analysis_status: 'completed',
+    robustness_status: 'computed',
+    robustness: { level: 'high', near_tie: { is_tie: false } },
+    option_comparison_status: 'computed',
+    option_comparison: [
+      {
+        option_id: 'opt_a',
+        option_label: 'Option A',
+        win_probability: 0.62,
+        status: 'computed',
+      },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -360,6 +392,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     delete (global as Record<string, unknown>).__test_prior_turns;
     delete (global as Record<string, unknown>).__test_prior_facts;
     delete (global as Record<string, unknown>).__test_persisted_graph;
+    delete (global as Record<string, unknown>).__test_last_append;
   });
 
   it('marks STALE when persisted graph diverges from request graphState (client lag)', async () => {
@@ -403,7 +436,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       mkTextResult('explanation'),
     );
 
-    await runTurnExecutor(
+    const run = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'why does it lead?' },
       'req-fresh-h3',
       {
@@ -428,7 +461,175 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(option?.label).toBe('Option A');
     expect(option?.label).not.toBe('Option A after saved edit');
     expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
+    // Egress evidence identity follows the same canonical reasoning snapshot,
+    // while the legacy request/commit carrier remains deliberately separate.
+    expect(run.reasoningGraph?.nodes.find((node) => node.id === 'opt_a')?.label).toBe(
+      'Option A',
+    );
+    expect(run.reasoningGraph).not.toBe(POST_EDIT_GRAPH);
+  });
 
+  it('uses one canonical content graph for durable and wire labels when stale request bytes rename an option', async () => {
+    installSeparatedPriorRunAnalysisFact(PRE_EDIT_HASH);
+    (global as Record<string, unknown>).__test_persisted_graph = PRE_EDIT_GRAPH;
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('I reviewed Option A against the saved model.'),
+    );
+
+    const run = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'which option leads?' },
+      'req-canonical-content-graph',
+      {
+        routingAdapter,
+        // Same identity, uncommitted client-only label. It may be validated for
+        // mutation dispatch, but it is not the content authority on this
+        // read-only turn.
+        graphState: POST_EDIT_GRAPH as never,
+      },
+    );
+
+    expect(run.freshness?.freshness).toBe('fresh');
+    expect(run.rawRobustness).toEqual({
+      level: 'high',
+      near_tie_is_tie: false,
+    });
+    expect(run.effectiveGraph?.nodes.find((node) => node.id === 'opt_a')?.label).toBe(
+      'Option A',
+    );
+
+    const finalised = finaliseV5Response(run.response, {
+      canonicalState: run.canonicalState,
+      analysisReady: run.analysisReady,
+      freshness: run.freshness,
+      mayNameLeadingOption: run.mayNameLeadingOption,
+      rawRobustness: run.rawRobustness,
+    });
+    const scrubbed = sanitiseOlumiResponseForEgress(finalised, {
+      graph: run.effectiveGraph ?? null,
+      requestId: 'req-canonical-content-graph',
+      exitPath: 'turn_executor',
+      userMessage: 'which option leads?',
+      mayNameLeadingOption: run.mayNameLeadingOption,
+    });
+    const wire = enforceLeadingOptionClaimsAtWire(scrubbed, {
+      requestId: 'req-canonical-content-graph',
+      exitPath: 'turn_executor',
+      graph: run.effectiveGraph ?? null,
+      analysisReady: run.analysisReady,
+      selectedFactComparisons: run.rawOptionComparisons ?? null,
+      leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(scrubbed),
+    }).response;
+    const durable = (global as Record<string, unknown>).__test_last_append as {
+      assistantMessage?: unknown;
+    };
+
+    expect(wire.analysis_state?.leader_claim).toMatchObject({ permitted: true });
+    expect(wire.assistant_text).toBe('I reviewed Option A against the saved model.');
+    expect(durable.assistantMessage).toBe(wire.assistant_text);
+    expect(wire.assistant_text).not.toContain('opt_a');
+    expect(wire.assistant_text).not.toContain('Option A after saved edit');
+  });
+
+  it('persists the same near-tie designation projection that reaches the wire', async () => {
+    installSeparatedPriorRunAnalysisFact(PRE_EDIT_HASH);
+    const facts = (global as Record<string, unknown>).__test_prior_facts as Array<{
+      result: Record<string, unknown>;
+    }>;
+    const fact = facts[0]!;
+    fact.result.enrichment = {
+      analysis_status: 'completed',
+      robustness_status: 'computed',
+      robustness: { level: 'low', near_tie: { is_tie: true } },
+      option_comparison_status: 'computed',
+      option_comparison: [
+        {
+          option_id: 'opt_a',
+          option_label: 'Option A',
+          win_probability: 0.5,
+          status: 'computed',
+        },
+      ],
+    };
+    fact.result.win_probabilities = { opt_a: 0.5 };
+    const decoy = structuredClone(fact);
+    decoy.result.computed_at = '2026-05-09T10:00:00.000Z';
+    decoy.result.enrichment = {
+      analysis_status: 'completed',
+      robustness_status: 'computed',
+      robustness: { level: 'high', near_tie: { is_tie: false } },
+      option_comparison_status: 'computed',
+      option_comparison: [
+        {
+          option_id: 'opt_a',
+          option_label: 'Option A',
+          win_probability: 0.9,
+          status: 'computed',
+        },
+      ],
+    };
+    decoy.result.win_probabilities = { opt_a: 0.9 };
+    facts.unshift(decoy);
+    const priorTurns = (global as Record<string, unknown>).__test_prior_turns as Array<
+      Record<string, unknown>
+    >;
+    priorTurns.unshift({
+      ...priorTurns[0],
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      turn_id: '99999999-9999-4999-8999-999999999999',
+      created_at: '2026-05-09T10:00:00.000+00:00',
+    });
+    (global as Record<string, unknown>).__test_persisted_graph = PRE_EDIT_GRAPH;
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('Option A is the leading option.'),
+    );
+
+    const run = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'which option leads?' },
+      'req-durable-near-tie',
+      { routingAdapter, graphState: PRE_EDIT_GRAPH as never },
+    );
+    expect(run.freshness?.selected_fact_index).toBe(1);
+    expect(run.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
+    expect(run.rawOptionComparisons).toEqual([
+      {
+        option_id: 'opt_a',
+        option_label: 'Option A',
+        win_probability: 0.5,
+      },
+    ]);
+
+    const finalised = finaliseV5Response(run.response, {
+      canonicalState: run.canonicalState,
+      analysisReady: run.analysisReady,
+      freshness: run.freshness,
+      mayNameLeadingOption: run.mayNameLeadingOption,
+      rawRobustness: run.rawRobustness,
+    });
+    const scrubbed = sanitiseOlumiResponseForEgress(finalised, {
+      graph: run.effectiveGraph ?? null,
+      requestId: 'req-durable-near-tie',
+      exitPath: 'turn_executor',
+      userMessage: 'which option leads?',
+      mayNameLeadingOption: run.mayNameLeadingOption,
+    });
+    const wire = enforceLeadingOptionClaimsAtWire(scrubbed, {
+      requestId: 'req-durable-near-tie',
+      exitPath: 'turn_executor',
+      graph: run.effectiveGraph ?? null,
+      analysisReady: run.analysisReady,
+      selectedFactComparisons: run.rawOptionComparisons ?? null,
+      leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(scrubbed),
+    }).response;
+    const durable = (global as Record<string, unknown>).__test_last_append as {
+      assistantMessage?: unknown;
+    };
+
+    expect(wire.analysis_state?.leader_claim).toMatchObject({
+      permitted: false,
+      withheld_reason: 'options_do_not_separate',
+    });
+    expect(wire.assistant_text).not.toMatch(/leading option/i);
+    expect(durable.assistantMessage).toBe(wire.assistant_text);
   });
 
   it('keeps the canonical baseline marker when request bytes mark a different option', async () => {
@@ -645,13 +846,13 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     // An explicit successful absent read is the only first-touch state that may
     // promote a valid request graph. A degraded read is covered above and must
     // remain unavailable.
-    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    installSeparatedPriorRunAnalysisFact(PRE_EDIT_HASH);
     (global as Record<string, unknown>).__test_persisted_graph = null;
     const routingAdapter = mockRoutingAdapter(async () =>
       mkTextResult('fallback path'),
     );
 
-    await runTurnExecutor(
+    const run = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'first response after analysis' },
       'req-fallback-h3',
       {
@@ -678,5 +879,25 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       expect.arrayContaining(['opt_a', 'fac_cost', 'goal_outcome']),
     );
     expect(prompt).toContain(GRAPH_CONTEXT_INSTRUCTION);
+
+    // The legacy freshness derivation still reports a matching hash, which is
+    // the counterexample's load-bearing precondition. But a request-only
+    // provisional graph is not persisted canonical authority, so a hot orphan
+    // analysis fact cannot lend it robustness/comparison evidence or mint a
+    // categorical leader licence.
+    expect(run.freshness?.freshness).toBe('fresh');
+    expect(run.rawRobustness).toBeNull();
+    expect(run.rawOptionComparisons).toBeNull();
+    const finalised = finaliseV5Response(run.response, {
+      canonicalState: run.canonicalState,
+      analysisReady: run.analysisReady,
+      freshness: run.freshness,
+      mayNameLeadingOption: run.mayNameLeadingOption,
+      rawRobustness: run.rawRobustness,
+    });
+    expect(finalised.analysis_state?.leader_claim).toMatchObject({
+      permitted: false,
+      withheld_reason: 'separation_unavailable',
+    });
   });
 });
