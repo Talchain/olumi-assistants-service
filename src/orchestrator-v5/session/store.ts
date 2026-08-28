@@ -96,6 +96,15 @@ export interface SessionAppendOutcome {
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
 }
 
+/**
+ * One exact-count, scenario-scoped page of durable non-noop run-analysis
+ * facts. `total_count` is the pre-limit database count, never an estimate.
+ */
+export interface ScenarioRunAnalysisFactPage {
+  readonly facts: readonly IdentifiedHandlerFact[];
+  readonly total_count: number;
+}
+
 export interface SessionTurnWrite {
   readonly scenario_id: string;
   readonly turn_id: string;
@@ -400,39 +409,32 @@ export interface SessionStore {
     limit: number,
   ): Promise<readonly IdentifiedHandlerFact[]>;
   /**
-   * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
+   * Load the bounded, scenario-wide `run_analysis` fact set used by the
+   * existing freshness/analysis selectors.
    *
-   * WHY THIS IS NOT A FLAVOUR OF {@link readFactsFor}. Every other fact read on
-   * this interface is keyed by `v5_conversation_turn_id`, i.e. by the turns
-   * {@link readRecent} returned, i.e. by a `LIMIT 20` WINDOW. The T1
-   * claim-safety permission was read off that window while the three channels
-   * it gates read the whole scenario (rolling summary `LIMIT 1000`; decision
-   * records scenario-wide). Past 20 turns the analysis fact was simply not
-   * loaded, the reader took its "no analysis ⇒ nothing to withhold" branch, and
-   * a withheld scenario shipped an ungated summary. Same defect shape as the
-   * window-vs-total lie {@link countTurns} exists to remove, one table over —
-   * and the same remedy: a separate read, scoped to the truth, every turn.
+   * Unlike {@link readFactsFor}, this read is not constrained to the recent
+   * turn window. Production implementations must make one uncached query with
+   * an exact pre-limit count, stable `created_at DESC, id DESC` ordering and
+   * the caller-supplied lookahead limit. They must validate row identity,
+   * parent identity, timestamps, handler/action type, noop and strict payload
+   * shape before returning. A missing/inexact count or malformed row throws;
+   * it never becomes an authoritative empty set.
    *
-   * Filtered to `handler_id = 'run_analysis'` and `noop = false`; ordered
-   * `created_at DESC`, `LIMIT 1`. Eligibility beyond that (the
-   * `analysis_status` success filter) is the SELECTOR's job, not the store's —
-   * the store must not acquire a second copy of "is this analysis usable".
+   * Optional only for legacy test doubles. Production always implements it;
+   * callers interpret omission as unavailable, never no analysis.
+   */
+  readScenarioRunAnalysisFactsFor?(
+    scenarioId: string,
+    limit: number,
+  ): Promise<ScenarioRunAnalysisFactPage>;
+  /**
+   * Legacy standalone newest-analysis read.
    *
-   * ⚠ MUST NOT be served from the session LRU. That cache is process-local,
-   * has no TTL, and is invalidated only on the instance that did the append,
-   * so a cached permission could be stale across instances in either
-   * direction — the same non-determinism that let the live flip happen twice
-   * over. This read goes to the database every turn, by design.
-   *
-   * Returns `null` when the scenario has no such fact. THROWS on read failure —
-   * no assume-good default, because "no analysis" and "I could not look" are
-   * exactly the two things this method exists to stop conflating. The caller
-   * degrades explicitly and arms the fail-closed guard.
-   *
-   * Optional on the interface so existing test mocks aren't forced to
-   * implement it (mirrors {@link countTurns} / {@link readFactsWithTurnFor});
-   * `buildTurnContext` treats absence as a degraded read. Production
-   * (`SupabaseSessionStore`) always implements it.
+   * @deprecated `buildTurnContext` now derives the same claim-safety input
+   * from the validated page returned by {@link readScenarioRunAnalysisFactsFor}.
+   * Keeping this optional member temporarily avoids a broad interface cleanup,
+   * but production turn construction must not call it: doing so would recreate
+   * two independently timed views of one scenario authority.
    */
   readNewestAnalysisFactFor?(scenarioId: string): Promise<HandlerFact | null>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;

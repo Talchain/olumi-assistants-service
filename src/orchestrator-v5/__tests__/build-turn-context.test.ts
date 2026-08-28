@@ -74,6 +74,7 @@ describe('buildTurnContext', () => {
       // wire-facing subset and is `.strict()`, so this key is deliberately not
       // added to it.
       prior_facts_read_ok: _pfrok,
+      scenario_analysis_fact_set: _safs,
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
       persistedGraph: _pg,
@@ -549,14 +550,16 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
     return {
       fact_type: 'run_analysis',
       fact_version: 1,
-      turn_id: 't1',
       noop: false,
       result: {
+        scenario_id: BASE.scenario_id,
+        leading_option_id: 'opt_a',
+        summary: 'Analysis completed.',
         graph_hash_at_run: graphHashAtRun,
         computed_at: '2026-05-01T00:00:00.000Z',
         enrichment: { analysis_status: 'computed' },
       },
-    } as unknown as HandlerFact;
+    };
   }
 
   it('hashes the PERSISTED graph and reuses deriveAnalysisFreshness (no second freshness truth)', async () => {
@@ -700,6 +703,11 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
       }),
       readFactsFor: async () => {
         throw new SessionReadError('DB offline', { code: '57P03' });
+      },
+      readScenarioRunAnalysisFactsFor: async () => {
+        throw new SessionReadError('DB offline', {
+          code: 'analysis_fact_query_failed',
+        });
       },
     };
     const ctx = await buildTurnContext(BASE, 'req-paf-3', { sessionStore: store });

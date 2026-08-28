@@ -54,6 +54,7 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     readRecent: async () => [],
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),

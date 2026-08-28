@@ -127,9 +127,9 @@ export interface RunComparisonGuardInput {
    * claim-bearing fact; a comparison names TWO runs. The gate therefore uses it
    * as the OUTER conjunct only, and refines it per compared run — see
    * {@link RunComparisonLeaderAuthority}. It remains load-bearing on its own:
-   * it is the only input that can see `fail_closed_truncated` (a degraded
-   * scenario-scoped read on a provably truncated window), which no per-fact
-   * read can detect.
+   * it is the only input that can see `fail_closed_truncated` or
+   * `fail_closed_unavailable` (a degraded scenario-scoped read), which no
+   * per-fact read can detect.
    */
   readonly mayNameLeadingOption: boolean;
   /**
@@ -712,8 +712,9 @@ export function tryRunComparisonGate(
   // a second selection ceremony in THIS file is the defect and this is not).
   //
   // THE CONJUNCTION IS ONE-DIRECTIONAL. `input.mayNameLeadingOption` stays the
-  // outer gate — it is the only input that can see `fail_closed_truncated`,
-  // which no per-fact read can detect — and each per-run verdict can only
+  // outer gate — it is the only input that can see `fail_closed_truncated` or
+  // `fail_closed_unavailable`, which no per-fact read can detect — and each
+  // per-run verdict can only
   // narrow it further. Every value is `<=` the pre-fix boolean, so a turn that
   // withheld still withholds and no leader becomes newly nameable.
   const authority: RunComparisonLeaderAuthority = {

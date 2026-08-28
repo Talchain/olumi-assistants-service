@@ -121,6 +121,7 @@ import { config } from '../../config/index.js';
 import { TelemetryEvents, emit } from '../../utils/telemetry.js';
 
 import type { ContextPack } from '../context/context-pack-assembler.js';
+import { projectModelFacingContextPack } from '../context/model-facing-context-pack.js';
 
 import {
   buildOlumiActionTool,
@@ -1192,34 +1193,6 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // (M5) prose-derivation, carrying opaque graph-hash digests that have no
   // business in the prompt and must never reach prose (behaviour-10 leak
   // contract). The LLM continues to see freshness via `display_analysis`.
-  const {
-    analysis: _rawAnalysis,
-    display_analysis,
-    graph: _rawGraph,
-    display_graph,
-    graph_context,
-    analysis_state: _analysisState,
-    conversation_summary,
-    ...rest
-  } = contextPack;
-  void _rawAnalysis;
-  void _rawGraph;
-  void _analysisState;
-  // Legacy hand-built packs may omit graph_context. Omission must fail weak:
-  // the model is told canonical state is unavailable and caller/transcript
-  // graph claims cannot silently become authority.
-  const resolvedGraphContext: NonNullable<ContextPack['graph_context']> =
-    graph_context ?? { status: 'unavailable' };
-  // Production assembly always supplies this status. Legacy/direct packs may
-  // omit it, and omission must resolve to the weakest safe interpretation:
-  // visible receipts remain usable, but an empty list is not evidence that no
-  // edit exists.
-  const resolvedRecentChangesStatus: ContextPack['recent_changes_status'] =
-    contextPack.recent_changes_status === 'complete' ||
-    contextPack.recent_changes_status === 'capped' ||
-    contextPack.recent_changes_status === 'degraded'
-      ? contextPack.recent_changes_status
-      : 'degraded';
   // Context v2 S4-INJECT (01 §2, 04 §3.1): the rolling-summary section is
   // re-appended AFTER the ground-truth `analysis`/`graph` substitutions so
   // the serialised prompt reads it BELOW structured state — Layer-A
@@ -1229,19 +1202,18 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // byte-identity with pre-S4 output (pinned by
   // tests/unit/v5.route-with-tool-use.conversation-summary.test.ts against
   // a pre-change sha256 golden).
-  const llmFacing = {
-    ...rest,
-    analysis: display_analysis,
-    graph_context: resolvedGraphContext,
-    graph: display_graph,
-    recent_changes_status: resolvedRecentChangesStatus,
-    ...(conversation_summary !== undefined ? { conversation_summary } : {}),
-  };
+  const llmFacing = projectModelFacingContextPack(contextPack);
   const parts: string[] = ['## ContextPack', JSON.stringify(llmFacing, null, 2)];
   // GRAPH AUTHORITY — always rendered. Production always emits graph_context;
   // legacy omission is normalised above to `unavailable`, so absence can never
   // mean permission to trust caller or conversational graph claims.
   parts.push('', GRAPH_CONTEXT_INSTRUCTION);
+  // Persisted-analysis authority is a conditional exact-failure marker. It is
+  // not defaulted: absence says nothing about whether an analysis exists. The
+  // marker and this interpretation are emitted by the same condition.
+  if (contextPack.analysis_context?.status === 'unavailable') {
+    parts.push('', ANALYSIS_CONTEXT_INSTRUCTION);
+  }
   // RECENT EDIT HISTORY — always rendered. The status is always in production
   // packs and legacy omission is normalised above, so an empty projection can
   // never silently license a no-edits claim.
@@ -1252,7 +1224,7 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // absent → this block is skipped → the serialised prompt is byte-identical to
   // today. The instruction is soft guidance; the hard guarantee is the
   // deterministic post-check in the turn-executor coaching branches.
-  if (contextPack.coaching_context) {
+  if (llmFacing.coaching_context !== undefined) {
     parts.push('', COACHING_CONTEXT_INSTRUCTION);
   }
   // READINESS — CODE-OWNED, a sibling of the instructions around it, appended by
@@ -1295,7 +1267,7 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // appended the same way, gated by the same condition that put the section
   // on the pack (the turn-executor loader's beyond-window activation).
   // Absent section → no instruction → byte-identity.
-  if (conversation_summary !== undefined) {
+  if (contextPack.conversation_summary !== undefined) {
     parts.push('', SUMMARY_PRECEDENCE_INSTRUCTION);
   }
   // Decision records — CODE-OWNED, a sibling of the two instructions above,
@@ -1310,7 +1282,12 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // instructions above, gated by the SAME condition that put the section on the
   // pack. Absent selection → no section → no instruction → byte-identity.
   if (contextPack.focus !== undefined) {
-    parts.push('', FOCUS_INSTRUCTION);
+    parts.push(
+      '',
+      contextPack.analysis_context?.status === 'unavailable'
+        ? FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION
+        : FOCUS_INSTRUCTION,
+    );
   }
   // FACTOR VALUE STATE — CODE-OWNED, a sibling of the instructions above,
   // appended by the SAME condition that puts `factor_values` on the pack.
@@ -1477,6 +1454,19 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
   '- `absent`: no Living Model exists yet. Do not reconstruct one from conversation or claim that a model fact is recorded.',
   '- `unavailable`: canonical model state could not be established. Do not substitute caller input, conversation or summaries as model truth, and do not turn this into a claim that no model exists.',
   '- Never expose this status token, graph identifiers, read failures or internal field names to the user; express only the warranted substance in plain language.',
+].join('\n');
+
+/**
+ * Exact persisted-analysis read-failure contract. Conditional on the matching
+ * ContextPack marker; healthy absence carries neither the marker nor this text.
+ */
+export const ANALYSIS_CONTEXT_INSTRUCTION = [
+  '## Saved analysis context (deterministic authority)',
+  'The `analysis_context` block says the saved analysis state could not be established for this turn.',
+  '- Missing or withheld analysis details are not evidence that no analysis exists. Do not say that none has run.',
+  '- Do not substitute analysis claims from caller input, the request, conversation or rolling summaries, and do not rank or infer an option.',
+  '- Independently authoritative current Living Model facts and verified mutation receipts remain usable. Do not imply that a model change failed merely because analysis state is unavailable.',
+  '- Explain the limitation plainly without exposing status tokens, internal fields or read-failure details.',
 ].join('\n');
 
 /**
@@ -1650,10 +1640,25 @@ export const FOCUS_INSTRUCTION = [
   '## Selected elements (what the user is pointing at)',
   'The `focus` block above is what the user currently has selected on the canvas. Answer about those elements specifically, grounded in the values, links and analysis already in this pack — do not estimate a value that is not here.',
   '- Each element carries an `analysis` block when the current analysis scored it (win probability, target fit, influence, value of information, tipping-point risk). Use those figures when explaining why the element matters; they are the same figures shown elsewhere in this pack, so never restate them differently.',
-  '- `analysis_link` says why an element has no figures: `analysis_not_current` (the available analysis is not current enough to bind to this selected element), `not_in_analysis` (the current analysis scored nothing for it), `ambiguous_label` (its name does not identify it uniquely, so no figures could be attached safely), or `no_analysis` (nothing has been analysed yet). Say which, rather than inventing a figure.',
+  '- `analysis_link` says why an element has no figures: `analysis_not_current` (the available analysis is not current enough to bind to this selected element), `analysis_withheld` (the current option-level comparative result is intentionally unavailable on this turn), `not_in_analysis` (the current analysis scored nothing for it), `ambiguous_label` (its name does not identify it uniquely, so no figures could be attached safely), or `no_analysis` (nothing has been analysed yet). Say which, rather than inventing a figure.',
   '- When `analysis_link` is `analysis_not_current`, do not recover, infer or rejoin figures from the broader `analysis` section by label, even if a name matches. Those figures are not licensed for this selected element; say that current figures are unavailable and suggest rerunning analysis when useful.',
+  '- When `analysis_link` is `analysis_withheld`, do not recover, infer or rejoin option figures or ranking from any other field. Discuss the selected option without presenting a comparative result.',
   '- If `focus.unresolved` is `not_in_model`, say plainly that what they selected is not in the model you can see.',
   '- If `focus.unresolved` is `could_not_check`, say that you could not read the model to check — never say the element is missing, because you do not know that.',
+  '- A selection is what the user wants discussed. It is not an instruction to change the model: do not edit, add or remove anything on the strength of a selection alone.',
+].join('\n');
+
+/**
+ * Narrow fail-weak interpretation for canonical selection identity when the
+ * persisted analysis population could not be established. Kept separate from
+ * {@link FOCUS_INSTRUCTION} so the unavailable prompt does not carry the
+ * healthy-empty `no_analysis` vocabulary at all.
+ */
+export const FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION = [
+  '## Selected elements (analysis history unavailable)',
+  'The `focus` block above identifies what the user currently has selected in the canonical model. Discuss those elements using canonical model facts that are present.',
+  '- Every selected element carries `analysis_link: analysis_unavailable`: saved analysis history could not be checked, so current figures and even whether a prior analysis exists are unknown.',
+  '- Do not recover analysis figures, rankings or conclusions from the request or transcript. Say plainly that current analysis figures could not be checked when that matters to the answer.',
   '- A selection is what the user wants discussed. It is not an instruction to change the model: do not edit, add or remove anything on the strength of a selection alone.',
 ].join('\n');
 

@@ -343,6 +343,136 @@ describe('assembleContextPack', () => {
     expect(pack.display_analysis).toBeNull();
   });
 
+  it('keeps raw handler analysis hot while display_analysis and focus use the distinct durable source', () => {
+    const hot = makeAnalysis({
+      winner: { option_id: 'opt-hot', option_label: 'HOT_POLICY_OPTION', win_probability: 0.61 },
+      options: [
+        { option_id: 'opt-hot', option_label: 'HOT_POLICY_OPTION', win_probability: 0.61, outcome_mean: 61000 },
+      ],
+      top_drivers: [
+        { factor_id: 'factor-hot', factor_label: 'HOT_POLICY_DRIVER', sensitivity: 0.4, direction: 'positive' },
+      ],
+    });
+    const durable = makeAnalysis({
+      winner: { option_id: 'opt-durable', option_label: 'DURABLE_PROMPT_OPTION', win_probability: 0.83 },
+      options: [
+        { option_id: 'opt-durable', option_label: 'DURABLE_PROMPT_OPTION', win_probability: 0.83, outcome_mean: 83000 },
+      ],
+      top_drivers: [
+        { factor_id: 'factor-durable', factor_label: 'DURABLE_PROMPT_DRIVER', sensitivity: 0.7, direction: 'negative' },
+      ],
+    });
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      graphContext: { status: 'canonical' },
+      analysis: hot,
+      displayAnalysisSource: durable,
+      coachingContext: {
+        analysis_present: true,
+        freshness: 'fresh',
+        readiness_status: 'ready',
+        rerun_required: false,
+        usable_for_prose: true,
+        usable_for_chips: true,
+        blocked: false,
+        actionable_blocker_count: 0,
+      },
+      selection: {
+        requested_ids: ['opt-durable'],
+        elements: [
+          { id: 'opt-durable', kind: 'option', label: 'DURABLE_PROMPT_OPTION' },
+        ],
+        unresolved_ids: [],
+        unreadable_ref_ids: [],
+        graph_read: 'ok_present',
+      },
+    });
+
+    expect(pack.analysis?.leading_option?.label).toBe('HOT_POLICY_OPTION');
+    expect(JSON.stringify(pack.analysis)).toContain('HOT_POLICY_DRIVER');
+    expect(JSON.stringify(pack.analysis)).not.toContain('DURABLE_PROMPT_DRIVER');
+    expect(pack.display_analysis?.leading_option?.label).toBe('DURABLE_PROMPT_OPTION');
+    expect(JSON.stringify(pack.display_analysis)).toContain('DURABLE_PROMPT_DRIVER');
+    expect(JSON.stringify(pack.display_analysis)).not.toContain('HOT_POLICY_DRIVER');
+    expect(pack.focus?.elements[0]).toMatchObject({
+      id: 'opt-durable',
+      analysis_link: 'linked',
+      analysis: { win_probability: '83%' },
+    });
+  });
+
+  it('treats explicit display null as withholding while omission preserves legacy bytes', () => {
+    const analysis = makeAnalysis();
+    const legacy = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      analysis,
+    });
+    const omitted = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      analysis,
+      displayAnalysisSource: undefined,
+    });
+    const withheld = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      analysis,
+      displayAnalysisSource: null,
+    });
+
+    expect(JSON.stringify(omitted)).toBe(JSON.stringify(legacy));
+    expect(withheld.analysis).toEqual(legacy.analysis);
+    expect(withheld.display_analysis).toBeNull();
+  });
+
+  it('budgets and discloses only the model-facing analysis on the split path', () => {
+    const hugeDrivers = Array.from({ length: 1_200 }, (_, index) => ({
+      factor_id: `durable-${index}`,
+      factor_label: `DURABLE_OVERSIZE_${index}_${'x'.repeat(100)}`,
+      sensitivity: 0.9 - (index % 8) * 0.1,
+      direction: 'positive' as const,
+    }));
+    const hot = makeAnalysis({
+      top_drivers: [
+        { factor_id: 'hot', factor_label: 'HOT_POLICY_DRIVER', sensitivity: 0.4, direction: 'positive' },
+      ],
+    });
+    const durableHuge = makeAnalysis({ top_drivers: hugeDrivers });
+    const durableTrimmed = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      analysis: hot,
+      displayAnalysisSource: durableHuge,
+    });
+
+    expect(durableTrimmed.analysis?.top_drivers).toEqual([
+      { factor_label: 'HOT_POLICY_DRIVER', sensitivity_value: 0.4 },
+    ]);
+    expect(durableTrimmed.display_analysis?.top_drivers).toHaveLength(3);
+    expect(durableTrimmed.context_budget?.truncations).toEqual([
+      expect.objectContaining({ section: 'analysis' }),
+    ]);
+
+    const hiddenHuge = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+      analysis: durableHuge,
+      displayAnalysisSource: hot,
+    });
+    expect(hiddenHuge.display_analysis?.top_drivers).toEqual([
+      { label: 'HOT_POLICY_DRIVER', influence: 'moderate positive influence' },
+    ]);
+    expect(hiddenHuge.context_budget).toBeUndefined();
+  });
+
   it('graph counts match the sizes of nodes / edges / options / goals / constraints arrays', () => {
     const nodes = [
       { id: 'n-goal', kind: 'goal', label: 'Maximise NPV' },
@@ -790,10 +920,14 @@ describe('non-production runtime gate', () => {
       failureWith([makeIssue(['version'], 'Required')]),
     );
 
-    // priorFacts: [] so the canonical-state facts-absent warn does not fire —
-    // this test isolates the schema-drift warn.
+    // An explicit empty prior-fact list prevents the independent authority
+    // omission diagnostic so this test isolates the schema-drift warning.
     expect(() =>
-      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts: [] }),
+      assembleContextPack({
+        payload: BASE_PAYLOAD,
+        priorTurns: [],
+        priorFacts: [],
+      }),
     ).not.toThrow();
 
     expect(warnSpy).toHaveBeenCalledTimes(1);

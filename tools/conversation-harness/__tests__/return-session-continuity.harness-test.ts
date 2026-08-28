@@ -147,6 +147,22 @@ describe('return-session continuity — shared durable bytes, fresh facades', ()
         (read) => read.channel === 'session.readRecentAppliedMutationFactsFor',
       )?.limit,
     ).toBe(4);
+    expect(
+      afterReload.reads.filter(
+        (read) => read.channel === 'session.readScenarioRunAnalysisFactsFor',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        requested_scenario_id: kase.scenario_id,
+        resolved_scenario_id: kase.scenario_id,
+        limit: 21,
+      }),
+    ]);
+    expect(
+      afterReload.reads.some(
+        (read) => read.channel === 'session.readNewestAnalysisFactFor',
+      ),
+    ).toBe(false);
     expect(afterReload.contextPack.graph.edges).toEqual([
       expect.objectContaining({
         from: 'factor_support_capacity',

@@ -39,6 +39,10 @@ import type {
   InvalidationScope,
 } from '../invalidation.js';
 import type { SessionStore, SessionTurnWrite } from '../store.js';
+import type {
+  HandlerFactWithTurn,
+  IdentifiedHandlerFact,
+} from '../../types/handler-fact.js';
 import type { PendingAction } from '../pending-action.js';
 import type { SessionTurnWithContent } from '../conversation-content.js';
 
@@ -49,6 +53,14 @@ export interface NoopSessionStoreOptions {
   // still assignable (content fields are optional).
   readonly priorTurns?: readonly SessionTurnWithContent[];
   readonly facts?: readonly HandlerFact[];
+  readonly factsWithTurn?: readonly HandlerFactWithTurn[];
+  /**
+   * Scenario-wide non-noop run-analysis facts. Defaults to the eligible
+   * `facts` entries so legacy fixtures keep modelling one coherent store read.
+   */
+  readonly scenarioAnalysisFacts?: readonly HandlerFact[];
+  readonly scenarioAnalysisFactTotal?: number;
+  readonly throwOnScenarioAnalysisFactRead?: Error;
   readonly loadGraphResult?: unknown | null;
   /**
    * V5 Phase 1 brief persistence: scenarios.brief_text returned by
@@ -88,6 +100,22 @@ export interface NoopSessionStoreOptions {
     | { readonly throws: Error };
 }
 
+function fixtureFactTimestamp(index: number): string {
+  return `2026-08-27T12:00:${String(59 - (index % 60)).padStart(2, '0')}.000Z`;
+}
+
+function identifyFixtureFact(
+  fact: HandlerFact,
+  index: number,
+  prefix: string,
+): IdentifiedHandlerFact {
+  return {
+    fact,
+    fact_row_id: `${prefix}-fact-${index}`,
+    fact_created_at: fixtureFactTimestamp(index),
+  };
+}
+
 export function createNoopSessionStore(
   opts: NoopSessionStoreOptions = {},
 ): SessionStore {
@@ -96,6 +124,13 @@ export function createNoopSessionStore(
   // excess members on the inline literal. `getScenarioOwner` is OPTIONAL
   // on `SessionStore` (added after this fixture shipped) and is attached
   // conditionally below the literal — see `getScenarioOwnerBehaviour`.
+  const identifiedHotFacts: readonly HandlerFactWithTurn[] =
+    opts.factsWithTurn ??
+    (opts.facts ?? []).map((fact, index) => ({
+      ...identifyFixtureFact(fact, index, 'noop'),
+      turn_id: opts.priorTurns?.[index]?.id ?? `noop-turn-row-${index}`,
+    }));
+
   const store = {
     async append(_: SessionTurnWrite): Promise<{ id: string }> {
       if (opts.throwOnAppend) throw opts.throwOnAppend;
@@ -113,6 +148,41 @@ export function createNoopSessionStore(
       _handlerId?: V5ActionType,
     ): Promise<readonly HandlerFact[]> {
       return opts.facts ?? [];
+    },
+    async readFactsWithTurnFor(
+      _turnIds: readonly string[],
+      _handlerId?: V5ActionType,
+    ): Promise<readonly HandlerFactWithTurn[]> {
+      return identifiedHotFacts;
+    },
+    async readScenarioRunAnalysisFactsFor(
+      _scenarioId: string,
+      _limit: number,
+    ): Promise<{
+      readonly facts: readonly IdentifiedHandlerFact[];
+      readonly total_count: number;
+    }> {
+      const readError = opts.throwOnScenarioAnalysisFactRead ?? opts.throwOnRead;
+      if (readError) throw readError;
+      const analysisFacts =
+        opts.scenarioAnalysisFacts ??
+        (opts.facts ?? []).filter(
+          (fact) => fact.fact_type === 'run_analysis' && !fact.noop,
+        );
+      const facts = analysisFacts.map((fact, index) => {
+        const hotMatch = identifiedHotFacts.find((entry) => entry.fact === fact);
+        return hotMatch
+          ? {
+              fact: hotMatch.fact,
+              fact_row_id: hotMatch.fact_row_id ?? '',
+              fact_created_at: hotMatch.fact_created_at,
+            }
+          : identifyFixtureFact(fact, index, 'scenario');
+      });
+      return {
+        facts,
+        total_count: opts.scenarioAnalysisFactTotal ?? facts.length,
+      };
     },
     async invalidateScoped(
       _scenarioId: string,

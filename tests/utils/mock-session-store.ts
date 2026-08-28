@@ -91,6 +91,12 @@ export function createMockSessionStore(
     // arm the claim-safety fail-closed guard across the whole suite; a store
     // that omitted the method would report "degraded" forever. Tests exercising
     // the scenario-scoped claim-safety path override it.
+    // #1170 added `readScenarioRunAnalysisFactsFor` to SessionStore; the
+    // `Required<SessionStore>` drift alarm above fired here, as designed.
+    // Benign default matches the other reads: an empty, well-formed page —
+    // NOT a throw — so the default store reads as 'supported, nothing there'
+    // rather than as a degraded read, which is a different product state.
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,

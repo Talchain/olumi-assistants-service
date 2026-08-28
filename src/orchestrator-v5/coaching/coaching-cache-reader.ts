@@ -26,6 +26,12 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { readLatestDraftCoaching } from './draft-coaching-log.js';
 import { readLatestLastCoachingSignal } from './last-coaching-signal-log.js';
 import {
+  isReconciledScenarioAnalysisFactSet,
+  isoInstantOrderKey,
+  type ScenarioAnalysisFactSet,
+} from '../context/reconcile-scenario-analysis-facts.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import {
   EMPTY_COACHING_CACHE,
   isCoachingSignalId,
   type CoachingCache,
@@ -38,14 +44,22 @@ import {
  */
 export async function readCoachingCache(
   scenarioId: string,
-  priorFacts: readonly HandlerFact[] = [],
+  analysisFactSet?: ScenarioAnalysisFactSet,
 ): Promise<CoachingCache> {
   const [draft, sidecarSignal] = await Promise.all([
     readLatestDraftCoaching(scenarioId),
     readLatestLastCoachingSignal(scenarioId),
   ]);
-  const decisionReview = extractLatestDecisionReview(priorFacts);
-  const factSignal = extractLatestCoachingSignalFromFacts(priorFacts);
+  const completeAnalysisFactSet =
+    isReconciledScenarioAnalysisFactSet(analysisFactSet, scenarioId) &&
+    analysisFactSet.status === 'complete'
+      ? analysisFactSet
+      : null;
+  const analysisFactChronology = completeAnalysisFactSet?.facts ?? [];
+  const selectedAnalysisFact =
+    selectRunAnalysisFact(analysisFactChronology)?.fact ?? null;
+  const decisionReview = extractSelectedDecisionReview(selectedAnalysisFact);
+  const factSignal = extractLatestCoachingSignalFromFacts(analysisFactChronology);
   const lastSignal = pickNewestSignal(factSignal, sidecarSignal);
 
   if (draft === null && decisionReview === null && lastSignal === null) {
@@ -60,31 +74,18 @@ export async function readCoachingCache(
 }
 
 /**
- * Walk facts newest-first to find the most recent run_analysis fact with
- * enrichment.decision_review set.
- *
- * Correctness note (V5 review cycle 2): `priorFacts` arrives newest-first
- * because `SupabaseSessionStore.readFactsFor` now applies
- * `ORDER BY created_at DESC`. The forward walk therefore returns the NEWEST
- * matching fact. An earlier revision of this function iterated backward
- * (`length - 1 → 0`) assuming facts were oldest-first; that assumption was
- * silently incorrect in production for two reasons: (a) `readFactsFor`
- * originally had no ORDER BY, so the order was undefined; (b) the upstream
- * caller passed `turn_id` into a row-id lookup, which made `priorFacts`
- * always empty. Both pre-existing bugs were fixed in cycle 2, and this
- * function's walk direction is now corrected to match the documented intent.
+ * Read Decision Review only from the exact fact selected for display. The
+ * selection itself is owned by the shared run-analysis selector; this reader
+ * must not create a second chronology by walking the database page.
  */
-function extractLatestDecisionReview(
-  facts: readonly HandlerFact[],
+function extractSelectedDecisionReview(
+  fact: HandlerFact | null,
 ): DecisionReviewOutput | null {
-  for (const fact of facts) {
-    if (fact.fact_type !== 'run_analysis') continue;
-    const enrichment = fact.result.enrichment;
-    if (enrichment === undefined) continue;
-    const dr = enrichment.decision_review;
-    if (isDecisionReviewOutput(dr)) return dr;
-  }
-  return null;
+  if (fact === null || fact.fact_type !== 'run_analysis') return null;
+  const enrichment = fact.result.enrichment;
+  if (enrichment === undefined) return null;
+  const dr = enrichment.decision_review;
+  return isDecisionReviewOutput(dr) ? dr : null;
 }
 
 /**
@@ -115,8 +116,8 @@ function extractLatestCoachingSignalFromFacts(
 }
 
 /**
- * Merge the two signal sources by produced_at timestamp. ISO-8601 strings
- * sort lexicographically by time. When both are present, the newer wins;
+ * Merge the two signal sources by represented instant. When both are present,
+ * the newer wins;
  * ties resolve to the fact source (ties only happen by coincidence since
  * the enrichment write and the sidecar append are separate operations).
  * Tie resolution is not user-facing: both sources record the same signal
@@ -126,11 +127,20 @@ function pickNewestSignal(
   factSignal: LastCoachingSignal | null,
   sidecarSignal: LastCoachingSignal | null,
 ): LastCoachingSignal | null {
-  if (factSignal === null) return sidecarSignal;
-  if (sidecarSignal === null) return factSignal;
-  return sidecarSignal.produced_at > factSignal.produced_at
-    ? sidecarSignal
-    : factSignal;
+  const factInstant =
+    factSignal === null ? null : isoInstantOrderKey(factSignal.produced_at);
+  const sidecarInstant =
+    sidecarSignal === null
+      ? null
+      : isoInstantOrderKey(sidecarSignal.produced_at);
+  if (factInstant !== null && sidecarInstant !== null) {
+    return sidecarInstant > factInstant ? sidecarSignal! : factSignal!;
+  }
+  if (factInstant !== null) return factSignal!;
+  if (sidecarInstant !== null) return sidecarSignal!;
+  // A malformed timestamp cannot establish chronology or mint prompt-facing
+  // coaching state, even when it is the only source available.
+  return null;
 }
 
 function isDecisionReviewOutput(value: unknown): value is DecisionReviewOutput {

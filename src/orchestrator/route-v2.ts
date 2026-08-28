@@ -150,6 +150,11 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import {
+  ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
+  enforceAnalysisAuthorityUnavailableAtEgress,
+  type AnalysisAuthorityUnavailableEgressMode,
+} from '../orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
+import {
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
 } from '../orchestrator-v5/routing/answer-shape.js';
@@ -951,6 +956,29 @@ async function sendFinalised200(
     readonly autoRunInFlight?: { readonly startedAt: string };
   },
 ): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
+  // System A-approved fail-closed arm: unreadable persisted analysis is not
+  // the healthy "no analysis exists" state. Project the distinction at this
+  // one 200-response seam so every dispatch family says what happened.
+  const analysisAuthorityUnavailable =
+    ctx.mayNameLeadingOptionProvenance === 'fail_closed_unavailable';
+  // Provenance names where the canonical state supplied by the dispatch came
+  // from. The fail-closed projection below may synthesise an unknown state for
+  // the wire, but that must not relabel a route fallback as turn-executor.
+  const canonicalStateSourceForSummary = ctx.canonicalState
+    ? 'turn_executor'
+    : 'route_fallback';
+  const finaliserContext = analysisAuthorityUnavailable
+    ? {
+        ...ctx,
+        freshness: ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
+        canonicalState: canonicalStateFromFreshness(
+          ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
+          ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+        ),
+      }
+    : ctx;
+  let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
+    'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
   // Persistence failure is never dark: when a scenario carries a
   // failure-marked fence row and no committed graph (the phantom state's
@@ -963,12 +991,14 @@ async function sendFinalised200(
   // step of this finaliser; every call site already `return`s it from an
   // async handler.
   let candidateForFinalise = candidate;
+  let draftLossNoticeSurfaced = false;
   if (exitPath !== 'system_event' && ctx.graph == null && ctx.scenarioId !== undefined) {
     const lossStands = await loadDraftLossStands(ctx.scenarioId, requestId);
     if (lossStands) {
+      draftLossNoticeSurfaced = true;
       candidateForFinalise = {
-        ...candidate,
-        assistant_text: `${DRAFT_LOSS_NOTICE}\n\n${candidate.assistant_text ?? ''}`.trimEnd(),
+        ...candidateForFinalise,
+        assistant_text: `${DRAFT_LOSS_NOTICE}\n\n${candidateForFinalise.assistant_text ?? ''}`.trimEnd(),
       } as import('@talchain/schemas/boundary').OlumiResponse;
       emit(TelemetryEvents.V5DraftLossNoticeSurfaced, {
         request_id: requestId,
@@ -1000,7 +1030,10 @@ async function sendFinalised200(
   // egress validation + re-attach + send. Flag-off cost is one
   // `Date.now()` call — the value is discarded if no trace is built.
   const finaliseStart = Date.now();
-  const candidateFinalised = finaliseV5Response(candidateForFinalise, ctx);
+  const candidateFinalised = finaliseV5Response(
+    candidateForFinalise,
+    finaliserContext,
+  );
   // Fix 4 (observability) + V5 diagnostic trace (Phase A): pluck out the
   // optional `_timings` and `_diagnostic_trace` blocks before egress
   // validation. OlumiResponseSchema is `.strict()` — unknown keys would
@@ -1120,17 +1153,40 @@ async function sendFinalised200(
   let wireBody = egress.ok
     ? finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        ctx,
+        finaliserContext,
       )
     : finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        ctx,
+        finaliserContext,
       );
   if (!egress.ok) {
     log.error(
       { request_id: requestId, exit_path: exitPath },
       'V5 egress validation failed — returning typed fallback envelope (post-finalised)',
     );
+  }
+  // Persisted analysis being unreadable is distinct from a healthy empty
+  // history. Apply the user-visible projection immediately after validation,
+  // before any debug/product sidecar re-attach, so every later surface is
+  // derived from the truthful replacement rather than from stale model prose.
+  // Functional receipts and typed fallbacks keep their validated content and
+  // receive the limitation; arbitrary substantive output is replaced.
+  if (analysisAuthorityUnavailable) {
+    const projected = enforceAnalysisAuthorityUnavailableAtEgress(wireBody, {
+      answerKind: ctx.answerKind,
+      egressOk: egress.ok,
+    });
+    analysisAuthorityUnavailableEgressMode = projected.mode;
+    const responseWithStandingDraftLoss =
+      draftLossNoticeSurfaced &&
+      !projected.response.assistant_text?.includes(DRAFT_LOSS_NOTICE)
+        ? {
+            ...projected.response,
+            assistant_text:
+              `${DRAFT_LOSS_NOTICE}\n\n${projected.response.assistant_text ?? ''}`.trimEnd(),
+          }
+        : projected.response;
+    wireBody = finaliseV5Response(responseWithStandingDraftLoss, finaliserContext);
   }
   // Re-attach `_timings` post-validation only on the success path AND
   // only when BOTH gates pass:
@@ -1174,7 +1230,7 @@ async function sendFinalised200(
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      ctx,
+      finaliserContext,
     );
   }
   // Re-attach `_diagnostic_trace` post-validation on the success path AND
@@ -1245,7 +1301,7 @@ async function sendFinalised200(
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      ctx,
+      finaliserContext,
     );
   }
   // Re-attach `_context_summary` post-validation on the success path AND
@@ -1275,7 +1331,7 @@ async function sendFinalised200(
     // parts-assembled path below still runs, so the diagnostic never silently
     // disappears while the state to build it is in hand.
     let contextSummary: V5ContextSummary | null =
-      ctx.frame !== undefined
+      ctx.frame !== undefined && !analysisAuthorityUnavailable
         ? contextSummaryFromFrame(
             ctx.frame,
             config.cee.coachingStatePackEnabled ? ctx.canonicalState : undefined,
@@ -1283,10 +1339,10 @@ async function sendFinalised200(
         : null;
     if (contextSummary === null) {
       const canonical: CanonicalAnalysisState | null =
-        ctx.canonicalState ??
-        (ctx.freshness !== undefined
+        finaliserContext.canonicalState ??
+        (finaliserContext.freshness !== undefined
           ? canonicalStateFromFreshness(
-              ctx.freshness,
+              finaliserContext.freshness,
               ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
             )
           : null);
@@ -1299,7 +1355,7 @@ async function sendFinalised200(
           // otherwise we composed the partial `canonicalStateFromFreshness`
           // fallback above for a non-turn-executor dispatch path. Lets a future
           // consumer avoid misreading partial state as full graph authority.
-          canonicalStateSource: ctx.canonicalState ? 'turn_executor' : 'route_fallback',
+          canonicalStateSource: canonicalStateSourceForSummary,
           // Second gate (default-off) for the redacted, hash-free
           // `coaching_state_pack` sub-block — projected from the SAME canonical
           // state as `analysis_state` (NOT non-execute-specific); diagnostic-only,
@@ -1315,7 +1371,7 @@ async function sendFinalised200(
       };
       wireBody = finaliseV5Response(
         sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        ctx,
+        finaliserContext,
       );
     }
   }
@@ -1329,14 +1385,19 @@ async function sendFinalised200(
   // the strip step above. Spreading breaks WeakSet membership (finaliser
   // brand), so we re-finalise the augmented body for the preSerialization
   // hook, same as the other debug surfaces.
-  if (egress.ok && config.features.reasoningCaptureEnabled && ctx.reasoning) {
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    config.features.reasoningCaptureEnabled &&
+    ctx.reasoning
+  ) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _reasoning: ctx.reasoning,
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      ctx,
+      finaliserContext,
     );
   }
   // Re-attach `_answer_shape` post-validation on the success path (ROADMAP
@@ -1367,14 +1428,14 @@ async function sendFinalised200(
   // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
   // it edits the answer rather than relying on this comparison to notice.
   // Neither guard is now the last word alone; read them together.
-  if (egress.ok && ctx.answerShape) {
+  if (egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
     };
     const withShape = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-      ctx,
+      finaliserContext,
     );
     const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
     const finalText =
@@ -1438,6 +1499,7 @@ async function sendFinalised200(
   // matching sidecar.
   if (
     egress.ok &&
+    !analysisAuthorityUnavailable &&
     ctx.answerKind !== 'functional' &&
     !responseCarriesDraftGraphBlock(wireBody) &&
     !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
@@ -1454,7 +1516,7 @@ async function sendFinalised200(
       };
       const withSynth = finaliseV5Response(
         sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
-        ctx,
+        finaliserContext,
       );
       const synthFinalText =
         typeof withSynth.assistant_text === 'string' ? withSynth.assistant_text : '';
@@ -1603,7 +1665,7 @@ async function sendFinalised200(
       }
       projected = withoutShape;
     }
-    wireBody = finaliseV5Response(projected, ctx);
+    wireBody = finaliseV5Response(projected, finaliserContext);
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // SELECTION-AWARE ANSWERING (hop 4b) — re-attach `_grounded_selection`.
@@ -1632,13 +1694,18 @@ async function sendFinalised200(
   // downstream of it. A claim-safety edit changes what the answer SAYS about
   // the element; it does not change WHICH element the answer is about.
   // ═══════════════════════════════════════════════════════════════════════════
-  if (egress.ok && ctx.groundedSelection) {
+  if (
+    egress.ok &&
+    ctx.groundedSelection &&
+    (!analysisAuthorityUnavailable ||
+      analysisAuthorityUnavailableEgressMode !== 'substantive_replaced')
+  ) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _grounded_selection: ctx.groundedSelection,
     };
     // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
-    wireBody = finaliseV5Response(augmented, ctx);
+    wireBody = finaliseV5Response(augmented, finaliserContext);
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
@@ -1718,6 +1785,16 @@ async function sendFinalised200(
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
   });
+  // Count the client-visible fail-closed outcome at the same exactly-once seam
+  // as the response. Derivation-level reads may retry or recover, so emitting
+  // there would overcount and would not prove that a user received the state.
+  // Content-free by contract: exit_path is the closed V5ExitPath union.
+  if (analysisAuthorityUnavailable) {
+    emit(TelemetryEvents.V5ClaimSafetyFailClosedUnavailable, {
+      exit_path: exitPath,
+      outcome: analysisAuthorityUnavailableEgressMode,
+    });
+  }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
 }

@@ -111,8 +111,13 @@
  * PURE. Never throws, never mutates its input, returns new objects.
  */
 
-import type { ContextPackAnalysis } from './context-pack-assembler.js';
+import type {
+  ContextPackAnalysis,
+  ContextPackFocus,
+  ContextPackFocusElement,
+} from './context-pack-assembler.js';
 import type { DisplaySafeAnalysis } from '../format/format-analysis-for-context.js';
+import type { CoachingCache } from '../coaching/types.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
@@ -317,6 +322,103 @@ export function projectContextPackAnalysisForWithheldClaim(
     runner_up: null,
     margin_pp: null,
   };
+}
+
+/**
+ * Project selected-element analysis through the same withheld-claim verdict as
+ * the model-facing analysis section.
+ *
+ * A selected option's label is canonical selection context, not a ranking
+ * claim, so it remains available. Its joined probability/target figures and
+ * the `linked` relationship are comparative analysis, however, and would let
+ * the model reconstruct the ranking that the sibling display projection just
+ * removed. Every option therefore keeps its identity but receives the exact
+ * closed `analysis_withheld` state and no attached figures. Non-option focus
+ * remains byte-identical: driver/uncertainty discussion is deliberately useful
+ * when a recommendation cannot honestly be put forward.
+ */
+export function projectFocusForWithheldClaim(
+  focus: ContextPackFocus | undefined,
+): ContextPackFocus | undefined {
+  if (focus === undefined) return undefined;
+  let changed = false;
+  const elements = focus.elements.map((element): ContextPackFocusElement => {
+    if (
+      element.kind !== 'option' ||
+      (element.analysis_link !== 'linked' && element.analysis === undefined)
+    ) {
+      return element;
+    }
+    changed = true;
+    const { analysis: _analysis, ...identity } = element;
+    void _analysis;
+    return {
+      ...identity,
+      analysis_link: 'analysis_withheld',
+    };
+  });
+  return changed ? { ...focus, elements } : focus;
+}
+
+/**
+ * Preserve canonical selection identity while refusing every analysis claim
+ * when persisted analysis history could not be established. This is stronger
+ * than ordinary claim withholding: even `no_analysis` would assert absence,
+ * so every selected element receives the distinct fail-weak state and every
+ * attached analysis field is removed.
+ */
+export function projectFocusForUnavailableAnalysis(
+  focus: ContextPackFocus | undefined,
+): ContextPackFocus | undefined {
+  if (focus === undefined) return undefined;
+  const elements = focus.elements.map((element): ContextPackFocusElement => {
+    const { analysis: _analysis, ...identity } = element;
+    void _analysis;
+    return {
+      ...identity,
+      analysis_link: 'analysis_unavailable',
+    };
+  });
+  return { ...focus, elements };
+}
+
+/**
+ * Remove the open producer Decision Review payload on a withheld turn.
+ *
+ * Decision Review is intentionally not field-projected here: its producer
+ * contract is open and may carry comparative prose in any present or future
+ * member. Keeping a curated subset would create a second leader-claim reader
+ * that drifts from the canonical verdict. Draft coaching and the typed signal
+ * remain useful and are preserved byte-for-byte.
+ */
+export function projectCoachingForWithheldClaim(
+  coaching: CoachingCache,
+): CoachingCache {
+  return coaching.decision_review === null
+    ? coaching
+    : { ...coaching, decision_review: null };
+}
+
+/**
+ * Preserve draft coaching while refusing every analysis-derived coaching
+ * claim when persisted analysis history could not be established.
+ *
+ * A typed signal such as `FIRST_ANALYSIS_COMPLETE` still asserts that a
+ * saved analysis exists. That is safe under ordinary leader withholding but
+ * contradictory under `fail_closed_unavailable`, where even existence is
+ * unknown. Decision Review is analysis-derived too, so both fields fail weak.
+ */
+export function projectCoachingForUnavailableAnalysis(
+  coaching: CoachingCache,
+): CoachingCache {
+  return coaching.decision_review === null &&
+    coaching.last_coaching_signal === null
+    ? coaching
+    : {
+        ...coaching,
+        decision_review: null,
+        last_coaching_signal: null,
+      };
 }
 
 /**

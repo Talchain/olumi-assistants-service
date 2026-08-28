@@ -929,6 +929,14 @@ export const TelemetryEvents = {
   // boolean. The matched PROSE and the user's decision content never appear —
   // field paths travel on the `log.error` payload only.
   V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
+  // A client-visible 200 response could not establish persisted analysis
+  // authority and therefore withheld any leading-option claim. Emitted once at
+  // sendFinalised200, never at a read/selector seam, so the counter measures
+  // delivered fail-closed outcomes rather than retries. Payload: bounded
+  // `exit_path` + closed `outcome` only; no identifiers or decision
+  // content. The mode distinguishes suppressed model prose from preserved
+  // deterministic functional copy.
+  V5ClaimSafetyFailClosedUnavailable: "v5.claim_safety.fail_closed_unavailable",
 
   // G-CEE-1 — the EXPLANATION-ANSWER gate (compose/withheld-explanation-answer.ts).
   //
@@ -3899,6 +3907,14 @@ export function emit(event: string, data: Event) {
             reason: String((eventData.reason as string) || "unknown"),
             exit_path: String((eventData.exit_path as string) || "unknown"),
             dropped: String(eventData.dropped === true),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5ClaimSafetyFailClosedUnavailable: {
+          datadogClient.increment("v5.claim_safety.fail_closed_unavailable_total", 1, {
+            exit_path: String((eventData.exit_path as string) || "unknown"),
+            outcome: String((eventData.outcome as string) || "unknown"),
           });
           break;
         }

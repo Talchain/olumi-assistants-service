@@ -529,11 +529,26 @@ const ContextPackFocusElementSchema = z
       'not_in_analysis',
       'ambiguous_label',
       'analysis_not_current',
+      'analysis_withheld',
+      'analysis_unavailable',
       'no_analysis',
     ]),
     analysis: ContextPackFocusAnalysisSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((element, ctx) => {
+    if (
+      element.analysis_link === 'analysis_unavailable' &&
+      element.analysis !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['analysis'],
+        message:
+          'analysis_unavailable cannot carry analysis figures',
+      });
+    }
+  });
 
 /**
  * The focus section. `unresolved` is a CLOSED ENUM and never prose: the reason
@@ -714,7 +729,7 @@ const ContextPackReadinessSchema = z
   })
   .strict();
 
-export const ContextPackSchema = z
+const ContextPackObjectSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
     scenario_id: z.string().min(1),
@@ -739,6 +754,17 @@ export const ContextPackSchema = z
     graph_context: z
       .object({
         status: z.enum(GRAPH_CONTEXT_STATUSES),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Exact marker for an unavailable persisted-analysis read. It is optional
+     * because healthy absence and every established state carry no marker;
+     * omission is never interpreted as permission or as proof of no analysis.
+     */
+    analysis_context: z
+      .object({
+        status: z.literal('unavailable'),
       })
       .strict()
       .optional(),
@@ -871,5 +897,67 @@ export const ContextPackSchema = z
   // Allow additive fields without immediate schema bumps — tighten later
   // by switching to `.strict()` once the contract is fully fixed.
   .passthrough();
+
+const ContextPackRefinedSchema = ContextPackObjectSchema.superRefine(
+  (pack, ctx) => {
+    const unavailable = pack.analysis_context?.status === 'unavailable';
+    const unavailableFocus =
+      pack.focus?.elements.some(
+        (element) => element.analysis_link === 'analysis_unavailable',
+      ) ?? false;
+
+    if (unavailable && pack.display_analysis !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['display_analysis'],
+        message:
+          'unavailable analysis authority cannot carry display analysis',
+      });
+    }
+    if (
+      unavailable &&
+      pack.focus?.elements.some(
+        (element) => element.analysis_link !== 'analysis_unavailable',
+      )
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['focus', 'elements'],
+        message:
+          'unavailable analysis authority requires fail-weak focus links',
+      });
+    }
+    if (!unavailable && unavailableFocus) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['focus', 'elements'],
+        message:
+          'analysis_unavailable focus requires the unavailable authority marker',
+      });
+    }
+    if (
+      unavailable &&
+      (pack.coaching.decision_review !== null ||
+        pack.coaching.last_coaching_signal !== null)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['coaching'],
+        message:
+          'unavailable analysis authority cannot carry analysis-derived coaching',
+      });
+    }
+  },
+);
+
+/**
+ * The refined canonical contract plus its static field map. Zod 3 wraps a
+ * refined object in `ZodEffects`, which otherwise hides `.shape`; exposing the
+ * unchanged base map preserves the existing prompt-sanction and drift gates
+ * without bypassing root validation in `parse`/`safeParse`.
+ */
+export const ContextPackSchema = Object.assign(ContextPackRefinedSchema, {
+  shape: ContextPackObjectSchema.shape,
+});
 
 export type ContextPackSchemaType = z.infer<typeof ContextPackSchema>;

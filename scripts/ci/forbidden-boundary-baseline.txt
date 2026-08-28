@@ -41,7 +41,13 @@ warnOnInvalid=0
 
 # Exact ratchet: distinctive double-cast that erases types at boundaries.
 # Lowered 94 -> 61 by PR #615 (V1 orchestrator-belt deletion banked the cleanup).
-as_unknown_as=59
+# Lowered 59 -> 58 by PR #1170: the count went DOWN. This PR retires request-supplied
+# `analysis_state` as an authority, which deleted the
+# `coercedIngress as unknown as Record<string, unknown>` double-cast along with
+# `reconcileAnalysisSummaryWithEnrichment`. This edit FOLLOWS a genuine cleanup —
+# it is not a ratchet loosening. The gate requires current == baseline, so a real
+# removal fails the gate until the floor is lowered in the same PR.
+as_unknown_as=58
 
 # Exact ratchet: constant fallback on a science field — `field ?? null|0|0.x`
 # or `field || null|0|0.x`. HIGH-SIGNAL (catches fabricated defaults like

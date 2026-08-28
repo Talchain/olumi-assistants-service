@@ -58,7 +58,21 @@ import { isRecommendableTypedOption } from '../tools/handlers/recommendable-opti
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import type { ContextPackGraphContext } from './context-graph-snapshot.js';
+import type { MayNameLeadingOptionProvenance } from './claim-safety-read.js';
 import { isCanonicalStrictContextGraphCompaction } from './compact-graph-for-contextpack.js';
+import { measureModelFacingContextPackChars } from './model-facing-context-pack.js';
+import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
+import {
+  projectCoachingForUnavailableAnalysis,
+  projectCoachingForWithheldClaim,
+  projectDisplayAnalysisForWithheldClaim,
+  projectFocusForWithheldClaim,
+  projectFocusForUnavailableAnalysis,
+} from './withheld-leader-projection.js';
+import {
+  projectConversationForWithheldClaim,
+  projectConversationSummaryForWithheldClaim,
+} from './withheld-history-redaction.js';
 // Selection-aware answering (hop 4). TYPE-ONLY on purpose: the resolved
 // selection is produced by `buildTurnContext` and this module only PLACES it,
 // so there is no runtime edge from the assembler back to the context builder.
@@ -405,6 +419,11 @@ export interface ContextPackConversation {
   readonly pending_confirmation: boolean;
 }
 
+/** Model-facing marker for the one persisted-analysis read failure arm. */
+export interface ContextPackAnalysisContext {
+  readonly status: 'unavailable';
+}
+
 export interface ContextPack {
   readonly version: typeof CONTEXT_PACK_VERSION;
   /**
@@ -440,6 +459,12 @@ export interface ContextPack {
    * or graph-read detail is model-facing.
    */
   readonly graph_context?: ContextPackGraphContext;
+  /**
+   * Exact fail-closed analysis-authority marker. Present only when the
+   * scenario-wide persisted analysis read could not be established. Absence
+   * makes no positive claim about whether analysis exists.
+   */
+  readonly analysis_context?: ContextPackAnalysisContext;
   readonly graph: ContextPackGraph;
   /**
    * Raw, handler-facing analysis projection. Carries float probabilities
@@ -759,6 +784,23 @@ export interface AssembleContextPackInput {
   readonly graphContext?: ContextPackGraphContext;
   readonly graph?: GraphWithOptions | null;
   /**
+   * The already-derived model-facing claim-safety decision for this turn.
+   * Production supplies this from the same scenario-scoped verdict that gates
+   * deterministic response copy. The assembler does not re-select or infer it.
+   *
+   * Omission exists only for legacy/direct callers and preserves their
+   * historical behaviour. A withheld arm is projected before the single
+   * whole-pack ceiling so bytes the model is forbidden to receive cannot evict
+   * authorised conversation or other context.
+   */
+  readonly modelFacingClaimSafety?:
+    | { readonly status: 'permitted' }
+    | {
+        readonly status: 'withheld';
+        readonly constraintVerdictState: ConstraintVerdictState | null;
+        readonly provenance: MayNameLeadingOptionProvenance;
+      };
+  /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
    * uses this to populate ContextPack.graph (nodes/edges/derived lists and
    * counts) instead of the raw `graph` passthrough. Options/goals are
@@ -824,6 +866,19 @@ export interface AssembleContextPackInput {
    * remain assignable; the extensions are additive and optional.
    */
   readonly analysis?: AnalysisResponseSummaryWithSignals | null;
+  /**
+   * Model-facing analysis source. When supplied, this value alone is
+   * projected into `display_analysis` (and any analysis-bearing `focus`
+   * projection); the legacy `analysis` input continues to own the raw
+   * handler-facing slot. This split lets production carry a durable,
+   * scenario-wide analysis into prompt bytes without silently changing the
+   * bounded hot-window authority used by deterministic handlers and chips.
+   *
+   * Optional for compatibility: omission preserves the historical single
+   * source (`analysis` feeds both projections). Explicit `null` withholds the
+   * model-facing analysis while leaving the handler-facing slot unchanged.
+   */
+  readonly displayAnalysisSource?: AnalysisResponseSummaryWithSignals | null;
   /**
    * V5 Task 1.4: when the analysis came from a server-side fallback
    * (prior handler facts, not this request's body), the caller supplies a
@@ -982,6 +1037,13 @@ export interface ContextPackFocusElement {
    *   · `analysis_not_current` — analysis exists, but canonical state does not
    *                         license it as current/trustworthy for exploration;
    *                         no analysis values are attached.
+   *   · `analysis_withheld` — analysis exists and is current, but its
+   *                         option-level comparative result is intentionally
+   *                         withheld by the canonical claim-safety verdict;
+   *                         no analysis values are attached.
+   *   · `analysis_unavailable` — persisted analysis history could not be
+   *                         established on this turn; no existence or
+   *                         freshness claim is licensed and no figures attach.
    *   · `no_analysis`     — no analysis on this turn to join against.
    */
   readonly analysis_link:
@@ -989,6 +1051,8 @@ export interface ContextPackFocusElement {
     | 'not_in_analysis'
     | 'ambiguous_label'
     | 'analysis_not_current'
+    | 'analysis_withheld'
+    | 'analysis_unavailable'
     | 'no_analysis';
   /** Present IFF `analysis_link === 'linked'` and at least one value matched. */
   readonly analysis?: ContextPackFocusAnalysis;
@@ -1544,20 +1608,36 @@ export function assembleContextPackWithSummary(
   // surface). The raw-graph fallback path (`input.graph`) is outside
   // the budget module's compact-shape domain and passes through
   // unbudgeted, as before.
+  const hasDistinctDisplayAnalysisSource = input.displayAnalysisSource !== undefined;
+  const selectedDisplayAnalysisSource = hasDistinctDisplayAnalysisSource
+    ? input.displayAnalysisSource ?? null
+    : input.analysis ?? null;
+  // The one disclosed budget pass follows the bytes that can reach the model.
+  // On legacy callers this is exactly the historical graph+analysis pass. On
+  // the split production path it budgets the durable display source; hidden
+  // raw policy state cannot mint a misleading model-facing truncation marker.
   const budgeted = applyContextBudgetToAssemblyInputs({
     compactedGraph: compactedGraphForBudget,
-    analysis: input.analysis ?? null,
+    analysis: selectedDisplayAnalysisSource,
     scenarioId: input.payload.scenario_id ?? null,
   });
-  // Compute the raw analysis projection ONCE — it is shared between the
-  // handler-facing `analysis` slot and the LLM-facing `display_analysis`
-  // wrapper. Calling projectAnalysis twice would double-emit
-  // analysis_projection_invalid_probability telemetry on bad inputs.
+  // Keep raw handler policy on its hot-window source. It is not part of the
+  // model context budget once a distinct display source is supplied. Legacy
+  // callers still reuse the budgeted value exactly as before.
   const rawAnalysis = projectAnalysis(
-    budgeted.analysis,
+    hasDistinctDisplayAnalysisSource ? input.analysis ?? null : budgeted.analysis,
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
   );
+  const displayRawAnalysis = hasDistinctDisplayAnalysisSource
+    ? projectAnalysis(
+        budgeted.analysis,
+        // `projectAnalysis` intentionally drops this legacy parameter. Keep
+        // the split source explicit without creating a second inert contract.
+        null,
+        input.interventionControlledFactorIds,
+      )
+    : rawAnalysis;
   const projectedGraphBeforeAuthority: ContextPackGraph = budgeted.compactedGraph
     ? projectCompactGraph(budgeted.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
@@ -1661,7 +1741,7 @@ export function assembleContextPackWithSummary(
   // projection can join against the SAME display-safe values the model
   // receives. One computation, one authority — a second call here would be a
   // second place formatting the same numbers.
-  const displayAnalysis = formatAnalysisForContext(rawAnalysis, {
+  const displayAnalysis = formatAnalysisForContext(displayRawAnalysis, {
     analysisFreshness: input.coachingContext?.freshness,
   });
   // Selection-aware answering (hop 4). `buildTurnContext` already resolved the
@@ -1673,7 +1753,9 @@ export function assembleContextPackWithSummary(
   const projectedFocus = projectFocus(
     input.selection,
     displayAnalysis,
-    buildAnalysisIdentityIndex(input.analysis),
+    buildAnalysisIdentityIndex(
+      hasDistinctDisplayAnalysisSource ? input.displayAnalysisSource : input.analysis,
+    ),
     // One authority for analysis currency: the turn-executor projects this
     // boolean from the canonical analysis selector, where `usable_for_chips`
     // requires fresh analysis and rejects blockers/contradictions. Absence is
@@ -1681,13 +1763,63 @@ export function assembleContextPackWithSummary(
     // from a stale prior run merely because its id/label still exists.
     input.coachingContext?.usable_for_chips === true,
   );
-
+  // Claim-safety is projected BEFORE the one model-facing whole-pack ceiling.
+  // This is load-bearing: applying the gate afterwards would keep forbidden
+  // leader figures / Decision Review prose out of the final prompt, but those
+  // hidden bytes could already have evicted useful conversation. Production
+  // passes the verdict selected once in TurnExecutor; this module only applies
+  // its deterministic projection and never authors permission.
+  const withholdModelFacingLeader =
+    input.modelFacingClaimSafety?.status === 'withheld';
+  const modelFacingAnalysisContext: ContextPackAnalysisContext | undefined =
+    input.modelFacingClaimSafety?.status === 'withheld' &&
+    input.modelFacingClaimSafety.provenance === 'fail_closed_unavailable'
+      ? { status: 'unavailable' }
+      : undefined;
+  const constraintVerdictState =
+    input.modelFacingClaimSafety?.status === 'withheld'
+      ? input.modelFacingClaimSafety.constraintVerdictState
+      : null;
+  const modelFacingDisplayAnalysis =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? null
+      : withholdModelFacingLeader
+        ? projectDisplayAnalysisForWithheldClaim(
+            displayAnalysis,
+            constraintVerdictState,
+          )
+        : displayAnalysis;
+  const modelFacingFocus =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? projectFocusForUnavailableAnalysis(projectedFocus ?? undefined)
+      : withholdModelFacingLeader
+        ? projectFocusForWithheldClaim(projectedFocus ?? undefined)
+        : projectedFocus ?? undefined;
+  const modelFacingConversation = withholdModelFacingLeader
+    ? projectConversationForWithheldClaim(conversation)
+    : conversation;
+  const modelFacingConversationSummary =
+    input.conversationSummary === undefined
+      ? undefined
+      : withholdModelFacingLeader
+        ? projectConversationSummaryForWithheldClaim(input.conversationSummary)
+        : input.conversationSummary;
+  const coaching = input.coaching ?? EMPTY_COACHING_CACHE;
+  const modelFacingCoaching =
+    modelFacingAnalysisContext?.status === 'unavailable'
+      ? projectCoachingForUnavailableAnalysis(coaching)
+      : withholdModelFacingLeader
+        ? projectCoachingForWithheldClaim(coaching)
+        : coaching;
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
     ...(projectedBrief !== null ? { brief: projectedBrief } : {}),
     graph_context: graphContext,
+    ...(modelFacingAnalysisContext !== undefined
+      ? { analysis_context: modelFacingAnalysisContext }
+      : {}),
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
@@ -1700,7 +1832,7 @@ export function assembleContextPackWithSummary(
     // formatter treats undefined and null IDENTICALLY (both fail closed), so a
     // coalescing default would add a science-field fallback the
     // forbidden-boundary gate rightly flags, while changing nothing.
-    display_analysis: displayAnalysis,
+    display_analysis: modelFacingDisplayAnalysis,
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` / `std` floats become decision-
     // language `relationship` phrases plus the compactor's closed coefficient
@@ -1801,16 +1933,16 @@ export function assembleContextPackWithSummary(
     // The analysis join reads the SAME display-safe projection the model
     // receives, so `focus` can never show a number that disagrees with the
     // `analysis` section beside it.
-    ...(graphContext.status === 'canonical' && projectedFocus !== null
-      ? { focus: projectedFocus }
+    ...(graphContext.status === 'canonical' && modelFacingFocus !== undefined
+      ? { focus: modelFacingFocus }
       : {}),
-    conversation,
+    conversation: modelFacingConversation,
     // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
     // Conditional spread — when the caller supplies nothing the key is
     // ABSENT (never null/undefined-valued), preserving off/maintain
     // byte-identity of the serialised pack.
-    ...(input.conversationSummary !== undefined
-      ? { conversation_summary: input.conversationSummary }
+    ...(modelFacingConversationSummary !== undefined
+      ? { conversation_summary: modelFacingConversationSummary }
       : {}),
     recent_changes: projectedRecentChanges,
     recent_changes_status: effectiveRecentChangesStatus,
@@ -1822,7 +1954,7 @@ export function assembleContextPackWithSummary(
     ...(input.olderRelevantFacts !== undefined
       ? { older_relevant_facts: input.olderRelevantFacts }
       : {}),
-    coaching: input.coaching ?? EMPTY_COACHING_CACHE,
+    coaching: modelFacingCoaching,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,
     parsed_quantities: extraction.results,
@@ -1846,11 +1978,12 @@ export function assembleContextPackWithSummary(
   const assembled: ContextPack = input.coachingContext
     ? { ...withSegments, coaching_context: input.coachingContext }
     : withSegments;
-  // Context/Memory V5 defect 3 — the WHOLE-PACK ceiling, enforced. Runs on the
-  // finished pack (every section placed, every conditional key resolved), so
-  // the number it measures is the pack that ships, not a proxy for it. Under
-  // budget it returns the SAME object by reference: no cut, no key, no event,
-  // byte-identity preserved (pinned by the O-3 golden).
+  // Context/Memory V5 defect 3 — the MODEL-FACING compact-pack ceiling,
+  // enforced. Runs on the finished internal pack but measures the shared pure
+  // projection buildUserMessage serialises. Raw graph/analysis bytes retained
+  // only for deterministic consumers therefore cannot evict conversation the
+  // model would otherwise receive. Under budget it returns the SAME object by
+  // reference: no cut, no key, no event, byte-identity preserved.
   const contextPack = enforceContextPackCeiling({
     pack: assembled,
     priorTurnsTotalKnown: isKnownPriorTurnsTotal(input.priorTurnsTotal),
@@ -2877,7 +3010,8 @@ interface CeilingCutRecord {
  *   - never throws: a budgeting fault degrades to "pack unchanged", the same
  *     posture as `applyContextBudgetToAssemblyInputs`.
  *
- * ⚠ SCOPE, stated precisely: this bounds `JSON.stringify(pack).length`. The
+ * ⚠ SCOPE, stated precisely: this bounds the compact JSON length of the shared
+ * model-facing projection. The
  * `v5.context_budget` telemetry measures `buildUserMessage(pack, message)
  * .length` — the exact embedded prompt, which is LARGER (2-space indentation
  * plus the code-owned instruction blocks). A pack this pass judges to fit can
@@ -2893,7 +3027,7 @@ export function enforceContextPackCeiling(args: {
   try {
     const budget = CONTEXT_POLICY.coach_converse.total_char_budget;
     if (budget === null) return pack;
-    let chars = JSON.stringify(pack).length;
+    let chars = measureModelFacingContextPackChars(pack);
     if (chars <= budget) return pack;
 
     const charsBefore = chars;
@@ -2922,7 +3056,7 @@ export function enforceContextPackCeiling(args: {
           break;
         }
         current = next;
-        chars = JSON.stringify(current).length;
+        chars = measureModelFacingContextPackChars(current);
       }
       if (cutter.records(current) < originalRecords) {
         cuts.push({
