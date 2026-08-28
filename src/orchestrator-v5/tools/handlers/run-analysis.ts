@@ -96,7 +96,19 @@ import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
-import { AnalysisNotReadyError, readinessQuestions } from './analysis-ready-core.js';
+import {
+  AnalysisNotReadyError,
+  readinessQuestions,
+  resolveRunAdmission,
+} from './analysis-ready-core.js';
+// The 2026-08-28 disclosure defect: the run proceeds past unset option effects
+// (the compute-discard waiver) and the analyse turn says nothing about them.
+import {
+  buildUnsetOptionEffectDisclosure,
+  collectUnsetOptionEffects,
+  unsetOptionEffectFactorIds,
+  type UnsetOptionEffect,
+} from '../../coaching/unset-option-effect-disclosure.js';
 import {
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -1523,6 +1535,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // returns `case: null`, which is precisely why each constraint branch
     // carries its own explicit emit. The user-facing disclosure is the only
     // signal until the registered event lands.
+    // ── UNSET OPTION EFFECTS (2026-08-28) ────────────────────────────────
+    // Measured on staging across 15 fresh authenticated draws: 7 of 9 first
+    // clicks returned `MISSING_OPTION_VALUE` blockers with `may_run: true`, the
+    // analysis returned results anyway, and the turn's own sentence was SILENT
+    // about the unset effects. In 3 of 15 the headline went further and named a
+    // decisive driver that was itself an unset factor.
+    //
+    // ⭐ CONSULTED, NOT RE-DERIVED. The blockers already carry `option_label` +
+    // `factor_label` + `factor_id`; nothing new is computed. `resolveRunAdmission`
+    // is the estate's single readiness authority and is pure and total — a rival
+    // predicate beside it is the defect class this codebase pays for most often.
+    //
+    // ⚠ TOTAL BY CONTRACT, GUARDED ANYWAY. This runs AFTER a successful analysis,
+    // so a throw here would replace a good result with a 500 — strictly worse
+    // than the silence it exists to fix. Same house rule the defaulted-value
+    // egress states at its own chokepoint: never throw at a disclosure seam.
+    let unsetOptionEffects: readonly UnsetOptionEffect[] = [];
+    try {
+      const admission = resolveRunAdmission(snapshot.rawPersistedGraph ?? snapshot.graph);
+      unsetOptionEffects = collectUnsetOptionEffects(
+        admission.assessment.blockingIssues,
+        analysedOptionIds,
+      );
+    } catch {
+      unsetOptionEffects = [];
+    }
+
     const headlineInput = {
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
@@ -1568,6 +1607,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
         snapshot.rawPersistedGraph ?? { options: snapshot.options },
       ),
+      // The named-driver half. Derived from the SAME records the disclosure
+      // sentence below is built from, so the sentence and the suppression can
+      // never disagree about which factors are unset.
+      unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
     };
     const headline = buildAnalysisResultHeadline(headlineInput);
     // D-ask-1 (2.11 P0-1) disclosure — claim-safety-critical: when the run
@@ -1685,7 +1728,32 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       resultRecords,
       headline !== null,
     );
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}`;
+    // ⭐ THE UNSET-OPTION-EFFECT DISCLOSURE, LAST OF THE FIVE.
+    //
+    // ⚠ DELIBERATELY *NOT* GATED ON `headline !== null`, and the contrast with
+    // the objective-contradiction tail directly above is the point. That tail
+    // NAMES A LEADER, so it must ship only where a leader was permitted. This
+    // one names an option solely as the subject of a gap the user left — no
+    // comparative claim, no ranking, no leader — so it is honest on a withheld
+    // turn, and the withheld turn is exactly where a user who ran past unset
+    // option effects most needs to be told. Its slot is registered in BOTH the
+    // headline and locked-template branches of the egress allowlist for that
+    // reason (`analysis-result-headline.ts`).
+    //
+    // Additive, never exclusive: a turn can carry all five and none may eat
+    // another. It carries no magnitude and no direction — the only number in it
+    // is an integer count of pairs.
+    const unsetOptionEffectDisclosure =
+      buildUnsetOptionEffectDisclosure(unsetOptionEffects);
+    // ⚠ NO TELEMETRY EMIT HERE, deliberately. The obvious move was to reuse
+    // `V5RunAnalysisOptionsScaffolded`, and it is wrong: that event means "the
+    // scaffold filled or excluded a WHOLLY unvalued option", and this is the
+    // per-(option,factor) axis on a valued one. Two concepts under one event
+    // name is the same defect class as two authorities under one predicate
+    // (trap 21), and it would corrupt the scaffold rate every dashboard reads.
+    // A dedicated event is a registered-telemetry change with its own
+    // validation gate; it belongs in its own PR, not bundled here.
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
