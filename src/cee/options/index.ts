@@ -1,5 +1,6 @@
 import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
+import { isDecisionFreeShape } from "../../validators/decision-free-shape.js";
 
 type CEEOptionV1 = components["schemas"]["CEEOptionV1"];
 type CEEOptionsRequestV1 = components["schemas"]["CEEOptionsRequestV1"];
@@ -42,7 +43,21 @@ export function generateOptions(graph: GraphV1, archetype?: ArchetypeMeta | null
   const suggestions: CEEOptionV1[] = [];
 
   // No options at all: encourage expanding the option set and channels.
-  if (optionCount === 0) {
+  //
+  // ⭐ SKIPPED FOR THE DELIBERATE EXPLORATORY MAP. These two suggestions are
+  // literally "add options" and "explore paths" nudges — precisely the pressure
+  // a user declined when they said they wanted to map the situation rather than
+  // jump to an answer. Emitting them to that user is the same dishonesty as the
+  // bias finding, in the shape of advice.
+  //
+  // A decision that exists with zero options still gets them: there the missing
+  // options are a genuine gap, not a choice.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: getNodesByKind(graph, "decision").length,
+    optionCount,
+  });
+
+  if (optionCount === 0 && !decisionFree) {
     suggestions.push({
       id: "expand_scope_add_options",
       kind: "expand_scope",

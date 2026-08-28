@@ -1573,9 +1573,14 @@ describe('validateGraph', () => {
       const result = validateGraph({ graph });
       expect(result.valid).toBe(false);
       expect(hasError(result, 'MISSING_GOAL')).toBe(true);
-      expect(hasError(result, 'MISSING_DECISION')).toBe(true);
-      expect(hasError(result, 'INSUFFICIENT_OPTIONS')).toBe(true);
       expect(hasError(result, 'MISSING_BRIDGE')).toBe(true);
+      // An EMPTY graph has zero decisions AND zero options, so it now falls in
+      // the deliberate decision-free class and those two cardinality codes are
+      // suppressed by design (`validators/decision-free-shape.ts`). The graph is
+      // still INVALID — it has no goal and no bridge — which is what this test
+      // is here to prove. Full 48-cell table: tests/unit/decision-free-model.test.ts.
+      expect(hasError(result, 'MISSING_DECISION')).toBe(false);
+      expect(hasError(result, 'INSUFFICIENT_OPTIONS')).toBe(false);
     });
 
     it('includes requestId in logs', () => {
@@ -1599,12 +1604,19 @@ describe('validateGraph', () => {
 
       const result = validateGraph({ graph });
       expect(result.valid).toBe(false);
-      // Should have multiple different error types
+      // Should have multiple different error types — the point of this test is
+      // that no tier short-circuits the others.
       expect(result.errors.length).toBeGreaterThan(3);
       expect(hasError(result, 'MISSING_GOAL')).toBe(true);
-      expect(hasError(result, 'MISSING_DECISION')).toBe(true);
-      expect(hasError(result, 'INSUFFICIENT_OPTIONS')).toBe(true);
+      expect(hasError(result, 'MISSING_BRIDGE')).toBe(true);
       expect(hasError(result, 'INVALID_EDGE_REF')).toBe(true);
+      expect(hasError(result, 'OBSERVABLE_MISSING_DATA')).toBe(true);
+      // This fixture carries no decision and no option, so it is the deliberate
+      // decision-free class and those two codes are suppressed by design.
+      // Four distinct codes across four tiers still prove the no-short-circuit
+      // property this test owns.
+      expect(hasError(result, 'MISSING_DECISION')).toBe(false);
+      expect(hasError(result, 'INSUFFICIENT_OPTIONS')).toBe(false);
     });
   });
 });

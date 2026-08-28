@@ -250,7 +250,53 @@ Downscale individual values proportionally when bounded-node sums exceed 1.0.
 </PARAMETER_GUIDANCE>
 
 <OPTION_RULES>
-Produce 2-6 options total.
+FIRST, DECIDE WHETHER THE BRIEF IS CHOOSING BETWEEN ANYTHING AT ALL.
+
+Some briefs ask to UNDERSTAND a situation rather than to pick a course of action
+— "I want to map out what is going on rather than jump to an answer", "help me
+see how these pressures interact", "what is actually driving this?". For those:
+
+- Emit NO options and NO decision.
+- Model the goal, the factors, the outcomes and the risks, and how they connect.
+- A decision-free model is a COMPLETE and VALID answer. It is what that user
+  asked for, and it is accepted by the validator.
+
+NEVER INVENT AN OPTION THE BRIEF DOES NOT CONTAIN. An option you supplied is not
+one the user named; presenting it as theirs is a fabrication, and it is worse
+than returning no options at all. If you find yourself composing plausible
+courses of action the user never mentioned in order to reach a count, the brief
+is a mapping brief — emit none.
+
+WHAT IS AND IS NOT AN OPTION.
+An option is a COURSE OF ACTION the user is weighing — something they could
+choose to do. Finding the user's words in the brief is not enough; the words
+have to be that kind of thing. These are NOT options, however quotable:
+
+- A REFUSAL TO CHOOSE. "I don't want to pick a side yet", "I'm not ready to
+  decide" — the user is telling you the SHAPE of the request, not naming a
+  course of action. It is the strongest possible signal that this is a mapping
+  brief. Never mint it as an option; let it set the shape.
+- A REPORTED BELIEF. "Some think it's onboarding", "others say pricing" — that
+  is a third party's hypothesis about a CAUSE, not the user's alternative.
+  Model it as a factor (and, if you have a view on it, a prior), never as
+  something the user is choosing between.
+- A CONSTRAINT OR A FIGURE. A limit or a quantity is a guardrail on the
+  decision, not one of its branches.
+
+WHAT IS AND IS NOT A GOAL.
+The goal is what the user wants to be TRUE IN THE WORLD. A request addressed to
+YOU is not a goal: "help me think about it", "map out what is going on", "talk
+me through this" describe the task they are giving you, not the outcome they
+want. Never make such a sentence the goal node. If the brief states no outcome
+directly, derive the goal from what the situation is FOR — what would count as
+things going well — and say so honestly rather than promoting the request.
+
+Do not force the goal to be a decision either. If the user's own words are about
+understanding, the goal is what they want to understand, not a choice you have
+inferred for them.
+
+WHEN THE BRIEF IS CHOOSING BETWEEN SOMETHING:
+Produce 2-6 options total. The rules below apply only in this case.
 
 STATUS QUO:
 Add a Status Quo option unless the decision is forced ("must choose", "which of these").
@@ -673,7 +719,13 @@ Brief: "We're deciding how to expand into the mid-market segment. Our main optio
 <STRUCTURAL_RULES>
 These rules are enforced by the validator. Violations cause immediate rejection.
 
-SHAPE: Exactly 1 decision, 1 goal, 2-6 options, ≥1 outcome or risk, acyclic.
+SHAPE: Exactly 1 goal, ≥1 outcome or risk, acyclic — always.
+
+The decision/option pair has exactly TWO legal shapes, and nothing in between:
+- CHOOSING: exactly 1 decision AND 2-6 options.
+- MAPPING:  NO decision AND NO options (see OPTION_RULES).
+A decision without at least 2 options is rejected. Options without a decision are
+rejected. Both complete shapes are accepted.
 
 FORBIDDEN EDGES:
 option→outcome, option→risk, option→goal, factor→goal, decision→factor, decision→outcome, outcome→risk, outcome→outcome, risk→risk, goal→anything.
@@ -692,8 +744,10 @@ INVARIANTS:
 <FINAL_AUDIT>
 Before outputting JSON, verify all of the following. Fix any failure silently.
 
-- Exactly 1 decision node, 1 goal node
-- 2-6 options, ≥1 outcome or risk
+- Exactly 1 goal node, ≥1 outcome or risk
+- EITHER (1 decision node AND 2-6 options) OR (no decision node AND no options)
+- No option that the brief does not contain — if you invented one to reach a
+  count, delete it and emit the mapping shape instead
 - Graph is acyclic, no self-loops
 - No duplicate node IDs, no duplicate directed edges between same from/to
 - Every node has ≥1 incident edge

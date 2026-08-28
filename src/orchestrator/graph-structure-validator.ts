@@ -81,6 +81,7 @@
 
 import type { GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
+import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
 
 // ============================================================================
 // Types
@@ -362,15 +363,23 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
 function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation[]): void {
   const hasGoal = graph.nodes.some((n) => n.kind === 'goal');
   const hasDecision = graph.nodes.some((n) => n.kind === 'decision');
+  const decisionCount = graph.nodes.filter((n) => n.kind === 'decision').length;
   const optionCount = graph.nodes.filter((n) => n.kind === 'option').length;
+
+  // ⭐ THE DIFFERENTLY-NAMED TWIN of `graph-validator.ts`'s MISSING_DECISION /
+  // INSUFFICIENT_OPTIONS. Same question, different code vocabulary — and
+  // READINESS reads THIS validator, not that one. Fixing one and missing the
+  // other is this estate's chronic defect, so both import the SAME predicate
+  // from `validators/decision-free-shape.ts` and cannot drift apart.
+  const decisionFree = isDecisionFreeShape({ decisionCount, optionCount });
 
   if (!hasGoal) {
     violations.push({ code: 'NO_GOAL', detail: 'No goal node in graph' });
   }
-  if (!hasDecision) {
+  if (!hasDecision && !decisionFree) {
     violations.push({ code: 'NO_DECISION', detail: 'No decision node in graph' });
   }
-  if (optionCount < MIN_OPTIONS) {
+  if (optionCount < MIN_OPTIONS && !decisionFree) {
     violations.push({
       code: 'FEWER_THAN_TWO_OPTIONS',
       detail: `Only ${optionCount} option node(s) — minimum is ${MIN_OPTIONS}`,
@@ -469,45 +478,66 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
 
   const decisionNodes = graph.nodes.filter((n) => n.kind === 'decision');
-  if (decisionNodes.length === 0) return; // Already caught by NO_DECISION check
 
-  // Build forward adjacency list — skip bidirected edges (unmeasured confounders)
-  const forward = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    if (!isDirected(edge)) continue;
-    if (!forward.has(edge.from)) forward.set(edge.from, new Set());
-    forward.get(edge.from)!.add(edge.to);
-  }
+  // Scoped to the class being admitted, exactly as in `graph-validator.ts` — see
+  // the note there. `options > 0 && decisions === 0` keeps its prior behaviour
+  // (skip both loops); it is already refused by NO_DECISION.
+  const decisionFree = isDecisionFreeShape({
+    decisionCount: decisionNodes.length,
+    optionCount: graph.nodes.filter((n) => n.kind === 'option').length,
+  });
+  if (decisionNodes.length === 0 && !decisionFree) return;
 
-  // BFS from each decision node to find all reachable nodes
-  const reachable = new Set<string>();
-  const queue: string[] = [];
+  // ⭐⭐ THE SPLIT, mirroring `graph-validator.ts`'s `validateReachability`.
+  //
+  // This used to be a single `if (decisionNodes.length === 0) return`, which
+  // skipped BOTH loops below. That was harmless only while a decision-free graph
+  // was refused outright; now that the deliberate exploratory map is ADMITTED, it
+  // would leave that class with no connectivity enforcement in this validator
+  // either — and READINESS reads this one.
+  //
+  // Loop 1 (goal reachable FROM the decision) genuinely needs a decision root.
+  // Loop 2 (every edged node can REACH the goal) is a reverse BFS from the goal
+  // and needs none, so it must keep running.
+  if (decisionNodes.length > 0) {
+    // Build forward adjacency list — skip bidirected edges (unmeasured confounders)
+    const forward = new Map<string, Set<string>>();
+    for (const edge of graph.edges) {
+      if (!isDirected(edge)) continue;
+      if (!forward.has(edge.from)) forward.set(edge.from, new Set());
+      forward.get(edge.from)!.add(edge.to);
+    }
 
-  for (const dec of decisionNodes) {
-    queue.push(dec.id);
-    reachable.add(dec.id);
-  }
+    // BFS from each decision node to find all reachable nodes
+    const reachable = new Set<string>();
+    const queue: string[] = [];
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const neighbours = forward.get(current);
-    if (neighbours) {
-      for (const next of neighbours) {
-        if (!reachable.has(next)) {
-          reachable.add(next);
-          queue.push(next);
+    for (const dec of decisionNodes) {
+      queue.push(dec.id);
+      reachable.add(dec.id);
+    }
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const neighbours = forward.get(current);
+      if (neighbours) {
+        for (const next of neighbours) {
+          if (!reachable.has(next)) {
+            reachable.add(next);
+            queue.push(next);
+          }
         }
       }
     }
-  }
 
-  // Check if every goal is reachable
-  for (const goal of goalNodes) {
-    if (!reachable.has(goal.id)) {
-      violations.push({
-        code: 'NO_PATH_TO_GOAL',
-        detail: `Goal node "${goal.id}" (${goal.label}) not reachable from decision node`,
-      });
+    // Check if every goal is reachable
+    for (const goal of goalNodes) {
+      if (!reachable.has(goal.id)) {
+        violations.push({
+          code: 'NO_PATH_TO_GOAL',
+          detail: `Goal node "${goal.id}" (${goal.label}) not reachable from decision node`,
+        });
+      }
     }
   }
 
