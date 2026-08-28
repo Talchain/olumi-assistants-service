@@ -84,6 +84,7 @@ function packWithGraph(rawGraph: ContextPackGraph): ContextPack {
     graph_context: { status: 'canonical' },
     graph: rawGraph,
     analysis: null,
+    analysis_state: null,
     display_analysis: null,
     display_graph: formatGraphForContext(rawGraph),
     conversation: {
