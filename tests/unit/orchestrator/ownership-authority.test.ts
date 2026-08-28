@@ -12,6 +12,10 @@
  * (CLAUDE.md trap 16-inverse: a fixture you wrote yourself is not evidence
  * about the wire).
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect } from 'vitest';
 
 import { attachCallerContext } from '../../../src/context/index.js';
@@ -174,6 +178,45 @@ describe('the carve-out table is COMPLETE, and widening it is a deliberate act',
       expect(carveOut.reason.length).toBeGreaterThan(60);
       expect(carveOut.standingEvidence.length).toBeGreaterThan(60);
       expect(carveOut.scope.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('records where a carve-out is UNAVAILABLE despite being in scope, and what measures it', () => {
+    // `scope` records where the rule APPLIES; this records where a caller can
+    // actually SATISFY it. The two differ for the HMAC row, and the difference
+    // is invisible from the module itself — it comes from `/orchestrate/v2/turn/
+    // stream` re-entering the turn handler with a path-bound signature that can
+    // no longer verify. Without this pin, a reader of `scope` would conclude the
+    // carve-out is available on every path reaching the handler.
+    const hmac = OWNERSHIP_CLAIM_CARVE_OUTS.find(
+      (c) => c.id === 'verified_hmac_service_caller',
+    );
+    expect(hmac).toBeDefined();
+
+    const stream = hmac?.knownUnavailableOn.find(
+      (u) => u.route === '/orchestrate/v2/turn/stream',
+    );
+    expect(stream, 'the streamed re-entry limitation must stay recorded').toBeDefined();
+    // Bound to the MEASURING suite by name, so this record cannot become a
+    // free-floating claim if that suite is ever moved or deleted.
+    expect(stream?.pinnedBy).toBe('tests/integration/streamed-turn-hmac.test.ts');
+  });
+
+  it('every pinnedBy reference names a suite that EXISTS', () => {
+    // DERIVED, not mirrored. Without this the `pinnedBy` field is prose that
+    // happens to be stored in a string: renaming or deleting the measuring
+    // suite would leave a confident citation pointing at nothing, and every
+    // other assertion here would stay green. Resolving it against the repo
+    // root is what makes the citation load-bearing.
+    const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const referenced = OWNERSHIP_CLAIM_CARVE_OUTS.flatMap((c) =>
+      c.knownUnavailableOn.map((u) => u.pinnedBy),
+    );
+    // Guard against the check passing by finding nothing (CLAUDE.md trap 13:
+    // an absence probe needs to prove it can see a presence).
+    expect(referenced.length).toBeGreaterThan(0);
+    for (const rel of referenced) {
+      expect(existsSync(join(repoRoot, rel)), `missing suite: ${rel}`).toBe(true);
     }
   });
 

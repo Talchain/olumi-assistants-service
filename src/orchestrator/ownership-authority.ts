@@ -85,6 +85,23 @@ export interface OwnershipClaimCarveOut {
   readonly standingEvidence: string;
   /** Routes on which this carve-out applies. */
   readonly scope: readonly string[];
+  /**
+   * Routes INSIDE `scope` where the carve-out is nevertheless unavailable,
+   * each with its reason and the suite that measures it.
+   *
+   * ── WHY THIS FIELD EXISTS ──────────────────────────────────────────────
+   * `scope` alone over-states a carve-out: it records where the rule APPLIES,
+   * not where a caller can actually SATISFY it. The two differ here, and the
+   * difference is not visible from this file — it comes from how another route
+   * re-enters this one. A reviewer reading `scope` in isolation would conclude
+   * the carve-out is available on every path that reaches the turn handler.
+   */
+  readonly knownUnavailableOn: readonly {
+    readonly route: string;
+    readonly reason: string;
+    /** The suite that MEASURES this, so the record cannot drift from reality. */
+    readonly pinnedBy: string;
+  }[];
 }
 
 /**
@@ -96,6 +113,25 @@ export interface OwnershipClaimCarveOut {
  *   EXACT id set, so a new row cannot arrive without a deliberate test edit
  *   and the review that comes with it. That is the point of the assertion —
  *   it is not a tautology, it is a tripwire.
+ *
+ * ⭐ THE SINGLE ROW BELOW HAS NO KNOWN LIVE CONSUMER, AND SAYING SO IS THE
+ *   HONEST SUMMARY OF THIS WHOLE MODULE. Derived, 28 Aug 2026, across five
+ *   fresh clones with a firing contrast control: no production caller sends a
+ *   body `user_id` to either turn route at all. The UI carries identity as an
+ *   `X-User-Id` HEADER, which has ZERO readers on the turn path (positive
+ *   control in `proxy-v5-turn.test.ts`: `authorization` returns 9 readers,
+ *   `x-user-id` none), and CEE strips body `user_id` on both proxy rungs.
+ *   `tests/integration/streamed-turn-hmac.test.ts` further shows a pure-HMAC
+ *   caller cannot use the streamed route at all.
+ *
+ *   So on live traffic the rule below currently evaluates to "deny, always".
+ *   That is a statement about today's callers, NOT a reason to delete the
+ *   carve-out: the row exists so that the documented service-caller behaviour
+ *   in `user-identity.ts` has one reviewed, testable expression rather than
+ *   being re-invented ad hoc the first time a service integration needs it.
+ *   But a reviewer should know that nothing exercises it in production, and
+ *   therefore that no live behaviour depends on its being right — only on its
+ *   being CLOSED, which the suites do pin.
  */
 export const OWNERSHIP_CLAIM_CARVE_OUTS: readonly OwnershipClaimCarveOut[] = Object.freeze([
   Object.freeze({
@@ -113,6 +149,22 @@ export const OWNERSHIP_CLAIM_CARVE_OUTS: readonly OwnershipClaimCarveOut[] = Obj
       'header satisfied without any verification — a forgeable flag under a ' +
       'load-bearing name. Re-check that binding before trusting this row.',
     scope: Object.freeze(['/orchestrate/v2/turn', '/orchestrate/v2/turn/stop']),
+    knownUnavailableOn: Object.freeze([
+      Object.freeze({
+        route: '/orchestrate/v2/turn/stream',
+        reason:
+          'The streamed route re-enters `/orchestrate/v2/turn` via `app.inject()`, ' +
+          'forwarding the signature headers verbatim. The HMAC canonical string is ' +
+          'PATH-BOUND (`METHOD\\nPATH\\nTS\\nNONCE\\nBODYHASH`, verified over ' +
+          '`request.url`) and the nonce is consumed by the OUTER verification, so ' +
+          'the inner request cannot verify. It falls through to the API-key path, ' +
+          'so an HMAC caller reaches the ownership decision as `shared_key` and its ' +
+          'claim is discarded. FAIL-CLOSED, and deliberately not fixed here — the ' +
+          'route is unconditionally registered (server.ts), so this is live ' +
+          'behaviour, not a hypothetical.',
+        pinnedBy: 'tests/integration/streamed-turn-hmac.test.ts',
+      }),
+    ]),
   }),
 ]);
 
