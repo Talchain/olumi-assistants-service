@@ -22,6 +22,28 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [
+        {
+          fact: {
+            fact_type: 'run_analysis',
+            fact_version: 1,
+            noop: false,
+            result: {
+              scenario_id: '77777777-7777-4777-8777-777777777777',
+              leading_option_id: 'opt_a',
+              summary: 'Prior analysis',
+              graph_hash_at_run: 'aaaa111122223333',
+              computed_at: '2026-08-13T19:07:44.000Z',
+              enrichment: { analysis_status: 'computed' },
+            },
+          },
+          fact_row_id: 'persisted-run-analysis-row',
+          fact_created_at: '2026-08-13T19:07:44.000Z',
+        },
+      ],
+      total_count: 1,
+    }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: ensureScenarioExistsSpy,

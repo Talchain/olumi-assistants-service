@@ -43,6 +43,10 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', async (importOriginal) 
         append: mocks.append,
         hasPriorTurns: async () => mocks.hasPriorTurns,
         readRecent: async () => mocks.recentTurns as never,
+        readScenarioRunAnalysisFactsFor: async () => ({
+          facts: [],
+          total_count: 0,
+        }),
         readMostRecentPendingActions: async () => mocks.pendingActions as never,
         loadGraph: async () => mocks.persistedGraph,
         loadGraphAndBriefText: async () => ({ graph: mocks.persistedGraph, briefText: null }),
