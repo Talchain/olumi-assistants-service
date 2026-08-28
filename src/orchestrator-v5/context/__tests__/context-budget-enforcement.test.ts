@@ -41,6 +41,10 @@ import { applyContextBudgetToAssemblyInputs } from '../context-budget-enforcemen
 import { CONTEXT_POLICY } from '../context-policy.js';
 import type { DisplaySafeGraph } from '../../format/format-graph-for-context.js';
 import {
+  buildUserMessage,
+  CONTEXT_BUDGET_INSTRUCTION,
+} from '../../routing/route-with-tool-use.js';
+import {
   analysisSummaryFixture,
   overBudgetCompactGraph,
   priorTurnsFixture,
@@ -187,6 +191,14 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(graphRecord!.kept_chars).toBe(
       JSON.stringify(bigGraphTrimmedProbe(pack)).length,
     );
+
+    // Prompt-byte binding: a REAL graph cut carries the marker and its
+    // interpretation together. Neither assertion can pass on a hand-built
+    // disclosure or an instruction that never reaches the model.
+    const prompt = buildUserMessage(pack, 'Which model facts matter here?');
+    expect(prompt).toContain('"context_budget": {');
+    expect(prompt).toContain('"section": "graph"');
+    expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
   });
 
   it('emits v5.context_truncation with disclosed:true for a budget trim', () => {
@@ -234,6 +246,13 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(analysisRecord!.original_chars).toBeGreaterThan(
       analysisRecord!.kept_chars,
     );
+
+    // The sibling REAL analysis cut reaches the identical code-owned
+    // interpretation; there is no graph-only special case.
+    const prompt = buildUserMessage(pack, 'What does the analysis show?');
+    expect(prompt).toContain('"context_budget": {');
+    expect(prompt).toContain('"section": "analysis"');
+    expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
   });
 
   it('positive control: an under-budget context is untrimmed, unmarked, and byte-identical to base', () => {
@@ -250,6 +269,13 @@ describe('context budget enforcement at assembly (O-3)', () => {
 
     // No marker key at all (key-absence doctrine — byte identity).
     expect('context_budget' in pack).toBe(false);
+
+    // Exact absence arm: under budget means no marker and no instruction. This
+    // guards against turning a conditional disclosure into generic prompt
+    // boilerplate or making key absence imply a cut occurred.
+    const prompt = buildUserMessage(pack, 'What matters here?');
+    expect(prompt).not.toContain('"context_budget"');
+    expect(prompt).not.toContain(CONTEXT_BUDGET_INSTRUCTION);
 
     // Nothing trimmed: node/edge arrays flow through by reference and the
     // five-driver projection survives (CONTEXT_PACK_TOP_DRIVER_CAP = 5).
