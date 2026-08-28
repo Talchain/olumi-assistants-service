@@ -6,9 +6,13 @@
  * (`with_recent_change` and `no_recent_changes`).
  */
 import { describe, expect, it } from 'vitest';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
-import type { RecentMutation } from '../../context/recent-changes.js';
+import {
+  projectRecentChanges,
+  type RecentMutation,
+} from '../../context/recent-changes.js';
 import {
   CHANGES_UNAVAILABLE_TEXT,
   tryStateQueryGuard,
@@ -19,6 +23,44 @@ const ADD_CONSTRAINT_50K: RecentMutation = {
   summary: 'Added constraint: Total cost must be at most £50,000.',
   target_label: 'Total cost',
 };
+
+const TYPED_FACTOR_TRANSITION = projectRecentChanges([
+  {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: false,
+    result: {
+      target_id: 'factor-switching-cost',
+      status: 'applied',
+      before: { raw_value: 50000, unit: '£', label: 'One-Off Switching Cost' },
+      after: { raw_value: 73000, unit: '£', label: 'One-Off Switching Cost' },
+    },
+  } as unknown as HandlerFact,
+])[0]!;
+
+const UNTYPED_GRAPH_EDIT = projectRecentChanges([
+  {
+    fact_type: 'edit_graph',
+    fact_version: 1,
+    noop: false,
+    result: {
+      edit_kind: 'parameter_update',
+      status: 'applied',
+      operations_count: 1,
+      affected_entities: [
+        { kind: 'node', label: 'One-Off Switching Cost' },
+      ],
+      graph_hash_before: 'before-hash',
+      graph_hash_after: 'after-hash',
+      // Deliberately hostile: edit_graph.safe_summary is free-form receipt
+      // copy, not a typed before/after transition. The consequence answer must
+      // not turn these numbers or their unit into canonical history.
+      safe_summary: 'Updated One-Off Switching Cost from £50,000 to £73,000.',
+      impact: 'moderate',
+      rerun_recommended: true,
+    },
+  } as unknown as HandlerFact,
+])[0]!;
 
 function ctxWith(
   recent: readonly RecentMutation[],
@@ -296,6 +338,100 @@ describe('tryStateQueryGuard', () => {
       expect(outcome.assistant_text).not.toMatch(/constraint_id/i);
       expect(outcome.assistant_text).not.toMatch(/node_id/i);
       expect(outcome.assistant_text).not.toMatch(/provenance/i);
+    });
+
+    it('preserves exact values and units for a typed durable factor transition', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What did that update do?',
+        contextPack: ctxWith([TYPED_FACTOR_TRANSITION]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain(
+        'Updated One-Off Switching Cost from £50,000 to £73,000.',
+      );
+      expect(outcome.assistant_text).not.toMatch(/without guessing/i);
+    });
+
+    it('withholds alleged prior/current values and units from an untyped graph-edit summary', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What did that update do?',
+        contextPack: ctxWith([UNTYPED_GRAPH_EDIT]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain(
+        'does not include a trustworthy before-and-after value and unit',
+      );
+      expect(outcome.assistant_text).toContain("can't quantify its effect without guessing");
+      expect(outcome.assistant_text).not.toContain('£50,000');
+      expect(outcome.assistant_text).not.toContain('£73,000');
+    });
+
+    it('does not let a transition-looking canonical label mint untyped values or units', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What did that update do?',
+        contextPack: ctxWith([
+          {
+            ...UNTYPED_GRAPH_EDIT,
+            summary: 'Updated the decision model.',
+            target_label: 'One-Off Switching Cost from £50,000 to £73,000',
+          },
+        ]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain('Recorded an edit to the saved model.');
+      expect(outcome.assistant_text).not.toContain('One-Off Switching Cost');
+      expect(outcome.assistant_text).not.toContain('£50,000');
+      expect(outcome.assistant_text).not.toContain('£73,000');
+    });
+
+    it.each([
+      'So, what did that update do?',
+      'Please explain what did that update do?',
+      'What did that update do for our plan?',
+      'What did that update do in practical terms?',
+      'What did that update do and what should we do next?',
+    ])('uses the same effect authority for every admitted wrapper: %s', (message) => {
+      const outcome = tryStateQueryGuard({
+        message,
+        contextPack: ctxWith([UNTYPED_GRAPH_EDIT]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain(
+        'does not include a trustworthy before-and-after value and unit',
+      );
+      expect(outcome.assistant_text).not.toContain('£50,000');
+      expect(outcome.assistant_text).not.toContain('£73,000');
+    });
+
+    it('continues to quote the same untyped graph-edit receipt for a bare readback', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed?',
+        contextPack: ctxWith([UNTYPED_GRAPH_EDIT]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain(UNTYPED_GRAPH_EDIT.summary);
+    });
+
+    it('does not turn an ordinary readback with trailing context into an effect query', () => {
+      const outcome = tryStateQueryGuard({
+        message: 'What changed in the saved model?',
+        contextPack: ctxWith([UNTYPED_GRAPH_EDIT]),
+      });
+      if (!outcome.matched || outcome.dispatch !== 'with_recent_change') {
+        throw new Error(`expected with_recent_change dispatch, got ${JSON.stringify(outcome)}`);
+      }
+      expect(outcome.assistant_text).toContain(UNTYPED_GRAPH_EDIT.summary);
+      expect(outcome.assistant_text).not.toMatch(/without guessing/i);
     });
   });
 
