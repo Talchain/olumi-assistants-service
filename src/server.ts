@@ -100,6 +100,7 @@ import { loadDskBundle, getDskVersionHash } from "./orchestrator/dsk-loader.js";
 import { logFeatureHealth } from "./diagnostics/feature-health.js";
 import { initSentry, setSentryRequestTag, setupSentryFastify } from "./middleware/sentry.js";
 import { createContextRegistrationHook, createContextCleanupHook } from "./middleware/token-budget.js";
+import { isAllowedBrowserOrigin } from "./security/browser-origin-policy.js";
 
 export const DEFAULT_ORIGINS = [
   "https://olumi.app",
@@ -470,9 +471,16 @@ export async function build() {
 
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
   const allowedOrigins = resolveAllowedOrigins();
+  const allowedOriginSet = new Set(allowedOrigins);
 
   await app.register(cors, {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      callback(
+        null,
+        typeof origin === "string" &&
+          isAllowedBrowserOrigin(origin, allowedOriginSet),
+      );
+    },
     allowedHeaders: DEFAULT_ALLOWED_HEADERS,
     exposedHeaders: [
       "x-olumi-service",
@@ -491,7 +499,7 @@ export async function build() {
   app.addHook("onRequest", async (request) => {
     const origin = request.headers.origin;
     if (origin) {
-      const isAllowed = allowedOrigins.includes(origin);
+      const isAllowed = isAllowedBrowserOrigin(origin, allowedOriginSet);
       request.log.info({ origin, isAllowed, allowedOrigins }, "[CORS] Incoming request origin");
     }
   });

@@ -186,6 +186,23 @@ describe("POST /proxy/v5/turn", () => {
       await previewApp.close();
     });
 
+    it("immutable Olumi deploy origin → 200 when staging alias is configured", async () => {
+      const immutableOrigin =
+        "https://6a91550f3af620000895d1e5--olumi.netlify.app";
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: immutableOrigin,
+          "content-type": "application/json",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBe(immutableOrigin);
+    });
+
     it("disallowed origin → 403", async () => {
       const res = await app.inject({
         method: "POST",

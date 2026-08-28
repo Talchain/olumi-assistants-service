@@ -34,9 +34,15 @@ vi.stubEnv("CEE_RATE_BUCKET_READ_RPM", "10000");
 // same switch as the buffered one.
 vi.stubEnv("BROWSER_PROXY_ENABLED", "true");
 const ALLOWED_ORIGIN = "http://localhost:5173";
+const STAGING_ORIGIN = "https://staging--olumi.netlify.app";
+const IMMUTABLE_DEPLOY_ORIGIN =
+  "https://6a91550f3af620000895d1e5--olumi.netlify.app";
 const FORBIDDEN_ORIGIN = "https://evil.example.com";
-vi.stubEnv("BROWSER_PROXY_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
-vi.stubEnv("CORS_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+vi.stubEnv(
+  "BROWSER_PROXY_ALLOWED_ORIGINS",
+  `${ALLOWED_ORIGIN},${STAGING_ORIGIN}`,
+);
+vi.stubEnv("ALLOWED_ORIGINS", `${ALLOWED_ORIGIN},${STAGING_ORIGIN}`);
 // The proxy injects this key internally; without it the inner turn 401s. Setting
 // it is what makes this suite test the browser path rather than a 401 path.
 vi.stubEnv("ASSIST_API_KEY", "proxy-stream-suite-key");
@@ -321,6 +327,50 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
       await server.close();
     }
   }, 90_000);
+
+  it("an immutable Olumi deploy receives readable CORS on the streamed route", async () => {
+    const scenarioId = nextScenarioId();
+    const res = await app.inject({
+      method: "POST",
+      url: PROXY_STREAMED_TURN_ROUTE,
+      headers: {
+        "content-type": "application/json",
+        origin: IMMUTABLE_DEPLOY_ORIGIN,
+      },
+      payload: draftTurnPayload(scenarioId, nextTurnId()),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      IMMUTABLE_DEPLOY_ORIGIN,
+    );
+  });
+
+  it("the full server admits immutable Olumi deploy preflight", async () => {
+    const server = await build();
+    await server.listen({ port: 0, host: "127.0.0.1" });
+    try {
+      const { port } = server.server.address() as { port: number };
+      const res = await fetch(
+        `http://127.0.0.1:${port}${PROXY_STREAMED_TURN_ROUTE}`,
+        {
+          method: "OPTIONS",
+          headers: {
+            origin: IMMUTABLE_DEPLOY_ORIGIN,
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "content-type",
+          },
+        },
+      );
+
+      expect(res.status).toBe(204);
+      expect(res.headers.get("access-control-allow-origin")).toBe(
+        IMMUTABLE_DEPLOY_ORIGIN,
+      );
+    } finally {
+      await server.close();
+    }
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ORIGIN VALIDATION — refused BEFORE the stream opens

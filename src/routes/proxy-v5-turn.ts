@@ -31,6 +31,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
+import { isAllowedBrowserOrigin } from "../security/browser-origin-policy.js";
 import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 import { recordExplicitTurnStop } from "./turn-stop.js";
@@ -163,14 +164,10 @@ export function parseAllowedOrigins(): Set<string> {
 
 /** EXPORTED for the streamed sibling — see parseAllowedOrigins. */
 export function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
-  // Exact-match only. Netlify preview patterns are NOT matched by regex here
-  // because the global @fastify/cors plugin (which handles OPTIONS preflight)
-  // only knows about ALLOWED_ORIGINS — it has no regex support. A preview
-  // origin allowed by proxy regex but not by global CORS would pass POST
-  // validation but fail OPTIONS preflight, causing a confusing CORS error.
-  // List preview/branch origins explicitly in BROWSER_PROXY_ALLOWED_ORIGINS
-  // AND in ALLOWED_ORIGINS if CORS preflight is needed.
-  return allowedOrigins.has(origin);
+  // Shared with global @fastify/cors. Branch/deploy-preview hostnames remain
+  // explicit-list only; exact immutable Olumi deploy permalinks are admitted
+  // when the staging alias is configured.
+  return isAllowedBrowserOrigin(origin, allowedOrigins);
 }
 
 /**
