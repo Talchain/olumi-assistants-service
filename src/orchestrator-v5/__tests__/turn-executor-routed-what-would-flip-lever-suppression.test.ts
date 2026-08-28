@@ -27,8 +27,10 @@
  *                      `fac_market_demand` survives; a no-lever turn is unchanged.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -46,6 +48,11 @@ const mockState: {
   persistedGraph: unknown | null;
 } = { priorTurns: [], priorFacts: [], persistedGraph: null };
 const appendCalls: unknown[][] = [];
+const dispatchEditGraphMock = vi.fn();
+
+vi.mock('../handlers/edit-graph-dispatch.js', () => ({
+  dispatchEditGraph: dispatchEditGraphMock,
+}));
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -64,6 +71,7 @@ vi.mock('../session/index.js', () => ({
     readMostRecentPendingActions: async () => [],
   }),
   resetSessionStoreForTests: () => undefined,
+  SessionReadError: class SessionReadError extends Error {},
 }));
 
 // Route the turn to `what_would_flip` (execute) deterministically — no real LLM.
@@ -79,6 +87,7 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
 });
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
 
 /**
  * Both options intervene on `fac_acquisition_cost` → it is an option-pinned
@@ -947,5 +956,210 @@ describe('System B — selected canonical option referent continuity', () => {
       expect(JSON.stringify(fact.result)).toBe(explicitFactBytes);
     }
     expect(selectedResponseCount).toBe(9);
+  });
+});
+
+describe('System B — full-route option identity survives routing-verb labels', () => {
+  let app: FastifyInstance;
+
+  const genericWrongOptionAnswer =
+    'Freelance plus moderate advertising is the option to focus on because it is currently ahead and should remain the preferred route.';
+
+  function graphWithOptionLabel(
+    label: string,
+    options: { readonly reverse?: boolean; readonly duplicateLabel?: boolean } = {},
+  ): typeof READY_GRAPH {
+    const nodes = READY_GRAPH.nodes.map((node) => {
+      if (node.id === 'opt_hire') return { ...node, label };
+      if (options.duplicateLabel === true && node.id === 'opt_freelance') {
+        return { ...node, label };
+      }
+      return node;
+    });
+    return {
+      ...READY_GRAPH,
+      nodes: options.reverse === true ? [...nodes].reverse() : nodes,
+      edges:
+        options.reverse === true
+          ? [...READY_GRAPH.edges].reverse()
+          : READY_GRAPH.edges,
+    };
+  }
+
+  type AppendedWrite = {
+    readonly graph?: unknown;
+    readonly handler_facts?: ReadonlyArray<{
+      readonly fact_type?: string;
+      readonly result?: Record<string, unknown>;
+    }>;
+    readonly [key: string]: unknown;
+  };
+
+  type RouteObservation = {
+    readonly body: Record<string, unknown>;
+    readonly writes: readonly AppendedWrite[];
+    readonly flipFact: {
+      readonly fact_type?: string;
+      readonly result?: Record<string, unknown>;
+    };
+  };
+
+  async function postWhatWouldFlip(params: {
+    readonly graph: typeof READY_GRAPH;
+    readonly message: string;
+    readonly selectedOptionId?: string;
+  }): Promise<RouteObservation> {
+    mockState.persistedGraph = params.graph;
+    mockState.priorTurns = [PRIOR_RA_TURN];
+    mockState.priorFacts = [priorFactWithDriversAndFlip(params.graph)];
+
+    const appendStart = appendCalls.length;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        source: 'composer',
+        turn_id: randomUUID(),
+        scenario_id: SCENARIO_ID,
+        message: params.message,
+        turn_class: 'decide',
+        stage: 'analyse',
+        graph_state: params.graph,
+        ...(params.selectedOptionId === undefined
+          ? {}
+          : {
+              selected_elements: {
+                node_ids: [params.selectedOptionId],
+                edge_ids: [],
+              },
+            }),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    const writes = appendCalls
+      .slice(appendStart)
+      .map(([write]) => write as AppendedWrite);
+    const flipFacts = writes
+      .flatMap((write) => write.handler_facts ?? [])
+      .filter((fact) => fact.fact_type === 'what_would_flip');
+    expect(flipFacts).toHaveLength(1);
+
+    return { body, writes, flipFact: flipFacts[0]! };
+  }
+
+  function assertReadOnlyRoute(observation: RouteObservation): void {
+    for (const write of observation.writes) {
+      expect(write.graph).toBeUndefined();
+      expect(JSON.stringify(write)).not.toContain('model_version_receipt');
+      expect(JSON.stringify(write)).not.toContain('mutation_receipt');
+      expect(JSON.stringify(write)).not.toContain('pending_edit');
+    }
+    expect(JSON.stringify(observation.body)).not.toContain('model_version_receipt');
+    expect(JSON.stringify(observation.body)).not.toContain('mutation_receipt');
+    expect(JSON.stringify(observation.body)).not.toContain('pending_edit');
+  }
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    dispatchEditGraphMock.mockReset();
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(
+      routedWhatWouldFlipWithAnswer(genericWrongOptionAnswer),
+    );
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each(['Set expansion', 'Update platform'])(
+    'keeps exact-label and selected deictic %s turns on one canonical ID-based read-only answer',
+    async (label) => {
+      const ordinaryGraph = graphWithOptionLabel(label);
+      const reorderedGraph = graphWithOptionLabel(label, { reverse: true });
+
+      const observations = [
+        await postWhatWouldFlip({
+          graph: ordinaryGraph,
+          message: `What would make ${label} win?`,
+        }),
+        await postWhatWouldFlip({
+          graph: ordinaryGraph,
+          message: 'What would make this option win?',
+          selectedOptionId: 'opt_hire',
+        }),
+        await postWhatWouldFlip({
+          graph: reorderedGraph,
+          message: `What would make ${label} win?`,
+        }),
+        await postWhatWouldFlip({
+          graph: reorderedGraph,
+          message: 'What would make this option win?',
+          selectedOptionId: 'opt_hire',
+        }),
+      ];
+
+      const [explicit, selected, reorderedExplicit, reorderedSelected] = observations;
+      const expectedText = explicit!.body.assistant_text;
+      expect(typeof expectedText).toBe('string');
+      expect(expectedText).toContain(`${label} would lead instead`);
+      expect(expectedText).not.toContain('Freelance plus moderate advertising');
+
+      for (const observation of observations) {
+        expect(observation.body.assistant_text).toBe(expectedText);
+        expect(observation.flipFact.result?.answer_source).toBe(
+          'deterministic_fallback',
+        );
+        expect(observation.flipFact.result?.fallback_reason).toBeNull();
+        expect(JSON.stringify(observation.flipFact.result)).toBe(
+          JSON.stringify(explicit!.flipFact.result),
+        );
+        assertReadOnlyRoute(observation);
+      }
+
+      for (const observation of [selected!, reorderedSelected!]) {
+        expect(observation.body._grounded_selection).toEqual({
+          element_ids: ['opt_hire'],
+          unresolved: 'none',
+        });
+      }
+      expect(reorderedExplicit!.body.assistant_text).toBe(
+        explicit!.body.assistant_text,
+      );
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails weak on an explicit duplicate label even when one colliding option is selected', async () => {
+    const duplicateGraph = graphWithOptionLabel('Set expansion', {
+      duplicateLabel: true,
+    });
+    const observation = await postWhatWouldFlip({
+      graph: duplicateGraph,
+      message: 'What would make Set expansion win?',
+      selectedOptionId: 'opt_hire',
+    });
+
+    expect(observation.body.assistant_text).toBe(genericWrongOptionAnswer);
+    expect(observation.flipFact.result?.answer_source).toBe('sonnet');
+    expect(observation.flipFact.result?.fallback_reason).toBeNull();
+    expect(JSON.stringify(observation.body)).not.toContain(
+      'Set expansion would lead instead',
+    );
+    assertReadOnlyRoute(observation);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
   });
 });
