@@ -250,6 +250,45 @@ describe('applyForcedExplanationHandler (pure)', () => {
     }
     expect(out.proposal.action.handler_id).toBe('explain_results');
     expect(out.proposal.action.explanation?.answer_text).toBe('authored prose');
+    expect(out.proposal.action.structure_query).toBeUndefined();
+  });
+
+  it('normalises the effective forced handler without inventing pair intent', () => {
+    const out = applyForcedExplanationHandler(baseToolCall, 'explain_from_structure');
+    expect(out.type).toBe('tool_call');
+    if (out.type !== 'tool_call' || out.proposal.intent_class !== 'execute') {
+      throw new Error('expected execute tool_call');
+    }
+    expect(out.proposal.action.structure_query).toEqual({ kind: 'general' });
+
+    if (baseToolCall.type !== 'tool_call' || baseToolCall.proposal.intent_class !== 'execute') {
+      throw new Error('expected execute base tool_call');
+    }
+    const directQuery = {
+      kind: 'direct_relationship' as const,
+      element_ids: ['factor-a', 'goal-b'] as [string, string],
+    };
+    const direct = {
+      ...baseToolCall,
+      proposal: {
+        intent_class: 'execute' as const,
+        action: {
+          ...baseToolCall.proposal.action,
+          structure_query: directQuery,
+        },
+      },
+    } as RoutingResult;
+    const preserved = applyForcedExplanationHandler(direct, 'explain_from_structure');
+    if (preserved.type !== 'tool_call' || preserved.proposal.intent_class !== 'execute') {
+      throw new Error('expected execute tool_call');
+    }
+    expect(preserved.proposal.action.structure_query).toEqual(directQuery);
+
+    const stripped = applyForcedExplanationHandler(direct, 'explain_results');
+    if (stripped.type !== 'tool_call' || stripped.proposal.intent_class !== 'execute') {
+      throw new Error('expected execute tool_call');
+    }
+    expect(stripped.proposal.action.structure_query).toBeUndefined();
   });
 
   it('lifts orientation text into answer_text when the model omitted the explanation', () => {

@@ -1392,7 +1392,19 @@ export function applyForcedExplanationHandler(
   if (result.type !== 'tool_call') return result;
   if (result.proposal.intent_class !== 'execute') return result;
   const action = result.proposal.action;
-  if (action.handler_id === forcedHandlerId && action.explanation !== undefined) {
+  const forcedStructureQuery =
+    forcedHandlerId === 'explain_from_structure'
+      ? action.structure_query ?? { kind: 'general' as const }
+      : undefined;
+  const queryAlreadyNormalised =
+    forcedHandlerId === 'explain_from_structure'
+      ? action.structure_query !== undefined
+      : action.structure_query === undefined;
+  if (
+    action.handler_id === forcedHandlerId &&
+    action.explanation !== undefined &&
+    queryAlreadyNormalised
+  ) {
     return result;
   }
   const authored = action.explanation?.answer_text ?? result.orientationText;
@@ -1400,13 +1412,17 @@ export function applyForcedExplanationHandler(
     authored.trim().length > 0
       ? { ...(action.explanation ?? {}), answer_text: authored }
       : action.explanation;
+  const { structure_query: _discardedStructureQuery, ...actionWithoutStructureQuery } = action;
   return {
     ...result,
     proposal: {
       ...result.proposal,
       action: {
-        ...action,
+        ...actionWithoutStructureQuery,
         handler_id: forcedHandlerId,
+        ...(forcedStructureQuery !== undefined
+          ? { structure_query: forcedStructureQuery }
+          : {}),
         ...(explanation !== undefined ? { explanation } : {}),
       },
     },

@@ -129,11 +129,25 @@ export const OLUMI_ACTION_TOOL = {
               '"why might option Y be the leading option?" and no analysis ' +
               'has been run yet. Answers from graph structure only. No mutation. ' +
               'You MUST populate `explanation.answer_text` with your complete ' +
-              'structural explanation: cite the available specific factors by ' +
-              'their graph labels, the available causal link strengths with ' +
-              'numeric values, and any verified pathway from those factors to ' +
-              'the goal label. Cite only what the graph actually shows — do ' +
-              'not fabricate factors, links, or pathways to fill the response. ' +
+              'structural explanation. Cite only model elements and direct ' +
+              'relationships present in the Living Model structure supplied ' +
+              'for this turn. Follow its code-owned structure rules for ' +
+              'direction, sign, bidirected relationships, confidence and ' +
+              'reachability. Do not compose a pathway from separate connectors ' +
+              'or invent detail that the supplied structure withholds. ' +
+              'When — and only when — the user asks about the direct ' +
+              'relationship between two named model elements, populate ' +
+              'action.structure_query with kind "direct_relationship" and ' +
+              'their exact two graph node ids. When the user instead asks ' +
+              'whether one named option can reach another named element through ' +
+              'the saved directed structure, use kind "reachability" with ' +
+              'source_element_id and target_element_id. These are different ' +
+              'questions: never use reachability to claim a direct connector, ' +
+              'and never assemble reachability from separate edges yourself. ' +
+              'For every other structural explanation, populate ' +
+              'action.structure_query with kind "general". If an older model ' +
+              'omits it, the runtime will ignore authored relationship claims ' +
+              'and use a fail-weak deterministic explanation. ' +
               'Write a complete multi-sentence explanation that walks the user ' +
               'through the structural reasoning available in the graph. Use ' +
               '"causal link" or "direct link" — never "edge" or "node". Do not ' +
@@ -322,6 +336,58 @@ export const OLUMI_ACTION_TOOL = {
               'paths this action drew on. Choose ONLY from the closed enum ' +
               'above; if unsure, omit a field rather than inventing a path. ' +
               'Entries outside the enum are dropped, never surfaced.',
+          },
+          structure_query: {
+            type: 'object',
+            additionalProperties: false,
+            description:
+              'Populate whenever handler_id is explain_from_structure. Use ' +
+              'direct_relationship when the user specifically asks whether two ' +
+              'Living Model elements have a direct relationship, and use ' +
+              'reachability when the user asks whether a named option reaches ' +
+              'another element through the saved directed structure. Use exact canonical ids ' +
+              'from graph.nodes; do not infer ids from absent or ambiguous labels. ' +
+              'Use kind general, with no identity fields, for every other ' +
+              'explain_from_structure question. An omitted legacy field is ' +
+              'accepted only for wire compatibility and cannot license the ' +
+              'authored structural answer.',
+            properties: {
+              kind: {
+                type: 'string',
+                enum: ['general', 'direct_relationship', 'reachability'],
+                description:
+                  'The exact structural question. general preserves an open ' +
+                  'explanation; direct_relationship asks only ' +
+                  'about a connector between element_ids; reachability asks only ' +
+                  'whether source_element_id reaches target_element_id.',
+              },
+              element_ids: {
+                type: 'array',
+                minItems: 2,
+                maxItems: 2,
+                uniqueItems: true,
+                items: { type: 'string', minLength: 1 },
+                description:
+                  'Required only for direct_relationship: exactly two distinct canonical element ids.',
+              },
+              source_element_id: {
+                type: 'string',
+                minLength: 1,
+                description: 'Required only for reachability: the canonical source id.',
+              },
+              target_element_id: {
+                type: 'string',
+                minLength: 1,
+                description: 'Required only for reachability: the canonical target id.',
+              },
+            },
+            // Anthropic's custom-tool dialect rejects a closed object whose
+            // fields exist only inside `oneOf`: the outer object appears closed
+            // to `{}`. Keep the advert concrete and let the enforcing Zod
+            // discriminated union below own the conditional required/forbidden
+            // keys. A malformed combination therefore takes the existing
+            // REPAIR_ONCE path rather than failing tool registration.
+            required: ['kind'],
           },
           // Answer-carrying explanation payload. Required by the side-band
           // validator for explanation handlers (explain_from_structure,
@@ -722,6 +788,17 @@ const RawToolCallSchema = RawToolCallObject
           path: ['answer_text'],
           message:
             'answer_text is forbidden when intent_class === "execute" — use action.explanation.answer_text',
+        });
+      }
+      if (
+        action?.structure_query !== undefined &&
+        action.handler_id !== 'explain_from_structure'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['action', 'structure_query'],
+          message:
+            'structure_query is permitted only for handler_id "explain_from_structure"',
         });
       }
     }

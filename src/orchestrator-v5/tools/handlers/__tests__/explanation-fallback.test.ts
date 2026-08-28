@@ -24,6 +24,7 @@ import {
   composeExplainFromStructureFallback,
   composeExplainResultsFallback,
   composeRobustnessVerdict,
+  composeStructuralPairEvidenceAnswer,
   composeWhatWouldFlipFallback,
 } from '../explanation-fallback.js';
 
@@ -41,10 +42,11 @@ const ANALYSIS: AnalysisProjectionSummary = {
 };
 
 const STRUCTURE: StructureProjectionSummary = {
+  relationship_detail_status: 'canonical_strict',
   goal_label: 'Q3 Throughput',
   top_causal_links: [
-    { label_from: 'Engineering Capacity', label_to: 'Q3 Throughput', strength: 0.65 },
-    { label_from: 'Hiring Cost', label_to: 'Q3 Throughput', strength: -0.42 },
+    { label_from: 'Engineering Capacity', label_to: 'Q3 Throughput', edge_type: 'directed', strength: 0.65 },
+    { label_from: 'Hiring Cost', label_to: 'Q3 Throughput', edge_type: 'directed', strength: -0.42 },
   ],
   named_factor_label: undefined,
   named_factor_pathways: [],
@@ -714,6 +716,7 @@ describe('composeExplainFromStructureFallback', () => {
           {
             label_from: 'Engineering Capacity',
             label_to: 'Q3 Throughput',
+            edge_type: 'directed',
             strength: 0.65,
           },
         ],
@@ -724,7 +727,7 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Q3 Throughput');
     // Goal-reaching pathway → reach-to-goal claim is allowed and surfaced.
-    expect(text).toMatch(/runs to Q3 Throughput/);
+    expect(text).toMatch(/runs from Engineering Capacity to Q3 Throughput/);
   });
 
   it('does NOT claim a named factor reaches the goal when the cited pathway reaches a sibling', () => {
@@ -740,6 +743,7 @@ describe('composeExplainFromStructureFallback', () => {
           {
             label_from: 'Hiring Cost',
             label_to: 'Engineering Capacity', // sibling factor, NOT the goal
+            edge_type: 'directed',
             strength: 0.3,
           },
         ],
@@ -763,6 +767,7 @@ describe('composeExplainFromStructureFallback', () => {
         {
           label_from: 'Engineering Capacity',
           label_to: 'Some other node',
+          edge_type: 'directed',
           strength: 0.65,
         },
       ],
@@ -771,8 +776,95 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).toContain('Engineering Capacity');
   });
 
+  it('preserves incoming direction instead of presenting an option-to-factor connector as a factor lever', () => {
+    const text = composeExplainFromStructureFallback({
+      ...STRUCTURE,
+      named_factor_label: 'Enterprise Integration Investment',
+      named_factor_pathways: [
+        {
+          label_from: 'Enterprise Integrations',
+          label_to: 'Enterprise Integration Investment',
+          edge_type: 'directed',
+          strength: 1,
+        },
+      ],
+    });
+    expect(text).toContain(
+      'incoming connector runs from Enterprise Integrations to Enterprise Integration Investment',
+    );
+    expect(text).toContain(
+      'It does not show Enterprise Integration Investment influencing Enterprise Integrations',
+    );
+    expect(text).not.toContain('secondary lever');
+    expect(text).not.toContain('factors influencing 2 options');
+  });
+
+  it('treats structural-fallback relationship detail as unavailable, not weak', () => {
+    const text = composeExplainFromStructureFallback({
+      relationship_detail_status: 'unavailable',
+      goal_label: 'Growth Goal',
+      top_causal_links: [],
+      named_factor_label: 'Demand Signal',
+      named_factor_pathways: [{
+        label_from: 'Demand Signal',
+        label_to: 'Growth Goal',
+        edge_type: 'directed',
+      }],
+      factor_count: 1,
+      option_count: 1,
+    });
+    expect(text).toContain('sign, magnitude and confidence are unavailable');
+    expect(text).not.toContain('weak link');
+    expect(text).not.toContain('negligible');
+  });
+
+  it('never turns a graph-budget cut into a total ranking or authoritative absence', () => {
+    const text = composeExplainFromStructureFallback({
+      relationship_detail_status: 'unavailable',
+      goal_label: 'Growth Goal',
+      top_causal_links: [],
+      named_factor_pathways: [],
+      factor_count: 6,
+      option_count: 2,
+    });
+
+    expect(text).toContain('does not carry licensed relationship detail');
+    expect(text).not.toMatch(/strongest|secondary lever|no causal links|no direct connector/i);
+  });
+
+  it('keeps a named bidirected fallback non-causal', () => {
+    const text = composeExplainFromStructureFallback({
+      relationship_detail_status: 'canonical_strict',
+      goal_label: 'Quarterly Profit',
+      top_causal_links: [],
+      named_factor_label: 'Brand Sentiment',
+      named_factor_pathways: [{
+        label_from: 'Brand Sentiment',
+        label_to: 'Quarterly Profit',
+        edge_type: 'bidirected',
+        strength: 0.5,
+      }],
+      factor_count: 1,
+      option_count: 1,
+    });
+    expect(text).toContain('bidirected');
+    expect(text).toContain('non-causal co-movement');
+    expect(text).not.toContain('outgoing connector');
+    expect(text).not.toContain('direct influence');
+  });
+
+  it('fails weak on an ambiguous named factor instead of selecting by graph order', () => {
+    const text = composeExplainFromStructureFallback({
+      ...STRUCTURE,
+      named_factor_ambiguous: true,
+    });
+    expect(text).toContain('cannot establish one unique Living Model factor');
+    expect(text).not.toContain('strongest visible direct influence');
+  });
+
   it('handles an empty graph gracefully without crashing or leaking internal terms', () => {
     const text = composeExplainFromStructureFallback({
+      relationship_detail_status: 'canonical_strict',
       goal_label: null,
       top_causal_links: [],
       named_factor_pathways: [],
@@ -781,6 +873,129 @@ describe('composeExplainFromStructureFallback', () => {
     });
     for (const pattern of FORBIDDEN_INTERNAL) expect(text).not.toMatch(pattern);
     expect(text).toContain('empty');
+  });
+});
+
+describe('composeStructuralPairEvidenceAnswer', () => {
+  it('states a directed relationship in canonical direction with its licensed sign and confidence', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'direct',
+      first_label: 'Implementation Quality Failure',
+      second_label: 'Pilot Scope and Commitment',
+      coverage: 'complete',
+      relationships: [
+        {
+          from_label: 'Pilot Scope and Commitment',
+          to_label: 'Implementation Quality Failure',
+          edge_type: 'directed',
+          relationship: 'moderate positive link',
+          coefficient_confidence: 'high',
+        },
+      ],
+    });
+    expect(text).toContain(
+      'from Pilot Scope and Commitment to Implementation Quality Failure, not the reverse',
+    );
+    expect(text).toContain('moderate positive link');
+    expect(text).toContain('strength-confidence band is high');
+  });
+
+  it('keeps a bidirected relationship non-causal', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'direct',
+      first_label: 'Brand Sentiment',
+      second_label: 'Quarterly Profit',
+      coverage: 'complete',
+      relationships: [
+        {
+          from_label: 'Brand Sentiment',
+          to_label: 'Quarterly Profit',
+          edge_type: 'bidirected',
+          relationship:
+            'moderate positive co-movement, unmeasured common cause (not a causal route)',
+        },
+      ],
+    });
+    expect(text).toContain('is bidirected');
+    expect(text).toContain('not influence in either direction');
+    expect(text).not.toContain('not the reverse');
+  });
+
+  it('does not compose an unlicensed path when no direct relationship or option reachability is present', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'no_direct',
+      first_label: 'Enterprise Integration Investment',
+      second_label: 'Preserve Strategic Flexibility',
+    });
+    expect(text).toContain('lists no direct connector');
+    expect(text).toContain('does not decide the separate reachability question');
+    expect(text).not.toContain('two-step');
+  });
+
+  it('treats missing relationships as unknown when graph coverage was trimmed', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'coverage_unavailable',
+      first_label: 'Enterprise Integration Investment',
+      second_label: 'Preserve Strategic Flexibility',
+    });
+    expect(text).toContain('was withheld');
+    expect(text).toContain('cannot safely say');
+    expect(text).not.toContain('lists no direct connector');
+  });
+
+  it('renders retained but incomplete topology without sign or reverse-absence claims', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'direct',
+      first_label: 'Demand Signal',
+      second_label: 'Growth Goal',
+      coverage: 'presence_only',
+      relationships: [{
+        from_label: 'Demand Signal',
+        to_label: 'Growth Goal',
+        edge_type: 'directed',
+      }],
+    });
+    expect(text).toContain('directed connector from Demand Signal to Growth Goal');
+    expect(text).toContain('sign, magnitude, confidence');
+    expect(text).not.toContain('not the reverse');
+    expect(text).not.toContain('positive');
+  });
+
+  it('renders reciprocal directed topology without contradictory reverse denials', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'direct',
+      first_label: 'Demand Signal',
+      second_label: 'Growth Goal',
+      coverage: 'complete',
+      relationships: [
+        {
+          from_label: 'Demand Signal',
+          to_label: 'Growth Goal',
+          edge_type: 'directed',
+          relationship: 'moderate positive link',
+        },
+        {
+          from_label: 'Growth Goal',
+          to_label: 'Demand Signal',
+          edge_type: 'directed',
+          relationship: 'weak negative link',
+        },
+      ],
+    });
+    expect(text).toContain('from Demand Signal to Growth Goal');
+    expect(text).toContain('from Growth Goal to Demand Signal');
+    expect(text).not.toContain('not the reverse');
+  });
+
+  it('keeps reachability separate from direct connectivity', () => {
+    const text = composeStructuralPairEvidenceAnswer({
+      status: 'reachable',
+      source_label: 'Pilot First',
+      target_label: 'Responsible Market Entry',
+    });
+    expect(text).toContain('can reach Responsible Market Entry');
+    expect(text).toContain('does not state');
+    expect(text).not.toContain('direct connector exists');
   });
 });
 

@@ -675,6 +675,32 @@ export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | 
 }
 
 /**
+ * True when prose names a label that the canonical reverse index marks as
+ * ambiguous. This is the fail-closed companion to
+ * {@link resolveProseEntityRefs}: that resolver deliberately omits ambiguous
+ * references, while callers answering an explicit relationship question need
+ * to distinguish "no second model element was named" from "a named element
+ * maps to more than one canonical identity".
+ *
+ * Uses the exact same normalisation, whole-phrase and over-match rails as the
+ * resolver. It does not create a second label-matching authority.
+ */
+export function hasAmbiguousProseEntityReference(
+  index: LabelIndex,
+  prose: string,
+): boolean {
+  const hay = normaliseForPhraseMatch(prose);
+  if (hay.length === 0) return false;
+  for (const [needle, resolved] of index) {
+    if (resolved !== AMBIGUOUS_LABEL) continue;
+    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    if (firstBoundedPhraseAt(hay, needle) >= 0) return true;
+  }
+  return false;
+}
+
+/**
  * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
  * one deduped `TargetRef` per unambiguously-resolved node, **ordered by first
  * mention in the prose**.

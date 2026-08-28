@@ -25,8 +25,13 @@
 import type {
   AnalysisProjectionSummary,
   AnalysisProjectionDriver,
+  StructureLink,
   StructureProjectionSummary,
 } from '../../context/projection-summaries.js';
+import type {
+  StructuralPairEvidence,
+  StructuralPairRelationship,
+} from '../../routing/structural-pair-evidence.js';
 // ROADMAP 2.1067: `formatPercentagePoints` is deliberately NOT imported here
 // any more. This module composed the last two deterministic sentences that
 // rendered the runner-up gap as a magnitude; with those retired, the only
@@ -818,6 +823,93 @@ export interface ExplainFromStructureFallbackOptions {
   readonly canRunAnalysis?: boolean;
 }
 
+function composeDirectRelationship(
+  relationship: StructuralPairRelationship,
+  options: { complete: boolean; reversePresent: boolean },
+): string {
+  if (!options.complete || relationship.relationship === undefined) {
+    if (relationship.edge_type === 'bidirected') {
+      return (
+        `The available Living Model structure includes a bidirected connector between ${relationship.from_label} and ${relationship.to_label}. ` +
+        'That does not license causal influence in either direction. Its sign, magnitude and confidence are unavailable in this turn.'
+      );
+    }
+    return (
+      `The available Living Model structure includes a direct, directed connector from ${relationship.from_label} to ${relationship.to_label}. ` +
+      'Its sign, magnitude, confidence and whether an omitted reverse connector also exists are unavailable in this turn.'
+    );
+  }
+  const confidence = relationship.coefficient_confidence === undefined
+    ? ''
+    : ` The recorded strength-confidence band is ${relationship.coefficient_confidence}.`;
+  if (relationship.edge_type === 'bidirected') {
+    return (
+      `The saved connector between ${relationship.from_label} and ${relationship.to_label} is bidirected. ` +
+      `It is described as ${relationship.relationship}; that records non-causal co-movement or an unmeasured common cause, not influence in either direction.${confidence}`
+    );
+  }
+  const directionQualification = options.reversePresent ? '' : ', not the reverse';
+  return (
+    `The saved Living Model lists a direct, directed connector from ${relationship.from_label} to ${relationship.to_label}${directionQualification}. ` +
+    `The relationship is described as a ${relationship.relationship}.${confidence}`
+  );
+}
+
+/**
+ * Render canonical two-element structure evidence. This deliberately outranks
+ * free-form Sonnet prose: direction and directness are closed facts in the
+ * display-safe graph, while prose cannot be reliably
+ * post-validated for those semantics.
+ */
+export function composeStructuralPairEvidenceAnswer(
+  evidence: StructuralPairEvidence,
+): string {
+  if (evidence.status === 'ambiguous') {
+    return (
+      'I cannot establish two unique Living Model elements from that wording, so I cannot safely state a direct relationship, direction, sign or indirect route. ' +
+      'Name or select the two elements more precisely and I can check them.'
+    );
+  }
+  if (evidence.status === 'direct') {
+    const directed = evidence.relationships.filter(
+      (relationship) => relationship.edge_type === 'directed',
+    );
+    return evidence.relationships.map((relationship) => {
+      const reversePresent = directed.some(
+        (candidate) =>
+          candidate.from_label === relationship.to_label &&
+          candidate.to_label === relationship.from_label,
+      );
+      return composeDirectRelationship(relationship, {
+        complete: evidence.coverage === 'complete',
+        reversePresent,
+      });
+    }).join(' ');
+  }
+  if (evidence.status === 'reachable') {
+    return (
+      `The saved Living Model's directed reachability shows that ${evidence.source_label} can reach ${evidence.target_label}. ` +
+      'That is a structural route claim only; it does not state the route strength, certainty or that there is a direct connector.'
+    );
+  }
+  if (evidence.status === 'not_reachable') {
+    return (
+      `The saved Living Model's complete directed reachability does not show ${evidence.source_label} reaching ${evidence.target_label}. ` +
+      'I will not assemble a route from unrelated or bidirected connectors.'
+    );
+  }
+  if (evidence.status === 'coverage_unavailable') {
+    return (
+      `Some relationship detail between ${evidence.first_label} and ${evidence.second_label} was withheld from this turn. ` +
+      'I therefore cannot safely say that a direct connector or indirect route is absent, and I will not reconstruct one from the remaining context.'
+    );
+  }
+  return (
+    `The saved Living Model lists no direct connector between ${evidence.first_label} and ${evidence.second_label}. ` +
+    'That answers direct connectivity only; it does not decide the separate reachability question.'
+  );
+}
+
 export function composeExplainFromStructureFallback(
   projection: StructureProjectionSummary | undefined,
   options?: ExplainFromStructureFallbackOptions,
@@ -834,6 +926,37 @@ export function composeExplainFromStructureFallback(
 
   const sentences: string[] = [];
 
+  if (projection.named_factor_ambiguous === true) {
+    return (
+      'I cannot establish one unique Living Model factor from that wording, so I will not choose a connector by label or model order. ' +
+      'Name or select the intended factor more precisely and I can explain its saved structure.'
+    );
+  }
+
+  if (projection.relationship_detail_status === 'unavailable') {
+    const named = projection.named_factor_label;
+    const link = projection.named_factor_pathways[0];
+    if (named !== undefined && link !== undefined) {
+      if (link.edge_type === 'bidirected') {
+        return (
+          `The available structure includes a bidirected connector between ${link.label_from} and ${link.label_to}. ` +
+          'That is non-causal co-movement, not influence in either direction. Its sign, magnitude and confidence are unavailable in this turn.'
+        );
+      }
+      const direction = link.label_from === named
+        ? `from ${named} to ${link.label_to}`
+        : `from ${link.label_from} to ${named}`;
+      return (
+        `The available structure includes a direct, directed connector ${direction}. ` +
+        'Its sign, magnitude and confidence are unavailable in this turn, so I will not rank or extend it into a path.'
+      );
+    }
+    return (
+      'The available Living Model structure does not carry licensed relationship detail in this turn. ' +
+      'I will not infer causal direction, sign, strength or a pathway from incomplete structural data.'
+    );
+  }
+
   if (
     projection.named_factor_label &&
     projection.named_factor_pathways.length > 0
@@ -841,45 +964,59 @@ export function composeExplainFromStructureFallback(
     const factor = projection.named_factor_label;
     const pathways = projection.named_factor_pathways.slice(0, 2);
 
-    // Over-claim guard: only assert the named factor "feeds into" the goal
-    // when at least one cited pathway actually terminates at the goal node
-    // (1-hop, structurally verified from the projection). If the named
-    // factor is only adjacent to sibling factors or other non-goal nodes,
-    // describe the structural connection without claiming it reaches the
-    // goal — multi-hop derivation crosses the F.6 line.
-    const reachesGoal =
-      projection.goal_label !== null &&
-      pathways.some(
-        (p) =>
-          (p.label_from === factor && p.label_to === projection.goal_label) ||
-          (p.label_to === factor && p.label_from === projection.goal_label),
-      );
-
     const top = pathways[0];
-    const otherEnd =
-      top.label_from === factor ? top.label_to : top.label_from;
-    sentences.push(
-      `${factor} shapes this decision through its causal links in the model.`,
-    );
-    if (reachesGoal && projection.goal_label) {
+    const topIsOutgoing = top.label_from === factor;
+    sentences.push(`${factor} is connected to other elements in the model.`);
+    if (top.edge_type === 'bidirected') {
       sentences.push(
-        `Its strongest direct influence runs to ${projection.goal_label} as a ${formatEdgeStrengthMagnitude(top.strength)} link, meaning movement here would have the most structural effect on your goal.`,
+        `Its most prominent adjacent connector is bidirected between ${top.label_from} and ${top.label_to}. It records non-causal co-movement, not influence in either direction.`,
       );
-    } else {
+    } else if (
+      topIsOutgoing &&
+      projection.goal_label !== null &&
+      top.label_to === projection.goal_label &&
+      top.strength !== undefined
+    ) {
       sentences.push(
-        `Its strongest direct connection is to ${otherEnd} as a ${formatEdgeStrengthMagnitude(top.strength)} link, so changes there would propagate first.`,
+        `Its strongest direct influence runs from ${factor} to ${projection.goal_label} as a ${formatEdgeStrengthMagnitude(top.strength)} link.`,
+      );
+    } else if (topIsOutgoing && top.strength !== undefined) {
+      sentences.push(
+        `Its strongest outgoing connector runs from ${factor} to ${top.label_to} as a ${formatEdgeStrengthMagnitude(top.strength)} link. This establishes only that direction, not a further route to the goal.`,
+      );
+    } else if (top.strength !== undefined) {
+      sentences.push(
+        `Its strongest incoming connector runs from ${top.label_from} to ${factor} as a ${formatEdgeStrengthMagnitude(top.strength)} link. It does not show ${factor} influencing ${top.label_from}.`,
       );
     }
     if (pathways.length > 1) {
       const second = pathways[1];
-      const secondOther =
-        second.label_from === factor ? second.label_to : second.label_from;
-      sentences.push(
-        `A second pathway runs to ${secondOther} as a ${formatEdgeStrengthMagnitude(second.strength)} link, giving you a secondary lever if the first proves hard to move.`,
-      );
+      if (second.edge_type === 'bidirected') {
+        sentences.push(
+          `A second adjacent connector is bidirected between ${second.label_from} and ${second.label_to}, so it does not establish causal direction.`,
+        );
+      } else if (second.label_from === factor && second.strength !== undefined) {
+        sentences.push(
+          `A second outgoing connector runs from ${factor} to ${second.label_to} as a ${formatEdgeStrengthMagnitude(second.strength)} link.`,
+        );
+      } else if (second.strength !== undefined) {
+        sentences.push(
+          `A second incoming connector runs from ${second.label_from} to ${factor} as a ${formatEdgeStrengthMagnitude(second.strength)} link.`,
+        );
+      }
     }
   } else if (projection.top_causal_links.length > 0) {
-    const top = projection.top_causal_links.slice(0, 2);
+    const top = projection.top_causal_links
+      .filter((link): link is StructureLink & { readonly strength: number } =>
+        link.edge_type === 'directed' && link.strength !== undefined,
+      )
+      .slice(0, 2);
+    if (top.length === 0) {
+      return (
+        'The available Living Model structure contains no licensed directed relationship detail to rank. ' +
+        'I will not reinterpret bidirected co-movement as causal influence.'
+      );
+    }
     const goalIntro = projection.goal_label
       ? `Your decision around ${projection.goal_label} is shaped by several causal mechanisms.`
       : 'This decision is shaped by several causal mechanisms.';
@@ -904,7 +1041,7 @@ export function composeExplainFromStructureFallback(
 
   if (projection.factor_count > 0 && projection.option_count > 0) {
     sentences.push(
-      `Across the model there are ${projection.factor_count} factors influencing ${projection.option_count} ${
+      `The model contains ${projection.factor_count} factors and ${projection.option_count} ${
         projection.option_count === 1 ? 'option' : 'options'
       }.`,
     );

@@ -164,6 +164,56 @@ export const ProposalExplanationSchema = z.object({
 export type ProposalExplanation = z.infer<typeof ProposalExplanationSchema>;
 
 /**
+ * Optional typed structure question carried by the frontier router.
+ *
+ * `handler_id: explain_from_structure` answers several different English
+ * questions. Merely seeing two labels therefore cannot license a direct-
+ * relationship answer. The router must explicitly say that the user asked
+ * this one question and bind both referents to canonical graph ids; the
+ * deterministic structure reader then exact-joins those ids before using
+ * them. This preserves model understanding without introducing a keyword
+ * classifier or reusing the single action entity for a two-entity claim.
+ */
+const DirectRelationshipQuerySchema = z
+  .object({
+    kind: z.literal('direct_relationship'),
+    element_ids: z.tuple([z.string().min(1), z.string().min(1)]),
+  })
+  .strict()
+  .refine(({ element_ids: [first, second] }) => first !== second, {
+    path: ['element_ids'],
+    message: 'structure_query.element_ids must identify two distinct elements',
+  });
+
+const ReachabilityQuerySchema = z
+  .object({
+    kind: z.literal('reachability'),
+    source_element_id: z.string().min(1),
+    target_element_id: z.string().min(1),
+  })
+  .strict()
+  .refine(
+    ({ source_element_id: source, target_element_id: target }) => source !== target,
+    {
+      path: ['target_element_id'],
+      message: 'structure_query reachability endpoints must be distinct',
+    },
+  );
+
+const GeneralStructureQuerySchema = z
+  .object({
+    kind: z.literal('general'),
+  })
+  .strict();
+
+export const StructureQuerySchema = z.union([
+  GeneralStructureQuerySchema,
+  DirectRelationshipQuerySchema,
+  ReachabilityQuerySchema,
+]);
+export type StructureQuery = z.infer<typeof StructureQuerySchema>;
+
+/**
  * The set of handler ids that own answer-carrying explanation responses.
  * Drives: side-band answer-text validation, suppress-orientation default at
  * compose time, mutation-language guard's "is this an explanation turn?"
@@ -192,6 +242,7 @@ export const ProposalActionSchema = z.object({
   parameters: z.array(ProposalParameterSchema).default([]),
   cited_context_fields: z.array(ContextPackFieldSchema).default([]),
   explanation: ProposalExplanationSchema.optional(),
+  structure_query: StructureQuerySchema.optional(),
 });
 export type ProposalAction = z.infer<typeof ProposalActionSchema>;
 

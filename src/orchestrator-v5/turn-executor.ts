@@ -307,7 +307,10 @@ import {
   type ContextPackFocus,
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
-import { compactSelectedGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import {
+  compactSelectedGraphForContextPack,
+  isCanonicalStrictContextGraphCompaction,
+} from './context/compact-graph-for-contextpack.js';
 import { selectContextGraphSnapshot } from './context/context-graph-snapshot.js';
 import { projectGoalTargetRecord } from './context/goal-target-record.js';
 import { projectFactorValueRecord } from './context/factor-value-record.js';
@@ -475,6 +478,10 @@ import {
 } from './routing/analysis-election-gate.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
+import {
+  buildStructuralPairEvidence,
+  type StructuralGraphAuthority,
+} from './routing/structural-pair-evidence.js';
 import {
   buildAnalysisProjectionSummary,
   buildStructureProjectionSummary,
@@ -1632,6 +1639,7 @@ export async function runTurnExecutor(
   // have drifted.
   let stateQueryGuardOutcomeForLog: StateQueryGuardOutcomeForLog = 'not_evaluated';
   let explainAcceptedEditConsequenceForRun = false;
+  let boundedAnalyticalExecuteForRun = false;
   // Compute the successful-mutation-fact count ONCE at function entry so
   // every turn class (including those where an earlier pre-route —
   // short-confirm, deterministic value-update — synthesises a routing
@@ -1964,6 +1972,10 @@ export async function runTurnExecutor(
   let proposedHandlerIdForLog: string | null = null;
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
+  // Hoisted with the ContextPack itself: the pair/fallback evidence is built
+  // after routing, outside the inner assembly try, and must read the exact
+  // attestation produced for that same pack rather than re-derive it.
+  let structuralGraphAuthority: StructuralGraphAuthority = 'unavailable';
   /**
    * Context v2 S4-INJECT: summary staleness (turns after the stored
    * summary's watermark) computed by the injection loader at assembly time.
@@ -2595,6 +2607,15 @@ export async function runTurnExecutor(
       });
       const compactedGraph =
         compactOutcome.kind === 'compacted' ? compactOutcome.compact : null;
+      structuralGraphAuthority =
+        contextGraphSelection.status === 'canonical' &&
+        isCanonicalStrictContextGraphCompaction(compactedGraph)
+          ? 'canonical_strict' as const
+          : contextGraphSelection.status === 'canonical' &&
+              compactOutcome.kind === 'compacted' &&
+              compactOutcome.via === 'structural_fallback'
+            ? 'canonical_structural_fallback' as const
+            : 'unavailable' as const;
       // V5 review: carry raw goal_constraints alongside the compact graph so
       // Sonnet does not lose decision constraints in the compact path.
       const compactedConstraints = compactedGraph
@@ -9754,11 +9775,29 @@ export async function runTurnExecutor(
       const analysisProjection = isExplanationHandler
         ? buildAnalysisProjectionSummary(contextPackForLog?.analysis ?? null) ?? undefined
         : undefined;
+      const contextGraphWasTrimmed =
+        contextPackForLog?.context_budget?.truncations.some(
+          (entry) => entry.section === 'graph',
+        ) === true;
       const structureProjection =
         proposedHandlerId === 'explain_from_structure' && contextPackForLog
           ? buildStructureProjectionSummary(contextPackForLog.graph, {
               messageText: payload.message,
+              relationshipDetailStatus:
+                structuralGraphAuthority === 'canonical_strict' && !contextGraphWasTrimmed
+                  ? 'canonical_strict'
+                  : 'unavailable',
             })
+          : undefined;
+      const structuralPairEvidence =
+        proposedHandlerId === 'explain_from_structure' && contextPackForLog
+          ? buildStructuralPairEvidence(contextPackForLog.graph, {
+              messageText: payload.message,
+              structureQuery: action.structure_query,
+              graphContextStatus: contextPackForLog.graph_context?.status,
+              graphAuthority: structuralGraphAuthority,
+              graphWasTrimmed: contextGraphWasTrimmed,
+            }) ?? undefined
           : undefined;
 
       // P0b-2: the routed `what_would_flip` deterministic fallback must not name
@@ -9839,6 +9878,7 @@ export async function runTurnExecutor(
           explanation: explanationInvocationPayload,
           analysisProjection,
           structureProjection,
+          structuralPairEvidence,
           graphForTurn: graphStateForTurn ?? undefined,
           analysisFreshness: routingFreshness ?? undefined,
           // V5 P0-B (Codex review): thread the SAME robustness + flip evidence
@@ -10799,7 +10839,7 @@ export async function runTurnExecutor(
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
       // run_analysis fact already exists in the conversation.
-      const boundedAnalyticalExecute =
+      boundedAnalyticalExecuteForRun =
         explainAcceptedEditConsequenceForRun ||
         isBoundedNonMutationAnalyticalRequest(payload.message);
       let executeChips = generateChips({
@@ -10829,7 +10869,7 @@ export async function runTurnExecutor(
           ? { excludedOptions: handlerOutcome.__excluded_options }
           : {}),
       });
-      if (boundedAnalyticalExecute) {
+      if (boundedAnalyticalExecuteForRun) {
         executeChips = [];
       }
 
@@ -10978,7 +11018,7 @@ export async function runTurnExecutor(
       // authoritative for result claims; placing this earlier would let that
       // projector overwrite a source-bound B2 recovery with the original
       // mutation offer.  Nothing may rewrite this text before compose.
-      if (boundedAnalyticalExecute) {
+      if (boundedAnalyticalExecuteForRun) {
         const boundedUnsafe = coachingPromptCanonical === null
           ? hasMutationProposalOnNonMutatingTurn(confirmationForCompose)
           : !checkCoachingOutput(
@@ -12147,7 +12187,14 @@ export async function runTurnExecutor(
           return null;
         }
       })();
-      const proposalPendingForCommit = explainAcceptedEditConsequenceForRun
+      // Bounded analytical turns are read-only all the way through durable
+      // state, not merely at the graph/chip seams above. A model answer such
+      // as "Would you like me to add X as a risk?" is otherwise capturable by
+      // the generic proposal-continuation helper and silently persists a
+      // `proposed_concept` that can govern the next turn. Do not let answer
+      // prose create a deferred mutation authority on a turn whose explicit
+      // contract is to explain without changing the model.
+      const proposalPendingForCommit = boundedAnalyticalExecuteForRun
         ? undefined
         : buildPendingActionsWithProposalCapture({
             assistantText: composedOk.assistant_text,

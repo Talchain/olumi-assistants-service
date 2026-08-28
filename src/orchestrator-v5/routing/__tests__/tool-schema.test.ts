@@ -260,6 +260,13 @@ describe('OLUMI_ACTION_TOOL definition', () => {
     expect(desc).toContain('pre-analysis');
     expect(desc).toContain('post-analysis');
     expect(desc).toContain('Requires a prior analysis run');
+    // The handler advert must defer to the one code-owned structure contract.
+    // A previous twin invited "any verified pathway" and numeric strengths,
+    // contradicting the final prompt's no-path-composition/display-safe rules.
+    expect(desc).toContain('Follow its code-owned structure rules');
+    expect(desc).toContain('Do not compose a pathway from separate connectors');
+    expect(desc).not.toContain('any verified pathway');
+    expect(desc).not.toContain('causal link strengths with numeric values');
   });
 
   // ROADMAP 1.52 — goal-fit sign inversion. "reduce/decrease X by N%"
@@ -519,6 +526,130 @@ describe('OLUMI_ACTION_TOOL.action.explanation field', () => {
     if (result.intent_class === 'execute') {
       expect(result.action.explanation).toBeUndefined();
     }
+  });
+});
+
+describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
+  const DIRECT_QUERY = {
+    kind: 'direct_relationship' as const,
+    element_ids: ['factor-a', 'goal-b'] as [string, string],
+  };
+
+  it('declares closed optional direct-relationship and reachability questions', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: {
+        structure_query?: {
+          additionalProperties?: boolean;
+          required?: readonly string[];
+          properties?: Record<string, unknown>;
+        };
+      };
+      required: readonly string[];
+    };
+    expect(action.properties.structure_query).toMatchObject({
+      additionalProperties: false,
+      required: ['kind'],
+      properties: {
+        kind: expect.objectContaining({
+          enum: ['general', 'direct_relationship', 'reachability'],
+        }),
+        element_ids: expect.objectContaining({
+          minItems: 2,
+          maxItems: 2,
+          uniqueItems: true,
+          items: expect.objectContaining({ minLength: 1 }),
+        }),
+        source_element_id: expect.objectContaining({ minLength: 1 }),
+        target_element_id: expect.objectContaining({ minLength: 1 }),
+      },
+    });
+    expect(action.required).not.toContain('structure_query');
+  });
+
+  it('parses the explicit general question while retaining old-wire compatibility', () => {
+    const parsed = parseToolCallResponse({
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+        structure_query: { kind: 'general' },
+      },
+    });
+    expect(parsed.intent_class).toBe('execute');
+    if (parsed.intent_class === 'execute') {
+      expect(parsed.action.structure_query).toEqual({ kind: 'general' });
+    }
+
+    const oldWire = parseToolCallResponse({
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+      },
+    });
+    expect(oldWire.intent_class).toBe('execute');
+    if (oldWire.intent_class === 'execute') {
+      expect(oldWire.action.structure_query).toBeUndefined();
+    }
+  });
+
+  it('parses a separately typed reachability question only on explain_from_structure', () => {
+    const query = {
+      kind: 'reachability' as const,
+      source_element_id: 'option-a',
+      target_element_id: 'goal-b',
+    };
+    const parsed = parseToolCallResponse({
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+        structure_query: query,
+      },
+    });
+    expect(parsed.intent_class).toBe('execute');
+    if (parsed.intent_class === 'execute') {
+      expect(parsed.action.structure_query).toEqual(query);
+    }
+  });
+
+  it('parses the typed query only on explain_from_structure', () => {
+    const input = {
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+        structure_query: DIRECT_QUERY,
+      },
+    };
+    const parsed = parseToolCallResponse(input);
+    expect(parsed.intent_class).toBe('execute');
+    if (parsed.intent_class === 'execute') {
+      expect(parsed.action.structure_query).toEqual(DIRECT_QUERY);
+    }
+
+    expect(() =>
+      parseToolCallResponse({
+        ...input,
+        action: { ...input.action, handler_id: 'explain_results' },
+      }),
+    ).toThrow(ToolCallParseError);
+  });
+
+  it('rejects duplicate ids instead of turning one object into a two-object claim', () => {
+    expect(() =>
+      parseToolCallResponse({
+        ...VALID_EXECUTE_INPUT,
+        action: {
+          ...VALID_EXECUTE_INPUT.action,
+          handler_id: 'explain_from_structure',
+          structure_query: {
+            kind: 'direct_relationship',
+            element_ids: ['same', 'same'],
+          },
+        },
+      }),
+    ).toThrow(ToolCallParseError);
   });
 });
 

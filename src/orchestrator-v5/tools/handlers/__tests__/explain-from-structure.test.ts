@@ -91,6 +91,7 @@ function makeInvocation(
     requestId: REQUEST_ID,
     signal: new AbortController().signal,
     orientationText: overrides?.orientationText ?? 'Looking at the structure of your decision graph.',
+    proposal: buildProposal({ structure_query: { kind: 'general' } }),
     analysisReady: overrides?.omitAnalysisReady ? undefined : makeAnalysisReady(optionCount),
     ...overrides,
   };
@@ -215,10 +216,11 @@ describe('explain_from_structure — validator', () => {
 });
 
 const STRUCTURE_PROJECTION: StructureProjectionSummary = {
+  relationship_detail_status: 'canonical_strict',
   goal_label: 'Q3 Throughput',
   top_causal_links: [
-    { label_from: 'Engineering Capacity', label_to: 'Q3 Throughput', strength: 0.65 },
-    { label_from: 'Hiring Cost', label_to: 'Q3 Throughput', strength: -0.42 },
+    { label_from: 'Engineering Capacity', label_to: 'Q3 Throughput', edge_type: 'directed', strength: 0.65 },
+    { label_from: 'Hiring Cost', label_to: 'Q3 Throughput', edge_type: 'directed', strength: -0.42 },
   ],
   named_factor_label: undefined,
   named_factor_pathways: [],
@@ -239,6 +241,27 @@ describe('explain_from_structure — answer-carrying contract', () => {
     });
     expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
     expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('legacy omission cannot let an authored relationship claim bypass typed authority', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation({
+        optionCount: 2,
+        proposal: buildProposal({ structure_query: undefined }),
+      }),
+      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+
+    expect(outcome.assistant_text).not.toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: {
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
+      },
+    });
   });
 
   it('bare tool_use regression: missing explanation → fallback contains causal links and factor labels', async () => {
@@ -282,6 +305,7 @@ describe('explain_from_structure — answer-carrying contract', () => {
           {
             label_from: 'Engineering Capacity',
             label_to: 'Q3 Throughput',
+            edge_type: 'directed',
             strength: 0.65,
           },
         ],
@@ -312,6 +336,77 @@ describe('explain_from_structure — answer-carrying contract', () => {
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('canonical pair evidence outranks a form-valid Sonnet answer that invents a path', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text:
+          'Enterprise Integration Investment reaches Preserve Strategic Flexibility through Enterprise Revenue Expansion, so the saved model establishes a two-step path between them.',
+        answer_text_valid: true,
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+      structuralPairEvidence: {
+        status: 'no_direct',
+        first_label: 'Enterprise Integration Investment',
+        second_label: 'Preserve Strategic Flexibility',
+      },
+    });
+    expect(outcome.assistant_text).toContain('lists no direct connector');
+    expect(outcome.assistant_text).toContain(
+      'does not decide the separate reachability question',
+    );
+    expect(outcome.assistant_text).not.toContain('Enterprise Revenue Expansion');
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_from_structure') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBeNull();
+    }
+  });
+
+  it('canonical pair evidence also outranks the direction-erasing generic fallback', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text: 'The edge wording is rejected before it can reach the user.',
+        answer_text_valid: false,
+        answer_validation_error: 'forbidden_internal_term',
+      },
+      structureProjection: {
+        ...STRUCTURE_PROJECTION,
+        named_factor_label: 'Enterprise Integration Investment',
+        named_factor_pathways: [
+          {
+            label_from: 'Enterprise Integrations',
+            label_to: 'Enterprise Integration Investment',
+            edge_type: 'directed',
+            strength: 1,
+          },
+        ],
+      },
+      structuralPairEvidence: {
+        status: 'direct',
+        first_label: 'Enterprise Revenue Expansion',
+        second_label: 'Enterprise Integration Investment',
+        coverage: 'complete',
+        relationships: [
+          {
+            from_label: 'Enterprise Integration Investment',
+            to_label: 'Enterprise Revenue Expansion',
+            edge_type: 'directed',
+            relationship: 'moderate positive link',
+            coefficient_confidence: 'moderate',
+          },
+        ],
+      },
+    });
+    expect(outcome.assistant_text).toContain(
+      'from Enterprise Integration Investment to Enterprise Revenue Expansion, not the reverse',
+    );
+    expect(outcome.assistant_text).not.toContain('Enterprise Integrations');
   });
 });
 
