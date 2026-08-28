@@ -259,8 +259,36 @@ async function authPluginImpl(fastify: FastifyInstance) {
       });
     }
 
-    // Auth successful - attach full caller context
-    const hmacAuth = hasSignature !== undefined && config.auth.hmacSecret !== undefined;
+    // Auth successful - attach full caller context.
+    //
+    // ── hmacAuth IS FALSE HERE BY CONSTRUCTION, AND USED TO BE FORGEABLE ─────
+    // Reaching this line means the request authenticated with an API KEY: the
+    // branch above returns early whenever a signature is present AND a secret
+    // is configured, and a signature that FAILS verification falls through to
+    // the API-key path below, which sets `hmacAuth: false` explicitly. There is
+    // no route to this line on which HMAC verification ran.
+    //
+    // This was previously
+    //   `hasSignature !== undefined && config.auth.hmacSecret !== undefined`
+    // — and the two guards disagreed about what "has a signature" means. The
+    // early return tests TRUTHINESS (`hasSignature && ...`); this tested
+    // DEFINEDNESS. An EMPTY `x-olumi-signature: ""` header is falsy but
+    // defined, so it skipped the early return, arrived here, and set the flag
+    // TRUE with no signature, no secret comparison and no verification.
+    //
+    // MEASURED before this change, on this file's own code: an assist-key
+    // request carrying `x-olumi-signature: ""` emitted
+    // `assist.auth.success ... hmac_auth:true`; the same request without the
+    // header emitted `hmac_auth:false`.
+    //
+    // That was harmless while `hmacAuth` fed telemetry only — it had no
+    // behavioural reader anywhere in src/. It is NOT harmless now:
+    // `route-v2-preflight.ts` consumes it to decide whether a caller may
+    // assert a body `user_id` as ownership authority, so a forgeable flag
+    // would be a forgeable authorization control. Correcting it here keeps the
+    // authorization question answerable at one place rather than teaching the
+    // consumer to distrust its own input.
+    const hmacAuth = false;
     const ctx = attachCallerContext(request, {
       keyId: keyId!,
       hmacAuth,

@@ -93,6 +93,7 @@
 import type { FastifyRequest } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
+import { resolveOwnershipAuthority } from "../orchestrator/ownership-authority.js";
 import {
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,
@@ -302,8 +303,14 @@ export async function recordExplicitTurnStop(
     // The caller-supplied `user_id`, read by the SAME parser the turn route
     // uses — not a hand-rolled `body.user_id` read, which would drift the day
     // the extension contract moves. With `CEE_REQUIRE_USER_JWT` on, the
-    // verified `sub` overrides it inside `authorizeScenarioOwnership`; with the
-    // flag off (staging today) it IS the identity, exactly as on a turn.
+    // verified `sub` overrides it inside `authorizeScenarioOwnership`.
+    //
+    // ⚠ WITH THE FLAG OFF (staging today) IT IS NO LONGER AUTOMATICALLY THE
+    //   IDENTITY. This comment used to end "it IS the identity, exactly as on
+    //   a turn", which was true and was the IDOR: a shared-assist-key caller
+    //   named whoever it liked. `resolveOwnershipAuthority` now gates it on
+    //   VERIFIED HMAC auth at both rungs, so on the flag-off path a shared-key
+    //   caller's claim is discarded and it is treated as anonymous.
     const extensions = parseRequestExtensions(body, requestId);
     if (!extensions.ok) {
       log.warn(
@@ -317,11 +324,17 @@ export async function recordExplicitTurnStop(
       return stopRefusedReply(requestId);
     }
 
+    // Same canonical rule as the turn rung, from the same module — the two
+    // rungs must not drift on WHO MAY CLAIM an identity any more than they may
+    // drift on who owns a scenario. The raw claim rides along as an
+    // observation so the misrepresentation alarm survives the discard.
+    const authority = resolveOwnershipAuthority(req, extensions.value.userId, resolved.identity);
     const owned = await authorizeScenarioOwnership(
       scenarioId,
-      extensions.value.userId,
+      authority.claimAdmitted ? authority.userId : null,
       resolved.identity,
       requestId,
+      authority.observedClaim,
     );
     if (!owned.ok) {
       // Every ownership reason collapses to the ONE refusal — including

@@ -16,6 +16,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
+import { attachCallerContext } from '../../../src/context/index.js';
+
 // Stub the session store BEFORE importing the helper — runPreFlight calls
 // preflightEnsureScenario which resolves the store via getSessionStore.
 // The cross-tenant snapshot test wants the store to report a different
@@ -54,6 +56,18 @@ function makeReq(body: unknown): { body: unknown; headers: Record<string, string
   // runPreFlight only reads `req.body` and `req.headers`; it does not
   // touch the reply.
   return { body, headers: { 'x-request-id': FIXED_REQUEST_ID } };
+}
+
+/**
+ * A verified HMAC service caller. Needed wherever a case depends on a body
+ * `user_id` actually reaching the ownership decision: from a shared-key caller
+ * it is discarded (`resolveOwnershipAuthority`), so a cross-tenant MISMATCH could
+ * never arise and the envelope under test would never be produced.
+ */
+function makeHmacReq(body: unknown): { body: unknown; headers: Record<string, string> } {
+  const req = makeReq(body);
+  attachCallerContext(req as never, { keyId: 'preflight-envelope-suite', hmacAuth: true });
+  return req;
 }
 
 describe('runPreFlight — 422 envelope shapes', () => {
@@ -204,7 +218,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
     ensureScenarioExistsSpy.mockReset();
     ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: OWNER_USER_ID });
 
-    const req = makeReq({
+    const req = makeHmacReq({
       kind: 'message',
       turn_id: '11111111-1111-4111-8111-111111111111',
       scenario_id: SCENARIO_ID,

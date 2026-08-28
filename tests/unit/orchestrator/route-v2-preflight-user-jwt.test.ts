@@ -34,6 +34,7 @@ import {
   startJwksFixture,
   type JwksFixture,
 } from '../../../src/utils/__tests__/helpers/supabase-jwks-fixture.js';
+import { attachCallerContext } from '../../../src/context/index.js';
 
 const FIXED_REQUEST_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
@@ -110,11 +111,31 @@ function makeBody(userId?: string): Record<string, unknown> {
   };
 }
 
+/**
+ * A SHARED-KEY caller: past the auth plugin, but not individually identified.
+ * No caller context, so `resolveOwnershipAuthority` discards any body `user_id`.
+ */
 function makeReq(
   body: unknown,
   headers: Record<string, string> = {},
 ): { body: unknown; headers: Record<string, string> } {
   return { body, headers: { 'x-request-id': FIXED_REQUEST_ID, ...headers } };
+}
+
+/**
+ * A VERIFIED HMAC service caller — the only kind entitled to name the user it
+ * acts as (`resolveOwnershipAuthority`, ownership-authority.ts). Several pins in
+ * this file are about what happens to an ADMITTED claim (does the verified sub
+ * override it? does the mismatch telemetry fire?), and those questions only
+ * exist for a caller whose claim is admissible in the first place.
+ */
+function makeHmacReq(
+  body: unknown,
+  headers: Record<string, string> = {},
+): { body: unknown; headers: Record<string, string> } {
+  const req = makeReq(body, headers);
+  attachCallerContext(req as never, { keyId: 'user-jwt-suite-hmac', hmacAuth: true });
+  return req;
 }
 
 beforeEach(async () => {
@@ -135,9 +156,33 @@ afterEach(async () => {
 });
 
 describe('runPreFlight — flag OFF (dormancy pin)', () => {
-  it('client-supplied user_id reaches the store untouched; garbage Authorization is inert', async () => {
+  // ⚠ SPLIT 28 Aug 2026. This was ONE test asserting that with the flag off a
+  // client-supplied `user_id` "reaches the store untouched". That is now true
+  // only for a caller entitled to send one — the untouched-claim half was the
+  // staging IDOR (an anonymous browser reached this route through an edge that
+  // injected the shared assist key and named a victim). The dormancy half of
+  // the pin — that a garbage Authorization header is INERT when the flag is
+  // off — is orthogonal to admissibility and is kept in both halves.
+  it('a SHARED-KEY caller: client-supplied user_id is DISCARDED; garbage Authorization is inert', async () => {
     mockConfig.auth.requireUserJwt = false;
     const req = makeReq(makeBody(BODY_USER_ID), {
+      authorization: 'Bearer garbage.garbage.garbage',
+    });
+
+    const result = await runPreFlight(req as never);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.context.extensions.userId).toBeNull();
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+    // Dormancy is unchanged: the flag is off, so the header is never verified.
+    expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtVerified');
+    expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtRefused');
+  });
+
+  it('an HMAC caller: client-supplied user_id reaches the store untouched; garbage Authorization is inert', async () => {
+    mockConfig.auth.requireUserJwt = false;
+    const req = makeHmacReq(makeBody(BODY_USER_ID), {
       authorization: 'Bearer garbage.garbage.garbage',
     });
 
@@ -153,8 +198,23 @@ describe('runPreFlight — flag OFF (dormancy pin)', () => {
 });
 
 describe('runPreFlight — flag ON', () => {
+  // Uses an HMAC caller so the body claim is ADMISSIBLE and therefore actually
+  // reaches the comparison. That is the whole subject of this pin: when a claim
+  // could have been honoured, the verified `sub` still wins, and the discrepancy
+  // is reported.
+  //
+  // ⚠ THE SENTENCE THAT USED TO END THIS COMMENT IS NOW FALSE, AND ITS BEING
+  //   TRUE WAS A DEFECT. It read: "For a shared-key caller the claim is
+  //   discarded before this point, so the mismatch event does not fire." That
+  //   was an accurate description of the first cut of the admissibility fix,
+  //   and it describes a SECURITY SIGNAL that the fix silently deleted —
+  //   gating at the call site removed the claim from the only two routes that
+  //   could still reach the alarm. `authorizeScenarioOwnership` now takes the
+  //   raw claim as an OBSERVATION-ONLY argument, so the alarm survives the
+  //   discard. The shared-key case is pinned immediately below, and it is the
+  //   case that would have gone unobserved.
   it('valid JWT: identity derived from sub; client body user_id IGNORED (mismatch telemetry only)', async () => {
-    const req = makeReq(makeBody(BODY_USER_ID), {
+    const req = makeHmacReq(makeBody(BODY_USER_ID), {
       authorization: `Bearer ${await forgeJwt()}`,
     });
 
@@ -165,6 +225,55 @@ describe('runPreFlight — flag ON', () => {
     expect(result.context.extensions.userId).toBe(JWT_SUB);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, JWT_SUB);
     expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtIdentityMismatch');
+  });
+
+  // ── THE MISREPRESENTATION ALARM SURVIVES THE DISCARD ──────────────────────
+  // A SHARED-KEY caller (no HMAC) presenting a VALID JWT whose `sub` DISAGREES
+  // with the body `user_id`. Two things must both hold, and they pull in
+  // opposite directions:
+  //   · the claim must NOT be honoured — the store is asked about the JWT sub;
+  //   · the claim must still be REPORTED — a client naming a different user is
+  //     the signal, and it is exactly as interesting when the caller was not
+  //     entitled to name anyone.
+  // Asserting only the first would leave a silently-blind alarm looking fixed.
+  it('shared-key caller, valid JWT, DISAGREEING body user_id: sub wins AND the mismatch still fires', async () => {
+    const req = makeReq(makeBody(BODY_USER_ID), {
+      authorization: `Bearer ${await forgeJwt()}`,
+    });
+
+    const result = await runPreFlight(req as never);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    // The claim was NOT honoured.
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, JWT_SUB);
+    // …and was still observed.
+    expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtIdentityMismatch');
+
+    // ── THE ALARM MUST REPORT THE OBSERVED CLAIM, NOT THE RESOLVED IDENTITY ──
+    // Asserting only that the event FIRES leaves the payload unpinned, and the
+    // payload is the entire content of the alarm. Sourcing
+    // `claimed_user_id_prefix` from `identity.userId` instead of `observed`
+    // still fires, still passes a fires-only assertion, and emits an event
+    // whose two prefixes are IDENTICAL — an alarm that goes off while saying
+    // nothing. Measured: that mutation survived 59/59 green before this
+    // assertion existed.
+    //
+    // The second expectation is the load-bearing one. Equality alone could be
+    // satisfied by a payload that happens to match; asserting the prefix is NOT
+    // the verified subject's is what makes the two sources distinguishable, and
+    // it is only meaningful because the fixtures genuinely differ in their
+    // first 8 characters (`bbbbbbbb…` vs `dddddddd…`) — a discrimination this
+    // test would silently lose if either fixture changed.
+    const mismatch = emitSpy.mock.calls.find((c) => c[0] === 'UserJwtIdentityMismatch');
+    expect(mismatch, 'mismatch event not emitted').toBeDefined();
+    const payload = mismatch?.[1] as {
+      claimed_user_id_prefix?: string;
+      verified_user_id_prefix?: string;
+    };
+    expect(payload.claimed_user_id_prefix).toBe(BODY_USER_ID.slice(0, 8));
+    expect(payload.claimed_user_id_prefix).not.toBe(JWT_SUB.slice(0, 8));
+    expect(payload.verified_user_id_prefix).toBe(JWT_SUB.slice(0, 8));
   });
 
   it('valid JWT with no body user_id: identity derived from sub, no mismatch telemetry', async () => {
@@ -224,8 +333,15 @@ describe('runPreFlight — flag ON', () => {
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
   });
 
-  it('no JWT from a key-authed caller: legacy client identity accepted (service carve-out)', async () => {
-    const req = makeReq(makeBody(BODY_USER_ID));
+  // ⚠ NARROWED 28 Aug 2026 — the carve-out is now HMAC-ONLY.
+  // `user-identity.ts` describes `service_legacy` as "reachable by key-authed
+  // service callers (internal harnesses) only, never browser paths". That
+  // sentence was true about the JWT flag and false about reachability: the edge
+  // injected the shared assist key, so a browser DID reach it, and the carve-out
+  // handed it a victim's identity. A shared bearer key cannot distinguish its
+  // holders, so it cannot carry this entitlement. HMAC can.
+  it('no JWT from an HMAC caller: legacy client identity accepted (service carve-out)', async () => {
+    const req = makeHmacReq(makeBody(BODY_USER_ID));
 
     const result = await runPreFlight(req as never);
 
@@ -233,6 +349,20 @@ describe('runPreFlight — flag ON', () => {
     if (!result.ok) throw new Error('unreachable');
     expect(result.context.extensions.userId).toBe(BODY_USER_ID);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, BODY_USER_ID);
+    expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtServiceCallerLegacy');
+  });
+
+  it('no JWT from a SHARED-KEY caller: the claim is discarded, service_legacy or not', async () => {
+    const req = makeReq(makeBody(BODY_USER_ID));
+
+    const result = await runPreFlight(req as never);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.context.extensions.userId).toBeNull();
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+    // The mode is still `service_legacy` — admissibility is a SEPARATE question
+    // from identity resolution, and this pins that the two stayed separate.
     expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtServiceCallerLegacy');
   });
 

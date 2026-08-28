@@ -21,6 +21,15 @@
  * ⚠ PoC trust-the-caller posture. See
  * supabase/migrations/…_v5_ensure_scenario_exists.sql for the production
  * upgrade (JWT-scoped client + auth.uid()).
+ *
+ * ⚠⚠ NARROWED 28 Aug 2026 — "userId PRESENT on the request body" above is now
+ * conditional. A body `user_id` is an ownership input ONLY from a VERIFIED
+ * HMAC caller; from a shared-assist-key caller it is discarded and the request
+ * is treated as anonymous. The matrix above still describes this suite
+ * faithfully because the suite now declares an admissible caller in
+ * `beforeAll` — see the note there. The admissibility rule itself, and the
+ * staging IDOR that motivated it, are pinned in
+ * `orchestrate-v2-turn-claimed-identity.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -29,6 +38,7 @@ import type { FastifyInstance } from 'fastify';
 import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
+import { attachCallerContext } from '../../src/context/index.js';
 
 const SCENARIO_NEW = 'e0000000-0000-4000-8000-000000000001';
 const SCENARIO_OWNED_BY_CALLER = 'e0000000-0000-4000-8000-000000000002';
@@ -180,6 +190,25 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
 
   beforeAll(async () => {
     app = Fastify();
+    // ── WHY THIS SUITE NOW DECLARES AN ADMISSIBLE CALLER ────────────────────
+    // This suite is about UPSERT-ON-APPEND SEMANTICS: which row the RPC
+    // creates, which owner it returns, how a cross-tenant row is rejected. It
+    // is not about WHO MAY CLAIM an identity — that question is owned by
+    // `tests/integration/orchestrate-v2-turn-claimed-identity.test.ts`.
+    //
+    // Since a body `user_id` is only admissible from a VERIFIED HMAC caller
+    // (`resolveOwnershipAuthority`, ownership-authority.ts), and this app is a
+    // bare Fastify with NO auth plugin, every request here would otherwise
+    // arrive with no caller context and its `user_id` discarded — so the
+    // upsert cases would all collapse into the anonymous branch and this suite
+    // would silently stop testing its own subject.
+    //
+    // Declaring the caller explicitly keeps the two concerns separate and
+    // makes the assumption VISIBLE: change the admissibility rule and this
+    // hook is where the suite says what it assumes about callers.
+    app.addHook('onRequest', async (req) => {
+      attachCallerContext(req, { keyId: 'preflight-suite', hmacAuth: true });
+    });
     await ceeOrchestratorRouteV2(app);
     await app.ready();
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
