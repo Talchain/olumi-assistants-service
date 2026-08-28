@@ -343,7 +343,10 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
-import { isReconciledScenarioAnalysisFactSet } from './context/reconcile-scenario-analysis-facts.js';
+import {
+  isReconciledScenarioAnalysisFactSet,
+  isScenarioAnalysisReasoningAuthority,
+} from './context/reconcile-scenario-analysis-facts.js';
 import {
   buildAnalysisRefusalFact,
   isAnalysisRefusalContinuityCause,
@@ -2357,12 +2360,21 @@ export async function runTurnExecutor(
       contextGraphSelection.status === 'canonical'
         ? scenarioAnalysisFactSet
         : undefined;
-    scenarioAnalysisFacts =
-      promptAnalysisFactSet?.status === 'complete'
-        ? promptAnalysisFactSet.facts
-        : [];
-    scenarioAnalysisFactsReadOk =
-      promptAnalysisFactSet?.status === 'complete';
+    // `complete` and `capped` both rest on a validated durable page and both
+    // carry real facts, so both may FEED reasoning. Admitting `capped` here is
+    // what stops the 21st lifetime run on a scenario silently deleting the
+    // model's analysis for good. `promptAnalysisFactSet` is an outer `let`, so
+    // bind the narrowed carrier once — an aliased boolean would not narrow it.
+    const analysisAuthority = isScenarioAnalysisReasoningAuthority(
+      promptAnalysisFactSet,
+    )
+      ? promptAnalysisFactSet
+      : undefined;
+    scenarioAnalysisFacts = analysisAuthority?.facts ?? [];
+    // ⚠ NOT the same question — see the trap-21 note at the `buildTurnContext`
+    // twin. This flag is read only on ABSENCE, and absence within a bounded
+    // window proves nothing about the history behind the wall.
+    scenarioAnalysisFactsReadOk = analysisAuthority?.status === 'complete';
 
     // ==================================================================
     // STEP 1 — ORIENT

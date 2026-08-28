@@ -3,9 +3,27 @@
  * scenario-scoped read of the durable `run_analysis` fact set.
  *
  * This module is deliberately pure. It owns no analysis/science policy: it
- * establishes only whether the existing selectors have a complete fact set
+ * establishes only whether the existing selectors have a coherent fact set
  * from which to apply their already-shipped status and chronology rules.
- * A capped prefix is never reasoning authority.
+ *
+ * THE CAP IS EPISTEMIC, NOT A SIZE GUARD, AND IT IS NOT AN INSTRUCTION TO
+ * FORGET. `capped` says "this scenario has more analysis history than the
+ * bound, so nothing here may be read as the WHOLE record" — it never says
+ * "there is no analysis". The carrier holds the newest {@link
+ * SCENARIO_ANALYSIS_FACT_CAP} facts and discloses the wall through `status`,
+ * exactly as the sibling `reconcile-recent-mutation-facts.ts` already does.
+ *
+ * ⚠ THE ORIGINAL WORDING HERE WAS "a capped prefix is never reasoning
+ * authority", AND IT WAS IMPLEMENTED AS `facts: []`. Because run_analysis
+ * facts are never pruned, `total_count` only grows: the 21st lifetime run on
+ * a scenario emptied this carrier permanently and the model saw
+ * `analysis: null` on every later turn, forever, while the wire freshness
+ * badge — derived from the separate hot turn window — still read `fresh`.
+ * A bound that cannot be crossed back over is not a bound, it is a cliff.
+ *
+ * Only {@link isScenarioAnalysisReasoningAuthority} decides what may author
+ * reasoning state. It is an ALLOW-LIST on purpose: a future status is
+ * excluded until someone states why it should not be.
  */
 
 import {
@@ -44,8 +62,14 @@ export type ScenarioAnalysisFactSet =
       readonly total_count: number;
     }
   | {
+      /**
+       * The durable set exceeds {@link SCENARIO_ANALYSIS_FACT_CAP}. `facts`
+       * carries the NEWEST `SCENARIO_ANALYSIS_FACT_CAP` rows — a usable,
+       * bounded window — and this status is the disclosure that older history
+       * exists behind it. It is never a claim of completeness.
+       */
       readonly status: 'capped';
-      readonly facts: readonly [];
+      readonly facts: readonly HandlerFact[];
       readonly total_count: number;
     }
   | {
@@ -74,6 +98,29 @@ const RECONCILED_SCENARIO_ANALYSIS_FACT_SETS = new WeakMap<
   object,
   ReconciledScenarioAnalysisFactSetAttestation
 >();
+
+/**
+ * ⭐ THE ONE GATE that decides whether a reconciled carrier may author
+ * model-facing reasoning state.
+ *
+ * ALLOW-LIST, NOT DENY-LIST, deliberately. `complete` and `capped` both rest
+ * on a validated durable page, so both carry real facts and a real newest
+ * fact; `degraded` proves nothing was read and must keep failing weak. A
+ * status added later is excluded here until someone states the case for it —
+ * a `!== 'degraded'` written at each call site would have admitted it
+ * silently at all of them.
+ *
+ * `undefined` is an absent carrier (a legacy/direct caller, or a turn whose
+ * canonical graph read did not license the durable analysis), and fails weak.
+ */
+export function isScenarioAnalysisReasoningAuthority(
+  value: ScenarioAnalysisFactSet | undefined,
+): value is Extract<
+  ScenarioAnalysisFactSet,
+  { readonly status: 'complete' | 'capped' }
+> {
+  return value !== undefined && (value.status === 'complete' || value.status === 'capped');
+}
 
 export function isReconciledScenarioAnalysisFactSet(
   value: unknown,
@@ -202,16 +249,20 @@ export function reconcileScenarioAnalysisFacts(
       return degraded('snapshot_conflict', input.scenarioId, durable.total_count);
     }
 
-    // A capped page is not reasoning authority, but its first row is still the
-    // validated database-newest fact used by the pre-existing claim-safety
-    // entitlement. Validate the hot-window contradiction evidence first: a
-    // split snapshot supplies neither authority, regardless of page size.
+    // A capped page cannot claim to be the WHOLE record, but it is a validated
+    // page, and its newest rows are the analysis the model is actually reasoning
+    // about. Retain the bounded window and disclose the wall through `status`;
+    // its first row remains the validated database-newest fact used by the
+    // pre-existing claim-safety entitlement. Validate the hot-window
+    // contradiction evidence first: a split snapshot supplies neither
+    // authority, regardless of page size.
     if (durable.total_count > SCENARIO_ANALYSIS_FACT_CAP) {
       return freezeCapped(
+        // Contract validation proves a capped page has exactly LOOKAHEAD rows,
+        // sorted newest-first. The window is the newest CAP of them.
+        durableContract.map((entry) => entry.fact),
         durable.total_count,
         input.scenarioId,
-        // Contract validation proves a capped page has exactly LOOKAHEAD rows.
-        durableContract[0]!.fact,
       );
     }
 
@@ -552,19 +603,33 @@ function freezeComplete(
   );
 }
 
+/**
+ * `facts` arrives newest-first and over-length by exactly one row (the
+ * lookahead that PROVED the wall). Keep the newest {@link
+ * SCENARIO_ANALYSIS_FACT_CAP}; the row the slice removes is the OLDEST, so the
+ * model loses the tail of its history and never its current analysis. Same
+ * shape as `reconcile-recent-mutation-facts.ts` `freezeResult`.
+ */
 function freezeCapped(
+  facts: readonly HandlerFact[],
   totalCount: number,
   scenarioId: string,
-  newestAnalysisFact: HandlerFact,
 ): ScenarioAnalysisFactSet {
+  const immutableFacts = Object.freeze(
+    facts
+      .slice(0, SCENARIO_ANALYSIS_FACT_CAP)
+      .map((fact) => cloneAndFreezeJson(fact)),
+  );
   return attestReconciled(
     Object.freeze({
       status: 'capped',
-      facts: Object.freeze([]) as readonly [],
+      facts: immutableFacts,
       total_count: totalCount,
     }),
     scenarioId,
-    cloneAndFreezeJson(newestAnalysisFact),
+    // The same frozen clone the window exposes — claim safety and reasoning
+    // cannot diverge about which fact is newest.
+    immutableFacts[0] ?? null,
     true,
   );
 }
