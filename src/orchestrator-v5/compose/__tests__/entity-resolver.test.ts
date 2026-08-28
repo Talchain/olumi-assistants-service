@@ -21,6 +21,7 @@ import {
   buildLabelIndex,
   resolveLabelToId,
   resolveProseEntityRefs,
+  resolveTypedCanonicalProseEntityRefs,
   AMBIGUOUS_LABEL,
   type GraphNodeLookup,
 } from '../phase3-blocks.js';
@@ -139,6 +140,45 @@ describe('δ1 resolveProseEntityRefs — 1.135 clickable-copy link resolution', 
   it('does NOT link a bare generic single word ("cost")', () => {
     const refs = resolveProseEntityRefs(lookup, index, 'The implementation cost estimates are uncertain.');
     expect(refs.map((r) => r.id)).not.toContain('fac_cost');
+  });
+
+  it('links a unique generic label only when a typed-identity caller opts in', () => {
+    const refs = resolveTypedCanonicalProseEntityRefs(
+      lookup,
+      index,
+      'How does Cost affect Launch success?',
+      ['fac_cost', 'goal_launch'],
+    );
+    expect(refs?.map((ref) => ref.id)).toEqual(['fac_cost', 'goal_launch']);
+  });
+
+  it('keeps a duplicate generic label ambiguous when a typed-identity caller opts in', () => {
+    const dupLookup = lookupOf([
+      { id: 'fac_cost_a', label: 'Cost', kind: 'factor' },
+      { id: 'fac_cost_b', label: 'cost', kind: 'factor' },
+    ]);
+    const dupIndex = buildLabelIndex(dupLookup);
+    expect(resolveTypedCanonicalProseEntityRefs(
+      dupLookup,
+      dupIndex,
+      'What changed Cost?',
+      ['fac_cost_a'],
+    )).toBeNull();
+  });
+
+  it('rejects an extra exact model reference and a forged expected id', () => {
+    expect(resolveTypedCanonicalProseEntityRefs(
+      lookup,
+      index,
+      'How do Cost and Launch success relate to Kubernetes migration?',
+      ['fac_cost', 'goal_launch'],
+    )).toBeNull();
+    expect(resolveTypedCanonicalProseEntityRefs(
+      lookup,
+      index,
+      'How does Cost affect Launch success?',
+      ['fac_cost', 'forged'],
+    )).toBeNull();
   });
 
   it('does NOT link either node when the named label is AMBIGUOUS (duplicate)', () => {

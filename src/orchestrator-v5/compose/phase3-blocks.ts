@@ -643,6 +643,15 @@ export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
 export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
 
 /**
+ * Narrow override for a caller that already carries a typed canonical-identity
+ * warrant. Generic single-word labels stay blocked by default because ordinary
+ * prose cannot establish that a word such as "cost" names a model element.
+ */
+interface ProseEntityReferenceOptions {
+  readonly allowGenericSingleWordLabels?: boolean;
+}
+
+/**
  * Build the reverse `label → id` index from a forward `GraphNodeLookup`. One
  * pass; duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic;
  * derived every build from the forward map (no hand-maintained mirror).
@@ -685,19 +694,31 @@ export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | 
  * Uses the exact same normalisation, whole-phrase and over-match rails as the
  * resolver. It does not create a second label-matching authority.
  */
-export function hasAmbiguousProseEntityReference(
+function hasAmbiguousProseEntityReferenceWithOptions(
   index: LabelIndex,
   prose: string,
+  options: ProseEntityReferenceOptions = {},
 ): boolean {
   const hay = normaliseForPhraseMatch(prose);
   if (hay.length === 0) return false;
   for (const [needle, resolved] of index) {
     if (resolved !== AMBIGUOUS_LABEL) continue;
     if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    if (
+      options.allowGenericSingleWordLabels !== true &&
+      !needle.includes(' ') &&
+      GENERIC_LEVER_TOKENS.has(needle)
+    ) continue;
     if (firstBoundedPhraseAt(hay, needle) >= 0) return true;
   }
   return false;
+}
+
+export function hasAmbiguousProseEntityReference(
+  index: LabelIndex,
+  prose: string,
+): boolean {
+  return hasAmbiguousProseEntityReferenceWithOptions(index, prose);
 }
 
 /**
@@ -742,10 +763,11 @@ export function hasAmbiguousProseEntityReference(
  * Final tie-break is the original lookup order, so the result stays TOTAL and
  * DETERMINISTIC (never dependent on `Array.prototype.sort` stability).
  */
-export function resolveProseEntityRefs(
+function resolveProseEntityRefsWithOptions(
   lookup: GraphNodeLookup,
   index: LabelIndex,
   prose: string,
+  options: ProseEntityReferenceOptions = {},
 ): readonly TargetRef[] {
   const hay = normaliseForPhraseMatch(prose);
   if (hay.length === 0) return [];
@@ -764,7 +786,11 @@ export function resolveProseEntityRefs(
     // A bare generic single word ("cost") over-matches ordinary decision prose —
     // require a distinctive single word or a multi-word phrase (same rule as the
     // lever-naming guard's Finding-5 tempering).
-    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    if (
+      options.allowGenericSingleWordLabels !== true &&
+      !needle.includes(' ') &&
+      GENERIC_LEVER_TOKENS.has(needle)
+    ) continue;
     const at = firstBoundedPhraseAt(hay, needle);
     if (at < 0) continue;
     // Fail-closed on ambiguity: a duplicate normalised label resolves to
@@ -784,6 +810,38 @@ export function resolveProseEntityRefs(
     (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
   );
   return matched.map((m) => m.ref);
+}
+
+export function resolveProseEntityRefs(
+  lookup: GraphNodeLookup,
+  index: LabelIndex,
+  prose: string,
+): readonly TargetRef[] {
+  return resolveProseEntityRefsWithOptions(lookup, index, prose);
+}
+
+/**
+ * Resolve exact canonical labels for a typed identity-bearing question.
+ *
+ * Unlike ordinary prose linking, this permits a unique generic single-word
+ * label because the caller must also provide the exact canonical ids it
+ * expects. It returns `null` unless the message resolves to precisely that id
+ * set. Duplicate labels, missing labels, extra model references and forged ids
+ * therefore all fail weak rather than turning the generic word into authority.
+ */
+export function resolveTypedCanonicalProseEntityRefs(
+  lookup: GraphNodeLookup,
+  index: LabelIndex,
+  prose: string,
+  expectedIds: readonly string[],
+): readonly TargetRef[] | null {
+  const expected = new Set(expectedIds);
+  if (expected.size !== expectedIds.length) return null;
+  const options = { allowGenericSingleWordLabels: true } as const;
+  if (hasAmbiguousProseEntityReferenceWithOptions(index, prose, options)) return null;
+  const refs = resolveProseEntityRefsWithOptions(lookup, index, prose, options);
+  if (refs.length !== expected.size || refs.some((ref) => !expected.has(ref.id))) return null;
+  return refs;
 }
 
 /**
