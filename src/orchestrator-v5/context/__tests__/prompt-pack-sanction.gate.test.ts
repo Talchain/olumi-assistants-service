@@ -59,6 +59,7 @@ import {
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
   ANALYSIS_CONTEXT_INSTRUCTION,
+  CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
@@ -129,6 +130,11 @@ function shortSha256(s: string): string {
 const CODE_OWNED_INSTRUCTIONS = [
   ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
   ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
+  // Prompt coverage. Emitted by the SAME condition that serialises
+  // `context_budget`, so a reduced graph/analysis projection cannot be read as
+  // proof of absence. The maximal fixture reaches this through real graph
+  // budget enforcement, not a hand-authored disclosure object.
+  ['CONTEXT_BUDGET_INSTRUCTION', CONTEXT_BUDGET_INSTRUCTION],
   ['RECENT_CHANGES_INSTRUCTION', RECENT_CHANGES_INSTRUCTION],
   ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
   ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
@@ -834,6 +840,21 @@ describe('prompt ↔ pack sanction gate', () => {
     );
     expect(SERIALISED.analysis_context).toBeUndefined();
     expect(RENDERED).not.toContain(ANALYSIS_CONTEXT_INSTRUCTION);
+  });
+
+  it('CONTEXT COVERAGE — real graph trimming carries the disclosure and its sanction together', () => {
+    const disclosure = SERIALISED.context_budget as {
+      truncations?: readonly { section?: string }[];
+    };
+
+    expect(
+      disclosure.truncations?.some((record) => record.section === 'graph'),
+      'precondition: the maximal fixture must reach context_budget through real graph trimming',
+    ).toBe(true);
+    expect(RENDERED.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
+    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
+      'omitted detail is withheld or unknown, never evidence that the omitted facts do not exist',
+    );
   });
 
   it('ANALYSIS AUTHORITY — legacy undefined coaching remains byte-equivalent to omission', () => {

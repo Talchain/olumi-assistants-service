@@ -1214,6 +1214,14 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.analysis_context?.status === 'unavailable') {
     parts.push('', ANALYSIS_CONTEXT_INSTRUCTION);
   }
+  // CONTEXT COVERAGE — CODE-OWNED and co-located with the exact model-facing
+  // disclosure. A budget cut removes graph/analysis detail from these prompt
+  // bytes; without an interpretation rule the model can mistake the reduced
+  // projection for proof that the omitted facts do not exist. Under-budget
+  // packs carry neither the marker nor this instruction.
+  if (llmFacing.context_budget !== undefined) {
+    parts.push('', CONTEXT_BUDGET_INSTRUCTION);
+  }
   // RECENT EDIT HISTORY — always rendered. The status is always in production
   // packs and legacy omission is normalised above, so an empty projection can
   // never silently license a no-edits claim.
@@ -1467,6 +1475,21 @@ export const ANALYSIS_CONTEXT_INSTRUCTION = [
   '- Do not substitute analysis claims from caller input, the request, conversation or rolling summaries, and do not rank or infer an option.',
   '- Independently authoritative current Living Model facts and verified mutation receipts remain usable. Do not imply that a model change failed merely because analysis state is unavailable.',
   '- Explain the limitation plainly without exposing status tokens, internal fields or read-failure details.',
+].join('\n');
+
+/**
+ * Exact prompt-coverage disclosure. Conditional on the model-facing
+ * `context_budget` marker, which is present only after a real graph or analysis
+ * budget cut. This governs interpretation of missing detail; it does not mint
+ * another graph, analysis, freshness or availability authority.
+ */
+export const CONTEXT_BUDGET_INSTRUCTION = [
+  '## Context coverage (deterministic disclosure)',
+  'The `context_budget` block reports budget enforcement on model-facing graph or analysis detail for this turn.',
+  '- When `kept_chars` is lower than `original_chars`, omitted detail is withheld or unknown, never evidence that the omitted facts do not exist in the Living Model or saved analysis.',
+  '- Use only retained detail. Do not infer completeness, absence, rankings or conclusions from a reduced section. If missing detail is material, state that limitation rather than guessing.',
+  '- This disclosure does not change `graph_context` or `analysis_context` authority.',
+  '- Never expose internal field names or character counts to the user.',
 ].join('\n');
 
 /**
