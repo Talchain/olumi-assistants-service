@@ -150,6 +150,26 @@ describe('dispatchEditGraph — the lane hands back a turn it could not resolve,
     expect(result.graph).toBeNull();
   });
 
+  it('a clarification attached to an APPLIED graph does NOT fall through — the fail-closed belt', async () => {
+    // Today no producer branch can reach this: the ONE site that sets
+    // `pendingClarification` also sets `appliedGraph: null`. The
+    // `appliedGraph === null` conjunct is therefore a belt against a FUTURE
+    // branch attaching a clarification to a real mutation — falling through
+    // there would discard an applied edit. Pinned rather than left as an
+    // "equivalent mutant": without this case, deleting the conjunct is
+    // invisible.
+    const withApplied = {
+      ...makeClarifyResult([], BARE_QUESTION),
+      appliedGraph: { nodes: [], edges: [] },
+    } as unknown as EditGraphResult;
+    hg.mockResolvedValue(withApplied);
+
+    const result = await run('Did my edit change which option comes out ahead?');
+
+    expect(result.unresolvedClarificationFellThrough).toBeUndefined();
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
   it('a clarification WITH alternatives still commits and does NOT fall through', async () => {
     hg.mockResolvedValue(makeClarifyResult(['Launch now', 'Wait'], RESOLVED_QUESTION));
 
