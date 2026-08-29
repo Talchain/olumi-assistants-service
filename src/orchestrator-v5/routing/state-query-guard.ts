@@ -37,9 +37,11 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  hasDispositionVerb,
   isBriefAuditQuestion,
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
+import { asksForOwnJudgement } from './judgement-request.js';
 import {
   findRecentChangeAboutOriginSubject,
   isStructureOriginQuestion,
@@ -400,6 +402,31 @@ export function tryStateQueryGuard(
     if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
       return { matched: false };
     }
+    // ⭐⭐ THE USER ASKED FOR OUR JUDGEMENT, AND A MANIFEST TALLY IS NOT ONE.
+    //
+    // Measured at `de254398`: *"Do you actually disagree with anything I
+    // said?"* satisfies the audit frame on `do you` and the brief referent on
+    // **"anything I said"**, and was answered with *"I found 8 stated figures.
+    // 0 of them are carried in the model…"* — a fidelity report to a request
+    // for disagreement, at `llm_calls: 0`. On the same scenario and build,
+    // *"Argue the opposite case as strongly as you can."* reached the reasoning
+    // layer and answered well. The capability was there; the phrasing decided
+    // whether the user reached it.
+    //
+    // ⚠ THE SECOND CONJUNCT IS LOAD-BEARING, NOT DEFENSIVE. Declining a GENUINE
+    // audit question re-opens loss class 7 (this module's header: explanation
+    // layers re-read the brief rather than the model). `hasDispositionVerb`
+    // keeps the decline to messages that attribute NO handling action to us —
+    // there is then nothing for the manifest to report on, whatever else the
+    // sentence contains. *"Do you agree you left out my deadline?"* keeps its
+    // manifest answer; both directions are pinned by execution in
+    // `__tests__/judgement-request.test.ts`.
+    if (
+      asksForOwnJudgement(input.message) &&
+      !hasDispositionVerb(input.message)
+    ) {
+      return { matched: false };
+    }
     if (input.briefAudit === undefined) return { matched: false };
     const answer = tryBriefAuditAnswer(
       input.briefAudit.briefText,
@@ -434,6 +461,27 @@ export function tryStateQueryGuard(
   // the session-edit side for the same reason.
   if (isStructureOriginQuestion(input.message)) {
     if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
+      return { matched: false };
+    }
+    // ⭐⭐ ORIGIN WAS ONLY HALF THE QUESTION, AND THE ARM RETURNS
+    // UNCONDITIONALLY — SO THE OTHER HALF WAS SILENTLY DROPPED.
+    //
+    // Measured at `de254398`: *"Why is Enterprise ACV target in the model, and
+    // how confident are you in it?"* matches `why is … in the model`, and the
+    // whole reply was **"\"Enterprise ACV target\" was my suggestion, not
+    // something you wrote."** — 67 characters, `llm_calls: 0`, with the
+    // confidence half unanswered. Reported failing 8 times out of 8 on the
+    // most natural thing to do with a model on screen: reason about a named
+    // element.
+    //
+    // The provenance record is a statement of FACT about authorship. It holds
+    // no judgement, so it cannot answer a request for one — in any
+    // construction, which is why this needs no second conjunct. Declining hands
+    // the turn to the reasoning layer, and this module's own header records
+    // that cell producing *"the best provenance answer witnessed on either
+    // build"*: the origin half is not lost by declining, and the other half is
+    // gained.
+    if (asksForOwnJudgement(input.message)) {
       return { matched: false };
     }
     // ⭐⭐ THE DEFERRAL IS NARROWED TO THE CASE IT WAS WRITTEN FOR — measured on
