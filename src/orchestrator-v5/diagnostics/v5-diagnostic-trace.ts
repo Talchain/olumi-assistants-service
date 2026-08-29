@@ -48,7 +48,6 @@
  */
 
 import type { MayNameLeadingOptionProvenance } from '../context/claim-safety-read.js';
-import type { GraphV3T } from '../../orchestrator/types.js';
 import type {
   DiagnosticTrace,
   LLMCallTrace,
@@ -431,7 +430,7 @@ export interface BuildMinimalV5DiagnosticTraceInput {
   readonly turnId: string;
   readonly requestId: string;
   readonly exitPath: V5DiagnosticExitPath;
-  readonly graph?: GraphV3T | null;
+  readonly graph?: GraphStateIngress | null;
   readonly turnTimings?: V5TurnTimings;
   /** Copy-source delivery diagnostics (Scope C). Surfaced when the
    *  post-analysis advice gate produced the response. */
@@ -901,11 +900,11 @@ function toolLLMTelemetryToCallTrace(
   };
 }
 
-function safeGraphHash(graph: GraphV3T | null | undefined): string | null {
+function safeGraphHash(graph: GraphStateIngress | null | undefined): string | null {
   if (graph == null) return null;
   try {
     return (
-      computeAnalysisAffectingGraphHash(graph as unknown as GraphStateIngress | undefined) ?? null
+      computeAnalysisAffectingGraphHash(graph) ?? null
     );
   } catch {
     return null;

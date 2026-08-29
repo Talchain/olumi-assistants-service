@@ -9,9 +9,8 @@
  *    directions — an unconditional instruction is a mutant this must catch);
  *  - the selected element's LABEL actually reaches the prompt (the end-to-end
  *    reason this slice exists), bound to the exact fixture label;
- *  - a pack WITHOUT `focus` serialises BYTE-IDENTICALLY to the pre-change tip,
- *    pinned by a sha256 golden captured at `ae0b4af8` BEFORE any hop-4 edit
- *    existed (see GOLDEN below);
+ *  - a pack WITHOUT `focus` serialises BYTE-IDENTICALLY to the sanctioned
+ *    canonical-binding baseline, with graph authority pinned independently;
  *  - `could_not_check` carries the "could not read" sanction and NOT the
  *    "not in the model" one — asserted as a DISCRIMINATING PAIR against
  *    `not_in_model`, because each alone passes under a mutant that collapses
@@ -30,7 +29,11 @@ import { createHash } from 'node:crypto';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { resolveTurnSelection, type TurnSelection } from '../../build-turn-context.js';
 import { assembleContextPack, type ContextPack } from '../../context/context-pack-assembler.js';
-import { buildUserMessage, FOCUS_INSTRUCTION } from '../route-with-tool-use.js';
+import {
+  buildUserMessage,
+  FOCUS_INSTRUCTION,
+  GRAPH_CONTEXT_INSTRUCTION,
+} from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
 
@@ -88,6 +91,7 @@ function packWith(selection?: TurnSelection, analysisCurrent = true): ContextPac
     priorFacts: [],
     analysis: ANALYSIS,
     graph: GRAPH as never,
+    graphContext: { status: 'canonical' },
     ...(selection !== undefined
       ? {
           selection,
@@ -139,8 +143,24 @@ function selectionFor(ids: readonly string[]): TurnSelection {
 const PRISTINE_GOLDEN_SHA256 =
   '8f43569dcdbfee06ab0bad056ce746e61a17980f6cfa7ac0afbc622663f9c504';
 
-describe('buildUserMessage — a turn with no selection is BYTE-IDENTICAL to pre-hop-4', () => {
-  it('matches the sha256 golden captured at the pre-change tip', () => {
+function subtractGraphAuthorityDelta(message: string): string {
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+  const jsonStart = message.indexOf('{');
+  const jsonEnd = message.indexOf(marker);
+  expect(jsonStart).toBeGreaterThan(-1);
+  expect(jsonEnd).toBeGreaterThan(jsonStart);
+  const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
+  expect(parsed.graph_context).toEqual({ status: 'canonical' });
+  delete parsed.graph_context;
+  return (
+    message.slice(0, jsonStart) +
+    JSON.stringify(parsed, null, 2) +
+    message.slice(jsonEnd + marker.length)
+  );
+}
+
+describe('buildUserMessage — a turn with no selection remains byte-stable', () => {
+  it('matches the historical golden after subtracting the pinned authority delta', () => {
     // ⚠ THE GOLDEN IS NOT RE-CAPTURED — see this constant's docblock, which
     // warns that pasting a value from the patched tree converts the guarantee
     // into a tautology. Context/Memory V5 defect 2 added ONE key to the
@@ -192,7 +212,11 @@ describe('buildUserMessage — a turn with no selection is BYTE-IDENTICAL to pre
 
     const msg = buildUserMessage(pack, USER_MESSAGE);
     expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
-    expect(createHash('sha256').update(msg).digest('hex')).toBe(PRISTINE_GOLDEN_SHA256);
+    expect(observeSerialisedPack(msg).graph_context).toEqual({ status: 'canonical' });
+    expect(msg.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    expect(createHash('sha256').update(subtractGraphAuthorityDelta(msg)).digest('hex')).toBe(
+      PRISTINE_GOLDEN_SHA256,
+    );
   });
 
   it('carries no focus section and no focus instruction', () => {
@@ -340,19 +364,28 @@ describe('NEGATIVE CONTROL — the same question without the selection is measur
 
 describe('the prompt never tells a user their node is gone when the read FAILED', () => {
   function unresolvedPack(graphRead: TurnSelection['graph_read']): ContextPack {
-    return packWith({
+    const pack = packWith({
       requested_ids: ['ghost_a'],
       elements: [],
       unresolved_ids: ['ghost_a'],
       graph_read: graphRead,
       unreadable_ref_ids: [],
     });
+    if (graphRead === 'degraded') {
+      // Grounded selection is canonical-only. A failed persisted read cannot
+      // carry even a defensive focus verdict from caller/request state.
+      pack.graph_context = { status: 'unavailable' };
+      delete pack.focus;
+    }
+    return pack;
   }
 
-  it('degraded serialises could_not_check', () => {
+  it('degraded suppresses focus and serialises unavailable graph authority', () => {
     const msg = buildUserMessage(unresolvedPack('degraded'), USER_MESSAGE);
-    const focus = observeSerialisedPack(msg).focus as { unresolved: string };
-    expect(focus.unresolved).toBe('could_not_check');
+    const serialised = observeSerialisedPack(msg);
+    expect(serialised.graph_context).toEqual({ status: 'unavailable' });
+    expect(serialised.focus).toBeUndefined();
+    expect(msg).not.toContain(FOCUS_INSTRUCTION);
   });
 
   it('ok_present serialises not_in_model', () => {
@@ -361,14 +394,16 @@ describe('the prompt never tells a user their node is gone when the read FAILED'
     expect(focus.unresolved).toBe('not_in_model');
   });
 
-  it('DISCRIMINATING PAIR — the two states serialise DIFFERENTLY on identical input', () => {
+  it('DISCRIMINATING PAIR — unavailable cannot masquerade as canonical absence', () => {
     const degraded = observeSerialisedPack(
       buildUserMessage(unresolvedPack('degraded'), USER_MESSAGE),
-    ).focus as { unresolved: string };
+    );
     const present = observeSerialisedPack(
       buildUserMessage(unresolvedPack('ok_present'), USER_MESSAGE),
-    ).focus as { unresolved: string };
-    expect(degraded.unresolved).not.toBe(present.unresolved);
+    );
+    expect(degraded.graph_context).toEqual({ status: 'unavailable' });
+    expect(degraded.focus).toBeUndefined();
+    expect((present.focus as { unresolved: string }).unresolved).toBe('not_in_model');
   });
 
   it('the instruction SANCTIONS both states apart — each is named, and named differently', () => {

@@ -39,6 +39,7 @@ import {
 import {
   BRIEF_INSTRUCTION,
   buildUserMessage,
+  GRAPH_CONTEXT_INSTRUCTION,
   routeWithToolUse,
 } from '../../routing/route-with-tool-use.js';
 
@@ -130,8 +131,25 @@ function assembleWithCurrentModel(brief: string | undefined): ContextPack {
     priorTurns: [],
     priorFacts: [],
     graph: CURRENT_GRAPH as never,
+    graphContext: { status: 'canonical' },
     ...(brief !== undefined ? { brief } : {}),
   });
+}
+
+function subtractGraphAuthorityDelta(message: string): string {
+  const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}`;
+  const jsonStart = message.indexOf('{');
+  const jsonEnd = message.indexOf(marker);
+  expect(jsonStart).toBeGreaterThan(-1);
+  expect(jsonEnd).toBeGreaterThan(jsonStart);
+  const parsed = JSON.parse(message.slice(jsonStart, jsonEnd)) as Record<string, unknown>;
+  expect(parsed.graph_context).toEqual({ status: 'unavailable' });
+  delete parsed.graph_context;
+  return (
+    message.slice(0, jsonStart) +
+    JSON.stringify(parsed, null, 2) +
+    message.slice(jsonEnd + marker.length)
+  );
 }
 
 describe('assembleContextPack — brief threading', () => {
@@ -290,7 +308,9 @@ describe('brief reaches the serialised routing prompt', () => {
     expect(prompt).not.toContain(BRIEF_INSTRUCTION);
     expect(prompt).not.toContain('Saved opening framing');
     expect(prompt).not.toContain('"brief"');
-    expect(createHash('sha256').update(prompt).digest('hex')).toBe(
+    expect(prompt).toContain('"status": "unavailable"');
+    expect(prompt.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+    expect(createHash('sha256').update(subtractGraphAuthorityDelta(prompt)).digest('hex')).toBe(
       'd88af36934273487395d40be6accf0359bf2b94e88ba9c183abd3781fc39c516',
     );
   });

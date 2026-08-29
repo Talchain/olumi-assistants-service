@@ -44,6 +44,7 @@ const FRAME_PAYLOAD = makeMessagePayload({
 });
 
 let mockedPriorFacts: HandlerFact[] = [];
+let persistedGraphForTest: GraphStateIngress | null = null;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -69,6 +70,7 @@ vi.mock('../session/index.js', () => ({
       },
     ],
     readFactsFor: async () => mockedPriorFacts,
+    loadGraphAndBriefText: async () => ({ graph: persistedGraphForTest, briefText: null }),
     // Production parity: `SupabaseSessionStore.readFactsFor` delegates to
     // `readFactsWithTurnFor` (single source of truth). When this mock
     // omitted the with-turn variant, `build-turn-context.fetchPriorFacts`
@@ -189,6 +191,7 @@ beforeEach(() => {
   events = [];
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
   mockedPriorFacts = [];
+  persistedGraphForTest = baseGraph;
 });
 
 afterEach(() => {
@@ -238,7 +241,17 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
 
   it('frame-stage text-only direct_answer → wrapper does NOT fire (silent skip)', async () => {
     const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
-    const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
+    // Keep the authoritative stage at `frame` while retaining a genuinely
+    // fresh analysis: a one-option canonical model does not satisfy the
+    // derive-stage promotion to `decide`. The two-option request graph is a
+    // deliberate conflicting/stale carrier and must not change that verdict.
+    const frameGraph = {
+      ...baseGraph,
+      nodes: baseGraph.nodes.filter((node) => node.id !== 'opt_b'),
+      options: baseGraph.options?.filter((option) => option.id !== 'opt_b'),
+    } as GraphStateIngress;
+    persistedGraphForTest = frameGraph;
+    const expectedHash = computeAnalysisAffectingGraphHash(frameGraph)!;
     mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash)];
 
     const adapter = textOnlyAdapter('Tell me more about your decision context.');

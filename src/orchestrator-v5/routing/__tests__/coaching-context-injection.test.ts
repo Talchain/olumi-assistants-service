@@ -24,7 +24,11 @@ import {
   summariseCoachingStatePack,
   type CoachingStatePack,
 } from '../../context/canonical-analysis-state.js';
-import { routeWithToolUse, COACHING_CONTEXT_INSTRUCTION } from '../route-with-tool-use.js';
+import {
+  routeWithToolUse,
+  COACHING_CONTEXT_INSTRUCTION,
+  GRAPH_CONTEXT_INSTRUCTION,
+} from '../route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 function mkResult(content: ToolResponseBlock[]): ChatWithToolsResult {
@@ -130,7 +134,7 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
     expect(msg).toContain('## User turn');
   });
 
-  it('flag-off user message is byte-identical to the legacy 4-section shape', async () => {
+  it('coaching omission adds no bytes beyond mandatory graph authority', async () => {
     const msg = await userMessageFor(undefined);
     const pack = packWith(undefined);
     // Reconstruct the exact pre-lane serialisation: ## ContextPack / <json> /
@@ -142,16 +146,26 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
       display_analysis,
       graph,
       display_graph,
+      graph_context,
       analysis_state,
       ...rest
     } = pack;
     void analysis;
     void graph;
     void analysis_state;
-    const llmFacing = { ...rest, analysis: display_analysis, graph: display_graph };
+    const resolvedGraphContext = graph_context ?? { status: 'unavailable' as const };
+    const llmFacing = {
+      ...rest,
+      analysis: display_analysis,
+      graph_context: resolvedGraphContext,
+      graph: display_graph,
+    };
+    expect(resolvedGraphContext).toEqual({ status: 'unavailable' });
     const expected = [
       '## ContextPack',
       JSON.stringify(llmFacing, null, 2),
+      '',
+      GRAPH_CONTEXT_INSTRUCTION,
       '',
       '## User turn',
       'hi',

@@ -203,7 +203,7 @@ describe('S4-inject — route-level (unconditional, beyond-window activation)', 
     const prompt = routingUserMessage(calls);
     expect(prompt).toContain('"conversation_summary":');
     expect(prompt).toContain('Keep Maria on the team.');
-    expect(prompt).toContain('the structured state is correct');
+    expect(prompt).toContain('follow `graph_context`');
     // #536 marker extension: cap+1 available, cap shown, 1 absorbed by the block.
     expect(prompt).toContain('"summarised": 1');
 
@@ -265,7 +265,7 @@ describe('S4-inject — route-level (unconditional, beyond-window activation)', 
     // so assert the injection-path count at the actual routing boundary.
     expect(attemptsAtRouting).toBe(2);
     expect(prompt).toContain('Keep Maria on the team.');
-    expect(prompt).toContain('the structured state is correct');
+    expect(prompt).toContain('follow `graph_context`');
     const routing = contextBudgetEvents().find((b) => b.call_site === 'routing')!;
     expect(routing.summary_lag_turns).toBe(0);
   });

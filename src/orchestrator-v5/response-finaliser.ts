@@ -230,7 +230,7 @@ export interface FinaliserContext {
    * `route-egress-analysis-state-freshness.drift.test.ts` makes the
    * graph-without-freshness combination fail loud in CI besides.
    */
-  readonly graph?: import('../orchestrator/types.js').GraphV3T | null;
+  readonly graph?: import('./boundary/request-extensions.js').GraphStateIngress | null;
   /**
    * ROADMAP 2.1271 — THIS turn started a provisional analysis and it is in
    * flight. Threaded ONLY by the draft exit, and only from the same

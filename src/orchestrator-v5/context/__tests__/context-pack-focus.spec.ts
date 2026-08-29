@@ -229,6 +229,7 @@ describe('assembleContextPack — focus threading', () => {
       payload: makeMessagePayload({ scenario_id: 'scen-focus', message: 'why does this matter?' }),
       priorTurns: [],
       priorFacts: [],
+      graphContext: { status: 'canonical' },
       analysis: ANALYSIS,
       graph: GRAPH as never,
       ...(selection !== undefined ? { selection } : {}),

@@ -30,6 +30,10 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     append: async () => ({ id: 'mock' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    // This suite exercises the validated first-touch request-graph path. Make
+    // the canonical read explicitly successful-and-empty; omitting the method
+    // is a degraded read and must not license request bytes as reasoning truth.
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     invalidateScoped: async () => ({ scope: {}, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),

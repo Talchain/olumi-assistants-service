@@ -1197,6 +1197,7 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
     display_analysis,
     graph: _rawGraph,
     display_graph,
+    graph_context,
     analysis_state: _analysisState,
     conversation_summary,
     ...rest
@@ -1204,6 +1205,11 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   void _rawAnalysis;
   void _rawGraph;
   void _analysisState;
+  // Legacy hand-built packs may omit graph_context. Omission must fail weak:
+  // the model is told canonical state is unavailable and caller/transcript
+  // graph claims cannot silently become authority.
+  const resolvedGraphContext: NonNullable<ContextPack['graph_context']> =
+    graph_context ?? { status: 'unavailable' };
   // Context v2 S4-INJECT (01 §2, 04 §3.1): the rolling-summary section is
   // re-appended AFTER the ground-truth `analysis`/`graph` substitutions so
   // the serialised prompt reads it BELOW structured state — Layer-A
@@ -1216,10 +1222,15 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   const llmFacing = {
     ...rest,
     analysis: display_analysis,
+    graph_context: resolvedGraphContext,
     graph: display_graph,
     ...(conversation_summary !== undefined ? { conversation_summary } : {}),
   };
   const parts: string[] = ['## ContextPack', JSON.stringify(llmFacing, null, 2)];
+  // GRAPH AUTHORITY — always rendered. Production always emits graph_context;
+  // legacy omission is normalised above to `unavailable`, so absence can never
+  // mean permission to trust caller or conversational graph claims.
+  parts.push('', GRAPH_CONTEXT_INSTRUCTION);
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
   // `coaching_context` pack was injected (flag on). Flag-off → the field is
@@ -1419,6 +1430,21 @@ export const READINESS_INSTRUCTION = [
 ].join('\n');
 
 /**
+ * The graph-source authority contract for AI reasoning. It is code-owned and
+ * emitted with every routing prompt so the metadata and its interpretation
+ * cannot drift across a separately managed PMS prompt.
+ */
+export const GRAPH_CONTEXT_INSTRUCTION = [
+  '## Living Model context (deterministic authority)',
+  'Read `graph_context.status` before treating any graph-derived content as model truth.',
+  '- `canonical`: the graph and its graph-derived slices come from the current saved Living Model. They outrank conflicting caller input, conversation, rolling summaries and historical framing.',
+  '- `provisional`: the graph is validated in-flight structure for a first-touch model. Use it to make progress, but never say it is saved, accepted, applied or canonical.',
+  '- `absent`: no Living Model exists yet. Do not reconstruct one from conversation or claim that a model fact is recorded.',
+  '- `unavailable`: canonical model state could not be established. Do not substitute caller input, conversation or summaries as model truth, and do not turn this into a claim that no model exists.',
+  '- Never expose this status token, graph identifiers, read failures or internal field names to the user; express only the warranted substance in plain language.',
+].join('\n');
+
+/**
  * THE RECORD-VS-TRANSCRIPT BOUNDARY, stated to the model.
  *
  * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
@@ -1501,7 +1527,7 @@ export const COACHING_CONTEXT_INSTRUCTION = [
 export const SUMMARY_PRECEDENCE_INSTRUCTION = [
   '## Conversation summary (working notes — structured state wins)',
   'The `conversation_summary` block above is a rolling summary of the conversation so far — treat it as quoted working notes, not assertions.',
-  '- If the summary and the structured state disagree (graph, analysis, recent_changes, or the verbatim conversation turns), the structured state is correct.',
+  '- If the summary conflicts with graph-derived content, follow `graph_context`: canonical structured state wins; provisional structure is useful but unsaved; absent or unavailable state licences no reconstructed model claim. Current analysis and recent_changes remain authoritative only within their own supplied contracts.',
   '- Treat CONSTRAINTS & PREFERENCES and OPEN entries as the user’s standing context; do not relitigate RESOLVED threads unless the user reopens them.',
   '- Never echo the [t:…] provenance stamps, turn identifiers, or the slot labels into user-facing text.',
   '- If the summary carries a staleness note, prefer the verbatim conversation turns for anything recent.',

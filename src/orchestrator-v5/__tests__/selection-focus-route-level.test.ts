@@ -160,9 +160,12 @@ vi.mock('../session/index.js', () => ({
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => PERSISTED_GRAPH,
+    loadGraph: async () =>
+      (global as Record<string, unknown>).__selection_graph_override ?? PERSISTED_GRAPH,
     loadGraphAndBriefText: async () => ({
-      graph: PERSISTED_GRAPH,
+      graph:
+        (global as Record<string, unknown>).__selection_graph_override ??
+        PERSISTED_GRAPH,
       briefText: 'Hire locally or engage an offshore partner?',
     }),
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -283,6 +286,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   setTestSink(null);
+  delete (global as Record<string, unknown>).__selection_graph_override;
   vi.clearAllMocks();
 });
 
@@ -351,6 +355,29 @@ describe('hop 4 route-level — the selected element reaches the routing prompt'
     expect(focus.unresolved).toBe('not_in_model');
     // The resolved one is still there, and nothing was invented for the ghost.
     expect(focus.elements.map((e) => e.id)).toEqual([FACTOR_ID]);
+  });
+
+  it('does not leak a node-by-node selection when the whole persisted graph is unavailable', async () => {
+    // The selection resolver deliberately validates nodes independently, so
+    // it can resolve FACTOR_ID even when a malformed sibling makes the graph
+    // snapshot invalid as a whole. ContextPack authority is single-snapshot:
+    // that partial element must not survive beside `graph_context.unavailable`.
+    (global as Record<string, unknown>).__selection_graph_override = {
+      ...PERSISTED_GRAPH,
+      nodes: [
+        PERSISTED_GRAPH.nodes[0],
+        { id: 'malformed_sibling', kind: 'factor' },
+      ],
+    };
+
+    const prompt = await runTurn(QUESTION, {
+      node_ids: [FACTOR_ID],
+      edge_ids: [],
+    });
+
+    expect(prompt).toContain('"status": "unavailable"');
+    expect(focusSection(prompt)).toBeUndefined();
+    expect(prompt).not.toContain(FACTOR_LABEL);
   });
 });
 

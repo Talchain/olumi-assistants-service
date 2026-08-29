@@ -31,6 +31,7 @@ const mockState = vi.hoisted(() => ({
   priorTurns: [] as Array<Record<string, unknown>>,
   /** Stored rolling summary the injector should read. `null` ⇒ no summary. */
   summary: null as Record<string, unknown> | null,
+  persistedGraph: null as unknown,
 }));
 
 /**
@@ -61,6 +62,7 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => [],
+    loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
@@ -195,6 +197,7 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
     setTestSink(() => {});
     mockState.priorTurns = [];
     mockState.summary = null;
+    mockState.persistedGraph = GRAPH_WITH_OPTIONS;
   });
   afterEach(() => {
     setTestSink(null);

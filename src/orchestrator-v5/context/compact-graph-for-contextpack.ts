@@ -39,16 +39,14 @@ export interface CompactGraphForContextPackOptions {
  * ⚠ THE SUCCESS-TARGET RECORD IS DELIBERATELY *NOT* DERIVED HERE.
  *
  * It lived on this outcome in the first draft of the fix and that was wrong.
- * This adapter is handed `graphStateForTurn`, which is REQUEST-FIRST
- * (`turn-executor.ts:2004`) — correct for the graph the model reasons over,
- * and WRONG for a claim about what is SAVED: a stale or forged client
- * `graph_state` carrying `goal_threshold_raw` would have been reported to the
- * model as recorded state.
+ * This adapter is handed the ContextPack selector's single canonical or
+ * provisional snapshot. That graph may support reasoning, but only the
+ * selector's `canonical` arm can license a claim about what is SAVED.
  *
  * The record now has its own module and its own authority order
- * (`context/goal-target-record.ts`, persisted-first, matching the `:2732`
- * precedent). Do not reintroduce it here — the two graphs are different on
- * purpose, and colocating them is what hid the defect.
+ * (`context/goal-target-record.ts`, emitted by turn-executor only for the
+ * canonical selector arm). Do not reintroduce it here: graph structure and a
+ * saved-record assertion are different contracts.
  */
 export type CompactGraphOutcome =
   | {

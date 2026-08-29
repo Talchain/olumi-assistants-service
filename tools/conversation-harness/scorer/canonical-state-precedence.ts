@@ -369,6 +369,10 @@ export function assembleCanonicalPrecedenceCase(
     priorTurns,
     priorTurnsTotal: kase.prior_turns_total,
     conversationSummary: kase.conversation_summary,
+    // Both case families construct this slice from their saved-model fixture,
+    // never from caller bytes. Omission now deliberately means unavailable,
+    // so the harness must state the authority it claims to witness.
+    graphContext: { status: 'canonical' as const },
     // Match loadConversationSummaryForInjection: the summary covers the
     // fetched hot window outside the eight verbatim turns, not every durable
     // turn that exists for the scenario.
