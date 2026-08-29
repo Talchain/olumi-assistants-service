@@ -90,13 +90,24 @@ describe('canonical precedence journey — transport is real and conflicting', (
     // agreeing with itself (CLAUDE.md trap 13b) — the point of a literal is
     // that a prompt-identity change cannot pass unnoticed.
     //
-    // `version` is still 120 because PMS still SERVES v120: the 2026-08-29
-    // handler-coverage change moved the repo-canonical bytes ahead of the PMS
-    // row, and the manifest deliberately holds `served_version: 120` /
-    // `served_hash_verified: false` until the operator uploads v121 (see the
-    // `pending_pms_upload` block on the manifest's `routing` row). When that
-    // upload lands, this becomes '121'.
-    expect(assembled.systemPrompt.version).toBe('120');
+    // ⭐ THE UPLOAD LANDED, so this literal moved 120 -> 121 exactly as the
+    // previous note said it would. THE GUARD DID ITS JOB: it is what caught the
+    // manifest bump in CI rather than letting a prompt-identity change pass
+    // unnoticed, which is precisely why it is a literal and not a manifest read
+    // (a re-derivation here would have been a guard agreeing with itself,
+    // CLAUDE.md trap 13b).
+    //
+    // The bump is not taken on trust. Verified 2026-08-29 at the served-prompt
+    // drift alarm's OWN OUTPUT (run 33262627273, head fc08ac68, 16:19:23Z):
+    //   OK: served routing v121 hash=bec840a648800928 == pinned snapshot (25725 chars)
+    // with a dated positive control that the same alarm CAN red — run
+    // 33259496773 at 15:11Z failed with `live routing v120 hash=adcc5128d4e6e6bc`.
+    //
+    // `sent_hash` is DELIBERATELY UNCHANGED: v121 is the PMS pointer catching up
+    // to bytes this repo already carried, so the identity of the prompt text did
+    // not move. A version bump WITH a hash change would be a different event and
+    // must fail this line, not silently pass it.
+    expect(assembled.systemPrompt.version).toBe('121');
     expect(assembled.systemPrompt.sent_hash).toBe('bec840a648800928');
   });
 
