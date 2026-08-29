@@ -26,6 +26,36 @@ import { deriveAskedEffectPair } from '../routing/repair-value-binding.js';
 
 const MAX_LABEL_CHARS = 40;
 
+/**
+ * ⭐⭐ THE RUN NUDGE, IN TWO FORMS — AND THE SECOND IS THE HONEST ONE ON AN
+ * OPEN BRIEF.
+ *
+ * `RUN_NEXT_STEP` is the sentence the product has always shipped, and on a
+ * genuine decision it is true: the analysis does compare the alternatives the
+ * user posed. It is recorded verbatim in the historic reply corpus
+ * (`compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/`) and is
+ * NOT changed here.
+ *
+ * On the PROVISIONAL path — where `deriveDecisionLabel` could not author a
+ * decision label from the brief, so the decision node exists only because the
+ * projector always mints one — "see how the options compare" presupposes that
+ * these are the alternatives to a decision the user posed. That is the same
+ * claim the options heading was changed away from four lines above it
+ * (`Options compared` -> `Options on the canvas`, `post-draft-narrative.ts`),
+ * merely in the forward-looking tense. `RUN_NEXT_STEP_PROVISIONAL` asserts only
+ * where the options are (verifiable on screen) and what the analysis does to
+ * them (robustness), not that the user chose between them.
+ *
+ * ⚠ RECORDED, NOT FIXED: the `blocked` and `review_model` branches below carry
+ * the same presupposition in their own words ("before comparing the options").
+ * They are out of scope for the lane that added this and are rowed with the
+ * upstream extraction gap, not silently left undescribed.
+ */
+export const RUN_NEXT_STEP =
+  'Next, run the analysis to see how the options compare and what could shift the outcome.';
+export const RUN_NEXT_STEP_PROVISIONAL =
+  'Next, run the analysis to see how the options on the canvas hold up and what could shift the outcome.';
+
 export interface ReadinessRecoveryInput {
   readonly status?: unknown;
   readonly blockers?: ReadonlyArray<unknown> | undefined;
@@ -229,12 +259,7 @@ export function projectReadinessRecovery(
   });
 
   if (status === 'ready') {
-    return project(
-      'run',
-      null,
-      null,
-      'Next, run the analysis to see how the options compare and what could shift the outcome.',
-    );
+    return project('run', null, null, RUN_NEXT_STEP);
   }
 
   if (status === 'blocked') {
@@ -361,11 +386,27 @@ export function projectReadinessRecovery(
   );
 }
 
+export interface ReadinessNextStepOptions {
+  /**
+   * TRUE when the caller's decision node exists only because the projector
+   * always mints one — see `hasProvisionalDecision` in `post-draft-narrative.ts`,
+   * which is the sole owner of that determination. Selection is bound to the
+   * recovery KIND (`run`), never to a substring of the sentence, so a future
+   * branch that happens to mention options cannot be caught by it.
+   */
+  readonly provisionalDecision?: boolean;
+}
+
 export function buildReadinessNextStep(
   analysisReady: ReadinessRecoveryInput | null | undefined,
   nodes: readonly ReadinessRecoveryNode[] = [],
+  options: ReadinessNextStepOptions = {},
 ): string {
-  return projectReadinessRecovery(analysisReady, nodes).nextStep;
+  const recovery = projectReadinessRecovery(analysisReady, nodes);
+  if (options.provisionalDecision === true && recovery.kind === 'run') {
+    return RUN_NEXT_STEP_PROVISIONAL;
+  }
+  return recovery.nextStep;
 }
 
 /**

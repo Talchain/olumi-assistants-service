@@ -453,7 +453,20 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     typeof coachingSummary === 'string' ? coachingSummary.trim() : '';
   const coachingSummaryPresent = summaryCandidate.length > 0;
   const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
-  const nextStep = buildReadinessNextStep(analysisReady, nodes);
+
+  // The projector mints a decision node from whatever options exist, so its
+  // presence says nothing about the brief. An UNAUTHORED label is the signal
+  // that no decision could be derived from what the user actually wrote.
+  //
+  // ⭐ DERIVED HERE, ABOVE THE NUDGE, ON PURPOSE. The next-step sentence is
+  // assembled LAST but chosen FIRST, and it must be chosen by the SAME signal
+  // as the options heading four lines above it — otherwise the heading says
+  // "Options on the canvas" while the sentence beneath it promises to "see how
+  // the options compare", which is the claim the heading was changed away from.
+  // Two authorities answering one question under similar names is this estate's
+  // chronic defect (`CLAUDE.md` trap 21); there is one authority here.
+  const provisionalDecision = hasProvisionalDecision(nodes);
+  const nextStep = buildReadinessNextStep(analysisReady, nodes, { provisionalDecision });
 
   // Run the full-response gate once so we can capture both the
   // pass/fail and (on fail) the categorical reject reason for ops
@@ -532,11 +545,6 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const options = collectLabels(nodes, 'option');
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
-
-  // The projector mints a decision node from whatever options exist, so its
-  // presence says nothing about the brief. An UNAUTHORED label is the signal
-  // that no decision could be derived from what the user actually wrote.
-  const provisionalDecision = hasProvisionalDecision(nodes);
 
   const confirmSentence = buildConfirmSentence(goalLabel, provisionalDecision);
 
@@ -904,6 +912,14 @@ function buildOptionsBlock(
   const heading = provisionalDecision ? 'Options on the canvas' : 'Options compared';
 
   if (trimmed.length === 1) {
+    // ⚠ KNOWN HOLE, RECORDED SO THE NEXT READER DOES NOT HAVE TO REDISCOVER IT.
+    // This branch ignores `provisionalDecision` entirely. It happens to be
+    // benign today — "one route" names where the thing is and asserts no
+    // comparison and no chosen alternative, which is exactly the standard the
+    // heading below was changed to meet — so there is nothing to fix, and a
+    // speculative reword would be an unmeasured copy change. But the omission
+    // is silent: if this line is ever rewritten to speak about a decision or a
+    // comparison, the provisional gate will NOT be guarding it.
     return `The model so far includes one route: ${trimmed[0]}.`;
   }
   if (trimmed.length <= MAX_NAMED_OPTIONS) {

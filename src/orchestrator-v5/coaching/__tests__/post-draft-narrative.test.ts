@@ -2113,46 +2113,134 @@ describe('provisional-decision framing (open brief)', () => {
   });
 
   /**
-   * ⭐⭐ THE KNOWN GAP, PINNED AS AN EXACT SET RATHER THAN DESCRIBED IN PROSE.
+   * ⭐⭐ THE KNOWN-DROPPED SET, PINNED AS AN EXACT SET OVER A NAMED CORPUS.
    *
-   * This lane fixes 2 of the 3 measured cases. The third is NOT caught, and the
-   * reason is upstream: `deriveDecisionLabel` runs its sentence-stripper over a
-   * NEGATED disclaimer and authors a confident label from it. Reproduced here by
-   * execution, at the producer:
+   * This lane's gate reads the producer's "I declined to author" signature. It
+   * therefore cannot see a brief whose disclaimer or exploratory framing is
+   * itself run through the sentence-stripper into a confident label: those set
+   * `label_authored` AND carry a non-placeholder label, so they are
+   * indistinguishable here BY CONSTRUCTION. The honest fix is upstream, in
+   * `deriveDecisionLabel` (`objective-label.ts`), and is deliberately not
+   * attempted here.
    *
-   *   "We are not choosing between fixed options yet."
-   *     -> { authored: true, label: "Choose Between Fixed Options Yet" }
+   * ⚠ WHY A SET AND NOT A CASE. The first version of this pin held ONE member
+   * (the negated disclaimer) and asserted it in prose. An independent 36-brief
+   * corpus then found a SECOND member the pin was structurally unable to see,
+   * because it arrives by a DIFFERENT MECHANISM: not a negation at all, but the
+   * ordinary exploratory frame `"figuring out "` (`objective-label.ts:158`,
+   * `DELIBERATION_FRAMES`). A pin shaped around "negated disclaimers" could
+   * never have caught it. So the pin is now a SET over a corpus, asserted in
+   * BOTH directions — it REDs if the set SHRINKS (the producer was fixed: delete
+   * the member, the builder starts catching it for free) and if it GROWS (the
+   * extraction gap widened). A gap recorded in the suite is honest; a gap
+   * invisible to it is how this shipped green in the first place.
    *
-   * Because it sets `label_authored` AND carries a non-placeholder label, it is
-   * indistinguishable from a genuine decision at this builder — by construction,
-   * not by oversight. The honest fix is negation handling in
-   * `deriveDecisionLabel`, which is upstream of this file and out of scope here.
-   *
-   * This test asserts the gap EXACTLY as it stands, so the suite is green for the
-   * right reason. It REDs if the producer is fixed (then delete it and this
-   * builder starts catching the case for free) AND if the gap widens.
+   * ⚠ SCOPE OF THE CLAIM. `OPEN_BRIEF_CORPUS` is this file's corpus, not the
+   * world: "exactly these" is exact OVER THIS CORPUS. Measured 29 Aug 2026 at
+   * the producer. The sibling frames `"working out "` / `"work out "` /
+   * `"considering "` in the same list produce the same shape (measured:
+   * `"We are working out where our margin actually goes each month."` ->
+   * `{ authored: true, label: "Where Margin Actually Goes Each Month" }`); they
+   * are recorded with the extraction row rather than asserted here, because
+   * whether a `considering `-framed brief poses a decision is a judgement this
+   * lane is not entitled to mint.
    */
-  it('KNOWN GAP: a negated disclaimer still authors a label, so it is not caught', async () => {
+  const OPEN_BRIEF_CORPUS: ReadonlyArray<{ readonly name: string; readonly brief: string }> = [
+    { name: 'negated-disclaimer', brief: 'We are not choosing between fixed options yet.' },
+    {
+      name: 'exploratory-figuring-out',
+      brief: 'We are figuring out what our customers actually value most about the service.',
+    },
+    { name: 'burn-rate', brief: 'Our burn rate is too high and the team is stretched thin.' },
+    { name: 'churn-symptom', brief: 'Churn has climbed for three quarters and nobody agrees on why.' },
+    { name: 'morale', brief: 'Morale in the support team has fallen and recruitment is slow.' },
+    {
+      name: 'no-shortlist',
+      brief: 'We have no shortlist yet; we just want to understand the market better.',
+    },
+  ];
+
+  /** The members of `OPEN_BRIEF_CORPUS` this builder CANNOT catch, and the exact
+   *  label each one authors. Both were established by an outside corpus, never
+   *  from this lane's head (trap 22). */
+  const KNOWN_DROPPED: ReadonlyArray<{ readonly name: string; readonly label: string }> = [
+    { name: 'negated-disclaimer', label: 'Choose Between Fixed Options Yet' },
+    {
+      name: 'exploratory-figuring-out',
+      label: 'What Customers Actually Value Most About the Service',
+    },
+  ];
+
+  it('KNOWN-DROPPED: exactly these open briefs still author a decision label', async () => {
     const { deriveDecisionLabel } = await import(
       '../../../cee/draft/records/objective-label.js'
     );
-    const negated = deriveDecisionLabel({
-      brief: 'We are not choosing between fixed options yet.',
-      goalQuotes: [],
-    });
-    expect(negated.authored).toBe(true);
-    expect(negated.label).toBe('Choose Between Fixed Options Yet');
+    const derived = OPEN_BRIEF_CORPUS.map((c) => ({
+      name: c.name,
+      ...deriveDecisionLabel({ brief: c.brief, goalQuotes: [] }),
+    }));
 
-    // ...and the consequence at THIS builder: the old wording still ships.
-    const text = textOf({
+    // POSITIVE CONTROL (trap 13). An "exactly these" assertion would also hold
+    // over a probe that authored NOTHING, or that authored EVERYTHING — so
+    // assert the corpus still exhibits both classes before believing the set.
+    expect(derived.some((d) => d.authored)).toBe(true);
+    expect(derived.some((d) => !d.authored)).toBe(true);
+
+    // (a) SHRINK direction — every pinned member is still dropped, with the
+    // exact label it authors.
+    for (const member of KNOWN_DROPPED) {
+      const observed = derived.find((d) => d.name === member.name);
+      expect(observed, `corpus member missing: ${member.name}`).toBeDefined();
+      expect(observed?.authored, `${member.name}: expected still-dropped`).toBe(true);
+      expect(observed?.label, `${member.name}: label drifted`).toBe(member.label);
+    }
+
+    // (b) GROW direction — and nothing ELSE in the corpus is dropped.
+    const droppedNow = derived.filter((d) => d.authored).map((d) => d.name).sort();
+    expect(droppedNow).toEqual(KNOWN_DROPPED.map((m) => m.name).sort());
+
+    // (c) The caught members are caught for the producer's actual reason — the
+    // placeholder literal this builder's gate reads — not incidentally.
+    for (const d of derived.filter((x) => !x.authored)) {
+      expect(d.label, `${d.name}: expected the placeholder`).toBe('Decision');
+    }
+  });
+
+  it('KNOWN-DROPPED: each dropped member still ships the un-hedged claim here', async () => {
+    const { deriveDecisionLabel } = await import(
+      '../../../cee/draft/records/objective-label.js'
+    );
+    const briefOf = (name: string): string => {
+      const entry = OPEN_BRIEF_CORPUS.find((c) => c.name === name);
+      if (entry === undefined) throw new Error(`no corpus member named ${name}`);
+      return entry.brief;
+    };
+
+    for (const member of KNOWN_DROPPED) {
+      const derived = deriveDecisionLabel({ brief: briefOf(member.name), goalQuotes: [] });
+      const text = textOf({
+        graph: makeGraph([
+          { id: 'd1', kind: 'decision', label: derived.label, label_authored: derived.authored },
+          OPTION_A,
+          OPTION_B,
+        ] as unknown as GraphV3T['nodes']),
+      });
+      expect(text.startsWith("I've built a first decision model"), member.name).toBe(true);
+      expect(text, member.name).not.toContain("I couldn't pin down");
+    }
+
+    // CONTRAST CONTROL: a CAUGHT member takes the hedged path through the very
+    // same assembly, so the loop above is observing the gap and not simply
+    // failing to reach the gate.
+    const caught = deriveDecisionLabel({ brief: briefOf('burn-rate'), goalQuotes: [] });
+    const caughtText = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: negated.label, label_authored: true },
+        { id: 'd1', kind: 'decision', label: caught.label, label_authored: caught.authored },
         OPTION_A,
         OPTION_B,
       ] as unknown as GraphV3T['nodes']),
     });
-    expect(text.startsWith("I've built a first decision model")).toBe(true);
-    expect(text).not.toContain("I couldn't pin down");
+    expect(caughtText).toContain("I couldn't pin down");
   });
 
   /**
@@ -2167,5 +2255,118 @@ describe('provisional-decision framing (open brief)', () => {
     });
     expect(text.startsWith("I've built a first decision model")).toBe(true);
     expect(text).not.toContain("I couldn't pin down");
+  });
+
+  /**
+   * ⭐ THE RESIDUAL COMPARISON CLAIM, FOUR LINES BELOW THE HEADING THIS PR
+   * CHANGED AWAY FROM `Options compared`.
+   *
+   * `Options compared` was changed because it asserts a comparison of
+   * alternatives the user chose between. The next-step nudge assembled
+   * immediately below it (`assembleSectionedNarrative` appends
+   * `input.nextStep` last) shipped, verbatim on the same provisional path:
+   *
+   *   "Next, run the analysis to see how the options compare ..."
+   *
+   * Weaker — forward-looking rather than past-tense — but the same message on
+   * the same path, and ungated. It is now selected by the SAME
+   * `provisionalDecision` signal, so the two cannot disagree.
+   */
+  it('the provisional path drops the comparison promise from the next step too', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_UNAUTHORED,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    // Precondition pinned IN-TEST (trap 13b): this fixture must actually be on
+    // the provisional path, or the assertion below passes for the wrong reason.
+    expect(text).toContain('Options on the canvas');
+
+    expect(text).not.toContain('the options compare');
+    expect(text).toContain(
+      'Next, run the analysis to see how the options on the canvas hold up and what could shift the outcome.',
+    );
+    assertCleanCopy(text);
+  });
+
+  /**
+   * ⭐ THE OVER-CORRECTION CONTROL FOR THE NUDGE. Without it, a change that
+   * simply retitled the nudge for EVERY draft would be indistinguishable from a
+   * gated one — and the historic reply corpus
+   * (`compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/`)
+   * records the old sentence on genuine decisions, where it is true.
+   */
+  it('CONTROL: a genuinely authored decision keeps the original next step', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_AUTHORED,
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text).toContain('Options compared');
+    expect(text).toContain(
+      'Next, run the analysis to see how the options compare and what could shift the outcome.',
+    );
+  });
+
+  /**
+   * The selector is bound to the recovery KIND (`run`), not to a string
+   * predicate another branch could satisfy (trap 19). A non-ready readiness on
+   * the provisional path must keep its own recovery copy untouched.
+   *
+   * ⚠ RECORDED, NOT FIXED: the `blocked` and `review_model` branches carry the
+   * same presupposition in their own words ("before comparing the options",
+   * `readiness-recovery.ts`). They are outside this lane's scope and are rowed
+   * with the extraction gap.
+   */
+  it('CONTROL: the provisional signal only reaches the run nudge', async () => {
+    const { buildReadinessNextStep } = await import('../readiness-recovery.js');
+    const blocked = { status: 'blocked' as const };
+    expect(buildReadinessNextStep(blocked, [], { provisionalDecision: true })).toBe(
+      buildReadinessNextStep(blocked, [], { provisionalDecision: false }),
+    );
+    // Contrast control: the run branch DOES differ, so the equality above is a
+    // real scoping result and not a selector that never fires.
+    const ready = { status: 'ready' as const };
+    expect(buildReadinessNextStep(ready, [], { provisionalDecision: true })).not.toBe(
+      buildReadinessNextStep(ready, [], { provisionalDecision: false }),
+    );
+  });
+
+  /**
+   * ⭐ PIN FOR THE `label_authored !== true` CONJUNCT, WHICH WAS UNPINNED.
+   *
+   * An adversarial review dropped that conjunct from `hasProvisionalDecision`
+   * and 164/164 stayed GREEN. It then DEMONSTRATED — not asserted — that the
+   * mutant is equivalent on today's producer (48 inputs; contrast control saw
+   * 13 authored labels and 0 carrying `label === "Decision"`), so there is no
+   * live defect. But the docstring above calls that conjunct load-bearing and
+   * NOTHING would RED if the producer ever authored the literal "Decision", or
+   * if another writer set the flag on a placeholder label. A guard that cannot
+   * fail is not a guard.
+   *
+   * This fixture is the exact shape the two conjuncts disagree about — the
+   * placeholder label WITH the authored flag — so only the flag can decide it.
+   * Its discriminating twin is the "unflagged decision with a REAL label"
+   * control above, which the OTHER conjunct decides.
+   */
+  it('PIN: an authored decision is not hedged even when its label reads "Decision"', () => {
+    const text = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: 'Decision', label_authored: true },
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).not.toContain("I couldn't pin down");
+    expect(text).toContain('Options compared');
   });
 });
