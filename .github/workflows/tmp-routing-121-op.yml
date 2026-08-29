@@ -20,11 +20,11 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'before | ship | sample | reload | turn | rollback'
+        description: 'before | ship | sample | reload | turn | draftprobe | rollback'
         required: true
         default: 'before'
         type: choice
-        options: [before, ship, sample, reload, turn, rollback]
+        options: [before, ship, sample, reload, turn, draftprobe, rollback]
 
 permissions:
   contents: read
@@ -314,6 +314,36 @@ jobs:
             drive "T4 edge"    propose "Strengthen the link from churn to revenue." || exit 1
             echo ""
             echo "All four turns returned HTTP 200."
+            ;;
+
+          draftprobe)
+            # Repeat the SAME frame turn N times against WHATEVER is currently
+            # served, to measure whether this brief's draft failure is
+            # stochastic. Touches no pointer. Prints the served routing version
+            # first so the arm is unambiguous.
+            if [ -z "${ASSIST_API_KEY:-}" ]; then echo "FAIL: STAGING_ASSIST_API_KEY is not set"; exit 1; fi
+            probe "arm" || exit 1
+            echo "ARM: routing v${R_VER}/${R_HASH}"
+            BRIEF="Should we raise our SaaS subscription price by 15% next quarter?"
+            PASS=0; FAIL=0
+            for i in $(seq 1 6); do
+              SCEN=$(cat /proc/sys/kernel/random/uuid)
+              TID=$(cat /proc/sys/kernel/random/uuid)
+              jq -n --arg t "$TID" --arg s "$SCEN" --arg m "$BRIEF" \
+                '{kind:"message",turn_id:$t,scenario_id:$s,stage:"frame",turn_class:"frame",source:"composer",message:$m}' > t.json
+              st=$(curl -sS -o tr.json -w '%{http_code}' --max-time 240 -X POST \
+                -H 'Content-Type: application/json' -H "X-Olumi-Assist-Key: ${ASSIST_API_KEY}" \
+                --data-binary @t.json "${CEE_BASE_URL%/}/orchestrate/v2/turn" || echo "000")
+              if [ "$st" = "200" ]; then
+                PASS=$((PASS+1))
+                echo "  draw ${i}: HTTP 200 nodes=$(jq -r '.draft_graph.nodes|length? // "n/a"' tr.json) options=$(jq -r '.analysis_ready.options|length? // "n/a"' tr.json)"
+              else
+                FAIL=$((FAIL+1))
+                echo "  draw ${i}: HTTP ${st} reason=$(jq -r '.details.reason // "?"' tr.json) codes=$(jq -r '[.details.validation_error_codes[]?]|unique|join(",") // "?"' tr.json) retries=$(jq -r '.details.auto_retry.attempts // "?"' tr.json)"
+              fi
+            done
+            echo "-------------------------------------------------"
+            echo "ARM v${R_VER}/${R_HASH}: ${PASS} passed / ${FAIL} failed out of 6 draws on the identical brief."
             ;;
 
           rollback)
