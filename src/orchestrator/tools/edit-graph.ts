@@ -350,6 +350,20 @@ export interface EditGraphTraceDiagnostics {
   stop_reason?: string | null;
   repair_attempts?: number;
   plot_outcome?: 'pass' | 'rejected' | 'unavailable' | 'skipped';
+  /**
+   * Served-prompt identity for this edit call, from the same
+   * `getSystemPromptMeta('edit_graph')` entry the prompt-resolution log line
+   * already reports. Consumed by `extractEditLlmCallTelemetry` so an edit
+   * turn's `_diagnostic_trace` can say WHICH PROMPT VERSION produced the edit.
+   *
+   * All three stay `undefined` on the deterministic (no-LLM) exits, which
+   * return before the prompt is resolved at all, and `prompt_hash` is also
+   * `undefined` on a loader cache miss — an honest absence, never a
+   * fabricated digest.
+   */
+  prompt_hash?: string;
+  prompt_version?: string;
+  prompt_source?: string;
 }
 
 // ============================================================================
@@ -1954,6 +1968,15 @@ export async function handleEditGraph(
   let outputTokensSum = 0;
   let lastStopReason: string | null = null;
   let repairAttempts = 0;
+  // Served-prompt identity, captured for the trace. Declared HERE rather than
+  // read from `promptMeta` directly: `promptMeta` is declared ~160 lines below
+  // this closure, and three deterministic-exit branches CALL `diagnostics()`
+  // above that declaration — closing over `promptMeta` would throw a
+  // temporal-dead-zone ReferenceError on those real edit turns. Stays
+  // undefined on exactly those no-LLM paths, which is the honest answer.
+  let servedPromptHash: string | undefined;
+  let servedPromptVersion: string | undefined;
+  let servedPromptSource: string | undefined;
   let plotOutcome: EditGraphTraceDiagnostics['plot_outcome'] = 'skipped';
 
   const setViolationCodes = (codes: string[]): void => {
@@ -1989,6 +2012,9 @@ export async function handleEditGraph(
     stop_reason: lastStopReason,
     repair_attempts: repairAttempts,
     plot_outcome: plotOutcome,
+    prompt_hash: servedPromptHash,
+    prompt_version: servedPromptVersion,
+    prompt_source: servedPromptSource,
   });
 
   // ── Constraint shortcut ────────────────────────────────────────────────
@@ -2135,6 +2161,9 @@ export async function handleEditGraph(
   }
 
   if (promptMeta) {
+    servedPromptHash = promptMeta.prompt_hash;
+    servedPromptVersion = promptMeta.prompt_version;
+    servedPromptSource = promptMeta.source;
     log.info(
       {
         request_id: requestId,

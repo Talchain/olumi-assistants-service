@@ -212,6 +212,9 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         latency_ms: 1450,
         stop_reason: 'end_turn',
         repair_attempts: 1,
+        prompt_hash: 'sha256:editgraphhash',
+        prompt_version: 'edit_graph_default@v12',
+        prompt_source: 'default',
       },
     });
     expect(trace!.exit_path).toBe('edit_graph');
@@ -230,6 +233,14 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(call.cache_creation_tokens).toBeNull();
     expect(call.thinking_enabled).toBe(false);
     expect(call.error).toBeNull();
+    // Prompt identity for the edit call — bound BY TASK ID, so this cannot
+    // pass on some other role's record.
+    const identity = trace!.prompt_identity.find((p) => p.task_id === 'edit_graph');
+    expect(identity).toBeDefined();
+    expect(identity!.hash).toBe('sha256:editgraphhash');
+    expect(identity!.version).toBe('edit_graph_default@v12');
+    expect(identity!.prompt_id).toBe('edit_graph_default@v12');
+    expect(identity!.source).toBe('default');
   });
 
   it('falls back to the honest model sentinel when the edit adapter did not expose a model', async () => {
@@ -248,10 +259,21 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         latency_ms: 900,
         stop_reason: null,
         repair_attempts: 0,
+        // Loader reported no identity for this call — the honest absence case.
+        prompt_hash: undefined,
+        prompt_version: undefined,
+        prompt_source: undefined,
       },
     });
     expect(trace!.llm_calls.length).toBe(1);
     expect(trace!.llm_calls[0]!.model).toBe('unknown');
+    // OPPOSITE-DIRECTION TWIN of the case above (trap 22b). The loader
+    // reported no identity, so the trace must record NONE — an honest
+    // "identity unknown", never a placeholder hash conjured to fill the slot.
+    // Without this case a fix that defaulted the hash to '' or 'unknown' would
+    // pass the positive test and silently start attributing every cache-miss
+    // call to a prompt that does not exist.
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'edit_graph')).toBe(false);
   });
 
   it('leaves llm_calls empty on a deterministic (no-LLM) edit exit — editLlmCall omitted', async () => {

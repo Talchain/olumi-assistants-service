@@ -1215,6 +1215,9 @@ export async function dispatchChipClickRunAnalysis(
         provider?: string;
         input_tokens?: number;
         output_tokens?: number;
+        prompt_hash?: string;
+        prompt_version?: string;
+        prompt_source?: string;
       } = {};
       enrichedFacts = await enrichRunAnalysisWithDecisionReview({
         handlerFacts: outcome.handler_facts,
@@ -1237,6 +1240,18 @@ export async function dispatchChipClickRunAnalysis(
           decision_review_provider: callTelemetrySink.provider,
           decision_review_input_tokens: callTelemetrySink.input_tokens,
           decision_review_output_tokens: callTelemetrySink.output_tokens,
+          // Spread-guarded: an absent hash must leave the key absent, so a
+          // cache-miss call reports "identity unknown" rather than undefined
+          // masquerading as a recorded value.
+          ...(callTelemetrySink.prompt_hash !== undefined
+            ? { decision_review_prompt_hash: callTelemetrySink.prompt_hash }
+            : {}),
+          ...(callTelemetrySink.prompt_version !== undefined
+            ? { decision_review_prompt_version: callTelemetrySink.prompt_version }
+            : {}),
+          ...(callTelemetrySink.prompt_source !== undefined
+            ? { decision_review_prompt_source: callTelemetrySink.prompt_source }
+            : {}),
         };
       }
     }

@@ -961,6 +961,12 @@ export async function invokeDecomposedDecisionReview(
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     prompt_version: DECOMPOSE_COMPOSITE_VERSION,
+    // No single served prompt produced this output — it is composed from four
+    // fragment calls — so there is no hash to report. Omitting it makes the
+    // trace say "identity unknown for this call" rather than attribute the
+    // composite to one prompt version it did not solely come from.
+    prompt_hash: undefined,
+    prompt_source: 'decompose_composite',
     resolution,
   };
 }

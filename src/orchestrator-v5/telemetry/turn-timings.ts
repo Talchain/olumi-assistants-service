@@ -153,6 +153,24 @@ export interface V5TurnTimings {
   decision_review_provider?: string;
   decision_review_input_tokens?: number;
   decision_review_output_tokens?: number;
+  /**
+   * Served-prompt identity of the awaited decision_review call — the prompt
+   * that produced the USER-VISIBLE analysis brief.
+   *
+   * Threaded from `DecisionReviewInvokeResult` (which reads the same
+   * `getSystemPromptMeta('decision_review')` entry the context-budget event
+   * already reports) by BOTH production writers: the turn-executor
+   * decision-review block and chip-click-dispatch.
+   *
+   * NOT co-set with the four fields above: the loader legitimately reports no
+   * hash on a cold start / cache miss, and an honest absence is required there
+   * — consumers must omit the prompt-identity attribution rather than record a
+   * placeholder. `decision_review_prompt_source` is the loader's own
+   * `'store' | 'default'` verdict, threaded verbatim and never relabelled.
+   */
+  decision_review_prompt_hash?: string;
+  decision_review_prompt_version?: string;
+  decision_review_prompt_source?: string;
   /** Wall clock for the COMMIT step (append_turn_atomic, awaited). */
   commit_ms?: number;
   /** Number of LLM calls attributed to this turn (echoes telemetry.llm_calls_used). */

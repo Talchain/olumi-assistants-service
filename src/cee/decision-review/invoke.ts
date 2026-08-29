@@ -19,6 +19,7 @@
  */
 
 import { getSystemPrompt, getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
+import type { SystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
 import {
   getAdapterWithResolution,
   getMaxTokensFromConfig,
@@ -212,6 +213,27 @@ export interface DecisionReviewInvokeResult {
   readonly input_tokens: number;
   readonly output_tokens: number;
   readonly prompt_version: string | undefined;
+  /**
+   * Served-prompt identity for THIS call, read from the same
+   * `getSystemPromptMeta('decision_review')` entry that supplied
+   * `prompt_version` (and that `emitContextBudget` already reports).
+   *
+   * `prompt_hash` is `undefined` when the loader had no cache entry to
+   * report (cold start / cache miss / a variabled prompt that is deliberately
+   * not cached) — an honest absence, never a fabricated digest. Consumers MUST
+   * treat "no hash" as "identity unknown for this call" and omit the
+   * attribution rather than substitute a placeholder.
+   *
+   * `prompt_source` is the loader's own `'store' | 'default'` verdict. It is
+   * threaded verbatim rather than relabelled: calling a hardcoded-default
+   * prompt "pms" would be exactly the class of untruth this attribution
+   * exists to prevent. The decompose path (four fragment prompts composed
+   * into one review) reports `'decompose_composite'` and NO hash, because no
+   * single served prompt produced that output — the only honest identity
+   * there is "not one prompt".
+   */
+  readonly prompt_hash: string | undefined;
+  readonly prompt_source: SystemPromptMeta['source'] | 'decompose_composite';
   /**
    * Model-routing resolution for this call. Closes the V5 holistic audit
    * UU-16 observability gap: previously this site used `getAdapter(...)`
@@ -607,6 +629,8 @@ export async function invokeDecisionReview(
     input_tokens: llmResult.usage.input_tokens,
     output_tokens: llmResult.usage.output_tokens,
     prompt_version: promptMeta.prompt_version,
+    prompt_hash: promptMeta.prompt_hash,
+    prompt_source: promptMeta.source,
     resolution,
   };
 }
