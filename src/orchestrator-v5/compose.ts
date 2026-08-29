@@ -68,6 +68,7 @@ import {
   // free; a local literal here would silently keep cloning it.
   WITHHELD_DROPPED_ENRICHMENT_BLOBS,
 } from './compose/withheld-claim-projection.js';
+import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -1147,8 +1148,20 @@ export function toSafeTransportEnrichment(
  * consistent across the run_analysis turn and any follow-up explain /
  * what_would_flip turn.
  *
- *   - `win_probabilities` preserved VERBATIM, keyed by option id (DGAI
- *     correlates by option id).
+ *   - `win_probabilities` preserved VERBATIM, keyed by option LABEL where the
+ *     record has one, falling back to option id only when it does not.
+ *
+ *     ⚠ CORRECTED 2026-08-29. This line read "keyed by option id (DGAI
+ *     correlates by option id)" and was wrong at the producer AND on the wire.
+ *     The producer is `extractWinProbabilities`
+ *     (`tools/handlers/run-analysis.ts`), whose key expression is
+ *     `option_label` first with `option_id` as the FALLBACK — and all ten live
+ *     captures reviewed on 29 Aug are label-keyed, e.g. capture
+ *     20260828T141150Z: `{"replace our current CRM with HubSpot next quarter":
+ *     0.7582, "keep what we have": 0.1209, …}`. A comment that misstates a map's
+ *     key is how the next lane reasons wrongly about correlation; it is also
+ *     how `V5AnalysisResultBlock.tsx`'s leader pill came to compare a LABEL
+ *     against an ID and fire zero times, noted further down this same function.
  *   - enrichment reduced to the P0-B safe-transport keep-list (see
  *     toSafeTransportEnrichment) — transport-only, NOT the coaching contract.
  */
@@ -1183,8 +1196,31 @@ export function buildAnalysisResultBlock(
   // cloned in the first place. Pure work-avoidance: the projection below still
   // runs and still owns the policy, and it would drop these keys anyway.
   const safeTransport = toSafeTransportEnrichment(enrichment, !mayNameLeadingOption);
+  // TIED-OPTION ORDERING — only on the branch that is allowed to present a
+  // ranking at all. A tie in `win_probability` is currently broken ARBITRARILY:
+  // on capture 20260828T141150Z "keep what we have" is presented ABOVE "Phased
+  // HubSpot Pilot" on a BIT-IDENTICAL win probability, while the same payload's
+  // `option_comparison` gives it a strictly worse `outcome.mean` AND a strictly
+  // higher `expected_regret`. That is a wrong recommendation shown with full
+  // confidence.
+  //
+  // It reorders `option_comparison[]` — the array whose order a user actually
+  // sees, because the UI builds one display row per entry and then STABLE-sorts
+  // by win probability, so a tied pair keeps this array's order
+  // (`mapV5AnalysisToReport.ts:571`, `optionDisplayOrder.ts:104-110` at UI
+  // `daf6537a`). `decision_brief.options[]` follows for internal coherence
+  // only; nothing renders its order. See compose/tied-option-ordering.ts for
+  // the full derivation, the fail-closed rules, why this is an honest interim
+  // over an ISL defect rather than a fix for it, and — stated rather than left
+  // to be found — that it does NOT disclose the tie, which needs a UI change.
+  //
+  // NOT applied on the withheld branch, deliberately:
+  // `projectOptionsForWithheldClaim` already drops the ordinal and neutralises
+  // the order there, so there is no ranking to make defensible — and
+  // reinstating one would reopen the leader claim that projection exists to
+  // close.
   const transportEnrichment = mayNameLeadingOption
-    ? safeTransport
+    ? (projectTiedOptionOrderingForTransport(safeTransport) as typeof safeTransport)
     : projectTransportEnrichmentForWithheldClaim(safeTransport);
   return {
     type: 'analysis_result',
