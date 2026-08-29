@@ -67,6 +67,12 @@ vi.mock('../../build-turn-context.js', async () => {
       scenarioBriefText: null,
       persistedGraph: null,
     })),
+    // ROUND 2 (2.1353) — the recovered/blocked commit reads the prior turn's
+    // pendings BEFORE writing, because a commit that threads none makes the new
+    // (newest) row's empty pendings list authoritative and silently wipes a live
+    // consent hold. Stubbed here so this suite exercises the commit rather than
+    // the fail-closed abort an absent Supabase store would trigger.
+    loadMostRecentPendingActionsIntegrityStrict: vi.fn(async () => []),
   };
 });
 
