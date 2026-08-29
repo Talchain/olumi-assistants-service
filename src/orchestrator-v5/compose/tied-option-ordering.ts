@@ -82,37 +82,87 @@
  *      turns on a hand-picked number with hard cliffs either side.
  *   2. THE UNTIED CASE IS PROTECTED BY CONSTRUCTION, not by care. If two
  *      options differ in win probability at all, they land in different groups
- *      and NOTHING can permute them. The overwhelming majority of recorded
- *      option maps are untied; this module cannot touch any of them, and the
- *      twin tests pin that rather than trusting the argument.
+ *      and NOTHING can permute them. 207 of 212 recorded analysis payloads
+ *      carry no bit-identical tie at all; this module cannot touch any of
+ *      them, and the twin tests pin that rather than trusting the argument.
+ *
+ *      ⚠ AND THE THING THAT IS *NOT* A DEFECT, because it will look like one:
+ *      `rank` disagrees with `outcome.mean` in 119 of 597 recorded option
+ *      pairs (19.9%, spanning 99 of 212 payloads) — ~24x more often than an
+ *      exact tie. That is NOT this module's business and must not be
+ *      "fixed" here. Ranking by P(best) and ranking by expected value are two
+ *      legitimate and genuinely different decision rules, and outside a tie
+ *      win probability is a real signal. A tie is special precisely because
+ *      win probability then carries NO information, so deferring to expected
+ *      value is the only defensible move left.
  *
  * ─── THE TIE-BREAK KEY, DERIVED ────────────────────────────────────────────
+ * ⚠⚠ FIRST, THE THING A LATER LANE WILL OTHERWISE GET WRONG:
+ * `expected_regret` AND `outcome.mean` ARE THE SAME KEY. Measured across the
+ * whole capture corpus (212 analysis payloads, 597 option pairs, tolerance
+ * 1e-9): `expected_regret + outcome.mean` is CONSTANT within every single
+ * payload, 212/212. Regret is exactly `C − mean` — an affine transform of the
+ * negated mean — so ordering by one IS ordering by the other. They disagreed
+ * in 0 of 597 pairs, and not by luck. An earlier draft of this comment called
+ * one "primary" and the other an independent "secondary"; that implied two
+ * signals where the payload carries one, and it is corrected here rather than
+ * left for someone to rediscover.
+ *
  * PRIMARY: `downside.expected_regret`, ASCENDING (less regret is better).
+ * SECONDARY: `outcome.mean`, DESCENDING — reached only when regret is absent
+ *   or equal on both sides. Given the affine identity above, the secondary is
+ *   a SHAPE fallback (for a payload shipping one field and not the other), NOT
+ *   a second opinion. It can never overturn the primary.
  *
- *   It is the expected shortfall from choosing this option rather than whatever
- *   turns out best — computed by the engine from the SAME draws that produced
- *   the tie, and therefore carrying information the tied win-probability does
- *   not. It is zero for the best option and positive otherwise BY
- *   CONSTRUCTION, so its direction is fixed without CEE needing to know whether
- *   the goal is maximised or minimised — which CEE does not know: there is no
- *   goal-direction field on the analysis payload, and the only polarity concept
- *   in the tree is `RiskPolarity` ('fears_high' | 'fears_low') for RISK nodes
- *   (`cee/compound-goal/risk-polarity.ts`). Minimising expected regret is also
- *   precisely the question a ranking answers: what does it cost me to pick this
- *   one?
+ * WHY REGRET IS READ FIRST, if the order is identical either way: it is the one
+ *   of the two whose DIRECTION is fixed by construction. Regret is zero for the
+ *   best option and positive otherwise, so "less is better" holds without CEE
+ *   knowing whether the goal is maximised or minimised — which CEE does not
+ *   know: there is no goal-direction field on the analysis payload, and the
+ *   only polarity concept in the tree is `RiskPolarity`
+ *   ('fears_high' | 'fears_low') for RISK nodes
+ *   (`cee/compound-goal/risk-polarity.ts`). `outcome.mean`'s "higher is better"
+ *   is merely IMPLIED, by the engine's own alignment between mean and win
+ *   probability. Reading the self-orienting field first means the affine
+ *   identity is what makes the other one safe, rather than an assumption doing
+ *   it. A genuinely INDEPENDENT tie-break would have to come from a third
+ *   quantity — `downside.cvar_10`, `p05`, `outcome.std` — which is a different
+ *   design question and is deliberately NOT settled here.
  *
- *   ⚠ Note the UI carries `expected_regret` but deliberately never DISPLAYS it
+ *   ⚠ The UI carries `expected_regret` but deliberately never DISPLAYS it
  *   (`OptionCards.tsx`: "the estate's no-EVPI-display doctrine"). Using it as a
- *   sort key is not a display of it — no magnitude reaches the screen — but a
- *   later lane that wants to SHOW the reason for the order must clear that
- *   doctrine first.
+ *   sort key displays no magnitude — but a later lane wanting to SHOW why the
+ *   order is what it is must clear that doctrine, or lean on `outcome.mean`,
+ *   which the UI already renders as "Expected".
  *
- * SECONDARY: `outcome.mean`, DESCENDING. Used only when regret is absent on
- *   either side or equal on both. It is secondary rather than primary because
- *   its direction is merely IMPLIED — by the engine's own alignment between a
- *   higher mean and a higher win probability — rather than declared anywhere.
- *   It is also the field the UI already renders as "Expected"/"Likely outcome",
- *   so an order justified by it is one a user can at least check on screen.
+ * ─── WHAT THE CURRENT (ARBITRARY) TIE-BREAK ACTUALLY IS ────────────────────
+ * Derived from the captures, 5/5 consistent: the better rank goes to the
+ * lexicographically smaller `option_id`, consistent with a stable sort on
+ * `win_probability` over an upstream array arriving in alphabetical
+ * `option_id` order (208/212 captures). A modern `option_id` is an 8-hex-char
+ * content hash, so THE CURRENT TIE-BREAK IS A COIN FLIP ON A HASH PREFIX — and
+ * it is not stable across runs: in capture `…-4d29da` `a551345f` WINS its tie
+ * and takes rank 2; seventeen minutes later in `…-46c748` the same `a551345f`
+ * LOSES a tie and drops to rank 3.
+ *
+ * ─── HOW OFTEN, AND THE CLASS THIS DOES NOT REACH ──────────────────────────
+ * Across 212 analysis payloads: 5 bit-identical tied pairs (4 distinct
+ * results). In 1 of the 5 the inferior option is ranked higher — the capture
+ * fixed here. The other 4 land correctly BY COINCIDENCE of the hash ordering,
+ * which is precisely why this is worth fixing: today's correct answers are not
+ * earned.
+ *
+ * ⚠ KNOWN-UNCOVERED, STATED RATHER THAN LEFT TO BE FOUND: a pair ONE ULP
+ * apart is not bit-identical, so it lands in different groups here and this
+ * module leaves it alone. The corpus contains exactly such a case, and it is
+ * the worst one in it — `20260811T013132Z-fresh-23c2c5/step-T3_ANALYSE.json`,
+ * `gap: 5.551115123125783e-17`, where the product NAMES A LEADER
+ * (`opt_switch_hubspot`) that has both the worse mean and the worse regret,
+ * and `robustness.near_tie.is_tie` is already TRUE. That is a LEADER-CLAIM
+ * defect with a signal the payload already carries, not an ordering defect,
+ * and it belongs where the leader claim is decided. Widening the grouping
+ * predicate to reach it would reintroduce exactly the arbitrary constant this
+ * module refuses.
  *
  * ─── FAIL-CLOSED ───────────────────────────────────────────────────────────
  * A reorder must be defensible or it must not happen. A tied group is left in
@@ -134,6 +184,15 @@
  * leader is 64 points clear, so nothing fires. Emitting a disclosure into a
  * channel measured to be dark would be worse than emitting none: it would let
  * us believe the tie is disclosed when no user can see it.
+ *
+ * NOR DOES THE PRODUCER'S OWN TIE SIGNAL COVER IT. `robustness.near_tie` is
+ * STRUCTURALLY BLIND below the top two — derived across all 212 payloads, not
+ * inferred: `near_tie.gap == wp[rank1] - wp[rank2]` in 212/212 and
+ * `is_tie == (gap < threshold)` in 212/212, with `threshold == 0.1` every
+ * time. It only ever compares ranks 1 and 2. 81 of those 212 payloads contain
+ * a sub-top-2 adjacent pair inside that same 0.1 threshold that `near_tie`
+ * cannot see. And the wire carries no tie-break provenance of any kind:
+ * `tie_break`, `tiebreak` and `tie_broken` appear in 0 of 1,010 captures.
  *
  * @module orchestrator-v5/compose/tied-option-ordering
  */
