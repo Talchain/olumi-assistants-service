@@ -34,7 +34,11 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn(async () => 'SYSTEM PROMPT'),
-  getSystemPromptMeta: vi.fn(() => ({ prompt_version: 'v1' })),
+  getSystemPromptMeta: vi.fn(() => ({
+    prompt_version: 'v1',
+    prompt_hash: 'sha256:drpromptidentity01',
+    source: 'store',
+  })),
 }));
 
 vi.mock('../science-claims.js', () => ({
@@ -174,6 +178,31 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
     // fields are independent axes of information.
     expect(result.resolution.provider).toBe('openai');
     expect(result.resolution.resolved_model).toBe('gpt-4.1');
+  });
+
+  it('returns the SERVED prompt identity so the caller can attribute the analysis brief', async () => {
+    // `invoke.ts` already read `promptMeta.prompt_hash` for its context-budget
+    // event but never RETURNED it, so every downstream consumer — including
+    // the diagnostic trace of the most user-facing LLM call in the product —
+    // had no identity to record. This is the producer hop of that thread.
+    const adapter = makeAdapterStub('{"narrative_summary":"ok"}');
+    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({
+      adapter,
+      resolution: MOCK_RESOLUTION,
+    });
+
+    const result = await invokeDecisionReview(baseInput(), {
+      requestId: 'req-prompt-identity',
+      timeoutMs: 15_000,
+    });
+
+    // Derived from the loader (the producer), not from a value invented here.
+    expect(result.prompt_hash).toBe('sha256:drpromptidentity01');
+    expect(result.prompt_version).toBe('v1');
+    // The loader's OWN verdict, threaded verbatim — not relabelled 'pms'.
+    // A hardcoded-default prompt reported as store-managed would be exactly
+    // the untruth this attribution exists to prevent.
+    expect(result.prompt_source).toBe('store');
   });
 
   it('RIDER-B — a per-call model override routes as a per_call source; the default path is unchanged', async () => {
