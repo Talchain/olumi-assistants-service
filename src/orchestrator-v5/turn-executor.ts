@@ -10339,20 +10339,50 @@ export async function runTurnExecutor(
             }),
           );
 
-          // Commit as a direct_answer so route-v2 sees commit_performed
-          // and returns 200. Commit failure on the recoverable path is
-          // still fatal, but the original recoverable outcome and the
+          // Commit so route-v2 sees commit_performed and returns 200 with the
+          // refusal the user is owed. Commit failure on the recoverable path
+          // is still fatal, but the original recoverable outcome and the
           // commit failure are logged as two distinct records so
           // infrastructure issues are not hidden behind resilience.
+          //
+          // ⭐ P0 (witnessed on deployed staging 2026-08-29, CEE `fc08ac6`):
+          // `turn_class` and `handler_id` are ONE decision here, not two.
+          // `v5_conversation_turns` carries a strict BICONDITIONAL —
+          //   CHECK ((turn_class = 'handler') = (handler_id IS NOT NULL))
+          // (supabase/migrations/20260417160000_v5_session_store.sql) — so
+          // pairing a hardcoded `'direct_answer'` with the analyse handler id
+          // was a row the database rejects. `append_turn_atomic_v2` threw,
+          // `commitPerformed` never became true, and route-v2's fail-closed
+          // commit check replaced this composed, specific refusal with a
+          // generic 500: three consecutive composer `stage: "analyse"` turns
+          // showed the user "Something went wrong on our side" while the
+          // chip_click arm refused CLEANLY on the identical graph in the same
+          // minute — because `chip-click-dispatch.ts` already commits
+          // `turn_class: 'handler'` with the same handler id.
+          //
+          // Both fields now derive from the SAME predicate, so the pair cannot
+          // drift apart again: a refusal we attribute to the analyse handler
+          // is a `handler` turn, and a recovery we attribute to nobody stays a
+          // handler-less `direct_answer`. This is also what makes the two arms
+          // agree about one event rather than describing it two ways
+          // (CLAUDE.md trap 21).
+          //
+          // NOTE the response class is unaffected: `resolvedTurnClass` was set
+          // to `'direct_answer'` above and still is. That is the WIRE turn
+          // class the client sees; this is the DURABLE row's class.
+          const persistsAnalysisRefusal = analysisRefusalFact !== null;
           try {
             const committed = await commitTurn(response, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
-              turn_class: 'direct_answer',
-              handler_id: analysisRefusalFact === null ? null : ANALYSE_HANDLER_ID,
+              turn_class: persistsAnalysisRefusal ? 'handler' : 'direct_answer',
+              handler_id: persistsAnalysisRefusal ? ANALYSE_HANDLER_ID : null,
               request_hash: computeRequestHash(payload),
               llm_calls_used: llmCallsUsed,
               duration_ms: Date.now() - startedAt,
+              // Written as the null-check rather than `persistsAnalysisRefusal`
+              // so TypeScript narrows the fact; the pair above is what must not
+              // drift, and it derives from the single predicate.
               handler_facts:
                 analysisRefusalFact === null ? [] : [analysisRefusalFact],
             });
