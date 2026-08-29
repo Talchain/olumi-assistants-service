@@ -173,6 +173,44 @@ describe('served-prompt-drift.yml — the alarm cannot be silenced quietly', () 
     expect(on.schedule[0].cron).toMatch(/\S/);
   });
 
+  it('pins `ref: staging` on the checkout — a scheduled run checks out `main`, which has no script', () => {
+    const doc = wf();
+    const steps = (Object.values(doc.jobs)[0] as {
+      steps: Array<{ uses?: string; name?: string; with?: Record<string, unknown> }>;
+    }).steps;
+    const checkouts = steps.filter(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout'),
+    );
+    expect(checkouts.length, 'no actions/checkout step to pin').toBeGreaterThan(0);
+    for (const s of checkouts) {
+      expect(
+        s.with?.ref,
+        'checkout does not pin `ref: staging` — GitHub fires `schedule:` from the DEFAULT branch, ' +
+          'and `main` carries neither scripts/verify-served-prompt.mjs nor the pinned snapshot, ' +
+          'so the scheduled run would die on a missing file',
+      ).toBe('staging');
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // NOT A GUARD. A REQUIREMENT THIS SUITE IS STRUCTURALLY UNABLE TO CHECK.
+  //
+  // GitHub fires `schedule:` ONLY from the repository's DEFAULT branch. So this
+  // workflow must EXIST ON `main` or the cron is inert no matter how well-formed
+  // its declaration is. A unit test reads one working tree; it cannot see which
+  // BRANCHES a file lives on. The `has BOTH a push trigger and a schedule
+  // trigger` test above is therefore satisfied by a declaration that never
+  // fires — and that is not hypothetical: between 2026-07-25 and 2026-08-29 the
+  // file was on `staging` only, SCHEDULED RUNS = 0, while this suite was green
+  // the whole time.
+  //
+  // The checks that CAN see it live outside this process:
+  //   gh api repos/Talchain/olumi-assistants-service/contents/.github/workflows/served-prompt-drift.yml?ref=main
+  //   gh api repos/Talchain/olumi-assistants-service/actions/workflows/320307337/runs?event=schedule --jq .total_count
+  //
+  // Do not read this comment as coverage. It is a note, not an assertion.
+  // ───────────────────────────────────────────────────────────────────────────
+
   it('pushes are watched on staging, never main', () => {
     const doc = wf();
     const on = doc.on ?? doc[true as unknown as keyof typeof doc];
