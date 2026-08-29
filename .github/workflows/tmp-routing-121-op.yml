@@ -20,11 +20,11 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'before | ship | sample | reload | rollback'
+        description: 'before | ship | sample | reload | turn | rollback'
         required: true
         default: 'before'
         type: choice
-        options: [before, ship, sample, reload, rollback]
+        options: [before, ship, sample, reload, turn, rollback]
 
 permissions:
   contents: read
@@ -50,6 +50,7 @@ jobs:
         env:
           CEE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
           ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
+          ASSIST_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
           ACTION: ${{ github.event.inputs.action || 'before' }}
         shell: bash
         run: |
@@ -272,6 +273,47 @@ jobs:
               exit 1
             fi
             echo "RESULT: SETTLED — 13/13 samples read v${NEW_VERSION}/${EXPECT_HASH16}."
+            ;;
+
+          turn)
+            if [ -z "${ASSIST_API_KEY:-}" ]; then
+              echo "FAIL: STAGING_ASSIST_API_KEY is not set"; exit 1
+            fi
+            SCEN=$(cat /proc/sys/kernel/random/uuid)
+            echo "scenario_id=${SCEN}"
+            drive() {                     # $1 label, $2 turn_class, $3 message
+              local label="$1" tc="$2" msg="$3" tid status
+              tid=$(cat /proc/sys/kernel/random/uuid)
+              jq -n --arg t "$tid" --arg s "$SCEN" --arg tc "$tc" --arg m "$msg" \
+                '{kind:"message",turn_id:$t,scenario_id:$s,stage:"frame",turn_class:$tc,source:"composer",message:$m}' > t.json
+              status=$(curl -sS -o tr.json -w '%{http_code}' --max-time 240 -X POST \
+                -H 'Content-Type: application/json' -H "X-Olumi-Assist-Key: ${ASSIST_API_KEY}" \
+                --data-binary @t.json "${CEE_BASE_URL%/}/orchestrate/v2/turn" || echo "000")
+              echo ""
+              echo "### [${label}] \"${msg}\" -> HTTP ${status}, $(wc -c < tr.json) bytes"
+              if [ "$status" != "200" ]; then head -c 600 tr.json; echo; return 1; fi
+              jq -r '{exit_path:(._diagnostic_trace.exit_path // null),
+                      trace_keys:(._diagnostic_trace|keys? // []),
+                      draft_nodes:(.draft_graph.nodes|length? // null),
+                      graph_hash:(.graph_hash // null),
+                      block_types:[.blocks[]?.type],
+                      ready_options:(.analysis_ready.options|length? // null)}' tr.json
+              echo "  handler-name occurrences in the response body:"
+              for h in add_constraint adjust_edge_strength edit_graph run_analysis; do
+                printf "    %-22s %s\n" "$h" "$(grep -ao "$h" tr.json | wc -l)"
+              done
+              echo "  assistant_text (first 600 chars):"
+              jq -r '.assistant_text // "(none)"' tr.json | head -c 600
+              echo ""
+              echo "  rule-citation check (must be 0):"
+              jq -r '.assistant_text // ""' tr.json | grep -aoiE "per rule [0-9]+|rule [0-9]+ (of|says|states)|as rule [0-9]+" | sort | uniq -c || echo "    0"
+            }
+            drive "T1 frame"   frame   "Should we raise our SaaS subscription price by 15% next quarter?" || exit 1
+            drive "T2 draft"   propose "Use your best guess for the rest and draft the model now." || exit 1
+            drive "T3 constraint" propose "Keep churn below 5%." || exit 1
+            drive "T4 edge"    propose "Strengthen the link from churn to revenue." || exit 1
+            echo ""
+            echo "All four turns returned HTTP 200."
             ;;
 
           rollback)
