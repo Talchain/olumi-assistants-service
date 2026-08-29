@@ -60,6 +60,14 @@ const BRIEF =
   "The goal is to grow without losing control of the cost base.";
 
 const BERLIN = "Opening the Berlin office";
+/**
+ * ⚠ THE V3 DISPLAY LABEL, WHICH IS NO LONGER THE QUOTE. `deriveOptionActionLabel`
+ * authors an option's display name at the V3 boundary (`schema-v3.ts`), so a
+ * lookup by label must use the authored string while the RECORD-level lookups
+ * above keep using the quote. Named apart deliberately: one constant serving
+ * both would hide exactly the distinction this change introduces.
+ */
+const BERLIN_V3_LABEL = "Open the Berlin Office";
 const UK = "Expanding in the UK";
 const STATUS_QUO = "Keeping things as they are";
 const COST = "Annual Operating Cost";
@@ -236,7 +244,7 @@ describe("composed magnitude citing the user's own stated figures", () => {
     const normalised = normaliseDraftResponse(structuredClone(projection.graph));
     const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: probeBrief });
     const factor = v3.graph.nodes.find((node) => node.label === COST)!;
-    const berlin = v3.options.find((option) => option.label === BERLIN)!;
+    const berlin = v3.options.find((option) => option.label === BERLIN_V3_LABEL)!;
 
     expect(berlin.interventions[factor.id]).toMatchObject({
       raw_value: 55_000,
@@ -290,7 +298,7 @@ describe("composed magnitude citing the user's own stated figures", () => {
     const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: BRIEF });
     const readiness = buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph);
 
-    const berlinOption = v3.options.find((option) => option.label === BERLIN);
+    const berlinOption = v3.options.find((option) => option.label === BERLIN_V3_LABEL);
     expect(berlinOption, "expected the Berlin option to survive projection").toBeDefined();
 
     const blockers = (readiness.blockers ?? []).filter(

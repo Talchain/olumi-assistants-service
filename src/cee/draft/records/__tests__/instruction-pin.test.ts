@@ -233,15 +233,60 @@ const HISTORIC_V7_INSTRUCTION_BYTES = 6748;
  * between the 2026-08-14 `is_baseline` widening and this one received those
  * bytes, and the 13-brief BEFORE measurement is attributable to exactly them.
  */
-const PREREGISTERED_V8_INSTRUCTION_SHA256 =
+const HISTORIC_V8_INSTRUCTION_SHA256 =
   "acd9148eb107ea85d839fd1198a4eff9659b3ab81b36ef2255d5c029837a0b4d";
-const PREREGISTERED_V8_INSTRUCTION_BYTES = 8265;
+const HISTORIC_V8_INSTRUCTION_BYTES = 8265;
+
+/**
+ * ⭐ PRE-REGISTERED — v9, frozen 2026-08-29.
+ *
+ * ⚠ STATUS AT THE TIME OF PINNING: **UNMEASURED**, and this line is here because
+ * the pin is what a future session finds first. No live draw was spent on these
+ * bytes. They were written against a WITNESSED defect — option nodes that
+ * shipped, scored and ranked with win probabilities on the deployed build across
+ * 16 signed-in runs and 7 briefs, among them the user's own question ("Should we
+ * hire a sales lead?", which then shipped as the BASELINE option), a stated
+ * unknown, and a 60-adviser description of how things work today at win
+ * probability 0.0542. Do not read this pin as evidence that the change worked;
+ * read it as a record of exactly what was served from this merge onward.
+ *
+ * WHAT v9 CHANGED, and it is ONE bullet:
+ *   · `option` gains a definition, a SPAN rule and three exclusions. The
+ *     definition and the exclusions are RECLASSIFICATION — they tell the model
+ *     where to put something it was already going to say — so neither applies
+ *     any pressure to invent, which is the property every version of this
+ *     instruction has had to keep.
+ *   · The span rule is the half that reaches the LABEL. On this path an option
+ *     node's label IS `source_quote` (`projector.ts`), and `source_quote` must
+ *     be verbatim — so the only way a label can stop being a pasted sentence is
+ *     for the quoted SPAN to be the one naming the action. "A shorter span is
+ *     still verbatim" is the sentence that makes those two rules compatible, and
+ *     the `goal` bullet has said the same thing ("Quote the span naming what is
+ *     at stake") since v8. This closes an asymmetry inside one file.
+ *
+ * ⚠ THE CONNECT HALF IS BYTE-IDENTICAL to v6/v7/v8 (`44c96633…` / 3,648,
+ * asserted below), so this edit is legible as shape-only without reading the
+ * diff — which is the entire reason the halves are pinned apart.
+ */
+const PREREGISTERED_V9_INSTRUCTION_SHA256 =
+  "7629e9ec738786eb4624b078a62c81a5f4e5c90adc2bb4e1b5edbd820f97def8";
+const PREREGISTERED_V9_INSTRUCTION_BYTES = 9183;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v8 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V8_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v9 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V9_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V8_INSTRUCTION_BYTES,
+      PREREGISTERED_V9_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v8 bytes, so v8's runs stay attributable", () => {
+    // v8 was served from the goal-bullet change until this merge. Its own
+    // pre-registration note says it was unmeasured at pinning; whatever was
+    // logged against it must stay separable from what is logged against v9.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V8_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V8_INSTRUCTION_BYTES,
     );
   });
 
@@ -338,10 +383,20 @@ describe("the draft records instruction is the measured artefact", () => {
     // byte-identical to v6/v7 (`44c96633…` / 3,648, asserted below), so this
     // edit is legible as shape-only without reading the diff — which is the
     // entire reason the halves are pinned apart.
+    //
+    // ⚠⚠ AND AGAIN IN v9 — the FOURTH consecutive version to touch it. What an
+    // `option` IS, and which span of the brief names it, are both statements
+    // about what goes in a field, so v9 is shape-half in its entirety and the
+    // connect half is byte-identical to v6/v7/v8 (asserted in the next test).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "9dfb9f583edaf66df70d355a260a9a56ef9b80fe3367a5043a97d3cca048a207",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(5535);
+    // HISTORIC — v8's shape half. Asserted DISTINCT so v8's runs stay
+    // attributable to the bytes that produced them.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "03974285d14572f39df7a7758ce553de956798c48a5a88376346ec12a203fe04",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(4617);
     // HISTORIC — v7's shape half. Asserted DISTINCT: it is the artefact the
     // 13-brief BEFORE arm was served, and it must stay separable from this one.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -460,6 +515,44 @@ describe("the draft records instruction is the measured artefact", () => {
     // substituting a sharper objective is most tempting and most wrong.
     expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
       "even if it is unquantified, modest or awkwardly worded",
+    );
+  });
+
+  /**
+   * ⭐⭐ THE v9 RULES, PINNED BY CONTENT — AND THE TWO HALVES PINNED APART,
+   * because they answer different questions and only one of them reaches a label.
+   *
+   * A hash pin cannot tell "someone deleted the span rule" from "someone fixed a
+   * typo two bullets away", and here the span rule is the ONLY sentence in the
+   * whole instruction that can shorten an option label: on this path the label
+   * IS `source_quote`, and `source_quote` must be verbatim, so "a shorter span
+   * is still verbatim" is what makes a short label reachable at all. Delete it
+   * and the classification half still reads correctly while every option node
+   * silently goes back to carrying a pasted sentence.
+   */
+  it("keeps the v9 span rule, which is the only sentence that can shorten an option label", () => {
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "Quote the span that NAMES the action, not the sentence it sits in.",
+    );
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain("A shorter\n  span is still verbatim");
+  });
+
+  it("keeps the v9 exclusions, which are what stop a non-option being scored", () => {
+    // The decision question shipped as an option — and then as the BASELINE
+    // option — in the witnessed corpus. This is the sentence that addresses it.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "The question the user is deciding is not an option.",
+    );
+    // The other three witnessed classes: a stated unknown, a piece of history,
+    // and a description of how things work today.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "something they say they do not know,\n  something that already happened, nor a description of how things work today",
+    );
+    // ⚠ AND THE REASON, which is what makes it a contract rather than a rule the
+    // model discards under load — the same discipline v6 states for its own
+    // reclassification lines.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "to be scored and ranked against the others",
     );
   });
 });

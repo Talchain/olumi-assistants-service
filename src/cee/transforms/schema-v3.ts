@@ -55,6 +55,11 @@ import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // restated — `nodes[].provenance` and `options[].provenance.source` describe one
 // fact and must not be able to disagree about it (trap 12).
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from "../provenance/brief-binding.js";
+// ⭐ THE SAME MODULE THE GOAL'S AUTHORED OBJECTIVE COMES FROM. One no-invention
+// guarantee, one whitelist of transformations, one refusal-to-verbatim rule —
+// a second implementation of "author a label from the user's own words" would
+// be two answers to one question (trap 21).
+import { deriveOptionActionLabel } from "../draft/records/objective-label.js";
 import {
   mergeRephrasedOptions,
   type RephraseMergeResult,
@@ -1310,11 +1315,53 @@ export function projectGraphAndOptionsToV3(
     node.interventions = option.interventions;
     if (option.is_baseline !== undefined) node.is_baseline = option.is_baseline;
 
+    // ⭐⭐ THE OPTION'S DISPLAY LABEL IS THE NAME OF A COURSE OF ACTION.
+    //
+    // ── WHY HERE, AND NOT IN THE PROJECTOR BESIDE THE GOAL'S ─────────────────
+    // The projector's product is the RECORD, and its C-K4 invariant is that a
+    // stated node's label is the canonicalised quote, verbatim
+    // (`projector-behaviour.test.ts`). This is the DISPLAY boundary, and the
+    // whole defect being fixed is that a display surface was reading
+    // `source_quote` — a field whose producer declares it verbatim provenance
+    // (`instruction.ts`) — because a `stated_item` has no `label` field for the
+    // model to author one into. Authoring at the record would have made the
+    // record contradict its own invariant; authoring here does not.
+    //
+    // ⚠ INSIDE THE TYPED BRANCH ONLY, and that is load-bearing. It runs AFTER
+    // `projectNodeProvenance`, so the badge is already decided and this cannot
+    // move it — and `node.source_quote` is populated only for a typed record, so
+    // a LEGACY graph node (whose provenance genuinely IS bound on its label,
+    // `:1188`) is never touched.
+    //
+    // ⚠ THE VERBATIM IS NOT LOST: it stays on `source_quote`, which the
+    // inspector reads, and `label_authored` says out loud that the display
+    // string is ours while `provenance` keeps saying the user stated it.
+    if (typeof node.source_quote === "string" && node.source_quote.length > 0) {
+      const authored = deriveOptionActionLabel(node.source_quote);
+      if (authored.authored) {
+        node.label = authored.label;
+        node.label_authored = true;
+        // The top-level option is what the analysis and the ranked list read;
+        // the graph node is what the canvas reads. One name, both surfaces —
+        // two labels for one option is the defect one level up.
+        option.label = authored.label;
+      }
+    }
+
     const fromBrief = node.provenance === "from_brief";
+    // ⭐ `brief_quote` IS A QUOTE, SO IT READS THE QUOTE. This was `node.label`,
+    // which was the same string only while an option's label WAS its verbatim
+    // `source_quote`. `deriveOptionActionLabel` ends that identity, and a label
+    // sitting in a field named `brief_quote` would be this estate's own
+    // characteristic defect (a display string borrowing a provenance field —
+    // exactly what `objective-label.ts` exists to undo, one level down).
+    // `node.source_quote` is populated from the typed record provenance a few
+    // lines above (`:1182`); the label remains the fallback for legacy graph
+    // paths, where it is still the only thing there is.
     option.provenance = {
       ...(option.provenance ?? {}),
       source: fromBrief ? "brief_extraction" : "cee_hypothesis",
-      ...(fromBrief ? { brief_quote: node.label } : {}),
+      ...(fromBrief ? { brief_quote: node.source_quote ?? node.label } : {}),
     };
   }
 

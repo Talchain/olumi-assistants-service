@@ -218,9 +218,15 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
 
   it('temporal route receives no fabricated scalar and enters the human configure flow', () => {
     const compiled = compile(CASES[2]);
-    const temporalLabel = 'charging £49 now and £59 in Q2';
+    // ⚠ THE QUOTE AND THE DISPLAY LABEL ARE NOW DIFFERENT STRINGS. An option's
+    // V3 label is an authored course-of-action name (`deriveOptionActionLabel`,
+    // applied at `schema-v3.ts`); the verbatim rides on `source_quote` and on
+    // `provenance.brief_quote`. Kept as two constants rather than one, because
+    // this test asserts across THREE surfaces and they must agree on the name.
+    const temporalQuote = 'charging £49 now and £59 in Q2';
+    const temporalLabel = 'Charging £49 Now and £59 in Q2';
     const temporalNode = compiled.nodes.find(
-      (node) => node.kind === 'option' && node.label === temporalLabel,
+      (node) => node.kind === 'option' && node.source_quote === temporalQuote,
     );
     const temporalOption = compiled.options.find((option) => option.label === temporalLabel);
     const temporalAnalysisOption = compiled.analysis_ready?.options.find(
