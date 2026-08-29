@@ -1919,3 +1919,454 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     expect(result.text).toBe(summary);
   });
 });
+
+/**
+ * ⭐⭐ COPY HONESTY WHEN NO DECISION COULD BE DERIVED FROM THE BRIEF.
+ *
+ * MEASURED DEFECT: three open strategic briefs — each explicitly disclaiming a
+ * choice between fixed options — were each organised as 1 `decision` node +
+ * 3-5 `option` nodes, and the narrative asserted "I've built a first decision
+ * model from your brief" above an "Options compared" block. The MODEL SHAPE is
+ * an architectural constraint (`DRAFT_RECORD_STATED_KINDS` has no vocabulary
+ * for "a thing under consideration" other than `option`, and a decision-free
+ * model is not expressible — `graph-validator.ts:348-382` raises
+ * `MISSING_DECISION` at error severity). That is NOT fixed here. What is fixed
+ * is the CLAIM ABOUT the model, which was false.
+ *
+ * ⚠ THE GATE IS `node.label_authored`, NOT `provenance.label_authored`.
+ * The projector writes `provenance.label_authored` as an OBJECT field
+ * (`projector.ts:3255-3262`), but `NodeV3.provenance` is a bare STRING ENUM
+ * (`schemas/cee-v3.ts:255`) and `NodeV3` STRIPS undeclared keys. The object is
+ * flattened by `projectNodeProvenance` (`transforms/schema-v3.ts:1183`), which
+ * LIFTS the flag to node level, where `NodeV3` declares it
+ * (`cee-v3.ts:284`) and it survives to this builder. Reading
+ * `provenance.label_authored` here would read a property off a string and get
+ * `undefined` on EVERY draft — the gate would fire on all of them, converting
+ * "always decides" into "always hedges". Two same-named flags at two levels;
+ * the pin below is what stops that distinction rotting.
+ */
+describe('provisional-decision framing (open brief)', () => {
+  const DECISION_UNAUTHORED = { id: 'd1', kind: 'decision' as const, label: 'Decision' };
+  const DECISION_AUTHORED = {
+    id: 'd1',
+    kind: 'decision' as const,
+    label: 'Build our own fleet or partner with third-party couriers',
+    label_authored: true,
+  };
+
+  /**
+   * PRECONDITION PIN (trap 13b). This gate is only meaningful if the producer
+   * actually delivers `label_authored` AT NODE LEVEL. If a refactor moved it
+   * back under `provenance`, or `NodeV3` stopped declaring it, every gate below
+   * would silently read `undefined` and the provisional framing would ship on
+   * every draft — with no red anywhere. This asserts the lift, in BOTH
+   * directions, so the discrimination itself is pinned rather than assumed.
+   */
+  it('PIN: the v3 producer lifts provenance.label_authored to node level', async () => {
+    const { projectGraphAndOptionsToV3 } = await import('../../../cee/transforms/schema-v3.js');
+    const decisionRecord = (authored: boolean) => ({
+      id: 'dec1',
+      kind: 'decision',
+      label: authored ? 'Build our own fleet or partner with couriers' : 'Decision',
+      provenance: {
+        provenance_class: 'projector_structural',
+        source_quote: 'structural',
+        ...(authored ? { label_authored: true } : {}),
+      },
+    });
+    const project = (authored: boolean) => {
+      const out = projectGraphAndOptionsToV3(
+        { nodes: [decisionRecord(authored)], edges: [] } as never,
+        {},
+      ) as { graph: { nodes: ReadonlyArray<Record<string, unknown>> } };
+      return out.graph.nodes.find((n) => n.kind === 'decision');
+    };
+
+    // Authored: the flag arrives at NODE level, and `provenance` has collapsed
+    // to the bare string enum — the exact shape this builder reads.
+    const authored = project(true);
+    expect(authored?.label_authored).toBe(true);
+    expect(typeof authored?.provenance).toBe('string');
+
+    // Contrast control: unauthored produces NO flag, so absence is a real
+    // signal and not merely a field this probe cannot see.
+    expect(project(false)?.label_authored).toBeUndefined();
+  });
+
+  it('reframes the opener when the projector could not author a decision label', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_UNAUTHORED,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+        FACTOR_QUALITY,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    // The false claim is gone...
+    expect(text).not.toContain("I've built a first decision model");
+    // ...and replaced by one that is true of what actually happened: a model
+    // exists, no decision could be pinned down, one was framed anyway.
+    expect(text).toContain("I couldn't pin down a single decision");
+    expect(text).toContain('provisional');
+    assertCleanCopy(text);
+  });
+
+  it('retitles the options block, and still shows the options', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_UNAUTHORED,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    // "compared" asserts a comparison of alternatives the user chose between.
+    expect(text).not.toContain('Options compared');
+    expect(text).toContain('Options on the canvas');
+    // ⚠ The options are NOT removed. They are on the user's canvas; pretending
+    // otherwise would be a second lie, not a fix for the first.
+    expect(text).toContain('Hire a tech lead');
+    expect(text).toContain('Hire two mid-weight developers');
+  });
+
+  /**
+   * ⭐ THE OVER-CORRECTION CONTROL. Without this, an "honest" fix that simply
+   * degrades EVERY draft to the hedged wording is indistinguishable from a
+   * correct one. A genuine decision must be completely untouched.
+   */
+  it('CONTROL: a genuinely authored decision keeps the existing wording', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_AUTHORED,
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+        FACTOR_QUALITY,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).toContain('Options compared');
+    expect(text).not.toContain("I couldn't pin down");
+    expect(text).not.toContain('Options on the canvas');
+    assertCleanCopy(text);
+  });
+
+  /**
+   * ⭐⭐ THE CONTROL THIS LANE ORIGINALLY LACKED, AND THE ONE THAT MATTERED.
+   *
+   * The first cut gated on `label_authored` ALONE. That is not the producer's
+   * signature for "could not derive a decision" — it is merely the absence of a
+   * RESPONSE-ONLY field, which a hand-built, user-edited or round-tripped graph
+   * will also lack while carrying a perfectly good decision. On such a graph the
+   * "honest" fix told the user *"I couldn't pin down a single decision in your
+   * brief"* about a decision node reading "Launch product?" — swapping one false
+   * claim for another.
+   *
+   * It was caught by an existing integration fixture, NOT by this file: the
+   * over-correction control below sets `label_authored: true` explicitly, so it
+   * was structurally incapable of observing this class. A control that pins only
+   * the shape you imagined is a guard agreeing with itself.
+   */
+  it('CONTROL: an unflagged decision with a REAL label is not hedged', () => {
+    const text = textOf({
+      graph: makeGraph([
+        // No `label_authored` — and a label the projector would never emit as a
+        // fallback. This is a genuine decision, so nothing may be hedged.
+        { id: 'd1', kind: 'decision', label: 'Launch product?' },
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).not.toContain("I couldn't pin down");
+    expect(text).toContain('Options compared');
+  });
+
+  /**
+   * DERIVED PIN AGAINST THE MIRROR (trap 12). `UNAUTHORED_DECISION_LABEL` is a
+   * copy of the producer's fallback literal. A copy that nothing checks is the
+   * hand-maintained mirror this estate keeps paying for — so ask the producer
+   * itself. If `deriveDecisionLabel` ever returns a different placeholder, this
+   * REDs instead of the gate silently never firing again.
+   */
+  it('PIN: the gate\'s placeholder matches what deriveDecisionLabel emits', async () => {
+    const { deriveDecisionLabel } = await import(
+      '../../../cee/draft/records/objective-label.js'
+    );
+    const declined = deriveDecisionLabel({
+      brief: 'Our burn rate is too high and the team is stretched thin.',
+      goalQuotes: [],
+    });
+    // Contrast control: a brief that DOES pose a choice must author a label,
+    // otherwise this pin would pass against a producer that authored nothing.
+    const authored = deriveDecisionLabel({
+      brief: 'We are deciding whether to build our own fleet or partner with third-party couriers.',
+      goalQuotes: [],
+    });
+    expect(authored.authored).toBe(true);
+
+    expect(declined.authored).toBe(false);
+    expect(declined.label).toBe('Decision');
+  });
+
+  /**
+   * ⭐⭐ THE KNOWN-DROPPED SET, PINNED AS AN EXACT SET OVER A NAMED CORPUS.
+   *
+   * This lane's gate reads the producer's "I declined to author" signature. It
+   * therefore cannot see a brief whose disclaimer or exploratory framing is
+   * itself run through the sentence-stripper into a confident label: those set
+   * `label_authored` AND carry a non-placeholder label, so they are
+   * indistinguishable here BY CONSTRUCTION. The honest fix is upstream, in
+   * `deriveDecisionLabel` (`objective-label.ts`), and is deliberately not
+   * attempted here.
+   *
+   * ⚠ WHY A SET AND NOT A CASE. The first version of this pin held ONE member
+   * (the negated disclaimer) and asserted it in prose. An independent 36-brief
+   * corpus then found a SECOND member the pin was structurally unable to see,
+   * because it arrives by a DIFFERENT MECHANISM: not a negation at all, but the
+   * ordinary exploratory frame `"figuring out "` (`objective-label.ts:158`,
+   * `DELIBERATION_FRAMES`). A pin shaped around "negated disclaimers" could
+   * never have caught it. So the pin is now a SET over a corpus, asserted in
+   * BOTH directions — it REDs if the set SHRINKS (the producer was fixed: delete
+   * the member, the builder starts catching it for free) and if it GROWS (the
+   * extraction gap widened). A gap recorded in the suite is honest; a gap
+   * invisible to it is how this shipped green in the first place.
+   *
+   * ⚠ SCOPE OF THE CLAIM. `OPEN_BRIEF_CORPUS` is this file's corpus, not the
+   * world: "exactly these" is exact OVER THIS CORPUS. Measured 29 Aug 2026 at
+   * the producer. The sibling frames `"working out "` / `"work out "` /
+   * `"considering "` in the same list produce the same shape (measured:
+   * `"We are working out where our margin actually goes each month."` ->
+   * `{ authored: true, label: "Where Margin Actually Goes Each Month" }`); they
+   * are recorded with the extraction row rather than asserted here, because
+   * whether a `considering `-framed brief poses a decision is a judgement this
+   * lane is not entitled to mint.
+   */
+  const OPEN_BRIEF_CORPUS: ReadonlyArray<{ readonly name: string; readonly brief: string }> = [
+    { name: 'negated-disclaimer', brief: 'We are not choosing between fixed options yet.' },
+    {
+      name: 'exploratory-figuring-out',
+      brief: 'We are figuring out what our customers actually value most about the service.',
+    },
+    { name: 'burn-rate', brief: 'Our burn rate is too high and the team is stretched thin.' },
+    { name: 'churn-symptom', brief: 'Churn has climbed for three quarters and nobody agrees on why.' },
+    { name: 'morale', brief: 'Morale in the support team has fallen and recruitment is slow.' },
+    {
+      name: 'no-shortlist',
+      brief: 'We have no shortlist yet; we just want to understand the market better.',
+    },
+  ];
+
+  /** The members of `OPEN_BRIEF_CORPUS` this builder CANNOT catch, and the exact
+   *  label each one authors. Both were established by an outside corpus, never
+   *  from this lane's head (trap 22). */
+  const KNOWN_DROPPED: ReadonlyArray<{ readonly name: string; readonly label: string }> = [
+    { name: 'negated-disclaimer', label: 'Choose Between Fixed Options Yet' },
+    {
+      name: 'exploratory-figuring-out',
+      label: 'What Customers Actually Value Most About the Service',
+    },
+  ];
+
+  it('KNOWN-DROPPED: exactly these open briefs still author a decision label', async () => {
+    const { deriveDecisionLabel } = await import(
+      '../../../cee/draft/records/objective-label.js'
+    );
+    const derived = OPEN_BRIEF_CORPUS.map((c) => ({
+      name: c.name,
+      ...deriveDecisionLabel({ brief: c.brief, goalQuotes: [] }),
+    }));
+
+    // POSITIVE CONTROL (trap 13). An "exactly these" assertion would also hold
+    // over a probe that authored NOTHING, or that authored EVERYTHING — so
+    // assert the corpus still exhibits both classes before believing the set.
+    expect(derived.some((d) => d.authored)).toBe(true);
+    expect(derived.some((d) => !d.authored)).toBe(true);
+
+    // (a) SHRINK direction — every pinned member is still dropped, with the
+    // exact label it authors.
+    for (const member of KNOWN_DROPPED) {
+      const observed = derived.find((d) => d.name === member.name);
+      expect(observed, `corpus member missing: ${member.name}`).toBeDefined();
+      expect(observed?.authored, `${member.name}: expected still-dropped`).toBe(true);
+      expect(observed?.label, `${member.name}: label drifted`).toBe(member.label);
+    }
+
+    // (b) GROW direction — and nothing ELSE in the corpus is dropped.
+    const droppedNow = derived.filter((d) => d.authored).map((d) => d.name).sort();
+    expect(droppedNow).toEqual(KNOWN_DROPPED.map((m) => m.name).sort());
+
+    // (c) The caught members are caught for the producer's actual reason — the
+    // placeholder literal this builder's gate reads — not incidentally.
+    for (const d of derived.filter((x) => !x.authored)) {
+      expect(d.label, `${d.name}: expected the placeholder`).toBe('Decision');
+    }
+  });
+
+  it('KNOWN-DROPPED: each dropped member still ships the un-hedged claim here', async () => {
+    const { deriveDecisionLabel } = await import(
+      '../../../cee/draft/records/objective-label.js'
+    );
+    const briefOf = (name: string): string => {
+      const entry = OPEN_BRIEF_CORPUS.find((c) => c.name === name);
+      if (entry === undefined) throw new Error(`no corpus member named ${name}`);
+      return entry.brief;
+    };
+
+    for (const member of KNOWN_DROPPED) {
+      const derived = deriveDecisionLabel({ brief: briefOf(member.name), goalQuotes: [] });
+      const text = textOf({
+        graph: makeGraph([
+          { id: 'd1', kind: 'decision', label: derived.label, label_authored: derived.authored },
+          OPTION_A,
+          OPTION_B,
+        ] as unknown as GraphV3T['nodes']),
+      });
+      expect(text.startsWith("I've built a first decision model"), member.name).toBe(true);
+      expect(text, member.name).not.toContain("I couldn't pin down");
+    }
+
+    // CONTRAST CONTROL: a CAUGHT member takes the hedged path through the very
+    // same assembly, so the loop above is observing the gap and not simply
+    // failing to reach the gate.
+    const caught = deriveDecisionLabel({ brief: briefOf('burn-rate'), goalQuotes: [] });
+    const caughtText = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: caught.label, label_authored: caught.authored },
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(caughtText).toContain("I couldn't pin down");
+  });
+
+  /**
+   * The gate is DECISION-NODE-SCOPED, not "absence of a flag". A graph with no
+   * decision node at all must not claim a decision was framed provisionally —
+   * nothing framed one. This also keeps every pre-existing fixture in this file
+   * (none of which carries a decision node) on its original wording.
+   */
+  it('CONTROL: a graph with no decision node is unaffected', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).not.toContain("I couldn't pin down");
+  });
+
+  /**
+   * ⭐ THE RESIDUAL COMPARISON CLAIM, FOUR LINES BELOW THE HEADING THIS PR
+   * CHANGED AWAY FROM `Options compared`.
+   *
+   * `Options compared` was changed because it asserts a comparison of
+   * alternatives the user chose between. The next-step nudge assembled
+   * immediately below it (`assembleSectionedNarrative` appends
+   * `input.nextStep` last) shipped, verbatim on the same provisional path:
+   *
+   *   "Next, run the analysis to see how the options compare ..."
+   *
+   * Weaker — forward-looking rather than past-tense — but the same message on
+   * the same path, and ungated. It is now selected by the SAME
+   * `provisionalDecision` signal, so the two cannot disagree.
+   */
+  it('the provisional path drops the comparison promise from the next step too', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_UNAUTHORED,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    // Precondition pinned IN-TEST (trap 13b): this fixture must actually be on
+    // the provisional path, or the assertion below passes for the wrong reason.
+    expect(text).toContain('Options on the canvas');
+
+    expect(text).not.toContain('the options compare');
+    expect(text).toContain(
+      'Next, run the analysis to see how the options on the canvas hold up and what could shift the outcome.',
+    );
+    assertCleanCopy(text);
+  });
+
+  /**
+   * ⭐ THE OVER-CORRECTION CONTROL FOR THE NUDGE. Without it, a change that
+   * simply retitled the nudge for EVERY draft would be indistinguishable from a
+   * gated one — and the historic reply corpus
+   * (`compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/`)
+   * records the old sentence on genuine decisions, where it is true.
+   */
+  it('CONTROL: a genuinely authored decision keeps the original next step', () => {
+    const text = textOf({
+      graph: makeGraph([
+        DECISION_AUTHORED,
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text).toContain('Options compared');
+    expect(text).toContain(
+      'Next, run the analysis to see how the options compare and what could shift the outcome.',
+    );
+  });
+
+  /**
+   * The selector is bound to the recovery KIND (`run`), not to a string
+   * predicate another branch could satisfy (trap 19). A non-ready readiness on
+   * the provisional path must keep its own recovery copy untouched.
+   *
+   * ⚠ RECORDED, NOT FIXED: the `blocked` and `review_model` branches carry the
+   * same presupposition in their own words ("before comparing the options",
+   * `readiness-recovery.ts`). They are outside this lane's scope and are rowed
+   * with the extraction gap.
+   */
+  it('CONTROL: the provisional signal only reaches the run nudge', async () => {
+    const { buildReadinessNextStep } = await import('../readiness-recovery.js');
+    const blocked = { status: 'blocked' as const };
+    expect(buildReadinessNextStep(blocked, [], { provisionalDecision: true })).toBe(
+      buildReadinessNextStep(blocked, [], { provisionalDecision: false }),
+    );
+    // Contrast control: the run branch DOES differ, so the equality above is a
+    // real scoping result and not a selector that never fires.
+    const ready = { status: 'ready' as const };
+    expect(buildReadinessNextStep(ready, [], { provisionalDecision: true })).not.toBe(
+      buildReadinessNextStep(ready, [], { provisionalDecision: false }),
+    );
+  });
+
+  /**
+   * ⭐ PIN FOR THE `label_authored !== true` CONJUNCT, WHICH WAS UNPINNED.
+   *
+   * An adversarial review dropped that conjunct from `hasProvisionalDecision`
+   * and 164/164 stayed GREEN. It then DEMONSTRATED — not asserted — that the
+   * mutant is equivalent on today's producer (48 inputs; contrast control saw
+   * 13 authored labels and 0 carrying `label === "Decision"`), so there is no
+   * live defect. But the docstring above calls that conjunct load-bearing and
+   * NOTHING would RED if the producer ever authored the literal "Decision", or
+   * if another writer set the flag on a placeholder label. A guard that cannot
+   * fail is not a guard.
+   *
+   * This fixture is the exact shape the two conjuncts disagree about — the
+   * placeholder label WITH the authored flag — so only the flag can decide it.
+   * Its discriminating twin is the "unflagged decision with a REAL label"
+   * control above, which the OTHER conjunct decides.
+   */
+  it('PIN: an authored decision is not hedged even when its label reads "Decision"', () => {
+    const text = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: 'Decision', label_authored: true },
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).not.toContain("I couldn't pin down");
+    expect(text).toContain('Options compared');
+  });
+});
