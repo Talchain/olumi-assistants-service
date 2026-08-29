@@ -344,11 +344,14 @@ describe('#1187 generic-label window — the RESOLVER\'s own contract', () => {
    * promises it "returns `null` unless the message resolves to precisely that
    * id set". Today it has exactly ONE product caller
    * (`structural-pair-evidence.ts`), and that caller re-checks `refs.length !==
-   * 2` itself — so a mutant deleting the resolver's OWN length check survives
-   * every test that reaches it through the caller (measured: 88/88 green).
+   * 2` itself — so a mutant deleting the resolver's OWN length check SURVIVED
+   * every test that reaches it through the caller: measured 88/88 green across
+   * all four specs touched by this PR, before the three cases below existed.
    *
-   * That is caller-level equivalence, not a correct function. These bind the
-   * resolver directly, so the promise stays true for the second caller.
+   * That is caller-level equivalence, not a correct function, and an equivalent
+   * mutant must be demonstrated rather than asserted. These three bind the
+   * resolver directly, so the promise stays true for the second caller — with
+   * the mutant now biting them instead of surviving.
    */
   function resolverFor(currentGraph: ContextPackGraph) {
     const display = formatGraphForContext(currentGraph);
