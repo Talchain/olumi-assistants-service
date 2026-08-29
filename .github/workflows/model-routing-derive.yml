@@ -1,0 +1,120 @@
+name: Derive Model Routing (on demand)
+
+# WHICH MODEL ACTUALLY SERVES EACH ROLE — DERIVED FROM THE DEPLOYED SERVICE.
+#
+# `GET /admin/models/routing` calls `resolveModelRoutingSnapshot()`
+# (src/routes/admin.models.ts). It COMPUTES rather than echoes: the resolution
+# precedence is per_call → store_model_config → `CEE_MODEL_*` env → checked-in
+# `TASK_MODEL_DEFAULTS`. The deployed service already knows its own Render env,
+# so this needs NO `RENDER_API_KEY` and no local derivation script — it asks the
+# running service what it resolved, which is the only authority.
+#
+# Every row carries a `source` field naming WHICH rank won. Read it: a row whose
+# source is the checked-in default is rank 4 and is NOT evidence that the env
+# sets it. Never quote `TASK_MODEL_DEFAULTS` as "the live map".
+#
+# `workflow_dispatch` ONLY, deliberately. This is an on-demand derivation, not a
+# watch: no schedule, nothing to go silently stale.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-routing-derive
+  cancel-in-progress: true
+
+jobs:
+  derive:
+    name: Resolved model map from the deployed service
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GET /admin/models/routing and print the resolved map
+        env:
+          CEE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
+          ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
+        # `shell: bash` + an explicit `set -euo pipefail`: a probe whose failure
+        # exits 0 is the guarantee-theatre this repo keeps paying for.
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x   # never echo the request line; the key rides a header
+
+          case "$CEE_BASE_URL" in
+            *cee-production*) echo "REFUSING: production host"; exit 1 ;;
+          esac
+
+          if [ -z "${ADMIN_API_KEY:-}" ]; then
+            echo "FAIL: STAGING_ADMIN_API_KEY is not set — a missing credential must never read as an empty map"
+            exit 1
+          fi
+
+          # Body to a file, status to a variable. The key is passed via -H from
+          # the env and never appears in the log or in any error path.
+          status=$(curl -sS -o body.json -w '%{http_code}' \
+            --max-time 45 \
+            -H "x-admin-key: ${ADMIN_API_KEY}" \
+            -H 'Accept: application/json' \
+            "${CEE_BASE_URL%/}/admin/models/routing" || echo "000")
+
+          echo "HTTP ${status}"
+          if [ "$status" != "200" ]; then
+            echo "FAIL: expected 200, got ${status} — a 401 or a 000 must fail the job, never print an empty map."
+            echo "--- body (first 400 chars, no credential is echoed) ---"
+            head -c 400 body.json || true
+            exit 1
+          fi
+
+          if ! jq -e . body.json >/dev/null 2>&1; then
+            echo "FAIL: 200 but the body is not valid JSON"
+            head -c 400 body.json || true
+            exit 1
+          fi
+
+          count=$(jq -r '(.tasks // []) | length' body.json)
+          provider=$(jq -r '.default_provider // ""' body.json)
+
+          # FLOOR, derived not guessed: the snapshot reports
+          # keys(TASK_MODEL_DEFAULTS) ∪ EXECUTABLE_RUNTIME_TASKS, and
+          # TASK_MODEL_DEFAULTS alone held 17 keys at 2026-08-29. A floor of 10
+          # sits well below that and well above zero, so an empty-but-200 or a
+          # truncated body fails loud instead of reading as "no models".
+          if [ "$count" -lt 10 ]; then
+            echo "FAIL: only ${count} task rows — an empty or truncated 200 must not read as a pass"
+            exit 1
+          fi
+          if [ -z "$provider" ]; then
+            echo "FAIL: default_provider is empty"
+            exit 1
+          fi
+
+          # Every row must actually name a model.
+          if jq -e '[.tasks[] | select((.model // "") == "")] | length > 0' body.json >/dev/null; then
+            echo "FAIL: at least one task row carries no model"
+            jq -r '.tasks[] | select((.model // "") == "") | .task' body.json
+            exit 1
+          fi
+
+          echo "OK: ${count} task rows, default_provider=${provider}"
+
+          {
+            echo "## Resolved model routing — \`${CEE_BASE_URL}\`"
+            echo
+            echo "\`default_provider\`: \`${provider}\` · rows: **${count}** · derived $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "\`source\` names which precedence rank won (per_call → store_model_config → CEE_MODEL_* env → checked-in default)."
+            echo
+            echo '| task | model | provider | source | runtime |'
+            echo '|---|---|---|---|---|'
+            jq -r '.tasks[] | "| \(.task) | \(.model) | \(.provider) | \(.source) | \(.runtime_availability) |"' body.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-routing-snapshot
+          path: body.json
