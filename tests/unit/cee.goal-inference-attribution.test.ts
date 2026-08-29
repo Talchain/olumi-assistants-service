@@ -193,15 +193,89 @@ describe("a CEE-minted goal must not be attributed to the user", () => {
     expect(line).toBe(CONFIRM_FROM_BRIEF);
   });
 
-  it("TWIN: a goal the user authored IS still quoted back to them", () => {
-    const stated = "Reach profitability without raising headcount";
-    const line = openingLine([
-      { id: "goal_stated", kind: "goal", label: stated },
-      { id: "opt_1", kind: "option", label: "Ship it" },
-    ]);
+  /**
+   * ⭐⭐ THE TWIN, REBUILT AGAINST THE REAL PROJECTOR — AND THE REASON IT HAD TO
+   * BE.
+   *
+   * The version that stood here passed a SYNTHETIC node carrying no
+   * `label_authored` and no `provenance`. The projector never emits that shape:
+   * `deriveGoalObjectiveLabel` Title-Cases the label of a goal that IS the
+   * user's, so `label_authored: true` rides EVERY goal on a real draft. The
+   * twin therefore certified a gate that, on the wire, fired 0 times out of 6
+   * live draws — including on `"Cut Churn Below 3% a Month"`, provenance
+   * `from_brief`, where the quotation was true and useful.
+   *
+   * A fixture outside the producer's output domain is not evidence about the
+   * wire (trap 16-inverse). Both directions below are now DRIVEN THROUGH
+   * `projectGraphAndOptionsToV3`, so the node shape under test is one the
+   * producer actually mints.
+   */
+  describe("the quotation gate, bound to REAL projector output", () => {
+    const projectGoal = async (provenance: Record<string, unknown>, label: string) => {
+      const { projectGraphAndOptionsToV3 } = await import(
+        "../../src/cee/transforms/schema-v3.js"
+      );
+      const out = projectGraphAndOptionsToV3(
+        {
+          nodes: [
+            { id: "goal_1", kind: "goal", label, provenance },
+            { id: "opt_1", kind: "option", label: "Ship it" },
+          ],
+          edges: [],
+        } as never,
+        {},
+      ) as { graph: { nodes: ReadonlyArray<Record<string, unknown>> } };
+      return out.graph.nodes.find((n) => n.kind === "goal") as Record<string, unknown>;
+    };
 
-    const match = CONFIRM_QUOTED.exec(line);
-    expect(match, `a user-authored goal must still be quoted — got: ${line}`).not.toBeNull();
-    expect(match?.[1]).toBe(stated);
+    /** What the producer stamps on a goal genuinely taken from the brief. */
+    const STATED = {
+      provenance_class: "stated",
+      brief_binding: "verified",
+      source_quote: "cut churn below 3% a month",
+      // ⭐ THE FIELD THAT BROKE THE OLD GATE. A stated objective still gets a
+      // Title-Cased label, so this is TRUE on the very goals we must quote.
+      label_authored: true,
+    };
+    /** What `ensureGoalNode` stamps on a goal CEE invented (MINTED_GOAL_PROVENANCE). */
+    const MINTED = {
+      provenance_class: "projector_structural",
+      source: "synthetic",
+      quote: "Goal minted by CEE: the drafted model carried no goal node",
+      label_authored: true,
+    };
+
+    it("PRECONDITION: the projector emits from_brief and ai_inferred, and label_authored rides BOTH", async () => {
+      // Trap 13b. Without this the pair below could pass over two nodes that
+      // differ in nothing the gate reads, or over a projector that stopped
+      // stamping provenance at all.
+      const stated = await projectGoal(STATED, "Cut Churn Below 3% a Month");
+      const minted = await projectGoal(MINTED, "Achieve the best outcome for this decision");
+
+      expect(stated.provenance).toBe("from_brief");
+      expect(minted.provenance).toBe("ai_inferred");
+      // ⭐ THE WHOLE POINT: authorship does NOT discriminate here. Both carry
+      // it, so a gate keyed on `label_authored` cannot tell these two apart —
+      // which is precisely how the quotation went dark on all six live draws.
+      expect(stated.label_authored).toBe(true);
+      expect(minted.label_authored).toBe(true);
+    });
+
+    it("a from_brief goal IS quoted, Title-Cased label and all", async () => {
+      const goal = await projectGoal(STATED, "Cut Churn Below 3% a Month");
+      const line = openingLine([goal, { id: "opt_1", kind: "option", label: "Ship it" }]);
+      const match = CONFIRM_QUOTED.exec(line);
+      expect(match, `a from_brief goal must be quoted — got: ${line}`).not.toBeNull();
+      expect(match?.[1]).toBe("Cut Churn Below 3% a Month");
+    });
+
+    it("an ai_inferred goal is NOT quoted", async () => {
+      const goal = await projectGoal(MINTED, "Achieve the best outcome for this decision");
+      const line = openingLine([goal, { id: "opt_1", kind: "option", label: "Ship it" }]);
+      expect(line, `an invented goal must not be quoted — got: ${line}`).not.toMatch(
+        CONFIRM_QUOTED,
+      );
+      expect(line).toBe(CONFIRM_FROM_BRIEF);
+    });
   });
 });

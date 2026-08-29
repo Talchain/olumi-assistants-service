@@ -346,6 +346,18 @@ interface NodeLite {
    * string and yield `undefined` on every draft.
    */
   readonly label_authored?: boolean;
+  /**
+   * The projected node-level provenance verdict — `"from_brief"` when the
+   * producer's typed record said `provenance_class: "stated"` with
+   * `brief_binding: "verified"`, `"ai_inferred"` otherwise
+   * (`transforms/schema-v3.ts:1170-1173`).
+   *
+   * ⚠ A STRING HERE, NOT AN OBJECT. `NodeV3.provenance` is a bare string enum;
+   * the structured record the producer minted is flattened by
+   * `projectNodeProvenance`, which lifts `label_authored` and `source_quote`
+   * to node level and collapses the rest to this verdict.
+   */
+  readonly provenance?: string;
   readonly observed_state?: {
     readonly uncertainty_drivers?: readonly string[];
   };
@@ -608,7 +620,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const confirmSentence = buildConfirmSentence(
     goalLabel,
     provisionalDecision,
-    hasAuthoredGoalLabel(nodes),
+    goalCameFromBrief(nodes),
   );
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
@@ -905,7 +917,7 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
 function buildConfirmSentence(
   goalLabel: string | null,
   provisionalDecision = false,
-  goalLabelAuthored = false,
+  goalFromBrief = false,
 ): string {
   // ── THE OPEN-BRIEF OPENER ──────────────────────────────────────────────────
   // Every clause below is a claim about something this builder can see:
@@ -959,7 +971,7 @@ function buildConfirmSentence(
   // one, so copy implying the decision could be dropped would be a second lie.
   // The sentence says a decision WAS framed, and marks it provisional.
   const trimmedGoal = goalLabel?.trim() ?? '';
-  // ⛔ AUTHORSHIP GATES THE QUOTATION, AND IT IS CHECKED FIRST.
+  // ⛔ PROVENANCE GATES THE QUOTATION, AND IT IS CHECKED FIRST.
   //
   // Every branch below that renders `for "<goal>"` makes the promise this
   // function's header states: quotation marks tell the user THESE ARE YOUR
@@ -984,9 +996,50 @@ function buildConfirmSentence(
   //
   // ⚠ FAIL-SAFE DIRECTION. Withholding a quotation costs a little warmth;
   // inventing one costs the user's trust in every other attribution on screen.
+  //
+  // ⚠⚠ THIS CONJUNCT WAS `!goalLabelAuthored` FOR ONE DEPLOY, AND IT WAS TOO
+  // WIDE. `deriveGoalObjectiveLabel` Title-Cases the label of a goal that IS
+  // the user's, so `label_authored: true` rides EVERY goal on a real draft.
+  // Measured on six live draws from deployed staging: the quotation fired
+  // 0 times out of 6, including where it was true and useful —
+  //
+  //   goal "Cut Churn Below 3% a Month", provenance from_brief
+  //     -> "I've built a first decision model from your brief."  (not quoted)
+  //
+  // Nothing dishonest shipped; the fallback is true and still credits the
+  // brief. But a piece of copy doing real attribution work had been retired,
+  // which is the opposite-direction harm (trap 22b). The PR's own twin test
+  // asserted "a user-authored goal IS still quoted" against a SYNTHETIC node
+  // carrying no `label_authored` — a shape the projector never emits — so it
+  // proved nothing about the wire. Every guard below is now bound to REAL
+  // projector output.
+  //
+  // ⭐ THE TWO SIGNALS ANSWER DIFFERENT QUESTIONS, AND THE PRODUCER SAYS SO.
+  // `label_authored` answers "did we write these characters?"; `provenance`
+  // answers "did this come from the brief?". `projectNodeProvenance` decides
+  // the verdict from `provenance_class`/`brief_binding` and RETURNS BEFORE the
+  // label-bound matching (`schema-v3.ts:1179-1181`, its own comment: "authoring
+  // a goal's label cannot move its provenance verdict"), so the two are
+  // independent by construction — which is exactly why one can be a Title-Cased
+  // label of a genuinely stated objective. Quotation is a question about
+  // ATTRIBUTION, so it takes the attribution signal.
+  //
+  // ⭐ THE DEFECT #1202 KILLED STAYS DEAD, derived not assumed: the minted goal
+  // carries `MINTED_GOAL_PROVENANCE` = `scaffoldingProvenance(...)` =
+  // `provenance_class: "projector_structural"` (`goal-inference.ts:47`,
+  // `projector.ts:141`), which is not `"stated"`, so the projector stamps it
+  // `ai_inferred` and "Achieve the best outcome for this decision" is still
+  // never quoted.
+  //
+  // ⚠ A KNOWN BOUNDARY CASE, DECIDED RATHER THAN PAPERED OVER. One live draw
+  // ("Get Median First-Response Time Under Two Hours by Q3") came back
+  // `ai_inferred` despite being a stated objective, so the provenance stamp is
+  // itself imperfect and this gate leaves it unquoted. That is the fail-safe
+  // direction and it is the point: UNDER-crediting the user is recoverable,
+  // OVER-crediting them is the lie.
   const hasWholeQuotation =
     trimmedGoal.length > 0 &&
-    !goalLabelAuthored &&
+    goalFromBrief &&
     elideLabelAtWordBoundary(trimmedGoal, MAX_GOAL_CHARS) === trimmedGoal;
 
   if (provisionalDecision) {
@@ -1616,8 +1669,15 @@ function findGoalLabel(nodes: readonly NodeLite[]): string | null {
 }
 
 /**
- * TRUE when the goal on this graph carries a label CEE authored rather than the
- * user's own words — so the opener must not put it in quotation marks.
+ * TRUE when the goal on this graph came from the user's brief — the only
+ * condition under which the opener may put it in quotation marks.
+ *
+ * ⚠ THE VERDICT IS THE PRODUCER'S, NOT OURS. `projectNodeProvenance` sets
+ * `from_brief` only for a typed record with `provenance_class: "stated"` AND
+ * `brief_binding: "verified"` (`schema-v3.ts:1170-1173`); everything else,
+ * including the CEE-minted placeholder goal, becomes `ai_inferred`. Reading the
+ * verdict rather than re-deriving it here keeps one authority for "may we
+ * attribute this" (trap 12).
  *
  * ⛔ WHY THIS IS SEPARATE FROM {@link findGoalLabel}. That function answers
  * "what is the goal called", which the opener needs either way. This answers
@@ -1632,17 +1692,15 @@ function findGoalLabel(nodes: readonly NodeLite[]): string | null {
  * (standing brief §3: bind by identity), and would misreport the moment a graph
  * carries two goals.
  *
- * `label_authored` is set by `projectNodeProvenance` (`schema-v3.ts:1183`) from
- * the typed record the producer minted — `MINTED_GOAL_PROVENANCE` for a goal
- * CEE chose (`structure/goal-inference.ts`), and the projector's own authored
- * objective labels. A goal carrying the user's words has no such record and
- * reads `undefined` here, which is the fail-safe direction: quotation is
- * withheld only on an explicit authored claim.
+ * ⚠ AN ABSENT OR UNRECOGNISED VERDICT READS FALSE, which is the fail-safe
+ * direction: quotation is granted only on an explicit `from_brief` stamp, never
+ * by default. A hand-built or round-tripped graph carrying no provenance is
+ * therefore not quoted — it is also not misattributed.
  */
-function hasAuthoredGoalLabel(nodes: readonly NodeLite[]): boolean {
+function goalCameFromBrief(nodes: readonly NodeLite[]): boolean {
   for (const n of nodes) {
     if (n.kind === 'goal' && typeof n.label === 'string' && n.label.trim().length > 0) {
-      return n.label_authored === true;
+      return n.provenance === 'from_brief';
     }
   }
   return false;

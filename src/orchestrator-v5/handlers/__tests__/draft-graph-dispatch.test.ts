@@ -260,7 +260,7 @@ describe('dispatchDraftGraph', () => {
       const graph = {
         nodes: [
           { id: 'n1', kind: 'decision', label: 'Launch?' },
-          { id: 'n2', kind: 'goal', label: 'Revenue' },
+          { id: 'n2', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
           { id: 'n3', kind: 'factor', label: 'Market size' },
         ],
         edges: [
@@ -287,7 +287,7 @@ describe('dispatchDraftGraph', () => {
       const graph = {
         nodes: [
           { id: 'n1', kind: 'decision', label: 'A' },
-          { id: 'n2', kind: 'goal', label: 'B' },
+          { id: 'n2', kind: 'goal', provenance: 'from_brief', label: 'B' },
         ],
         edges: [{ from: 'n1', to: 'n2' }],
       };
@@ -317,7 +317,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative names the goal and summarises options and factors when all present', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Maximise revenue' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Maximise revenue' },
           { id: 'o1', kind: 'option', label: 'Launch now' },
           { id: 'o2', kind: 'option', label: 'Delay' },
           { id: 'f1', kind: 'factor', label: 'Market size' },
@@ -355,7 +355,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative omits any risk wording when riskCount is 0', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Improve uptime' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Improve uptime' },
           { id: 'o1', kind: 'option', label: 'Migrate' },
           { id: 'f1', kind: 'factor', label: 'Latency' },
         ],
@@ -422,7 +422,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative is shipped even when handler narration is graph-shaped', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Win Q3' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Win Q3' },
           { id: 'o1', kind: 'option', label: 'Plan A' },
           { id: 'f1', kind: 'factor', label: 'Budget' },
         ],
@@ -955,7 +955,7 @@ describe('B1 egress: OlumiResponseSchema.parse', () => {
       draft_graph: {
         nodes: [
           { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
-          { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+          { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
         ],
         edges: [
           { from: 'dec_launch', to: 'goal_revenue', strength: 0.8 },
@@ -1217,7 +1217,7 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
   it('does not let an accepted Run summary bypass typed non-ready status on the dispatch boundary', async () => {
     const graph = {
       nodes: [
-        { id: 'goal_arr', kind: 'goal', label: 'Improve annual recurring revenue' },
+        { id: 'goal_arr', kind: 'goal', provenance: 'from_brief', label: 'Improve annual recurring revenue' },
         { id: 'opt_phased', kind: 'option', label: 'Phased price rise' },
         { id: 'fac_price', kind: 'factor', label: 'Monthly Subscription Price' },
       ],
@@ -1642,7 +1642,7 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
     return {
       nodes: [
         { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
-        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
         { ...node, kind: node.kind ?? 'risk' },
       ],
       edges: [{ from: 'dec_launch', to: 'goal_revenue' }],

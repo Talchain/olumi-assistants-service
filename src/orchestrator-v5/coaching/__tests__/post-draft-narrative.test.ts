@@ -88,9 +88,19 @@ function buildReadyNarrative(
   });
 }
 
+/**
+ * ⚠ `provenance: 'from_brief'` IS NOT DECORATION — it is what the producer
+ * stamps on a goal genuinely taken from the user's brief, and it is what the
+ * opener's quotation gate reads. A goal fixture without it is a shape the
+ * projector never emits (it always stamps a verdict), and a suite built on
+ * such fixtures certified a gate that fired 0 times out of 6 on the wire.
+ * See `tests/unit/cee.goal-inference-attribution.test.ts` for both directions
+ * driven through the real projector.
+ */
 const GOAL_NODE = {
   id: 'g1',
   kind: 'goal' as const,
+  provenance: 'from_brief' as const,
   label: 'Deliver Successful Launch Within Three Months at Acceptable Quality',
 };
 
@@ -372,7 +382,7 @@ describe('buildPostDraftNarrative', () => {
     const unreachableFactorId = 'fac_unreachable_budget';
     const producerGraph = {
       nodes: [
-        { id: 'goal_real', kind: 'goal', label: 'Improve delivery confidence' },
+        { id: 'goal_real', kind: 'goal', provenance: 'from_brief', label: 'Improve delivery confidence' },
         { id: optionId, kind: 'option', label: 'Strengthen the current team' },
         { id: reachableFactorId, kind: 'factor', label: 'Delivery capacity', category: 'controllable' },
         { id: unreachableFactorId, kind: 'factor', label: 'Budget flexibility', category: 'controllable' },
@@ -2562,7 +2572,7 @@ describe('the provisional opener claims only what the product did', () => {
     const text = textOf({
       graph: makeGraph([
         { id: 'd1', kind: 'decision', label: 'Decision' },
-        { id: 'g1', kind: 'goal', label: 'Cut delivery cost per parcel' },
+        { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Cut delivery cost per parcel' },
         OPTION_A,
         OPTION_B,
       ] as unknown as GraphV3T['nodes']),
@@ -2703,7 +2713,7 @@ describe('every draft says the model is one of several the system could build', 
   it('the note does not displace coaching on a content-heavy draft', () => {
     const result = buildReadyNarrative({
       graph: makeGraph([
-        { id: 'g1', kind: 'goal', label: 'Reduce cost to serve per enterprise account' },
+        { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Reduce cost to serve per enterprise account' },
         { id: 'o1', kind: 'option', label: 'Consolidate onto a single support platform' },
         { id: 'o2', kind: 'option', label: 'Move tier-one triage to a partner' },
         { id: 'o3', kind: 'option', label: 'Automate the top twenty ticket types' },
