@@ -168,15 +168,91 @@ const HISTORIC_V6_INSTRUCTION_BYTES = 6021;
  * are not. Every draft served between 2026-08-14's grammar widening and this one
  * received those bytes.
  */
-const PREREGISTERED_V7_INSTRUCTION_SHA256 =
+const HISTORIC_V7_INSTRUCTION_SHA256 =
   "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8";
-const PREREGISTERED_V7_INSTRUCTION_BYTES = 6748;
+const HISTORIC_V7_INSTRUCTION_BYTES = 6748;
+
+/**
+ * ⭐ v8 — 2026-08-29. What a `goal` IS, replacing the four words that were all
+ * the served bytes ever said about it.
+ *
+ * v7 and every version before it defined the goal as "an objective the user
+ * stated" — four words, no discriminator, and no instruction for the case where
+ * the user states no objective at all. MEASURED at the deployed staging draft
+ * endpoint on 2026-08-29 across a 13-brief corpus, served prompt `draft_graph`
+ * v195 (`152998b447819c2e`) plus exactly these v7 bytes:
+ *
+ *   · 6 of 6 briefs that STATE an outcome produced the right goal. That half
+ *     works and is what the preservation clause exists to protect.
+ *   · 0 of 7 briefs that DO NOT state an outcome produced a goal that is one.
+ *     The model quoted, variously, an action the board wants to take, a REASON
+ *     ("two of our largest customers have operations there and have asked"), a
+ *     symptom, a process wish, and a 147-character sub-question.
+ *
+ * Why it is worth an instruction change rather than a validator: everything in
+ * the graph points AT the goal, so when the goal is one of the options the
+ * causal structure is built to justify that option, and the analysis then scores
+ * the alternatives against a target that already assumes one of them. On
+ * `D1_plant_closure` the model filed ONE span — "The board wants to close our
+ * Carlisle plant." — as both the `goal` and an `option`, byte-identical
+ * `source_quote` on both records.
+ *
+ * The three rules added are stated as a DEFINITION plus a structural test, never
+ * as a phrase list: a goal is the result wanted rather than the move weighed;
+ * every option including the status quo must be a candidate route TO it; and —
+ * the opposite-direction half — a stated objective is quoted as the user wrote
+ * it even when unquantified, modest or awkward. That last clause is what stops
+ * the fix substituting our judgement for theirs, which is the worse harm.
+ *
+ * ⚠⚠ STATUS AT PINNING: **UNMEASURED AGAINST A LIVE DRAW, AND THE PROXY THAT WAS
+ * TRIED FAILED ITS OWN POSITIVE CONTROL.** Said in full because this comment is
+ * what a future session finds first, and a hedged version would read as evidence.
+ *
+ * What was tried: both arms composed from the same two system blocks
+ * `anthropic.ts:516-517` composes, the control arm asserted BYTE-IDENTICAL to v7
+ * (`37f271b2…` / 6,748) — but drawn by an independent model instance rather than
+ * by `claude-sonnet-5` under the structured-outputs grammar. THE CONTROL ARM DID
+ * NOT REPRODUCE DEPLOYED BEHAVIOUR: on the 7 briefs that state no outcome it
+ * emitted NO goal record at all (6 of 13 overall), where deployed staging emits a
+ * goal on 12 of 13. Absolute rates from that instrument are therefore worth
+ * nothing, and none is claimed here.
+ *
+ * What the instrument CAN support, because both arms carry the same bias, is the
+ * WITHIN-INSTRUMENT delta: no-goal 6 → 0; all 6 stated-outcome briefs preserved
+ * (4 byte-identical quotes, 2 longer spans of the same statement, 0 substituted);
+ * and on the 7 unstated-outcome briefs the goal moved from nothing to a
+ * decision-relevant quantity in 6 cases. That is directional support, NOT a
+ * measurement of the fix.
+ *
+ * The sanctioned live path is `tools/draft-quality-eval --live --candidate`,
+ * which needs `ANTHROPIC_API_KEY`. The lane that wrote these bytes did not hold
+ * one. The BEFORE arm above IS deployed truth and stands on its own; the AFTER
+ * arm does not exist yet.
+ *
+ * ⚠ v7 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Every draft served
+ * between the 2026-08-14 `is_baseline` widening and this one received those
+ * bytes, and the 13-brief BEFORE measurement is attributable to exactly them.
+ */
+const PREREGISTERED_V8_INSTRUCTION_SHA256 =
+  "acd9148eb107ea85d839fd1198a4eff9659b3ab81b36ef2255d5c029837a0b4d";
+const PREREGISTERED_V8_INSTRUCTION_BYTES = 8265;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v7 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V7_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v8 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V8_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V7_INSTRUCTION_BYTES,
+      PREREGISTERED_V8_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v7 bytes, so the 13-brief BEFORE arm stays attributable", () => {
+    // The BEFORE half of this change's own evidence was served exactly v7. If a
+    // later edit ever lands back on those bytes, that measurement would silently
+    // become a measurement of the CURRENT artefact, which is the one thing it is
+    // not. Asserting distinctness is also what makes an accidental revert loud.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V7_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V7_INSTRUCTION_BYTES,
     );
   });
 
@@ -254,10 +330,23 @@ describe("the draft records instruction is the measured artefact", () => {
     // to connect two records. The connect half is byte-identical to v6, and that
     // asymmetry is the point of pinning the halves apart — this edit is legible
     // as a shape-only change without reading the diff.
+    //
+    // ⚠⚠ AND AGAIN IN v8 — the THIRD consecutive version to touch it, and the
+    // largest single move it has ever made (3,100 → 4,617 bytes). The whole of
+    // v8 is shape-half: what a `goal` IS is a statement about which span goes in
+    // a field, not about how two records connect. The connect half is
+    // byte-identical to v6/v7 (`44c96633…` / 3,648, asserted below), so this
+    // edit is legible as shape-only without reading the diff — which is the
+    // entire reason the halves are pinned apart.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "03974285d14572f39df7a7758ce553de956798c48a5a88376346ec12a203fe04",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(4617);
+    // HISTORIC — v7's shape half. Asserted DISTINCT: it is the artefact the
+    // 13-brief BEFORE arm was served, and it must stay separable from this one.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "8964de6b75f45814bdbf0af7f8439e27a7a6ed75022368cca927d9105c225a4d",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(3100);
     // HISTORIC — v6's shape half. Asserted DISTINCT so v6's runs stay attributable.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "575509cbc8570c1bd4fb8d31f9ce8b83f3d5508f28f37a5f11417a1f6dd30a3e",
@@ -320,6 +409,57 @@ describe("the draft records instruction is the measured artefact", () => {
     );
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
       "goal is never one of your `claims`, so `to_claim` cannot reach it",
+    );
+  });
+
+  /**
+   * ⭐⭐ THE v8 RULES, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
+   *
+   * A hash pin cannot tell "someone deleted the preservation clause" from
+   * "someone fixed a typo", and here that distinction is the whole safety
+   * argument. This guards TWO OPPOSITE HARMS, and they are asserted separately
+   * on purpose, because a fix for either one alone reopens the other:
+   *
+   *   (a) THE GOAL IS AN OPTION. The frame is pre-committed and every causal
+   *       chain is built to justify a move the user has not finished making.
+   *   (b) A STATED OBJECTIVE IS DISCARDED and a better-formed one substituted.
+   *       That is the WORSE harm — it silently replaces the user's judgement
+   *       with ours — and 6 of 6 briefs that state an outcome already get it
+   *       right today, so it is a live regression risk, not a hypothetical.
+   *
+   * Deleting either group must go red BY NAME, not as an unexplained hash drift.
+   */
+  it("keeps the v8 rule that a goal is the result wanted, not the move weighed", () => {
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "the result the user wants, not the move they are weighing to get",
+    );
+    // The structural test, which is what makes this a rule about the GRAPH
+    // rather than a rule about wording. Without it the definition is a slogan.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "has to be a candidate route TO the goal",
+    );
+    // Derived from a live observation, not invented: on the 2026-08-29 corpus
+    // the model filed ONE span as both records, byte-identical `source_quote`.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "Never file one span as both a `goal` and an `option`",
+    );
+    // The constructive half. Without it the model is told what a goal is NOT and
+    // given nothing to do on the 7-of-13 briefs that never state one — and the
+    // measured failure mode is precisely falling back to the sentence that
+    // frames the choice.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "that sentence is the decision, not its purpose",
+    );
+  });
+
+  it("keeps the v8 clause that protects a stated objective from being improved", () => {
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "When the user HAS said what they are trying to achieve, that is the goal.",
+    );
+    // The three adjectives are the load-bearing part: they are the cases where
+    // substituting a sharper objective is most tempting and most wrong.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "even if it is unquantified, modest or awkwardly worded",
     );
   });
 });

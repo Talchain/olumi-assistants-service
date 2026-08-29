@@ -137,7 +137,28 @@ Do not emit a graph. Emit two lists instead.
 **stated_items** — one entry for each thing the user actually said that bears on
 the decision. \`source_quote\` is REQUIRED and must be copied VERBATIM from the
 brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
-- \`goal\` — an objective the user stated
+- \`goal\` — the result the user wants, not the move they are weighing to get
+  there. Quote the span naming what is at stake: the quantity, position or state
+  that will tell them the decision went well. A course of action is an
+  \`option\`, however settled the user sounds about it and however early the brief
+  puts it. Never file one span as both a \`goal\` and an \`option\`: if the words
+  name something the user might DO, they are the option, and the goal is
+  elsewhere.
+  Check your pick against the alternatives. Every option, including carrying on
+  as they are, has to be a candidate route TO the goal. If the goal you chose is
+  one of those alternatives, or takes one of them as given, the others cannot be
+  weighed against it and the whole model is built to justify a move the user has
+  not finished making.
+  Most briefs never state an objective outright — they open with a decision
+  already taken, a symptom, or a question. Do not fall back to the sentence that
+  frames the choice: that sentence is the decision, not its purpose. Quote
+  instead the span naming what the options are trying to move — the measure that
+  is going wrong, the position under threat, the quantity everyone is arguing
+  about. Set \`role\` to \`baseline\` when that span gives where they are now
+  rather than where they want to be.
+  When the user HAS said what they are trying to achieve, that is the goal.
+  Quote it, even if it is unquantified, modest or awkwardly worded, and even if
+  you can see a sharper objective behind it. Theirs is the one that counts.
 - \`option\` — a course of action the user named
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
