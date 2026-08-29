@@ -286,14 +286,33 @@ describe('TWINS — a model that genuinely should be refused is still refused', 
     expect(verdict.blocked).toBe(true);
   });
 
-  it('an OVER-FRAME level outside the unit interval is still refused', () => {
-    // `{value: 5, raw_value: 500000}` recovers a frame (the owner allows a
-    // level above 1 — an over-frame edit is honest), but 5 is NOT a unit-interval
-    // representation, so it cannot serve as `unitIntervalEquivalent` without
-    // violating that field's own contract and the payload postcondition.
-    // The consumer needs BOTH conditions, not just the owner's verdict.
+  /**
+   * ⚠ THIS TWIN ASSERTS THE REASON, NOT ONLY THE OUTCOME — and it is written
+   * this way because the outcome-only version WAS NOT A GUARD. Deleting the
+   * `value <= 1` condition left it fully GREEN (mutant C, measured): the
+   * over-frame pair still blocked, because demoting it emits 5, the payload
+   * postcondition then fails, and `postconditionViolated` blocks the run
+   * anyway. The twin could not tell which of the two guards had done the work,
+   * so it would have passed over a change that removed one of them.
+   *
+   * `postconditionViolated` is not an equivalent way to reach the same place.
+   * It is logged at ERROR as an INVARIANT VIOLATION whose own comment says it
+   * "should be unreachable" — so the outcome-only twin was content with a fix
+   * that turned an ordinary user model into a self-reported invariant breach.
+   * Pinning the reason is what makes `value <= 1` load-bearing.
+   */
+  it('an OVER-FRAME level is refused as UNDEMOTABLE, never by tripping the postcondition', () => {
+    // The owner allows a level above 1 — an over-frame edit is honest — but 5
+    // is not a unit-interval representation, so it may not serve as
+    // `unitIntervalEquivalent`. The consumer needs BOTH conditions.
     expect(recoverScaleFrame({ value: 5, raw_value: 500000 })).toBeDefined();
-    const { verdict } = runProductionScaleSequence(withPair(5, 500000));
+    const { verdict, projection } = runProductionScaleSequence(withPair(5, 500000));
     expect(verdict.blocked).toBe(true);
+    expect(verdict.blocked && verdict.reason_code).toBe('mixed_scale_unresolved');
+    expect(verdict.blocked && verdict.unresolvedFactorIds).toContain(FRAMED_PAIR_FACTOR_ID);
+    // The discriminating assertion: refused because it is undemotable, NOT
+    // because demotion was attempted and broke the payload.
+    expect(projection.postconditionViolated).toBe(false);
+    expect(projection.demoted).toBe(false);
   });
 });
