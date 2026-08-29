@@ -38,6 +38,7 @@ import type {
 const appendCalls: Array<unknown> = [];
 const priorTurnRows: Array<unknown> = [];
 const priorFactRows: Array<unknown> = [];
+let persistedGraphForSession: unknown | null = null;
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: unknown) => {
@@ -46,6 +47,39 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => priorTurnRows,
     readFactsFor: async () => priorFactRows,
+    readFactsWithTurnFor: async () =>
+      priorFactRows.map((fact, index) => ({
+        fact,
+        fact_row_id: `prior-fact-row-${index}`,
+        turn_id:
+          ((priorTurnRows[index] as { id?: string } | undefined)?.id) ??
+          `prior-turn-row-${index}`,
+        fact_created_at:
+          (((fact as { result?: { computed_at?: string } }).result?.computed_at) ??
+            '2026-07-15T00:00:00.000Z'),
+      })),
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const facts = priorFactRows.filter(
+        (fact) =>
+          (fact as { fact_type?: unknown }).fact_type === 'run_analysis' &&
+          (fact as { noop?: unknown }).noop !== true,
+      );
+      return {
+        facts: facts.slice(0, limit).map((fact, index) => ({
+          fact,
+          fact_row_id: `prior-fact-row-${priorFactRows.indexOf(fact)}`,
+          fact_created_at:
+            (((fact as { result?: { computed_at?: string } }).result?.computed_at) ??
+              `2026-07-15T00:00:0${index}.000Z`),
+        })),
+        total_count: facts.length,
+      };
+    },
+    loadGraph: async () => persistedGraphForSession,
+    loadGraphAndBriefText: async () => ({
+      graph: persistedGraphForSession,
+      briefText: null,
+    }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({
       scope: { kind: 'structural' as const },
@@ -117,14 +151,43 @@ function makeGoldenResponse(): V2RunResponseEnvelope {
       { option_id: 'opt_a', option_label: 'A', win_probability: 0.6 },
       { option_id: 'opt_b', option_label: 'B', win_probability: 0.4 },
     ],
+    robustness_status: 'computed',
+    robustness: {
+      near_tie: {
+        is_tie: false,
+        top_option_id: 'opt_a',
+        second_option_id: 'opt_b',
+        tied_option_ids: [],
+        gap: 0.2,
+        threshold: 0.05,
+      },
+    },
     response_hash: 'h-top',
     analysis_status: 'completed',
   } as V2RunResponseEnvelope;
 }
 
 function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
+  const graph = {
+    nodes: [
+      { id: 'd', kind: 'decision', label: 'Which plan?' },
+      { id: 'g', kind: 'goal', label: 'Reach the goal' },
+      { id: 'f', kind: 'factor', label: 'Delivery capacity' },
+      { id: 'opt_a', kind: 'option', label: 'A', interventions: { f: 1 } },
+      { id: 'opt_b', kind: 'option', label: 'B', interventions: { f: 0 } },
+    ],
+    edges: [
+      { from: 'd', to: 'opt_a', strength: { mean: 1, std: 0.1 } },
+      { from: 'd', to: 'opt_b', strength: { mean: 1, std: 0.1 } },
+      { from: 'opt_a', to: 'f', strength: { mean: 1, std: 0.1 } },
+      { from: 'opt_b', to: 'f', strength: { mean: 0.1, std: 0.1 } },
+      { from: 'f', to: 'g', strength: { mean: 1, std: 0.1 } },
+    ],
+    goal_node_id: 'g',
+  };
   return {
-    graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+    graph,
+    rawPersistedGraph: graph,
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { f: 1 } },
       { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { f: 0 } },
@@ -178,6 +241,7 @@ beforeEach(() => {
   appendCalls.length = 0;
   priorTurnRows.length = 0;
   priorFactRows.length = 0;
+  persistedGraphForSession = null;
   events = [];
   installSink();
 });
@@ -239,6 +303,9 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
   });
 
   it('assistant_text = typed confirmation template (registry-driven per correction 5)', async () => {
+    // The headline is a categorical designation, so this positive fixture must
+    // establish the persisted graph the run actually analysed.
+    persistedGraphForSession = makeScenarioSnapshot().graph;
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
     );

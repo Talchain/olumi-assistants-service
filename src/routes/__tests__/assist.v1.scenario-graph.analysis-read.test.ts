@@ -140,7 +140,8 @@ function runAnalysisFact(opts: {
       },
       enrichment: {
         analysis_status: "ok",
-        robustness: { level: "moderate", near_tie: false },
+        robustness_status: "computed",
+        robustness: { level: "moderate", near_tie: { is_tie: false } },
         option_comparison: [
           { option_id: "opt_hire", option_label: "Hire a marketing manager", win_probability: 0.68, outcome_mean: 0.55 },
           { option_id: "opt_hold", option_label: "Hold headcount", win_probability: 0.32, outcome_mean: 0.41 },

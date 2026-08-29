@@ -227,7 +227,19 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
             { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.3 },
           ],
           factor_sensitivity: [{ factor_id: 'fac_x', influence_score: 0.5 }],
-          robustness: { level: 'fragile', fragile_edges: [] },
+          robustness_status: 'computed',
+          robustness: {
+            level: 'fragile',
+            fragile_edges: [],
+            near_tie: {
+              is_tie: false,
+              top_option_id: 'opt_a',
+              second_option_id: 'opt_b',
+              tied_option_ids: [],
+              gap: 0.4,
+              threshold: 0.05,
+            },
+          },
           results: [{ option_id: 'opt_a' }],
           // Recovered top-level science field (kept): carries an honest
           // `flip_value: null` that must survive verbatim, not be coerced.

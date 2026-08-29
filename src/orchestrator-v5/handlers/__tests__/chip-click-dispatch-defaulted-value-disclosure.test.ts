@@ -43,6 +43,7 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import { DEFAULTED_DISCLOSURE_TAIL } from '../../coaching/pick-defaulted-assumptions.js';
 
@@ -166,6 +167,7 @@ const READY_GRAPH: GraphV3T = {
     { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
 } as unknown as GraphV3T;
+const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH)!;
 
 function snapshot(): RunAnalysisScenarioSnapshot {
   return {
@@ -198,7 +200,13 @@ function handlerOutcome(enrichment: Record<string, unknown>) {
           scenario_id: SCENARIO_ID,
           leading_option_id: 'opt_launch',
           summary: 'Analysis ran with two options compared.',
-          enrichment,
+          graph_hash_at_run: READY_GRAPH_HASH,
+          computed_at: '2026-08-28T12:00:00.000Z',
+          enrichment: {
+            ...enrichment,
+            robustness_status: 'computed',
+            robustness: { near_tie: { is_tie: false } },
+          },
           constraint_verdict: {
             may_name_leading_option: true,
             constraint_verdict_state: 'not_applicable',

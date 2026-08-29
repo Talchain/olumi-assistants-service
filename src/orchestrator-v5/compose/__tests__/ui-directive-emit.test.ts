@@ -41,6 +41,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphV3T } from '../../../orchestrator/types.js';
 
 import { composeToolCallResponse } from '../../compose.js';
+import { mayDesignateLeadingOptionForFact } from '../leader-designation-license.js';
 import { sanitiseOlumiResponseForEgress } from '../output-safety.js';
 
 // ---------------------------------------------------------------------------
@@ -114,6 +115,8 @@ function runAnalysisFact(overrides: FactOverrides = {}): HandlerFact {
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible',
     },
+    robustness_status: 'computed',
+    robustness: { near_tie: { is_tie: false } },
   };
   if (overrides.graphNodes !== null) {
     enrichment.graph = { nodes: overrides.graphNodes ?? STANDARD_GRAPH.nodes, edges: [] };
@@ -151,8 +154,10 @@ function uiDirectives(response: { blocks: ReadonlyArray<{ type: string }> }) {
 
 describe('ui_directive emitter — unconditional', () => {
   it('emits exactly one ui_directive on a run_analysis turn with a recommended option', () => {
+    const fact = runAnalysisFact();
+    expect(mayDesignateLeadingOptionForFact(fact)).toBe(true);
     const env = composeToolCallResponse({
-    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [fact] });
     expect(uiDirectives(env)).toHaveLength(1);
   });
 });

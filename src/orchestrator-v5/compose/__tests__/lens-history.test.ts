@@ -20,6 +20,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import { composeToolCallResponse } from '../../compose.js';
 import { derivePreviousAnalysisLens } from '../lens-history.js';
 import { BODY_BY_RATIONALE, selectLens } from '../lens-selector.js';
+import { mayDesignateLeadingOptionForFact } from '../leader-designation-license.js';
 import { buildFocusInspectorDirective } from '../ui-directive.js';
 import { buildGraphNodeLookupFromGraph, buildLensSurface } from '../phase3-blocks.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
@@ -73,6 +74,8 @@ function bothTriggerFact(computedAt: string): HandlerFact {
       enrichment: {
         graph: GRAPH,
         confidence_tier: 'fair',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         __cee_claim_safety: {
           may_name_leading_option: true,
           constraint_verdict_state: 'evaluated_feasible',
@@ -102,6 +105,8 @@ function noLensFact(computedAt: string): HandlerFact {
       enrichment: {
         graph: GRAPH,
         confidence_tier: 'strong',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         __cee_claim_safety: {
           may_name_leading_option: true,
           constraint_verdict_state: 'evaluated_feasible',
@@ -147,6 +152,7 @@ describe('2.211 — derivePreviousAnalysisLens', () => {
     // 0.526 strict majority. Assert the assumption rather than trusting the
     // numbers to stay where they were put.
     const fact = bothTriggerFact('2026-07-31T10:00:00.000Z') as RunAnalysisHandlerFact;
+    expect(mayDesignateLeadingOptionForFact(fact)).toBe(true);
 
     // No strict-majority driver ⇒ neither sensitivity rule 1b nor
     // devils_advocacy's shared dominance derivation can fire.

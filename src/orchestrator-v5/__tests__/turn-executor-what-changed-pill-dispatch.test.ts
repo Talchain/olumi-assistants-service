@@ -44,6 +44,32 @@ vi.mock('../session/index.js', () => ({
     ...createNoopSessionStore(),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `run-fact-row-${index}`,
+        turn_id: `run-turn-row-${index}`,
+        fact_created_at:
+          (((fact.result as Record<string, unknown> | undefined)
+            ?.computed_at as string | undefined) ??
+            `2026-05-01T12:00:0${index}.000Z`),
+      })),
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return {
+        facts: facts.slice(0, limit).map((fact, index) => ({
+          fact,
+          fact_row_id: `run-fact-row-${mockState.priorFacts.indexOf(fact)}`,
+          fact_created_at:
+            (((fact.result as Record<string, unknown> | undefined)
+              ?.computed_at as string | undefined) ??
+              `2026-05-01T12:00:0${index}.000Z`),
+        })),
+        total_count: facts.length,
+      };
+    },
     loadGraph: async () => mockState.persistedGraph,
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
   }),
@@ -79,12 +105,26 @@ const READY_GRAPH = {
     { id: 'goal_growth', kind: 'goal' as const, label: 'Customer growth', goal_threshold: 0.8 },
     { id: 'fac_acquisition_cost', kind: 'factor' as const, label: 'Acquisition cost' },
     { id: 'fac_market_demand', kind: 'factor' as const, label: 'Market demand' },
-    { id: 'opt_freelance', kind: 'option' as const, label: 'Freelance + Moderate Ad Spend' },
-    { id: 'opt_hire', kind: 'option' as const, label: 'Hire Marketing Manager' },
+    {
+      id: 'opt_freelance',
+      kind: 'option' as const,
+      label: 'Freelance + Moderate Ad Spend',
+      interventions: { fac_acquisition_cost: 0.45, fac_market_demand: 0.6 },
+    },
+    {
+      id: 'opt_hire',
+      kind: 'option' as const,
+      label: 'Hire Marketing Manager',
+      interventions: { fac_acquisition_cost: 0.7, fac_market_demand: 0.8 },
+    },
   ],
   edges: [
     { from: 'dec_root', to: 'opt_freelance', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'dec_root', to: 'opt_hire', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'opt_freelance', to: 'fac_acquisition_cost', strength: { mean: 0.45, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'opt_freelance', to: 'fac_market_demand', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'opt_hire', to: 'fac_acquisition_cost', strength: { mean: 0.7, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'opt_hire', to: 'fac_market_demand', strength: { mean: 0.8, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_acquisition_cost', to: 'goal_growth', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_market_demand', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
   ],
@@ -144,6 +184,19 @@ function makeRunFact(opts: {
       computed_at: opts.computedAt,
       enrichment: {
         analysis_status: 'computed',
+        robustness_status: 'computed',
+        robustness: {
+          near_tie: {
+            is_tie: false,
+            top_option_id:
+              opts.winFreelance >= 0.5 ? 'opt_freelance' : 'opt_hire',
+            second_option_id:
+              opts.winFreelance >= 0.5 ? 'opt_hire' : 'opt_freelance',
+            tied_option_ids: [],
+            gap: Math.abs(opts.winFreelance - winHire),
+            threshold: 0.05,
+          },
+        },
         option_comparison: options,
         results: options,
         robustness_synthesis: { overall_assessment: opts.band },

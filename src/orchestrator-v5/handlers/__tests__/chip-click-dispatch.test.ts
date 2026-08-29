@@ -543,10 +543,6 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     if (out.outcome !== 'ok') return;
     expect(out.freshness?.selected_fact_index).toBe(1);
     expect(out.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
-    expect(out.rawOptionComparisons).toEqual([
-      { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
-      { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.5 },
-    ]);
     const committedResponse = commitDirectAnswerMock.mock.calls[0]?.[0];
     expect(committedResponse).toEqual(out.response);
     const analysisBlocks = out.response.blocks.filter(

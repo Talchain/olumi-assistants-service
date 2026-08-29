@@ -191,6 +191,8 @@ function priorRunAnalysisFact(verdict: {
       constraint_verdict: verdict,
       enrichment: {
         analysis_status: 'completed',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         option_comparison: [
           {
             option_id: 'opt_hire',

@@ -36,6 +36,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 
 import { composeToolCallResponse } from '../../compose.js';
+import { mayDesignateLeadingOptionForFact } from '../leader-designation-license.js';
 import { buildDiscussedEntityUiDirective } from '../ui-directive.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
@@ -143,6 +144,8 @@ function analysisFact(
       enrichment: {
         graph: GRAPH,
         confidence_tier: 'strong',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         __cee_claim_safety: {
           may_name_leading_option: overrides.mayNameLeadingOption ?? true,
           constraint_verdict_state: 'evaluated_feasible',
@@ -276,7 +279,9 @@ describe('row 7 — the workspace follows the conversation', () => {
   it('N=1 — a side-effect gesture still wins; row 7 never displaces it', () => {
     // Same fixture, but a real leading option: row 3's highlight fires and the
     // latch closes BEFORE row 7 is reached.
-    const env = compose(analysisFact({ leadingOptionId: 'opt_x' }));
+    const fact = analysisFact({ leadingOptionId: 'opt_x' });
+    expect(mayDesignateLeadingOptionForFact(fact)).toBe(true);
+    const env = compose(fact);
     const ds = directives(env);
     expect(ds).toHaveLength(1);
     // The side-effect row authored it, and row 7 emitted NOTHING — the latch

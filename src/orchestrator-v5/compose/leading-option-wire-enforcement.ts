@@ -98,10 +98,12 @@
  *   canonical-name anchor licenses removal of the vocabulary-bearing unit. In
  *   an evidence-only current state, however, the same shape can resemble
  *   recorded losing-option evidence ("Keep what we have ... It only comes out
- *   ahead in a tiny fraction"). Evidence-only deletion therefore requires name
- *   and designation in the same unit, or an exact canonical-joined comparison
- *   set from which this rail can build deterministic evidence-only copy. With
- *   neither, it stands down rather than inventing a referent.
+ *   ahead in a tiny fraction"). Even same-unit name/vocabulary co-occurrence is
+ *   not a typed subject binding: "Option A is in scope; the salary survey
+ *   leads" is the counterexample. Evidence-only free prose therefore remains
+ *   observe-only UNLESS the response carries one exact typed designation id,
+ *   that id uniquely joins the canonical option, and a closed direct predicate
+ *   designates that exact label. This is attribution, never permission.
  *
  * THE CRITERION THAT CLOSES BOTH. Enforcement needs TWO independent facts, and
  * neither alone is sufficient:
@@ -121,11 +123,12 @@
  * exit is already shipping. Those are different questions.
  *
  * After surgery, cleanliness means no remaining designation in a strict
- * withheld state, and no remaining co-located name+designation in an
- * evidence-only state. A bare canonical option name may be a receipt or ordinary
- * evidence and survives. This is the corpus-derived correction: the prior
- * zero-name postcondition destroyed truthful qualified responses, while a
- * field-wide evidence-only pass destroyed a truthful losing-option explanation.
+ * withheld state. Evidence-only states project typed structured members and
+ * exact code-owned signals; the only model-prose arm additionally requires the
+ * typed canonical identity plus the closed direct-designation grammar below.
+ * This is the corpus-derived correction: the prior zero-name postcondition
+ * destroyed truthful qualified responses, while field-wide and generic
+ * same-unit evidence-only passes destroyed truthful comparison prose.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ SCOPE — STATED, NOT IMPLIED. A chokepoint that claims to cover "the wire"
@@ -191,11 +194,10 @@ import { types as nodeUtilTypes } from 'node:util';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { FinalLeaderClaimEgressPolicy } from './analysis-state-v1.js';
-import type { RawOptionComparisonSignal } from '../coaching/pick-raw-robustness.js';
-import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 import { COACHING_TEXT } from '../signals/coaching-signals.js';
 import { textAssertsLeadingOption, textNamesLeadingOption } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
+import { projectAnalysisSummaryForWithheldClaim } from './withheld-claim-projection.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
 import { sanitiseUserFacingText } from '../../orchestrator/shared/output-safety.js';
 import { projectTransportEnrichmentForWithheldClaim } from './withheld-claim-projection.js';
@@ -361,354 +363,6 @@ export function textNamesAnOption(value: string, roster: readonly string[]): boo
 }
 
 /**
- * The only model-authored comparative form retained when the final authority
- * withholds a categorical designation.
- *
- * This is deliberately not another leader vocabulary. It recognises the data
- * side of the shared contract's data-vs-designation boundary: an exact
- * canonical option identity + label, the exact percentage rendered from the
- * final producer-attested `option_comparison[].win_probability`, and a
- * reason-appropriate disclosure in the SAME redactable unit. The matched span
- * is masked and the shared leader reader is run over the residual; any
- * additional categorical language therefore keeps the unit enforceable.
- *
- * A model-authored label or number can never self-license. Ambiguous/duplicate
- * identities, a mismatched label, an invented percentage, or a disclosure in a
- * neighbouring sentence all fail closed for the evidence carve-out.
- */
-const QUALIFIED_NEAR_TIE_DISCLOSURE =
-  /\b(?:(?:this|it|the (?:result|comparison|ranking|order)|the options?) (?:is|are|remain|remains) (?:still )?(?:a close call|effectively tied|too close|not settled|not yet robust|within (?:the )?model uncertainty)|the analysis treats (?:this|the (?:result|comparison)) as (?:a close call|effectively tied|too close)|there is no clear (?:winner|leader)|options? (?:do|does) not separate|(?:the )?(?:result|ranking|order|options?) could shift)\b/i;
-
-const CONSTRAINT_WITHHELD_DISCLOSURE =
-  /\b(?:(?:the )?constraint(?:s| verdict)? (?:withhold|withholds|do not license|does not license|prevent|prevents) (?:a |the )?(?:leader|leading option|recommendation)|(?:leader|leading option|recommendation) (?:is|remains) withheld (?:by|because of) (?:the )?constraints?)\b/i;
-
-const SEPARATION_UNAVAILABLE_DISCLOSURE =
-  /\b(?:(?:the )?analysis (?:did not|could not|has not) establish whether (?:the )?options? separate|option separation (?:was|is|remains) (?:not established|unavailable|unknown)|whether (?:the )?options? separate (?:was|is|remains) (?:not established|unavailable|unknown))\b/i;
-
-const LICENSED_EVIDENCE_SENTINEL = '#';
-
-interface CanonicalOptionIdentity {
-  readonly id: string;
-  readonly label: string;
-}
-
-interface AttestedComparison {
-  readonly id: string;
-  readonly label: string;
-  readonly renderedPercent: number;
-}
-
-function exactNonEmptyIdentity(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
-    return null;
-  }
-  return value;
-}
-
-function optionIdentitiesFromGraph(graph: unknown): readonly CanonicalOptionIdentity[] | null {
-  const nodes = (graph as { readonly nodes?: unknown } | null | undefined)?.nodes;
-  if (!Array.isArray(nodes)) return null;
-  const identities: CanonicalOptionIdentity[] = [];
-  for (const raw of nodes) {
-    if (raw == null || typeof raw !== 'object') continue;
-    const node = raw as { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
-    if (node.kind !== 'option') continue;
-    const id = exactNonEmptyIdentity(node.id);
-    const label = exactNonEmptyIdentity(node.label);
-    if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
-    identities.push({ id, label });
-  }
-  return identities;
-}
-
-function optionIdentitiesFromAnalysisReady(
-  analysisReady: unknown,
-): readonly CanonicalOptionIdentity[] | null {
-  const options = (analysisReady as { readonly options?: unknown } | null | undefined)?.options;
-  if (!Array.isArray(options)) return null;
-  const identities: CanonicalOptionIdentity[] = [];
-  for (const raw of options) {
-    if (raw == null || typeof raw !== 'object') return null;
-    const option = raw as {
-      readonly option_id?: unknown;
-      readonly id?: unknown;
-      readonly label?: unknown;
-    };
-    const id = exactNonEmptyIdentity(option.option_id) ?? exactNonEmptyIdentity(option.id);
-    const label = exactNonEmptyIdentity(option.label);
-    if (id === null || label === null || label.length < MIN_OPTION_LABEL_LENGTH) return null;
-    identities.push({ id, label });
-  }
-  return identities;
-}
-
-function uniqueOptionIdentities(
-  identities: readonly CanonicalOptionIdentity[] | null,
-): readonly CanonicalOptionIdentity[] | null {
-  if (identities === null || identities.length === 0) return null;
-  const ids = new Set<string>();
-  const labels = new Set<string>();
-  for (const identity of identities) {
-    const foldedLabel = identity.label.toLocaleLowerCase('en-US');
-    if (ids.has(identity.id) || labels.has(foldedLabel)) return null;
-    ids.add(identity.id);
-    labels.add(foldedLabel);
-  }
-  return identities;
-}
-
-function canonicalOptionIdentities(
-  graph: unknown,
-  analysisReady: unknown,
-): readonly CanonicalOptionIdentity[] | null {
-  const graphNodes = (graph as { readonly nodes?: unknown } | null | undefined)?.nodes;
-  if (graph !== null && graph !== undefined) {
-    // A present graph is the canonical identity source. If it is empty,
-    // malformed or ambiguous, fail closed; a readiness payload must never
-    // repair or overrule a present canonical graph for evidence licensing.
-    if (!Array.isArray(graphNodes)) return null;
-    return uniqueOptionIdentities(optionIdentitiesFromGraph(graph));
-  }
-  return uniqueOptionIdentities(optionIdentitiesFromAnalysisReady(analysisReady));
-}
-
-function readAttestedComparisons(
-  response: OlumiResponse,
-  graph: unknown,
-  analysisReady: unknown,
-  selectedFactComparisons: readonly RawOptionComparisonSignal[] | null | undefined,
-): readonly AttestedComparison[] {
-  // Evidence must be joined to the same fact that supplied final freshness.
-  // A validated body is not enough: it can still be a projection of a
-  // different run. Absence therefore withholds the carve-out rather than
-  // treating arbitrary response bytes as producer authority.
-  if (selectedFactComparisons == null || selectedFactComparisons.length === 0) return [];
-  const identities = canonicalOptionIdentities(graph, analysisReady);
-  if (identities === null) return [];
-  const identityById = new Map(identities.map((identity) => [identity.id, identity]));
-
-  // The selected fact is sufficient authority for a blockless follow-up: the
-  // turn may discuss the current analysis without re-shipping its structured
-  // analysis_result block. Join every selected comparison to the current
-  // canonical roster first; no model-authored label or number can self-license.
-  const selectedAttested: AttestedComparison[] = [];
-  const selectedIds = new Set<string>();
-  for (const selected of selectedFactComparisons) {
-    const id = exactNonEmptyIdentity(selected.option_id);
-    const label = exactNonEmptyIdentity(selected.option_label);
-    const canonical = id === null ? undefined : identityById.get(id);
-    const probability = selected.win_probability;
-    if (
-      id === null ||
-      label === null ||
-      canonical === undefined ||
-      canonical.label !== label ||
-      selectedIds.has(id) ||
-      typeof probability !== 'number' ||
-      !Number.isFinite(probability) ||
-      probability < 0 ||
-      probability > 1
-    ) {
-      return [];
-    }
-    selectedIds.add(id);
-    selectedAttested.push({ id, label, renderedPercent: Math.round(probability * 100) });
-  }
-
-  const blocks = (response as { readonly blocks?: unknown }).blocks;
-  if (!Array.isArray(blocks)) return [];
-  const analysisBlocks = blocks.filter(
-    (block) =>
-      block !== null &&
-      typeof block === 'object' &&
-      (block as { readonly type?: unknown }).type === 'analysis_result',
-  );
-  // A blockless follow-up uses the exact canonical-joined selected fact above.
-  // A present block is an additional claim surface and must agree exactly;
-  // multiple blocks are ambiguous and fail weak.
-  if (analysisBlocks.length === 0) return selectedAttested;
-  if (analysisBlocks.length !== 1) return [];
-  const enrichment = (analysisBlocks[0] as { readonly enrichment?: unknown }).enrichment;
-  if (enrichment === null || typeof enrichment !== 'object') return [];
-  const enrichmentRecord = enrichment as Record<string, unknown>;
-  // A present analysis block is itself a claim surface. Its feature-level
-  // status must therefore be independently recommendable before its scalar
-  // rows can corroborate the selected canonical fact. Exact numbers cannot
-  // rehabilitate an explicitly failed/skipped comparison computation.
-  if (
-    !isRecommendableOption({
-      status: enrichmentRecord['option_comparison_status'],
-    })
-  ) {
-    return [];
-  }
-  const comparison = enrichmentRecord['option_comparison'];
-  if (!Array.isArray(comparison) || comparison.length === 0) return [];
-  if (comparison.length !== selectedFactComparisons.length) return [];
-
-  const attested: AttestedComparison[] = [];
-  const seenIds = new Set<string>();
-  for (const [index, raw] of comparison.entries()) {
-    if (raw === null || typeof raw !== 'object') return [];
-    const row = raw as {
-      readonly option_id?: unknown;
-      readonly option_label?: unknown;
-      readonly win_probability?: unknown;
-      readonly status?: unknown;
-    };
-    const id = exactNonEmptyIdentity(row.option_id);
-    const label = exactNonEmptyIdentity(row.option_label);
-    const probability = row.win_probability;
-    const selected = selectedFactComparisons[index];
-    const canonical = id === null ? undefined : identityById.get(id);
-    if (
-      id === null ||
-      label === null ||
-      !isRecommendableOption(row as Record<string, unknown>) ||
-      canonical === undefined ||
-      canonical.label !== label ||
-      seenIds.has(id) ||
-      typeof probability !== 'number' ||
-      !Number.isFinite(probability) ||
-      probability < 0 ||
-      probability > 1 ||
-      selected === undefined ||
-      selected.option_id !== id ||
-      selected.option_label !== label ||
-      selected.win_probability !== probability
-    ) {
-      return [];
-    }
-    seenIds.add(id);
-    attested.push({ id, label, renderedPercent: Math.round(probability * 100) });
-  }
-  return attested;
-}
-
-function disclosureForPolicy(policy: FinalLeaderClaimEgressPolicy): RegExp | null {
-  switch (policy) {
-    case 'evidence_only_options_do_not_separate':
-      return QUALIFIED_NEAR_TIE_DISCLOSURE;
-    case 'evidence_only_constraint_verdict_withheld':
-      return CONSTRAINT_WITHHELD_DISCLOSURE;
-    case 'evidence_only_separation_unavailable':
-      return SEPARATION_UNAVAILABLE_DISCLOSURE;
-    default:
-      return null;
-  }
-}
-
-/**
- * Deterministic evidence-only replacement for an unstructured field whose
- * option identity and leader vocabulary are split across redactable units.
- *
- * The wire gate must not guess whether a pronoun in a later sentence refers to
- * the named option. When the exact freshness-selected comparison set has
- * already joined the canonical roster, however, it can preserve those typed
- * measurements without preserving the ambiguous model prose. This is not a
- * second analytical authority: ordering, labels and values all come from the
- * selected producer fact, and the final policy supplies only its already-
- * composed disclosure.
- */
-function deterministicEvidenceSummary(
-  policy: FinalLeaderClaimEgressPolicy,
-  attested: readonly AttestedComparison[],
-): string | null {
-  if (attested.length === 0) return null;
-  const measurements = attested
-    .map(
-      ({ label, renderedPercent }) =>
-        `${label} came out ahead in ${renderedPercent}% of runs of this model`,
-    )
-    .join('; ');
-  switch (policy) {
-    case 'evidence_only_options_do_not_separate':
-      return `${measurements}. The options do not separate.`;
-    case 'evidence_only_constraint_verdict_withheld':
-      return `${measurements}. The constraint verdict withholds a leading option.`;
-    case 'evidence_only_separation_unavailable':
-      return `${measurements}. The analysis did not establish whether the options separate.`;
-    default:
-      return null;
-  }
-}
-
-function hasAffirmativeTerminalDisclosure(
-  unit: string,
-  measuredComparisonEnd: number,
-  disclosure: RegExp,
-): boolean {
-  const tail = unit.slice(measuredComparisonEnd);
-  const match = disclosure.exec(tail);
-  if (match === null || match.index === undefined) return false;
-  const prefix = tail.slice(0, match.index);
-  // The disclosure must be the direct conjunct following the exact measured
-  // comparison. Arbitrary prose before it can negate/retract the apparent
-  // caveat ("but it is not true that this is a close call").
-  if (
-    !/^\s*(?:[,;:\u2014-]\s*)?(?:(?:but|while|although|and|yet|because)\s+)?$/iu.test(
-      prefix,
-    )
-  ) {
-    return false;
-  }
-  const suffix = tail.slice(match.index + match[0].length).trim();
-  // A question or any trailing clause can retract/qualify the apparent
-  // disclosure ("close call? No", "close call, incorrectly"). Only an
-  // affirmative terminal statement licenses the evidence carve-out.
-  return suffix.length === 0 || /^[.!]+$/u.test(suffix);
-}
-
-function maskAttestedEvidence(
-  value: string,
-  policy: FinalLeaderClaimEgressPolicy,
-  attested: readonly AttestedComparison[],
-): string {
-  const disclosure = disclosureForPolicy(policy);
-  if (disclosure === null || attested.length === 0) return value;
-  let changed = false;
-  const masked = splitIntoRedactableUnits(value).map((unit) => {
-    let next = unit;
-    let unitChanged = false;
-    for (const evidence of attested) {
-      const labelPattern = escapeForRegExp(evidence.label).replace(/\s+/g, '\\s+');
-      const measuredComparison = new RegExp(
-        `(?<![\\p{L}\\p{N}_])${labelPattern}(?![\\p{L}\\p{N}_])` +
-          `\\s+(?:came|comes?)\\s+out\\s+ahead\\s+in\\s+${evidence.renderedPercent}%` +
-          `\\s+of\\s+(?:runs|simulations)(?:\\s+of\\s+this\\s+model)?`,
-        'giu',
-      );
-      const measuredMatch = measuredComparison.exec(unit);
-      if (
-        measuredMatch === null ||
-        measuredMatch.index === undefined ||
-        !hasAffirmativeTerminalDisclosure(
-          unit,
-          measuredMatch.index + measuredMatch[0].length,
-          disclosure,
-        )
-      ) {
-        continue;
-      }
-      const replaced = next.replace(measuredComparison, LICENSED_EVIDENCE_SENTINEL);
-      if (replaced !== next) unitChanged = true;
-      next = replaced;
-    }
-    if (unitChanged) {
-      changed = true;
-      // The caveat is part of the licensed evidence unit. Mask it for the
-      // designation reader as well: phrases such as “no clear leader” and “the
-      // constraint verdict withholds a leading option” contain the shared
-      // vocabulary but assert the opposite of a designation. The output bytes
-      // are untouched; this is only the residual inspected by the guard.
-      next = next.replace(disclosure, LICENSED_EVIDENCE_SENTINEL);
-    }
-    return next;
-  });
-  return changed ? masked.join('') : value;
-}
-
-/**
  * ⚠ WHY THIS IS AN EXACT TOKEN SEQUENCE AND NOT A FUZZY / PARTIAL MATCH — an
  * ARCHITECT CALL, recorded so the next reader does not "fix" it into the defect
  * it is avoiding. (ROADMAP 2.149, adjudicated 31 Jul.)
@@ -743,9 +397,9 @@ export interface WireLeaderClaimEnforcementOpts {
    * designated", read from the final composed `analysis_state` at
    * `sendFinalised200` and never re-derived here (CLAUDE.md trap #12).
    * `designation_permitted` ⇒ a by-reference no-op. Evidence-only policies
-   * permit exact producer-attested comparisons with a truthful same-unit caveat
-   * or deterministic copy from the exact selected comparison set; they never
-   * permit categorical designation.
+   * project typed structured designations and exact code-owned signals, and may
+   * remove only a closed direct predicate attributed by the exact typed/current
+   * option identity. They never infer from roster-name co-occurrence alone.
    */
   readonly leaderClaimPolicy: FinalLeaderClaimEgressPolicy;
   /**
@@ -783,13 +437,6 @@ export interface WireLeaderClaimEnforcementOpts {
    * is present, so we do not delete the user's prose.
    */
   readonly analysisReady?: unknown;
-  /**
-   * Exact option comparisons from the SAME run-analysis fact selected by final
-   * freshness. Required for the numerical-evidence carve-out; absence, or any
-   * disagreement in a present analysis-result body, fails weak to no evidence
-   * licence. A blockless follow-up can use the selected fact alone.
-   */
-  readonly selectedFactComparisons?: readonly RawOptionComparisonSignal[] | null;
 }
 
 export interface WireLeaderClaimEnforcementResult {
@@ -822,12 +469,10 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
  * |               |                 | "leading option" designate nobody         |
  * | YES           | YES             | ENTER: surgery, then post-check           |
  *
- * "Claim present" and "canonical name present" are read at FIELD level. Strict
- * withheld states then remove every designation-bearing unit. Evidence-only
- * states remove only units where canonical identity and designation co-occur.
- * If identity and designation are distributed across units, the gate never
- * invents a pronoun referent: it replaces the field only when exact selected-
- * fact comparisons can produce a deterministic evidence-only summary.
+ * "Claim present" and "canonical name present" are read at FIELD level for the
+ * strict withheld state. Evidence-only prose additionally requires an exact
+ * typed identity join plus the closed direct predicate; this gate never guesses
+ * identity from same-unit co-occurrence or a pronoun.
  *
  * ⭐ THE POST-CHECK, and why the residual is re-read at all. Removing the
  * vocabulary unit can leave a distributed claim behind. So after each pass the
@@ -857,47 +502,30 @@ function projectField(
   value: string,
   roster: readonly string[],
   policy: FinalLeaderClaimEgressPolicy,
-  attested: readonly AttestedComparison[],
 ): { text: string; mode: WireEnforcementMode } | null {
   if (typeof value !== 'string' || value.length === 0) return null;
-  const withoutLicensedEvidence = (candidate: string): string =>
-    maskAttestedEvidence(candidate, policy, attested);
-  const assertsUnlicensedDesignation = (candidate: string): boolean =>
-    textAssertsLeadingOption(withoutLicensedEvidence(candidate));
   const isEvidenceOnly = policy.startsWith('evidence_only_');
-  const shouldRemoveUnit = (unit: string): boolean =>
-    assertsUnlicensedDesignation(unit) &&
-    // Identity is established from the ORIGINAL unit. Masking the measured
-    // comparison removes its canonical label as well as its numbers; reading
-    // identity from that masked residual would let a same-unit pronoun claim
-    // piggyback on licensed evidence ("...close call; it still leads").
-    (!isEvidenceOnly || textNamesAnOption(unit, roster));
+  if (isEvidenceOnly) {
+    // Free prose has no producer-attested designation span. Natural-language
+    // surgery here previously erased the numerical evidence and close-call
+    // qualification in the same sentence. Evidence-only prose is therefore
+    // observe-only; typed fields and exact code-owned signals are projected at
+    // their own authorities, and producer/prompt gates prevent new false copy.
+    return null;
+  }
   // (1) A CLAIM IS PRESENT — field level, so distributed and wrapped claims
   //     cannot evade the deleting arm merely by splitting name from vocabulary.
-  if (!assertsUnlicensedDesignation(value)) return null;
+  if (!textAssertsLeadingOption(value)) return null;
   // (2) A DESIGNATION IS POSSIBLE — the field names one of this scenario's own
   //     options. Vocabulary with no name designates nobody.
   if (!textNamesAnOption(value, roster)) return null;
-  // (3) Evidence-only turns preserve distributed evidence without preserving
-  //     an ambiguous distributed designation. If no single unit proves
-  //     identity + designation, use the exact selected-fact comparison set as
-  //     a typed fallback. With no such authority, stand down and let the alarm
-  //     retain the residue for producer repair rather than guessing.
-  if (isEvidenceOnly && !splitIntoRedactableUnits(value).some(shouldRemoveUnit)) {
-    const fallback = deterministicEvidenceSummary(policy, attested);
-    return fallback === null ? null : { text: fallback, mode: 'whole_field' };
-  }
-  const isClean = (candidate: string): boolean =>
-    isEvidenceOnly
-      ? !splitIntoRedactableUnits(candidate).some(shouldRemoveUnit)
-      : !assertsUnlicensedDesignation(candidate);
 
   const surgical = replaceAssertingUnits(
     value,
-    shouldRemoveUnit,
+    textAssertsLeadingOption,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
-  if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
+  if (!textAssertsLeadingOption(surgical)) return { text: surgical, mode: 'surgical' };
 
   // Defensive only: if the field-level reader still sees a designation after
   // surgery, do not ship the unresolved field.
@@ -908,15 +536,14 @@ function projectField(
  * Align the structured analysis block with the same final designation policy.
  * `leading_option_id` is nulled, and the existing producer-owned withheld
  * projection removes leader-designating members from nested enrichment while
- * retaining independent numerical evidence. The block summary uses the same
- * evidence-preserving projector as the user-facing fields; without a usable
- * roster, only an unambiguous leader assertion is replaced.
+ * retaining independent numerical evidence. The block summary is free prose:
+ * strict withheld states use the deployed projector, while evidence-only states
+ * leave it untouched rather than inventing a semantic subject span.
  */
 function projectAnalysisResultBlocks(
   response: OlumiResponse,
   roster: readonly string[],
   policy: FinalLeaderClaimEgressPolicy,
-  attested: readonly AttestedComparison[],
 ): OlumiResponse | null {
   if (!Array.isArray(response.blocks) || response.blocks.length === 0) return null;
   let changed = false;
@@ -966,14 +593,15 @@ function projectAnalysisResultBlocks(
       }
     }
     if (typeof block.summary === 'string' && block.summary.length > 0) {
-      const summaryProjection =
-        roster.length > 0
-          ? projectField(block.summary, roster, policy, attested)
-          : textAssertsLeadingOption(block.summary)
-            ? { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' as const }
-            : null;
-      if (summaryProjection !== null && summaryProjection.text !== block.summary) {
-        projected = { ...projected, summary: summaryProjection.text };
+      const projectedSummary = policy.startsWith('evidence_only_')
+        ? projectAnalysisSummaryForWithheldClaim(block.summary)
+        : roster.length > 0
+          ? projectField(block.summary, roster, policy)?.text ?? block.summary
+          : policy === 'designation_withheld' && textAssertsLeadingOption(block.summary)
+            ? WIRE_WITHHELD_LEADER_REPLACEMENT
+            : block.summary;
+      if (projectedSummary !== block.summary) {
+        projected = { ...projected, summary: projectedSummary };
         changed = true;
       }
     }
@@ -1017,7 +645,13 @@ function snapshotEnumerableData(
   ) {
     throw new TypeError('exotic_prototype');
   }
-  const descriptors = Object.getOwnPropertyDescriptors(value);
+  // TypeScript's lib declaration exposes only string keys here, while the
+  // runtime result also carries own symbol descriptors. Keep one descriptor
+  // snapshot (important for Proxy safety) and type that actual runtime shape.
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<
+    PropertyKey,
+    PropertyDescriptor
+  >;
   const ownToJson = descriptors['toJSON'];
   if (ownToJson !== undefined) throw new TypeError('custom_to_json');
   ancestors.add(value);
@@ -1171,17 +805,10 @@ export function enforceLeadingOptionClaimsAtWire(
       opts.graph === null || opts.graph === undefined
         ? optionRosterFromAnalysisReady(opts.analysisReady)
         : graphRoster;
-    const attestedComparisons = readAttestedComparisons(
-      next,
-      opts.graph,
-      opts.analysisReady,
-      opts.selectedFactComparisons,
-    );
     const projectedBlocks = projectAnalysisResultBlocks(
       next,
       roster,
       opts.leaderClaimPolicy,
-      attestedComparisons,
     );
     if (projectedBlocks !== null) {
       editedFields.add('analysis_result');
@@ -1240,7 +867,6 @@ export function enforceLeadingOptionClaimsAtWire(
       next.assistant_text,
       roster,
       opts.leaderClaimPolicy,
-      attestedComparisons,
     );
     if (answer !== null) {
       escalate(answer.mode);
@@ -1254,7 +880,6 @@ export function enforceLeadingOptionClaimsAtWire(
         framing,
         roster,
         opts.leaderClaimPolicy,
-        attestedComparisons,
       );
       if (projected !== null) {
         escalate(projected.mode);

@@ -33,6 +33,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import { composeToolCallResponse } from '../../compose.js';
 import type { FreshnessDerivation } from '../../context/freshness.js';
+import { mayDesignateLeadingOptionForFact } from '../leader-designation-license.js';
 import { log } from '../../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,8 @@ function makeFact(options: FactOptions = {}): RunAnalysisHandlerFact {
       enrichment: {
         graph: { nodes: [FACTOR_DELIVERY, FACTOR_COST] },
         confidence_tier: 'needs_work',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         factor_sensitivity: [
           {
             factor_id: 'fac_delivery_risk',
@@ -213,7 +216,9 @@ function expectedCompanionInputsPresent(dr: Record<string, unknown>): void {
 describe('capability P1 — pre_mortem lens companion ARRIVES on the wire', () => {
   it('emits exactly one exercise block on a fresh, licensed analysis turn', () => {
     expectedCompanionInputsPresent(DECISION_REVIEW);
-    const exercises = exercisesOf(composeCurrentTurn(makeFact()));
+    const fact = makeFact();
+    expect(mayDesignateLeadingOptionForFact(fact)).toBe(true);
+    const exercises = exercisesOf(composeCurrentTurn(fact));
     expect(exercises).toHaveLength(1);
     expect(exercises[0]!.exercise_kind).toBe('pre_mortem');
   });

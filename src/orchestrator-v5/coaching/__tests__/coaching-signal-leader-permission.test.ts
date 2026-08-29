@@ -70,6 +70,7 @@ import {
   selectRunAnalysisFact,
 } from '../../context/freshness.js';
 import { compareRuns, projectRunFact } from '../compare-runs.js';
+import { readRawRobustnessFromRunAnalysisFact } from '../pick-raw-robustness.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -95,9 +96,37 @@ const SCOPE: ClaimSafetyScenarioScope = {
  * still names a leader is the producer's declared output, not an invention of
  * this test (`plot-lite-service` `src/routes/v2/run.ts`, `determineTopLevelStatus`).
  */
-function envelope(analysisStatus: string): Record<string, unknown> {
+type RobustnessFixture =
+  | 'separated'
+  | 'near_tie'
+  | 'missing'
+  | 'malformed'
+  | 'not_computed';
+
+function envelope(
+  analysisStatus: string,
+  robustness: RobustnessFixture,
+): Record<string, unknown> {
   return {
     analysis_status: analysisStatus,
+    ...(robustness === 'missing'
+      ? {}
+      : robustness === 'not_computed'
+        ? {
+            robustness_status: 'unavailable',
+            robustness: { near_tie: { is_tie: false } },
+          }
+        : {
+            robustness_status: 'computed',
+            robustness: {
+              near_tie: {
+                is_tie:
+                  robustness === 'malformed'
+                    ? 'false'
+                    : robustness === 'near_tie',
+              },
+            },
+          }),
     results: [
       {
         option_id: 'opt_launch',
@@ -123,6 +152,7 @@ function runFact(opts: {
     may_name_leading_option: boolean;
     constraint_verdict_state: string;
   } | null;
+  readonly robustness?: RobustnessFixture;
 }): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -134,7 +164,7 @@ function runFact(opts: {
       summary: 'Analysis ran with two options compared.',
       computed_at: opts.computedAt,
       graph_hash_at_run: `hash-${opts.computedAt}`,
-      enrichment: envelope(opts.analysisStatus),
+      enrichment: envelope(opts.analysisStatus, opts.robustness ?? 'separated'),
       ...(opts.constraintVerdict === null
         ? {}
         : { constraint_verdict: opts.constraintVerdict }),
@@ -471,6 +501,157 @@ describe('the coaching slot reads the SETTLED permission, not the turn-entry one
     expect(out.coachingText).not.toBe(
       COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
     );
+  });
+});
+
+// ============================================================================
+// CASE 3 — producer-attested separation must belong to THIS selected run.
+// ============================================================================
+
+describe('the coaching slot uses the final categorical designation licence', () => {
+  function permittingFact(opts: {
+    readonly analysisStatus: string;
+    readonly computedAt: string;
+    readonly robustness?: RobustnessFixture;
+  }): HandlerFact {
+    return runFact({
+      ...opts,
+      constraintVerdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
+    });
+  }
+
+  function applyRun(
+    current: HandlerFact,
+    priorFacts: readonly HandlerFact[],
+    requestId: string,
+  ) {
+    return applyCoachingSignal({
+      proposedHandlerId: 'run_analysis',
+      outcome: outcomeFor(current),
+      contextPack: null,
+      priorFacts,
+      handlerFacts: [current],
+      requestId,
+      scenarioId: SCENARIO_ID,
+      claimSafetyScope: SCOPE,
+    });
+  }
+
+  it('does not borrow an older separated fact when this turn produced only a partial near-tie', () => {
+    const current = permittingFact({
+      analysisStatus: 'partial',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      robustness: 'near_tie',
+    });
+    const prior = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-15T00:00:00.000Z',
+      robustness: 'separated',
+    });
+    const unified = [current, prior];
+
+    // Discriminating preconditions: the turn entitlement permits, but the
+    // successful projection selector chooses the older prior fact. Without the
+    // current-turn membership guard that older fact donates its separation and
+    // the current partial result gets categorical coaching.
+    expect(
+      readMayNameLeadingOptionVerdict(unified, SCOPE).may_name_leading_option,
+    ).toBe(true);
+    expect(selectRunAnalysisFact(unified)?.fact).toBe(prior);
+    expect(readRawRobustnessFromRunAnalysisFact(prior)?.near_tie_is_tie).toBe(false);
+    expect(readRawRobustnessFromRunAnalysisFact(current)?.near_tie_is_tie).toBe(true);
+    expect(projectRunFact(current)).not.toBeNull();
+
+    const out = applyRun(current, [prior], 'req-current-partial');
+    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
+    expect(out.coachingText).toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+    );
+    for (const label of OPTION_LABELS) expect(out.coachingText).not.toContain(label);
+  });
+
+  it('binds separation to the selected current fact, not an older separated decoy', () => {
+    const current = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      robustness: 'near_tie',
+    });
+    const olderSeparated = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-15T00:00:00.000Z',
+      robustness: 'separated',
+    });
+    expect(selectRunAnalysisFact([current, olderSeparated])?.fact).toBe(current);
+
+    const out = applyRun(current, [olderSeparated], 'req-current-near-tie');
+    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
+    expect(out.coachingText).toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+    );
+  });
+
+  it('does not let an older near-tie decoy suppress a selected separated current run', () => {
+    const current = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      robustness: 'separated',
+    });
+    const olderNearTie = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-15T00:00:00.000Z',
+      robustness: 'near_tie',
+    });
+    expect(selectRunAnalysisFact([current, olderNearTie])?.fact).toBe(current);
+
+    const out = applyRun(current, [olderNearTie], 'req-current-separated');
+    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
+    expect(out.coachingText).not.toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+    );
+    expect(out.coachingText).toContain('Launch now');
+  });
+
+  it.each<RobustnessFixture>([
+    'near_tie',
+    'missing',
+    'malformed',
+    'not_computed',
+  ])('suppresses FIRST_ANALYSIS_COMPLETE when current separation is %s', (robustness) => {
+    const current = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      robustness,
+    });
+    const out = applyRun(current, [], `req-first-${robustness}`);
+    expect(out.signalId).toBeNull();
+    expect(out.coachingText).toBeNull();
+  });
+
+  it.each<RobustnessFixture>([
+    'near_tie',
+    'missing',
+    'malformed',
+    'not_computed',
+  ])('degrades RERUN_ANALYSIS_COMPLETE when current separation is %s', (robustness) => {
+    const current = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      robustness,
+    });
+    const prior = permittingFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-15T00:00:00.000Z',
+      robustness: 'separated',
+    });
+    const out = applyRun(current, [prior], `req-rerun-${robustness}`);
+    expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
+    expect(out.coachingText).toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+    );
+    for (const label of OPTION_LABELS) expect(out.coachingText).not.toContain(label);
   });
 });
 

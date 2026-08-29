@@ -106,6 +106,9 @@ function makeHistoricFact(opts: {
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible',
     };
+    const enrichment = result.enrichment as Record<string, unknown>;
+    enrichment.robustness_status = 'computed';
+    enrichment.robustness = { near_tie: { is_tie: false } };
   }
   return {
     fact_type: 'run_analysis',

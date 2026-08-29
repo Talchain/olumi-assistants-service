@@ -1,7 +1,24 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { readRawRobustnessFromRunAnalysisFact } from '../coaching/pick-raw-robustness.js';
+import {
+  readRawRobustnessFromRunAnalysisFact,
+  type RawRobustnessSignals,
+} from '../coaching/pick-raw-robustness.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+
+/**
+ * The one conjunction that licenses a categorical leader designation.
+ *
+ * The entitlement and separation facts are supplied by their canonical
+ * readers. This leaf only combines them; it never derives a tie from option
+ * probabilities or treats missing robustness as permission.
+ */
+export function mayDesignateLeadingOption(
+  entitled: boolean,
+  rawRobustness: RawRobustnessSignals | null,
+): boolean {
+  return entitled && rawRobustness?.near_tie_is_tie === false;
+}
 
 /**
  * Whether one persisted analysis fact licenses a categorical leader
@@ -16,6 +33,9 @@ import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 export function mayDesignateLeadingOptionForFact(
   fact: HandlerFact,
 ): boolean {
-  if (!mayNameLeadingOptionForFact(fact)) return false;
-  return readRawRobustnessFromRunAnalysisFact(fact)?.near_tie_is_tie === false;
+  if (fact.fact_type !== 'run_analysis') return false;
+  return mayDesignateLeadingOption(
+    mayNameLeadingOptionForFact(fact),
+    readRawRobustnessFromRunAnalysisFact(fact),
+  );
 }

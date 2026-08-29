@@ -27,6 +27,7 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const {
   loadScenarioSnapshotForRunAnalysisMock,
@@ -141,6 +142,7 @@ const READY_GRAPH: GraphV3T = {
     { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
 } as unknown as GraphV3T;
+const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH)!;
 
 function snapshot(): RunAnalysisScenarioSnapshot {
   return {
@@ -157,6 +159,8 @@ function snapshot(): RunAnalysisScenarioSnapshot {
 function runEnvelope(): Record<string, unknown> {
   return {
     analysis_status: 'completed',
+    robustness_status: 'computed',
+    robustness: { near_tie: { is_tie: false } },
     results: [
       { option_id: 'opt_launch', option_label: 'Launch now', win_probability: 0.62, factor_sensitivity: [] },
       { option_id: 'opt_status_quo', option_label: 'Status quo', win_probability: 0.38, factor_sensitivity: [] },
@@ -176,6 +180,8 @@ function handlerOutcome() {
           scenario_id: SCENARIO_ID,
           leading_option_id: 'opt_launch',
           summary: 'Analysis ran with two options compared.',
+          graph_hash_at_run: READY_GRAPH_HASH,
+          computed_at: '2026-08-28T12:00:00.000Z',
           enrichment: runEnvelope(),
           // ROADMAP 2.804 — now LOAD-BEARING. The coaching slot's leader-claim
           // permission comes from the fact chain, which fails CLOSED on a fact

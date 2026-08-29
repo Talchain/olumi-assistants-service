@@ -214,7 +214,7 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'opt_a',
       to: 'fac_cost',
-      edge_type: 'causal',
+      edge_type: 'directed',
       strength: { mean: 0.5, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'positive',
@@ -222,7 +222,7 @@ const PRE_EDIT_GRAPH = {
     {
       from: 'fac_cost',
       to: 'goal_outcome',
-      edge_type: 'causal',
+      edge_type: 'directed',
       strength: { mean: 0.4, std: 0.1 },
       exists_probability: 0.9,
       effect_direction: 'negative',
@@ -516,8 +516,8 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       exitPath: 'turn_executor',
       graph: run.effectiveGraph ?? null,
       analysisReady: run.analysisReady,
-      selectedFactComparisons: run.rawOptionComparisons ?? null,
       leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(scrubbed),
+      selectedAnalysisLeadingOptionId: run.selectedAnalysisLeadingOptionId,
     }).response;
     const durable = (global as Record<string, unknown>).__test_last_append as {
       assistantMessage?: unknown;
@@ -590,13 +590,6 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     );
     expect(run.freshness?.selected_fact_index).toBe(1);
     expect(run.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
-    expect(run.rawOptionComparisons).toEqual([
-      {
-        option_id: 'opt_a',
-        option_label: 'Option A',
-        win_probability: 0.5,
-      },
-    ]);
 
     const finalised = finaliseV5Response(run.response, {
       canonicalState: run.canonicalState,
@@ -617,8 +610,8 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       exitPath: 'turn_executor',
       graph: run.effectiveGraph ?? null,
       analysisReady: run.analysisReady,
-      selectedFactComparisons: run.rawOptionComparisons ?? null,
       leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(scrubbed),
+      selectedAnalysisLeadingOptionId: run.selectedAnalysisLeadingOptionId,
     }).response;
     const durable = (global as Record<string, unknown>).__test_last_append as {
       assistantMessage?: unknown;
@@ -883,11 +876,10 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     // The legacy freshness derivation still reports a matching hash, which is
     // the counterexample's load-bearing precondition. But a request-only
     // provisional graph is not persisted canonical authority, so a hot orphan
-    // analysis fact cannot lend it robustness/comparison evidence or mint a
+    // analysis fact cannot lend it robustness evidence or mint a
     // categorical leader licence.
     expect(run.freshness?.freshness).toBe('fresh');
     expect(run.rawRobustness).toBeNull();
-    expect(run.rawOptionComparisons).toBeNull();
     const finalised = finaliseV5Response(run.response, {
       canonicalState: run.canonicalState,
       analysisReady: run.analysisReady,

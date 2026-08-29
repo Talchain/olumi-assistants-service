@@ -25,8 +25,11 @@ import {
   type ClaimSafetyScenarioScope,
 } from '../context/claim-safety-read.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
 import { detectCoachingSignal } from '../signals/coaching-signals.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
+import { mayDesignateLeadingOption } from '../compose/leader-designation-license.js';
+import { readRawRobustnessFromRunAnalysisFact } from './pick-raw-robustness.js';
 import { appendLastCoachingSignal } from './last-coaching-signal-log.js';
 import type { CoachingSignalId } from './types.js';
 
@@ -129,17 +132,38 @@ export function applyCoachingSignal(
   // re-read and the chip-click exit use. Not a second derivation: one function,
   // one selector pair, one leaf reader (CLAUDE.md trap #12).
   // ═══════════════════════════════════════════════════════════════════════════
-  const mayNameLeadingOption = readMayNameLeadingOptionVerdict(
-    [...input.handlerFacts, ...input.priorFacts],
+  const factsAtSignal = [...input.handlerFacts, ...input.priorFacts];
+  const leaderEntitled = readMayNameLeadingOptionVerdict(
+    factsAtSignal,
     input.claimSafetyScope,
   ).may_name_leading_option;
+  const selectedAnalysis = selectRunAnalysisFact(factsAtSignal);
+  // `selectRunAnalysisFact` answers which successful result the final turn can
+  // project. The coaching sentence describes THIS run, so an older successful
+  // fact may not lend its separation verdict when the current handler produced
+  // only a partial/degraded result. Select over the same unified array as the
+  // final freshness path, then require the winner to be one of this turn's
+  // facts. Selecting handlerFacts alone would let timestamp skew make coaching
+  // and final freshness describe different runs.
+  const currentSelectedAnalysisFact =
+    selectedAnalysis !== null && input.handlerFacts.includes(selectedAnalysis.fact)
+      ? selectedAnalysis.fact
+      : undefined;
+  // The coaching producer must ask the same final question as analysis_state:
+  // entitlement AND producer-attested separation. A near-tie can still be
+  // described numerically elsewhere, but it cannot mint “still leads” or
+  // “explore the leading option” here. Missing/malformed robustness fails weak.
+  const leaderDesignationPermitted = mayDesignateLeadingOption(
+    leaderEntitled,
+    readRawRobustnessFromRunAnalysisFact(currentSelectedAnalysisFact),
+  );
 
   const detection = detectCoachingSignal({
     proposedHandlerId: input.proposedHandlerId,
     outcome: input.outcome,
     contextPack: input.contextPack,
     priorFacts: input.priorFacts,
-    mayNameLeadingOption,
+    mayNameLeadingOption: leaderDesignationPermitted,
     ...(input.interventionControlledFactorIds !== undefined
       ? { interventionControlledFactorIds: input.interventionControlledFactorIds }
       : {}),

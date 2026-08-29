@@ -32,7 +32,6 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { deriveCompanionValueClaimSafe } from '../compose/companion-claim-safe.js';
-import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 
 export interface RawRobustnessSignals {
   /** Raw `enrichment.robustness.level` string when present (lower-cased). */
@@ -43,17 +42,6 @@ export interface RawRobustnessSignals {
    * never collapse to `false` (which positively means the options separate).
    */
   readonly near_tie_is_tie: boolean | null;
-}
-
-/**
- * The only comparison fields the final wire gate may license as measured
- * evidence. They are carried from the exact fact selected by freshness so an
- * arbitrary analysis-result block cannot borrow another run's authority.
- */
-export interface RawOptionComparisonSignal {
-  readonly option_id: string;
-  readonly option_label: string;
-  readonly win_probability: number;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -129,66 +117,4 @@ export function readRawRobustnessFromRunAnalysisFact(
   // Delegate: ONE normaliser, so the V4 and V5 addresses can never disagree
   // about what `near_tie.is_tie` means.
   return readRawRobustnessSignals(enrichment['robustness']);
-}
-
-/**
- * Project an exact, bounded comparison carrier from one already-selected fact.
- * Any malformed row invalidates the whole set; partial evidence must not mint
- * permission for the rows that happened to parse.
- */
-export function readOptionComparisonsFromRunAnalysisFact(
-  fact: HandlerFact | undefined,
-): readonly RawOptionComparisonSignal[] | null {
-  if (fact === undefined || fact.fact_type !== 'run_analysis') return null;
-  const enrichment = asObject(fact.result.enrichment);
-  if (enrichment === null) return null;
-  // Feature-level status is a whole-set authority. Absent remains the
-  // sanctioned legacy shape; any present non-computed value fails closed.
-  if (
-    !isRecommendableOption({
-      status: enrichment['option_comparison_status'],
-    })
-  ) {
-    return null;
-  }
-  const rawComparison = enrichment?.['option_comparison'];
-  if (!Array.isArray(rawComparison) || rawComparison.length === 0) return null;
-  const out: RawOptionComparisonSignal[] = [];
-  const ids = new Set<string>();
-  for (const raw of rawComparison) {
-    const row = asObject(raw);
-    if (row === null) return null;
-    // Reuse the ONE shared per-option status authority. A failed/skipped row's
-    // probability is not scientific evidence even when every scalar parses.
-    if (!isRecommendableOption(row)) return null;
-    const rawOptionId = row['option_id'];
-    const option_id =
-      typeof rawOptionId === 'string' &&
-      rawOptionId.length > 0 &&
-      rawOptionId === rawOptionId.trim()
-        ? rawOptionId
-        : null;
-    const rawOptionLabel = row['option_label'];
-    const option_label =
-      typeof rawOptionLabel === 'string' &&
-      rawOptionLabel.length > 0 &&
-      rawOptionLabel === rawOptionLabel.trim()
-        ? rawOptionLabel
-        : null;
-    const win_probability = row['win_probability'];
-    if (
-      option_id === null ||
-      option_label === null ||
-      ids.has(option_id) ||
-      typeof win_probability !== 'number' ||
-      !Number.isFinite(win_probability) ||
-      win_probability < 0 ||
-      win_probability > 1
-    ) {
-      return null;
-    }
-    ids.add(option_id);
-    out.push({ option_id, option_label, win_probability });
-  }
-  return out;
 }

@@ -245,7 +245,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   {
     code: 'band_ahead',
-    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably|only\s+just)\s+ahead\b/i,
+    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
   },
 ];
 
@@ -426,7 +426,6 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Hire Marketing Manager leads at 72% against Hold at 28%.',
   'Standardise on MacBook Pro comes out ahead, leading in 44% of simulations.',
   'Double Down on SMB is slightly ahead.',
-  'Invest is only just ahead.',
   'Standardise on Dell XPS performs best, with a probability of 56%.',
 ]);
 

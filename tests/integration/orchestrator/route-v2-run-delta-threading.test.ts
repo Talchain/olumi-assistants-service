@@ -77,7 +77,7 @@ function runFact(opts: {
     noop: false,
     result: {
       scenario_id: SCENARIO_ID,
-      leading_option_id: opts.options[0].id,
+      leading_option_id: [...opts.options].sort((a, b) => b.win - a.win)[0]!.id,
       summary: 'ok',
       graph_hash_at_run: opts.hash,
       computed_at: opts.computedAt,
@@ -87,6 +87,8 @@ function runFact(opts: {
       },
       enrichment: {
         analysis_status: 'completed',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: false } },
         results: opts.options.map((o) => ({
           option_id: o.id,
           option_label: o.label,
@@ -133,6 +135,16 @@ function mkRunResult(opts: { withPriorFacts: boolean }) {
     },
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
+    freshness: {
+      freshness: 'fresh' as const,
+      reason: 'graph_hash_match' as const,
+      selected_fact_index: 0,
+      graph_hash_at_run: 'HASH_B',
+      current_graph_hash: 'HASH_B',
+      computed_at: '2026-08-26T02:00:00.000Z',
+    },
+    rawRobustness: { level: null, near_tie_is_tie: false },
+    reasoningGraph: null,
     mayNameLeadingOption: true,
     mayNameLeadingOptionProvenance: 'fact_verdict_permitted',
     ...(opts.withPriorFacts ? { priorFacts: TWO_RUNS } : {}),

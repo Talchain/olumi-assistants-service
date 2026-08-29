@@ -1217,10 +1217,6 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         analysisReady: CURRENT_ANALYSIS_READY,
         freshness: CURRENT_ANALYSIS_FRESHNESS,
         rawRobustness: { level: 'high', near_tie_is_tie: false },
-        rawOptionComparisons: [
-          { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.72 },
-          { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.28 },
-        ],
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
         // describe exists to pin. A `functional` chip answer never shapes.
@@ -1297,10 +1293,6 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         analysisReady: CURRENT_ANALYSIS_READY,
         freshness: CURRENT_ANALYSIS_FRESHNESS,
         rawRobustness: { level: 'low', near_tie_is_tie: true },
-        rawOptionComparisons: [
-          { option_id: 'opt_hire', option_label: LEADER_LABEL, win_probability: 0.5 },
-          { option_id: 'opt_hold', option_label: RUNNER_LABEL, win_probability: 0.5 },
-        ],
         answerKind: 'substantive',
         response: {
           response_version: 2,

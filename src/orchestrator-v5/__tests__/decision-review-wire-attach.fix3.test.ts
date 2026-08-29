@@ -103,6 +103,17 @@ const DECISION_REVIEW_OUTPUT: Record<string, unknown> = {
 function makeRunAnalysisFact(withDecisionReview: boolean): HandlerFact {
   const enrichment: Record<string, unknown> = {
     graph: { nodes: [{ id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' }] },
+    robustness_status: 'computed',
+    robustness: {
+      near_tie: {
+        is_tie: false,
+        top_option_id: 'opt_a',
+        second_option_id: null,
+        tied_option_ids: [],
+        gap: 0.7,
+        threshold: 0.05,
+      },
+    },
     // T1 claim safety — the fixture must DECLARE its constraint verdict.
     // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without it,
     // dropping every leader-presuming card (narrative / robustness /

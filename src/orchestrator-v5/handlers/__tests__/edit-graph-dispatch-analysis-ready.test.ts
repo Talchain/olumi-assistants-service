@@ -209,7 +209,6 @@ describe('edit-graph-dispatch — analysisReady surfacing (response-finaliser br
         mayNameLeadingOption: true,
         mayNameLeadingOptionProvenance: 'scenario_fact',
         rawRobustness: null,
-        rawOptionComparisons: null,
         exitReasoningGraph: POST_EDIT_GRAPH as never,
         exitFreshness: {
           freshness: 'fresh',

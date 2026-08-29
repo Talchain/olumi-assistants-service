@@ -145,7 +145,6 @@ function makeMockResult() {
     graph: null,
     mayNameLeadingOption: false,
     rawRobustness: null,
-    rawOptionComparisons: null,
   };
 }
 

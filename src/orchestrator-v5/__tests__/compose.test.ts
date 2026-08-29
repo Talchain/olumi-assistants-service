@@ -106,7 +106,15 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
         scenario_id: 'scen-a',
         leading_option_id: 'opt-1',
         summary: 'Ran analysis on your current scenario.',
-        enrichment: { ...(enrichment ?? {}), __cee_claim_safety: CLAIM_SAFETY_STAMP },
+        enrichment:
+          enrichment === undefined
+            ? { __cee_claim_safety: CLAIM_SAFETY_STAMP }
+            : {
+                ...enrichment,
+                robustness_status: 'computed',
+                robustness: { near_tie: { is_tie: false } },
+                __cee_claim_safety: CLAIM_SAFETY_STAMP,
+              },
       },
     };
   }
@@ -128,7 +136,7 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
     expect(block.type).toBe('analysis_result');
     if (block.type !== 'analysis_result') throw new Error('narrowing');
     expect(block.summary).toBe('Ran analysis on your current scenario.');
-    expect(block.leading_option_id).toBe('opt-1');
+    expect(block.leading_option_id).toBeNull();
     expect(block.enrichment).toBeUndefined();
   });
 
@@ -338,6 +346,8 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
               }
             : {}),
           decision_review: { ...RICH_DECISION_REVIEW, produced_at: '2026-05-16T15:00:00.000Z' },
+          robustness_status: 'computed',
+          robustness: { near_tie: { is_tie: false } },
           // T1 claim safety — the fixture must DECLARE its constraint verdict.
           // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
           // it, dropping every leader-presuming block. `evaluated_feasible` is the branch

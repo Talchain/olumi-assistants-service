@@ -25,6 +25,7 @@ import {
   WIRE_ENFORCED_STRUCTURED_FIELDS,
   WIRE_WITHHELD_LEADER_REPLACEMENT,
 } from '../leading-option-wire-enforcement.js';
+import { WITHHELD_ANALYSIS_SUMMARY } from '../withheld-claim-projection.js';
 import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
@@ -49,32 +50,6 @@ function envelope(assistantText: string, extra: Record<string, unknown> = {}): O
   } as OlumiResponse;
 }
 
-function envelopeWithAttestedComparison(
-  assistantText: string,
-  winProbability = 0.5,
-  comparisonOverride?: readonly Record<string, unknown>[],
-): OlumiResponse {
-  return envelope(assistantText, {
-    blocks: [
-      {
-        type: 'analysis_result',
-        enrichment: {
-          option_comparison:
-            comparisonOverride ??
-            [
-              {
-                option_id: 'opt_hire',
-                option_label: LEADER,
-                win_probability: winProbability,
-              },
-              { option_id: 'opt_hold', option_label: 'Hold', win_probability: 1 - winProbability },
-            ],
-        },
-      },
-    ],
-  });
-}
-
 /**
  * The scenario's own graph — the ONLY thing this gate reads it for is the option
  * ROSTER ("which options exist"), never a ranking. Without it the gate stands
@@ -90,18 +65,10 @@ const ROSTER_GRAPH = {
   edges: [],
 };
 
-function selectedComparisons(winProbability = 0.5) {
-  return [
-    { option_id: 'opt_hire', option_label: LEADER, win_probability: winProbability },
-    { option_id: 'opt_hold', option_label: 'Hold', win_probability: 1 - winProbability },
-  ] as const;
-}
-
 const OPTS = {
   requestId: 'req-2149',
   exitPath: 'edit_graph' as const,
   graph: ROSTER_GRAPH,
-  selectedFactComparisons: selectedComparisons(),
 };
 
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
@@ -218,170 +185,197 @@ describe('FINAL AUTHORITY — designation and independently attested evidence ar
   });
 });
 
-describe('EVIDENCE-ONLY — exact producer data survives without becoming a designation', () => {
-  const nearTieEvidence =
-    `${LEADER} came out ahead in 50% of runs of this model, but this is a close call.`;
-
-  it('keeps exact producer-attested near-tie evidence and its same-unit qualification', () => {
-    const input = envelopeWithAttestedComparison(nearTieEvidence, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it.each(['error', 'skipped', 'unavailable'])(
-    'rejects body comparison evidence whose feature status is %s even when its values match the selected fact',
-    (option_comparison_status) => {
-      const input = envelopeWithAttestedComparison(nearTieEvidence, 0.5) as OlumiResponse & {
-        blocks: Array<{ enrichment: Record<string, unknown> }>;
-      };
-      input.blocks[0]!.enrichment['option_comparison_status'] = option_comparison_status;
-      const result = enforceLeadingOptionClaimsAtWire(input, {
-        ...OPTS,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      });
-      expect(result.changed).toBe(true);
-      expect(result.response.assistant_text).not.toContain('50%');
-    },
-  );
-
-  it.each(['error', 'skipped', 'unavailable'])(
-    'rejects body comparison evidence with a %s row even when its values match the selected fact',
-    (status) => {
-      const input = envelopeWithAttestedComparison(nearTieEvidence, 0.5) as OlumiResponse & {
-        blocks: Array<{
-          enrichment: { option_comparison: Array<Record<string, unknown>> };
-        }>;
-      };
-      input.blocks[0]!.enrichment.option_comparison[0]!['status'] = status;
-      const result = enforceLeadingOptionClaimsAtWire(input, {
-        ...OPTS,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      });
-      expect(result.changed).toBe(true);
-      expect(result.response.assistant_text).not.toContain('50%');
-    },
-  );
-
-  it('keeps exact body evidence when both feature and row statuses are computed', () => {
-    const input = envelopeWithAttestedComparison(nearTieEvidence, 0.5) as OlumiResponse & {
-      blocks: Array<{
-        enrichment: {
-          option_comparison_status?: string;
-          option_comparison: Array<Record<string, unknown>>;
-        };
-      }>;
-    };
-    input.blocks[0]!.enrichment.option_comparison_status = 'computed';
-    for (const row of input.blocks[0]!.enrichment.option_comparison) {
-      row['status'] = 'computed';
-    }
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it('keeps a result-scoped could-shift qualification in the same evidence unit', () => {
-    const text =
-      `${LEADER} came out ahead in 50% of runs of this model, but the result could shift.`;
-    const input = envelopeWithAttestedComparison(text, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it('keeps the captured producer-scoped near-tie qualification', () => {
-    const text =
-      `${LEADER} came out ahead in 50% of runs of this model, but the analysis treats this as a close call.`;
-    const input = envelopeWithAttestedComparison(text, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it('does not let a negated producer-scoped phrase license near-tie evidence', () => {
-    const text =
-      `${LEADER} came out ahead in 50% of runs of this model, but the analysis does not treat this as a close call.`;
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(text, 0.5),
-      {
-        ...OPTS,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it('rejects an unrelated could-shift clause as a near-tie qualification', () => {
-    const text =
-      `${LEADER} came out ahead in 50% of runs of this model, but our hiring date could shift.`;
-    const input = envelopeWithAttestedComparison(text, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it.each([
-    'but this is not a close call.',
-    'but it would be wrong to call this close.',
-    'but the result is not effectively tied.',
-    'the analysis treats this as a close call? No.',
-    'the analysis treats this as a close call, incorrectly.',
-    'the analysis treats this as a close call even though it is not.',
-    'but it is not true that this is a close call.',
-    'I reject the claim that the options are effectively tied.',
-  ])('rejects a negated or repudiated near-tie phrase: %s', (qualification) => {
-    const text = `${LEADER} came out ahead in 50% of runs of this model, ${qualification}`;
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(text, 0.5),
-      {
-        ...OPTS,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it.each([
+describe('EVIDENCE-ONLY — typed and code-owned surfaces only', () => {
+  const evidenceOnlyPolicies = [
     'evidence_only_options_do_not_separate',
     'evidence_only_constraint_verdict_withheld',
     'evidence_only_separation_unavailable',
-    'designation_withheld',
-  ] as const)(
-    'removes the structured leader designation under %s while retaining measured enrichment',
+  ] as const;
+
+  it.each(evidenceOnlyPolicies)(
+    'does not infer semantic spans in arbitrary prose under %s',
     (leaderClaimPolicy) => {
-      const input = envelopeWithAttestedComparison(
-        leaderClaimPolicy === 'evidence_only_options_do_not_separate'
-          ? nearTieEvidence
-          : 'Analysis complete.',
-        0.5,
-      ) as OlumiResponse & {
-        blocks: Array<{
-          type: 'analysis_result';
-          summary: string;
-          leading_option_id: string | null;
-          enrichment: { option_comparison: Array<Record<string, unknown>> };
-        }>;
-      };
-      input.blocks[0]!.summary = `${LEADER} leads on this run.`;
-      input.blocks[0]!.leading_option_id = 'opt_hire';
+      const input = envelope(
+        `${LEADER} currently leads at 72%. It comes out ahead in a salary survey.`,
+        {
+          framing_question: `Why does ${LEADER} lead?`,
+        },
+      );
+      const result = enforceLeadingOptionClaimsAtWire(input, {
+        ...OPTS,
+        leaderClaimPolicy,
+      });
+
+      expect(result.changed).toBe(false);
+      expect(result.response).toBe(input);
+      expect(result.editedFields).toEqual([]);
+    },
+  );
+
+  it('keeps an unrelated same-unit co-occurrence byte-identical', () => {
+    const input = envelope(
+      `${LEADER} is in scope; the salary survey currently leads the discussion.`,
+    );
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it.each(evidenceOnlyPolicies)(
+    'projects typed designation and summary while preserving comparison prose under %s',
+    (leaderClaimPolicy) => {
+      const comparison = [
+        { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
+        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
+      ];
+      const assistantText =
+        `${LEADER} came out ahead in 50% of simulations, but the analysis treats this as a close call.`;
+      const input = envelope(assistantText, {
+        blocks: [
+          {
+            type: 'analysis_result',
+            leading_option_id: 'opt_hire',
+            summary: `${LEADER} leads on this run.`,
+            enrichment: { option_comparison: comparison },
+          },
+        ],
+      });
+      const result = enforceLeadingOptionClaimsAtWire(input, {
+        ...OPTS,
+        leaderClaimPolicy,
+      });
+      const block = result.response.blocks.find(
+        (candidate) => candidate.type === 'analysis_result',
+      );
+
+      expect(result.response.assistant_text).toBe(assistantText);
+      expect(block?.leading_option_id).toBeNull();
+      expect(block?.summary).toBe(WITHHELD_ANALYSIS_SUMMARY);
+      expect((block?.enrichment as Record<string, unknown>)?.option_comparison).toEqual(
+        comparison,
+      );
+    },
+  );
+
+  it.each([
+    [`The prior claim \"${LEADER} leads.\" is disputed.`, 'quoted claim'],
+    [`I am checking whether ${LEADER} leads.`, 'interrogative clause'],
+    [`${LEADER} leads the implementation workstream.`, 'transitive workstream'],
+    [`${LEADER} is in scope; the salary survey currently leads the discussion.`, 'co-occurrence'],
+  ])('does not treat a %s as a direct designation', (assistantText) => {
+    const input = envelope(assistantText, {
+      blocks: [
+        {
+          type: 'analysis_result',
+          leading_option_id: 'opt_hire',
+          summary: 'The options do not separate.',
+        },
+      ],
+    });
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+
+    expect(result.response.assistant_text).toBe(assistantText);
+  });
+
+  it('does not turn a distributed pronoun into an option identity', () => {
+    const input = envelope(
+      `${LEADER} is a distant third. It only comes out ahead in a tiny fraction of simulations.`,
+    );
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it('does not splice or rewrite untyped same-unit evidence and consequences', () => {
+    const input = envelope(
+      `${LEADER} comes out ahead in 99%, so the regulator approved it and budget risk is eliminated.`,
+    );
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
+  it('removes the exact code-owned first-analysis designation without deleting its receipt', () => {
+    const signal =
+      'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.';
+    const input = envelope(`${RECEIPT} ${signal}`);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.editedFields).toEqual(['assistant_text']);
+    expect(result.response.assistant_text).toContain(RECEIPT);
+    expect(result.response.assistant_text).not.toContain(signal);
+    expect(result.response.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+  });
+
+  it.each(evidenceOnlyPolicies)(
+    'projects typed structured designation under %s while leaving free summary prose untouched',
+    (leaderClaimPolicy) => {
+      const comparison = [
+        {
+          option_id: 'opt_hire',
+          option_label: LEADER,
+          win_probability: 0.5,
+          status: 'computed',
+        },
+        {
+          option_id: 'opt_hold',
+          option_label: 'Hold',
+          win_probability: 0.5,
+          status: 'computed',
+        },
+      ];
+      const summary = `${LEADER} leads on this run.`;
+      const input = envelope('Analysis complete.', {
+        blocks: [
+          {
+            type: 'analysis_result',
+            leading_option_id: 'opt_hire',
+            summary,
+            enrichment: {
+              option_comparison_status: 'computed',
+              option_comparison: comparison,
+              decision_brief: {
+                headline: `${LEADER} currently leads, but remains within model uncertainty.`,
+                top_drivers: ['Capacity is the strongest licensed driver.'],
+                key_assumptions: ['Demand remains stable.'],
+              },
+              decision_review: {
+                story_headlines: { opt_hire: `${LEADER} leads—but only slightly.` },
+              },
+              robustness: {
+                recommended_option_id: 'opt_hire',
+                recommended_option_label: LEADER,
+                near_tie: {
+                  is_tie: true,
+                  gap: 0,
+                  threshold: 0.05,
+                  top_option_id: 'opt_hire',
+                  second_option_id: 'opt_hold',
+                },
+              },
+            },
+          },
+        ],
+      });
 
       const result = enforceLeadingOptionClaimsAtWire(input, {
         ...OPTS,
@@ -390,108 +384,65 @@ describe('EVIDENCE-ONLY — exact producer data survives without becoming a desi
       const block = result.response.blocks.find(
         (candidate) => candidate.type === 'analysis_result',
       );
+      const enrichment = block?.enrichment as Record<string, any> | undefined;
+
       expect(result.changed).toBe(true);
-      expect(result.editedFields).toContain('analysis_result');
+      expect(result.editedFields).toEqual(['analysis_result']);
       expect(block?.leading_option_id).toBeNull();
-      expect(block?.summary).not.toMatch(/leads on this run/i);
-      expect(block?.enrichment?.option_comparison).toEqual(
-        input.blocks[0]!.enrichment.option_comparison,
-      );
+      expect(block?.summary).toBe(summary);
+      expect(enrichment?.option_comparison).toEqual(comparison);
+      expect(enrichment?.decision_brief).toMatchObject({
+        top_drivers: ['Capacity is the strongest licensed driver.'],
+        key_assumptions: ['Demand remains stable.'],
+      });
+      expect(enrichment?.decision_brief).not.toHaveProperty('headline');
+      expect(enrichment).not.toHaveProperty('decision_review');
+      expect(enrichment?.robustness).toEqual({
+        near_tie: { is_tie: true, gap: 0, threshold: 0.05 },
+      });
     },
   );
 
   it('keeps the structured leader designation byte-identical when final authority permits it', () => {
-    const input = envelopeWithAttestedComparison('Analysis complete.', 0.62) as OlumiResponse & {
-      blocks: Array<{ summary: string; leading_option_id: string | null }>;
-    };
-    input.blocks[0]!.summary = `${LEADER} leads on this run.`;
-    input.blocks[0]!.leading_option_id = 'opt_hire';
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      selectedFactComparisons: selectedComparisons(0.62),
-      leaderClaimPolicy: 'designation_permitted',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it('removes nested near-tie designations while preserving independent evidence', () => {
-    const comparison = [
-      {
-        option_id: 'opt_hire',
-        option_label: LEADER,
-        win_probability: 0.5,
-        status: 'computed',
-      },
-      {
-        option_id: 'opt_hold',
-        option_label: 'Hold',
-        win_probability: 0.5,
-        status: 'computed',
-      },
-    ];
-    const input = envelope('The analysis treats this as a close call.', {
+    const input = envelope('Analysis complete.', {
       blocks: [
         {
           type: 'analysis_result',
+          summary: `${LEADER} leads on this run.`,
           leading_option_id: 'opt_hire',
-          summary: 'The options do not separate.',
-          enrichment: {
-            option_comparison_status: 'computed',
-            option_comparison: comparison,
-            decision_brief: {
-              headline: `${LEADER} currently leads, but remains within model uncertainty.`,
-              top_drivers: ['Capacity is the strongest licensed driver.'],
-              key_assumptions: ['Demand remains stable.'],
-            },
-            decision_review: {
-              story_headlines: { opt_hire: `${LEADER} leads—but only slightly.` },
-            },
-            robustness: {
-              recommended_option_id: 'opt_hire',
-              recommended_option_label: LEADER,
-              near_tie: {
-                is_tie: true,
-                gap: 0,
-                threshold: 0.05,
-                top_option_id: 'opt_hire',
-                second_option_id: 'opt_hold',
-              },
-            },
-          },
         },
       ],
     });
-
     const result = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
+      leaderClaimPolicy: 'designation_permitted',
     });
-    const block = result.response.blocks.find(
-      (candidate) => candidate.type === 'analysis_result',
-    );
-    const enrichment = block?.enrichment as Record<string, any> | undefined;
 
-    expect(result.changed).toBe(true);
-    expect(block?.leading_option_id).toBeNull();
-    expect(enrichment?.option_comparison).toEqual(comparison);
-    expect(enrichment?.decision_brief).toMatchObject({
-      top_drivers: ['Capacity is the strongest licensed driver.'],
-      key_assumptions: ['Demand remains stable.'],
-    });
-    expect(enrichment?.decision_brief).not.toHaveProperty('headline');
-    expect(enrichment).not.toHaveProperty('decision_review');
-    expect(enrichment?.robustness).toEqual({
-      near_tie: { is_tie: true, gap: 0, threshold: 0.05 },
-    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
   });
 
   it.each([
     ['BigInt', { option_comparison: [{ impossible: 1n }] }],
-    ['cycle', (() => { const value: Record<string, unknown> = {}; value.self = value; return value; })()],
-    ['throwing getter', Object.defineProperty({}, 'decision_brief', { enumerable: true, get() { throw new Error('getter'); } })],
+    [
+      'cycle',
+      (() => {
+        const value: Record<string, unknown> = {};
+        value.self = value;
+        return value;
+      })(),
+    ],
+    [
+      'throwing getter',
+      Object.defineProperty({}, 'decision_brief', {
+        enumerable: true,
+        get() {
+          throw new Error('getter');
+        },
+      }),
+    ],
     ['throwing toJSON', { option_comparison: { toJSON() { throw new Error('toJSON'); } } }],
-  ])('does not let a hostile %s enrichment bypass typed designation removal', (_name, enrichment) => {
+  ])('does not let hostile %s enrichment bypass typed designation removal', (_name, enrichment) => {
     const input = envelope('Analysis complete.', {
       blocks: [
         {
@@ -509,435 +460,49 @@ describe('EVIDENCE-ONLY — exact producer data survives without becoming a desi
     const block = result.response.blocks.find(
       (candidate) => candidate.type === 'analysis_result',
     );
+
     expect(result.changed).toBe(true);
     expect(block?.leading_option_id).toBeNull();
     expect(block?.summary).not.toMatch(/leads on this run/i);
   });
 
-  it('inspects a stateful Proxy once and cannot fail open on a later ownKeys trap', () => {
-    let ownKeysCalls = 0;
-    const enrichment = new Proxy(
-      {
-        option_comparison: [
-          { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
+  it('preserves the recorded losing-option explanation rather than guessing its pronouns', () => {
+    const text =
+      'Keep what we have is a long way off the pace. ' +
+      'It is currently a distant third. It only comes out ahead in a tiny fraction of simulations, ' +
+      'so the case for it rests on the other two options underperforming badly. ' +
+      'Budget overrun is the main lever working against switching.';
+    const input = envelope(text);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      graph: {
+        nodes: [
+          { id: 'opt_keep', kind: 'option', label: 'Keep what we have' },
+          { id: 'opt_move', kind: 'option', label: 'Move to HubSpot' },
         ],
+        edges: [],
       },
-      {
-        ownKeys(target) {
-          ownKeysCalls += 1;
-          if (ownKeysCalls > 1) throw new Error('second inspection forbidden');
-          return Reflect.ownKeys(target);
-        },
-      },
-    );
-    const input = envelope('Analysis complete.', {
-      blocks: [
-        {
-          type: 'analysis_result',
-          leading_option_id: 'opt_hire',
-          summary: `${LEADER} leads on this run.`,
-          enrichment,
-        },
-      ],
-    });
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'designation_withheld',
-    });
-    const block = result.response.blocks.find(
-      (candidate) => candidate.type === 'analysis_result',
-    );
-    expect(ownKeysCalls).toBeGreaterThanOrEqual(1);
-    expect(result.changed).toBe(true);
-    expect(block?.leading_option_id).toBeNull();
-    expect(block?.summary).not.toMatch(/leads on this run/i);
-    expect(Object.is(block?.enrichment, enrichment)).toBe(false);
-  });
-
-  it('keeps blockless follow-up evidence grounded by the exact selected fact and canonical roster', () => {
-    const input = envelope(nearTieEvidence);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
       leaderClaimPolicy: 'evidence_only_options_do_not_separate',
     });
+
     expect(result.changed).toBe(false);
     expect(result.response).toBe(input);
   });
 
-  it.each([
-    ['changed percentage', nearTieEvidence.replace('50%', '51%'), selectedComparisons()],
-    [
-      'mismatched selected identity',
-      nearTieEvidence,
-      [
-        { option_id: 'opt_other', option_label: LEADER, win_probability: 0.5 },
-        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
-      ],
-    ],
-    [
-      'mismatched selected label',
-      nearTieEvidence,
-      [
-        { option_id: 'opt_hire', option_label: 'Invented label', win_probability: 0.5 },
-        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
-      ],
-    ],
-  ])('blockless RED control: %s cannot self-license', (_label, text, selectedFactComparisons) => {
-    const result = enforceLeadingOptionClaimsAtWire(envelope(text), {
-      ...OPTS,
-      selectedFactComparisons,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain(text);
-  });
-
-  it('removes a categorical designation while retaining a separate attested near-tie sentence', () => {
-    const input = envelopeWithAttestedComparison(
-      `${LEADER} is the leading option. ${nearTieEvidence}`,
-      0.5,
-    );
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('is the leading option');
-    expect(result.response.assistant_text).toContain(nearTieEvidence);
-  });
-
-  it.each([
-    '; it is still the leading option.',
-    ' — and it still leads.',
-  ])(
-    'does not let a same-unit pronoun designation piggyback on licensed evidence: %s',
-    (suffix) => {
-      const text = nearTieEvidence.replace(/\.$/, suffix);
-      const input = envelopeWithAttestedComparison(text, 0.5);
-      const result = enforceLeadingOptionClaimsAtWire(input, {
-        ...OPTS,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      });
-      expect(result.changed).toBe(true);
-      expect(result.response.assistant_text).not.toMatch(/leading option|still leads/i);
-    },
-  );
-
-  it('preserves the recorded losing-option explanation instead of resolving its pronoun as a leader', () => {
-    // Exact load-bearing excerpt from
-    // olumi-docs/.../20260827T073839Z-fresh-extended-439216-raw/step-T6_FLIP.json.
-    // The field names a canonical option, but the comparative unit describes it
-    // as a distant third. Field-wide vocabulary deletion removed the whole unit.
-    const losingEvidence =
-      'Keep what we have is a long way off the pace, so this would take more than a small nudge ' +
-      'to flip.\n\n• **It is currently a distant third.** It only comes out ahead in a tiny ' +
-      'fraction of simulations, well behind both HubSpot options, so the case for it rests on ' +
-      'the other two options underperforming badly rather than on its own strengths.';
-    const graph = {
-      nodes: [
-        { id: 'opt_hubspot', kind: 'option', label: 'replace our current CRM with HubSpot next quarter' },
-        { id: 'opt_keep', kind: 'option', label: 'Keep what we have' },
-        { id: 'opt_pilot', kind: 'option', label: 'Phased HubSpot Pilot' },
-      ],
-      edges: [],
-    };
-    const input = envelope(losingEvidence);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      graph,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-  });
-
-  it('removes the typed first-analysis leader nudge while preserving near-tie evidence', () => {
+  it('leaves historical rerun prose untouched at wire; its code-owned producer owns the fix', () => {
     const text =
-      `${nearTieEvidence}\n\nYour first analysis is ready. Take a moment to explore the leading ` +
-      'option and the factors shaping it before acting on the result.';
-    const input = envelopeWithAttestedComparison(text, 0.5);
+      'The picture has stayed the same: Hire Marketing Manager still leads. ' +
+      'That is a result in itself: the conclusion held both before and after those changes.';
+    const input = envelope(text);
     const result = enforceLeadingOptionClaimsAtWire(input, {
       ...OPTS,
       leaderClaimPolicy: 'evidence_only_options_do_not_separate',
     });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).toContain(nearTieEvidence);
-    expect(result.response.assistant_text).not.toContain('explore the leading option');
-  });
 
-  it('replaces a distributed pronoun designation with exact typed evidence', () => {
-    const text = `${LEADER} is strong. It leads at 72%.`;
-    const input = envelopeWithAttestedComparison(text, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).toBe(
-      `${LEADER} came out ahead in 50% of runs of this model; Hold came out ahead in 50% ` +
-        'of runs of this model. The options do not separate.',
-    );
-    expect(result.response.assistant_text).not.toContain('leads at 72%');
-
-    const strict = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'designation_withheld',
-    });
-    expect(strict.changed).toBe(true);
-    expect(strict.response.assistant_text).not.toContain('leads at 72%');
-  });
-
-  it('uses the same typed fallback when truthful evidence is phrased outside the narrow carve-out', () => {
-    const text =
-      `${LEADER} was measured in half the simulations. It leads, but the result is not settled.`;
-    const input = envelopeWithAttestedComparison(text, 0.5);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).toContain(
-      `${LEADER} came out ahead in 50% of runs of this model`,
-    );
-    expect(result.response.assistant_text).toContain('The options do not separate.');
-    expect(result.response.assistant_text).not.toContain('was ahead');
-  });
-
-  it('preserves attested evidence under a constraint-withheld caveat without inventing a tie', () => {
-    const text =
-      `${LEADER} came out ahead in 62% of runs of this model, while the constraint verdict ` +
-      'withholds a leading option.';
-    const input = envelopeWithAttestedComparison(text, 0.62);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_constraint_verdict_withheld',
-      selectedFactComparisons: selectedComparisons(0.62),
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-    expect(result.response.assistant_text).not.toContain('close call');
-  });
-
-  it('preserves attested evidence when separation was not established without inventing a tie', () => {
-    const text =
-      `${LEADER} came out ahead in 62% of runs of this model, but the analysis did not ` +
-      'establish whether the options separate.';
-    const input = envelopeWithAttestedComparison(text, 0.62);
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_separation_unavailable',
-      selectedFactComparisons: selectedComparisons(0.62),
-    });
-    expect(result.changed).toBe(false);
-    expect(result.response).toBe(input);
-    expect(result.response.assistant_text).not.toContain('effectively tied');
-  });
-
-  it('RED control: a changed percentage cannot self-license', () => {
-    const mutated = nearTieEvidence.replace('50%', '51%');
-    expect(mutated).not.toBe(nearTieEvidence);
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(mutated, 0.5),
-      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('51%');
-  });
-
-  it('RED control: qualification in another sentence cannot license the comparison', () => {
-    const mutated = nearTieEvidence.replace(', but this is a close call.', '. It is a close call.');
-    expect(splitIntoRedactableUnits(mutated)).toHaveLength(2);
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(mutated, 0.5),
-      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-    expect(result.response.assistant_text).toContain('It is a close call.');
-  });
-
-  it('RED control: response comparisons cannot borrow a different selected fact', () => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
-      {
-        ...OPTS,
-        selectedFactComparisons: selectedComparisons(0.51),
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it('RED control: absent selected-fact comparisons cannot license body evidence', () => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
-      {
-        ...OPTS,
-        selectedFactComparisons: null,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it('a present malformed graph stands down instead of borrowing stale readiness identity', () => {
-    const analysisReady = {
-      options: [
-        { option_id: 'opt_hire', label: LEADER },
-        { option_id: 'opt_hold', label: 'Hold' },
-      ],
-    };
-    const malformed = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence),
-      {
-        ...OPTS,
-        graph: { nodes: 'malformed' },
-        analysisReady,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(malformed.changed).toBe(false);
-    expect(malformed.response.assistant_text).toContain('50%');
-    expect(
-      events.some(
-        (event) =>
-          event.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire &&
-          event.data['mode'] === 'roster_unavailable',
-      ),
-    ).toBe(true);
-
-    const absentGraph = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence),
-      {
-        ...OPTS,
-        graph: null,
-        analysisReady,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(absentGraph.changed).toBe(false);
-  });
-
-  it.each([
-    [
-      'canonical graph label',
-      {
-        graph: {
-          ...ROSTER_GRAPH,
-          nodes: ROSTER_GRAPH.nodes.map((node) =>
-            node.id === 'opt_hire' ? { ...node, label: ` ${LEADER} ` } : node,
-          ),
-        },
-      },
-    ],
-    [
-      'readiness option id',
-      {
-        graph: null,
-        analysisReady: {
-          options: [
-            { option_id: ' opt_hire ', label: LEADER },
-            { option_id: 'opt_hold', label: 'Hold' },
-          ],
-        },
-      },
-    ],
-    [
-      'readiness option label',
-      {
-        graph: null,
-        analysisReady: {
-          options: [
-            { option_id: 'opt_hire', label: ` ${LEADER} ` },
-            { option_id: 'opt_hold', label: 'Hold' },
-          ],
-        },
-      },
-    ],
-  ])('RED control: outer whitespace in %s cannot be normalised into identity', (_label, identityOverride) => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence),
-      {
-        ...OPTS,
-        ...identityOverride,
-        leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-      },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it.each([
-    ['response comparison id', ' opt_hire ', LEADER],
-    ['response comparison label', 'opt_hire', ` ${LEADER} `],
-  ])('RED control: outer whitespace in %s cannot borrow canonical identity', (_label, id, optionLabel) => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence, 0.5, [
-        { option_id: id, option_label: optionLabel, win_probability: 0.5 },
-        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
-      ]),
-      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it.each([
-    [
-      'mismatched canonical label',
-      [
-        { option_id: 'opt_hire', option_label: 'Invented label', win_probability: 0.5 },
-        { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.5 },
-      ],
-    ],
-    [
-      'duplicate producer identity',
-      [
-        { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
-        { option_id: 'opt_hire', option_label: LEADER, win_probability: 0.5 },
-      ],
-    ],
-    [
-      'malformed producer probability',
-      [
-        { option_id: 'opt_hire', option_label: LEADER, win_probability: 2 },
-        { option_id: 'opt_hold', option_label: 'Hold', win_probability: -1 },
-      ],
-    ],
-  ])('RED control: %s fails closed for evidence', (_label, comparison) => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence, 0.5, comparison),
-      { ...OPTS, leaderClaimPolicy: 'evidence_only_options_do_not_separate' },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it('a stale/refused/malformed policy cannot reuse otherwise exact evidence', () => {
-    const result = enforceLeadingOptionClaimsAtWire(
-      envelopeWithAttestedComparison(nearTieEvidence, 0.5),
-      { ...OPTS, leaderClaimPolicy: 'designation_withheld' },
-    );
-    expect(result.changed).toBe(true);
-    expect(result.response.assistant_text).not.toContain('50%');
-  });
-
-  it('GREEN control: unrelated structured fields cannot change the evidence verdict', () => {
-    const input = {
-      ...envelopeWithAttestedComparison(nearTieEvidence, 0.5),
-      suggested_actions: [{ action: 'inspect_assumptions', label: 'Inspect assumptions' }],
-    } as OlumiResponse;
-    const result = enforceLeadingOptionClaimsAtWire(input, {
-      ...OPTS,
-      leaderClaimPolicy: 'evidence_only_options_do_not_separate',
-    });
     expect(result.changed).toBe(false);
     expect(result.response).toBe(input);
   });
 });
-
 describe('SURGERY — only the offending unit goes', () => {
   it('the surviving sentence is byte-identical and the claim is gone', () => {
     const { response } = enforceLeadingOptionClaimsAtWire(envelope(`${RECEIPT} ${CLAIM}`), {
@@ -1016,6 +581,7 @@ describe('SURGERY — only the offending unit goes', () => {
     expect(twice.changed).toBe(false);
     expect(twice.response).toBe(once.response);
   });
+
 });
 
 describe('framing_question — the second covered surface', () => {

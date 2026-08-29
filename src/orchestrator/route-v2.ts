@@ -718,9 +718,9 @@ async function sendFinalised200(
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
     /** Graph identity used by AI reasoning; explicit null forbids request fallback. */
-    readonly reasoningGraph?: GraphV3T | null;
+    readonly reasoningGraph?: unknown | null;
     /** Persisted resolver snapshot used only when this exit has no graph of its own. */
-    readonly exitReasoningGraph?: GraphV3T | null;
+    readonly exitReasoningGraph?: unknown | null;
     /** V5 state-trust freshness derivation. Threaded into the finaliser
      *  so the analysisReady payload carries freshness fields and
      *  computed_at reflects the selected fact's timestamp. Populated on
@@ -822,10 +822,8 @@ async function sendFinalised200(
      * Current canonical run-analysis robustness for final `analysis_state`.
      * TurnExecutor derives this from the same selected fact/freshness basis as
      * its answer; other exits omit and therefore fail weakly.
-     */
+    */
     readonly rawRobustness?: import('../orchestrator-v5/coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
-    /** Comparisons from the same selected fact; numerical evidence fails weak without it. */
-    readonly rawOptionComparisons?: readonly import('../orchestrator-v5/coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
     /**
      * Persisted turn-entry freshness carried by the lazy non-execute resolver.
      * It is deliberately distinct from a dispatch's own `freshness`: positions
@@ -996,7 +994,7 @@ async function sendFinalised200(
   // a fact identity: tied rows can appear in different orders in independently
   // loaded arrays, and selected_fact_index is explicitly array-relative. Until
   // a dispatcher carries evidence from its own selected fact (or an immutable
-  // fact id exists), dual-source exits fail weak for robustness/comparisons.
+  // fact id exists), dual-source exits fail weak for robustness.
   const carriesOneAuthoritativeEvidenceSnapshot =
     // Dispatch-owned carriers (TurnExecutor and successful run-analysis chip)
     // come from the exact fact array used for this dispatch's freshness.
@@ -1010,7 +1008,7 @@ async function sendFinalised200(
       ctx.exitFreshness?.freshness === 'fresh');
   const coherentSnapshotContext = carriesOneAuthoritativeEvidenceSnapshot
     ? ctx
-    : { ...ctx, rawRobustness: null, rawOptionComparisons: null };
+    : { ...ctx, rawRobustness: null };
   const finaliserContext = analysisAuthorityUnavailable
     ? {
         ...coherentSnapshotContext,
@@ -1018,7 +1016,6 @@ async function sendFinalised200(
         // must not survive the same fail-closed projection and manufacture a
         // separation verdict beside an unavailable canonical read.
         rawRobustness: null,
-        rawOptionComparisons: null,
         freshness: ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
         canonicalState: canonicalStateFromFreshness(
           ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
@@ -1201,11 +1198,10 @@ async function sendFinalised200(
   const egress = validateEgress(candidateSanitised, requestId);
   // One fail-weak context for every post-validation pass. A typed fallback is
   // not evidence about the historical run, and later re-finalisation must not
-  // resurrect either robustness or comparison authority from the rejected
-  // candidate.
+  // resurrect robustness authority from the rejected candidate.
   const wireFinaliserContext = egress.ok
     ? finaliserContext
-    : { ...finaliserContext, rawRobustness: null, rawOptionComparisons: null };
+    : { ...finaliserContext, rawRobustness: null };
   let wireBody = egress.ok
     ? finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
@@ -1703,9 +1699,6 @@ async function sendFinalised200(
     // `compose/__tests__/leader-roster-fallback.test.ts` RED if that stops
     // being true.
     analysisReady: ctx.analysisReady,
-    selectedFactComparisons: egress.ok
-      ? wireFinaliserContext.rawOptionComparisons ?? null
-      : null,
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =
@@ -3021,7 +3014,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // Same post-dispatch fact selected by `cc.freshness`; the final
           // analysis-state/wire gate must not re-author evidence from body copy.
           rawRobustness: cc.rawRobustness,
-          rawOptionComparisons: cc.rawOptionComparisons,
           reasoningGraph: cc.graph,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
           // answer's declared kind, DEFAULTING to 'functional' when the dispatch
@@ -6411,7 +6403,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // degraded detection + contradictions over the unified fact chain).
       ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
       rawRobustness: run.rawRobustness,
-      rawOptionComparisons: run.rawOptionComparisons ?? null,
       reasoningGraph: run.reasoningGraph,
       // T4 Slice 2: the once-per-turn canonical context frame. When present,
       // the context-summary diagnostic is projected from the frame alone.

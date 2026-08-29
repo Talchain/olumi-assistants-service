@@ -434,7 +434,6 @@ import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import {
   pickLatestRawRobustness,
-  readOptionComparisonsFromRunAnalysisFact,
   readRawRobustnessFromRunAnalysisFact,
 } from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
@@ -535,14 +534,8 @@ export interface TurnExecutorRunResult {
    * selected analysis is stale/unavailable or supplied no usable signal.
    */
   rawRobustness: import('./coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
-  /**
-   * Exact comparisons from the same selected fact as `rawRobustness`. Final
-   * wire enforcement uses this only to prove that numerical body evidence and
-   * final analysis authority describe one run.
-   */
-  rawOptionComparisons?: readonly import('./coaching/pick-raw-robustness.js').RawOptionComparisonSignal[] | null;
   /** Canonical/provisional graph selected for AI reasoning identity at egress. */
-  reasoningGraph: GraphV3T | null;
+  reasoningGraph: GraphStateIngress | null;
   /**
    * T1 claim safety — may this turn NAME a leading option?
    *
@@ -1543,9 +1536,6 @@ export async function runTurnExecutor(
       const rawRobustnessForCommit = readRawRobustnessFromRunAnalysisFact(
         selectedAnalysisFactForCommit,
       );
-      const rawComparisonsForCommit = readOptionComparisonsFromRunAnalysisFact(
-        selectedAnalysisFactForCommit,
-      );
       const canonicalStateForCommit =
         canonicalStateForRun ??
         (freshness !== null ? canonicalStateForNonExecute() : undefined);
@@ -1562,12 +1552,11 @@ export async function runTurnExecutor(
       const durableResponse = projectLeaderClaimForDurableCommit(
         zeroSelectionProjection.response,
         {
-        requestId,
-        exitPath: 'turn_executor',
-        leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelopeForCommit),
-        graph: contentGraphForCommit,
-        analysisReady: analysisReadyForTurn,
-        selectedFactComparisons: rawComparisonsForCommit,
+          requestId,
+          exitPath: 'turn_executor',
+          leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelopeForCommit),
+          graph: contentGraphForCommit,
+          analysisReady: analysisReadyForTurn,
         },
       ).response;
       result = await commitDirectAnswer(
@@ -2200,7 +2189,7 @@ export async function runTurnExecutor(
   // Read-only AI authority. Kept separate from `effectiveTurnGraph`, which is
   // request/commit oriented and may legitimately be newer or stale while a
   // canonical persisted graph still governs reasoning.
-  let reasoningTurnGraph: GraphV3T | null = null;
+  let reasoningTurnGraph: GraphStateIngress | null = null;
   // Final response/durable-text authority. Once the four-state selector runs,
   // read-only turns use that snapshot; only a graph that actually commits in
   // this turn may supersede it.
@@ -13711,15 +13700,11 @@ export async function runTurnExecutor(
     const rawRobustnessForRun = readRawRobustnessFromRunAnalysisFact(
       selectedFinalAnalysisFact,
     );
-    const rawOptionComparisonsForRun = readOptionComparisonsFromRunAnalysisFact(
-      selectedFinalAnalysisFact,
-    );
     return {
       response,
       // Same fact array and same freshness gate as the final canonical verdict.
       // No independent selection or request-state fallback is introduced.
       rawRobustness: rawRobustnessForRun,
-      rawOptionComparisons: rawOptionComparisonsForRun,
       reasoningGraph: reasoningTurnGraph,
       // T1 claim safety — READ (never derived here, CLAUDE.md trap #12) at
       // TURN ENTRY from the persisted verdict, and refined post-dispatch on
@@ -13759,7 +13744,10 @@ export async function runTurnExecutor(
       effectiveGraph: graphWriteCommittedForTurn
         ? effectiveTurnGraph
         : reasoningGraphSelectionEstablished
-          ? reasoningTurnGraph
+          ? (() => {
+              const parsed = GraphV3.safeParse(reasoningTurnGraph);
+              return parsed.success ? parsed.data : null;
+            })()
           : effectiveTurnGraph,
       // Observability: expose the fully-populated per-stage timings (total_ms,
       // routing_llm_ms, tokens, routing model/prompt identity) so route-v2 can

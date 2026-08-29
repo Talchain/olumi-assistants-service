@@ -98,8 +98,6 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
-
 import { buildTurnContext } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
 import {
@@ -109,9 +107,7 @@ import {
 import type { MayNameLeadingOptionVerdict } from './claim-safety-read.js';
 import type { FreshnessDerivation } from './freshness.js';
 import {
-  readOptionComparisonsFromRunAnalysisFact,
   readRawRobustnessFromRunAnalysisFact,
-  type RawOptionComparisonSignal,
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
 
@@ -141,10 +137,8 @@ export interface TurnExitStamp {
   readonly mayNameLeadingOptionProvenance: MayNameLeadingOptionVerdict['provenance'];
   /** Robustness from the same scenario fact selected by exit freshness. */
   readonly rawRobustness: RawRobustnessSignals | null;
-  /** Comparisons from that same selected fact; never reconstructed from body copy. */
-  readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
   /** Persisted reasoning graph from this resolver snapshot, for graphless exits only. */
-  readonly exitReasoningGraph?: GraphV3T | null;
+  readonly exitReasoningGraph?: unknown | null;
   /**
    * The turn context's persisted-graph analysis-freshness derivation, for the
    * `analysis_state` stamped at this exit.
@@ -206,8 +200,7 @@ interface ResolvedTurnExit {
   readonly verdict: MayNameLeadingOptionVerdict;
   readonly freshness?: FreshnessDerivation;
   readonly rawRobustness: RawRobustnessSignals | null;
-  readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
-  readonly reasoningGraph?: GraphV3T | null;
+  readonly reasoningGraph?: unknown | null;
 }
 
 export interface TurnClaimSafetyResolver {
@@ -242,7 +235,6 @@ export function createTurnClaimSafetyResolver(
       return {
         verdict: NO_TURN_CONTEXT_VERDICT,
         rawRobustness: null,
-        rawOptionComparisons: null,
       };
     }
     try {
@@ -265,7 +257,6 @@ export function createTurnClaimSafetyResolver(
         // it hands `deriveCoachingState`. Read, never recomputed (trap 12).
         freshness,
         rawRobustness: readRawRobustnessFromRunAnalysisFact(selectedFact),
-        rawOptionComparisons: readOptionComparisonsFromRunAnalysisFact(selectedFact),
         reasoningGraph: context.persistedGraph,
       };
     } catch (err) {
@@ -292,7 +283,6 @@ export function createTurnClaimSafetyResolver(
         verdict: NO_TURN_CONTEXT_VERDICT,
         freshness: CONTEXT_READ_FAILED_DERIVATION,
         rawRobustness: null,
-        rawOptionComparisons: null,
         reasoningGraph: null,
       };
     }
@@ -306,7 +296,6 @@ export function createTurnClaimSafetyResolver(
         mayNameLeadingOption: resolved.verdict.may_name_leading_option,
         mayNameLeadingOptionProvenance: resolved.verdict.provenance,
         rawRobustness: resolved.rawRobustness,
-        rawOptionComparisons: resolved.rawOptionComparisons,
         ...(resolved.reasoningGraph !== undefined
           ? { exitReasoningGraph: resolved.reasoningGraph }
           : {}),

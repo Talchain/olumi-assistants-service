@@ -125,6 +125,7 @@ import type { FreshnessDerivation } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { deriveCompanionValueClaimSafe } from './companion-claim-safe.js';
+import { mayDesignateLeadingOption } from './leader-designation-license.js';
 
 /**
  * The readiness status this producer emits when the turn supplied no readiness
@@ -555,13 +556,12 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const tie = raw?.near_tie_is_tie ?? null;
   const separationKnown = typeof tie === 'boolean';
-  const separates = tie === false;
 
   const claim: {
     permitted: boolean;
     withheld_reason?: string;
     separation?: string;
-  } = { permitted: entitled && separates };
+  } = { permitted: mayDesignateLeadingOption(entitled, raw) };
 
   if (!claim.permitted) {
     // ONE reason, chosen by which half failed first, so a consumer is never

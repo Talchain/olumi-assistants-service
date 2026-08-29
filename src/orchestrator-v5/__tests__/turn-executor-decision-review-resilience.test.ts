@@ -19,13 +19,18 @@ import type {
 
 // Module-level holder for the session-store stub; tests can mutate it to
 // configure what loadGraphAndBriefText returns for the current run.
-const mockSessionState: { briefText: string | null } = { briefText: null };
+const mockSessionState: { briefText: string | null; persistedGraph: unknown | null } = {
+  briefText: null,
+  persistedGraph: null,
+};
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readFactsWithTurnFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     invalidateScoped: async (_s: string, scope: unknown) => ({
       scope,
       entries_invalidated: [],
@@ -34,9 +39,9 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    loadGraph: async () => null,
+    loadGraph: async () => mockSessionState.persistedGraph,
     loadGraphAndBriefText: async () => ({
-      graph: null,
+      graph: mockSessionState.persistedGraph,
       briefText: mockSessionState.briefText,
     }),
     storeDraftGraph: async () => undefined,
@@ -100,8 +105,26 @@ function resolvedRunAnalysisToolCall() {
 }
 
 function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
+  const graph = {
+    nodes: [
+      { id: 'd', kind: 'decision', label: 'Which plan?' },
+      { id: 'g', kind: 'goal', label: 'Reach the goal' },
+      { id: 'f', kind: 'factor', label: 'Delivery capacity' },
+      { id: 'opt_a', kind: 'option', label: 'Plan A', interventions: { f: 1 } },
+      { id: 'opt_b', kind: 'option', label: 'Plan B', interventions: { f: 0 } },
+    ],
+    edges: [
+      { from: 'd', to: 'opt_a', strength: { mean: 1, std: 0.1 } },
+      { from: 'd', to: 'opt_b', strength: { mean: 1, std: 0.1 } },
+      { from: 'opt_a', to: 'f', strength: { mean: 1, std: 0.1 } },
+      { from: 'opt_b', to: 'f', strength: { mean: 0.1, std: 0.1 } },
+      { from: 'f', to: 'g', strength: { mean: 1, std: 0.1 } },
+    ],
+    goal_node_id: 'g',
+  };
   return {
-    graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+    graph,
+    rawPersistedGraph: graph,
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'Plan A', interventions: { f: 1 } },
       { id: 'opt_b', option_id: 'opt_b', label: 'Plan B', interventions: { f: 0 } },
@@ -114,6 +137,17 @@ function makeGoldenResponse(): V2RunResponseEnvelope {
   return {
     meta: { seed_used: 42, n_samples: 1000, response_hash: 'h' },
     results: [{ option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 }],
+    robustness_status: 'computed',
+    robustness: {
+      near_tie: {
+        is_tie: false,
+        top_option_id: 'opt_a',
+        second_option_id: 'opt_b',
+        tied_option_ids: [],
+        gap: 0.4,
+        threshold: 0.05,
+      },
+    },
     response_hash: 'h-top',
     analysis_status: 'completed',
   } as V2RunResponseEnvelope;
@@ -164,6 +198,7 @@ beforeEach(async () => {
   // Reset the session-store brief stub between tests so brief-presence
   // does not leak across the suite.
   mockSessionState.briefText = null;
+  mockSessionState.persistedGraph = null;
   priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
   priorTurnBudget = process.env.TURN_BUDGET_MS;
   process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
@@ -189,6 +224,10 @@ afterEach(async () => {
 
 describe('TurnExecutor — decision_review enricher resilience', () => {
   it('enricher throws → analysis result still returned, v5.decision_review_degraded fires', async () => {
+    // This positive fixture represents a real run against the persisted model.
+    // Without that canonical read the final wire must (correctly) withhold the
+    // result's leader designation, so it cannot prove enrichment resilience.
+    mockSessionState.persistedGraph = makeScenarioSnapshot().graph;
     // Bypass the enricher's own try/catch by replacing the entire export
     // with a synchronous throw. This simulates a future regression where
     // the never-throws invariant is broken.

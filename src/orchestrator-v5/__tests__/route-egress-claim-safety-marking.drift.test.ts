@@ -103,7 +103,9 @@ function enumerateSendCalls(source: string): SendCall[] {
       offset: matchStart,
       argSpan,
       marked:
-        /mayNameLeadingOption/.test(argSpan) || /claimSafety\.forExit\(\)/.test(argSpan),
+        /mayNameLeadingOption/.test(argSpan) ||
+        /claimSafety\.forExit\(\)/.test(argSpan) ||
+        /\.\.\.editExitAuthority\b/.test(argSpan),
       literalPermission: /mayNameLeadingOption:\s*(true|false)\b/.test(argSpan),
     });
   }
@@ -130,6 +132,17 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
         '`?? true` fallback — the shape that disarmed the chip exit until 2026-07-27), ' +
         'otherwise inherit the turn-entry read with `...(await claimSafety.forExit())`.',
     ).toEqual([]);
+  });
+
+  it('the edit exit alias is one shared turn-entry snapshot, not an unlicensed spread', () => {
+    expect(
+      source.match(/const\s+editExitAuthority\s*=\s*await\s+claimSafety\.forExit\(\);/g),
+      'editExitAuthority must be bound exactly once from the canonical turn-entry resolver',
+    ).toHaveLength(1);
+    expect(
+      calls.filter((c) => /\.\.\.editExitAuthority\b/.test(c.argSpan)),
+      'exactly one committed edit exit may reuse that same authority snapshot',
+    ).toHaveLength(1);
   });
 
   it('NO exit may pass a LITERAL permission — every one reads or inherits', () => {

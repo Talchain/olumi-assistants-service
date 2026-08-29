@@ -113,7 +113,11 @@ export function splitIntoRedactableUnits(text: string): string[] {
     // `start` does not move, so the text stays in the current unit and the join
     // identity is untouched.
     let start = 0;
-    const re = /[.!?]+["')\]]*\s+/g;
+    // Markdown emphasis markers may close immediately after the terminal
+    // punctuation ("**A distant third.** It only ..."). Treat those markers
+    // like quotes/brackets so one later sentence can be replaced without
+    // deleting the truthful bold sentence before it.
+    const re = /[.!?]+["')\]*_]*\s+/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
       if (!isSentenceBoundary(line, m.index, m[0])) continue;

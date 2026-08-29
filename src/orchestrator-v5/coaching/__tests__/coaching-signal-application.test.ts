@@ -60,7 +60,11 @@ const SCOPE: ClaimSafetyScenarioScope = {
  * suppress the very signals these tests are about. Stamped permitted here, in
  * the exact shape `projectClaimSafety` writes.
  */
-function runFact(): HandlerFact {
+function runFact(opts: {
+  readonly computedAt?: string;
+  readonly nearTie?: boolean;
+} = {}): HandlerFact {
+  const computedAt = opts.computedAt ?? '2026-08-28T12:00:00.000Z';
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -69,6 +73,13 @@ function runFact(): HandlerFact {
       scenario_id: 'scen-a',
       leading_option_id: 'opt-1',
       summary: 'Ran analysis',
+      computed_at: computedAt,
+      graph_hash_at_run: `hash-${computedAt}`,
+      enrichment: {
+        analysis_status: 'computed',
+        robustness_status: 'computed',
+        robustness: { near_tie: { is_tie: opts.nearTie ?? false } },
+      },
       constraint_verdict: {
         may_name_leading_option: true,
         constraint_verdict_state: 'not_applicable',
@@ -77,8 +88,8 @@ function runFact(): HandlerFact {
   } as unknown as HandlerFact;
 }
 
-function runOutcome(): SuccessfulHandlerOutcome {
-  return { assistant_text: 'done', handler_facts: [runFact()], llm_calls_used: 0 };
+function runOutcome(fact: HandlerFact): SuccessfulHandlerOutcome {
+  return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
 }
 
 beforeEach(() => {
@@ -91,7 +102,7 @@ describe('applyCoachingSignal', () => {
     const out = applyCoachingSignal({
       proposedHandlerId: 'run_analysis',
       claimSafetyScope: SCOPE,
-      outcome: runOutcome(),
+      outcome: runOutcome(facts[0]!),
       contextPack: null,
       priorFacts: [],
       handlerFacts: facts,
@@ -115,13 +126,13 @@ describe('applyCoachingSignal', () => {
   });
 
   it('rerun: RERUN_ANALYSIS_COMPLETE fires when a prior run_analysis fact exists', () => {
-    const facts = [runFact()];
+    const facts = [runFact({ computedAt: '2026-08-28T12:00:00.000Z' })];
     const out = applyCoachingSignal({
       proposedHandlerId: 'run_analysis',
       claimSafetyScope: SCOPE,
-      outcome: runOutcome(),
+      outcome: runOutcome(facts[0]!),
       contextPack: null,
-      priorFacts: [runFact()],
+      priorFacts: [runFact({ computedAt: '2026-08-27T12:00:00.000Z' })],
       handlerFacts: facts,
       requestId: 'req-2',
       scenarioId: 'scen-a',
@@ -141,7 +152,7 @@ describe('applyCoachingSignal', () => {
     const out = applyCoachingSignal({
       proposedHandlerId: 'explain_results',
       claimSafetyScope: SCOPE,
-      outcome: runOutcome(),
+      outcome: runOutcome(facts[0]!),
       contextPack: null,
       priorFacts: [],
       handlerFacts: facts,

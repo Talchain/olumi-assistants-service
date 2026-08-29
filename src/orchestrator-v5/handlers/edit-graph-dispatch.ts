@@ -4615,7 +4615,6 @@ export async function dispatchEditGraph(
         exitPath: 'edit_graph',
         graph: contentGraph,
         analysisReady,
-        selectedFactComparisons: null,
         leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelope),
       }).response;
     }

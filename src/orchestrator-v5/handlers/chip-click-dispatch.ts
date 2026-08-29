@@ -111,9 +111,7 @@ import { applyCoachingSignal } from '../coaching/coaching-signal-application.js'
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import {
-  readOptionComparisonsFromRunAnalysisFact,
   readRawRobustnessFromRunAnalysisFact,
-  type RawOptionComparisonSignal,
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
@@ -297,8 +295,6 @@ export type DispatchChipClickRunAnalysisResult =
       readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
       /** Robustness from the exact post-dispatch fact selected by freshness. */
       readonly rawRobustness: RawRobustnessSignals | null;
-      /** Option comparisons from that same selected fact; never body-derived. */
-      readonly rawOptionComparisons: readonly RawOptionComparisonSignal[] | null;
       /** ROADMAP 2.73 Fix C — decision_review call attribution for the
        *  chip-click path (mirrors #476's executor wiring). Present ONLY
        *  when the timings/trace gate is on AND the enricher's LLM call
@@ -1504,9 +1500,6 @@ export async function dispatchChipClickRunAnalysis(
         ? postDispatchFacts[freshness.selected_fact_index]
         : undefined;
     const rawRobustness = readRawRobustnessFromRunAnalysisFact(selectedPostDispatchFact);
-    const rawOptionComparisons = readOptionComparisonsFromRunAnalysisFact(
-      selectedPostDispatchFact,
-    );
     const mayNameLeadingOption = readMayNameLeadingOptionVerdict(
       postDispatchFacts,
       claimSafetyScopeFromContext(context),
@@ -1523,7 +1516,6 @@ export async function dispatchChipClickRunAnalysis(
       exitPath: 'chip_click_run_analysis_precommit',
       graph: snapshotGraph,
       analysisReady,
-      selectedFactComparisons: rawOptionComparisons,
       leaderClaimPolicy: readFinalLeaderClaimEgressPolicy(authorityEnvelopeForCommit),
     }).response;
     emitFreshnessTelemetry(
@@ -1605,7 +1597,6 @@ export async function dispatchChipClickRunAnalysis(
         graph: snapshotGraph,
         freshness,
         rawRobustness,
-        rawOptionComparisons,
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),

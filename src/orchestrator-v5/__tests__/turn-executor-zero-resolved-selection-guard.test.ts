@@ -159,6 +159,17 @@ const RUN_ANALYSIS_FACT: Record<string, unknown> = {
     },
     enrichment: {
       analysis_status: 'completed',
+      robustness_status: 'computed',
+      robustness: {
+        near_tie: {
+          is_tie: false,
+          top_option_id: OPTION_ID,
+          second_option_id: OTHER_OPTION_ID,
+          tied_option_ids: [],
+          gap: 0.24,
+          threshold: 0.05,
+        },
+      },
       option_comparison: [
         {
           option_id: OPTION_ID,

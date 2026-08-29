@@ -167,9 +167,6 @@ describe('createTurnClaimSafetyResolver — exitFreshness production', () => {
     const stamp = await createTurnClaimSafetyResolver(PAYLOAD, 'req-ef-canonical').forExit();
     expect(stamp.exitReasoningGraph).toBe(canonicalGraph);
     expect(stamp.rawRobustness).toEqual({ level: 'low', near_tie_is_tie: true });
-    expect(stamp.rawOptionComparisons).toEqual([
-      { option_id: 'opt_a', option_label: 'Canonical Plan', win_probability: 0.5 },
-    ]);
   });
 
   it('a THROWN context read reports derivation_failed — and NEVER "none"', async () => {
@@ -188,7 +185,6 @@ describe('createTurnClaimSafetyResolver — exitFreshness production', () => {
     expect(stamp.exitFreshness!.selected_fact_index).toBeNull();
     expect(stamp.exitFreshness!.computed_at).toBeNull();
     expect(stamp.rawRobustness).toBeNull();
-    expect(stamp.rawOptionComparisons).toBeNull();
     expect(stamp.exitReasoningGraph).toBeNull();
   });
 

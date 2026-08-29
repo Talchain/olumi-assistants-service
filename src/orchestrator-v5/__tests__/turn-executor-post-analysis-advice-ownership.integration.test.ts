@@ -58,6 +58,34 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, index) => ({
+        fact,
+        fact_row_id: `analysis-fact-row-${index}`,
+        turn_id:
+          ((mockState.priorTurns[index] as { id?: string } | undefined)?.id) ??
+          PRIOR_RA_ROW_ID,
+        fact_created_at:
+          (((fact.result as Record<string, unknown> | undefined)
+            ?.computed_at as string | undefined) ??
+            '2026-08-27T09:00:00.000Z'),
+      })),
+    readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+      const facts = mockState.priorFacts.filter(
+        (fact) => fact.fact_type === 'run_analysis' && fact.noop !== true,
+      );
+      return {
+        facts: facts.slice(0, limit).map((fact, index) => ({
+          fact,
+          fact_row_id: `analysis-fact-row-${mockState.priorFacts.indexOf(fact)}`,
+          fact_created_at:
+            (((fact.result as Record<string, unknown> | undefined)
+              ?.computed_at as string | undefined) ??
+              `2026-08-27T09:00:0${index}.000Z`),
+        })),
+        total_count: facts.length,
+      };
+    },
     invalidateScoped: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -89,6 +117,7 @@ const PRIOR_RA_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 const READY_GRAPH = {
   nodes: [
+    { id: 'decision_q3', kind: 'decision', label: 'How should we deliver Q3?' },
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
     {
@@ -106,6 +135,20 @@ const READY_GRAPH = {
     },
   ],
   edges: [
+    {
+      from: 'decision_q3',
+      to: 'opt_hire',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'decision_q3',
+      to: 'opt_status_quo',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
     {
       from: 'opt_hire',
       to: 'fac_capacity',
@@ -188,6 +231,17 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: {
         analysis_status: 'completed',
+        robustness_status: 'computed',
+        robustness: {
+          near_tie: {
+            is_tie: false,
+            top_option_id: 'opt_hire',
+            second_option_id: 'opt_status_quo',
+            tied_option_ids: [],
+            gap: 0.44,
+            threshold: 0.05,
+          },
+        },
         option_comparison: [
           {
             option_id: 'opt_hire',

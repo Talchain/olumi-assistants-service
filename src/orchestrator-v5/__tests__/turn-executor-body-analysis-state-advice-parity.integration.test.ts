@@ -344,9 +344,18 @@ function stagingShapedAnalysisState(): Record<string, unknown> {
       { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive', influence_score: 0.42 },
       { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative', influence_score: 0.31 },
     ],
+    robustness_status: 'computed',
     robustness: {
       level: 'low',
       is_robust: false,
+      near_tie: {
+        is_tie: false,
+        top_option_id: 'opt_hire_local',
+        second_option_id: 'opt_status_quo',
+        tied_option_ids: [],
+        gap: 0.482,
+        threshold: 0.05,
+      },
       recommended_option_id: 'opt_hire_local',
       recommended_option_label: 'Hire Two Senior Engineers Locally',
       fragile_edges: [

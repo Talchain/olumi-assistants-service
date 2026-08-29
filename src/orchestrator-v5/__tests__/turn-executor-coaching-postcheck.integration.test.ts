@@ -8,8 +8,9 @@
  *   - an invented mutation-success claim on a real graph label → the wire
  *     `assistant_text` is DEGRADED to a deterministic safe trust response +
  *     rerun chip, and `v5.coaching.output_postcheck` telemetry fires;
- *   - safe prose (incl. pre-analysis directional coaching, the T1/T2 fix) →
- *     unchanged, no telemetry.
+ *   - safe non-designating prose → unchanged, no telemetry;
+ *   - a pre-analysis categorical recommendation naming an option → the final
+ *     leader-designation authority withholds it without fabricating analysis.
  * (The former "flag OFF = byte-identical" describe was removed with the
  * flag: its scenario — pre-analysis directional prose shipping verbatim —
  * is identical to the pass-through case above, which it silently duplicated
@@ -27,6 +28,7 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findForbiddenPhraseHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+import { WIRE_WITHHELD_LEADER_REPLACEMENT } from '../compose/leading-option-wire-enforcement.js';
 import { _resetConfigCache } from '../../config/index.js';
 import type {
   ChatWithToolsArgs,
@@ -235,17 +237,17 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
     ],
   };
 
-  it('pre-analysis (none): a directional recommendation on a real option label REACHES THE USER (T1/T2 fix)', async () => {
-    // "I recommend Plan A" pre-analysis is legitimate coaching, not a
-    // misrepresented result — it must ship through. (Post-analysis, when a
-    // stale/unknown/blocked result exists, the label-aware directional degrade
-    // still fires — covered by the coaching-output-postcheck unit tests.)
+  it('pre-analysis (none): a categorical recommendation on a real option label is withheld', async () => {
+    // Constraint entitlement and producer separation are both absent. The
+    // model may still offer non-designating strategic coaching, but it cannot
+    // turn the graph roster alone into "I recommend Plan A" authority.
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
       'req-coach-label-dir',
       { routingAdapter: mockRoutingAdapter('I recommend Plan A.'), graphState: LABELLED_GRAPH as never },
     );
-    expect(response.assistant_text).toBe('I recommend Plan A.');
+    expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    expect(response.assistant_text).not.toContain('I recommend Plan A');
     expect(postcheckEvent()).toBeUndefined();
   });
 
