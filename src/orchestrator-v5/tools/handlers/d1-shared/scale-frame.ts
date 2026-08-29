@@ -198,6 +198,35 @@ export function checkPairCoherence(input: {
  * own blast radius. What is NOT acceptable is the sentence that told the next
  * reader the question had one owner when it has three. Enumerate READERS, not
  * writers: a reader that only ever refuses is still a reader.
+ *
+ * ⚠⚠ AND THE CORRECTION ABOVE UNDERSTATED ITS OWN BLAST RADIUS — corrected
+ * again 2026-08-29, in place. Two things it got wrong:
+ *
+ *  1. IT NAMED ONE GATE. It scoped the consequence to the baseline gate and
+ *     `baseline_scale_unresolved`. There is a FOURTH reader on the same seam:
+ *     `scaleNumeric`'s rule 1, the INTERVENTION path. It was blind to a
+ *     persisted `scale_frame` in exactly the same way, and it is the one a user
+ *     actually hits — Paul's session was refused `mixed_scale_unresolved` on
+ *     four cells whose frames (5 and 200000, the second being his own £200,000
+ *     budget) were sitting in `node.scale_frame` and were ALSO recoverable from
+ *     each cell's `{value, raw_value}` pair. Both carriers agreed; neither was
+ *     read. Enumerating readers is only half the discipline — the enumeration
+ *     must also state which SURFACE each reader's blindness reaches.
+ *
+ *  2. "CONSERVATIVE ... FAILS IN THE SAFE DIRECTION" IS NOT TRUE OF THE USER-
+ *     FACING HALF. Refusing rather than computing is safe for the NUMBERS, and
+ *     that judgement stands — a wrongly-permitted rescale returns confidently
+ *     wrong answers and is much worse. But the copy the intervention refusal
+ *     ships says "I don't have a step I can promise will clear it", so on this
+ *     class the safe direction terminates in a DEAD END on a model the user has
+ *     not touched: measured 2 of 8 fresh drafts of one ordinary brief on
+ *     deployed staging, 2026-08-29. A refusal is only conservative when the
+ *     user can act on it; otherwise "safe" is being scored against the engine
+ *     and not against the person.
+ *
+ * The intervention limb is now closed — `scaleNumeric` consults
+ * `recoverScaleFrame`, so a pair-carried frame demotes instead of dead-ending.
+ * The BASELINE limb described above is still open and still real.
  */
 export function resolveScaleFrame(input: {
   /** The factor's persisted `scale_frame`, if any. */

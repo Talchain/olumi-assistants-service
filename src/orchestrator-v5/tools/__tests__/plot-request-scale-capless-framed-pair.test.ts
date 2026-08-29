@@ -212,6 +212,36 @@ describe('the corpus is real evidence and this replay reproduces it', () => {
   });
 });
 
+/**
+ * ⚠ PROVENANCE, STATED BECAUSE IT IS NOT MY OWN CAPTURE. These four cells are
+ * REPORTED from the Render logs of Paul's own failed session (2026-08-29),
+ * relayed by a second lane, together with each factor's persisted
+ * `node.scale_frame`. I did not capture them; what I verified here is the
+ * ARITHMETIC and the consequence, which is all this test asserts.
+ *
+ * They matter because they are a SECOND, INDEPENDENT CARRIER of the same
+ * answer: every cell's persisted `scale_frame` equals the frame
+ * `recoverScaleFrame` recovers from its `{value, raw_value}` pair alone. Two
+ * carriers agreed, and the intervention seam read neither. The 200000 is the
+ * user's own £200,000 budget; the values carry `"source": "cee_hypothesis"` —
+ * the user typed none of them.
+ */
+describe("the frame is recoverable from the pair on Paul's own blocked cells", () => {
+  const REPORTED_CELLS = [
+    { where: 'Two Developers → Onboarding', value: 0.4, raw_value: 2, persistedScaleFrame: 5 },
+    { where: 'Two Developers → Hiring cost', value: 0.65, raw_value: 130000, persistedScaleFrame: 200000 },
+    { where: 'Hire a Tech Lead → Onboarding', value: 0.3, raw_value: 1.5, persistedScaleFrame: 5 },
+    { where: 'Hire a Tech Lead → Hiring cost', value: 0.4, raw_value: 80000, persistedScaleFrame: 200000 },
+  ] as const;
+
+  it.each(REPORTED_CELLS)(
+    'recovers the persisted frame from the pair alone: $where',
+    ({ value, raw_value, persistedScaleFrame }) => {
+      expect(recoverScaleFrame({ value, raw_value })).toBe(persistedScaleFrame);
+    },
+  );
+});
+
 describe('ACCEPTANCE — a model the product framed itself is analysable', () => {
   it('does not refuse the fresh first draft staging refused', () => {
     const { verdict } = runProductionScaleSequence(captureById(BLOCKED_CAPTURE_ID));
