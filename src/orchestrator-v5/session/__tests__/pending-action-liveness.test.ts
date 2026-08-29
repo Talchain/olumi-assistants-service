@@ -154,6 +154,20 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           label: 'Churn rate',
         },
       };
+    case 'elicit_option_effect':
+      // ROADMAP 2.1352 — the configure-option clarify intercept's asked cell
+      // (server-only; carries the (option, factor) identity the question
+      // named, so a short reply on the next turn has a referent to bind to).
+      return {
+        ...base,
+        action: {
+          kind,
+          option_id: 'opt_two_devs',
+          option_label: 'Two Developers',
+          factor_id: 'fac_dev_throughput',
+          factor_label: 'Development throughput',
+        },
+      };
     case 'proposed_concept':
       return {
         ...base,
@@ -194,6 +208,11 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     ['set_factor_value', 0],
     ['clarify_v2_round', 0],
     ['edit_graph_add_risk', 0],
+    // ROADMAP 2.1352 — the asked cell is an ELICITATION, not a proposal: a
+    // bare "yes" answers no "give me a number from 0 to 1" question, so it
+    // must contribute ZERO to the confirmation-expecting tally even though it
+    // is fully live and counted live.
+    ['elicit_option_effect', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {

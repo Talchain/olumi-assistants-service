@@ -230,6 +230,14 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // mutating now so they fail closed by default when wired.
   apply_proposed_change: 'mutating',
   edit_graph_add_risk: 'mutating',
+  // ROADMAP 2.1352 — the configure-option clarify intercept's asked cell.
+  // Not resumed by this module today; classified MUTATING fail-closed because
+  // answering it WRITES an option→factor effect value, and because the cell's
+  // identity can be invalidated by a graph change between the ask and the
+  // answer (an option or factor can be renamed or removed). Fail-closed is the
+  // load-bearing half: an unclassified-but-wired kind would slip through the
+  // non-mutating branch and skip the divergence guard entirely.
+  elicit_option_effect: 'mutating',
   // ROADMAP 2.63 C3/C4 — the draft/redraft offer. Never resumed by this
   // module (route-v2's draft-offer pre-route owns it; here it falls
   // through like any unclassified-for-resume kind), but classified

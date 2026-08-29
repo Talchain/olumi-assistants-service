@@ -490,6 +490,11 @@ describe('tryClarificationResume — kind classification regression', () => {
     // non-mutating branch.
     apply_proposed_change: 'mutating',
     edit_graph_add_risk: 'mutating',
+    // ROADMAP 2.1352 — answering the configure-option clarify's asked cell
+    // writes an option→factor effect value, and the cell's identity can be
+    // invalidated by a graph change between ask and answer. Mutating, so the
+    // divergence guard fires by default when a resumer is wired.
+    elicit_option_effect: 'mutating',
     // ROADMAP 2.918 — resuming the pending baseline question replays
     // add_constraint, whose mint writes observed_state on the target:
     // graph-mutating, so ask→answer divergence fails closed.
