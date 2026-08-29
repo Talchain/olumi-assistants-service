@@ -1885,10 +1885,18 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
     // and the `Worth a look:` bullet asserted above was SHED — silently, under
     // a green suite, because nothing else here observes that bullet on real
     // data. The note is a fixed footer now and is spliced in AFTER the ladder
-    // has measured, so it displaces nothing. Asserting the note's presence
-    // beside `additional_checks_surfaced` above is what stops that regressing:
-    // if a later change puts the note back inside the budget, the coaching
-    // assertions RED rather than quietly dropping a bullet.
+    // has measured, so it displaces nothing.
+    //
+    // ⚠ WHAT THIS TEST DOES *NOT* GUARD, DEMONSTRATED RATHER THAN ASSUMED. A
+    // mutant putting the note back inside the budget leaves THIS test GREEN:
+    // at 31 words the fixture still fits (108 + 31 = 139 <= 140), so only the
+    // 35-word version ever shed the bullet here. The guards that DO bite that
+    // regression are the content-heavy case below (120 words of content, which
+    // no longer fits once the note is charged to the ladder) and
+    // `tests/integration/orchestrator/route-v2-direction-clarification-served
+    // .test.ts` ("does not CROWD OUT ordinary coaching"), both verified RED
+    // under that mutant. An earlier version of this comment claimed the
+    // coexistence pinned here was that guard; the mutant refuted it.
     expect(result.text).toContain(MODEL_VARIANCE_NOTE);
     expect(wordCount(result.text)).toBeLessThanOrEqual(140);
     assertPassesAllGuards(result.text);
@@ -2677,6 +2685,60 @@ describe('every draft says the model is one of several the system could build', 
     const blocks = text.split('\n\n');
     expect(blocks.at(-1)?.startsWith('Next,')).toBe(true);
     expect(blocks.at(-2)).toBe(NOTE);
+  });
+
+  /**
+   * ⭐⭐ THE NOTE MUST NOT DISPLACE COACHING — THE GUARD, ON A FIXTURE BIG
+   * ENOUGH TO SHOW IT.
+   *
+   * Measured here: 120 words of composed content, note 31, served 151. Charge
+   * the note to the ladder's 140-word budget (as a first cut did) and rung 2
+   * sheds the `Worth a look:` bullet. The footer is spliced in after the
+   * ladder has measured, so both survive.
+   *
+   * The final assertion bounds the COMPOSED CONTENT, derived from the constant
+   * rather than written as a second magic number, so it cannot drift out of
+   * agreement with the copy.
+   */
+  it('the note does not displace coaching on a content-heavy draft', () => {
+    const result = buildReadyNarrative({
+      graph: makeGraph([
+        { id: 'g1', kind: 'goal', label: 'Reduce cost to serve per enterprise account' },
+        { id: 'o1', kind: 'option', label: 'Consolidate onto a single support platform' },
+        { id: 'o2', kind: 'option', label: 'Move tier-one triage to a partner' },
+        { id: 'o3', kind: 'option', label: 'Automate the top twenty ticket types' },
+        { id: 'o4', kind: 'option', label: 'Hold the current operating model' },
+        { id: 'f1', kind: 'factor', label: 'Support cost per account' },
+        { id: 'f2', kind: 'factor', label: 'Time to first response' },
+        { id: 'r1', kind: 'risk', label: 'Enterprise churn during migration' },
+      ] as unknown as GraphV3T['nodes']),
+      strengthenItems: [
+        {
+          id: 's1',
+          label: 'Range the migration cost',
+          detail:
+            'the migration cost sits as a point value and would benefit from a 2 to 6M range across the transition window',
+          action_type: 'add_constraint',
+        },
+        {
+          id: 's2',
+          label: 'Check the partner capacity',
+          detail:
+            'partner triage capacity is assumed constant through the peak renewal quarter when volumes historically double',
+          action_type: 'add_constraint',
+        },
+      ],
+    });
+    // PRECONDITION PINNED IN-TEST (trap 13b): this fixture is only a guard if
+    // it actually carries an extra check bullet AND is big enough that the
+    // note would push it over the ladder's budget. Assert both, or the test
+    // below passes for the wrong reason.
+    expect(result.telemetry.additional_checks_surfaced).toBe(1);
+    expect(wordCount(result.text)).toBeGreaterThan(140);
+
+    expect(result.text).toContain('Worth a look:');
+    expect(result.text).toContain(MODEL_VARIANCE_NOTE);
+    expect(wordCount(result.text) - wordCount(MODEL_VARIANCE_NOTE)).toBeLessThanOrEqual(140);
   });
 
   it('CONTROL: a draft with no model does not claim one was built', () => {
