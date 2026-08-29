@@ -1,0 +1,290 @@
+name: TMP Routing v121 Operation
+
+# THROWAWAY OPERATIONS WORKFLOW — ships Prompts/canonical/routing.txt as PMS
+# version 121 of `orchestrator_default`, and nothing else.
+#
+# Shape copied from model-routing-derive.yml: the credential is a repo secret
+# read into an env var and passed ONLY as a curl `-H` header. No `set -x`, no
+# `-v`, no credential on any error path.
+#
+# Deliberately on a throwaway branch: this is an operation, not a change to the
+# product. Delete the branch when the operation is done.
+#
+# The bytes uploaded are read from `ref: staging` — the merged article — NOT
+# from this branch, and their sha256 is asserted BEFORE the POST and AGAIN
+# from the store's own `contentHash` BEFORE the pointer moves.
+
+on:
+  push:
+    branches: ['tmp/ops-routing-121']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'before | ship | sample | reload | rollback'
+        required: true
+        default: 'before'
+        type: choice
+        options: [before, ship, sample, reload, rollback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tmp-routing-121-op
+  cancel-in-progress: false
+
+jobs:
+  op:
+    name: Routing prompt operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # The merged article. Sparse: only the prompt directory is needed.
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          sparse-checkout: |
+            Prompts/canonical
+
+      - name: Run
+        env:
+          CEE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
+          ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
+          ACTION: ${{ github.event.inputs.action || 'before' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x   # the key rides a header; never echo the request line
+
+          PROMPT_ID='orchestrator_default'
+          FILE='Prompts/canonical/routing.txt'
+          EXPECT_SHA256='bec840a6488009284f4bf3c5a6b5ebe604a96ab973946911fec8639af182d949'
+          EXPECT_HASH16='bec840a648800928'
+          EXPECT_CHARS=25725
+          BEFORE_VERSION='120'
+          BEFORE_HASH16='adcc5128d4e6e6bc'
+          NEW_VERSION=121
+          GUARD_MIN=18500
+          GUARD_MAX=29000
+
+          case "$CEE_BASE_URL" in
+            *cee-production*) echo "REFUSING: production host"; exit 1 ;;
+          esac
+          if [ -z "${ADMIN_API_KEY:-}" ]; then
+            echo "FAIL: STAGING_ADMIN_API_KEY is not set — a missing credential must never read as a pass"
+            exit 1
+          fi
+          echo "Credential present (length asserted non-zero; value never echoed). ACTION=${ACTION}"
+          echo "Base: ${CEE_BASE_URL}"
+
+          # ---- helpers -------------------------------------------------------
+          # GET the status and print the routing row. Sets globals R_VER/R_HASH.
+          probe() {                       # $1 = label
+            local label="$1" status
+            status=$(curl -sS -o st.json -w '%{http_code}' --max-time 45 \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Accept: application/json' \
+              "${CEE_BASE_URL%/}/admin/prompts/status" || echo "000")
+            if [ "$status" != "200" ]; then
+              echo "FAIL [$label]: /admin/prompts/status HTTP ${status}"
+              head -c 400 st.json || true
+              return 1
+            fi
+            R_VER=$(jq -r '(.keys[]|select(.key=="routing")).version // "MISSING"' st.json)
+            R_HASH=$(jq -r '(.keys[]|select(.key=="routing")) | (.sent_hash // .content_hash) // "MISSING"' st.json)
+            R_CHARS=$(jq -r '(.keys[]|select(.key=="routing")).content_chars // "MISSING"' st.json)
+            R_SRC=$(jq -r '(.keys[]|select(.key=="routing")).source // "MISSING"' st.json)
+            R_ERR=$(jq -r '(.keys[]|select(.key=="routing")).snapshot_error // "null"' st.json)
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [$label] routing: version=${R_VER} hash=${R_HASH} chars=${R_CHARS} source=${R_SRC} snapshot_error=${R_ERR}"
+          }
+
+          do_reload() {                   # $1 = label
+            local label="$1" status ok serr ver hash
+            status=$(curl -sS -o rl.json -w '%{http_code}' --max-time 60 -X POST \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Accept: application/json' \
+              "${CEE_BASE_URL%/}/admin/prompts/reload" || echo "000")
+            if [ "$status" != "200" ]; then
+              echo "FAIL [$label]: reload HTTP ${status}"; head -c 400 rl.json || true; return 1
+            fi
+            ok=$(jq -r '.reload_ok' rl.json)
+            serr=$(jq -r '.snapshot_error // "null"' rl.json)
+            ver=$(jq -r '(.keys[]|select(.key=="routing")).version // "MISSING"' rl.json)
+            hash=$(jq -r '(.keys[]|select(.key=="routing")) | (.sent_hash // .content_hash) // "MISSING"' rl.json)
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [$label] reload_ok=${ok} snapshot_error=${serr} routing=v${ver}/${hash}"
+            if [ "$ok" != "true" ]; then
+              echo "FAIL [$label]: reload_ok is not true — the snapshot rebuild was REJECTED (size guard or store)."
+              return 1
+            fi
+          }
+
+          # ---- verify the local article, always -------------------------------
+          test -f "$FILE" || { echo "FAIL: $FILE missing from the staging checkout"; exit 1; }
+          ACTUAL_SHA256=$(sha256sum "$FILE" | cut -d' ' -f1)
+          ACTUAL_CHARS=$(python3 -c "import sys;print(len(open(sys.argv[1],encoding='utf-8').read()))" "$FILE")
+          echo "Local article: sha256=${ACTUAL_SHA256} chars=${ACTUAL_CHARS}"
+          if [ "$ACTUAL_SHA256" != "$EXPECT_SHA256" ]; then
+            echo "FAIL: staging's routing.txt does not hash to the expected bytes. Refusing."
+            exit 1
+          fi
+          if [ "$ACTUAL_CHARS" != "$EXPECT_CHARS" ]; then
+            echo "FAIL: char count ${ACTUAL_CHARS} != ${EXPECT_CHARS}"; exit 1
+          fi
+          if [ "$ACTUAL_CHARS" -lt "$GUARD_MIN" ] || [ "$ACTUAL_CHARS" -gt "$GUARD_MAX" ]; then
+            echo "FAIL: ${ACTUAL_CHARS} outside the routing snapshot size guard [${GUARD_MIN}, ${GUARD_MAX}]"; exit 1
+          fi
+          echo "OK: article verified and inside the size guard [${GUARD_MIN}, ${GUARD_MAX}]."
+
+          # ====================================================================
+          case "$ACTION" in
+
+          before)
+            probe "before-1"; probe "before-2"; probe "before-3"
+            status=$(curl -sS -o p.json -w '%{http_code}' --max-time 60 \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Accept: application/json' \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}" || echo "000")
+            echo "GET /admin/prompts/${PROMPT_ID} -> HTTP ${status}"
+            if [ "$status" != "200" ]; then head -c 400 p.json || true; exit 1; fi
+            jq -r '{id,taskId,status,activeVersion,stagingVersion,
+                    maxVersion:([.versions[].version]|max),
+                    versionCount:(.versions|length)}' p.json
+            echo "--- last 3 versions ---"
+            jq -r '[.versions[]|{version,createdBy,changeNote,contentHash,
+                    chars:(.content|length),vars:(.variables|length)}]
+                   | sort_by(.version) | .[-3:] | .[]' p.json
+            ;;
+
+          ship)
+            # 1. BEFORE-state gate. Anything other than v120/adcc… is a STOP.
+            probe "gate-1" || exit 1
+            if [ "$R_VER" != "$BEFORE_VERSION" ] || [ "$R_HASH" != "$BEFORE_HASH16" ]; then
+              echo "STOP: expected served v${BEFORE_VERSION}/${BEFORE_HASH16}, got v${R_VER}/${R_HASH}. The premise has moved."
+              exit 1
+            fi
+            probe "gate-2" || exit 1
+            if [ "$R_VER" != "$BEFORE_VERSION" ] || [ "$R_HASH" != "$BEFORE_HASH16" ]; then
+              echo "STOP: second sample disagrees (v${R_VER}/${R_HASH}) — split before we touched anything."
+              exit 1
+            fi
+
+            # 2. Store gate: the next auto-assigned version must be exactly 121.
+            curl -sS -o p.json --fail --max-time 60 \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Accept: application/json' \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}"
+            MAXV=$(jq -r '[.versions[].version]|max' p.json)
+            CUR_STAGING=$(jq -r '.stagingVersion // "null"' p.json)
+            CUR_ACTIVE=$(jq -r '.activeVersion' p.json)
+            CUR_VARS=$(jq -r '[.versions[]|select(.version==('"$MAXV"'))]|.[0].variables|length' p.json)
+            echo "Store: maxVersion=${MAXV} stagingVersion=${CUR_STAGING} activeVersion=${CUR_ACTIVE} v${MAXV}.variables=${CUR_VARS}"
+            if [ "$MAXV" != "$BEFORE_VERSION" ]; then
+              echo "STOP: max stored version is ${MAXV}, so createVersion would mint $((MAXV+1)), not ${NEW_VERSION}."
+              exit 1
+            fi
+            if [ "$CUR_VARS" != "0" ]; then
+              echo "STOP: v${MAXV} carries ${CUR_VARS} variables; the new bytes carry none. Refusing to drop them silently."
+              exit 1
+            fi
+
+            # 3. Build the body and RE-VERIFY the encoded bytes before sending.
+            jq -Rs --arg cb 'ops-lane-routing-121' \
+                   --arg cn 'v121: add_constraint + adjust_edge_strength named in <HANDLERS> with an edit_graph carve-out; rule 4 and <STYLE> extended to forbid quoting/numbering its own rules to the user. Bytes = Prompts/canonical/routing.txt at staging (PR #1203).' \
+              '{content: ., variables: [], createdBy: $cb, changeNote: $cn, requiresApproval: false}' \
+              < "$FILE" > body.json
+            jq -r '.content' body.json > roundtrip.txt
+            # `jq -r` appends exactly one newline on output and the source file
+            # already ends with one, so strip that single added byte and compare
+            # the round-tripped bytes against the file byte-for-byte.
+            head -c -1 roundtrip.txt > roundtrip.trim
+            RT_SHA=$(sha256sum roundtrip.trim | cut -d' ' -f1)
+            echo "round-trip: file=${ACTUAL_SHA256} encoded=${RT_SHA}"
+            if [ "$RT_SHA" != "$EXPECT_SHA256" ]; then
+              echo "FAIL: the JSON-encoded content is not byte-identical to the file. Refusing to upload."
+              exit 1
+            fi
+
+            # 4. Create the version.
+            status=$(curl -sS -o cv.json -w '%{http_code}' --max-time 90 -X POST \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+              -H 'Accept: application/json' --data-binary @body.json \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}/versions" || echo "000")
+            echo "POST versions -> HTTP ${status}"
+            if [ "$status" != "201" ]; then
+              echo "FAIL: expected 201."; head -c 600 cv.json || true; exit 1
+            fi
+            CREATED=$(jq -r '[.versions[].version]|max' cv.json)
+            CREATED_HASH=$(jq -r --argjson v "$CREATED" '.versions[]|select(.version==$v)|.contentHash // "MISSING"' cv.json)
+            CREATED_CHARS=$(jq -r --argjson v "$CREATED" '.versions[]|select(.version==$v)|.content|length' cv.json)
+            echo "Created version ${CREATED}: contentHash=${CREATED_HASH} chars=${CREATED_CHARS}"
+
+            # 5. THE LOAD-BEARING GATE: the STORE's own hash of the STORED bytes
+            #    must match, BEFORE the pointer moves. If it does not, the
+            #    pointer is never touched and nothing user-facing changed.
+            if [ "$CREATED_HASH" != "$EXPECT_SHA256" ]; then
+              echo "FAIL: stored contentHash != expected. NOT pinning. v${CREATED} is an orphan version; the served prompt is untouched."
+              exit 1
+            fi
+            if [ "$CREATED" != "$NEW_VERSION" ]; then
+              echo "FAIL: created version ${CREATED} != ${NEW_VERSION}. NOT pinning."
+              exit 1
+            fi
+            echo "OK: stored bytes verified at the store's own hash."
+
+            # 6. Pin staging. activeVersion is deliberately untouched.
+            status=$(curl -sS -o pa.json -w '%{http_code}' --max-time 60 -X PATCH \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+              -H 'Accept: application/json' -d "{\"stagingVersion\": ${NEW_VERSION}}" \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}" || echo "000")
+            echo "PATCH stagingVersion=${NEW_VERSION} -> HTTP ${status}"
+            if [ "$status" != "200" ]; then echo "FAIL"; head -c 600 pa.json || true; exit 1; fi
+            AFTER_STAGING=$(jq -r '.stagingVersion' pa.json)
+            AFTER_ACTIVE=$(jq -r '.activeVersion' pa.json)
+            echo "Pointer now: stagingVersion=${AFTER_STAGING} activeVersion=${AFTER_ACTIVE} (active must still be ${CUR_ACTIVE})"
+            if [ "$AFTER_STAGING" != "$NEW_VERSION" ]; then echo "FAIL: pin did not take"; exit 1; fi
+            if [ "$AFTER_ACTIVE" != "$CUR_ACTIVE" ]; then echo "FAIL: activeVersion moved — that is the production pointer"; exit 1; fi
+
+            # 7. Reload. The routing snapshot has NO TTL (prompt-loader.ts: built
+            #    once, swapped only by an explicit reload), and each POST lands on
+            #    ONE instance — so reload repeatedly to reach them all.
+            for i in $(seq 1 10); do
+              do_reload "reload-${i}" || exit 1
+              sleep 4
+            done
+
+            echo "--- immediate post-reload samples ---"
+            for i in $(seq 1 5); do probe "post-${i}" || exit 1; sleep 5; done
+            ;;
+
+          reload)
+            for i in $(seq 1 10); do do_reload "reload-${i}" || exit 1; sleep 4; done
+            ;;
+
+          sample)
+            # ~6 minutes, spanning more than one loader TTL.
+            SPLIT=0; BAD=0
+            for i in $(seq 1 13); do
+              probe "sample-${i}" || exit 1
+              if [ "$R_VER" != "${NEW_VERSION}" ] || [ "$R_HASH" != "$EXPECT_HASH16" ]; then
+                BAD=$((BAD+1)); SPLIT=1
+              fi
+              sleep 30
+            done
+            echo "-------------------------------------------------"
+            if [ "$SPLIT" = "1" ]; then
+              echo "RESULT: NOT SETTLED — ${BAD}/13 samples were not v${NEW_VERSION}/${EXPECT_HASH16}."
+              exit 1
+            fi
+            echo "RESULT: SETTLED — 13/13 samples read v${NEW_VERSION}/${EXPECT_HASH16}."
+            ;;
+
+          rollback)
+            status=$(curl -sS -o pa.json -w '%{http_code}' --max-time 60 -X PATCH \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+              -H 'Accept: application/json' -d "{\"stagingVersion\": ${BEFORE_VERSION}}" \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}" || echo "000")
+            echo "ROLLBACK PATCH stagingVersion=${BEFORE_VERSION} -> HTTP ${status}"
+            if [ "$status" != "200" ]; then echo "FAIL"; head -c 600 pa.json || true; exit 1; fi
+            jq -r '{stagingVersion,activeVersion}' pa.json
+            for i in $(seq 1 10); do do_reload "rb-reload-${i}" || exit 1; sleep 4; done
+            for i in $(seq 1 5); do probe "rb-${i}" || exit 1; sleep 5; done
+            ;;
+
+          *) echo "FAIL: unknown ACTION '${ACTION}'"; exit 1 ;;
+          esac
