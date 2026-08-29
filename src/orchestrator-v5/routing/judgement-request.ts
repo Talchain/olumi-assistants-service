@@ -67,10 +67,20 @@
  * genuine edit dispatching. The failure direction is UNIFORM, which is the one
  * condition under which widening a natural-language predicate is not a bet.
  *
- * And the fall-through is not a consolation prize: `structure-origin-answer.ts`
- * records that the reasoning-layer cell produced *"the best provenance answer
- * witnessed on either build"*, and the A/B above shows it answering the
- * challenge questions well when it is allowed to see them.
+ * And the fall-through is not a consolation prize: the reasoning-layer cell is
+ * recorded as having produced the best provenance answer on the witness, and
+ * the A/B above shows it answering the challenge questions well when it is
+ * allowed to see them.
+ *
+ * ⚠ ATTRIBUTION CORRECTED. This sentence previously presented that finding as a
+ * VERBATIM QUOTATION of `structure-origin-answer.ts`. That file does not contain
+ * the words, and neither does any other: swept across `src/` for *"best
+ * provenance answer"*, the only three hits were this citation, its twin in
+ * `state-query-guard.ts`, and the paraphrase both were citing — an inline
+ * comment on that module's `subjectMatch === null` fall-through. A quotation
+ * mark is a claim about bytes; there were none behind this one. Recorded rather
+ * than silently deleted, because a false citation is what the next session
+ * inherits as fact (trap 14: an honest label overwritten by a confident one).
  *
  * ── THE ONE REAL COST, STATED RATHER THAN PAPERED OVER ──────────────────────
  * `brief-audit-answer.ts` exists because explanation layers *"re-read the brief

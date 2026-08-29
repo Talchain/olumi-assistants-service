@@ -477,10 +477,18 @@ export function tryStateQueryGuard(
     // The provenance record is a statement of FACT about authorship. It holds
     // no judgement, so it cannot answer a request for one — in any
     // construction, which is why this needs no second conjunct. Declining hands
-    // the turn to the reasoning layer, and this module's own header records
-    // that cell producing *"the best provenance answer witnessed on either
-    // build"*: the origin half is not lost by declining, and the other half is
-    // gained.
+    // the turn to the reasoning layer, which is recorded below — on the
+    // `subjectMatch === null` fall-through — as the destination that produced
+    // the best provenance answer on the witness: the origin half is not lost by
+    // declining, and the other half is gained.
+    //
+    // ⚠ ATTRIBUTION CORRECTED. This previously cited *"the best provenance
+    // answer witnessed on either build"* as a verbatim quotation of THIS
+    // MODULE'S OWN HEADER. The header contains no such sentence; the nearest
+    // real text is the inline comment named above, and it is a paraphrase, not
+    // those words. Swept across `src/` for *"best provenance answer"*: three
+    // hits, being this citation, its twin in `judgement-request.ts`, and that
+    // comment. Both citations pointed at bytes that do not exist.
     if (asksForOwnJudgement(input.message)) {
       return { matched: false };
     }

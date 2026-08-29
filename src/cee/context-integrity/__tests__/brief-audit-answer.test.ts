@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   composeBriefAuditAnswer,
   isBriefAuditQuestion,
+  hasDispositionVerb,
   tryBriefAuditAnswer,
 } from "../brief-audit-answer.js";
 import {
@@ -568,5 +569,51 @@ describe("composeBriefAuditAnswer", () => {
       expect(answer).toMatch(/and \d+ more/);
       expect(answer).toMatch(/not a ranking/i);
     });
+  });
+});
+
+/**
+ * THE SEPARABLE PARTICLE — `OMISSION_VERB_PATTERNS[0]`.
+ *
+ * `leave out` is a phrasal verb whose object routinely splits it. The pattern
+ * required the particle ADJACENT (`/\ble(?:ave|aving|ft)\s+out\b/i`), so
+ * *"did you leave anything out?"* — the plainest way a tester asks the fidelity
+ * question — scored NO disposition, and the brief-audit arm declined a question
+ * it exists to answer. The grounded manifest was lost and the turn fell through.
+ *
+ * The twin matters as much as the fix (standing brief §3): this predicate guards
+ * TWO OPPOSITE HARMS. Too narrow drops a real fidelity question; too wide
+ * answers a genuine SESSION-EDIT question with a report about the brief — "A LIE
+ * either way" (`brief-audit-answer.ts:110-111`). Both directions are asserted.
+ */
+describe("omission verbs with a split particle", () => {
+  it("CONTROL: the adjacent form was already recognised", () => {
+    expect(hasDispositionVerb("did you leave out my deadline?")).toBe(true);
+    expect(isBriefAuditQuestion("did you leave out my deadline?")).toBe(true);
+  });
+
+  it.each([
+    "did you leave anything out?",
+    "have you left anything out?",
+    "did you leave my deadline out?",
+    "are you leaving anything important out?",
+  ])("recognises a disposition in %j", (message) => {
+    expect(hasDispositionVerb(message)).toBe(true);
+  });
+
+  it("routes the plainest fidelity question to the grounded manifest", () => {
+    expect(isBriefAuditQuestion("did you leave anything out?")).toBe(true);
+  });
+
+  it("TWIN: the window stays tight — it does not swallow an unrelated clause", () => {
+    // "leave" and "out" more than two words apart are not one phrasal verb.
+    expect(
+      hasDispositionVerb("did you leave the model in a state I can get out of later?"),
+    ).toBe(false);
+  });
+
+  it("TWIN: a session-edit question is still NOT a brief audit", () => {
+    expect(isBriefAuditQuestion("what did you just change?")).toBe(false);
+    expect(isBriefAuditQuestion("add a factor for churn")).toBe(false);
   });
 });

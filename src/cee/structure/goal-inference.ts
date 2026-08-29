@@ -9,6 +9,46 @@
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
+// ⭐ THE ONE SCAFFOLDING-BADGE AUTHORITY, shared with the projector, the
+// deterministic sweep and the terminal-bridge repair. A fourth mint site, one
+// constructor — see `projector.ts:121` for why this is not a new vocabulary.
+import { scaffoldingProvenance, type RecordProvenance } from "../draft/records/projector.js";
+
+/**
+ * ⛔ THE BADGE FOR A GOAL CEE CHOSE, AND WHY ITS ABSENCE WAS THE DEFECT.
+ *
+ * A node minted here with NO provenance is not neutral. `projectNodeProvenance`
+ * (`transforms/schema-v3.ts:1158`) reads an unrecognised node as LEGACY and
+ * falls through to label containment at `:1193`: `goal` is in
+ * `LABEL_BOUND_PROVENANCE_KINDS`, the minted label carries no value and has ≥2
+ * tokens, and — for the regex limb — the label IS a case-folded substring of
+ * the brief BY CONSTRUCTION, because `inferGoalFromBrief` lifted it from there.
+ * So `bindOptionLabelToBrief` returned `verified` and the node was stamped
+ * `provenance: "from_brief"`: THE USER'S BADGE ON A GOAL THEY NEVER DESIGNATED
+ * AND THE MODEL NEVER AUTHORED.
+ *
+ * That module's header names this exact hazard — *"an inferred label that
+ * happens to repeat brief text is falsely re-attributed to the user"*
+ * (`:1153-1155`) — and the typed path exists to stop it. This goal simply never
+ * took that path. Carrying a typed record makes `projectNodeProvenance` return
+ * at `:1169` BEFORE any label match, so the verdict is `ai_inferred` by class
+ * rather than by a string comparison that the regex guarantees will succeed.
+ *
+ * `label_authored` is the estate's existing node-level signal for "the producer
+ * authored this display label rather than carrying the user's own words"
+ * (`post-draft-narrative.ts:291`). It is what stops the narrative wrapping this
+ * label in quotation marks, which promise "these are your words".
+ *
+ * ⚠ NOT APPLIED TO THE `explicitGoal` LIMB. `context.goals[0]` is the user's own
+ * text; badging it would be the OPPOSITE HARM — stripping a real goal of a real
+ * attribution. Both directions are pinned in
+ * `tests/unit/cee.goal-inference-attribution.test.ts`.
+ */
+const MINTED_GOAL_PROVENANCE: RecordProvenance = {
+  // `quote` is NEVER user text (max 100) — it describes what the machine did.
+  ...scaffoldingProvenance("Goal minted by CEE: the drafted model carried no goal node"),
+  label_authored: true,
+};
 
 /**
  * Patterns that indicate goal/objective phrases in briefs
@@ -54,7 +94,22 @@ export interface GoalInferenceResult {
   found: boolean;
   /** The inferred goal label */
   label: string;
-  /** Source of the goal */
+  /**
+   * ⚠ TELEMETRY ONLY — NOT AN ATTRIBUTION BADGE, AND NEVER PUT ONE ON A NODE.
+   *
+   * `"brief"` here means only "a regex matched brief text", i.e. WHERE THE
+   * CHARACTERS CAME FROM. It does NOT mean the user designated this as their
+   * goal, and it is deliberately NOT the field any consumer reads to decide
+   * authorship. It reaches exactly two places, both diagnostic: the
+   * `CeeGoalInferred` telemetry event and a log line
+   * (`unified-pipeline/stages/repair/connectivity.ts:60-75`).
+   *
+   * The node's authorship badge is {@link MINTED_GOAL_PROVENANCE}, which says
+   * `projector_structural` + `label_authored` for BOTH limbs. Wiring this
+   * string to a user-facing attribution is the defect
+   * `cee.goal-inference-attribution.test.ts` exists to prevent — `"brief"`
+   * reads like the user's badge and is not one.
+   */
   source: "brief" | "placeholder" | "explicit";
   /** The matched pattern (for debugging) */
   matchedPattern?: string;
@@ -128,16 +183,19 @@ function capitalizeFirst(text: string): string {
  */
 export function createGoalNode(
   label: string,
-  id: string = "goal_inferred"
+  id: string = "goal_inferred",
+  provenance?: RecordProvenance
 ): {
   id: string;
   kind: "goal";
   label: string;
+  provenance?: RecordProvenance;
 } {
   return {
     id,
     kind: "goal",
     label,
+    ...(provenance ? { provenance } : {}),
   };
 }
 
@@ -315,7 +373,12 @@ export function ensureGoalNode(
 
   // Infer goal from brief
   const inference = inferGoalFromBrief(brief);
-  const goalNode = createGoalNode(inference.label, "goal_inferred");
+  // ⛔ BOTH LIMBS ARE CEE'S CHOICE, so both are badged. The regex limb carries
+  // the user's WORDS but not their designation — "we want to cut paid
+  // acquisition" names an OPTION, and lifting it as the goal is CEE deciding
+  // what the user was aiming at. The placeholder limb is pure invention. In
+  // neither case did the user author A GOAL, which is the claim the badge makes.
+  const goalNode = createGoalNode(inference.label, "goal_inferred", MINTED_GOAL_PROVENANCE);
   const graphWithGoal = {
     ...graph,
     nodes: [...(graph.nodes as any[]), goalNode],

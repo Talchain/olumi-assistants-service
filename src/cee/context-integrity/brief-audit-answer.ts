@@ -289,7 +289,15 @@ const INFERENCE_VERB_PATTERNS: readonly RegExp[] = [
  * *"what did you leave out?"* is unambiguous even with no brief named.
  */
 const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
-  /\ble(?:ave|aving|ft)\s+out\b/i,
+  // ⚠ THE PARTICLE IS SEPARABLE. `leave out` is a phrasal verb whose object
+  // routinely splits it — *"did you leave anything out?"*, *"did you leave my
+  // deadline out?"* — and the adjacent-only form scored those as NO disposition,
+  // so a genuine fidelity question lost its grounded answer and fell through.
+  // The 0-2 word window matches the shape the sibling INFERENCE patterns above
+  // already use, and stays tight deliberately: widening here is a real bet
+  // (a too-wide frame answers a session-edit question with a brief report —
+  // `:110-111`), so the window admits the split object and nothing longer.
+  /\ble(?:ave|aving|ft)\s+(?:\w+\s+){0,2}out\b/i,
   /\bomit(?:ted|ting|s)?\b/i,
   /\bignor(?:e|ed|ing)\b/i,
   /\bdiscard(?:ed|ing|s)?\b/i,
