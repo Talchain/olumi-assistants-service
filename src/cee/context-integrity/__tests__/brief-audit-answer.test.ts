@@ -605,11 +605,32 @@ describe("omission verbs with a split particle", () => {
     expect(isBriefAuditQuestion("did you leave anything out?")).toBe(true);
   });
 
-  it("TWIN: the window stays tight — it does not swallow an unrelated clause", () => {
-    // "leave" and "out" more than two words apart are not one phrasal verb.
-    expect(
-      hasDispositionVerb("did you leave the model in a state I can get out of later?"),
-    ).toBe(false);
+  /**
+   * ⛔ THE GAP, PINNED RATHER THAN HIDDEN — and the twin that failed to find it.
+   *
+   * The first twin written here asserted "the window stays tight" using
+   * *"did you leave the model in a state I can get out of later?"*. A mutant
+   * widening the window from {0,2} to {0,6} SURVIVED it: that case sits EIGHT
+   * words out, so it discriminates nothing at the boundary and the assertion was
+   * a guard agreeing with itself (trap 13b). Measured, the boundary is THREE.
+   *
+   * So the honest form is a KNOWN-DROPPED set asserting EXACTLY where the window
+   * ends (trap 22f). The suite is then green for the RIGHT reason, and REDs if
+   * the set grows OR shrinks — including if someone widens the window without
+   * the external corpus that question actually needs.
+   */
+  it("KNOWN-DROPPED: three intervening words fall outside the window", () => {
+    // Both are genuine fidelity questions. Neither is recognised today. This is
+    // a recorded gap, NOT desired behaviour — see the pattern's own comment.
+    expect(hasDispositionVerb("did you leave the churn factor out?")).toBe(false);
+    expect(hasDispositionVerb("did you leave my Q3 revenue target out?")).toBe(false);
+  });
+
+  it("TWIN: the boundary is real — two words in, three words out", () => {
+    // The discriminating pair the first twin lacked: adjacent to the boundary
+    // on BOTH sides, so widening or narrowing the window turns this red.
+    expect(hasDispositionVerb("did you leave my deadline out?")).toBe(true);
+    expect(hasDispositionVerb("did you leave the churn factor out?")).toBe(false);
   });
 
   it("TWIN: a session-edit question is still NOT a brief audit", () => {
