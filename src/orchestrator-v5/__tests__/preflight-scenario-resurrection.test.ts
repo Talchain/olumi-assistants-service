@@ -56,6 +56,8 @@
  * a live turn and it grows no fence rows"). At pre-flight time the current
  * turn has no fence row.
  */
+import { readFile } from 'node:fs/promises';
+
 import { describe, it, expect, vi } from 'vitest';
 
 import { preflightEnsureScenario } from '../build-turn-context.js';
@@ -174,6 +176,53 @@ describe('preflightEnsureScenario — a turn must not resurrect a deleted scenar
     const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, db.store);
 
     expect(result).toEqual({ ok: false, reason: 'scenario_requires_authenticated_owner' });
+  });
+
+  it('binds to THIS scenario: an admitted turn on a DIFFERENT scenario does not refuse this one', async () => {
+    // Identity binding, not a value predicate another object could satisfy
+    // (CLAUDE.md trap 19). A store that answered "some scenario somewhere has
+    // a fence row" would pass every other test in this file while refusing
+    // every first turn in production.
+    const rows = new Map<string, { user_id: string | null }>();
+    const OTHER_SCENARIO = '99999999-9999-4999-8999-999999999999';
+    const store = {
+      scenarioExists: vi.fn(async (id: string) => rows.has(id)),
+      // Only the OTHER scenario has ever admitted a turn.
+      scenarioHasAdmittedTurn: vi.fn(async (id: string) => id === OTHER_SCENARIO),
+      ensureScenarioExists: vi.fn(async (id: string, userId: string | null) => {
+        if (!rows.has(id)) rows.set(id, { user_id: userId });
+        return { user_id: rows.get(id)!.user_id };
+      }),
+    } as unknown as SessionStore;
+
+    const result = await preflightEnsureScenario(SCENARIO_ID, null, REQUEST_ID, store);
+
+    expect(result).toEqual({ ok: true });
+    expect(rows.has(SCENARIO_ID)).toBe(true);
+    expect(store.scenarioHasAdmittedTurn).toHaveBeenCalledWith(SCENARIO_ID);
+  });
+
+  it('THE ORDERING THIS GATE DEPENDS ON: fence admission happens AFTER the pre-flight', async () => {
+    // The discriminator is only sound because the asking turn has no fence row
+    // yet when the pre-flight runs. If `admitCurrentTurnFence()` were ever
+    // hoisted above `runPreFlight`, every genuine first turn would see its own
+    // admission and be refused as a deleted scenario — a total outage for new
+    // decisions, with nothing else in the suite able to see it.
+    //
+    // DERIVED from the route rather than described in a comment, so a reorder
+    // REDs here instead of shipping.
+    const routeSource = await readFile(
+      new URL('../../orchestrator/route-v2.ts', import.meta.url),
+      'utf8',
+    );
+    const preFlightAt = routeSource.indexOf('await runPreFlight(req)');
+    const admissionAt = routeSource.indexOf('await admitCurrentTurnFence()');
+
+    // Positive control: both anchors must actually be found, or this guard is
+    // comparing -1 to -1 and asserting nothing.
+    expect(preFlightAt).toBeGreaterThan(-1);
+    expect(admissionAt).toBeGreaterThan(-1);
+    expect(admissionAt).toBeGreaterThan(preFlightAt);
   });
 
   describe('degradation — this gate is an integrity guard, NOT an authorization control', () => {
