@@ -297,6 +297,34 @@ const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
   /\bmiss(?:ed|ing)\s+(?:out|anything|any)\b/i,
 ];
 
+/**
+ * Does the message attribute a HANDLING ACTION to the system — keeping,
+ * dropping, omitting, inferring? i.e. is there a disposition for the manifest
+ * to report on at all?
+ *
+ * ⚠ DERIVED FROM THE THREE VERB LISTS ABOVE, NOT COPIED FROM THEM (CLAUDE.md
+ * trap 12). One definition, two readers: `isBriefAuditQuestion` uses the lists
+ * to ADMIT a question, and `state-query-guard`'s brief-audit arm uses this to
+ * decide whether a judgement request has left anything for the manifest to
+ * answer. A hand-listed second copy here would drift the moment either list
+ * grew.
+ *
+ * Exported for exactly one caller — the brief-audit arm's decline conjunct. It
+ * narrows that decline: *"do you agree you left out my deadline?"* carries a
+ * disposition (`left out`) and stays with the manifest, while *"do you actually
+ * disagree with anything I said?"* carries none and goes to the reasoning
+ * layer. See `orchestrator-v5/routing/judgement-request.ts` for why the two
+ * must part.
+ */
+export function hasDispositionVerb(message: string): boolean {
+  if (typeof message !== "string" || message.length === 0) return false;
+  return (
+    OMISSION_VERB_PATTERNS.some((p) => p.test(message)) ||
+    RETENTION_VERB_PATTERNS.some((p) => p.test(message)) ||
+    INFERENCE_VERB_PATTERNS.some((p) => p.test(message))
+  );
+}
+
 // ── the composer ────────────────────────────────────────────────────────────
 
 /**

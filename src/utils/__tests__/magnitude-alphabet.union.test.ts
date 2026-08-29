@@ -453,6 +453,23 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // already numeric, and renders integer percentages via Math.round.
     'orchestrator-v5/coaching/objective-contradiction.ts':
       'incidental — comment only; spells no alphabet and parses no numbers',
+    // ⭐ FIFTH — and the prediction two entries above has now come true twice
+    // over. Same comment-only `£1.5 million`, same reason: the planning-preamble
+    // stripper's `SENTENCE_SPLIT` must not cut on a bare `[.!?]`, because that
+    // character is also the decimal point (CLAUDE.md trap 22). The mention sits
+    // in the docstring explaining exactly that.
+    //
+    // The module holds no magnitude list, parses no number and multiplies
+    // nothing: it matches internal-vocabulary patterns over assistant text and
+    // returns a substring. Its sibling spec spells `£1.5 million` too, in the
+    // case pinning the decimal-safe split, and is correctly invisible to this
+    // scan (`walk()` skips `__tests__`) — so it is deliberately NOT listed.
+    //
+    // ⚠ The standing recommendation stands and is now overdue: state the
+    // decimal-split hazard ONCE in a shared place. Not done here — unrelated to
+    // this lane, and "while we're here" work is prohibited.
+    'orchestrator-v5/routing/strip-planning-preamble.ts':
+      'incidental — comment only; spells no alphabet and parses no numbers',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
     // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is

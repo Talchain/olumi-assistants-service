@@ -205,6 +205,7 @@ import {
   tryPostAnalysisAdviceGate,
   hasRenderableTopDriverLabel,
 } from './routing/post-analysis-advice-gate.js';
+import { stripPlanningPreamble } from './routing/strip-planning-preamble.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
@@ -10619,7 +10620,23 @@ export async function runTurnExecutor(
       // the converse/clarify/coach paths — Sonnet's pre-action text could
       // carry contamination (tags, em-dashes) and must be cleaned before it
       // joins the composed assistant_text.
-      const sanitisedOrientation = sanitiseNarrateOutput(routingResult.orientationText);
+      // ⭐⭐ AND THE MODEL'S PLANNING MONOLOGUE IS REMOVED BEFORE IT CAN BECOME
+      // THE FIRST PARAGRAPH THE USER READS. Witnessed verbatim in 5 of 7
+      // evaluation briefs: *"The user wants two things… Per rule 9 (one action
+      // per turn), I'll handle the value change first…"* — third-person
+      // reference to the reader, and an internal prompt rule cited by number.
+      // `sanitiseNarrateOutput` cleans tags and dashes and does not see either.
+      //
+      // Safe HERE by construction, and only here: `compose.ts:355` pushes the
+      // orientation only `if (trimmedOrientation)`, and the handler receipt is a
+      // separate piece, so an empty strip costs decoration and never the answer.
+      // Deliberately NOT applied to the coach / converse `orientation_fallback`
+      // below, where the orientation IS the whole answer. See
+      // `routing/strip-planning-preamble.ts` for the derivation and the root
+      // cause (`coachThinkingDisabled`, which this does not touch).
+      const sanitisedOrientation = sanitiseNarrateOutput(
+        stripPlanningPreamble(routingResult.orientationText),
+      );
       if (sanitisedOrientation.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
           request_id: requestId,
@@ -11227,8 +11244,13 @@ export async function runTurnExecutor(
       // Clarify intent — use the clarification question as the assistant text.
       // Run it through the narrate sanitiser for consistency with the existing
       // A2 clarify path (Paul's BI-02: contamination handled in-band).
+      // The planning strip applies here too, and the existing `||` is exactly
+      // why it is safe: when the pre-tool-call text was ALL deliberation, the
+      // turn falls back to the deterministic clarification question — which is
+      // what the monologue was displacing. See
+      // `routing/strip-planning-preamble.ts`.
       const candidateText =
-        routingResult.orientationText ||
+        stripPlanningPreamble(routingResult.orientationText) ||
         routingResult.proposal.clarification.question;
       const sanitised = sanitiseNarrateOutput(candidateText);
       if (sanitised.contamination_detected) {
