@@ -167,6 +167,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 100,
       output_tokens: 200,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
 
@@ -219,6 +221,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 5,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
     const facts: readonly HandlerFact[] = [
@@ -282,6 +286,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
 
@@ -328,6 +334,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
 
@@ -377,6 +385,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
     const facts: readonly HandlerFact[] = [
@@ -404,6 +414,8 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 5,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
     const facts: readonly HandlerFact[] = [
@@ -633,7 +645,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt-2',
@@ -664,7 +676,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_offshore',
@@ -697,7 +709,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_offshore',
@@ -781,7 +793,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_offshore',
@@ -822,7 +834,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_offshore',
@@ -865,7 +877,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
-      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_current_match',
@@ -947,7 +959,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
         decision_quality_prompts: [],
       },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 50,
-      input_tokens: 100, output_tokens: 200, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+      input_tokens: 100, output_tokens: 200, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
       leading_option_id: 'opt_offshore',
@@ -1144,6 +1156,8 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
       input_tokens: 1,
       output_tokens: 1,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     });
   }
@@ -1750,6 +1764,8 @@ describe('enricher — CEE_DECISION_REVIEW_DECOMPOSE flag branch (B1)', () => {
     input_tokens: 1,
     output_tokens: 1,
     prompt_version: 'v',
+    prompt_hash: 'sha256:fixturehash',
+    prompt_source: 'default' as const,
     resolution: MOCK_RESOLUTION,
   };
 
@@ -1831,6 +1847,8 @@ describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
     input_tokens: 100,
     output_tokens: 200,
     prompt_version: 'v1',
+    prompt_hash: 'sha256:fixturehash',
+    prompt_source: 'default' as const,
     resolution: MOCK_RESOLUTION,
   };
 
@@ -1980,6 +1998,8 @@ describe('decision_review contract gate (auto-fire consume seam)', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      prompt_hash: 'sha256:fixturehash',
+      prompt_source: 'default' as const,
       resolution: MOCK_RESOLUTION,
     };
   }

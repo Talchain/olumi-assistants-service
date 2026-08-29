@@ -319,6 +319,9 @@ describe('chip-click run_analysis — decision_review observability (ROADMAP 2.7
           provider?: string;
           input_tokens?: number;
           output_tokens?: number;
+          prompt_hash?: string;
+          prompt_version?: string;
+          prompt_source?: string;
         };
       }) => {
         if (callTelemetrySink) {
@@ -326,6 +329,9 @@ describe('chip-click run_analysis — decision_review observability (ROADMAP 2.7
           callTelemetrySink.provider = 'openai';
           callTelemetrySink.input_tokens = 1200;
           callTelemetrySink.output_tokens = 800;
+          callTelemetrySink.prompt_hash = 'sha256:chipdrhash';
+          callTelemetrySink.prompt_version = 'decision_review_default@v11.1';
+          callTelemetrySink.prompt_source = 'store';
         }
         return handlerFacts;
       },
@@ -343,6 +349,15 @@ describe('chip-click run_analysis — decision_review observability (ROADMAP 2.7
     expect(out.turnTimings!.decision_review_input_tokens).toBe(1200);
     expect(out.turnTimings!.decision_review_output_tokens).toBe(800);
     expect(typeof out.turnTimings!.decision_review_ms).toBe('number');
+    // SECOND PRODUCTION WRITER of the decision_review_* fields. The
+    // turn-executor block is the other one; a fix applied to only one of them
+    // leaves chip-driven analysis turns silently un-attributed, which is
+    // exactly the enumerate-vs-observe trap this assertion exists to close.
+    expect(out.turnTimings!.decision_review_prompt_hash).toBe('sha256:chipdrhash');
+    expect(out.turnTimings!.decision_review_prompt_version).toBe(
+      'decision_review_default@v11.1',
+    );
+    expect(out.turnTimings!.decision_review_prompt_source).toBe('store');
     // The sink must actually have been OFFERED to the enricher.
     const call = enrichRunAnalysisMock.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.callTelemetrySink).toBeDefined();

@@ -129,6 +129,15 @@ export interface EnrichDecisionReviewInput {
     provider?: string;
     input_tokens?: number;
     output_tokens?: number;
+    /**
+     * Served-prompt identity for the call, threaded from
+     * `DecisionReviewInvokeResult`. `prompt_hash` stays `undefined` when the
+     * loader reported no cache entry — the caller MUST omit the attribution
+     * in that case rather than record a placeholder digest.
+     */
+    prompt_hash?: string;
+    prompt_version?: string;
+    prompt_source?: string;
   };
   /**
    * D-ask-1 (2.11 P0-1) — P1-2: options the CURRENT run_analysis scaffolded
@@ -368,6 +377,16 @@ export async function enrichRunAnalysisWithDecisionReview(
       input.callTelemetrySink.provider = result.provider;
       input.callTelemetrySink.input_tokens = result.input_tokens;
       input.callTelemetrySink.output_tokens = result.output_tokens;
+      // Served-prompt identity. Assigned only when the loader actually
+      // reported one, so a cache-miss call leaves the field absent (identity
+      // unknown) instead of carrying a fabricated hash.
+      if (result.prompt_hash !== undefined) {
+        input.callTelemetrySink.prompt_hash = result.prompt_hash;
+      }
+      if (result.prompt_version !== undefined) {
+        input.callTelemetrySink.prompt_version = result.prompt_version;
+      }
+      input.callTelemetrySink.prompt_source = result.prompt_source;
     }
     if (result.output === null) {
       emit(TelemetryEvents.V5DecisionReviewFailed, {

@@ -16,6 +16,16 @@ let patchBudgetEnabledForTest = false;
 vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
   getSystemPrompt: vi.fn().mockResolvedValue("You edit causal decision graphs"),
   getSystemPromptMeta: vi.fn().mockReturnValue({ source: 'default', prompt_version: 'v2' }),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: "You edit causal decision graphs",
+    meta: { source: 'default', prompt_version: 'v2' },
+  }),
 }));
 
 vi.mock("../../../../src/config/index.js", async (importOriginal) => {
@@ -1005,8 +1015,15 @@ describe("golden fixtures", () => {
 
 describe("prompt loading", () => {
   // Test 19a: Handler loads prompt via getSystemPrompt('edit_graph')
-  it("uses prompt-loader for edit_graph system prompt", async () => {
-    const { getSystemPrompt } = await import("../../../../src/adapters/llm/prompt-loader.js");
+  it("uses prompt-loader for edit_graph system prompt — via the BOUND snapshot call", async () => {
+    // The lane resolves bytes and identity together now. Two independent
+    // reads could disagree on the transient store-failure path (default bytes
+    // served while the stale store entry still answers a separate meta read),
+    // and that identity is recorded as provenance — so the bound call is the
+    // seam worth pinning here.
+    const { getSystemPromptSnapshot, getSystemPrompt } = await import(
+      "../../../../src/adapters/llm/prompt-loader.js"
+    );
     const adapter = makeAdapter(V2_GOOD_RESPONSE);
 
     await handleEditGraph(
@@ -1017,7 +1034,9 @@ describe("prompt loading", () => {
       "turn-1",
     );
 
-    expect(getSystemPrompt).toHaveBeenCalledWith("edit_graph");
+    expect(getSystemPromptSnapshot).toHaveBeenCalledWith("edit_graph");
+    // ...and NOT via the unbound two-read pattern this replaced.
+    expect(getSystemPrompt).not.toHaveBeenCalledWith("edit_graph");
   });
 
   it("steers narrow value edits toward field-level updates in the system prompt", async () => {

@@ -212,6 +212,9 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         latency_ms: 1450,
         stop_reason: 'end_turn',
         repair_attempts: 1,
+        prompt_hash: 'sha256:editgraphhash',
+        prompt_version: 'edit_graph_default@v12',
+        prompt_source: 'default',
       },
     });
     expect(trace!.exit_path).toBe('edit_graph');
@@ -230,6 +233,14 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(call.cache_creation_tokens).toBeNull();
     expect(call.thinking_enabled).toBe(false);
     expect(call.error).toBeNull();
+    // Prompt identity for the edit call — bound BY TASK ID, so this cannot
+    // pass on some other role's record.
+    const identity = trace!.prompt_identity.find((p) => p.task_id === 'edit_graph');
+    expect(identity).toBeDefined();
+    expect(identity!.hash).toBe('sha256:editgraphhash');
+    expect(identity!.version).toBe('edit_graph_default@v12');
+    expect(identity!.prompt_id).toBe('edit_graph_default@v12');
+    expect(identity!.source).toBe('default');
   });
 
   it('falls back to the honest model sentinel when the edit adapter did not expose a model', async () => {
@@ -248,10 +259,64 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         latency_ms: 900,
         stop_reason: null,
         repair_attempts: 0,
+        // Loader reported no identity for this call — the honest absence case.
+        prompt_hash: undefined,
+        prompt_version: undefined,
+        prompt_source: undefined,
       },
     });
     expect(trace!.llm_calls.length).toBe(1);
     expect(trace!.llm_calls[0]!.model).toBe('unknown');
+    // OPPOSITE-DIRECTION TWIN of the case above (trap 22b). The loader
+    // reported no identity, so the trace must record NONE — an honest
+    // "identity unknown", never a placeholder hash conjured to fill the slot.
+    // Without this case a fix that defaulted the hash to '' or 'unknown' would
+    // pass the positive test and silently start attributing every cache-miss
+    // call to a prompt that does not exist.
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'edit_graph')).toBe(false);
+  });
+
+  it('records NO decision_review prompt identity when the loader reported no hash', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    // OPPOSITE-DIRECTION TWIN for `decision_review` — the mirror of the
+    // edit_graph case above, on the most user-facing LLM call in the product.
+    //
+    // The triggering state is ROUTINE, not exotic: the decompose path returns
+    // `prompt_hash: undefined` alongside a real model and real token counts, so
+    // "decision_review_ms set, no hash" is the NORMAL decompose turn. Without
+    // this case, substituting `hash: … ?? 'unknown'` for the presence guard
+    // survives the entire required gate and starts certifying every such brief
+    // against a prompt that does not exist.
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'turn_executor',
+      turnTimings: {
+        decision_review_ms: 14_000,
+        decision_review_model: 'gpt-4.1',
+        decision_review_provider: 'openai',
+        decision_review_input_tokens: 4321,
+        decision_review_output_tokens: 876,
+        // Loader reported no identity (decompose composite / cache miss).
+        decision_review_prompt_hash: undefined,
+        decision_review_prompt_version: undefined,
+        decision_review_prompt_source: undefined,
+      },
+    });
+
+    // PRECONDITION — keep this. It asserts the decision_review CALL was built,
+    // so the absence assertion below cannot pass merely because nothing was
+    // recorded at all.
+    const drCall = trace!.llm_calls.find((c) => c.role === 'decision_review');
+    expect(drCall).toBeDefined();
+    expect(drCall!.model).toBe('gpt-4.1');
+
+    // The call is recorded; its identity is NOT invented.
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'decision_review')).toBe(
+      false,
+    );
   });
 
   it('leaves llm_calls empty on a deterministic (no-LLM) edit exit — editLlmCall omitted', async () => {

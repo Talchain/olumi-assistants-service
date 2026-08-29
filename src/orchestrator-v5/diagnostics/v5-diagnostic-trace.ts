@@ -371,6 +371,15 @@ export interface EditGraphLlmCallTelemetry {
   readonly latency_ms: number;
   readonly stop_reason: string | null;
   readonly repair_attempts: number;
+  /**
+   * Served-prompt identity for the edit call, bound by `edit-graph.ts` to the
+   * bytes actually sent via a single `getSystemPromptSnapshot('edit_graph')`
+   * resolution. `prompt_hash` is `undefined` when the loader reported no
+   * identity — an honest absence, never a fabricated digest.
+   */
+  readonly prompt_hash: string | undefined;
+  readonly prompt_version: string | undefined;
+  readonly prompt_source: string | undefined;
 }
 
 /**
@@ -413,6 +422,9 @@ export function extractEditLlmCallTelemetry(
     latency_ms: result.latencyMs,
     stop_reason: diag.stop_reason ?? null,
     repair_attempts: diag.repair_attempts ?? 0,
+    prompt_hash: diag.prompt_hash,
+    prompt_version: diag.prompt_version,
+    prompt_source: diag.prompt_source,
   };
 }
 
@@ -764,6 +776,27 @@ function populateCollectorFromTurnTimings(
       thinking_enabled: false,
       error: null,
     });
+    // Prompt identity for the analysis-brief call. `decision_review` is the
+    // most user-facing LLM call in the product, and without this the trace
+    // could say WHAT ran but never WHICH PROMPT VERSION produced the brief the
+    // user read. Guarded on a real hash exactly like the routing/draft_graph
+    // sites above: the loader reports none on a cold start / cache miss, and
+    // `PromptIdentity.hash` is required, so the only honest options are a real
+    // hash or no record at all — never a placeholder digest.
+    if (turnTimings.decision_review_prompt_hash) {
+      collector.recordPromptIdentity({
+        task_id: 'decision_review',
+        prompt_id: turnTimings.decision_review_prompt_version ?? 'unknown',
+        version: turnTimings.decision_review_prompt_version ?? 'unknown',
+        hash: turnTimings.decision_review_prompt_hash,
+        // The loader's own 'store' | 'default' verdict, threaded verbatim.
+        // The sibling sites hardcode 'pms'; doing that here would LABEL a
+        // hardcoded-default prompt as store-managed, which is the class of
+        // untruth this attribution exists to prevent.
+        source: turnTimings.decision_review_prompt_source ?? 'unknown',
+        is_staging: config.server.nodeEnv !== 'production',
+      });
+    }
   }
 }
 
@@ -794,6 +827,18 @@ function populateCollectorFromEditTelemetry(
     thinking_enabled: false,
     error: null,
   });
+  // Prompt identity for the edit call — same guard and same rationale as the
+  // decision_review and routing sites: a real hash or no record at all.
+  if (editLlmCall.prompt_hash) {
+    collector.recordPromptIdentity({
+      task_id: 'edit_graph',
+      prompt_id: editLlmCall.prompt_version ?? 'unknown',
+      version: editLlmCall.prompt_version ?? 'unknown',
+      hash: editLlmCall.prompt_hash,
+      source: editLlmCall.prompt_source ?? 'unknown',
+      is_staging: config.server.nodeEnv !== 'production',
+    });
+  }
 }
 
 function buildBenchmarkingForDraftGraph(

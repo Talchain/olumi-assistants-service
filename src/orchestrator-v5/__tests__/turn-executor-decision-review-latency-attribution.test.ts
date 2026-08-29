@@ -98,6 +98,13 @@ const DR_MODEL = 'gpt-4.1';
 const DR_PROVIDER = 'openai';
 const DR_INPUT_TOKENS = 4321;
 const DR_OUTPUT_TOKENS = 876;
+// Served-prompt identity of the decision_review call. Deliberately unlike the
+// routing entry's identity so an assertion that accidentally matched the
+// ROUTING prompt_identity record would fail rather than pass (trap 19: bind by
+// identity, never by a value another object could satisfy).
+const DR_PROMPT_HASH = 'sha256:decisionreviewhash01';
+const DR_PROMPT_VERSION = 'decision_review_default@v11.1';
+const DR_PROMPT_SOURCE = 'default' as const;
 // Measurable enricher delay so `decision_review_ms` is unambiguously non-trivial
 // and the de-absorption of `compose_ms` is discriminating with a WIDE margin.
 // Real compose work in this heavily-logged harness runs ~tens-to-few-hundred ms
@@ -207,7 +214,9 @@ function mockDecisionReviewInvoke() {
       llm_latency_ms: DR_DELAY_MS,
       input_tokens: DR_INPUT_TOKENS,
       output_tokens: DR_OUTPUT_TOKENS,
-      prompt_version: 'v1',
+      prompt_version: DR_PROMPT_VERSION,
+      prompt_hash: DR_PROMPT_HASH,
+      prompt_source: DR_PROMPT_SOURCE,
       resolution: MOCK_RESOLUTION,
     };
   });
@@ -300,6 +309,37 @@ describe('TurnExecutor — decision_review latency attribution (observability la
       expect(drCall!.output_tokens).toBe(DR_OUTPUT_TOKENS);
       // The surfaced latency is the executor's wall-clock for the await.
       expect(drCall!.latency_ms).toBe(tt!.decision_review_ms);
+
+      // (4) PROMPT IDENTITY for the analysis brief. `decision_review` is the
+      // most user-facing LLM call in the product; without this record the
+      // trace can say WHAT ran but never WHICH PROMPT VERSION produced the
+      // brief the user read.
+      expect(tt!.decision_review_prompt_hash).toBe(DR_PROMPT_HASH);
+      expect(tt!.decision_review_prompt_version).toBe(DR_PROMPT_VERSION);
+      expect(tt!.decision_review_prompt_source).toBe(DR_PROMPT_SOURCE);
+
+      // Bound BY TASK ID, not by position or by value: a `find` on the hash
+      // alone would also pass if the routing record happened to carry it.
+      const drIdentity = trace!.prompt_identity.find(
+        (p) => p.task_id === 'decision_review',
+      );
+      expect(drIdentity).toBeDefined();
+      expect(drIdentity!.hash).toBe(DR_PROMPT_HASH);
+      expect(drIdentity!.version).toBe(DR_PROMPT_VERSION);
+      expect(drIdentity!.prompt_id).toBe(DR_PROMPT_VERSION);
+      // Threaded verbatim from the loader — NOT relabelled 'pms' the way the
+      // sibling sites hardcode it. A default-sourced prompt reported as
+      // store-managed would be the exact untruth this record exists to close.
+      expect(drIdentity!.source).toBe(DR_PROMPT_SOURCE);
+
+      // DISCRIMINATION: the routing record must still be present AND distinct.
+      // This is what makes the assertion above about decision_review rather
+      // than about "some prompt identity existing".
+      const routingIdentity = trace!.prompt_identity.find(
+        (p) => p.task_id === 'routing',
+      );
+      expect(routingIdentity).toBeDefined();
+      expect(routingIdentity!.hash).not.toBe(DR_PROMPT_HASH);
     } finally {
       await restoreFlags();
     }

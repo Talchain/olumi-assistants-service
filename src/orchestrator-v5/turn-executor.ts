@@ -10459,6 +10459,9 @@ export async function runTurnExecutor(
             provider?: string;
             input_tokens?: number;
             output_tokens?: number;
+            prompt_hash?: string;
+            prompt_version?: string;
+            prompt_source?: string;
           } = {};
           try {
             handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
@@ -10520,6 +10523,13 @@ export async function runTurnExecutor(
                 turnTimings.decision_review_provider = callTelemetrySink.provider;
                 turnTimings.decision_review_input_tokens = callTelemetrySink.input_tokens;
                 turnTimings.decision_review_output_tokens = callTelemetrySink.output_tokens;
+                // Served-prompt identity for the analysis-brief call. Assigned
+                // only when the loader reported one: a cache-miss call leaves
+                // these undefined so the trace omits the attribution instead of
+                // claiming an identity it does not have.
+                turnTimings.decision_review_prompt_hash = callTelemetrySink.prompt_hash;
+                turnTimings.decision_review_prompt_version = callTelemetrySink.prompt_version;
+                turnTimings.decision_review_prompt_source = callTelemetrySink.prompt_source;
               }
             }
           }

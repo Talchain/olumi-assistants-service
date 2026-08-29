@@ -34,7 +34,32 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn(async () => 'SYSTEM PROMPT'),
-  getSystemPromptMeta: vi.fn(() => ({ prompt_version: 'v1' })),
+  // ⚠ DELIBERATELY DIVERGENT from the snapshot below — this models the real
+  // transient store-failure path, where the loader serves DEFAULT bytes but
+  // leaves an expired STORE entry in the cache for a separate meta read to
+  // find. Any code that reads identity from here rather than from the bound
+  // snapshot certifies the served bytes against the wrong prompt.
+  getSystemPromptMeta: vi.fn(() => ({
+    prompt_version: 'STALE-STORE-v1',
+    prompt_hash: 'sha256:STALESTOREENTRYHASH',
+    source: 'store',
+  })),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  // The BOUND resolution — content and meta from one entry. These are the
+  // bytes actually sent, so this is the only identity that may be recorded.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'SYSTEM PROMPT',
+    meta: {
+      prompt_version: 'v1',
+      prompt_hash: 'sha256:drpromptidentity01',
+      source: 'default',
+    },
+  }),
 }));
 
 vi.mock('../science-claims.js', () => ({
@@ -174,6 +199,40 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
     // fields are independent axes of information.
     expect(result.resolution.provider).toBe('openai');
     expect(result.resolution.resolved_model).toBe('gpt-4.1');
+  });
+
+  it('returns the SERVED prompt identity so the caller can attribute the analysis brief', async () => {
+    // `invoke.ts` already read `promptMeta.prompt_hash` for its context-budget
+    // event but never RETURNED it, so every downstream consumer — including
+    // the diagnostic trace of the most user-facing LLM call in the product —
+    // had no identity to record. This is the producer hop of that thread.
+    const adapter = makeAdapterStub('{"narrative_summary":"ok"}');
+    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({
+      adapter,
+      resolution: MOCK_RESOLUTION,
+    });
+
+    const result = await invokeDecisionReview(baseInput(), {
+      requestId: 'req-prompt-identity',
+      timeoutMs: 15_000,
+    });
+
+    // Derived from the loader (the producer), not from a value invented here.
+    expect(result.prompt_hash).toBe('sha256:drpromptidentity01');
+    expect(result.prompt_version).toBe('v1');
+    // The loader's OWN verdict, threaded verbatim — not relabelled 'pms'.
+    // A hardcoded-default prompt reported as store-managed would be exactly
+    // the untruth this attribution exists to prevent.
+    expect(result.prompt_source).toBe('default');
+
+    // DISCRIMINATION — the load-bearing half. `getSystemPromptMeta` is mocked
+    // to a DIFFERENT, stale store identity, mirroring the real transient
+    // store-failure path. Reverting to the unbound two-read pattern would make
+    // these three assertions report the stale entry and RED here, which is what
+    // makes the binding a tested property rather than a docblock claim.
+    expect(result.prompt_hash).not.toBe('sha256:STALESTOREENTRYHASH');
+    expect(result.prompt_version).not.toBe('STALE-STORE-v1');
+    expect(result.prompt_source).not.toBe('store');
   });
 
   it('RIDER-B — a per-call model override routes as a per_call source; the default path is unchanged', async () => {

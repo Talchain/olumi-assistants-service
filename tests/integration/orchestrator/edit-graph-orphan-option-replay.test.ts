@@ -38,6 +38,7 @@
  * - `maxRepairRetries = 1` allows one repair attempt (so totalAttempts = 2).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getSystemPromptSnapshot } from '../../../src/adapters/llm/prompt-loader.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Mocks
@@ -45,9 +46,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 let patchPreValidationEnabledForTest = true;
 
+// Served-prompt identity the mocked loader reports. The edit lane must carry
+// THIS value into `diagnostics`, which is what lets an edit turn's
+// `_diagnostic_trace` say which prompt version produced the edit.
+// `vi.hoisted` because `vi.mock` factories are hoisted above plain consts.
+const { EDIT_PROMPT_HASH } = vi.hoisted(() => ({
+  EDIT_PROMPT_HASH: 'sha256:editpromptidentity01',
+}));
+
 vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn().mockResolvedValue('You edit causal decision graphs'),
-  getSystemPromptMeta: vi.fn().mockReturnValue({ source: 'default', prompt_version: 'v2' }),
+  getSystemPromptMeta: vi
+    .fn()
+    .mockReturnValue({ source: 'default', prompt_version: 'v2', prompt_hash: EDIT_PROMPT_HASH }),
+  // The edit lane resolves bytes AND identity in one bound call. A mock
+  // factory REPLACES the module, so omitting this export would hand
+  // edit-graph.ts `undefined` (trap 12) — content and meta are returned
+  // together here for the same reason production binds them.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'You edit causal decision graphs',
+    meta: { source: 'default', prompt_version: 'v2', prompt_hash: EDIT_PROMPT_HASH },
+  }),
 }));
 
 vi.mock('../../../src/config/index.js', async (importOriginal) => {
@@ -320,6 +339,35 @@ describe('edit_graph orphan-option replay', () => {
     expect(adapter.chat).toHaveBeenCalledTimes(1);
     expect(result.wasRejected).toBe(false);
     expect(result.diagnostics?.validation_violation_codes ?? []).not.toContain('OPTION_NO_FACTOR_EDGES');
+  });
+
+  it('captures the SERVED prompt identity into diagnostics on a real edit turn', async () => {
+    // Guards the CAPTURE hop inside edit-graph.ts itself. The dispatch-level
+    // suites mock `handleEditGraph` wholesale, so without this test the three
+    // lines that read `promptMeta` into the diagnostics closure are covered by
+    // typecheck only — deleting them would leave every edit turn's prompt
+    // identity silently dark under a fully green suite.
+    const adapter = makeAdapter(COMPLETE_OPTION_RESPONSE);
+    const ctx = makeHiringContext();
+
+    const result = await handleEditGraph(
+      ctx,
+      'Add an option for contract hiring',
+      adapter,
+      'req-replay-prompt-identity',
+      'turn-replay-prompt-identity',
+    );
+
+    expect(result.diagnostics).toBeDefined();
+    // Derived from the PRODUCER (the loader the lane actually consults), not
+    // from a value invented here.
+    expect(result.diagnostics!.prompt_hash).toBe(EDIT_PROMPT_HASH);
+    expect(result.diagnostics!.prompt_version).toBe('v2');
+    expect(result.diagnostics!.prompt_source).toBe('default');
+    // CONTROL that can actually fail: the loader was CONSULTED for this turn.
+    // (The previous version asserted a local const was a non-empty string,
+    // which is true regardless of what the code under test did.)
+    expect(vi.mocked(getSystemPromptSnapshot)).toHaveBeenCalledWith('edit_graph');
   });
 });
 

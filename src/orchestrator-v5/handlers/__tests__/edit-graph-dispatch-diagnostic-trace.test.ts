@@ -127,6 +127,9 @@ function llmRanDiagnostics(overrides: Partial<EditGraphTraceDiagnostics> = {}): 
     failure_code: null,
     failure_message: null,
     model: 'claude-sonnet-4-6',
+    prompt_hash: 'sha256:editgraphhash',
+    prompt_version: 'edit_graph_default@v12',
+    prompt_source: 'default',
     input_tokens_est: 3100,
     output_tokens: 210,
     stop_reason: 'end_turn',
@@ -184,6 +187,12 @@ describe('extractEditLlmCallTelemetry (S3-L6 / F-5)', () => {
       latency_ms: 1450,
       stop_reason: 'end_turn',
       repair_attempts: 1,
+      // Served-prompt identity maps straight through, so an edit turn's trace
+      // can say WHICH PROMPT VERSION produced the edit. `toEqual` is exact, so
+      // a mapping that dropped these would RED.
+      prompt_hash: 'sha256:editgraphhash',
+      prompt_version: 'edit_graph_default@v12',
+      prompt_source: 'default',
     });
   });
 
@@ -250,6 +259,10 @@ describe('dispatchEditGraph — editLlmCall threading (S3-L6 / F-5)', () => {
       latency_ms: 1450,
       stop_reason: 'end_turn',
       repair_attempts: 1,
+      // Identity survives the whole dispatch hop, not just the extractor.
+      prompt_hash: 'sha256:editgraphhash',
+      prompt_version: 'edit_graph_default@v12',
+      prompt_source: 'default',
     });
   });
 

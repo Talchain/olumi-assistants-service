@@ -34,6 +34,16 @@ import type { FastifyRequest } from 'fastify';
 vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn().mockResolvedValue('You edit causal decision graphs'),
   getSystemPromptMeta: vi.fn().mockReturnValue({ source: 'default', prompt_version: 'v2' }),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'You edit causal decision graphs',
+    meta: { source: 'default', prompt_version: 'v2' },
+  }),
 }));
 
 vi.mock('../../../src/config/index.js', async (importOriginal) => {
