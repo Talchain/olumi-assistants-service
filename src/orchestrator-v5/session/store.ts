@@ -311,6 +311,52 @@ export interface SessionStore {
    */
   scenarioExists?(scenarioId: string): Promise<boolean>;
   /**
+   * HAS ANY TURN EVER BEEN ADMITTED ON THIS SCENARIO? — the only signal in the
+   * system that separates "this scenario was DELETED" from "this scenario does
+   * not exist yet".
+   *
+   * ── WHY THIS QUESTION, AND WHY THE FENCE TABLE ANSWERS IT ─────────────────
+   * An absent `scenarios` row is ambiguous between three states that matter to
+   * the turn pre-flight — never existed, deleted, and not-yet-created — and the
+   * row itself carries nothing to tell them apart: `public.scenarios` has NO
+   * tombstone column of any kind (derived across the migration tree with firing
+   * contrast controls), and `ensure_scenario_exists` `RETURNS UUID`, so it
+   * discards the insert-vs-found bit inside the function body before any caller
+   * can see it.
+   *
+   * So the answer has to come from state that SURVIVES the delete.
+   * `v5_conversation_turns` and `v5_handler_facts` are `ON DELETE CASCADE` and
+   * are therefore gone with the parent. `v5_turn_fence` has NO foreign key to
+   * `scenarios` and its own table comment states its rows "are never deleted by
+   * the application". A fence row for a scenario whose row is absent is
+   * therefore durable evidence that the scenario ONCE EXISTED — because the
+   * fence is only ever claimed AFTER the pre-flight upsert has succeeded, so a
+   * fence row could not have been written unless the `scenarios` row existed at
+   * that moment.
+   *
+   * ⚠ MUST NOT be scoped to the asking turn, and does not need to be. The
+   *   claim (`admitCurrentTurnFence`) runs strictly AFTER `runPreFlight`
+   *   returns ok, so at pre-flight time the current turn has NO fence row and
+   *   a genuine first turn cannot trip over its own admission. If that ordering
+   *   ever moves, this read starts refusing first turns — which is why the
+   *   ordering is asserted in `preflight-scenario-resurrection.test.ts` rather
+   *   than described here.
+   *
+   * MAY throw on a failed read — the caller fails OPEN (proceeds), because this
+   * is a data-integrity guard rather than an authorization control: refusing a
+   * turn on an unreadable fence would cost a legitimate user their session,
+   * while proceeding merely degrades to the pre-existing behaviour. Optional
+   * for the same reason as {@link claimTurnFence}.
+   *
+   * ⚠ RETENTION HAZARD, INHERITED: the fence table's comment already warns that
+   *   no trim job exists and what one must not delete. A trim that removed old
+   *   fence rows would ALSO silently weaken this discriminator back towards
+   *   "not deleted" — fail-open, not fail-dangerous, but it would restore the
+   *   resurrection it exists to stop. Any future trim must be assessed against
+   *   this reader too, not only against the commit-time fence evaluation.
+   */
+  scenarioHasAdmittedTurn?(scenarioId: string): Promise<boolean>;
+  /**
    * ROADMAP 2.236 (Stop-route authorization; Codex audit C finding C-1) — does
    * a `v5_turn_fence` row ALREADY exist for this (scenario, turn) pair? In
    * other words: was this turn ADMITTED on this scenario?

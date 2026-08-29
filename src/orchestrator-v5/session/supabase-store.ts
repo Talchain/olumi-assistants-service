@@ -499,6 +499,35 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * Has ANY turn ever been admitted on this scenario? One indexed read against
+   * `v5_turn_fence_scenario_generation_idx` (`scenario_id, generation DESC`),
+   * selecting a single column with `LIMIT 1` — no data transfer beyond one
+   * generation value.
+   *
+   * Deliberately NOT scoped to a turn id: the question is about the SCENARIO's
+   * history, and the asking turn has not been admitted yet when the pre-flight
+   * runs. See the interface docstring for why the fence table is the authority
+   * and what its retention hazard would do to this reader.
+   *
+   * Same error discipline as `scenarioExists`: throws on a FAILED read, and the
+   * caller fails OPEN.
+   */
+  async scenarioHasAdmittedTurn(scenarioId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('v5_turn_fence')
+      .select('generation')
+      .eq('scenario_id', scenarioId)
+      .limit(1);
+    if (error) {
+      throw new SessionReadError(
+        `scenarioHasAdmittedTurn(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    return (data ?? []).length > 0;
+  }
+
+  /**
    * ROADMAP 2.236 — was this turn ADMITTED on this scenario? One indexed read
    * on the fence table's UNIQUE (scenario_id, turn_id) key. Same error
    * discipline as `scenarioExists`: throws on a FAILED read (the caller fails

@@ -354,6 +354,64 @@ export async function authorizeScenarioOwnership(
   return { ok: true, effectiveUserId };
 }
 
+/**
+ * THE ONE TRUE SENTENCE A DELETED-SCENARIO REFUSAL CAN CARRY TODAY.
+ *
+ * ── WHY COPY IS ON THIS ENVELOPE AT ALL ────────────────────────────────────
+ * Refusing a turn must not turn a silent resurrection into a silent failure.
+ * Derived at the client (DecisionGuideAI `staging`), the 422 IS surfaced — a
+ * synthetic assistant bubble in the transcript, plus the composer's hero
+ * failure copy — so the refusal is visible. But the client's guidance table
+ * (`failureTypeRetryability.ts`, `OWNERSHIP_REASON_GUIDANCE`) maps only the
+ * three PRE-EXISTING reasons, and an unmapped reason on the
+ * `scenario_preflight` validator falls through to its server-fault line:
+ * "Something on our side isn't working — your message was fine. Please try
+ * again in a moment." Both halves of that are FALSE for a deleted scenario,
+ * and the wait it prescribes can never succeed.
+ *
+ * `details` is `passthrough` on `BoundaryErrorSchema` at both pins, and the
+ * client already reads `details.recovery.{suggestion,hints}` and the flat
+ * `details.recovery_suggestion` mirror — and renders them ABOVE the guidance
+ * line. So CEE can put a true statement in front of the user unilaterally,
+ * which is why this ships here rather than waiting.
+ *
+ * ⚠ WHAT THIS DOES NOT FIX, AND IT IS NOT CLAIMED AS FIXED: the false
+ *   server-fault sentence still renders BELOW this copy until the client adds
+ *   a `scenario_deleted` row to `OWNERSHIP_REASON_GUIDANCE`. That is a
+ *   one-line change in the other repo, it is NOT in this lane's write slot,
+ *   and until it lands the user reads an accurate sentence followed by a
+ *   contradictory one. That is strictly better than a silently resurrected
+ *   decision and strictly worse than the finished state.
+ *
+ * ⚠ A NEW TOP-LEVEL WIRE CODE WOULD BE WORSE THAN DOING NOTHING.
+ *   `BoundaryErrorSchema` is `.strict()` over a CLOSED nine-member enum, so a
+ *   new `error` value (or any extra top-level key) fails the client's
+ *   `safeParse`, collapses to `INTERNAL_ERROR` and shows "Something went wrong
+ *   on our side. Please retry." with a Try-again chip. The refusal therefore
+ *   rides the existing code and validator, and varies only `details.reason`.
+ */
+const SCENARIO_DELETED_RECOVERY_BODY = Object.freeze({
+  suggestion:
+    'This decision has been deleted, so nothing further can be saved to it. ' +
+    'If you did not delete it yourself, it was deleted in another tab or window.',
+  hints: Object.freeze([
+    'Trying again will not restore it.',
+    'Start a new decision, or open a different one from your list.',
+  ]),
+});
+
+const SCENARIO_DELETED_RECOVERY = Object.freeze({
+  recovery: SCENARIO_DELETED_RECOVERY_BODY,
+  // The PINNED flat mirror (@talchain/schemas 0.19.0, Wave-2 ask 7) — same
+  // sentence under the field name the draft-graph and turn routes already
+  // ship, so a consumer implemented against either contract finds it. READ
+  // from the structured value rather than restated: a second copy of this
+  // sentence is a hand-maintained mirror, and it would drift the first time
+  // the copy is edited (CLAUDE.md trap 12). `route-v2.ts` derives its own flat
+  // mirror the same way.
+  recovery_suggestion: SCENARIO_DELETED_RECOVERY_BODY.suggestion,
+});
+
 export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcome> {
   const requestId = getOrGenerateRequestId(req);
 
@@ -413,7 +471,14 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
       boundary: 'B1',
       direction: 'ingress',
       validator: 'scenario_preflight',
-      details: { reason: owned.reason, scenario_id: ingress.value.scenario_id },
+      details: {
+        reason: owned.reason,
+        scenario_id: ingress.value.scenario_id,
+        // Only the deleted-scenario refusal carries copy. The other three
+        // reasons keep a byte-identical envelope (pinned by the inline
+        // snapshots in tests/unit/orchestrator/route-v2-preflight.test.ts).
+        ...(owned.reason === 'scenario_deleted' ? SCENARIO_DELETED_RECOVERY : {}),
+      },
       request_id: requestId,
       retryable: false,
     };

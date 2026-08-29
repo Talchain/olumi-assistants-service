@@ -2161,6 +2161,14 @@ async function fetchPriorFacts(
  *     - Skipped, turn proceeds (`{ ok: true, skipped }`). There is no
  *       persistence here, therefore no stored owner to protect.
  *
+ *   Scenario row ABSENT (checked read-only, BEFORE the upsert):
+ *     - No turn was ever admitted on it → CREATE, turn proceeds. This is the
+ *       first-turn race the upsert exists for and it is preserved exactly.
+ *     - A turn WAS once admitted on it → the scenario existed and its row is
+ *       gone: `{ ok: false, reason: 'scenario_deleted' }`, route 422.
+ *     See the block at the check itself for why absence alone cannot decide
+ *     this and where the surviving evidence comes from.
+ *
  *   Ownership RPC FAILS against a CONFIGURED store, any caller:
  *     - Fail CLOSED (`{ ok: false, reason: 'scenario_ownership_unverifiable' }`,
  *       route 422). We asked who owns this scenario and could not find out;
@@ -2185,7 +2193,13 @@ export type PreflightResult =
         | 'scenario_owned_by_other_user'
         | 'scenario_requires_authenticated_owner'
         /** The store is configured but could not tell us who owns the row. */
-        | 'scenario_ownership_unverifiable';
+        | 'scenario_ownership_unverifiable'
+        /**
+         * The `scenarios` row is GONE and the fence table proves a turn was
+         * once admitted on it — so it existed and has since been deleted.
+         * Creating it again would resurrect a decision the user removed.
+         */
+        | 'scenario_deleted';
     };
 
 export async function preflightEnsureScenario(
@@ -2214,6 +2228,92 @@ export async function preflightEnsureScenario(
       'V5 pre-flight ensureScenarioExists skipped (no session store configured)',
     );
     return { ok: true, skipped: true };
+  }
+
+  // ── A TURN MUST NOT RESURRECT A DELETED SCENARIO ────────────────────────
+  // `ensureScenarioExists` is `INSERT … ON CONFLICT (id) DO NOTHING`, so
+  // reaching it with an id whose row is GONE CREATES that row. Every sibling
+  // surface that shares this pre-flight already gates on a read-only existence
+  // probe first — `assist.v1.scenario-graph`, `assist.v1.scenario-versions`
+  // and `turn-stop` — for exactly this reason. This path did not, and the UI
+  // deletes scenarios by a direct PostgREST DELETE with NO cross-tab
+  // coordination, so a second open tab kept silently bringing them back.
+  //
+  // ⚠ THE HARD PART IS NOT THE PROBE, IT IS WHAT ABSENCE MEANS. An absent row
+  //   is ambiguous between THREE states — never existed, deleted, and not yet
+  //   created — and `public.scenarios` carries NOTHING to separate them: no
+  //   tombstone column exists anywhere in the migration tree, and the RPC
+  //   `RETURNS UUID`, discarding the insert-vs-found bit before its caller can
+  //   see it. Refusing on absence alone would therefore re-break the exact
+  //   traffic the upsert was introduced to fix: the UI's own scenarios INSERT
+  //   can land after or concurrently with the first V5 turn (commit dbd59c9e's
+  //   existence-only check was reverted for precisely this, and the race is
+  //   still live — the deployed client's first scenario-graph POST 404s and
+  //   succeeds on retry).
+  //
+  // So the distinction is made from state that SURVIVES a delete. Turns and
+  // facts are ON DELETE CASCADE and are gone; `v5_turn_fence` has no foreign
+  // key to `scenarios` and is never deleted by the application. Because the
+  // fence is claimed only AFTER this pre-flight succeeds, a fence row cannot
+  // exist unless the `scenarios` row existed when it was written. Hence:
+  //
+  //     absent + no admitted turn  → never existed / not yet created → CREATE
+  //     absent + an admitted turn  → it existed and is gone → DELETED → REFUSE
+  //
+  // The residual gap is exactly the harmless case: a scenario deleted before
+  // any turn was admitted has no conversation and no graph, so recreating an
+  // empty row for it is indistinguishable from creating it fresh.
+  //
+  // ⚠ THIS GATE FAILS OPEN, AND THAT IS NOT THE FAIL-OPEN THE CATCH BELOW
+  //   EXISTS TO REMOVE. That one is an AUTHORIZATION control with nothing
+  //   behind it. This is a data-integrity guard: degrading it restores the
+  //   PRE-EXISTING behaviour and opens nothing new, whereas refusing a turn
+  //   because a fence read blipped would cost a legitimate user their session.
+  //   Every ownership decision below still fails CLOSED, unchanged.
+  if (typeof store.scenarioExists === 'function') {
+    let rowPresent = true;
+    try {
+      rowPresent = await store.scenarioExists(scenarioId);
+    } catch (e) {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: scenarioId,
+          err_name: e instanceof Error ? e.name : 'unknown',
+          err_message: e instanceof Error ? e.message : String(e),
+        },
+        'V5 pre-flight: scenario existence read failed — proceeding (integrity guard degrades to prior behaviour; ownership below is unaffected)',
+      );
+    }
+
+    if (!rowPresent && typeof store.scenarioHasAdmittedTurn === 'function') {
+      let everAdmitted = false;
+      try {
+        everAdmitted = await store.scenarioHasAdmittedTurn(scenarioId);
+      } catch (e) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err_name: e instanceof Error ? e.name : 'unknown',
+            err_message: e instanceof Error ? e.message : String(e),
+          },
+          'V5 pre-flight: turn-fence history read failed — proceeding rather than refusing a possibly-legitimate first turn',
+        );
+      }
+
+      if (everAdmitted) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: scenarioId,
+            caller_identified: userId !== null,
+          },
+          'V5 pre-flight: scenario row is absent but a turn was once admitted on it — refusing the turn rather than recreating a deleted scenario',
+        );
+        return { ok: false, reason: 'scenario_deleted' };
+      }
+    }
   }
 
   // NO structural `typeof store.ensureScenarioExists === 'function'` probe
