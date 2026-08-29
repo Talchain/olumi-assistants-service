@@ -546,7 +546,11 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
 
-  const confirmSentence = buildConfirmSentence(goalLabel, provisionalDecision);
+  const confirmSentence = buildConfirmSentence(
+    goalLabel,
+    provisionalDecision,
+    hasAuthoredGoalLabel(nodes),
+  );
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
@@ -839,7 +843,11 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
  * defensive against a second caller arriving, which is exactly when a
  * `for ""` opener would ship.
  */
-function buildConfirmSentence(goalLabel: string | null, provisionalDecision = false): string {
+function buildConfirmSentence(
+  goalLabel: string | null,
+  provisionalDecision = false,
+  goalLabelAuthored = false,
+): string {
   // ── THE OPEN-BRIEF OPENER ──────────────────────────────────────────────────
   // Every clause below is a claim about something this builder can see:
   //   "I've built a first model"          — nodes.length > 0 is checked above.
@@ -862,8 +870,34 @@ function buildConfirmSentence(goalLabel: string | null, provisionalDecision = fa
   // one, so copy implying the decision could be dropped would be a second lie.
   // The sentence says a decision WAS framed, and marks it provisional.
   const trimmedGoal = goalLabel?.trim() ?? '';
+  // ⛔ AUTHORSHIP GATES THE QUOTATION, AND IT IS CHECKED FIRST.
+  //
+  // Every branch below that renders `for "<goal>"` makes the promise this
+  // function's header states: quotation marks tell the user THESE ARE YOUR
+  // WORDS. When the drafter emits no goal, `ensureGoalNode` mints one — from a
+  // regex over the brief, or from the placeholder "Achieve the best outcome for
+  // this decision" — and before this conjunct the product quoted that straight
+  // back at the user. Measured verbatim at pristine:
+  //
+  //   I've built a first decision model for "Achieve the best outcome for this
+  //   decision".
+  //
+  // 42 characters, comfortably inside the 80-char budget, so the elision guard
+  // above could never catch it: THAT guard asks "is this quotation WHOLE?",
+  // which is a question about length, and this one asks "is it OURS TO QUOTE?",
+  // which is a question about authorship. A short invented label passes the
+  // first and must fail the second. Two harms, two conjuncts (trap 22b).
+  //
+  // The fallback is the sentence this builder ALREADY ships for the no-whole-
+  // quotation case — ratified copy, no new claim. It still credits `your
+  // brief`, which stays true: the MODEL was built from the brief even when the
+  // GOAL was not taken from it.
+  //
+  // ⚠ FAIL-SAFE DIRECTION. Withholding a quotation costs a little warmth;
+  // inventing one costs the user's trust in every other attribution on screen.
   const hasWholeQuotation =
     trimmedGoal.length > 0 &&
+    !goalLabelAuthored &&
     elideLabelAtWordBoundary(trimmedGoal, MAX_GOAL_CHARS) === trimmedGoal;
 
   if (provisionalDecision) {
@@ -1490,6 +1524,39 @@ function findGoalLabel(nodes: readonly NodeLite[]): string | null {
     }
   }
   return null;
+}
+
+/**
+ * TRUE when the goal on this graph carries a label CEE authored rather than the
+ * user's own words — so the opener must not put it in quotation marks.
+ *
+ * ⛔ WHY THIS IS SEPARATE FROM {@link findGoalLabel}. That function answers
+ * "what is the goal called", which the opener needs either way. This answers
+ * "may we attribute it", and they are DIFFERENT QUESTIONS (trap 21: two
+ * questions under one name is how a permission seam silently inverts). Folding
+ * the authorship test into the label lookup would make an unattributable goal
+ * indistinguishable from NO goal, and the two take different openers.
+ *
+ * ⚠ BOUND TO THE SAME NODE THE LABEL CAME FROM — the FIRST goal node, matching
+ * `findGoalLabel`'s own scan order. Reading `label_authored` off any goal node
+ * on the graph would be a value predicate another object could satisfy
+ * (standing brief §3: bind by identity), and would misreport the moment a graph
+ * carries two goals.
+ *
+ * `label_authored` is set by `projectNodeProvenance` (`schema-v3.ts:1183`) from
+ * the typed record the producer minted — `MINTED_GOAL_PROVENANCE` for a goal
+ * CEE chose (`structure/goal-inference.ts`), and the projector's own authored
+ * objective labels. A goal carrying the user's words has no such record and
+ * reads `undefined` here, which is the fail-safe direction: quotation is
+ * withheld only on an explicit authored claim.
+ */
+function hasAuthoredGoalLabel(nodes: readonly NodeLite[]): boolean {
+  for (const n of nodes) {
+    if (n.kind === 'goal' && typeof n.label === 'string' && n.label.trim().length > 0) {
+      return n.label_authored === true;
+    }
+  }
+  return false;
 }
 
 function collectLabels(nodes: readonly NodeLite[], kind: string): string[] {

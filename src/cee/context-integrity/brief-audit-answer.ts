@@ -289,7 +289,28 @@ const INFERENCE_VERB_PATTERNS: readonly RegExp[] = [
  * *"what did you leave out?"* is unambiguous even with no brief named.
  */
 const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
-  /\ble(?:ave|aving|ft)\s+out\b/i,
+  // ⚠ THE PARTICLE IS SEPARABLE. `leave out` is a phrasal verb whose object
+  // routinely splits it — *"did you leave anything out?"*, *"did you leave my
+  // deadline out?"* — and the adjacent-only form scored those as NO disposition,
+  // so a genuine fidelity question lost its grounded answer and fell through.
+  // The 0-2 word window matches the shape the sibling INFERENCE patterns use.
+  //
+  // ⛔ WHAT THIS WINDOW IS *NOT* BOUNDED BY — do not read the number as measured.
+  // The boundary sits at THREE intervening words, and *"did you leave the churn
+  // factor out?"* is a perfectly ordinary fidelity question that this window
+  // DROPS. That gap is pinned as a KNOWN-DROPPED case in
+  // `__tests__/brief-audit-answer.test.ts` so it is visible in the suite rather
+  // than invisible to it, and so the set REDs if it grows OR shrinks.
+  //
+  // It is left at 2 deliberately and NOT widened on my own judgement: this
+  // predicate guards two opposite harms — too narrow drops a real fidelity
+  // question, too wide answers a genuine SESSION-EDIT question with a report
+  // about the brief, "A LIE either way" (`:110-111`). A corpus from the author's
+  // head cannot bound a natural-language predicate (trap 22), and a mutant
+  // widening this to {0,6} SURVIVED the first twin written here — the twin's
+  // case sat eight words out and could never discriminate at the boundary. The
+  // widening is a rowed question for an external corpus, not a guess to make here.
+  /\ble(?:ave|aving|ft)\s+(?:\w+\s+){0,2}out\b/i,
   /\bomit(?:ted|ting|s)?\b/i,
   /\bignor(?:e|ed|ing)\b/i,
   /\bdiscard(?:ed|ing|s)?\b/i,
