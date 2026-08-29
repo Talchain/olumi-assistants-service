@@ -1963,13 +1963,69 @@ export function fixOptionGoalShortcut(graph: GraphT, format: EdgeFormat): {
 // ---------------------------------------------------------------------------
 
 /**
- * Remove observable or external factors with zero connected edges.
+ * ⭐⭐ THE SENTENCE THE PRUNE MUST NOT LEAVE STANDING.
  *
- * These nodes carry no causal influence (no inbound or outbound edges) and
- * trigger ORPHAN_NODE violations.  Controllable factors are never pruned —
- * they represent actionable levers even when temporarily disconnected.
+ * When `handleUnreachableFactors` reclassifies a factor whose magnitude it is
+ * about to strip, it appends a RECEIPT to its own repair
+ * (`unreachable-factors.ts:806`):
+ *
+ *   ". The extracted value £200,000 is not used in the maths
+ *     — the range shown is a placeholder"
+ *
+ * That repair is the ONE code on `REPAIR_CODE_TO_ADJUSTMENT`
+ * (`boundary.ts:43`), so unlike most sweep repairs it genuinely reaches the
+ * user as a `category_reclassified` model adjustment.
+ *
+ * ⚠ AND THEN THIS FUNCTION DELETES THE NODE THE SENTENCE IS ABOUT — measured on
+ * a live session (persisted trace 2026-08-29 16:40:05.093, `factor_budget_0`,
+ * `previous_raw_value: 200000`, `previous_unit: "£"`, node count 15 -> 14).
+ * The user is told a placeholder RANGE IS SHOWN for their £200,000, and then
+ * there is no node, no range, and nothing to correct. The receipt survives its
+ * own subject.
+ *
+ * This is trap 21 at the level of COPY: the reclassification stage answers
+ * "what did I do to this factor?" and the prune answers "does it have edges?",
+ * and neither knew the other had spoken. Rather than invent a second sentence
+ * that contradicts the first, the prune AMENDS the receipt it just invalidated,
+ * so one channel carries one true account.
+ *
+ * ⚠ WHY AMEND RATHER THAN RETAIN THE NODE. Retaining was built and MEASURED
+ * first, over the 14-draw governed baseline, and rejected on its own evidence:
+ * exempting magnitude-bearing factors from the prune took orphan counts from
+ * 0 to 5, 5 and 8 on three briefs and roughly doubled their factor counts
+ * (05-product-feature 5->10, 07-cloud-migration 7->12, 10-many-observables
+ * 7->15), with post-repair quality falling 164 -> 159 of 246 checks on
+ * `D5.1-no-orphan-nodes` and `D5.2-no-connectivity-errors`. Magnitude
+ * destruction is WIDESPREAD in this corpus, not rare, so no predicate wide
+ * enough to catch the £200,000 leaves the canvas readable. Retention is a real
+ * fix at a different seam (do not delete the magnitude, or wire the factor) and
+ * is left NAMED and unfixed rather than smuggled in here.
  */
-export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; pruned: string[] } {
+function amendReceiptsForPrunedNodes(
+  priorRepairs: readonly Repair[],
+  prunedIds: ReadonlySet<string>,
+): void {
+  for (const repair of priorRepairs) {
+    if (repair.code !== "UNREACHABLE_FACTOR_RECLASSIFIED") continue;
+    // The reclassification repair's path is `nodes[<id>].category`.
+    const match = /^nodes\[(.+)\]\.category$/.exec(repair.path);
+    const nodeId = match?.[1];
+    if (nodeId === undefined || !prunedIds.has(nodeId)) continue;
+    // Only a receipt that PROMISED a visible placeholder is now false. One that
+    // never mentioned a figure is still true and is left byte-identical.
+    if (!repair.action.includes("the range shown is a placeholder")) continue;
+    (repair as { action: string }).action = repair.action.replace(
+      "the range shown is a placeholder",
+      "and the factor was then removed from the model because nothing connects it " +
+        "to your goal, so no range is shown. Add it back and connect it to use this figure",
+    );
+  }
+}
+
+export function fixDisconnectedObservables(
+  graph: GraphT,
+  priorRepairs: readonly Repair[] = [],
+): { repairs: Repair[]; pruned: string[] } {
   const repairs: Repair[] = [];
   const nodes = (graph as any).nodes as NodeT[];
   const edges = (graph as any).edges as EdgeT[];
@@ -1983,11 +2039,12 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
   const pruned: string[] = [];
   const keptNodes: NodeT[] = [];
   for (const node of nodes) {
-    if (
+    const disconnectedPrunableFactor =
       node.kind === "factor" &&
       (node.category === "observable" || node.category === "external") &&
-      !edgeNodes.has(node.id)
-    ) {
+      !edgeNodes.has(node.id);
+
+    if (disconnectedPrunableFactor) {
       pruned.push(node.id);
       repairs.push({
         code: "DISCONNECTED_OBSERVABLE_PRUNED",
@@ -2011,6 +2068,9 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
   }
 
   if (pruned.length > 0) {
+    // A receipt this sweep already wrote for one of these nodes is now false.
+    // Correct it here, before the node list changes underneath it.
+    amendReceiptsForPrunedNodes(priorRepairs, new Set(pruned));
     (graph as any).nodes = keptNodes;
 
     // Clean up intervention references on option nodes that point to pruned factors
@@ -2401,7 +2461,11 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   // without wiring them, causing ORPHAN_NODE violations. Pruning is safe because
   // these nodes have no causal influence on any metric.
   // Controllable factors are NEVER pruned — they represent actionable levers.
-  const disconnectedObservableResult = fixDisconnectedObservables(graph);
+  // `allRepairs` already carries step 5's reclassification receipts, so the
+  // prune can correct any it is about to invalidate. This is the reconciliation:
+  // the stage that declares what it did to a factor and the stage that deletes
+  // the factor were answering different questions and never spoke.
+  const disconnectedObservableResult = fixDisconnectedObservables(graph, allRepairs);
   allRepairs.push(...disconnectedObservableResult.repairs);
 
   // Step 6c: Proportional complexity cap — ALWAYS run.
