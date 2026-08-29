@@ -89,7 +89,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *     NO deploy, so CI alone can never be the whole gate.
  */
 const SERVED_PROMPT_PATH = join(HERE, 'fixtures', 'served-orchestrator-prompt.txt');
-const SERVED_PROMPT_SHA256_16 = 'adcc5128d4e6e6bc'; // orchestrator_default v120
+// ⚠ AHEAD OF PMS from 2026-08-29 until the operator uploads these bytes as
+// orchestrator_default v121 and re-pins staging. Live still serves v120
+// (`adcc5128d4e6e6bc`), so the LIVE tier below is EXPECTED to red in that
+// window — that is the alarm working, not a broken one. See the
+// `pending_pms_upload` block on the `routing` row of Prompts/canonical/manifest.json.
+const SERVED_PROMPT_SHA256_16 = 'bec840a648800928'; // orchestrator_default v121 (pending upload)
 const SERVED_PROMPT = readFileSync(SERVED_PROMPT_PATH, 'utf8');
 
 /**
@@ -238,8 +243,8 @@ const KNOWN_UNSANCTIONED: ReadonlyArray<{
 }> = [
   {
     field: 'analysis.staleness_reason',
-    promptSha: 'adcc5128d4e6e6bc',
-    note: 'FOUND BY THIS GATE (PHANTOM — the INVERSE drift), STILL OPEN AT v120. The served prompt tells the model to use "analysis.staleness_reason (acknowledge before citing results)", but state-trust phase 0 deliberately removed that field from the prompt-visible projection and ContextPackAnalysisSchema is .strict(), so it CANNOT reappear. A dead instruction on every turn. Carried unchanged from v119 into v120.',
+    promptSha: 'bec840a648800928',
+    note: 'FOUND BY THIS GATE (PHANTOM — the INVERSE drift), STILL OPEN AT v121. The served prompt tells the model to use "analysis.staleness_reason (acknowledge before citing results)", but state-trust phase 0 deliberately removed that field from the prompt-visible projection and ContextPackAnalysisSchema is .strict(), so it CANNOT reappear. A dead instruction on every turn. Carried v119 -> v120 -> v121. ⚠ RE-RATIFIED 2026-08-29, NOT rubber-stamped: the claim was re-derived at this tip before the sha was moved — ContextPackAnalysisSchema (context-pack-schema.ts:216) is .strict() and declares the omission deliberate at :207-209, and the three `staleness_reason` hits in context-pack-assembler.ts are TWO COMMENTS plus one STALE DOC-COMMENT on the `analysisStalenessReason` INPUT (:886) still claiming it is "passed through to ContextPackAnalysis.staleness_reason" — it is not. Contrast control in the same sweep: `freshness` 18 hits in the assembler, so the probe discriminates. NOT FIXED HERE ON PURPOSE: the v121 lane\'s mandate was the missing add_constraint / adjust_edge_strength handlers and the rule-citation ban, and this prompt fires on EVERY turn, so an unrelated behavioural edit to it belongs in its own reviewed change (routing has no eval pack — promotion-gate.ts:122 — so nothing else would catch a regression). THE FIX IS CHEAP: delete the 54-char clause "analysis.staleness_reason (acknowledge before citing results), " from Prompts/canonical/routing.txt:155 and drop this waiver. Next prompt lane should close it.',
   },
 ];
 
