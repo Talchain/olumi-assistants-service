@@ -1817,6 +1817,15 @@ function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnve
  * node content is owned by `appliedGraph`, whose nodes were already
  * NodeV3-parsed at ingress. That remains a prompt/schema-lane issue.
  *
+ * ⚠ NOT INTERCHANGEABLE with its near-identical twin
+ * `mergeMutatedGraphForPersistence` (d1-shared/apply-graph-mutation.ts). Each is
+ * WRONG on the other's path, in opposite directions: this one PRUNES deleted
+ * `options[]` entries (rule 4 above) and does NOT overlay top-level
+ * `goal_constraints`; the D1 twin does the exact opposite. Swapping them
+ * reproduces a real defect one field over. The difference is pinned by
+ * `orchestrator-v5/__tests__/persist-merge-twins-are-not-interchangeable.test.ts`
+ * — change either twin and read that file first.
+ *
  * @internal Exported for testing.
  */
 export function mergeAppliedGraphForPersistence(args: {

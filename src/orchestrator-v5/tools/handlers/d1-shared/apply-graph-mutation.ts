@@ -188,6 +188,17 @@ export function applyAndValidateMutation<TBefore, TAfter>(
  * commit site (the single place a D1 `mutated_graph` reaches
  * persistence).
  */
+/*
+ * ⚠ NOT INTERCHANGEABLE with its near-identical twin
+ * `mergeAppliedGraphForPersistence` (handlers/edit-graph-dispatch.ts). Each is
+ * WRONG on the other's path, in opposite directions: this one OVERLAYS top-level
+ * `goal_constraints` (D1 `add_constraint` owns it) and does NOT prune deleted
+ * `options[]` entries (no D1 mutation removes a node); the edit twin does the
+ * exact opposite. Swapping them reproduces a real defect one field over. The
+ * difference is pinned by
+ * `orchestrator-v5/__tests__/persist-merge-twins-are-not-interchangeable.test.ts`
+ * — change either twin and read that file first.
+ */
 export function mergeMutatedGraphForPersistence(args: {
   /** Handler-emitted post-mutation graph (ingress-shaped, validated). */
   readonly mutatedGraph: Record<string, unknown>;
