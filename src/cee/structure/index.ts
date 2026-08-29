@@ -373,6 +373,97 @@ function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
 }
 
 /**
+ * ⭐⭐⭐ WHICH STATED OBJECTIVE BECOMES THE ONE EVERYTHING OPTIMISES FOR.
+ *
+ * ── THE DEFECT, REPRODUCED AT THE WIRE ─────────────────────────────────────
+ * This was `goalIds[0]` — array position, with NOTHING about the content of the
+ * objectives participating in the choice. Every causal chain in the graph
+ * terminates at the primary goal, so the pick decides what the whole model is
+ * built to justify, and it was being made by emission order.
+ *
+ * MEASURED on deployed staging 2026-08-29, guest `/proxy/v5/turn`, build
+ * `f18d941`, instruction v9 (`7629e9ec…`), 12 fresh draws of the founder's
+ * verbatim brief: **2 of 12** made `we'd like to spend less` the goal and
+ * demoted `increase productivity, while maintaining code quality` to an
+ * outcome. The user's BUDGET CEILING became the thing the options were scored
+ * against. Captures `out-E-1` / `out-E-10`; both are pinned in
+ * `__tests__/primary-goal-is-not-a-constraint.test.ts`.
+ *
+ * ── THE DISCRIMINATOR, AND WHY IT IS NOT ANOTHER LANGUAGE RULE ─────────────
+ * No predicate here reads English. The question asked is:
+ *
+ *   *did an INDEPENDENT extractor, over the same brief, already read this exact
+ *    span as a numeric limit?*
+ *
+ * The spans come from `extractCompoundGoals` — the producer of
+ * `goal_constraints[]`, which the very next repair substep (`runCompoundGoals`)
+ * runs on the same `effectiveBrief`. So this adds NO new authority and no
+ * second opinion to drift from: two extractors claiming one span is evidence
+ * about the span, not a judgement about its wording. On the reproduced case the
+ * constraint's source quote is
+ * `"Our budget is £200,000, but we'd like to spend less."`, which CONTAINS the
+ * goal quote `"we'd like to spend less"`.
+ *
+ * ⚠⚠ THE DIRECTION IS LOAD-BEARING AND IS THE WHOLE OPPOSITE-DIRECTION HALF.
+ * The test is `constraint span ⊇ goal quote`, NEVER the reverse. Measured on
+ * `02-multi-option-constrained` (the repo's own corpus, live draws B-1..3): the
+ * correct goal is `achieve 15% revenue growth within 18 months` and the
+ * extractor emits a constraint whose source quote is `within 18 months` — a
+ * SUBSTRING of that goal. Under the reverse test the real objective would be
+ * disqualified and the model would optimise for something else entirely. A
+ * goal that HAPPENS TO CONTAIN a limit is still a goal; a goal that IS a limit
+ * is not.
+ *
+ * ── WHAT IT MAY NOT DO ─────────────────────────────────────────────────────
+ * · It may not leave the graph goal-less. If EVERY candidate is disqualified,
+ *   index 0 stands — today's behaviour exactly. Fail toward preservation, the
+ *   same direction the duplicate guard below already fails in.
+ * · It may not reorder among the eligible. The first ELIGIBLE candidate wins,
+ *   so where nothing is disqualified the result is byte-identical to before.
+ * · It may not delete anything. A disqualified objective is still demoted to an
+ *   `outcome` node with its verbatim quote, exactly as any other non-primary
+ *   objective — the user's budget preference stays visible on the graph, it
+ *   simply stops being what the options are scored against.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT ANSWER ───────────────────────────────────
+ * The RESIDUE: several distinct objectives, none of them a extracted limit —
+ * the founder's `We'd like to spend less. We also want to increase
+ * productivity…` brief mints NO constraint (no number), so nothing here fires
+ * and index 0 still decides. Measured 3/3 live. That case has no determination
+ * available and the ratified exit for it is to ASK the user, which needs a
+ * conversational surface this function does not have. Reported, not faked: a
+ * silent pick dressed as a determination is the defect, and widening this
+ * predicate to cover the residue would be exactly the language rule the first
+ * paragraph refuses.
+ */
+export function selectPrimaryGoalIndex(
+  goalNodes: readonly unknown[],
+  constraintSourceQuotes?: readonly string[],
+): number {
+  if (!constraintSourceQuotes || constraintSourceQuotes.length === 0) return 0;
+
+  const limitSpans = constraintSourceQuotes
+    .map((q) => canonicalLabelText(q).toLowerCase())
+    .filter((q) => q.length > 0);
+  if (limitSpans.length === 0) return 0;
+
+  const isALimit = (node: unknown): boolean => {
+    const provenance = ((node ?? {}) as Record<string, unknown>).provenance as
+      | Record<string, unknown>
+      | undefined;
+    const quote = canonicalLabelText(provenance?.source_quote).toLowerCase();
+    // An absent or empty quote can never match, so a quote-less goal is never
+    // disqualified — the same fail-toward-preservation rule the duplicate guard
+    // states below.
+    if (quote.length === 0) return false;
+    return limitSpans.some((span) => span.includes(quote));
+  };
+
+  const eligible = goalNodes.findIndex((n) => !isALimit(n));
+  return eligible === -1 ? 0 : eligible;
+}
+
+/**
  * ⭐⭐ A NON-PRIMARY OBJECTIVE BECOMES AN OUTCOME NODE. IT IS NOT DELETED.
  *
  * ── THE RULING (quality bar §8 A3, Paul, 18 Aug 2026) ───────────────────────
@@ -441,6 +532,13 @@ function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
  */
 export function enforceSingleGoal(
   graph: GraphV1 | undefined,
+  /**
+   * ⭐⭐ THE SPANS AN INDEPENDENT EXTRACTOR READ AS LIMITS — see
+   * {@link selectPrimaryGoalIndex}. Absent or empty ⇒ byte-identical behaviour
+   * to before this parameter existed, which is what keeps every caller that
+   * does not supply it (and every single-goal brief) unchanged.
+   */
+  constraintSourceQuotes?: readonly string[],
 ): SingleGoalResult | undefined {
   if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
     return undefined;
@@ -469,9 +567,13 @@ export function enforceSingleGoal(
     };
   }
 
-  // Multiple goals - merge into compound goal
-  const primaryId = goalIds[0];
-  const otherGoalIds = new Set(goalIds.slice(1));
+  // Multiple goals - merge into compound goal.
+  //
+  // ⭐⭐ THE PRIMARY IS NO LONGER `goalIds[0]` UNCONDITIONALLY. See
+  // {@link selectPrimaryGoalIndex} for what may move it and what may not.
+  const primaryIndex = selectPrimaryGoalIndex(goalNodes, constraintSourceQuotes);
+  const primaryId = goalIds[primaryIndex];
+  const otherGoalIds = new Set(goalIds.filter((_, i) => i !== primaryIndex));
 
   // ⭐⭐ THE DUPLICATE GUARD — §8 A3's amendment, and the one case where the
   // BASE behaviour (delete + redirect both ends) was right all along.
@@ -498,12 +600,17 @@ export function enforceSingleGoal(
   // both survive. Wrongly keeping an objective is a duplicate node; wrongly
   // deleting one is the silent loss A3 exists to fix. Only one of those is
   // recoverable by the user.
+  //
+  // ⚠ READ AGAINST THE CHOSEN PRIMARY, NOT AGAINST `goalNodes[0]`. Before the
+  // primary could move, "index 0" and "the primary" were the same node and the
+  // distinction was invisible; they are now two different questions (trap 21)
+  // and a duplicate is a duplicate OF THE SURVIVOR.
   const primaryQuote = canonicalLabelText(
-    ((goalNodes[0] as any)?.provenance ?? {})?.source_quote,
+    ((goalNodes[primaryIndex] as any)?.provenance ?? {})?.source_quote,
   );
   const duplicateGoalIds = new Set(
     goalNodes
-      .slice(1)
+      .filter((_, i) => i !== primaryIndex)
       .filter(
         (n) =>
           primaryQuote.length > 0 &&
@@ -784,6 +891,13 @@ export interface GraphFixOptions {
   normalizeDecisionBranches?: boolean;
   /** Check size limits (default: true, but caller should use existing pipeline) */
   checkSizeLimits?: boolean;
+  /**
+   * Source spans an independent extractor read as numeric LIMITS over the same
+   * brief. Used only to disqualify a stated limit from becoming the primary
+   * goal — see {@link selectPrimaryGoalIndex}. Omitting it is byte-identical to
+   * the behaviour before the option existed.
+   */
+  constraintSourceQuotes?: readonly string[];
 }
 
 /**
@@ -842,6 +956,10 @@ export function validateAndFixGraph(
     defaultOutcomeBelief: options?.defaultOutcomeBelief ?? 0.5,
     normalizeDecisionBranches: options?.normalizeDecisionBranches ?? true,
     checkSizeLimits: options?.checkSizeLimits ?? true,
+    // Default EMPTY, which `selectPrimaryGoalIndex` treats as "no discriminator
+    // available" and answers exactly as the pre-existing rule did. Every caller
+    // that does not pass spans is therefore unchanged, by construction.
+    constraintSourceQuotes: options?.constraintSourceQuotes ?? [],
   };
 
   // Handle empty/invalid input
@@ -889,7 +1007,7 @@ export function validateAndFixGraph(
 
   // Step 2: Single goal enforcement (optional)
   if (opts.enforceSingleGoal) {
-    const singleGoalResult = enforceSingleGoal(currentGraph);
+    const singleGoalResult = enforceSingleGoal(currentGraph, opts.constraintSourceQuotes);
     if (singleGoalResult) {
       currentGraph = singleGoalResult.graph;
       fixes.singleGoalApplied = singleGoalResult.hadMultipleGoals;

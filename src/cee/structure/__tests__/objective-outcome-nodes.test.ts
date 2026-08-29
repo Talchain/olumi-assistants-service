@@ -39,6 +39,7 @@ import { enforceSingleGoal } from "../index.js";
 import { projectGraphAndOptionsToV3 } from "../../transforms/schema-v3.js";
 import { GraphV3 } from "../../../schemas/cee-v3.js";
 import { quantityTokens } from "../compound-goal-label.js";
+import { constraintSourceQuotesForBrief } from "../../unified-pipeline/stages/repair/goal-merge.js";
 
 const canonical = (s: unknown): string => String(s ?? "").replace(/\s+/g, " ").trim();
 
@@ -172,10 +173,44 @@ describe("⭐ THE LEAD RED — the founder's brief must not lose objectives", ()
       expect(node, `objective not on the wire: ${objective}`).toBeDefined();
     }
 
-    // The primary stays the goal; the other two are outcome nodes.
-    expect(nodeForObjective(nodes, FOUNDER_OBJECTIVES[0])!.kind).toBe("goal");
-    expect(nodeForObjective(nodes, FOUNDER_OBJECTIVES[1])!.kind).toBe("outcome");
-    expect(nodeForObjective(nodes, FOUNDER_OBJECTIVES[2])!.kind).toBe("outcome");
+    // ⚠⚠ CORRECTED 2026-08-29 — THIS ASSERTION PREVIOUSLY PINNED THE INVERSE OF
+    // A RULING, AND PASSED. It read, with no further comment:
+    //
+    //     expect(nodeForObjective(nodes, FOUNDER_OBJECTIVES[0])!.kind).toBe("goal");
+    //     expect(nodeForObjective(nodes, FOUNDER_OBJECTIVES[1])!.kind).toBe("outcome");
+    //
+    // i.e. it asserted that "we'd like to spend less" — a preference over a
+    // bounded resource — IS the objective every causal chain terminates at, and
+    // that "increase productivity" is merely an outcome of pursuing it. That is
+    // the exact shape of *a constraint silently becoming the optimisation
+    // objective*, pinned as expected behaviour.
+    //
+    // It was never a claim anyone made. `enforceSingleGoal` picked `goalIds[0]`,
+    // this fixture lists the objectives in brief order, and the assertion simply
+    // recorded where the array happened to put them — an accident wearing the
+    // clothes of a determination. Its neighbours (one goal, nothing lost, every
+    // objective on the wire) ARE §8 A3 and are untouched below.
+    //
+    // ⭐ THE CORRECTION IS TO PIN THE PRECONDITION, NOT TO DELETE THE ASSERTION
+    // (trap 13b: a guard whose discrimination rests on an unpinned fixture is a
+    // guard agreeing with itself). The pick is undetermined ON THIS BRIEF for a
+    // derivable reason — "spend less" carries no number, so the constraint
+    // extractor emits nothing and there is nothing to disqualify a candidate
+    // with. That precondition is now asserted in-test, so the day this brief
+    // becomes discriminable this test goes RED and is re-derived rather than
+    // silently continuing to bless index 0.
+    expect(
+      constraintSourceQuotesForBrief(FOUNDER_BRIEF),
+      "a limit is now extractable from the founder brief — the primary is no longer undetermined here, so re-derive this expectation rather than updating it",
+    ).toEqual([]);
+
+    // Exactly one of the three is the goal and the other two are outcomes —
+    // which is the ruling. WHICH one is the goal is, on this brief, still
+    // decided by array position, and that residue is recorded (not endorsed) in
+    // `primary-goal-is-not-a-constraint.test.ts`.
+    const kinds = FOUNDER_OBJECTIVES.map((q) => nodeForObjective(nodes, q)!.kind);
+    expect(kinds.filter((k) => k === "goal")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "outcome")).toHaveLength(2);
 
     // Two outcome nodes ADDED by the demotion, beside the model's own one.
     const demoted = nodes.filter(
