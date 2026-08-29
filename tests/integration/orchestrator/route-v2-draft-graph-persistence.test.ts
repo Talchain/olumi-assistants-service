@@ -62,7 +62,11 @@ const TURN_ID_2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const MINIMAL_GRAPH_1 = {
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch product?' },
-    { id: 'goal_revenue', kind: 'goal', label: 'Revenue target' },
+    // `provenance: 'from_brief'` is what the projector stamps on a goal taken
+    // from the user's brief, and it is what the opener's quotation gate reads.
+    // Without it this is a shape the projector never emits, and the assertion
+    // below (that the goal IS quoted) would be testing an unreachable state.
+    { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue target' },
     { id: 'factor_market', kind: 'factor', label: 'Market readiness' },
   ],
   edges: [

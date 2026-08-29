@@ -151,7 +151,7 @@ function makeGraph(nodes: unknown[]): GraphV3T {
 function openingLine(goalLabel: string, optionLabel = 'Ship it'): string {
   const result = buildPostDraftNarrative({
     graph: makeGraph([
-      { id: 'goal_uxg4', kind: 'goal', label: goalLabel },
+      { id: 'goal_uxg4', kind: 'goal', provenance: 'from_brief', label: goalLabel },
       { id: 'opt_uxg4', kind: 'option', label: optionLabel },
     ]),
     analysisReady: { status: 'ready' },
@@ -345,7 +345,7 @@ describe('UX-GATE-4 — the opener quotes a goal whole or does not quote it', ()
   it('the option path is UNTOUCHED — budget 40 still elides and still marks', () => {
     const result = buildPostDraftNarrative({
       graph: makeGraph([
-        { id: 'goal_opt_guard', kind: 'goal', label: 'Choose a growth strategy' },
+        { id: 'goal_opt_guard', kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
         {
           id: 'opt_long',
           kind: 'option',

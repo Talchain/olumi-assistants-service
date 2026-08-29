@@ -44,6 +44,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
+import { MODEL_VARIANCE_NOTE } from '../../coaching/post-draft-narrative.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
@@ -259,7 +260,7 @@ describe('dispatchDraftGraph', () => {
       const graph = {
         nodes: [
           { id: 'n1', kind: 'decision', label: 'Launch?' },
-          { id: 'n2', kind: 'goal', label: 'Revenue' },
+          { id: 'n2', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
           { id: 'n3', kind: 'factor', label: 'Market size' },
         ],
         edges: [
@@ -286,7 +287,7 @@ describe('dispatchDraftGraph', () => {
       const graph = {
         nodes: [
           { id: 'n1', kind: 'decision', label: 'A' },
-          { id: 'n2', kind: 'goal', label: 'B' },
+          { id: 'n2', kind: 'goal', provenance: 'from_brief', label: 'B' },
         ],
         edges: [{ from: 'n1', to: 'n2' }],
       };
@@ -316,7 +317,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative names the goal and summarises options and factors when all present', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Maximise revenue' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Maximise revenue' },
           { id: 'o1', kind: 'option', label: 'Launch now' },
           { id: 'o2', kind: 'option', label: 'Delay' },
           { id: 'f1', kind: 'factor', label: 'Market size' },
@@ -354,7 +355,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative omits any risk wording when riskCount is 0', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Improve uptime' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Improve uptime' },
           { id: 'o1', kind: 'option', label: 'Migrate' },
           { id: 'f1', kind: 'factor', label: 'Latency' },
         ],
@@ -421,7 +422,7 @@ describe('dispatchDraftGraph', () => {
     it('coaching narrative is shipped even when handler narration is graph-shaped', async () => {
       const graph = {
         nodes: [
-          { id: 'g1', kind: 'goal', label: 'Win Q3' },
+          { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Win Q3' },
           { id: 'o1', kind: 'option', label: 'Plan A' },
           { id: 'f1', kind: 'factor', label: 'Budget' },
         ],
@@ -954,7 +955,7 @@ describe('B1 egress: OlumiResponseSchema.parse', () => {
       draft_graph: {
         nodes: [
           { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
-          { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+          { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
         ],
         edges: [
           { from: 'dec_launch', to: 'goal_revenue', strength: 0.8 },
@@ -1208,13 +1209,15 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.assistant_text).toBe(CLEAN_SUMMARY);
+    // Verbatim, plus the undroppable model-variance note as its own block.
+    // The summary's own bytes are untouched; nothing is prepended.
+    expect(result.response.assistant_text).toBe(`${CLEAN_SUMMARY}\n\n${MODEL_VARIANCE_NOTE}`);
   });
 
   it('does not let an accepted Run summary bypass typed non-ready status on the dispatch boundary', async () => {
     const graph = {
       nodes: [
-        { id: 'goal_arr', kind: 'goal', label: 'Improve annual recurring revenue' },
+        { id: 'goal_arr', kind: 'goal', provenance: 'from_brief', label: 'Improve annual recurring revenue' },
         { id: 'opt_phased', kind: 'option', label: 'Phased price rise' },
         { id: 'fac_price', kind: 'factor', label: 'Monthly Subscription Price' },
       ],
@@ -1558,10 +1561,16 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
       request: STUB_REQUEST,
     });
 
-    // 1. The whole assistant_text is the summary, byte-for-byte. No
-    //    deterministic five-sentence opener was prepended, no trailing
-    //    text was appended, no characters were rewritten.
-    expect(result.response.assistant_text).toBe(realisticSummary);
+    // 1. The model's summary is carried byte-for-byte. No deterministic
+    //    five-sentence opener was prepended and no characters were rewritten.
+    //    The one appended block is the model-variance note, which rides EVERY
+    //    draft on both builder paths: the same brief produces materially
+    //    different models (5 of 5 runs, distinct option sets, byte-identical
+    //    requests) and nothing told the user their model was one of several.
+    //    It survives the coaching scrub unchanged, which this equality pins.
+    expect(result.response.assistant_text).toBe(
+      `${realisticSummary}\n\n${MODEL_VARIANCE_NOTE}`,
+    );
 
     // 2. The three-chip set is still emitted (chip generation is
     //    independent of which assistant_text source fired).
@@ -1633,7 +1642,7 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
     return {
       nodes: [
         { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
-        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue' },
         { ...node, kind: node.kind ?? 'risk' },
       ],
       edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
@@ -1806,6 +1815,11 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.assistant_text).toBe(clean);
+    expect(result.response.assistant_text).toBe(`${clean}\n\n${MODEL_VARIANCE_NOTE}`);
+    // ⭐ AND THE NOTE ITSELF SURVIVES THE SCRUB BYTE-FOR-BYTE. It is composed
+    // in CEE, not by the model, but it still passes through
+    // `sanitiseCoachingProse` — a scrub that rewrote it would be invisible
+    // everywhere else in this file.
+    expect(result.response.assistant_text).toContain(MODEL_VARIANCE_NOTE);
   });
 });

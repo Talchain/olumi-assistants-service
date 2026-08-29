@@ -154,7 +154,7 @@ function bulletFor(lines: readonly string[], label: string): string | undefined 
 describe('N26 — post-draft narrative elides user labels honestly', () => {
   it('renders the 85-char user option as a closed phrase with an ellipsis, not the witnessed unclosed bracket', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: 'Choose a growth strategy' },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
       { id: OPT_85_ID, kind: 'option', label: USER_OPTION_85 },
       { id: OPT_44_ID, kind: 'option', label: USER_OPTION_44 },
     ]);
@@ -170,7 +170,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
 
   it('renders the 101-char user option with an ellipsis (the label #1038 never tested)', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: 'Choose a growth strategy' },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
       { id: OPT_101_ID, kind: 'option', label: USER_OPTION_101 },
       { id: OPT_44_ID, kind: 'option', label: USER_OPTION_44 },
     ]);
@@ -184,7 +184,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
 
   it('renders the 44-char user option with an ellipsis and inside the 40-char cap', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: 'Choose a growth strategy' },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
       { id: OPT_44_ID, kind: 'option', label: USER_OPTION_44 },
       { id: OPT_85_ID, kind: 'option', label: USER_OPTION_85 },
     ]);
@@ -232,7 +232,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
      * deleted, so this test REDs if either cut ever comes back.
      */
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: USER_GOAL_90 },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: USER_GOAL_90 },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
 
@@ -255,7 +255,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
     const fittingGoal = 'Several of our largest enterprise customers want self-hosting';
     expect(fittingGoal.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: fittingGoal },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: fittingGoal },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
     expect(lines[0]).toBe(`I've built a first decision model for "${fittingGoal}".`);
@@ -266,7 +266,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
     const shortLabel = 'Status Quo: Hold current strategy';
     expect(shortLabel.length).toBeLessThanOrEqual(MAX_LABEL_CHARS);
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: 'Choose a growth strategy' },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
       { id: 'opt_short', kind: 'option', label: shortLabel },
       { id: OPT_44_ID, kind: 'option', label: USER_OPTION_44 },
     ]);
@@ -276,7 +276,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
 
   it('INVERSE (a) — too aggressive: honours the retention floor rather than collapsing to a stub', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: 'Choose a migration path' },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a migration path' },
       { id: OPT_NESTED_ID, kind: 'option', label: NESTED_PARENTHETICAL },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
@@ -297,7 +297,7 @@ describe('N26 — post-draft narrative elides user labels honestly', () => {
 
   it('INVERSE (b) — too permissive: a label whose only boundaries sit below the floor is still cut to the cap and marked, at BOTH caps', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: UNBREAKABLE_GOAL_94 },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: UNBREAKABLE_GOAL_94 },
       { id: OPT_UNBREAKABLE_ID, kind: 'option', label: UNBREAKABLE_LABEL_76 },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
@@ -445,7 +445,7 @@ describe('N26 — prefix relation controls (both directions)', () => {
 
     for (const [source, expected] of optionCases) {
       const lines = narrativeLines([
-        { id: GOAL_ID, kind: 'goal', label: 'Choose a growth strategy' },
+        { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
         { id: 'opt_under_test', kind: 'option', label: source },
         { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
       ]);
@@ -473,7 +473,7 @@ describe('N26 — prefix relation controls (both directions)', () => {
     const fittingGoal = 'Several of our largest enterprise customers want self-hosting';
     expect(fittingGoal.length).toBeLessThanOrEqual(MAX_GOAL_CHARS);
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: fittingGoal },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: fittingGoal },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
     const match = /^I've built a first decision model for "(.+)"\.$/.exec(lines[0] ?? '');
@@ -487,7 +487,7 @@ describe('N26 — prefix relation controls (both directions)', () => {
 
   it('and the over-budget goal produces NO quotation for the oracle to judge', () => {
     const lines = narrativeLines([
-      { id: GOAL_ID, kind: 'goal', label: USER_GOAL_90 },
+      { id: GOAL_ID, kind: 'goal', provenance: 'from_brief', label: USER_GOAL_90 },
       { id: OPT_44_ID, kind: 'option', label: 'Ship it' },
     ]);
     expect(/^I've built a first decision model for "(.+)"\.$/.exec(lines[0] ?? '')).toBeNull();

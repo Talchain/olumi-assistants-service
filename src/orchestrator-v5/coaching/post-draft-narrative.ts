@@ -100,6 +100,49 @@ const MAX_NAMED_OPTIONS = 4;
 const MAX_LISTED_WHEN_OVER = 3;
 
 /**
+ * The second sentence of the opener when the projector framed the decision
+ * itself. See {@link buildConfirmSentence} for why its subject is the product
+ * and never the user's brief.
+ */
+const PROVISIONAL_FRAMING_SENTENCE =
+  "I've framed the decision provisionally, so tell me if it isn't the one you're weighing.";
+
+/**
+ * ⭐⭐ THE MODEL IS ONE OF SEVERAL THE SYSTEM COULD HAVE BUILT, AND UNTIL NOW
+ * NOTHING SAID SO.
+ *
+ * ── THE MEASURED FACT ──────────────────────────────────────────────────────
+ * The same brief produces materially different models. Five of five runs gave
+ * DISTINCT option sets and the journeys inverted (retain 66% → 45% → blocked →
+ * 75% → CLOSE 52%), on a request that was BYTE-IDENTICAL every time
+ * (`temperature: 0`, same prompt hash). The analysis solver downstream is
+ * bit-identical to 16 significant figures, so all of that variance is in the
+ * DRAFT.
+ *
+ * ── ⛔ THERE IS NO FIX, WHICH IS PRECISELY WHY THERE IS COPY ────────────────
+ * The Anthropic API exposes no seed parameter and temperature is already 0.
+ * This is a property of the system, not a defect awaiting a lane. The product
+ * already hedges honestly WITHIN a model; what was missing is that the model
+ * ITSELF is one draw. Two colleagues comparing notes each saw honest hedging
+ * and no hint that their models differ.
+ *
+ * ── WHY IT LIVES HERE AND NOT IN THE PROMPT ────────────────────────────────
+ * Prompts are store-managed with a per-instance TTL, so a re-pin serves a
+ * mixture of two prompts for ~5 minutes and no acceptance run inside that
+ * window means anything. A deterministic sentence composed after the draft is
+ * served identically by every instance from the moment it deploys. It also
+ * touches no generation: this is what we SAY about the result.
+ *
+ * ── WHY IT IS NOT AT THE TOP ───────────────────────────────────────────────
+ * Read together with the provisional opener, a variance note in block 1 would
+ * open the reply with two hedges in a row. It is the CLOSING frame instead,
+ * placed BEFORE the call to action so the reader still ends on the next step.
+ * It states what the thing is; it does not apologise for it.
+ */
+export const MODEL_VARIANCE_NOTE =
+  'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+
+/**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
  * single primary assumption bullet. One keeps the section at most one line
  * longer than today — enough to add a second high-value point without
@@ -303,6 +346,18 @@ interface NodeLite {
    * string and yield `undefined` on every draft.
    */
   readonly label_authored?: boolean;
+  /**
+   * The projected node-level provenance verdict — `"from_brief"` when the
+   * producer's typed record said `provenance_class: "stated"` with
+   * `brief_binding: "verified"`, `"ai_inferred"` otherwise
+   * (`transforms/schema-v3.ts:1170-1173`).
+   *
+   * ⚠ A STRING HERE, NOT AN OBJECT. `NodeV3.provenance` is a bare string enum;
+   * the structured record the producer minted is flattened by
+   * `projectNodeProvenance`, which lifts `label_authored` and `source_quote`
+   * to node level and collapses the rest to this verdict.
+   */
+  readonly provenance?: string;
   readonly observed_state?: {
     readonly uncertainty_drivers?: readonly string[];
   };
@@ -490,7 +545,23 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
     if (isReady && countWords(acceptedSummary) <= MAX_WORDS) {
       return {
-        text: acceptedSummary,
+        // ⭐ THE VARIANCE NOTE RIDES BOTH PATHS, AND THIS IS THE ONE THAT
+        // MATTERS MOST. This shortcut ships the model's own summary verbatim
+        // and is the MAJORITY path — the deterministic opener carried only 146
+        // of 688 replies in the 18 Aug live capture. A note added solely to the
+        // sectioned builder below would be DARK for most users while every
+        // register said the truthfulness gap was closed, which is this
+        // estate's single most repeated failure ("we build more than we plug
+        // in"). Appended, never interleaved: the summary's own bytes are
+        // untouched and the deterministic opener is still not prepended.
+        //
+        // The narrative word budget is deliberately NOT re-checked against the
+        // note here. Tightening the acceptance test would change WHICH PATH
+        // serves a 110-140 word summary, and a copy change may not silently
+        // re-route composition.
+        text: nodes.length > 0
+          ? `${acceptedSummary}\n\n${MODEL_VARIANCE_NOTE}`
+          : acceptedSummary,
         telemetry: {
           assumption_source: 'coaching_summary',
           coaching_summary_present: true,
@@ -549,7 +620,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const confirmSentence = buildConfirmSentence(
     goalLabel,
     provisionalDecision,
-    hasAuthoredGoalLabel(nodes),
+    goalCameFromBrief(nodes),
   );
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
@@ -846,31 +917,61 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
 function buildConfirmSentence(
   goalLabel: string | null,
   provisionalDecision = false,
-  goalLabelAuthored = false,
+  goalFromBrief = false,
 ): string {
   // ── THE OPEN-BRIEF OPENER ──────────────────────────────────────────────────
   // Every clause below is a claim about something this builder can see:
   //   "I've built a first model"          — nodes.length > 0 is checked above.
   //   "for <goal>"                        — a goal node's own label.
-  //   "couldn't pin down a single
-  //    decision in your brief"            — exactly what an unauthored decision
-  //                                         label means: `deriveDecisionLabel`
-  //                                         declined rather than guessed.
-  //   "I've framed one provisionally"     — the decision node exists; the
-  //                                         projector minted it deterministically.
+  //   "I've framed the decision
+  //    provisionally"                     — the decision node exists and its
+  //                                         statement is OURS: the projector
+  //                                         minted it deterministically because
+  //                                         `deriveDecisionLabel` declined to
+  //                                         author one from the brief.
+  //   "tell me if it isn't the one
+  //    you're weighing"                   — an invitation, not a promise about
+  //                                         a mechanism this builder cannot see.
   //
-  // ⚠ THE NEGATIVE IS ABOUT OUR EXTRACTION, NOT ABOUT THEIR BRIEF. "Your brief
-  // didn't contain a decision" would be a negative claim about the user's own
-  // input that this builder cannot support — the brief may well pose one we
-  // failed to read (the known negation gap does exactly that). "I couldn't pin
-  // down" is true either way, and it is the fail-safe direction for this class
-  // of claim.
+  // ⚠⚠ THE SUBJECT OF THIS SENTENCE IS THE PRODUCT, NEVER THE BRIEF, AND THAT
+  // IS THE WHOLE FIX. The sentence that stood here read:
+  //
+  //   "I couldn't pin down a single decision in your brief, so I've framed one
+  //    provisionally."
+  //
+  // Measured on the deployed build over 16 signed-in runs / 84 turns, it fired
+  // on 7 OF 9 DRAFTS — including briefs that literally open "Should we A, or B,
+  // or C?" — and the product then built a perfectly good model of exactly that
+  // decision. It is the FIRST thing anyone reads, and it is refuted by the
+  // screen underneath it.
+  //
+  // The old comment here defended it as "about our extraction, not about their
+  // brief", and as prose that is arguable. It is beside the point: a sentence
+  // whose SUBJECT is the user's brief reads as a verdict on the user's brief
+  // whatever its modality, and the reader is the only person qualified to
+  // judge that verdict. So the subject changed. The verb was not softened.
+  //
+  // ⚠ WHY THIS CANNOT BE FALSE IN EITHER DIRECTION. Reaching this branch means
+  // `hasProvisionalDecision` held: the decision node carries the projector's
+  // placeholder and no authored flag, so its statement was composed HERE and
+  // not lifted from the brief. That is true whether or not the brief posed a
+  // decision — which is exactly why the claim is safe to make and the old one
+  // was not.
+  //
+  // ⛔ THE ROAD THAT STAYS CLOSED. Widening `deriveDecisionLabel` so it stops
+  // declining on "Should we A or B?" is the OPPOSITE-DIRECTION HARM of the
+  // change that stopped the product falsely CLAIMING a decision on briefs
+  // posing none (18/18 → 1/18 on an independent corpus). Two harms cannot
+  // share one window; the extraction breadth is rowed separately
+  // (ROADMAP 2.1341) with two arbitrary length constants and hard cliffs, and
+  // "one more rule" on it has already been shown to oscillate. Nothing in this
+  // function touches the classifier.
   //
   // ⚠ IT DOES NOT PROMISE A DECISION-FREE MODEL. The product cannot express
   // one, so copy implying the decision could be dropped would be a second lie.
   // The sentence says a decision WAS framed, and marks it provisional.
   const trimmedGoal = goalLabel?.trim() ?? '';
-  // ⛔ AUTHORSHIP GATES THE QUOTATION, AND IT IS CHECKED FIRST.
+  // ⛔ PROVENANCE GATES THE QUOTATION, AND IT IS CHECKED FIRST.
   //
   // Every branch below that renders `for "<goal>"` makes the promise this
   // function's header states: quotation marks tell the user THESE ARE YOUR
@@ -895,15 +996,56 @@ function buildConfirmSentence(
   //
   // ⚠ FAIL-SAFE DIRECTION. Withholding a quotation costs a little warmth;
   // inventing one costs the user's trust in every other attribution on screen.
+  //
+  // ⚠⚠ THIS CONJUNCT WAS `!goalLabelAuthored` FOR ONE DEPLOY, AND IT WAS TOO
+  // WIDE. `deriveGoalObjectiveLabel` Title-Cases the label of a goal that IS
+  // the user's, so `label_authored: true` rides EVERY goal on a real draft.
+  // Measured on six live draws from deployed staging: the quotation fired
+  // 0 times out of 6, including where it was true and useful —
+  //
+  //   goal "Cut Churn Below 3% a Month", provenance from_brief
+  //     -> "I've built a first decision model from your brief."  (not quoted)
+  //
+  // Nothing dishonest shipped; the fallback is true and still credits the
+  // brief. But a piece of copy doing real attribution work had been retired,
+  // which is the opposite-direction harm (trap 22b). The PR's own twin test
+  // asserted "a user-authored goal IS still quoted" against a SYNTHETIC node
+  // carrying no `label_authored` — a shape the projector never emits — so it
+  // proved nothing about the wire. Every guard below is now bound to REAL
+  // projector output.
+  //
+  // ⭐ THE TWO SIGNALS ANSWER DIFFERENT QUESTIONS, AND THE PRODUCER SAYS SO.
+  // `label_authored` answers "did we write these characters?"; `provenance`
+  // answers "did this come from the brief?". `projectNodeProvenance` decides
+  // the verdict from `provenance_class`/`brief_binding` and RETURNS BEFORE the
+  // label-bound matching (`schema-v3.ts:1179-1181`, its own comment: "authoring
+  // a goal's label cannot move its provenance verdict"), so the two are
+  // independent by construction — which is exactly why one can be a Title-Cased
+  // label of a genuinely stated objective. Quotation is a question about
+  // ATTRIBUTION, so it takes the attribution signal.
+  //
+  // ⭐ THE DEFECT #1202 KILLED STAYS DEAD, derived not assumed: the minted goal
+  // carries `MINTED_GOAL_PROVENANCE` = `scaffoldingProvenance(...)` =
+  // `provenance_class: "projector_structural"` (`goal-inference.ts:47`,
+  // `projector.ts:141`), which is not `"stated"`, so the projector stamps it
+  // `ai_inferred` and "Achieve the best outcome for this decision" is still
+  // never quoted.
+  //
+  // ⚠ A KNOWN BOUNDARY CASE, DECIDED RATHER THAN PAPERED OVER. One live draw
+  // ("Get Median First-Response Time Under Two Hours by Q3") came back
+  // `ai_inferred` despite being a stated objective, so the provenance stamp is
+  // itself imperfect and this gate leaves it unquoted. That is the fail-safe
+  // direction and it is the point: UNDER-crediting the user is recoverable,
+  // OVER-crediting them is the lie.
   const hasWholeQuotation =
     trimmedGoal.length > 0 &&
-    !goalLabelAuthored &&
+    goalFromBrief &&
     elideLabelAtWordBoundary(trimmedGoal, MAX_GOAL_CHARS) === trimmedGoal;
 
   if (provisionalDecision) {
     return hasWholeQuotation
-      ? `I've built a first model for "${trimmedGoal}". I couldn't pin down a single decision in your brief, so I've framed one provisionally.`
-      : "I've built a first model from your brief. I couldn't pin down a single decision in it, so I've framed one provisionally.";
+      ? `I've built a first model for "${trimmedGoal}". ${PROVISIONAL_FRAMING_SENTENCE}`
+      : `I've built a first model from your brief. ${PROVISIONAL_FRAMING_SENTENCE}`;
   }
 
   if (!goalLabel) {
@@ -1527,8 +1669,15 @@ function findGoalLabel(nodes: readonly NodeLite[]): string | null {
 }
 
 /**
- * TRUE when the goal on this graph carries a label CEE authored rather than the
- * user's own words — so the opener must not put it in quotation marks.
+ * TRUE when the goal on this graph came from the user's brief — the only
+ * condition under which the opener may put it in quotation marks.
+ *
+ * ⚠ THE VERDICT IS THE PRODUCER'S, NOT OURS. `projectNodeProvenance` sets
+ * `from_brief` only for a typed record with `provenance_class: "stated"` AND
+ * `brief_binding: "verified"` (`schema-v3.ts:1170-1173`); everything else,
+ * including the CEE-minted placeholder goal, becomes `ai_inferred`. Reading the
+ * verdict rather than re-deriving it here keeps one authority for "may we
+ * attribute this" (trap 12).
  *
  * ⛔ WHY THIS IS SEPARATE FROM {@link findGoalLabel}. That function answers
  * "what is the goal called", which the opener needs either way. This answers
@@ -1543,17 +1692,15 @@ function findGoalLabel(nodes: readonly NodeLite[]): string | null {
  * (standing brief §3: bind by identity), and would misreport the moment a graph
  * carries two goals.
  *
- * `label_authored` is set by `projectNodeProvenance` (`schema-v3.ts:1183`) from
- * the typed record the producer minted — `MINTED_GOAL_PROVENANCE` for a goal
- * CEE chose (`structure/goal-inference.ts`), and the projector's own authored
- * objective labels. A goal carrying the user's words has no such record and
- * reads `undefined` here, which is the fail-safe direction: quotation is
- * withheld only on an explicit authored claim.
+ * ⚠ AN ABSENT OR UNRECOGNISED VERDICT READS FALSE, which is the fail-safe
+ * direction: quotation is granted only on an explicit `from_brief` stamp, never
+ * by default. A hand-built or round-tripped graph carrying no provenance is
+ * therefore not quoted — it is also not misattributed.
  */
-function hasAuthoredGoalLabel(nodes: readonly NodeLite[]): boolean {
+function goalCameFromBrief(nodes: readonly NodeLite[]): boolean {
   for (const n of nodes) {
     if (n.kind === 'goal' && typeof n.label === 'string' && n.label.trim().length > 0) {
-      return n.label_authored === true;
+      return n.provenance === 'from_brief';
     }
   }
   return false;
@@ -1701,23 +1848,58 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     return blocks.join('\n\n');
   };
 
+  /**
+   * ⭐⭐ THE VARIANCE NOTE IS A FIXED FOOTER, AND IT IS DELIBERATELY OUTSIDE
+   * THE WORD BUDGET THE LADDER SPENDS.
+   *
+   * ⚠ IT WAS INSIDE IT FOR ONE ROUND, AND TWO INDEPENDENT TESTS CAUGHT WHAT
+   * THAT COSTS. Charging 31 words of the 140 to the note makes it COMPETE with
+   * the coaching, and the ladder pays out of content the product has already
+   * committed to delivering:
+   *   · on the real staging fixture the `Worth a look:` bullet was shed
+   *     (108 words of content -> 143 with the note -> rung 2);
+   *   · on the direction-clarification integration path the ORDINARY coaching
+   *     bullet was shed while the clarification survived — which is precisely
+   *     the trade `route-v2-direction-clarification-served.test.ts` exists to
+   *     forbid ("a fix that surfaces the question by silencing the coaching is
+   *     a trade, not a fix").
+   * The first was recoverable by trimming four words. The second was not: it
+   * would have needed a note of roughly zero. That is the signal — a footer
+   * about what the artefact IS must not be priced against the artefact's
+   * content, or every future coaching addition silently trades against the
+   * truthfulness statement, invisibly.
+   *
+   * So the ladder below measures and sheds EXACTLY as it did before this
+   * change, over the content alone, and the note is spliced in afterwards.
+   * Nothing the product had committed to delivering is displaced by it.
+   *
+   * ⭐ SPLICED SECOND-TO-LAST, not appended. `nextStep` stays terminal so the
+   * reply still ends on the action; placing the note first would open every
+   * draft with two hedges in a row (see the opener in `buildConfirmSentence`).
+   */
+  const withNote = (text: string): string => {
+    const blocks = text.split('\n\n');
+    blocks.splice(blocks.length - 1, 0, MODEL_VARIANCE_NOTE);
+    return blocks.join('\n\n');
+  };
+
   const hasCompleteness = input.completenessBlock !== null;
   const hasExtra = input.weighingBlock !== input.weighingBlockCore;
 
   // Rung 1 — everything.
   let text = tryAssemble(input.weighingBlock, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 2 — drop the extra check bullet.
   text = tryAssemble(input.weighingBlockCore, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: hasCompleteness, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 3 — drop the completeness advisory.
   text = tryAssemble(input.weighingBlockCore, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
   }
   // Rung 3b — reduce the weighing block to the direction clarifications alone.
   //
@@ -1729,17 +1911,17 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
   if (input.weighingBlockDirectionOnly !== null) {
     text = tryAssemble(input.weighingBlockDirectionOnly, true, false);
     if (countWords(text) <= MAX_WORDS) {
-      return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+      return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
     }
   }
   // Rung 4 — drop the whole weighing block.
   text = tryAssemble(null, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: false };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: false };
   }
   // Rung 5 — drop options too.
   return {
-    text: tryAssemble(null, false, false),
+    text: withNote(tryAssemble(null, false, false)),
     includedWeighingExtra: false,
     includedCompleteness: false,
     includedWeighing: false,
