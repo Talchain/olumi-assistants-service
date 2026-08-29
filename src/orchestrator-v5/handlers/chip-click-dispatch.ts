@@ -63,8 +63,10 @@ import {
 import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
+  loadMostRecentPendingActionsIntegrityStrict,
   loadScenarioSnapshotForRunAnalysis,
 } from '../build-turn-context.js';
+import type { PendingAction } from '../session/pending-action.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
@@ -832,8 +834,77 @@ async function tryComposeRecoverableChipOutcome(
   // change to a separate file.
   // ══════════════════════════════════════════════════════════════════════════
   const acquiresRefusalContinuity = isAnalysisRefusalContinuityCause(err.cause_kind);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROUND-2 BLOCKER — A COMMIT THAT DOES NOT THREAD PRIORS *WIPES* THEM.
+  //
+  // `commit.ts` reads `metadata.priorPendingActions ?? []` (:1116/:1164) and
+  // writes the result to the new row's `pending_actions` column (:1377); the
+  // store then reads the NEWEST ROW ONLY (`supabase-store.ts` :2272-2277,
+  // `.limit(1)`). So a commit with no priors threaded does not "carry nothing
+  // forward" — it lands an authoritative row with an EMPTY pendings list and
+  // the user's live consent hold is gone. Silently: the F-HELD lapse notice is
+  // built by the carry-forward pass, which never ran.
+  //
+  // Before 2.1353 the seven non-continuity recoverable causes wrote NO ROW, so
+  // the hold survived on the previous row. Committing them without priors
+  // would therefore make those seven causes STRICTLY WORSE than the defect this
+  // PR set out to fix — trading the user's live proposal for this turn's
+  // memory, which is the exact inversion of the ordering this lane declared:
+  //
+  //     LOSING THE USER'S PROPOSAL  ≫  LOSING THE MEMORY  ≫  LOSING THE REFERENT
+  //
+  // ⚠ THE READ IS `…IntegrityStrict`, NOT `…Strict`. This commit becomes the
+  // NEWEST turn, so its pendings column supersedes the row we are reading. The
+  // tolerant variant returns the SURVIVORS of a partially-corrupt row and does
+  // not throw (`supabase-store.ts` :2305-2347) — which would silently drop the
+  // unreadable entries into a row that then becomes authoritative. Truncation
+  // is a lossy write here, so it must fail like a read failure.
+  //
+  // ⚠ A FAILED READ ABORTS THE COMMIT ENTIRELY, both halves of the split:
+  //   - non-continuity causes degrade to exactly the pre-2.1353 shape (a
+  //     graceful 200, no row) — the user keeps their proposal and loses only
+  //     this question's memory;
+  //   - continuity causes report `commit_failed` (→ typed 500), the same
+  //     escalation a failed commit has always produced on them, because the
+  //     durable refusal fact the freshness selectors depend on is equally
+  //     absent either way. In practice the two are near-identical: this loader
+  //     throws only on store-unavailable / `SessionReadError`, the same class
+  //     that would fail the write against the same store.
+  // ══════════════════════════════════════════════════════════════════════════
+  let priorPendingActions: readonly PendingAction[] | null = null;
+  try {
+    priorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
+      scenarioId,
+      requestId,
+    );
+  } catch (priorReadError) {
+    log.warn(
+      {
+        event: 'v5.recovered_turn_prior_pending_read_failed',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        cause_kind: err.cause_kind,
+        acquires_refusal_continuity: acquiresRefusalContinuity,
+        err:
+          priorReadError instanceof Error
+            ? { name: priorReadError.name, message: priorReadError.message }
+            : { message: String(priorReadError) },
+      },
+      'V5 chip_click run_analysis recovery — prior-pending read failed; not committing, because a commit without carry-forward would wipe live proposals',
+    );
+    if (acquiresRefusalContinuity) {
+      return {
+        outcome: 'commit_failed',
+        response: recovered.response,
+        commitPerformed: false,
+        graph,
+      };
+    }
+  }
+
   let turnPersisted = false;
-  {
+  if (priorPendingActions !== null) {
     const refusalFact = acquiresRefusalContinuity
       ? buildAnalysisRefusalFact({
           scenarioId,
@@ -851,6 +922,13 @@ async function tryComposeRecoverableChipOutcome(
         llm_calls_used: 0,
         duration_ms: Date.now() - startedAt,
         handler_facts: refusalFact === null ? [] : [refusalFact],
+        // ⭐ THE ROUND-2 FIX. Without this key the chokepoint carries forward
+        // `[]` and this row — which becomes the newest — wipes every live
+        // pending. `pending_actions` is deliberately NOT pre-supplied: the
+        // chokepoint derives this turn's own pendings from the EGRESS-finalised
+        // chips, which is what keeps the "persisted pending ⟹ rendered chip"
+        // invariant true on the recovery chip this path emits.
+        priorPendingActions,
         coaching_state: coachingState,
         userMessage: payload.message,
         contentGraph: graph,

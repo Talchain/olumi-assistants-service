@@ -447,6 +447,71 @@ describe('the two edit-clarify intercepts must PERSIST the question they asked',
     ).toBe(0);
   });
 
+  // ─── THE OTHER HALF OF THE READ'S DOMAIN (round 2) ───────────────────────
+  // ⚠ THE CASE ABOVE, AND ITS SIBLING IN THE REPAIR-VALUE SUITE, BOTH USE A
+  // REJECTED PROMISE — so between them they covered only the THROW half of this
+  // read's domain, and the fail-closed claim was true only over that half.
+  //
+  // The real store has a SECOND failure mode with no throw in it: on a
+  // PARTIALLY-CORRUPT `pending_actions` column it drops the unparseable /
+  // cross-scenario entries, emits `PendingActionsReadDegraded`, and returns
+  // THE SURVIVORS (`supabase-store.ts` :2305-2347). Only
+  // `{ validation: 'strict' }` turns that into a throw — which is exactly why
+  // `loadMostRecentPendingActionsIntegrityStrict` exists and is documented for
+  // "a caller that will become the newest turn". This caller IS that caller:
+  // the truncated list would be written into the row that then supersedes the
+  // one it was read from, so the dropped entries would be gone for good, with
+  // no abort and no notice.
+  //
+  // The mock below models exactly that asymmetry — truncate for a tolerant
+  // read, throw for a lossless one — so the test binds to WHICH READ the caller
+  // makes, not to a shape the caller could satisfy either way.
+  it('a PARTIALLY-CORRUPT prior row also fails CLOSED — a truncated carry-forward is a silent lossy write, not a read that succeeded', async () => {
+    readPendingsMock.mockImplementation(
+      async (_scenarioId: string, options?: { validation?: string }) => {
+        if (options?.validation === 'strict') {
+          throw new Error(
+            'readMostRecentPendingActions: newest row pending_actions failed lossless validation',
+          );
+        }
+        // The tolerant read's answer: one SURVIVOR, silently one entry short.
+        return [
+          {
+            id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+            scenario_id: SCENARIO_ID,
+            chip_id: 'chip_apply_proposal_survivor',
+            action: {
+              kind: 'apply_proposed_change',
+              proposal_ref: 'prop_survivor',
+              inline_patch: {},
+              public_label: 'The entry that happened to parse',
+              public_message: 'The entry that happened to parse',
+            },
+            preconditions: {},
+            expires_at_turn_count: 2,
+            expires_at_iso: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            emitted_at_iso: new Date().toISOString(),
+          },
+        ];
+      },
+    );
+
+    await driveVagueEdit();
+
+    // PRECONDITION PINNED IN-TEST: the tolerant read really would have returned
+    // a committable list here, so a `writes().length === 0` below is the
+    // caller's lossless read choosing to abort — not the fixture failing to
+    // produce anything.
+    const tolerant = await readPendingsMock(SCENARIO_ID);
+    expect(tolerant.length, 'the tolerant read must return a non-empty truncated list').toBe(1);
+
+    expect(
+      writes().length,
+      'the tolerant read hands back the SURVIVORS of a corrupt row; committing them would make ' +
+        'the truncated list authoritative and delete the unreadable entries permanently',
+    ).toBe(0);
+  });
+
   // ─── THE TWIN (mandatory) ────────────────────────────────────────────────
   it('TWIN: an ordinary, specific edit is NOT intercepted and arms no clarify pending', async () => {
     dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());

@@ -58,7 +58,8 @@
  *
  *   LOSING THE USER'S PROPOSAL  ≫  LOSING THE MEMORY  ≫  LOSING THE REFERENT.
  *
- * 1. **An unreadable prior-pending state aborts the whole commit.** These are
+ * 1. **An unreadable OR LOSSILY-READABLE prior-pending state aborts the whole
+ *    commit.** These are
  *    NON-CONSUMING turns, and `commit.ts`'s carry-forward is the only thing that
  *    keeps a still-live proposal alive: a commit that omitted the survivors would
  *    WIPE it. So a failed read means no commit at all, and the turn degrades to
@@ -109,7 +110,7 @@ import { randomUUID } from 'node:crypto';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { commitDirectAnswer } from '../commit.js';
-import { loadMostRecentPendingActionsStrict } from '../build-turn-context.js';
+import { loadMostRecentPendingActionsIntegrityStrict } from '../build-turn-context.js';
 import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -186,9 +187,25 @@ export async function persistAskedQuestion(
   // here must abort the commit rather than proceed without them. See the
   // ordering note in the file header: losing the user's live proposal is the
   // one outcome worse than losing this question.
+  //
+  // ⚠ ROUND 2 — THE LOSSLESS VARIANT, NOT THE TOLERANT-PARSE ONE. The claim
+  // "a failed read means no commit at all" was true only over the THROW half of
+  // this read's domain. `loadMostRecentPendingActionsStrict` propagates a
+  // TRANSPORT failure but still returns the SURVIVORS of a partially-corrupt
+  // row (`supabase-store.ts` :2305-2347 drop unparseable / cross-scenario
+  // entries, emit `PendingActionsReadDegraded`, and return what is left) — so a
+  // truncated list would be committed as the newest authoritative row and the
+  // dropped entries would be gone with no abort and no notice. This caller
+  // BECOMES the newest turn, which is precisely the case
+  // `loadMostRecentPendingActionsIntegrityStrict` is documented for
+  // (`build-turn-context.ts` :1533-1554): it passes `{ validation: 'strict' }`
+  // so a lossy parse throws and lands in the fail-closed branch below.
   let priorPendings: readonly PendingAction[];
   try {
-    priorPendings = await loadMostRecentPendingActionsStrict(input.scenarioId, input.requestId);
+    priorPendings = await loadMostRecentPendingActionsIntegrityStrict(
+      input.scenarioId,
+      input.requestId,
+    );
   } catch (err) {
     log.warn(
       {

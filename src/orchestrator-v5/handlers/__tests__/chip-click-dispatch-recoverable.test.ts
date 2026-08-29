@@ -32,9 +32,13 @@ import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-ca
 // Mutable turn-budget holder so the budget-precedence test can shrink the
 // turn_ms to make `turnAbort` fire before a (deliberately slow) handler throws.
 // `vi.hoisted` guarantees it is initialised before the hoisted `vi.mock` factory.
-const { budgetHolder, commitDirectAnswerMock } = vi.hoisted(() => ({
+const { budgetHolder, commitDirectAnswerMock, priorPendingsMock } = vi.hoisted(() => ({
   budgetHolder: { turnMs: 30000 },
   commitDirectAnswerMock: vi.fn(),
+  // ROUND 2 — the recovered commit now reads the prior turn's pendings before
+  // it writes, so this must be stubbed or every commit in this file fails
+  // closed against an absent Supabase store.
+  priorPendingsMock: vi.fn(),
 }));
 
 vi.mock('../../commit.js', async () => {
@@ -71,6 +75,7 @@ vi.mock('../../build-turn-context.js', async () => {
       scenarioBriefText: null,
       persistedGraph: null,
     })),
+    loadMostRecentPendingActionsIntegrityStrict: priorPendingsMock,
   };
 });
 
@@ -186,6 +191,8 @@ let errorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   events = [];
+  priorPendingsMock.mockReset();
+  priorPendingsMock.mockResolvedValue([]);
   commitDirectAnswerMock.mockResolvedValue({
     response: {},
     performed: true,
@@ -579,5 +586,142 @@ describe('chip-click run_analysis — a recovered turn must be REMEMBERED (2.135
       'a failed commit on a continuity refusal loses DURABLE EVIDENCE the freshness selectors ' +
         'depend on, and that escalation must survive this change',
     ).toBe('commit_failed');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⭐⭐ ROUND 2 — THE REGRESSION 2.1353 WOULD OTHERWISE HAVE INTRODUCED.
+//
+// Committing these turns is only HALF a fix. `commit.ts` reads
+// `metadata.priorPendingActions ?? []` (:1116/:1164) and writes the carry-
+// forward result into the NEW row's `pending_actions` (:1377); the store then
+// reads the NEWEST ROW ONLY (`supabase-store.ts` :2272-2277, `.limit(1)`).
+//
+// So a commit that threads no priors does not merely "carry nothing" — it
+// lands an authoritative row with an EMPTY pendings list and the user's live
+// consent hold is gone, with no lapse notice (that notice is built by the
+// carry-forward pass, which never ran). Before 2.1353 these seven causes wrote
+// NO ROW AT ALL, so the hold survived on the previous row: the memory fix
+// would have made them strictly WORSE, inverting this lane's own ordering —
+// LOSING THE USER'S PROPOSAL ≫ LOSING THE MEMORY.
+//
+// ⚠ EVERY CASE BINDS BY IDENTITY (the hold's `id`), never by list length: a
+// length assertion would pass on a carried list containing some OTHER pending.
+// ══════════════════════════════════════════════════════════════════════════
+describe('chip-click run_analysis — a recovered turn must not WIPE a live hold (2.1353 round 2)', () => {
+  const HOLD_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+  /** A live consent hold sitting on the prior turn's authoritative row. */
+  function livePriorHold() {
+    return {
+      id: HOLD_ID,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip-apply-proposed',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'prop-1',
+        public_label: 'Raise price to 1.2',
+      },
+      preconditions: { graph_hash: 'h-prior' },
+      expires_at_turn_count: 3,
+      expires_at_iso: new Date(Date.now() + 3_600_000).toISOString(),
+      emitted_at_iso: new Date().toISOString(),
+    };
+  }
+
+  beforeEach(() => {
+    commitDirectAnswerMock.mockClear();
+    priorPendingsMock.mockReset();
+    priorPendingsMock.mockResolvedValue([livePriorHold()]);
+  });
+
+  function soleCommitMetadata(): Record<string, unknown> {
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'exactly one commit is expected on this turn',
+    ).toBe(1);
+    return (commitDirectAnswerMock.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+  }
+
+  it('RED-FIRST: a NON-continuity recovered cause threads the live hold through the commit, so the new newest row cannot wipe it', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-onc-priors',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    expect(out.outcome).toBe('handler_recovered');
+
+    // PRECONDITION PINNED IN-TEST: the read this turn depends on actually
+    // returned a hold. Without this the assertion below could pass vacuously
+    // against a stub that silently stopped returning anything.
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+
+    const meta = soleCommitMetadata();
+    const priors = meta.priorPendingActions as Array<{ id?: string }> | undefined;
+    expect(
+      priors,
+      'no priors threaded ⟹ commit.ts carries forward [] ⟹ the newest row lands with an EMPTY ' +
+        'pendings list and the live hold is silently gone',
+    ).toBeDefined();
+    expect((priors ?? []).map((p) => p.id)).toContain(HOLD_ID);
+  });
+
+  it('OPPOSITE DIRECTION — a CONTINUITY cause threads the same hold (the split is about the FACT, never about the priors)', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-continuity-priors',
+      handlerRegistry: registryThrowing('analysis_not_ready'),
+    });
+    expect(out.outcome).toBe('handler_recovered');
+    const meta = soleCommitMetadata();
+    expect((meta.priorPendingActions as Array<{ id?: string }>).map((p) => p.id)).toContain(HOLD_ID);
+    // …and the refusal fact still rides only on a continuity cause.
+    expect((meta.handler_facts as unknown[]).length).toBe(1);
+  });
+
+  it('FAIL-CLOSED — an unreadable prior-pending state aborts the commit entirely on a non-continuity cause (the user keeps the proposal, loses only the memory)', async () => {
+    priorPendingsMock.mockRejectedValue(new Error('session read failed'));
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-read-fail-onc',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    expect(out.outcome).toBe('handler_recovered');
+    expect(out.commitPerformed).toBe(false);
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'committing without the priors would wipe the live hold — worse than writing no row',
+    ).toBe(0);
+  });
+
+  it('FAIL-CLOSED, OPPOSITE ARM — the same unreadable state on a CONTINUITY cause escalates to commit_failed (the durable refusal fact is equally absent either way)', async () => {
+    priorPendingsMock.mockRejectedValue(new Error('session read failed'));
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-read-fail-continuity',
+      handlerRegistry: registryThrowing('analysis_blocked'),
+    });
+    expect(out.outcome).toBe('commit_failed');
+    expect(commitDirectAnswerMock.mock.calls.length).toBe(0);
+  });
+
+  it('EVERY recoverable cause that commits threads the priors — none of the nine is a wipe sharer', async () => {
+    for (const cause of RECOVERABLE_HANDLER_CAUSES) {
+      commitDirectAnswerMock.mockClear();
+      priorPendingsMock.mockReset();
+      priorPendingsMock.mockResolvedValue([livePriorHold()]);
+      await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: `req-r2-all-${cause}`,
+        handlerRegistry: registryThrowing(cause),
+      });
+      const meta = (commitDirectAnswerMock.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+      const priors = meta.priorPendingActions as Array<{ id?: string }> | undefined;
+      expect(priors, `cause ${cause} committed with NO priors threaded — it wipes live holds`).toBeDefined();
+      expect(
+        (priors ?? []).map((p) => p.id),
+        `cause ${cause} committed without threading the prior hold`,
+      ).toContain(HOLD_ID);
+    }
   });
 });

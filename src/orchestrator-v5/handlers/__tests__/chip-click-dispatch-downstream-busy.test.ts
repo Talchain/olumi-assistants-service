@@ -20,6 +20,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { log } from '../../../utils/telemetry.js';
 
+// ROUND 2 (2.1353) — `commitDirectAnswer` and the prior-pending read are
+// stubbed HERE, deliberately. Before this they were not, so the real commit hit
+// an absent Supabase store, failed, and `commitPerformed` read `false` for an
+// ENVIRONMENTAL reason rather than because the contract said so — the
+// assertion below was pinning the harness, not the product.
+const { commitDirectAnswerMock, priorPendingsMock } = vi.hoisted(() => ({
+  commitDirectAnswerMock: vi.fn(),
+  priorPendingsMock: vi.fn(),
+}));
+
+vi.mock('../../commit.js', async () => {
+  const actual = await vi.importActual<typeof import('../../commit.js')>('../../commit.js');
+  return { ...actual, commitDirectAnswer: commitDirectAnswerMock };
+});
+
 // `dispatchChipClickRunAnalysis` calls `buildTurnContext` unconditionally,
 // which would hit Supabase. Same minimal stub the sibling recoverable suite
 // uses; the registry + handler below are REAL.
@@ -48,6 +63,7 @@ vi.mock('../../build-turn-context.js', async () => {
       scenarioBriefText: null,
       persistedGraph: null,
     })),
+    loadMostRecentPendingActionsIntegrityStrict: priorPendingsMock,
   };
 });
 
@@ -138,6 +154,15 @@ let warnSpy: ReturnType<typeof vi.spyOn> | undefined;
 let errorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
+  commitDirectAnswerMock.mockReset();
+  commitDirectAnswerMock.mockResolvedValue({
+    response: {},
+    performed: true,
+    persisted_row_id: 'row-busy',
+    graphPersisted: false,
+  });
+  priorPendingsMock.mockReset();
+  priorPendingsMock.mockResolvedValue([]);
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
 });
@@ -179,8 +204,20 @@ describe('chip-click run_analysis — downstream 429 recovers as BUSY (200), not
     expect(text.toLowerCase()).not.toContain('analysis is ready');
     expect(out.response.suggested_actions?.length ?? 0).toBeGreaterThan(0);
     expect(out.response.suggested_actions?.[0]?.action_type).toBe('run_analysis');
-    // No analysis ran and no graph mutated.
-    expect(out.commitPerformed).toBe(false);
+    // ⚠ CONTRACT CHANGED — ROADMAP 2.1353 round 2. This line asserted `false`,
+    // and it was GREEN FOR AN ENVIRONMENTAL REASON: this suite did not mock
+    // `commit.js`, so the real `commitDirectAnswer` failed against an absent
+    // store. `analysis_engine_busy` is on RECOVERABLE_HANDLER_CAUSES, and a
+    // recovered turn that produced a user-visible answer MUST be written to
+    // conversation history — the whole point of 2.1353. Corrected at source
+    // rather than baselined: with the commit stubbed, the contract is what the
+    // assertion now reads.
+    expect(out.commitPerformed).toBe(true);
+    // …and it must not have wiped the prior row's pendings on its way through.
+    const meta = (commitDirectAnswerMock.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(meta.priorPendingActions, 'a commit with no priors threaded wipes live holds').toBeDefined();
+    // No refusal FACT, though: a busy engine is not evidence about the model.
+    expect((meta.handler_facts as unknown[]).length).toBe(0);
     // ⚠ CONTRACT CHANGED — ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2. Was
     // `toBeUndefined()`. A busy engine is still a REFUSED analyse turn, and it
     // took the same silent exit as the mixed-scale refusal: 200, honest prose,
