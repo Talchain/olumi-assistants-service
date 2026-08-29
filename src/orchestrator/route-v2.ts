@@ -254,6 +254,7 @@ import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compos
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
   resolveRepairValueBinding,
+  deriveMissingEffectPairs,
   type RepairValueBindingResolution,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
@@ -5216,7 +5217,160 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // parameter is required so the omission cannot recur.
           message: ingress.message,
         });
-        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+
+        // ══════════════════════════════════════════════════════════════════
+        // ⭐⭐ ROADMAP 2.1352 — PERSIST THE QUESTION THIS TURN ASKED.
+        //
+        // THE WITNESSED DEFECT (Paul's live session, root-caused at the DB):
+        //   ASKED    "'Two Developers' has no effect value on Development
+        //             throughput yet. Give me a number from 0 … to 1."
+        //   REPLIED  "0.6"
+        //   ANSWERED "I need to know which factor and which option it belongs
+        //             to before setting anything."
+        // It had named the cell in its own question, one turn earlier.
+        //
+        // MECHANISM: this intercept returned via `sendFinalised200` — an early
+        // return that never reaches `commitDirectAnswer` — so NO TURN ROW was
+        // written. Measured: 8 rows in `v5_conversation_turns` with none
+        // between 16:40:34 and 16:53:23, `pending_actions = []` on every one,
+        // and on the `0.6` turn `conversation_history_turns: 2` (both from
+        // 16:40) with `pending_action_count: 0`. The prompt was not at fault:
+        // it cannot use what it never received.
+        //
+        // ⚠ THE FIX IS PERSISTED STATE, NOT A WIDER PARSER. This predicate
+        // family has already oscillated through four rounds in this codebase,
+        // each fixing one direction and reopening the other, and a reviewer
+        // proved the obvious fifth tweak oscillates too. The asked cell is
+        // therefore RECORDED, not re-derived from prose next turn.
+        //
+        // DERIVED, NOT RE-STATED: the cell comes from
+        // `deriveMissingEffectPairs` — the estate's ONE owner of "which effect
+        // value is outstanding" — filtered to the option this intercept
+        // actually named. The composer and the pending cannot drift, because
+        // both are functions of the same readiness payload.
+        //
+        // FAIL-CLOSED, on the `edit_graph_add_risk` precedent: no resolvable
+        // cell, or no computable graph hash, means NO pending rather than one
+        // that could only ever dispatch `recovery_graph_changed`. A commit
+        // failure degrades to the pre-existing behaviour — the user still gets
+        // the answer; they simply do not get the memory.
+        //
+        // PRIOR PENDINGS ARE THREADED. A turn that commits an empty pending
+        // array would WIPE a still-valid proposal (`commit.ts` carry-forward);
+        // this is a non-consuming turn, so the survivors must ride along.
+        // ══════════════════════════════════════════════════════════════════
+        let clarifyResponse = response;
+        const askedCell =
+          deriveMissingEffectPairs(configureClarify.readiness).find(
+            (pair) => pair.optionId === configureClarify.optionId,
+          ) ?? null;
+        const clarifyEmitGraphHash = ((): string | null => {
+          try {
+            return computeAnalysisAffectingGraphHash(persistedForClarify as GraphStateIngress);
+          } catch {
+            return null;
+          }
+        })();
+        // The prior pendings are read FIRST and separately, because a failure
+        // here must abort the commit rather than proceed without them: this is
+        // a non-consuming turn, and committing with only this turn's own
+        // pending would silently WIPE a still-valid proposal. Losing the
+        // memory of this question is strictly better than losing the user's
+        // live proposal, so an unreadable prior state fails closed.
+        let clarifyPriorPendings: readonly PendingAction[] | null = null;
+        if (askedCell !== null && clarifyEmitGraphHash !== null) {
+          try {
+            clarifyPriorPendings = await loadMostRecentPendingActionsStrict(
+              ingress.scenario_id,
+              requestId,
+            );
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 configure-option clarify — prior-pending read failed; not committing, because a commit without carry-forward would wipe live proposals',
+            );
+          }
+        }
+        if (askedCell !== null && clarifyEmitGraphHash !== null && clarifyPriorPendings !== null) {
+          try {
+            const askedAtIso = new Date().toISOString();
+            const askedPending: PendingAction = {
+              id: randomUUID(),
+              scenario_id: ingress.scenario_id,
+              // Server-only pending — no rendered chip. Same convention as the
+              // add-risk clarify: a STABLE synthetic handle, so key-level
+              // supersession in carry-forward retires a previous ask instead
+              // of accumulating one slot per re-ask (the pending column is
+              // capped at 3 by the DB CHECK constraint).
+              chip_id: 'chip_configure_option_clarify',
+              action: {
+                kind: 'elicit_option_effect',
+                option_id: askedCell.optionId,
+                option_label: askedCell.optionLabel,
+                factor_id: askedCell.factorId,
+                factor_label: askedCell.factorLabel,
+              },
+              preconditions: { graph_hash: clarifyEmitGraphHash },
+              expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+              expires_at_iso: new Date(
+                Date.parse(askedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+              ).toISOString(),
+              emitted_at_iso: askedAtIso,
+            };
+            const committed = await commitDirectAnswer(response, {
+              scenario_id: ingress.scenario_id,
+              turn_id: ingress.turn_id,
+              turn_class: 'clarify',
+              handler_id: null,
+              request_hash: computeRequestHash(ingress),
+              // Deterministic intercept — no LLM call is made on this path.
+              llm_calls_used: 0,
+              duration_ms: Date.now() - routeStartedAt,
+              handler_facts: [],
+              pending_actions: [askedPending],
+              priorPendingActions: clarifyPriorPendings,
+              // This path never builds a turn context, so it derives no
+              // coaching state. The most-recent read filters non-null, so a
+              // null here never resets the prior snapshot.
+              coaching_state: null,
+              userMessage: ingress.message,
+            });
+            // The chokepoint may APPEND to the committed response; ship ITS
+            // response so the wire carries exactly what was persisted.
+            clarifyResponse = committed.response;
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 configure-option clarify — commit failed; the answer still ships but the asked cell is not remembered',
+            );
+          }
+        } else {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              asked_cell_resolved: askedCell !== null,
+              graph_hash_available: clarifyEmitGraphHash !== null,
+            },
+            'V5 configure-option clarify — no resumable cell or no graph hash; no pending emitted (fail-closed)',
+          );
+        }
+
+        return sendFinalised200(reply, requestId, 'edit_graph', clarifyResponse, {
           // ⭐ GATE-REASON INTEGRITY. On the walk, the turns that took the
           // edit-lane non-apply path were the ONLY ones of seven to ship no
           // `analysis_ready`, and they are exactly the turns on which the run

@@ -74,6 +74,33 @@ export interface ElicitTargetBaselineFields {
   readonly label?: string;
 }
 
+/**
+ * THE ASKED CELL, carried across the turn on which the product asked about it.
+ *
+ * The configure-option clarify intercept names a specific (option, factor) cell
+ * — "'Two Developers' has no effect value on Development throughput yet" — and
+ * before ROADMAP 2.1352 that referent existed only in the prose of a turn that
+ * was never written. The next turn therefore received no history of the
+ * question and no pending action, so a compliant reply of "0.6" had nothing to
+ * bind to and the product asked which cell was meant. It had named it itself,
+ * one turn earlier.
+ *
+ * Both ids AND both labels are carried deliberately. The ids are the question's
+ * IDENTITY (a label can be duplicated across options — the duplicate-label dead
+ * end at route-v2 exists because of exactly that); the labels are the copy the
+ * user actually saw, kept so a resume can restate the question in the user's own
+ * vocabulary without re-deriving it from a graph that may have moved.
+ *
+ * Fields are derived from `deriveMissingEffectPairs` (the estate's ONE owner of
+ * "which effect value is outstanding"), never re-stated at the emit site.
+ */
+export interface ElicitOptionEffectFields {
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly factor_id: string;
+  readonly factor_label: string;
+}
+
 export type PendingActionAction =
   | {
       readonly kind: 'set_factor_value';
@@ -279,6 +306,21 @@ export type PendingActionAction =
        */
       readonly kind: 'elicit_target_baseline';
     } & ElicitTargetBaselineFields)
+  | ({
+      /**
+       * ROADMAP 2.1352 — the configure-option clarify intercept's asked cell.
+       *
+       * Server-only: never chip-derived, and it introduces no wire-level
+       * `action_type`. Persisted in the existing `pending_actions` JSONB
+       * column, whose DB CHECK enforces only array + length <= 3, so no
+       * migration is required.
+       *
+       * Deliberately ABSENT from `CONFIRMATION_EXPECTING_ACTION_TYPES`, on the
+       * same reasoning as `elicit_target_baseline`: a bare "yes" answers no
+       * "give me a number from 0 to 1" question.
+       */
+      readonly kind: 'elicit_option_effect';
+    } & ElicitOptionEffectFields)
   | {
       /**
        * V5 P0 proposal-memory continuation. Captures a noun-phrase
@@ -341,6 +383,16 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // Deliberately ABSENT from the short-confirm resumer's local
   // RESUMABLE_KINDS: a bare "yes" answers no percent question.
   'elicit_target_baseline',
+  // ROADMAP 2.1352 — the configure-option clarify intercept's asked cell.
+  // MANDATORY here even though no deterministic resumer claims it yet:
+  // `parsePendingAction` gates every read on this set, so a kind omitted from
+  // it is WRITE-ONLY and cannot be read back at all. Its readers today are the
+  // context projection (`most_recent_pending_actions` → the ContextPack the
+  // model sees) and `derivePendingActivity`'s ORIENT tally — the same tally
+  // that reported `pending_action_count: 0` on the turn this fixes.
+  // Deliberately ABSENT from the short-confirm resumer's local
+  // RESUMABLE_KINDS: a bare "yes" answers no "give me a number" question.
+  'elicit_option_effect',
 ]);
 
 /**
@@ -732,6 +784,21 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.value !== 'number' || !Number.isFinite(a.value)) return null;
     if (a.unit !== undefined && (typeof a.unit !== 'string' || a.unit.length === 0)) return null;
     if (a.label !== undefined && (typeof a.label !== 'string' || a.label.length === 0)) return null;
+  }
+  if (a.kind === 'elicit_option_effect') {
+    // ROADMAP 2.1352 — all four fields REQUIRED. The ids are the asked cell's
+    // identity and the labels are the copy the user saw; a row missing any of
+    // them cannot restate or rebind the question, so it is refused at parse
+    // time rather than surfacing as a pending that names nothing.
+    //
+    // ⚠ THIS BLOCK IS NOT OPTIONAL. `parsePendingAction` is a flat `if` chain,
+    // NOT a switch: a kind admitted to RESUMABLE_ACTION_TYPES with no block
+    // here passes the envelope checks and is returned by a CAST, so a corrupted
+    // row would reach the readers with zero field validation.
+    if (typeof a.option_id !== 'string' || a.option_id.length === 0) return null;
+    if (typeof a.option_label !== 'string' || a.option_label.length === 0) return null;
+    if (typeof a.factor_id !== 'string' || a.factor_id.length === 0) return null;
+    if (typeof a.factor_label !== 'string' || a.factor_label.length === 0) return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.
