@@ -1877,17 +1877,19 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
     expect(result.text).not.toContain('strengthen_001');
     expect(result.text).not.toContain('strengthen_002');
 
-    // Word budget respected and all egress guards clean on real data.
+    // ⭐⭐ THE COACHING AND THE VARIANCE NOTE BOTH SURVIVE ON REAL DATA, AND
+    // THIS PAIR IS THE GUARD ON THAT.
     //
-    // ⚠ HEADROOM IS ONE WORD, AND THAT IS DELIBERATE RATHER THAN LUCKY.
-    // Measured on this fixture: 108 words before the model-variance note, 139
-    // with it. The note costs 31. Had it been written at 35 words (it was, in
-    // a first cut) the ladder would have shed the `Worth a look:` bullet
-    // asserted above and `additional_checks_surfaced` would have dropped to 0
-    // — silently, under a green suite, because no other test in this file
-    // observes that bullet on real data. This assertion pair IS the guard on
-    // that trade. If a later copy edit lengthens the note, this REDs; shed the
-    // words from the note, do not weaken the coaching assertions above.
+    // Measured on this fixture: 108 words of composed content, note 31, served
+    // 139. In a first cut the note was charged to the ladder's 140-word budget
+    // and the `Worth a look:` bullet asserted above was SHED — silently, under
+    // a green suite, because nothing else here observes that bullet on real
+    // data. The note is a fixed footer now and is spliced in AFTER the ladder
+    // has measured, so it displaces nothing. Asserting the note's presence
+    // beside `additional_checks_surfaced` above is what stops that regressing:
+    // if a later change puts the note back inside the budget, the coaching
+    // assertions RED rather than quietly dropping a bullet.
+    expect(result.text).toContain(MODEL_VARIANCE_NOTE);
     expect(wordCount(result.text)).toBeLessThanOrEqual(140);
     assertPassesAllGuards(result.text);
   });

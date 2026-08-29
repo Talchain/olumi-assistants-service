@@ -1786,20 +1786,42 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     if (includeCompleteness && input.completenessBlock !== null) {
       blocks.push(input.completenessBlock);
     }
-    // ⭐ UNDROPPABLE, AND SECOND-TO-LAST ON PURPOSE.
-    //
-    // Undroppable: every rung of the ladder below carries it, so the one
-    // statement about what this artefact IS cannot be shed by a long options
-    // list. It costs 33 of the 140 words and the ladder pays for it out of the
-    // extra check bullet — the right trade, because a check bullet the reader
-    // loses costs them a prompt and a model they believe is THE model costs
-    // two colleagues a disagreement they cannot resolve.
-    //
-    // Second-to-last: `nextStep` stays terminal, so the reply still ends on
-    // the action. Placing the note first would open every draft with two
-    // hedges in a row (see the opener in `buildConfirmSentence`).
-    blocks.push(MODEL_VARIANCE_NOTE);
     blocks.push(input.nextStep);
+    return blocks.join('\n\n');
+  };
+
+  /**
+   * ⭐⭐ THE VARIANCE NOTE IS A FIXED FOOTER, AND IT IS DELIBERATELY OUTSIDE
+   * THE WORD BUDGET THE LADDER SPENDS.
+   *
+   * ⚠ IT WAS INSIDE IT FOR ONE ROUND, AND TWO INDEPENDENT TESTS CAUGHT WHAT
+   * THAT COSTS. Charging 31 words of the 140 to the note makes it COMPETE with
+   * the coaching, and the ladder pays out of content the product has already
+   * committed to delivering:
+   *   · on the real staging fixture the `Worth a look:` bullet was shed
+   *     (108 words of content -> 143 with the note -> rung 2);
+   *   · on the direction-clarification integration path the ORDINARY coaching
+   *     bullet was shed while the clarification survived — which is precisely
+   *     the trade `route-v2-direction-clarification-served.test.ts` exists to
+   *     forbid ("a fix that surfaces the question by silencing the coaching is
+   *     a trade, not a fix").
+   * The first was recoverable by trimming four words. The second was not: it
+   * would have needed a note of roughly zero. That is the signal — a footer
+   * about what the artefact IS must not be priced against the artefact's
+   * content, or every future coaching addition silently trades against the
+   * truthfulness statement, invisibly.
+   *
+   * So the ladder below measures and sheds EXACTLY as it did before this
+   * change, over the content alone, and the note is spliced in afterwards.
+   * Nothing the product had committed to delivering is displaced by it.
+   *
+   * ⭐ SPLICED SECOND-TO-LAST, not appended. `nextStep` stays terminal so the
+   * reply still ends on the action; placing the note first would open every
+   * draft with two hedges in a row (see the opener in `buildConfirmSentence`).
+   */
+  const withNote = (text: string): string => {
+    const blocks = text.split('\n\n');
+    blocks.splice(blocks.length - 1, 0, MODEL_VARIANCE_NOTE);
     return blocks.join('\n\n');
   };
 
@@ -1809,17 +1831,17 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
   // Rung 1 — everything.
   let text = tryAssemble(input.weighingBlock, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 2 — drop the extra check bullet.
   text = tryAssemble(input.weighingBlockCore, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: hasCompleteness, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 3 — drop the completeness advisory.
   text = tryAssemble(input.weighingBlockCore, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
   }
   // Rung 3b — reduce the weighing block to the direction clarifications alone.
   //
@@ -1831,17 +1853,17 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
   if (input.weighingBlockDirectionOnly !== null) {
     text = tryAssemble(input.weighingBlockDirectionOnly, true, false);
     if (countWords(text) <= MAX_WORDS) {
-      return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+      return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
     }
   }
   // Rung 4 — drop the whole weighing block.
   text = tryAssemble(null, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: false };
+    return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: false };
   }
   // Rung 5 — drop options too.
   return {
-    text: tryAssemble(null, false, false),
+    text: withNote(tryAssemble(null, false, false)),
     includedWeighingExtra: false,
     includedCompleteness: false,
     includedWeighing: false,
