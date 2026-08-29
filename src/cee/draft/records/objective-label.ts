@@ -111,7 +111,13 @@ export type AuthoredLabelRefusal =
   | "not_derivable"
   /** Normalisation was a no-op — the quote already IS the objective, verbatim. */
   | "identical_to_quote"
-  | "no_derivable_decision_statement";
+  | "no_derivable_decision_statement"
+  /**
+   * ⭐ THE OPTION PATH ONLY. The quote asks a question. A course of action is
+   * never interrogative, so this is a structural fact about the span and not a
+   * judgement about its wording.
+   */
+  | "asks_a_question";
 
 /**
  * ⭐ DELIBERATION FRAMES — the closed list of constructions in which a sentence
@@ -315,6 +321,13 @@ const APPARATUS_NOUNS: ReadonlySet<string> = new Set([
 
 /** A goal label renders in the node body; the four gold labels are 6-8 words. */
 const GOAL_WORD_BOUND = 9;
+/**
+ * An option label renders on a node AND in the ranked list beside a win
+ * probability, so it is the tightest of the three. Set one word under the goal's
+ * bound rather than derived from it: the two answer different questions and a
+ * shared constant would be trap 21 in a number.
+ */
+const OPTION_WORD_BOUND = 8;
 /** The decision node is the graph's root and carries the widest label. */
 const DECISION_WORD_BOUND = 12;
 
@@ -714,6 +727,134 @@ export function deriveGoalObjectiveLabel(quote: string): AuthoredLabel {
     return { label: source, authored: false, reason: "no_concise_form" };
   }
   if (tokenCount < 2) return { label: source, authored: false, reason: "too_few_tokens" };
+
+  const label = titleCase(normalised);
+  if (!labelIsDerivedFrom(label, source)) {
+    return { label: source, authored: false, reason: "not_derivable" };
+  }
+  if (canonical(label) === source) {
+    return { label: source, authored: false, reason: "identical_to_quote" };
+  }
+  return { label, authored: true };
+}
+
+/**
+ * ⭐⭐ THE OPTION NODE'S DISPLAY LABEL — THE NAME OF A COURSE OF ACTION.
+ *
+ * ── THE WITNESSED DEFECT ───────────────────────────────────────────────────
+ * Option nodes that shipped, scored and ranked with win probabilities, measured
+ * on the deployed build across 16 signed-in runs and 7 briefs:
+ *
+ *   "Should we hire a sales lead?"                       ← the user's own question
+ *   "events budget which everyone loves but I've never
+ *    seen a deal come out of one"
+ *   "We do not know what local certification would cost"  ← a stated unknown
+ *   "Today, suitability records are captured in free text
+ *    by 60 advisers across four offices…"                 ← win probability 0.0542
+ *
+ * ── THE CAUSE, DERIVED RATHER THAN INFERRED ────────────────────────────────
+ * NOT "the served prompt has no node-label rule", which is true and not the
+ * operative cause. On the live records path (`anthropic.ts:842` — "shipped ON,
+ * with no flag and no env gate") an option node's label IS
+ * `stated_items[].source_quote`, and `instruction.ts:138-139` REQUIRES that
+ * field to be "copied VERBATIM from the brief: do not paraphrase, tidy,
+ * translate or summarise it". A `stated_item` carries no `label` field, so no
+ * label rule addressed to the model can reach an option label at all: the
+ * display string is a provenance field, exactly as the goal's was before
+ * {@link deriveGoalObjectiveLabel}.
+ *
+ * ── THE BLOCKER THE GOAL LANE NAMED, RE-DERIVED AND REFUTED ────────────────
+ * `projector.ts` said: *"Option labels are NOT touched: `transforms/schema-v3.ts:1130`
+ * binds an option's provenance on its LABEL, so authoring one flips `from_brief`
+ * → `ai_inferred`."* Derived at those bytes, that is TRUE OF THE LEGACY PATH AND
+ * FALSE OF THIS ONE. `projectNodeProvenance` reads the typed record provenance
+ * FIRST and `continue`s (`schema-v3.ts:1185`) — for EVERY kind, not only `goal`
+ * — so a records-path option never reaches the label binding at `:1188`. The
+ * verdict keys on `provenance_class` + `brief_binding`, and `brief_binding` is
+ * derived from the QUOTE by `bindStatedItemToBrief`, which this cannot move.
+ * The one real coupling was `option.provenance.brief_quote = node.label`
+ * (`schema-v3.ts:1317`); it now reads `source_quote`, so the recorded brief
+ * quote stays the user's verbatim whatever the label says.
+ *
+ * ── WHAT IT MAY DO, AND WHY REFUSAL IS THE SAFE DIRECTION ──────────────────
+ * The SAME whitelist as the goal path — strip an intent preamble, gerund → base
+ * form from the closed map, drop a bare possessive, title case — and a refusal
+ * the moment any clause would be discarded. Nothing generates text;
+ * {@link labelIsDerivedFrom} rejects the derivation if a token the user did not
+ * write ever appears. Refusal keeps the verbatim, which IS the shipped
+ * behaviour, so over-refusal cannot regress a single label while under-refusal
+ * would put words in the user's mouth. The opposite-direction harm the brief
+ * names — "a label so aggressively normalised that the user cannot recognise
+ * their own idea" — is closed by construction rather than by calibration.
+ *
+ * ⭐ MEASURED ON THE SIX WITNESSED LABELS: all six REFUSE, and that is the
+ * honest result rather than a shortfall. Five of them are not courses of action
+ * at all (a question, a stated unknown, two pieces of history, one description
+ * of how things work today) and the sixth is the decision question. **A tidier
+ * label for a non-option would make a classification defect harder to see, not
+ * easier** — so the label path refuses and the CLASSIFICATION half is answered
+ * where it belongs, in the instruction's `option` bullet. The two are different
+ * questions and are deliberately not merged into one predicate (trap 21).
+ *
+ * IDEMPOTENT, on the same terms as the goal path: an already-authored label fed
+ * back in returns `identical_to_quote`.
+ */
+export function deriveOptionActionLabel(quote: string): AuthoredLabel {
+  const source = canonical(quote);
+  if (source.length === 0) return { label: source, authored: false, reason: "empty" };
+
+  // ⭐ A COURSE OF ACTION IS NEVER A QUESTION. Structural — the terminal `?` is
+  // the user's own punctuation, not a phrase list to be outrun — and it is the
+  // single worst witnessed case ("Should we hire a sales lead?", which then
+  // shipped as the BASELINE option). Refusing keeps the question visible as the
+  // question it is, rather than dressing it as an alternative.
+  if (/\?\s*$/.test(source)) {
+    return { label: source, authored: false, reason: "asks_a_question" };
+  }
+
+  // The quote states the CHOICE, not one of its branches. Same signal as the
+  // goal path and the same verdict: there is no single action in it to name.
+  if (findDeliberationFrame(source)) {
+    return { label: source, authored: false, reason: "deliberation_frame" };
+  }
+
+  // A free-standing `or` is two alternatives inside one quote. Naming either one
+  // settles a choice the user has not made — the same reasoning the projector
+  // gives for never collapsing the user's own option set.
+  if (NAMES_AN_ALTERNATIVE.test(source)) {
+    return { label: source, authored: false, reason: "states_alternatives" };
+  }
+
+  const stripped = stripPreamble(source).replace(/[.!]+$/, "").trim();
+
+  // The whitelist gate, unchanged from the goal path: if any clause would be
+  // thrown away, refuse. This is what catches the rambling aside
+  // ("… which everyone loves but I've never seen a deal come out of one").
+  if (wouldDiscardAClause(stripped)) {
+    return { label: source, authored: false, reason: "clause_discarded" };
+  }
+
+  const normalised = normaliseHead(stripped);
+  // A span saying what is NOT so is a statement about the world, not something
+  // the user could do.
+  if (HEAD_DISCLAIMS.test(normalised) || CONTRACTED_NEGATION.test(normalised)) {
+    return { label: source, authored: false, reason: "head_disclaims" };
+  }
+
+  const tokens = words(normalised);
+  if (tokens.length < 1) return { label: source, authored: false, reason: "too_few_tokens" };
+  // ⚠ NOTHING IS CUT TO REACH THE BOUND. An over-long span is refused, not
+  // shortened — shortening is the direction that loses the user's meaning.
+  if (tokens.length > OPTION_WORD_BOUND) {
+    return { label: source, authored: false, reason: "no_concise_form" };
+  }
+
+  // "the other option", "a third alternative" — the decision APPARATUS, which
+  // names no course of action however well it is cased.
+  const head = tokens[tokens.length - 1]!.toLowerCase().replace(/[^a-z]/g, "");
+  if (APPARATUS_NOUNS.has(head)) {
+    return { label: source, authored: false, reason: "names_no_subject" };
+  }
 
   const label = titleCase(normalised);
   if (!labelIsDerivedFrom(label, source)) {

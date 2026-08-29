@@ -169,6 +169,21 @@ export async function runValidationPipeline(
       requestId,
       timeoutMs: VALIDATION_PIPELINE_TIMEOUT_MS,
     },
+    // Served-prompt + model attribution sink. Threaded from the turn's opts
+    // rather than created here, so the record survives a Pass-2 throw: the
+    // dispatcher owns the collector and reads it in its catch block.
+    //
+    // ⚠ `ctx.opts?` DESPITE `StageContext.opts` BEING DECLARED REQUIRED, and
+    // the `?` is load-bearing rather than defensive habit. Before this change
+    // `runValidationPipeline` read NOTHING from `ctx.opts` — so a plain
+    // `ctx.opts.promptAttribution` silently WIDENS this function's
+    // precondition, for the sake of observability alone. Six existing fixtures
+    // in `attach-gate.test.ts` construct a context with no `opts` at all and
+    // threw `Cannot read properties of undefined` the moment the dot was added:
+    // the declared type is stricter than the callers actually are. Attribution
+    // must never be the thing that breaks a validation pass that would have
+    // worked, and one `?` buys that outright.
+    ctx.opts?.promptAttribution,
   );
   const pass2LatencyMs = Date.now() - pass2StartMs;
 

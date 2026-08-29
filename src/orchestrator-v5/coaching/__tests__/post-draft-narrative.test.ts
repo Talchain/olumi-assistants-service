@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import {
   buildPostDraftNarrative,
   validateUncertaintyDriver,
+  MODEL_VARIANCE_NOTE,
 } from '../post-draft-narrative.js';
 import { sanitiseUserFacingText } from '../../compose/output-safety.js';
 import {
@@ -87,9 +88,19 @@ function buildReadyNarrative(
   });
 }
 
+/**
+ * ⚠ `provenance: 'from_brief'` IS NOT DECORATION — it is what the producer
+ * stamps on a goal genuinely taken from the user's brief, and it is what the
+ * opener's quotation gate reads. A goal fixture without it is a shape the
+ * projector never emits (it always stamps a verdict), and a suite built on
+ * such fixtures certified a gate that fired 0 times out of 6 on the wire.
+ * See `tests/unit/cee.goal-inference-attribution.test.ts` for both directions
+ * driven through the real projector.
+ */
 const GOAL_NODE = {
   id: 'g1',
   kind: 'goal' as const,
+  provenance: 'from_brief' as const,
   label: 'Deliver Successful Launch Within Three Months at Acceptable Quality',
 };
 
@@ -371,7 +382,7 @@ describe('buildPostDraftNarrative', () => {
     const unreachableFactorId = 'fac_unreachable_budget';
     const producerGraph = {
       nodes: [
-        { id: 'goal_real', kind: 'goal', label: 'Improve delivery confidence' },
+        { id: 'goal_real', kind: 'goal', provenance: 'from_brief', label: 'Improve delivery confidence' },
         { id: optionId, kind: 'option', label: 'Strengthen the current team' },
         { id: reachableFactorId, kind: 'factor', label: 'Delivery capacity', category: 'controllable' },
         { id: unreachableFactorId, kind: 'factor', label: 'Budget flexibility', category: 'controllable' },
@@ -723,16 +734,22 @@ describe('buildPostDraftNarrative', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
-    // Confirm + Options compared + What the model is weighing + Next-step
-    // = 4 blocks separated by blank lines. The single-option case
-    // collapses Options compared to an inline sentence (3 blocks); this
-    // fixture has two options so we expect 4.
+    // Confirm + Options compared + What the model is weighing + the
+    // model-variance note + Next-step = 5 blocks separated by blank lines. The
+    // single-option case collapses Options compared to an inline sentence;
+    // this fixture has two options.
+    //
+    // ⭐ THE ORDER IS THE ASSERTION, NOT JUST THE COUNT. The variance note is
+    // second-to-last by design: the reply must not open with two hedges, and
+    // the call to action must stay terminal. A change that merely inserted the
+    // note SOMEWHERE would pass a count check and fail this.
     const blocks = text.split('\n\n');
-    expect(blocks.length).toBe(4);
+    expect(blocks.length).toBe(5);
     expect(blocks[0]).toMatch(/^I've built a first decision model/);
     expect(blocks[1]).toMatch(/^Options compared\n• /);
     expect(blocks[2]).toMatch(/^What the model is weighing\n• /);
-    expect(blocks[3]).toMatch(/^Next, run the analysis/);
+    expect(blocks[3]).toMatch(/^This is one of several models I could build/);
+    expect(blocks[4]).toMatch(/^Next, run the analysis/);
   });
 
   it('uses • (U+2022) for bullets, not - or *', () => {
@@ -1264,8 +1281,11 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
       coachingSummary: summary,
       analysisReady: { status: 'ready' },
     });
-    // Exact pass-through — no deterministic opener was prepended.
-    expect(result.text).toBe(summary);
+    // Exact pass-through of the model's own bytes — no deterministic opener
+    // was prepended. The undroppable model-variance note is APPENDED as its
+    // own block (it rides every draft, on both builder paths); the summary
+    // itself is still used verbatim, which is what this pin exists for.
+    expect(result.text).toBe(`${summary}\n\n${MODEL_VARIANCE_NOTE}`);
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_present).toBe(true);
     expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
@@ -1340,7 +1360,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
       coachingSummary: summary,
       strengthenItems: items,
     });
-    expect(result.text).toBe(summary);
+    expect(result.text).toBe(`${summary}\n\n${MODEL_VARIANCE_NOTE}`);
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
   });
 
@@ -1867,7 +1887,27 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
     expect(result.text).not.toContain('strengthen_001');
     expect(result.text).not.toContain('strengthen_002');
 
-    // Word budget respected and all egress guards clean on real data.
+    // ⭐⭐ THE COACHING AND THE VARIANCE NOTE BOTH SURVIVE ON REAL DATA, AND
+    // THIS PAIR IS THE GUARD ON THAT.
+    //
+    // Measured on this fixture: 108 words of composed content, note 31, served
+    // 139. In a first cut the note was charged to the ladder's 140-word budget
+    // and the `Worth a look:` bullet asserted above was SHED — silently, under
+    // a green suite, because nothing else here observes that bullet on real
+    // data. The note is a fixed footer now and is spliced in AFTER the ladder
+    // has measured, so it displaces nothing.
+    //
+    // ⚠ WHAT THIS TEST DOES *NOT* GUARD, DEMONSTRATED RATHER THAN ASSUMED. A
+    // mutant putting the note back inside the budget leaves THIS test GREEN:
+    // at 31 words the fixture still fits (108 + 31 = 139 <= 140), so only the
+    // 35-word version ever shed the bullet here. The guards that DO bite that
+    // regression are the content-heavy case below (120 words of content, which
+    // no longer fits once the note is charged to the ladder) and
+    // `tests/integration/orchestrator/route-v2-direction-clarification-served
+    // .test.ts` ("does not CROWD OUT ordinary coaching"), both verified RED
+    // under that mutant. An earlier version of this comment claimed the
+    // coexistence pinned here was that guard; the mutant refuted it.
+    expect(result.text).toContain(MODEL_VARIANCE_NOTE);
     expect(wordCount(result.text)).toBeLessThanOrEqual(140);
     assertPassesAllGuards(result.text);
   });
@@ -1900,7 +1940,8 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
     expect(result.telemetry.coaching_summary_style_rewritten).toBe(true);
     expect(result.text).toBe(
-      'Your decision model weighs delivery speed against hiring risk, the trade-off that matters most here. One assumption worth checking is the hiring timeline. Next, run the analysis to see how the options compare.',
+      'Your decision model weighs delivery speed against hiring risk, the trade-off that matters most here. One assumption worth checking is the hiring timeline. Next, run the analysis to see how the options compare.' +
+        `\n\n${MODEL_VARIANCE_NOTE}`,
     );
     expect(result.text).not.toMatch(/[–—]/);
     assertCleanCopy(result.text);
@@ -1916,7 +1957,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     });
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_style_rewritten).toBe(false);
-    expect(result.text).toBe(summary);
+    expect(result.text).toBe(`${summary}\n\n${MODEL_VARIANCE_NOTE}`);
   });
 });
 
@@ -2006,8 +2047,16 @@ describe('provisional-decision framing (open brief)', () => {
     // The false claim is gone...
     expect(text).not.toContain("I've built a first decision model");
     // ...and replaced by one that is true of what actually happened: a model
-    // exists, no decision could be pinned down, one was framed anyway.
-    expect(text).toContain("I couldn't pin down a single decision");
+    // exists and THIS BUILDER framed its decision rather than lifting one from
+    // the brief.
+    //
+    // ⚠ THE MARKER MOVED, THE GATE DID NOT. This assertion used to read
+    // `toContain("I couldn't pin down a single decision")`. That sentence made
+    // a claim about the USER'S BRIEF and fired on 7 of 9 drafts including
+    // briefs that plainly posed a decision (measured on the deployed build).
+    // What this test pins is unchanged: the provisional gate fires here, and
+    // the opener says so. Only the subject of the sentence changed.
+    expect(text).toContain('framed the decision provisionally');
     expect(text).toContain('provisional');
     assertCleanCopy(text);
   });
@@ -2048,7 +2097,7 @@ describe('provisional-decision framing (open brief)', () => {
     });
     expect(text.startsWith("I've built a first decision model")).toBe(true);
     expect(text).toContain('Options compared');
-    expect(text).not.toContain("I couldn't pin down");
+    expect(text).not.toContain('framed the decision provisionally');
     expect(text).not.toContain('Options on the canvas');
     assertCleanCopy(text);
   });
@@ -2081,7 +2130,7 @@ describe('provisional-decision framing (open brief)', () => {
       ] as unknown as GraphV3T['nodes']),
     });
     expect(text.startsWith("I've built a first decision model")).toBe(true);
-    expect(text).not.toContain("I couldn't pin down");
+    expect(text).not.toContain('framed the decision provisionally');
     expect(text).toContain('Options compared');
   });
 
@@ -2226,7 +2275,7 @@ describe('provisional-decision framing (open brief)', () => {
         ] as unknown as GraphV3T['nodes']),
       });
       expect(text.startsWith("I've built a first decision model"), member.name).toBe(true);
-      expect(text, member.name).not.toContain("I couldn't pin down");
+      expect(text, member.name).not.toContain('framed the decision provisionally');
     }
 
     // CONTRAST CONTROL: a CAUGHT member takes the hedged path through the very
@@ -2240,7 +2289,7 @@ describe('provisional-decision framing (open brief)', () => {
         OPTION_B,
       ] as unknown as GraphV3T['nodes']),
     });
-    expect(caughtText).toContain("I couldn't pin down");
+    expect(caughtText).toContain('framed the decision provisionally');
   });
 
   /**
@@ -2254,7 +2303,7 @@ describe('provisional-decision framing (open brief)', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
     });
     expect(text.startsWith("I've built a first decision model")).toBe(true);
-    expect(text).not.toContain("I couldn't pin down");
+    expect(text).not.toContain('framed the decision provisionally');
   });
 
   /**
@@ -2366,7 +2415,368 @@ describe('provisional-decision framing (open brief)', () => {
       ] as unknown as GraphV3T['nodes']),
     });
     expect(text.startsWith("I've built a first decision model")).toBe(true);
-    expect(text).not.toContain("I couldn't pin down");
+    expect(text).not.toContain('framed the decision provisionally');
     expect(text).toContain('Options compared');
+  });
+});
+
+/**
+ * ⭐⭐ THE OPENER MADE A CLAIM ABOUT THE USER'S BRIEF, AND IT WAS THE FIRST
+ * THING ANYONE READ.
+ *
+ * ── THE MEASURED DEFECT (16 signed-in runs / 84 turns, deployed build) ──────
+ *   "I couldn't pin down a single decision in your brief, so I've framed one
+ *    provisionally."
+ *
+ * fired on **7 of 9 drafts**, including briefs that literally open
+ * *"Should we A, or B, or C?"* — and the product then built a perfectly good
+ * model of that decision, which makes the sentence self-evidently wrong to the
+ * one person qualified to judge it.
+ *
+ * ── WHY THE FIX IS COPY AND NOT CLASSIFICATION ─────────────────────────────
+ * The sentence is TRUE of our extractor: `deriveDecisionLabel` did decline. It
+ * is FALSE as the user reads it, because it is phrased as a finding about
+ * THEIR brief. Widening the extractor is the opposite-direction harm of the
+ * change that stopped the product falsely CLAIMING a decision on briefs posing
+ * none (18/18 → 1/18 on an independent corpus); that win is not for sale, and
+ * the predicate's breadth is rowed (ROADMAP 2.1341) precisely because "one
+ * more rule" on it oscillates.
+ *
+ * So the opener now describes **what this builder did** — it framed the
+ * decision itself, provisionally — and invites correction. That claim is
+ * verifiable HERE, in this function, on every input, and it cannot be false in
+ * either direction:
+ *   · brief posed a decision and extraction declined → we framed it, so true;
+ *   · brief posed none                              → we framed it, so true.
+ *
+ * ⚠ WHAT THE OLD SENTENCE GOT RIGHT AND THE NEW ONE MUST KEEP: it never said
+ * "your brief contained no decision". Neither does this. The failure was not
+ * that the claim was negative about the brief in form — it is that a sentence
+ * whose subject is the brief READS as a verdict on the brief whatever its
+ * modality. The fix is to change the subject, not to soften the verb.
+ */
+describe('the provisional opener claims only what the product did', () => {
+  /**
+   * Corpus sourced from OUTSIDE this lane's head — the four brief shapes named
+   * in the measured defect report, plus three genuinely open briefs. Each is
+   * run through the REAL producer (`deriveDecisionLabel`) rather than through a
+   * hand-built node, because a fixture I wrote myself is not evidence about
+   * what the producer emits (trap 16-inverse).
+   */
+  const BRIEF_CORPUS: ReadonlyArray<{ readonly name: string; readonly brief: string }> = [
+    {
+      name: 'explicit-should-we',
+      brief: 'Should we build our own delivery fleet, partner with third-party couriers, or do nothing this year?',
+    },
+    {
+      name: 'weighing-whether',
+      brief: "We're weighing whether to open a second warehouse in Leeds or to expand the one we already have.",
+    },
+    {
+      name: 'board-recommendation',
+      brief: 'The board wants a recommendation on whether to acquire the smaller competitor or to build the capability in house.',
+    },
+    {
+      name: 'or-shaped',
+      brief: 'Do we raise prices by ten percent, cut the free tier, or hold everything as it is until the new year?',
+    },
+    { name: 'burn-rate', brief: 'Our burn rate is too high and the team is stretched thin.' },
+    { name: 'churn-symptom', brief: 'Churn has climbed for three quarters and nobody agrees on why.' },
+    {
+      name: 'no-shortlist',
+      brief: 'We have no shortlist yet; we just want to understand the market better.',
+    },
+  ];
+
+  /**
+   * Phrases whose SUBJECT is the user's brief rather than this product. Each
+   * one asserts something this builder cannot see and the user can — which is
+   * the whole defect. Absence of every one of them is the invariant, written
+   * against the spec ("say only what the product did"), not against the single
+   * sentence that happened to be witnessed.
+   */
+  const CLAIMS_ABOUT_THE_BRIEF: readonly string[] = [
+    "couldn't pin down",
+    'could not pin down',
+    "didn't contain",
+    'did not contain',
+    "wasn't clear",
+    'was not clear',
+    'no decision',
+    'unclear',
+    'vague',
+    'ambiguous',
+    'missing a decision',
+    "you didn't",
+    'you did not',
+  ];
+
+  const openerFor = (label: string, authored: boolean): string =>
+    textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label, ...(authored ? { label_authored: true } : {}) },
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+      ] as unknown as GraphV3T['nodes']),
+    }).split('\n\n')[0];
+
+  it('BOTH DIRECTIONS: no opener in the corpus asserts anything about the brief', async () => {
+    const { deriveDecisionLabel } = await import(
+      '../../../cee/draft/records/objective-label.js'
+    );
+    const cases = BRIEF_CORPUS.map((c) => {
+      const derived = deriveDecisionLabel({ brief: c.brief, goalQuotes: [] });
+      return { ...c, derived, opener: openerFor(derived.label, derived.authored) };
+    });
+
+    // POSITIVE + CONTRAST CONTROL (trap 13). An "asserts nothing" sweep would
+    // also pass over a corpus that never reached the provisional path at all.
+    // Assert BOTH builder paths are exercised before believing the absence.
+    expect(
+      cases.filter((c) => !c.derived.authored).map((c) => c.name).length,
+      'corpus must contain at least one PROVISIONAL case',
+    ).toBeGreaterThan(0);
+    expect(
+      cases.filter((c) => c.derived.authored).map((c) => c.name).length,
+      'corpus must contain at least one AUTHORED case',
+    ).toBeGreaterThan(0);
+
+    for (const c of cases) {
+      const lower = c.opener.toLowerCase();
+      for (const claim of CLAIMS_ABOUT_THE_BRIEF) {
+        expect(lower, `${c.name}: opener asserts "${claim}" about the brief: ${c.opener}`)
+          .not.toContain(claim);
+      }
+    }
+  });
+
+  it('the provisional opener names what the builder did, and invites correction', () => {
+    const text = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: 'Decision' },
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+        FACTOR_QUALITY,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    // ⭐ THE COPY IS THE DELIVERABLE, so it is pinned as a literal here.
+    expect(text.split('\n\n')[0]).toBe(
+      "I've built a first model from your brief. I've framed the decision provisionally, so tell me if it isn't the one you're weighing.",
+    );
+    assertCleanCopy(text);
+  });
+
+  it('the provisional opener quotes a whole goal when one exists, and still invites correction', () => {
+    const text = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Cut delivery cost per parcel' },
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.split('\n\n')[0]).toBe(
+      'I\'ve built a first model for "Cut delivery cost per parcel". I\'ve framed the decision provisionally, so tell me if it isn\'t the one you\'re weighing.',
+    );
+    assertCleanCopy(text);
+  });
+
+  /**
+   * ⭐ THE OVER-CORRECTION CONTROL, RESTATED FOR THE NEW COPY. A change that
+   * simply gave EVERY draft the invitation would be indistinguishable from a
+   * correct one. A genuinely authored decision is untouched.
+   */
+  it('CONTROL: a genuinely authored decision gets neither the provisional framing nor the invitation', () => {
+    const text = textOf({
+      graph: makeGraph([
+        {
+          id: 'd1',
+          kind: 'decision',
+          label: 'Build our own fleet or partner with third-party couriers',
+          label_authored: true,
+        },
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text.startsWith("I've built a first decision model")).toBe(true);
+    expect(text).not.toContain('framed the decision provisionally');
+    expect(text).not.toContain("the one you're weighing");
+  });
+});
+
+/**
+ * ⭐⭐ THE MODEL IS ONE OF SEVERAL THE SYSTEM COULD HAVE BUILT, AND NOTHING
+ * SAID SO.
+ *
+ * ── THE MEASURED FACT, AND WHY THERE IS NO FIX FOR IT ──────────────────────
+ * The same brief produces materially different models: 5 of 5 runs gave
+ * distinct option sets, and the journeys inverted
+ * (retain 66% → 45% → blocked → 75% → CLOSE 52%). The request was
+ * BYTE-IDENTICAL every time (`temperature: 0`, same prompt hash) and the
+ * analysis solver is bit-identical to 16 significant figures, so every bit of
+ * that variance is in the DRAFT. The Anthropic API exposes no seed parameter
+ * and temperature is already 0: this is a property of the system, not a defect
+ * with a fix.
+ *
+ * ── THE TRUTHFULNESS GAP THIS CLOSES ───────────────────────────────────────
+ * The product hedges honestly WITHIN a model. Nothing told a user their model
+ * was one of several. Two colleagues comparing notes each saw honest hedging
+ * and no hint that their models differ — and they WILL compare notes.
+ *
+ * ── WHERE IT SITS, AND WHY NOT AT THE TOP ──────────────────────────────────
+ * Read together with the opener above, a variance note in block 1 would open
+ * every draft with two hedges in a row. It is the CLOSING frame instead —
+ * after the content, BEFORE the call to action, so the last thing the reader
+ * takes away is still the next step. On the verbatim-summary path there is no
+ * builder-composed call to action, so it closes the reply.
+ */
+describe('every draft says the model is one of several the system could build', () => {
+  const NOTE =
+    'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+
+  const authoredGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+  const provisionalGraph = makeGraph([
+    { id: 'd1', kind: 'decision', label: 'Decision' },
+    OPTION_A,
+    OPTION_B,
+    OPTION_C,
+  ] as unknown as GraphV3T['nodes']);
+
+  /**
+   * ⭐ THE LITERAL IS THE AUTHORITY. `NOTE` above is written out by hand; the
+   * module's exported constant is what ships. Pinning them equal here means a
+   * copy edit REDs on the literal (where a human reads it) rather than
+   * silently carrying every composed assertion in this file along with it.
+   */
+  it('PIN: the shipped constant is exactly the copy pinned here', () => {
+    expect(MODEL_VARIANCE_NOTE).toBe(NOTE);
+  });
+
+  it('the deterministic sectioned narrative carries the note', () => {
+    const text = textOf({ graph: authoredGraph });
+    expect(text).toContain(NOTE);
+    assertCleanCopy(text);
+  });
+
+  it('the verbatim coaching-summary path carries the note too', () => {
+    // ⭐ THIS PATH IS THE MAJORITY OF REPLIES. The deterministic opener carried
+    // 146 of 688 replies in the 18 Aug live capture; a note added only to the
+    // sectioned builder would be DARK for most users while the register said
+    // the gap was closed.
+    const summary =
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+    const result = buildPostDraftNarrative({
+      graph: authoredGraph,
+      coachingSummary: summary,
+      analysisReady: { status: 'ready' },
+    });
+    // The model's own summary is still used verbatim and is still not prefixed
+    // by the deterministic opener — the note is appended, nothing is rewritten.
+    expect(result.text).toBe(`${summary}\n\n${NOTE}`);
+    expect(result.text).not.toContain("I've built a first decision model");
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+  });
+
+  it('the note never opens the reply — the draft must not lead with two hedges', () => {
+    const text = textOf({ graph: provisionalGraph });
+    const blocks = text.split('\n\n');
+    expect(blocks[0]).not.toContain('one of several models');
+    // The block immediately after the opener is the model's content, not a
+    // second hedge stacked on the first.
+    expect(blocks[1]).toContain('Options on the canvas');
+  });
+
+  it('the call to action still comes last on the deterministic path', () => {
+    const text = textOf({ graph: provisionalGraph });
+    const blocks = text.split('\n\n');
+    expect(blocks.at(-1)?.startsWith('Next,')).toBe(true);
+    expect(blocks.at(-2)).toBe(NOTE);
+  });
+
+  /**
+   * ⭐⭐ THE NOTE MUST NOT DISPLACE COACHING — THE GUARD, ON A FIXTURE BIG
+   * ENOUGH TO SHOW IT.
+   *
+   * Measured here: 120 words of composed content, note 31, served 151. Charge
+   * the note to the ladder's 140-word budget (as a first cut did) and rung 2
+   * sheds the `Worth a look:` bullet. The footer is spliced in after the
+   * ladder has measured, so both survive.
+   *
+   * The final assertion bounds the COMPOSED CONTENT, derived from the constant
+   * rather than written as a second magic number, so it cannot drift out of
+   * agreement with the copy.
+   */
+  it('the note does not displace coaching on a content-heavy draft', () => {
+    const result = buildReadyNarrative({
+      graph: makeGraph([
+        { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Reduce cost to serve per enterprise account' },
+        { id: 'o1', kind: 'option', label: 'Consolidate onto a single support platform' },
+        { id: 'o2', kind: 'option', label: 'Move tier-one triage to a partner' },
+        { id: 'o3', kind: 'option', label: 'Automate the top twenty ticket types' },
+        { id: 'o4', kind: 'option', label: 'Hold the current operating model' },
+        { id: 'f1', kind: 'factor', label: 'Support cost per account' },
+        { id: 'f2', kind: 'factor', label: 'Time to first response' },
+        { id: 'r1', kind: 'risk', label: 'Enterprise churn during migration' },
+      ] as unknown as GraphV3T['nodes']),
+      strengthenItems: [
+        {
+          id: 's1',
+          label: 'Range the migration cost',
+          detail:
+            'the migration cost sits as a point value and would benefit from a 2 to 6M range across the transition window',
+          action_type: 'add_constraint',
+        },
+        {
+          id: 's2',
+          label: 'Check the partner capacity',
+          detail:
+            'partner triage capacity is assumed constant through the peak renewal quarter when volumes historically double',
+          action_type: 'add_constraint',
+        },
+      ],
+    });
+    // PRECONDITION PINNED IN-TEST (trap 13b): this fixture is only a guard if
+    // it actually carries an extra check bullet AND is big enough that the
+    // note would push it over the ladder's budget. Assert both, or the test
+    // below passes for the wrong reason.
+    expect(result.telemetry.additional_checks_surfaced).toBe(1);
+    expect(wordCount(result.text)).toBeGreaterThan(140);
+
+    expect(result.text).toContain('Worth a look:');
+    expect(result.text).toContain(MODEL_VARIANCE_NOTE);
+    expect(wordCount(result.text) - wordCount(MODEL_VARIANCE_NOTE)).toBeLessThanOrEqual(140);
+  });
+
+  it('CONTROL: a draft with no model does not claim one was built', () => {
+    // Nothing was built, so "one of several models I could build" would be a
+    // fresh false claim in the opposite direction.
+    const readyText = textOf({ graph: makeGraph([]) });
+    expect(readyText).not.toContain('one of several models');
+    const nonReady = buildPostDraftNarrative({
+      graph: null,
+      analysisReady: { status: 'blocked' },
+    });
+    expect(nonReady.text).not.toContain('one of several models');
+  });
+
+  it('the 140-word narrative budget still holds with the note in it', () => {
+    const text = textOf({
+      graph: makeGraph([
+        { id: 'd1', kind: 'decision', label: 'Decision' },
+        GOAL_NODE,
+        OPTION_A,
+        OPTION_B,
+        OPTION_C,
+        OPTION_D,
+        FACTOR_QUALITY,
+        FACTOR_CAPACITY,
+      ] as unknown as GraphV3T['nodes']),
+    });
+    expect(text).toContain(NOTE);
+    expect(wordCount(text)).toBeLessThanOrEqual(140);
   });
 });

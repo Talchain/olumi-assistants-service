@@ -30,6 +30,15 @@ const BRIEF =
 
 const FULL_SWITCH = "replace our current CRM with HubSpot next quarter";
 const STATUS_QUO = "keep what we have";
+/**
+ * ⚠ THE DISPLAY NAMES, WHICH ARE NO LONGER THE QUOTES. An option's V3 label is
+ * an authored course-of-action name (`deriveOptionActionLabel`, applied at
+ * `schema-v3.ts`), and a readiness blocker addresses the USER, so it names the
+ * option the way the user sees it on the canvas. Named apart from the quotes
+ * above rather than folded into them: the whole point of the change is that the
+ * two strings are now different things.
+ */
+const STATUS_QUO_LABEL = "Keep What We Have";
 const PILOT = "Phased HubSpot Pilot (subset of team first)";
 const COST = "One-Off Migration Cost";
 const FACTOR_CARRIED_BRIEF = BRIEF.replace("£20,000", "£25,000");
@@ -268,8 +277,19 @@ function bindingOf(projection: Projected, optionLabel: string): Record<string, u
   )?.[factor.id];
 }
 
+/**
+ * ⚠ RESOLVES BY THE USER'S QUOTE FIRST, THEN BY THE LABEL — and the order is the
+ * point. An option's V3 display label is now an authored course-of-action name
+ * (`deriveOptionActionLabel`, applied at `schema-v3.ts`), so a STATED option is
+ * no longer findable by its verbatim. `provenance.brief_quote` is the verbatim
+ * and is the stable identity; the label fallback is what still finds a MODEL
+ * option, which never had a quote. Binding on the quote is also the stronger
+ * shape (trap 19): a display string can change, an identity should not.
+ */
 function v3OptionByLabel(options: OptionV3T[], label: string): OptionV3T {
-  const matches = options.filter((option) => option.label === label);
+  const matches = options.filter(
+    (option) => option.provenance?.brief_quote === label || option.label === label,
+  );
   expect(matches, `expected exactly one V3 option labelled ${label}`).toHaveLength(1);
   return matches[0]!;
 }
@@ -539,7 +559,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     expect(statusQuoBlocker).toBeDefined();
     expect(statusQuoBlocker).toMatchObject({
       blocker_type: "missing_value",
-      message: `Factor "${COST}" is currently 25,000. What should option "${STATUS_QUO}" set it to?`,
+      message: `Factor "${COST}" is currently 25,000. What should option "${STATUS_QUO_LABEL}" set it to?`,
       suggested_action: "add_value",
     });
 
@@ -872,7 +892,8 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
       source: "brief_extraction",
     });
     const fullSwitchGraphNode = v3.graph.nodes.find(
-      (node) => node.kind === "option" && node.label === FULL_SWITCH,
+      // Bound by the user's quote — the V3 label is the authored display name.
+      (node) => node.kind === "option" && node.source_quote === FULL_SWITCH,
     );
     expect(fullSwitchGraphNode?.interventions?.[factor.id]).toMatchObject({
       value: 0.4,

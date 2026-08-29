@@ -13,6 +13,7 @@ import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import { currentStageEmitter } from "../../cee/unified-pipeline/stage-stream-context.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
+import type { PromptAttributionCollector } from "../pipeline/prompt-attribution.js";
 import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem, DraftCoachingWideningLog } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
@@ -171,7 +172,23 @@ export async function handleDraftGraph(
   brief: string,
   request: FastifyRequest,
   turnId: string,
-  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal; userCurrencyHint?: string | null; requestStartMs?: number },
+  draftOpts?: {
+    briefSignalsHeader?: string;
+    signal?: AbortSignal;
+    userCurrencyHint?: string | null;
+    requestStartMs?: number;
+    /**
+     * Served-prompt attribution sink for the pipeline's NON-DRAFT LLM calls
+     * (the post-draft coaching pass and `validate_graph`). Neither rides
+     * `DraftGraphResult`, so neither could reach the V5 trace builder before.
+     *
+     * Passed straight through to `UnifiedPipelineOpts`. The CALLER owns it —
+     * `handleDraftGraph` throws on a pipeline failure, and a collector created
+     * here would be lost with the stack, taking the attribution for a failing
+     * turn with it.
+     */
+    promptAttribution?: PromptAttributionCollector;
+  },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
 
@@ -227,6 +244,10 @@ export async function handleDraftGraph(
     // parse.ts owns the documented LLM-start fallback for legacy callers.
     ...(draftOpts?.requestStartMs !== undefined ? { requestStartMs: draftOpts.requestStartMs } : {}),
     ...(stageEmitter ? { onStage: stageEmitter } : {}),
+    // Attribution sink for the coaching pass + validate_graph. Omitted (not
+    // defaulted) when the caller did not thread one, so every recording site
+    // stays a guarded no-op and the pipeline behaves exactly as before.
+    ...(draftOpts?.promptAttribution ? { promptAttribution: draftOpts.promptAttribution } : {}),
   };
 
   log.info({ brief_length: brief.length, turn_id: turnId }, "draft_graph: starting unified pipeline");

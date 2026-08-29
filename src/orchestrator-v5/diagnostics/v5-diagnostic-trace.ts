@@ -57,6 +57,7 @@ import {
   DiagnosticTraceCollector,
   emptyDiagnosticTrace,
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
+import type { PromptAttributionSnapshot } from '../../orchestrator/pipeline/prompt-attribution.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
@@ -380,6 +381,22 @@ export interface EditGraphLlmCallTelemetry {
   readonly prompt_hash: string | undefined;
   readonly prompt_version: string | undefined;
   readonly prompt_source: string | undefined;
+  /**
+   * Served-prompt identity for the REPAIR attempts, when any ran. Repair
+   * attempts are served by `repair_edit_graph`, not by `edit_graph`, so
+   * attributing a repaired turn to the edit prompt alone pairs the INITIAL
+   * call's identity with the LAST attempt's `stop_reason` — the one place in
+   * this attribution surface that reported something FALSE rather than merely
+   * omitting.
+   *
+   * `undefined` when no repair ran (the clean case) AND when a repair ran but
+   * the loader could not bind an identity to the bytes it served. Those two
+   * are told apart by `repair_attempts`, which is why the count is surfaced
+   * onto the trace rather than left here as the only signal.
+   */
+  readonly repair_prompt_hash: string | undefined;
+  readonly repair_prompt_version: string | undefined;
+  readonly repair_prompt_source: string | undefined;
 }
 
 /**
@@ -425,6 +442,9 @@ export function extractEditLlmCallTelemetry(
     prompt_hash: diag.prompt_hash,
     prompt_version: diag.prompt_version,
     prompt_source: diag.prompt_source,
+    repair_prompt_hash: diag.repair_prompt_hash,
+    repair_prompt_version: diag.repair_prompt_version,
+    repair_prompt_source: diag.repair_prompt_source,
   };
 }
 
@@ -438,6 +458,15 @@ export interface BuildV5DiagnosticTraceInput {
   readonly scenarioId: string;
   readonly turnId: string;
   readonly requestId: string;
+  /**
+   * Attribution for the pipeline's NON-DRAFT LLM calls — the post-draft
+   * coaching pass and `validate_graph`. Both run on every draft turn and
+   * neither rides `DraftGraphResult`, so before this the trace attributed a
+   * multi-call turn entirely to `draft_graph`. Collected by the dispatcher and
+   * threaded down through `UnifiedPipelineOpts`; see
+   * `orchestrator/pipeline/prompt-attribution.ts`.
+   */
+  readonly promptAttribution?: PromptAttributionSnapshot;
 }
 
 export interface BuildMinimalV5DiagnosticTraceInput {
@@ -470,6 +499,13 @@ export interface BuildErrorV5DiagnosticTraceInput {
   readonly toolLLMTelemetry?: DraftGraphResult['toolLLMTelemetry'];
   readonly pipelineOutcome?: PipelineOutcome;
   readonly draftGraphTimings?: DraftGraphTimings;
+  /**
+   * Attribution for the pipeline's non-draft LLM calls, for whatever ran
+   * BEFORE the failure. This is the whole reason the collector is owned by the
+   * dispatcher rather than created inside the pipeline: a turn that threw
+   * after the coaching pass still knows which prompt and model that pass used.
+   */
+  readonly promptAttribution?: PromptAttributionSnapshot;
 }
 
 // ─── Builders ──────────────────────────────────────────────────────────────
@@ -486,6 +522,9 @@ export function buildV5DiagnosticTrace(
 
   const collector = new DiagnosticTraceCollector();
   populateCollectorFromDraftResult(collector, input.draftResult);
+  if (input.promptAttribution) {
+    populateCollectorFromPromptAttribution(collector, input.promptAttribution);
+  }
 
   const frozen = collector.freeze();
   const benchmarking = buildBenchmarkingForDraftGraph(input);
@@ -556,10 +595,28 @@ export function buildMinimalV5DiagnosticTrace(
     ...(tt?.routing_prompt_hash ? { prompt_hash: tt.routing_prompt_hash } : {}),
   };
 
+  // `repair_attempts` reached this builder and was DROPPED, so a reader could
+  // not tell a clean single-attempt edit from a repaired one — and therefore
+  // could not tell whether the `stop_reason` on the single `edit_graph` call
+  // record belonged to the prompt named beside it. Surfaced here as the
+  // trace's existing retry vocabulary rather than a new field, so it reads the
+  // same way as the draft path's repair count.
+  //
+  // Emitted on EVERY edit turn that ran the LLM, including `repair_attempts: 0`
+  // — a zero that is present is a positive statement that no repair ran, while
+  // an absent block is indistinguishable from a builder that forgot.
+  const editRetry: V5Retry | undefined = input.editLlmCall
+    ? {
+        retry_count: input.editLlmCall.repair_attempts,
+        llm_attempt_count: input.editLlmCall.repair_attempts + 1,
+      }
+    : undefined;
+
   return assembleTrace({
     frozen,
     benchmarking,
     correlationIds,
+    ...(editRetry ? { retry: editRetry } : {}),
     environment: buildEnvironment(),
     exitPath: input.exitPath,
     coachingDelivery: input.coachingDelivery,
@@ -583,6 +640,43 @@ export function buildErrorV5DiagnosticTrace(
   const collector = new DiagnosticTraceCollector();
   if (input.toolLLMTelemetry) {
     collector.recordLLMCall(toolLLMTelemetryToCallTrace(input.toolLLMTelemetry, errorType));
+    // Served-prompt identity on the ERROR path. This builder previously froze
+    // `prompt_identity: []` on EVERY failing turn — while publishing the very
+    // hash it was withholding one field down, in `correlation_ids.prompt_hash`.
+    // A failing turn is exactly when "which prompt produced this?" matters
+    // most, so the omission was worst where the need was greatest.
+    //
+    // Deliberately IDENTICAL in shape to the success-path site in
+    // `populateCollectorFromDraftResult` — same task_id, same version/prompt_id
+    // fallbacks, same hardcoded `'pms'` source (`toolLLMTelemetry` carries no
+    // source field on either path). Identical shape is the point: an error
+    // trace and a success trace for the same prompt must be joinable, and a
+    // second, differently-shaped record would defeat that.
+    //
+    // Guarded on a real hash exactly like the four sibling sites: the loader
+    // reports none on a cold start / cache miss, and `PromptIdentity.hash` is
+    // required — so the only honest options are a real hash or no record at
+    // all, never a placeholder digest.
+    if (input.toolLLMTelemetry.prompt_hash) {
+      collector.recordPromptIdentity({
+        task_id: 'draft_graph',
+        prompt_id: input.toolLLMTelemetry.prompt_version ?? 'unknown',
+        version: input.toolLLMTelemetry.prompt_version ?? 'unknown',
+        hash: input.toolLLMTelemetry.prompt_hash,
+        source: 'pms',
+        is_staging: config.server.nodeEnv !== 'production',
+      });
+    }
+  }
+
+  // Whatever the pipeline's non-draft calls recorded BEFORE the failure. A
+  // draft that threw in validation still reports the coaching pass's prompt
+  // and model; a draft that threw inside Pass 2 still reports Pass 2's model,
+  // because the recording site runs before the truncation guard that throws.
+  // Outside the `toolLLMTelemetry` guard above deliberately: these calls
+  // happen whether or not the structural draft surfaced any telemetry.
+  if (input.promptAttribution) {
+    populateCollectorFromPromptAttribution(collector, input.promptAttribution);
   }
 
   const benchmarking: V5BenchmarkingTimings = {
@@ -653,6 +747,39 @@ function assembleTrace(input: AssembleInput): V5DiagnosticTrace {
     exit_path: input.exitPath,
     trace_version: 1,
   };
+}
+
+/**
+ * Replay the pipeline's non-draft LLM calls into the trace collector.
+ *
+ * The recording sites (the coaching pass, `validate_graph`) already decided
+ * what is TRUE — which is why this function makes no decisions of its own and
+ * derives nothing. It stamps exactly one field the sites do not carry:
+ * `is_staging`, which the four sibling sites in this module all spell as
+ * `config.server.nodeEnv !== 'production'`. Stamping it here keeps that
+ * expression in one place instead of letting a fifth spelling appear in the
+ * pipeline, and keeps `prompt-attribution.ts` free of `config`.
+ *
+ * Appended AFTER the draft's own records, which is chronologically honest:
+ * both calls run after the structural draft returns.
+ */
+function populateCollectorFromPromptAttribution(
+  collector: DiagnosticTraceCollector,
+  attribution: PromptAttributionSnapshot,
+): void {
+  for (const call of attribution.llm_calls) {
+    collector.recordLLMCall(call);
+  }
+  for (const identity of attribution.prompt_identity) {
+    collector.recordPromptIdentity({
+      task_id: identity.task_id,
+      prompt_id: identity.prompt_id,
+      version: identity.version,
+      hash: identity.hash,
+      source: identity.source,
+      is_staging: config.server.nodeEnv !== 'production',
+    });
+  }
 }
 
 function populateCollectorFromDraftResult(
@@ -836,6 +963,25 @@ function populateCollectorFromEditTelemetry(
       version: editLlmCall.prompt_version ?? 'unknown',
       hash: editLlmCall.prompt_hash,
       source: editLlmCall.prompt_source ?? 'unknown',
+      is_staging: config.server.nodeEnv !== 'production',
+    });
+  }
+  // SECOND identity for the repair prompt, when repair attempts actually ran
+  // and the producer could bind an identity to the bytes it served. Without
+  // this the trace attributes a repaired turn's outcome — including its
+  // `stop_reason`, which belongs to the LAST attempt — entirely to
+  // `edit_graph`, sending anyone debugging it to change the wrong prompt.
+  //
+  // Guarded on the producer's own hash, never derived from the edit entry: a
+  // repair record carrying the edit prompt's hash would satisfy "two entries
+  // exist" while restating the same misattribution.
+  if (editLlmCall.repair_prompt_hash) {
+    collector.recordPromptIdentity({
+      task_id: 'repair_edit_graph',
+      prompt_id: editLlmCall.repair_prompt_version ?? 'unknown',
+      version: editLlmCall.repair_prompt_version ?? 'unknown',
+      hash: editLlmCall.repair_prompt_hash,
+      source: editLlmCall.repair_prompt_source ?? 'unknown',
       is_staging: config.server.nodeEnv !== 'production',
     });
   }

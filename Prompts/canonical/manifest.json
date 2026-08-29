@@ -21,12 +21,18 @@
       "served_version": 120,
       "pms_active_version": 113,
       "pms_staging_version": 120,
-      "sha256": "adcc5128d4e6e6bcc03d8f87cff1c0a93e4b5a45e56ae1b79d940624419ac499",
-      "cee_content_hash_16": "adcc5128d4e6e6bc",
-      "bytes": 25153,
-      "chars": 25149,
-      "served_hash_verified": true,
+      "sha256": "bec840a6488009284f4bf3c5a6b5ebe604a96ab973946911fec8639af182d949",
+      "cee_content_hash_16": "bec840a648800928",
+      "bytes": 25730,
+      "chars": 25725,
+      "served_hash_verified": false,
       "live_served_hash_observed": "adcc5128d4e6e6bc",
+      "pending_pms_upload": {
+        "state": "AWAITING_PMS_UPLOAD",
+        "note": "The sha256/bytes/chars above describe Prompts/canonical/routing.txt AT THIS COMMIT and are NOT yet what PMS serves. served_version/pms_staging_version are deliberately left at 120 and served_hash_verified at false because no live observation has been made of the new bytes — writing 121 here before the upload would be a fabrication. LIVE STILL SERVES v120 / adcc5128d4e6e6bc (live_served_hash_observed, unchanged), so scripts/verify-served-prompt.mjs will correctly RED from this commit until the upload lands. Steps 3-6 of the Version-bump procedure in this directory's README are outstanding: create PMS version 121 on prompt_id orchestrator_default from these bytes, PATCH stagingVersion to 121, POST /admin/prompts/reload, then confirm content_hash reads bec840a648800928 on several samples. On confirmation set served_version and pms_staging_version to 121, served_hash_verified to true, live_served_hash_observed to bec840a648800928, and delete this block.",
+        "expected_content_hash_16_after_upload": "bec840a648800928",
+        "changed": "Added add_constraint and adjust_edge_strength to <HANDLERS> (both are live, dispatchable handlers that appeared ZERO times in v120) plus an edit_graph carve-out that stops their traffic falling through; extended rule 4 and <STYLE> to forbid the model quoting or numbering its own rules to the user, after 'Per rule 9 (one action per turn)' was witnessed verbatim in a user's chat window."
+      },
       "trigger": "EVERY turn (ORIENT system prompt) — no gate"
     },
     {

@@ -762,11 +762,15 @@ export function looksLikeImperativeRerun(message: string): boolean {
 // predicate enforces is not invented here: it is the sentence the SERVED
 // routing prompt already states to the model. Read at the bytes on
 // `src/orchestrator-v5/context/__tests__/fixtures/served-orchestrator-prompt.txt`,
-// whose sha256 is `adcc5128d4e6e6bc…` — byte-identical to
-// `Prompts/canonical/manifest.json`'s `routing` v120 `cee_content_hash_16`,
-// i.e. the prompt identity observed on the wire (`routing=120#adcc5128`):
+// whose sha256 is `bec840a648800928…` — byte-identical to
+// `Prompts/canonical/manifest.json`'s `routing` `cee_content_hash_16`.
+// ⚠ 2026-08-29: those bytes are AHEAD OF PMS. The identity observed on the
+// wire is still `routing=120#adcc5128` until the operator uploads v121 (see
+// the manifest's `pending_pms_upload` block). The sentence quoted below is
+// UNCHANGED across both versions, so this predicate's producer binding holds
+// either way; `analysis-election-gate.test.ts` asserts that directly.
 //
-//   line 134  "COMPUTATION:
+//   line 136  "COMPUTATION:
 //              - run_analysis: only for explicit requests to run, rerun,
 //                simulate or analyse. Target the goal. Never use it to explain
 //                results, drivers, robustness or what would change."

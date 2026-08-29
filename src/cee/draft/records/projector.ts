@@ -2161,28 +2161,42 @@ function projectOnce(
     // That asymmetry is the whole defect: every inferred node read "Monthly
     // Recurring Revenue" while the user's objective read like a pasted fragment.
     //
-    // ⚠ SCOPED TO `goal`. Option labels are NOT touched: `transforms/schema-v3.ts:1130`
-    // binds an option's provenance on its LABEL, so authoring one flips
-    // `from_brief` → `ai_inferred`. Breaking that coupling is a separate,
-    // named prerequisite and this lane does not own it. A goal node is safe
-    // because it carries a TYPED record provenance, and `:1121-1128` returns on
-    // that path before any label match is reached — derived at those bytes, and
-    // pinned by `authored-node-labels.test.ts`.
-    const authoredGoalLabel =
+    // ⚠ SCOPED TO `goal`. Option labels are NOT authored HERE — they are
+    // authored at the DISPLAY BOUNDARY (`transforms/schema-v3.ts`, the
+    // node↔option pairing loop), and the split is deliberate rather than
+    // incidental. This projector's product is the RECORD, and C-K4 states its
+    // invariant: a stated node's label is the canonicalised quote, verbatim. An
+    // option's authored name is a display string, so authoring it here would
+    // have made the record disagree with its own invariant — and, measured, it
+    // reddened 94 tests across 14 files that identify an option BY its verbatim
+    // label. The goal is different and stays here because its authored label is
+    // read back by `structure/index.ts` when a non-primary objective is demoted
+    // to an outcome, which happens before the V3 transform.
+    //
+    // ⚠⚠ AND THE BLOCKER THIS COMMENT USED TO GIVE FOR OPTIONS IS REFUTED, so
+    // it is not repeated: it said `schema-v3.ts:1130` binds an option's
+    // provenance on its LABEL. `projectNodeProvenance` reads the TYPED record
+    // provenance first and `continue`s for EVERY kind, so a records-path option
+    // never reaches that binding; the verdict keys on `provenance_class` +
+    // `brief_binding`, and `brief_binding` comes from `bindStatedItemToBrief`
+    // over the QUOTE. It is still true of the LEGACY graph path, which has no
+    // typed record — which is why the authoring at the wire runs inside the
+    // typed branch only.
+    const authoredLabel =
       kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
 
     const prov: RecordProvenance = {
       provenance_class: "stated",
       source_quote: quote,
       brief_binding: briefBinding,
-      ...(authoredGoalLabel.authored ? { label_authored: true } : {}),
+      ...(authoredLabel.authored ? { label_authored: true } : {}),
     };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
       id,
       kind,
-      label: authoredGoalLabel.label,
+      label: authoredLabel.label,
       provenance: prov,
     };
 

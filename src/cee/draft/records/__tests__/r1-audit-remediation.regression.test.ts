@@ -943,8 +943,14 @@ describe("ROOT 4 — the final response agrees with itself about provenance", ()
     const wire = CEEGraphResponseV3.parse(
       transformResponseToV3({ graph: projection.graph } as never, { brief }),
     );
-    const node = wire.nodes.find((n) => n.label === "Open a second warehouse");
-    const option = wire.options.find((o) => o.label === "Open a second warehouse");
+    // ⚠ BOUND BY THE USER'S QUOTE, NOT THE DISPLAY LABEL. An option's V3 label
+    // is now an authored course-of-action name ("Open a Second Warehouse"); the
+    // verbatim rides on `source_quote` / `provenance.brief_quote`, and that is
+    // the identity this assertion is about.
+    const node = wire.nodes.find((n) => n.source_quote === "Open a second warehouse");
+    const option = wire.options.find(
+      (o) => o.provenance?.brief_quote === "Open a second warehouse",
+    );
     expect(node?.provenance).toBe("from_brief");
     expect(option?.provenance?.source).toBe("brief_extraction");
   });

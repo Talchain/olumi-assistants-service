@@ -7,8 +7,23 @@ import type { CallOpts } from '../../../src/adapters/llm/types.js';
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
+// ⚠ BOTH loader entry points. `callValidateGraph` now resolves its prompt
+// through `getSystemPromptSnapshot` (bound bytes + meta from ONE resolution),
+// falling back to `getSystemPrompt` when the snapshot cannot bind. A `vi.mock`
+// factory REPLACES the module, so a factory naming only `getSystemPrompt` would
+// leave the snapshot undefined — every case here would silently exercise the
+// DEGRADED path while reading as though it tested the bound one (trap 12).
 vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn().mockResolvedValue('You are a validation assistant.'),
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'You are a validation assistant.',
+    meta: {
+      taskId: 'validate_graph',
+      source: 'default',
+      prompt_version: 'validate_graph_default@v4',
+      prompt_hash: 'validatehash02',
+    },
+  }),
 }));
 
 vi.mock('../../../src/adapters/llm/router.js', () => ({
