@@ -100,6 +100,49 @@ const MAX_NAMED_OPTIONS = 4;
 const MAX_LISTED_WHEN_OVER = 3;
 
 /**
+ * The second sentence of the opener when the projector framed the decision
+ * itself. See {@link buildConfirmSentence} for why its subject is the product
+ * and never the user's brief.
+ */
+const PROVISIONAL_FRAMING_SENTENCE =
+  "I've framed the decision provisionally, so tell me if it isn't the one you're weighing.";
+
+/**
+ * ⭐⭐ THE MODEL IS ONE OF SEVERAL THE SYSTEM COULD HAVE BUILT, AND UNTIL NOW
+ * NOTHING SAID SO.
+ *
+ * ── THE MEASURED FACT ──────────────────────────────────────────────────────
+ * The same brief produces materially different models. Five of five runs gave
+ * DISTINCT option sets and the journeys inverted (retain 66% → 45% → blocked →
+ * 75% → CLOSE 52%), on a request that was BYTE-IDENTICAL every time
+ * (`temperature: 0`, same prompt hash). The analysis solver downstream is
+ * bit-identical to 16 significant figures, so all of that variance is in the
+ * DRAFT.
+ *
+ * ── ⛔ THERE IS NO FIX, WHICH IS PRECISELY WHY THERE IS COPY ────────────────
+ * The Anthropic API exposes no seed parameter and temperature is already 0.
+ * This is a property of the system, not a defect awaiting a lane. The product
+ * already hedges honestly WITHIN a model; what was missing is that the model
+ * ITSELF is one draw. Two colleagues comparing notes each saw honest hedging
+ * and no hint that their models differ.
+ *
+ * ── WHY IT LIVES HERE AND NOT IN THE PROMPT ────────────────────────────────
+ * Prompts are store-managed with a per-instance TTL, so a re-pin serves a
+ * mixture of two prompts for ~5 minutes and no acceptance run inside that
+ * window means anything. A deterministic sentence composed after the draft is
+ * served identically by every instance from the moment it deploys. It also
+ * touches no generation: this is what we SAY about the result.
+ *
+ * ── WHY IT IS NOT AT THE TOP ───────────────────────────────────────────────
+ * Read together with the provisional opener, a variance note in block 1 would
+ * open the reply with two hedges in a row. It is the CLOSING frame instead,
+ * placed BEFORE the call to action so the reader still ends on the next step.
+ * It states what the thing is; it does not apologise for it.
+ */
+export const MODEL_VARIANCE_NOTE =
+  'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+
+/**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
  * single primary assumption bullet. One keeps the section at most one line
  * longer than today — enough to add a second high-value point without
@@ -490,7 +533,23 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
     if (isReady && countWords(acceptedSummary) <= MAX_WORDS) {
       return {
-        text: acceptedSummary,
+        // ⭐ THE VARIANCE NOTE RIDES BOTH PATHS, AND THIS IS THE ONE THAT
+        // MATTERS MOST. This shortcut ships the model's own summary verbatim
+        // and is the MAJORITY path — the deterministic opener carried only 146
+        // of 688 replies in the 18 Aug live capture. A note added solely to the
+        // sectioned builder below would be DARK for most users while every
+        // register said the truthfulness gap was closed, which is this
+        // estate's single most repeated failure ("we build more than we plug
+        // in"). Appended, never interleaved: the summary's own bytes are
+        // untouched and the deterministic opener is still not prepended.
+        //
+        // The narrative word budget is deliberately NOT re-checked against the
+        // note here. Tightening the acceptance test would change WHICH PATH
+        // serves a 110-140 word summary, and a copy change may not silently
+        // re-route composition.
+        text: nodes.length > 0
+          ? `${acceptedSummary}\n\n${MODEL_VARIANCE_NOTE}`
+          : acceptedSummary,
         telemetry: {
           assumption_source: 'coaching_summary',
           coaching_summary_present: true,
@@ -852,19 +911,49 @@ function buildConfirmSentence(
   // Every clause below is a claim about something this builder can see:
   //   "I've built a first model"          — nodes.length > 0 is checked above.
   //   "for <goal>"                        — a goal node's own label.
-  //   "couldn't pin down a single
-  //    decision in your brief"            — exactly what an unauthored decision
-  //                                         label means: `deriveDecisionLabel`
-  //                                         declined rather than guessed.
-  //   "I've framed one provisionally"     — the decision node exists; the
-  //                                         projector minted it deterministically.
+  //   "I've framed the decision
+  //    provisionally"                     — the decision node exists and its
+  //                                         statement is OURS: the projector
+  //                                         minted it deterministically because
+  //                                         `deriveDecisionLabel` declined to
+  //                                         author one from the brief.
+  //   "tell me if it isn't the one
+  //    you're weighing"                   — an invitation, not a promise about
+  //                                         a mechanism this builder cannot see.
   //
-  // ⚠ THE NEGATIVE IS ABOUT OUR EXTRACTION, NOT ABOUT THEIR BRIEF. "Your brief
-  // didn't contain a decision" would be a negative claim about the user's own
-  // input that this builder cannot support — the brief may well pose one we
-  // failed to read (the known negation gap does exactly that). "I couldn't pin
-  // down" is true either way, and it is the fail-safe direction for this class
-  // of claim.
+  // ⚠⚠ THE SUBJECT OF THIS SENTENCE IS THE PRODUCT, NEVER THE BRIEF, AND THAT
+  // IS THE WHOLE FIX. The sentence that stood here read:
+  //
+  //   "I couldn't pin down a single decision in your brief, so I've framed one
+  //    provisionally."
+  //
+  // Measured on the deployed build over 16 signed-in runs / 84 turns, it fired
+  // on 7 OF 9 DRAFTS — including briefs that literally open "Should we A, or B,
+  // or C?" — and the product then built a perfectly good model of exactly that
+  // decision. It is the FIRST thing anyone reads, and it is refuted by the
+  // screen underneath it.
+  //
+  // The old comment here defended it as "about our extraction, not about their
+  // brief", and as prose that is arguable. It is beside the point: a sentence
+  // whose SUBJECT is the user's brief reads as a verdict on the user's brief
+  // whatever its modality, and the reader is the only person qualified to
+  // judge that verdict. So the subject changed. The verb was not softened.
+  //
+  // ⚠ WHY THIS CANNOT BE FALSE IN EITHER DIRECTION. Reaching this branch means
+  // `hasProvisionalDecision` held: the decision node carries the projector's
+  // placeholder and no authored flag, so its statement was composed HERE and
+  // not lifted from the brief. That is true whether or not the brief posed a
+  // decision — which is exactly why the claim is safe to make and the old one
+  // was not.
+  //
+  // ⛔ THE ROAD THAT STAYS CLOSED. Widening `deriveDecisionLabel` so it stops
+  // declining on "Should we A or B?" is the OPPOSITE-DIRECTION HARM of the
+  // change that stopped the product falsely CLAIMING a decision on briefs
+  // posing none (18/18 → 1/18 on an independent corpus). Two harms cannot
+  // share one window; the extraction breadth is rowed separately
+  // (ROADMAP 2.1341) with two arbitrary length constants and hard cliffs, and
+  // "one more rule" on it has already been shown to oscillate. Nothing in this
+  // function touches the classifier.
   //
   // ⚠ IT DOES NOT PROMISE A DECISION-FREE MODEL. The product cannot express
   // one, so copy implying the decision could be dropped would be a second lie.
@@ -902,8 +991,8 @@ function buildConfirmSentence(
 
   if (provisionalDecision) {
     return hasWholeQuotation
-      ? `I've built a first model for "${trimmedGoal}". I couldn't pin down a single decision in your brief, so I've framed one provisionally.`
-      : "I've built a first model from your brief. I couldn't pin down a single decision in it, so I've framed one provisionally.";
+      ? `I've built a first model for "${trimmedGoal}". ${PROVISIONAL_FRAMING_SENTENCE}`
+      : `I've built a first model from your brief. ${PROVISIONAL_FRAMING_SENTENCE}`;
   }
 
   if (!goalLabel) {
@@ -1697,6 +1786,19 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     if (includeCompleteness && input.completenessBlock !== null) {
       blocks.push(input.completenessBlock);
     }
+    // ⭐ UNDROPPABLE, AND SECOND-TO-LAST ON PURPOSE.
+    //
+    // Undroppable: every rung of the ladder below carries it, so the one
+    // statement about what this artefact IS cannot be shed by a long options
+    // list. It costs 33 of the 140 words and the ladder pays for it out of the
+    // extra check bullet — the right trade, because a check bullet the reader
+    // loses costs them a prompt and a model they believe is THE model costs
+    // two colleagues a disagreement they cannot resolve.
+    //
+    // Second-to-last: `nextStep` stays terminal, so the reply still ends on
+    // the action. Placing the note first would open every draft with two
+    // hedges in a row (see the opener in `buildConfirmSentence`).
+    blocks.push(MODEL_VARIANCE_NOTE);
     blocks.push(input.nextStep);
     return blocks.join('\n\n');
   };
