@@ -291,12 +291,50 @@ function scaleNumeric(
     // `value * cap ≈ raw_value`. That, and only that, makes rule 1 demotable.
     const pairProvesUnitForm =
       !inconsistent && capUsable && value >= 0 && value <= 1;
+    // ⭐ THE CAPLESS FRAMED PAIR — the SAME question, asked of the SAME owner
+    // the baseline gate already asks (2026-08-29).
+    //
+    // The records projector writes magnitude-scaled factors as capless framed
+    // pairs BY DESIGN: `value` is the level, `raw_value` is the user's
+    // magnitude, and the frame is deliberately NOT persisted (a stored cap
+    // flips `normaliseFactorValue` to cap-normalised writes and breaks the
+    // user-scale round trip). So on such a factor there is no cap to prove the
+    // pair with — and `capUsable` above therefore refused the projector's own
+    // convention, emitted the DISPLAY MAGNITUDE onto the wire, and left it
+    // undemotable. `run_analysis` then refused the analysis, naming a factor
+    // whose value the product itself had framed, with copy that admits it has
+    // no step to offer. Measured on deployed staging 2026-08-29: 2 of 8 fresh
+    // first drafts of one ordinary brief, dead-ended before the user touched
+    // anything (`__tests__/fixtures/staging-capless-framed-pair-captures-2026-08-29.json`).
+    //
+    // `recoverScaleFrame` is this estate's ONE OWNER of "does this pair encode
+    // a frame?" (`raw_value / value`), and `findScaleIncoherentBaselineFactorIds`
+    // ALREADY consults it to rule exactly this shape COHERENT on the baseline
+    // side. Two gates, one concept, one owner, and only one of them was asking.
+    // This is that second ask — not a new rule, and not a relaxation: the
+    // demotion postcondition below still asserts [0,1] on the emitted payload.
+    //
+    // BOTH conditions are required, and the second is not redundant. The owner
+    // deliberately admits a level ABOVE 1 (an over-frame edit writes
+    // `{value: 5, raw_value: 500000}` and that pair is honest), but 5 is not a
+    // unit-interval representation — writing it into `unitIntervalEquivalent`
+    // would violate that field's own contract and fail the postcondition. This
+    // consumer needs a recovered frame AND a level inside the unit interval.
+    // Every pair the owner refuses — an unframed `{x, x}`, a zero level (zero
+    // is scale-ambiguous), a negative — is untouched and still blocks.
+    const caplessPairProvesUnitForm =
+      !capUsable &&
+      value >= 0 &&
+      value <= 1 &&
+      recoverScaleFrame({ value, raw_value: rawValue }) !== undefined;
     return {
       value: rawValue,
       rule: 'raw_value_used',
       inputValue: value,
       inconsistent,
-      ...(pairProvesUnitForm ? { unitIntervalEquivalent: value } : {}),
+      ...(pairProvesUnitForm || caplessPairProvesUnitForm
+        ? { unitIntervalEquivalent: value }
+        : {}),
     };
   }
 
