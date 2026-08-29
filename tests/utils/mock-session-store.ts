@@ -74,6 +74,18 @@ export function createMockSessionStore(
     // 2.174 fix a: benign default = the scenario exists, so every suite keeps
     // recording Stops unless it seeds an unknown scenario deliberately.
     scenarioExists: async () => true,
+    // Anti-resurrection gate: benign default = NO turn has ever been admitted
+    // on this scenario. Deliberately the opposite polarity to
+    // `turnFenceRowExists` below, and the reason is that they answer different
+    // questions — that one asks "was THIS turn admitted" (a Stop precondition,
+    // benign when true), this one asks "did this scenario EVER run a turn",
+    // which is only ever consulted when the `scenarios` row is ALREADY absent
+    // and whose `true` REFUSES the turn. With `scenarioExists` defaulting to
+    // true above, the gate short-circuits before reading this in every suite
+    // that does not seed a missing row, so the default is unreachable there;
+    // it is `false` so that a suite which DOES seed a missing row keeps the
+    // pre-existing create-on-demand behaviour unless it opts into the refusal.
+    scenarioHasAdmittedTurn: async () => false,
     // ROADMAP 2.236: benign default = the turn WAS admitted (its fence row
     // exists), matching `claimTurnFence`'s succeeding default above, so every
     // suite keeps recording Stops unless it seeds an un-admitted turn id

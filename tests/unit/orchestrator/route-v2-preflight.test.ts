@@ -23,9 +23,16 @@ import { attachCallerContext } from '../../../src/context/index.js';
 // The cross-tenant snapshot test wants the store to report a different
 // owner than the caller; the other two tests never reach the store.
 const ensureScenarioExistsSpy = vi.fn();
+// The anti-resurrection gate runs BEFORE the upsert. Defaulting the row to
+// PRESENT keeps every pre-existing case in this file on exactly the path it
+// was written for; the deleted-scenario case below flips both spies.
+const scenarioExistsSpy = vi.fn(async () => true);
+const scenarioHasAdmittedTurnSpy = vi.fn(async () => false);
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     ensureScenarioExists: ensureScenarioExistsSpy,
+    scenarioExists: scenarioExistsSpy,
+    scenarioHasAdmittedTurn: scenarioHasAdmittedTurnSpy,
     append: async () => ({ id: 'unused' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -169,6 +176,59 @@ describe('runPreFlight — 422 envelope shapes', () => {
     expect(result.ok).toBe(true);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+  });
+
+  it('deleted scenario → scenario_preflight 422 carrying TRUE recovery copy, and the upsert never runs', async () => {
+    // The row is gone and the fence table proves a turn was once admitted on
+    // it. The envelope must (a) keep the existing wire code and validator —
+    // `BoundaryErrorSchema` is `.strict()` over a closed enum, so a new
+    // top-level code would fail the client's parse and degrade the message to
+    // "something went wrong on our side" — and (b) carry copy that is true,
+    // because the client's guidance table has no row for this reason yet and
+    // its fallback says the opposite.
+    ensureScenarioExistsSpy.mockReset();
+    scenarioExistsSpy.mockResolvedValueOnce(false);
+    scenarioHasAdmittedTurnSpy.mockResolvedValueOnce(true);
+
+    const req = makeReq({
+      kind: 'message',
+      turn_id: '44444444-4444-4444-8444-444444444444',
+      scenario_id: SCENARIO_ID,
+      message: 'test',
+      turn_class: 'frame',
+      stage: 'frame',
+      source: 'composer',
+    });
+
+    const result = await runPreFlight(req as any);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.status).toBe(422);
+    expect(result.error).toMatchInlineSnapshot(`
+      {
+        "boundary": "B1",
+        "details": {
+          "reason": "scenario_deleted",
+          "recovery": {
+            "hints": [
+              "Trying again will not restore it.",
+              "Start a new decision, or open a different one from your list.",
+            ],
+            "suggestion": "This decision has been deleted, so nothing further can be saved to it. If you did not delete it yourself, it was deleted in another tab or window.",
+          },
+          "recovery_suggestion": "This decision has been deleted, so nothing further can be saved to it. If you did not delete it yourself, it was deleted in another tab or window.",
+          "scenario_id": "55555555-5555-4555-8555-555555555555",
+        },
+        "direction": "ingress",
+        "error": "INGRESS_CONTRACT_VIOLATION",
+        "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "retryable": false,
+        "validator": "scenario_preflight",
+      }
+    `);
+    // THE HARM, at the route boundary: the row-creating RPC was never reached.
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
   });
 
   it('IDOR fail-closed: no user_id + owned scenario → scenario_preflight 422 (scenario_requires_authenticated_owner)', async () => {
