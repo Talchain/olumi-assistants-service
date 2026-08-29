@@ -22,6 +22,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ── Mocks — must be declared before imports ────────────────────────────────
 vi.mock('../../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn().mockResolvedValue('You are editing a graph.'),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'You are editing a graph.',
+    meta: { source: 'default', prompt_version: 'v2' },
+  }),
 }));
 
 vi.mock('../../../../src/config/index.js', async (importOriginal) => {

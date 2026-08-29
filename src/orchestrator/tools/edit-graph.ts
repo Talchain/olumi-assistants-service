@@ -45,7 +45,11 @@ import {
   PATCH_BUDGET_FAILURE_CODE,
   type PatchBudgetDimension,
 } from "./patch-budget-limits.js";
-import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
+import {
+  getSystemPrompt,
+  getSystemPromptMeta,
+  getSystemPromptSnapshot,
+} from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { GraphV3, FactorCategoryV3 } from "../../schemas/cee-v3.js";
 import type {
@@ -351,10 +355,15 @@ export interface EditGraphTraceDiagnostics {
   repair_attempts?: number;
   plot_outcome?: 'pass' | 'rejected' | 'unavailable' | 'skipped';
   /**
-   * Served-prompt identity for this edit call, from the same
-   * `getSystemPromptMeta('edit_graph')` entry the prompt-resolution log line
-   * already reports. Consumed by `extractEditLlmCallTelemetry` so an edit
-   * turn's `_diagnostic_trace` can say WHICH PROMPT VERSION produced the edit.
+   * Served-prompt identity for this edit call, bound to the bytes actually
+   * sent: content and meta come from ONE `getSystemPromptSnapshot('edit_graph')`
+   * resolution, which asserts `entry.promptHash === sha256(content)`. Consumed
+   * by `extractEditLlmCallTelemetry` so an edit turn's `_diagnostic_trace` can
+   * say WHICH PROMPT VERSION produced the edit.
+   *
+   * SCOPE: the INITIAL resolution. Repair attempts are served by the
+   * `repair_edit_graph` prompt, and this identity is not re-captured per
+   * attempt — see the note at the capture site.
    *
    * All three stay `undefined` on the deterministic (no-LLM) exits, which
    * return before the prompt is resolved at all, and `prompt_hash` is also
@@ -1968,8 +1977,18 @@ export async function handleEditGraph(
   let outputTokensSum = 0;
   let lastStopReason: string | null = null;
   let repairAttempts = 0;
-  // Served-prompt identity, captured for the trace. Declared HERE rather than
-  // read from `promptMeta` directly: `promptMeta` is declared ~160 lines below
+  // Served-prompt identity, captured for the trace.
+  //
+  // ⚠ SCOPE (rowed, not fixed here): captured ONCE from the INITIAL
+  // `edit_graph` resolution, before the repair-attempt loop. `repairAttempts`
+  // and `lastStopReason` update PER ATTEMPT, and repair attempts are served by
+  // the `repair_edit_graph` prompt — so on `repair_attempts > 0` the trace
+  // pairs the INITIAL call's prompt identity with the LAST attempt's stop
+  // reason. That is an incomplete attribution, not a fabrication: the hash is
+  // a real hash of a prompt genuinely used on the turn. Attributing per attempt
+  // needs a per-attempt identity channel, which is a wider change.
+  //
+  // Declared HERE rather than read from `promptMeta` directly: `promptMeta` is declared ~160 lines below
   // this closure, and three deterministic-exit branches CALL `diagnostics()`
   // above that declaration — closing over `promptMeta` would throw a
   // temporal-dead-zone ReferenceError on those real edit turns. Stays
@@ -2145,20 +2164,42 @@ export async function handleEditGraph(
     }
   }
 
-  // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
-  const systemPrompt = await getSystemPrompt('edit_graph');
-
-  // Capture prompt metadata for telemetry/debugging
-  let promptMeta: ReturnType<typeof getSystemPromptMeta> | undefined;
+  // Load system prompt AND its identity in ONE bound resolution (3-tier:
+  // cache → Supabase → hardcoded default).
+  //
+  // Previously this was two independent reads — `getSystemPrompt('edit_graph')`
+  // then `getSystemPromptMeta('edit_graph')` — which CAN disagree: on the
+  // transient store-failure path the loader serves hardcoded DEFAULT bytes,
+  // deliberately does not cache them, and does not evict the expired store
+  // entry, so the separate meta read returned that stale entry and reported a
+  // default-bytes edit as "store prompt vN at hash H1". Now that this identity
+  // is promoted into `_diagnostic_trace.prompt_identity` — a CERTIFICATION
+  // surface — that misattribution is no longer tolerable.
+  //
+  // `getSystemPromptSnapshot` derives content and meta from the SAME
+  // resolution entry and asserts `entry.promptHash === sha256(content)`. Its
+  // throw replaces the previous `getSystemPrompt` throw rather than adding a
+  // failure mode: the content is required for the call, so a resolution that
+  // cannot be trusted could not have proceeded anyway. (The old try/catch
+  // around the meta read guarded an unreachable branch — `getSystemPromptMeta`
+  // throws only on an unknown operation, and the same literal had already
+  // resolved through `getSystemPrompt`.)
+  const editPromptSnapshot = await getSystemPromptSnapshot('edit_graph');
+  const systemPrompt = editPromptSnapshot.content;
+  const promptMeta: ReturnType<typeof getSystemPromptMeta> | undefined =
+    editPromptSnapshot.meta;
   // Context v2 S0: repair-prompt identity for the repair-attempt
   // `v5.context_budget` events. Resolved lazily on the first repair attempt;
   // `null` = resolution failed (observability-only, never fatal).
+  //
+  // ⚠ STILL THE UNBOUND PATTERN, and deliberately left so (rowed, not fixed
+  // here): the repair prompt's bytes come from `getSystemPrompt(
+  // 'repair_edit_graph')` at the call site below while its meta is read
+  // separately here, so the same divergence remains possible for repair-attempt
+  // context-budget telemetry. It is NOT promoted into `prompt_identity` by this
+  // change — see the repair-scope note on `servedPromptHash` — so it stays an
+  // observability-only inaccuracy rather than a certification one.
   let repairPromptMeta: ReturnType<typeof getSystemPromptMeta> | null | undefined;
-  try {
-    promptMeta = getSystemPromptMeta('edit_graph');
-  } catch {
-    // Non-fatal — metadata is for observability only
-  }
 
   if (promptMeta) {
     servedPromptHash = promptMeta.prompt_hash;

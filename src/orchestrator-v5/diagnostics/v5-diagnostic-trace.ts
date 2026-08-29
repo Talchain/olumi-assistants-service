@@ -372,10 +372,10 @@ export interface EditGraphLlmCallTelemetry {
   readonly stop_reason: string | null;
   readonly repair_attempts: number;
   /**
-   * Served-prompt identity for the edit call, read from the same
-   * `getSystemPromptMeta('edit_graph')` entry `edit-graph.ts` already reports
-   * on its prompt-resolution telemetry. `prompt_hash` is `undefined` on a
-   * loader cache miss — an honest absence, never a fabricated digest.
+   * Served-prompt identity for the edit call, bound by `edit-graph.ts` to the
+   * bytes actually sent via a single `getSystemPromptSnapshot('edit_graph')`
+   * resolution. `prompt_hash` is `undefined` when the loader reported no
+   * identity — an honest absence, never a fabricated digest.
    */
   readonly prompt_hash: string | undefined;
   readonly prompt_version: string | undefined;

@@ -276,6 +276,49 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(trace!.prompt_identity.some((p) => p.task_id === 'edit_graph')).toBe(false);
   });
 
+  it('records NO decision_review prompt identity when the loader reported no hash', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    // OPPOSITE-DIRECTION TWIN for `decision_review` — the mirror of the
+    // edit_graph case above, on the most user-facing LLM call in the product.
+    //
+    // The triggering state is ROUTINE, not exotic: the decompose path returns
+    // `prompt_hash: undefined` alongside a real model and real token counts, so
+    // "decision_review_ms set, no hash" is the NORMAL decompose turn. Without
+    // this case, substituting `hash: … ?? 'unknown'` for the presence guard
+    // survives the entire required gate and starts certifying every such brief
+    // against a prompt that does not exist.
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'turn_executor',
+      turnTimings: {
+        decision_review_ms: 14_000,
+        decision_review_model: 'gpt-4.1',
+        decision_review_provider: 'openai',
+        decision_review_input_tokens: 4321,
+        decision_review_output_tokens: 876,
+        // Loader reported no identity (decompose composite / cache miss).
+        decision_review_prompt_hash: undefined,
+        decision_review_prompt_version: undefined,
+        decision_review_prompt_source: undefined,
+      },
+    });
+
+    // PRECONDITION — keep this. It asserts the decision_review CALL was built,
+    // so the absence assertion below cannot pass merely because nothing was
+    // recorded at all.
+    const drCall = trace!.llm_calls.find((c) => c.role === 'decision_review');
+    expect(drCall).toBeDefined();
+    expect(drCall!.model).toBe('gpt-4.1');
+
+    // The call is recorded; its identity is NOT invented.
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'decision_review')).toBe(
+      false,
+    );
+  });
+
   it('leaves llm_calls empty on a deterministic (no-LLM) edit exit — editLlmCall omitted', async () => {
     process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
     const trace = buildMinimalV5DiagnosticTrace({

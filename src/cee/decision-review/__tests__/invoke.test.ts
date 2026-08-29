@@ -34,11 +34,32 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn(async () => 'SYSTEM PROMPT'),
+  // ⚠ DELIBERATELY DIVERGENT from the snapshot below — this models the real
+  // transient store-failure path, where the loader serves DEFAULT bytes but
+  // leaves an expired STORE entry in the cache for a separate meta read to
+  // find. Any code that reads identity from here rather than from the bound
+  // snapshot certifies the served bytes against the wrong prompt.
   getSystemPromptMeta: vi.fn(() => ({
-    prompt_version: 'v1',
-    prompt_hash: 'sha256:drpromptidentity01',
+    prompt_version: 'STALE-STORE-v1',
+    prompt_hash: 'sha256:STALESTOREENTRYHASH',
     source: 'store',
   })),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  // The BOUND resolution — content and meta from one entry. These are the
+  // bytes actually sent, so this is the only identity that may be recorded.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'SYSTEM PROMPT',
+    meta: {
+      prompt_version: 'v1',
+      prompt_hash: 'sha256:drpromptidentity01',
+      source: 'default',
+    },
+  }),
 }));
 
 vi.mock('../science-claims.js', () => ({
@@ -202,7 +223,16 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
     // The loader's OWN verdict, threaded verbatim — not relabelled 'pms'.
     // A hardcoded-default prompt reported as store-managed would be exactly
     // the untruth this attribution exists to prevent.
-    expect(result.prompt_source).toBe('store');
+    expect(result.prompt_source).toBe('default');
+
+    // DISCRIMINATION — the load-bearing half. `getSystemPromptMeta` is mocked
+    // to a DIFFERENT, stale store identity, mirroring the real transient
+    // store-failure path. Reverting to the unbound two-read pattern would make
+    // these three assertions report the stale entry and RED here, which is what
+    // makes the binding a tested property rather than a docblock claim.
+    expect(result.prompt_hash).not.toBe('sha256:STALESTOREENTRYHASH');
+    expect(result.prompt_version).not.toBe('STALE-STORE-v1');
+    expect(result.prompt_source).not.toBe('store');
   });
 
   it('RIDER-B — a per-call model override routes as a per_call source; the default path is unchanged', async () => {

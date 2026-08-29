@@ -38,6 +38,7 @@
  * - `maxRepairRetries = 1` allows one repair attempt (so totalAttempts = 2).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getSystemPromptSnapshot } from '../../../src/adapters/llm/prompt-loader.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Mocks
@@ -58,6 +59,14 @@ vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPromptMeta: vi
     .fn()
     .mockReturnValue({ source: 'default', prompt_version: 'v2', prompt_hash: EDIT_PROMPT_HASH }),
+  // The edit lane resolves bytes AND identity in one bound call. A mock
+  // factory REPLACES the module, so omitting this export would hand
+  // edit-graph.ts `undefined` (trap 12) — content and meta are returned
+  // together here for the same reason production binds them.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'You edit causal decision graphs',
+    meta: { source: 'default', prompt_version: 'v2', prompt_hash: EDIT_PROMPT_HASH },
+  }),
 }));
 
 vi.mock('../../../src/config/index.js', async (importOriginal) => {
@@ -355,10 +364,10 @@ describe('edit_graph orphan-option replay', () => {
     expect(result.diagnostics!.prompt_hash).toBe(EDIT_PROMPT_HASH);
     expect(result.diagnostics!.prompt_version).toBe('v2');
     expect(result.diagnostics!.prompt_source).toBe('default');
-    // POSITIVE CONTROL (trap 13): prove the loader genuinely reported an
-    // identity, so the assertions above are not undefined === undefined.
-    expect(typeof EDIT_PROMPT_HASH).toBe('string');
-    expect(EDIT_PROMPT_HASH.length).toBeGreaterThan(0);
+    // CONTROL that can actually fail: the loader was CONSULTED for this turn.
+    // (The previous version asserted a local const was a non-empty string,
+    // which is true regardless of what the code under test did.)
+    expect(vi.mocked(getSystemPromptSnapshot)).toHaveBeenCalledWith('edit_graph');
   });
 });
 

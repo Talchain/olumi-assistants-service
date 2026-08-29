@@ -157,10 +157,11 @@ export interface V5TurnTimings {
    * Served-prompt identity of the awaited decision_review call — the prompt
    * that produced the USER-VISIBLE analysis brief.
    *
-   * Threaded from `DecisionReviewInvokeResult` (which reads the same
-   * `getSystemPromptMeta('decision_review')` entry the context-budget event
-   * already reports) by BOTH production writers: the turn-executor
-   * decision-review block and chip-click-dispatch.
+   * Threaded from `DecisionReviewInvokeResult`, which resolves prompt bytes
+   * and identity in ONE `getSystemPromptSnapshot('decision_review')` call, so
+   * the hash describes the bytes actually sent rather than whatever entry a
+   * separate meta read happened to find. Written by BOTH production writers:
+   * the turn-executor decision-review block and chip-click-dispatch.
    *
    * NOT co-set with the four fields above: the loader legitimately reports no
    * hash on a cold start / cache miss, and an honest absence is required there
