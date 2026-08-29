@@ -115,6 +115,86 @@ describe('buildStructuralPairEvidence', () => {
     }
   });
 
+  it('uses typed canonical ids to corroborate unique exact generic labels', () => {
+    const currentGraph = graph(
+      [
+        { id: 'cost', kind: 'factor', label: 'Cost' },
+        { id: 'risk', kind: 'outcome', label: 'Risk' },
+      ],
+      [{ from: 'cost', to: 'risk', strength: -0.55 }],
+    );
+    expect(build(
+      currentGraph,
+      'How does Cost affect Risk?',
+      ['cost', 'risk'],
+    )).toEqual({
+      status: 'direct',
+      first_label: 'Cost',
+      second_label: 'Risk',
+      coverage: 'complete',
+      relationships: [{
+        from_label: 'Cost',
+        to_label: 'Risk',
+        edge_type: 'directed',
+        relationship: 'moderate negative link',
+      }],
+    });
+  });
+
+  it('does not let typed ids disambiguate duplicate exact generic labels', () => {
+    const currentGraph = graph(
+      [
+        { id: 'cost_a', kind: 'factor', label: 'Cost' },
+        { id: 'cost_b', kind: 'factor', label: 'cost' },
+        { id: 'risk', kind: 'outcome', label: 'Risk' },
+      ],
+      [{ from: 'cost_a', to: 'risk', strength: 0.5 }],
+    );
+    expect(build(
+      currentGraph,
+      'How does Cost affect Risk?',
+      ['cost_a', 'risk'],
+    )).toEqual({ status: 'ambiguous' });
+  });
+
+  it('does not ignore an additional ambiguous generic reference', () => {
+    const currentGraph = graph(
+      [
+        { id: 'cost', kind: 'factor', label: 'Cost' },
+        { id: 'risk', kind: 'outcome', label: 'Risk' },
+        { id: 'goal_a', kind: 'goal', label: 'Goal' },
+        { id: 'goal_b', kind: 'goal', label: 'goal' },
+      ],
+      [{ from: 'cost', to: 'risk', strength: 0.5 }],
+    );
+    expect(build(
+      currentGraph,
+      'How do Cost and Risk affect Goal?',
+      ['cost', 'risk'],
+    )).toEqual({ status: 'ambiguous' });
+  });
+
+  it('does not promote a nonexact generic word or a third named identity', () => {
+    const currentGraph = graph(
+      [
+        { id: 'cost', kind: 'factor', label: 'Cost' },
+        { id: 'risk', kind: 'outcome', label: 'Risk' },
+        { id: 'goal', kind: 'goal', label: 'Goal' },
+      ],
+      [{ from: 'cost', to: 'risk', strength: 0.5 }],
+    );
+    expect(build(
+      currentGraph,
+      'How do Costs affect Risk?',
+      ['cost', 'risk'],
+    )).toEqual({ status: 'ambiguous' });
+    expect(build(
+      currentGraph,
+      'How do Cost and Risk affect Goal?',
+      ['cost', 'risk'],
+    )).toEqual({ status: 'ambiguous' });
+  });
+
   it('preserves bidirected semantics without minting a causal direction', () => {
     const currentGraph = graph(
       [

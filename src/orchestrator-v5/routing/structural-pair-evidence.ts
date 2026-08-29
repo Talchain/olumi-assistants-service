@@ -19,8 +19,7 @@ import {
 import {
   buildGraphNodeLookupFromGraph,
   buildLabelIndex,
-  hasAmbiguousProseEntityReference,
-  resolveProseEntityRefs,
+  resolveTypedCanonicalProseEntityRefs,
 } from '../compose/phase3-blocks.js';
 
 export type StructuralGraphAuthority =
@@ -193,22 +192,27 @@ export function buildStructuralPairEvidence(
   const displayGraph = formatGraphForContext(graph);
   const lookup = buildGraphNodeLookupFromGraph(displayGraph);
   const labelIndex = buildLabelIndex(lookup);
-  if (hasAmbiguousProseEntityReference(labelIndex, options.messageText)) {
-    return { status: 'ambiguous' };
-  }
-
-  const refs = resolveProseEntityRefs(lookup, labelIndex, options.messageText)
-    .filter((ref) => ref.kind !== 'edge');
-  if (refs.length !== 2) return { status: 'ambiguous' };
+  const queryIds = options.structureQuery.kind === 'direct_relationship'
+    ? options.structureQuery.element_ids
+    : [options.structureQuery.source_element_id, options.structureQuery.target_element_id] as const;
+  // A bare word such as "Cost" is too weak to establish identity in ordinary
+  // prose. Here the frontier router has already supplied a typed pair of
+  // canonical ids, so exact bounded label equality may corroborate those ids.
+  // The shared typed resolver still rejects duplicate labels, extra references
+  // and any id mismatch; this does not create label-only authority.
+  const refs = resolveTypedCanonicalProseEntityRefs(
+    lookup,
+    labelIndex,
+    options.messageText,
+    queryIds,
+  )?.filter((ref) => ref.kind !== 'edge');
+  if (refs === undefined || refs === null || refs.length !== 2) return { status: 'ambiguous' };
 
   const [firstRef, secondRef] = refs;
   if (firstRef === undefined || secondRef === undefined || firstRef.id === secondRef.id) {
     return { status: 'ambiguous' };
   }
 
-  const queryIds = options.structureQuery.kind === 'direct_relationship'
-    ? options.structureQuery.element_ids
-    : [options.structureQuery.source_element_id, options.structureQuery.target_element_id] as const;
   const [firstId, secondId] = queryIds;
   if (
     firstId === secondId ||

@@ -525,6 +525,39 @@ describe('B2 real executor convergence', () => {
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 
+  it('uses typed canonical ids to resolve unique exact generic labels without trusting wrong Sonnet direction', async () => {
+    const genericGraph = structuredClone(GRAPH);
+    genericGraph.nodes = genericGraph.nodes.map((node) =>
+      node.id === 'adoption'
+        ? { ...node, label: 'Cost' }
+        : node.id === 'goal'
+          ? { ...node, label: 'Risk' }
+          : node,
+    );
+    persistedGraph = structuredClone(genericGraph);
+    const adapter = answeringAdapter(
+      'Risk directly drives Cost, so the saved relationship runs from Risk to Cost.',
+      { kind: 'direct_relationship', element_ids: ['adoption', 'goal'] },
+    );
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('Using only the saved Living Model, how does Cost affect Risk?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(genericGraph),
+      },
+    );
+
+    expect(response.assistant_text).toContain('from Cost to Risk, not the reverse');
+    expect(response.assistant_text).not.toContain('from Risk to Cost');
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
   it('does not compose a path between two factors when the canonical model lists no direct connector', async () => {
     const wrongAnswer =
       'Sales Rep Adoption Rate reaches Team Capacity Consumed through the shared paid-team goal, so the model establishes an indirect path between them.';
