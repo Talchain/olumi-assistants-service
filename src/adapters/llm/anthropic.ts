@@ -2876,6 +2876,21 @@ export async function clarifyBriefWithAnthropic(
   const prompt = await buildClarifyPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
+  // Temperature policy (rejects-sampling gate -> omit; thinking -> 1; else the
+  // requested value) is single-sourced in anthropicTemperatureFor (FINAL-SWEEP
+  // F2). This site hardcoded `args.seed ? 0 : 0.1` and was never caught,
+  // because clarify_brief had no checked-in default and fell through to the
+  // global OpenAI provider default — so this Anthropic limb was unreachable and
+  // the missing gate was invisible. Now that the task resolves to a registered
+  // Anthropic model, a rejects-sampling-params model (claude-sonnet-5) would
+  // 400 on every POST /assist/clarify-brief without this. Third instance of the
+  // same defect shape after critique_graph and explain_diff; the seeded
+  // determinism contract (seed => temperature 0) is preserved for models that
+  // do accept sampling params.
+  const temperature = anthropicTemperatureFor(model, {
+    requested: args.seed ? 0 : 0.1,
+    thinking: false,
+  });
   const clarifyPromptMeta = opts?.promptMeta ?? getSystemPromptMeta('clarify_brief');
 
   // V04: Generate idempotency key for request traceability
@@ -2895,7 +2910,7 @@ export async function clarifyBriefWithAnthropic(
           {
             model,
             max_tokens: maxTokens,
-            temperature: args.seed ? 0 : 0.1,
+            temperature,
             system: prompt.system,
             messages: [{ role: "user", content: prompt.userContent }],
           },

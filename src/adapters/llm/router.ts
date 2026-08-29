@@ -114,11 +114,17 @@ function getTaskModelSourceKey(
  *     one hit, and it is 'validate_graph'). Giving a callerless alias a default
  *     would be decoration; declaring it env-only is the honest record.
  *
- * `clarify_brief` is intentionally represented in AI_TASK_LIFECYCLE as the
- * executable route while the historical `clarification` default remains a
- * display/compatibility name. Until that compatibility model row is retired,
- * clarify_brief remains explicit env-or-global fallback rather than silently
- * pretending the display row governs it.
+ * ⚠ CORRECTED 2026-08-29: 'clarify_brief' USED to be listed here, on the
+ * grounds that "the historical `clarification` default remains a
+ * display/compatibility name, so clarify_brief stays explicit env-or-global
+ * fallback rather than silently pretending the display row governs it". The
+ * reasoning about the display row was right; the CONSEQUENCE was not. With
+ * CEE_MODEL_CLARIFICATION unset on the deployed posture, "explicit
+ * env-or-global fallback" resolved in practice to the GLOBAL PROVIDER DEFAULT
+ * — gpt-4o-mini — on the task that reads the user's brief before any other
+ * reasoning step. Declaring a task env-only does not make its model a choice;
+ * it only makes the fall-through silent. clarify_brief now carries its own
+ * checked-in default and the display row keeps its separate, unrelated one.
  *
  * This list is the ONE hand-maintained exception to "every router task has a
  * default". The drift tripwire asserts it stays EXACT (disjoint from the
@@ -127,7 +133,6 @@ function getTaskModelSourceKey(
  */
 export const ROUTER_ENV_ONLY_TASKS: readonly string[] = [
   'validate',
-  'clarify_brief',
 ];
 
 /**

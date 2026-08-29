@@ -121,6 +121,17 @@ export type CeeTask =
   // Display-only compatibility name. The executable standalone route calls
   // getAdapter('clarify_brief'); this row does not serve that call by itself.
   | "clarification"
+  // The EXECUTABLE brief-clarification task — POST /assist/clarify-brief calls
+  // getAdapter('clarify_brief'). Promoted to a first-class CeeTask (2026-08-29)
+  // for the same reason as explain_diff and validate_graph below: with no
+  // checked-in default it was declared env-only, and CEE_MODEL_CLARIFICATION is
+  // unset on the deployed staging posture, so it fell past precedence ranks 3
+  // AND 4 onto the GLOBAL PROVIDER DEFAULT — gpt-4o-mini. Nobody chose that
+  // model; it was the residue of a fall-through, on the one task that reads the
+  // user's brief BEFORE anything else does.
+  // The display-only `clarification` row above is a DIFFERENT string and stays
+  // display-only — they are deliberately not synonyms.
+  | "clarify_brief"
   | "preflight"
   | "draft_graph"
   | "edit_graph"
@@ -244,6 +255,18 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   sensitivity_coach: "gpt-4.1-2025-04-14",
   // Quality tier - reconciled to live staging CEE_MODEL_* (2026-08-08)
   draft_graph: "claude-sonnet-5",  // live CEE_MODEL_DRAFT_GRAPH (was claude-sonnet-4-6)
+  // UPSTREAM COMPREHENSION STEP. clarify_brief is the first reasoning pass over
+  // the user's brief; every later stage (draft, analysis, coaching) inherits its
+  // interpretation, so a shallow reading here contaminates everything after it.
+  // Pinned to the SAME tier already proven for drafting rather than a new model
+  // choice. Overridable by CEE_MODEL_CLARIFICATION exactly like every other row
+  // (router precedence step 3 > step 4).
+  // ⚠ This pin is what makes the ANTHROPIC clarify limb live. That limb
+  // hardcoded a sampling param; claude-sonnet-5 rejects them, so the pin is
+  // load-bearing on the anthropicTemperatureFor gate in
+  // clarifyBriefWithAnthropic — guarded by
+  // src/adapters/llm/__tests__/constrained-task-sampling-params.test.ts.
+  clarify_brief: "claude-sonnet-5",
   edit_graph: "claude-sonnet-5",  // live CEE_MODEL_EDIT_GRAPH (was claude-sonnet-4-6)
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
   orchestrator: "claude-sonnet-5",  // live CEE_MODEL_ORCHESTRATOR (was gpt-4o)
@@ -612,8 +635,11 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
   },
   clarify_brief: {
     hasExecutablePath: true,
-    modelAuthority: 'router_env_or_global_fallback',
-    checkedInModel: null,
+    // Was 'router_env_or_global_fallback' with checkedInModel: null — which is
+    // precisely what let the deployed service resolve this task to the global
+    // provider default (gpt-4o-mini) with nobody having chosen it.
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.clarify_brief,
     promptAuthority: 'provider_specific_pms_or_inline_constant',
     promptTask: 'clarify_brief',
     promptIdentity: 'provider_specific_runtime_or_code_hash',

@@ -163,14 +163,20 @@ describe("router task provider capability", () => {
  * OPPOSITE-DIRECTION TWINS.
  *
  * Every task the router can resolve, pinned BY NAME to the exact provider and
- * model it served at staging tip 77e2e7d9 under the deployed posture. Only
- * critique_graph and explain_diff are permitted to move; the other eighteen
- * rows are the control. A per-task provider change anywhere else REDs here.
+ * model it served at staging tip 77e2e7d9 under the deployed posture, updated
+ * for each deliberate move since. Only the rows called out at the bottom of the
+ * table are permitted to move; the rest are the control. A per-task provider
+ * change anywhere else REDs here.
+ *
+ * ⚠ `validate` is deliberately still "openai / gpt-4o-mini": it is a callerless
+ * alias of validate_graph declared in ROUTER_ENV_ONLY_TASKS, so it is the one
+ * remaining routed name with no checked-in default. It has no call site, so its
+ * fall-through resolves nothing a user can reach — do not "fix" it by giving it
+ * a default it can never use.
  */
 const PINNED_TASK_RESOLUTIONS: Readonly<Record<string, string>> = Object.freeze({
   bias_check: "anthropic / claude-sonnet-4-20250514",
   clarification: "openai / gpt-4.1-2025-04-14",
-  clarify_brief: "openai / gpt-4o-mini",
   decision_review: "openai / gpt-4.1-2025-04-14",
   draft_graph: "anthropic / claude-sonnet-5",
   edit_graph: "anthropic / claude-sonnet-5",
@@ -186,9 +192,15 @@ const PINNED_TASK_RESOLUTIONS: Readonly<Record<string, string>> = Object.freeze(
   suggest_options: "openai / gpt-5.2",
   validate: "openai / gpt-4o-mini",
   validate_graph: "openai / o4-mini",
-  // The two tasks this lane moves, pinned to their post-fix identities.
+  // Tasks deliberately moved onto a checked-in Anthropic default, pinned to
+  // their post-fix identities.
   critique_graph: "anthropic / claude-sonnet-5",
   explain_diff: "anthropic / claude-sonnet-5",
+  // clarify_brief, 2026-08-29. Was "openai / gpt-4o-mini" — NOT a choice: it
+  // had no checked-in default and no CEE_MODEL_CLARIFICATION on the deployed
+  // posture, so it fell past every intentional rank onto the OpenAI provider
+  // default, on the step that reads the user's brief before anything else.
+  clarify_brief: "anthropic / claude-sonnet-5",
 });
 
 describe("router task provider assignment is per-task", () => {

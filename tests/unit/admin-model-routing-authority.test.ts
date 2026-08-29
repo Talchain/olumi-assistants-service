@@ -186,23 +186,27 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  // Vehicle changed from explain_diff to clarify_brief. providers.json is
-  // OUTRANKED by a checked-in task default (router precedence: task_default >
-  // providers_json), so once explain_diff gained a default it stopped being a
-  // "router fallback task" and could no longer demonstrate this precedence.
-  // clarify_brief is a genuine one: declared in ROUTER_ENV_ONLY_TASKS, no entry
-  // in TASK_MODEL_DEFAULTS. The precedence under test is unchanged.
-  it('consumes the real providers config for router fallback tasks', () => {
+  // ⚠ VEHICLE RETIRED, 2026-08-29 — READ THIS BEFORE LOOKING FOR A THIRD ONE.
+  // This test demonstrated the providers_json rank through a task that had no
+  // checked-in default. The vehicle decayed TWICE: explain_diff carried it
+  // until explain_diff gained an Anthropic default, then clarify_brief carried
+  // it until clarify_brief gained one. Every router-chain task now has a
+  // checked-in default, so there is NO third vehicle — the rank is no longer
+  // reachable through any real reported task.
+  // The fall-through ranks (providers_json / LLM_MODEL / provider_default) are
+  // now pinned directly, with `taskDefault: undefined` stated as an input, in
+  // tests/unit/router-resolution-fallback-precedence.test.ts. That cannot decay.
+  // What remains REACHABLE at this report layer, and is asserted here instead,
+  // is the opposite direction: a real providers.json override must LOSE to the
+  // checked-in task default.
+  it('keeps a task on its checked-in default against a providers.json override', () => {
     const directory = mkdtempSync(join(tmpdir(), 'olumi-provider-routing-'));
     const configPath = join(directory, 'providers.json');
     writeFileSync(
       configPath,
       JSON.stringify({
         overrides: {
-          clarify_brief: {
-            provider: 'anthropic',
-            model: 'claude-sonnet-4-6',
-          },
+          clarify_brief: { provider: 'openai', model: 'gpt-4o-mini' },
         },
       }),
     );
@@ -214,31 +218,11 @@ describe('admin runtime model-routing authority', () => {
       resetAdapterCache();
 
       expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-        model: 'claude-sonnet-4-6',
+        model: TASK_MODEL_DEFAULTS.clarify_brief,
         provider: 'anthropic',
         availability: 'registry_enabled',
-        source: 'providers_config',
-        source_key: 'providers.json.overrides.clarify_brief.model',
-      });
-
-      writeFileSync(
-        configPath,
-        JSON.stringify({
-          defaults: {
-            provider: 'anthropic',
-            model: 'claude-sonnet-4-20250514',
-          },
-        }),
-      );
-      _resetConfigCache();
-      resetAdapterCache();
-
-      expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-        model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
-        availability: 'registry_enabled',
-        source: 'providers_config',
-        source_key: 'providers.json.defaults.model',
+        source: 'default',
+        source_key: 'TASK_MODEL_DEFAULTS.clarify_brief',
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -402,29 +386,27 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  it('reports clarification global-model and provider-default fallbacks without inventing a task default', () => {
+  // Retitled and inverted 2026-08-29. clarify_brief no longer "has no task
+  // default to invent" — it has a real one, and task_default outranks both the
+  // global model and the provider default. The fall-through behaviour this
+  // covered now lives in router-resolution-fallback-precedence.test.ts.
+  it('keeps clarify_brief on its checked-in default against a hostile global posture', () => {
     process.env.LLM_PROVIDER = 'openai';
     process.env.LLM_MODEL = 'gpt-4o';
     _resetConfigCache();
 
     expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: 'gpt-4o',
-      provider: 'openai',
-      availability: 'registry_enabled',
-      source: 'global_model',
-      source_key: 'LLM_MODEL',
-    });
-
-    process.env.LLM_PROVIDER = 'anthropic';
-    delete process.env.LLM_MODEL;
-    _resetConfigCache();
-
-    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: PROVIDER_DEFAULT_MODELS.anthropic,
+      model: TASK_MODEL_DEFAULTS.clarify_brief,
       provider: 'anthropic',
       availability: 'registry_enabled',
-      source: 'provider_default',
-      source_key: 'PROVIDER_DEFAULT_MODELS.anthropic',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.clarify_brief',
+      executable: true,
+      has_executable_path: true,
+      runtime_availability: 'available',
+    });
+    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+      clarify_brief: TASK_MODEL_DEFAULTS.clarify_brief,
     });
   });
 
@@ -433,9 +415,12 @@ describe('admin runtime model-routing authority', () => {
     process.env.CEE_MODEL_CLARIFICATION = '';
     _resetConfigCache();
 
+    // EMPTY means UNSET, so it falls through the env rank. It now lands on the
+    // checked-in task default rather than the provider default — which is the
+    // whole point of the defaults map: a dropped env var is safe.
     expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: PROVIDER_DEFAULT_MODELS.anthropic,
-      source: 'provider_default',
+      model: TASK_MODEL_DEFAULTS.clarify_brief,
+      source: 'default',
     });
 
     process.env.CEE_MODEL_CLARIFICATION = '   ';
@@ -450,38 +435,31 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  // SPLIT AND RETARGETED. explain_diff is no longer governed by the global
-  // model/provider: it now carries a checked-in Anthropic task default, and
-  // task_default outranks both global_model and provider_default. The
-  // global/provider-default fallback behaviour this test existed to cover is
-  // therefore demonstrated on clarify_brief, a task that genuinely has no
-  // checked-in default (declared in ROUTER_ENV_ONLY_TASKS).
-  it('reports global and provider fallbacks for a task with no checked-in default', () => {
-    process.env.LLM_PROVIDER = 'anthropic';
-    process.env.LLM_MODEL = 'claude-sonnet-4-6';
-    _resetConfigCache();
-
-    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: 'claude-sonnet-4-6',
-      provider: 'anthropic',
-      availability: 'registry_enabled',
-      source: 'global_model',
-      source_key: 'LLM_MODEL',
-      executable: true,
-      has_executable_path: true,
-      runtime_availability: 'available',
-    });
-
+  // RETIRED 2026-08-29, same reason as the providers.json vehicle above: no
+  // reported task falls through to global_model / provider_default any more.
+  // Re-homed, un-decayable, at
+  // tests/unit/router-resolution-fallback-precedence.test.ts.
+  // What is asserted here instead is the report-layer invariant that replaces
+  // it: EVERY reported router-chain task now resolves from an INTENDED rank
+  // (a per-call/store override, an env pin, or a checked-in default) — never
+  // by falling through to a provider default nobody chose. That is the defect
+  // clarify_brief was the last instance of.
+  it('leaves no reported router task resolving by unchosen fall-through', () => {
     delete process.env.LLM_MODEL;
+    process.env.LLM_PROVIDER = 'openai';
     _resetConfigCache();
+    resetAdapterCache();
 
-    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: PROVIDER_DEFAULT_MODELS.anthropic,
-      provider: 'anthropic',
-      availability: 'registry_enabled',
-      source: 'provider_default',
-      source_key: 'PROVIDER_DEFAULT_MODELS.anthropic',
-    });
+    const fellThrough = resolveModelRoutingSnapshot()
+      .tasks.filter((row) => row.source === 'provider_default')
+      .map((row) => `${row.task} -> ${row.provider}/${row.model}`);
+
+    expect(
+      fellThrough,
+      'These tasks resolve to a model nobody chose, by falling past every ' +
+        'rank that expresses an intent. Give each a checked-in default in ' +
+        'TASK_MODEL_DEFAULTS (src/config/model-routing.ts).',
+    ).toEqual([]);
   });
 
   // The opposite-direction twin of the defect this lane closed: the checked-in
@@ -509,23 +487,12 @@ describe('admin runtime model-routing authority', () => {
     });
   });
 
-  // Retargeted for the same reason as above: explain_diff no longer reads the
-  // global model, so it can no longer surface an invalid one. The property —
-  // an unregistered global model becomes a typed configuration error without
-  // constructing an adapter — is preserved on a genuinely global-governed task.
-  it('surfaces an invalid global model without making an adapter call', () => {
-    process.env.LLM_PROVIDER = 'anthropic';
-    process.env.LLM_MODEL = 'unregistered-explainer';
-    _resetConfigCache();
-
-    expect(resolveTaskRouting('clarify_brief')).toMatchObject({
-      model: 'unregistered-explainer',
-      provider: 'unresolved',
-      availability: 'configuration_error',
-      registry_model_id: null,
-      source: 'global_model',
-      source_key: 'LLM_MODEL',
-      configuration_error: { code: 'MODEL_NOT_REGISTERED' },
-    });
-  });
+  // RETIRED 2026-08-29. No reported task reads the global model any more, so
+  // an invalid global model cannot be surfaced through one. The property — an
+  // unregistered model becomes a typed configuration error without
+  // constructing an adapter — is preserved in TWO places that do not depend on
+  // a task lacking a default: the CEE_MODEL_CLARIFICATION cases above
+  // ('surfaces unknown and disabled clarification overrides as typed errors'),
+  // and the global-model case in
+  // tests/unit/router-resolution-fallback-precedence.test.ts.
 });
