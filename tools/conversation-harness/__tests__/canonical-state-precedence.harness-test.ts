@@ -85,8 +85,19 @@ describe('canonical precedence journey — transport is real and conflicting', (
     expect(assembled.recentTurnsText).not.toContain('£350,000');
     expect(assembled.recentTurnsText).not.toContain('Bluebird');
     expect(prompt).toContain('"freshness": "stale"');
+    // Deliberate LITERALS, not a manifest read. The assembler already derives
+    // both FROM the manifest, so re-deriving them here would be a guard
+    // agreeing with itself (CLAUDE.md trap 13b) — the point of a literal is
+    // that a prompt-identity change cannot pass unnoticed.
+    //
+    // `version` is still 120 because PMS still SERVES v120: the 2026-08-29
+    // handler-coverage change moved the repo-canonical bytes ahead of the PMS
+    // row, and the manifest deliberately holds `served_version: 120` /
+    // `served_hash_verified: false` until the operator uploads v121 (see the
+    // `pending_pms_upload` block on the manifest's `routing` row). When that
+    // upload lands, this becomes '121'.
     expect(assembled.systemPrompt.version).toBe('120');
-    expect(assembled.systemPrompt.sent_hash).toBe('adcc5128d4e6e6bc');
+    expect(assembled.systemPrompt.sent_hash).toBe('bec840a648800928');
   });
 
   it('routes through the production adapter seam and the scorer accepts only the visible answer', async () => {

@@ -13,6 +13,15 @@
 >   converse/coach `answer_shape` instruction at **line 101**, in substantively the same words
 >   this PR adds to the fallback. **The `666d56dd4845e2c7` v118 hash named below is therefore
 >   stale — do not use it as a SERVE-VERIFY expectation.**
+>   
+>   ⚠ **APPENDED 2026-08-29 (not an edit — the block above is a dated derivation and stays
+>   as written).** The `adcc5128d4e6e6bc` hash named above is now itself a SERVE-VERIFY
+>   expectation with a shelf life. The repo-canonical bytes moved to `bec840a648800928`
+>   (routing prompt v121, adding the missing `add_constraint` / `adjust_edge_strength`
+>   handlers and a ban on the model citing its own numbered rules) and are AHEAD OF PMS
+>   until the operator uploads them — see the `pending_pms_upload` block on the `routing`
+>   row of `Prompts/canonical/manifest.json`. The `answer_shape` instruction this note is
+>   about is UNAFFECTED: it sits above the edited sections and is still at line 101.
 > - ❌ **The FALLBACK gap this PR closes is STILL OPEN at `staging`.** At CEE `staging`
 >   `b5204544`, `Prompts/v40.txt` contains **zero** occurrences of `answer_shape` — and
 >   `src/prompts/defaults.ts:2350-2352` still reads that exact file from disk and registers it as
