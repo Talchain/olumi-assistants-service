@@ -535,7 +535,7 @@ describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
     element_ids: ['factor-a', 'goal-b'] as [string, string],
   };
 
-  it('declares closed optional direct-relationship and reachability questions', () => {
+  it('declares closed optional dependency, direct-relationship and reachability questions', () => {
     const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
       properties: {
         structure_query?: {
@@ -551,8 +551,9 @@ describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
       required: ['kind'],
       properties: {
         kind: expect.objectContaining({
-          enum: ['general', 'direct_relationship', 'reachability'],
+          enum: ['general', 'dependencies', 'direct_relationship', 'reachability'],
         }),
+        element_id: expect.objectContaining({ minLength: 1 }),
         element_ids: expect.objectContaining({
           minItems: 2,
           maxItems: 2,
@@ -611,6 +612,31 @@ describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
     if (parsed.intent_class === 'execute') {
       expect(parsed.action.structure_query).toEqual(query);
     }
+  });
+
+  it('parses a selected-element dependency question with one exact canonical id', () => {
+    const query = { kind: 'dependencies' as const, element_id: 'factor-a' };
+    const parsed = parseToolCallResponse({
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+        structure_query: query,
+      },
+    });
+    expect(parsed.intent_class).toBe('execute');
+    if (parsed.intent_class === 'execute') {
+      expect(parsed.action.structure_query).toEqual(query);
+    }
+
+    expect(() => parseToolCallResponse({
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_from_structure',
+        structure_query: { kind: 'dependencies', element_id: '' },
+      },
+    })).toThrow(ToolCallParseError);
   });
 
   it('parses the typed query only on explain_from_structure', () => {

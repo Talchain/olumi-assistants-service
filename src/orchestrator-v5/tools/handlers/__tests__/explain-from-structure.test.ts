@@ -243,6 +243,117 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(outcome.suppress_orientation).toBe(true);
   });
 
+  it('selected canonical neighbourhood outranks valid prose that invents an unlisted relationship', async () => {
+    const handler = createExplainFromStructureHandler();
+    const invented =
+      'Sales rep time depends on automation, and the phased pilot directly feeds into automation before it reaches the outcome.';
+    const outcome = await handler({
+      ...makeInvocation({ optionCount: 4 }),
+      explanation: { answer_text: invented, answer_text_valid: true },
+      selectedDependenciesEvidence: {
+        status: 'resolved',
+        selected_label: 'Sales rep time on selling activities',
+        dependencies: [
+          {
+            from_label: 'Sales process automation level',
+            to_label: 'Sales rep time on selling activities',
+            edge_type: 'directed',
+            relationship: 'moderate positive link',
+          },
+          {
+            from_label: 'CRM adoption and usability',
+            to_label: 'Sales rep time on selling activities',
+            edge_type: 'directed',
+            relationship: 'moderate positive link',
+          },
+        ],
+        bidirected: [],
+      },
+    });
+
+    expect(outcome.assistant_text).toContain(
+      'from Sales process automation level to Sales rep time on selling activities',
+    );
+    expect(outcome.assistant_text).toContain(
+      'from CRM adoption and usability to Sales rep time on selling activities',
+    );
+    expect(outcome.assistant_text).not.toContain('phased pilot');
+    expect(outcome.assistant_text).not.toBe(invented);
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: { answer_source: 'deterministic_fallback', fallback_reason: null },
+    });
+  });
+
+  it('renders zero incoming coverage narrowly and keeps bidirected associations non-causal', async () => {
+    const handler = createExplainFromStructureHandler();
+    const none = await handler({
+      ...makeInvocation(),
+      selectedDependenciesEvidence: {
+        status: 'resolved',
+        selected_label: 'Sales rep time on selling activities',
+        dependencies: [],
+        bidirected: [],
+      },
+    });
+    expect(none.assistant_text).toContain('no direct incoming dependency');
+    expect(none.assistant_text).toContain('does not prove');
+
+    const bidirected = await handler({
+      ...makeInvocation(),
+      selectedDependenciesEvidence: {
+        status: 'resolved',
+        selected_label: 'Sales rep time on selling activities',
+        dependencies: [],
+        bidirected: [{
+          from_label: 'Ramp and disruption time',
+          to_label: 'Sales rep time on selling activities',
+          edge_type: 'bidirected',
+          relationship: 'moderate co-movement',
+        }],
+      },
+    });
+    expect(bidirected.assistant_text).toContain('is bidirected');
+    expect(bidirected.assistant_text).toContain('does not license causal influence');
+    expect(bidirected.assistant_text).not.toContain('direct, directed connector');
+  });
+
+  it('selected neighbourhood ambiguity and unavailable coverage fail weak instead of restoring authored prose', async () => {
+    const handler = createExplainFromStructureHandler();
+    const authored =
+      'The selected item definitely has a direct relationship from the phased pilot and no other inputs.';
+    const ambiguous = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: authored, answer_text_valid: true },
+      selectedDependenciesEvidence: { status: 'ambiguous' },
+    });
+    expect(ambiguous.assistant_text).toContain('cannot establish one unique selected');
+    expect(ambiguous.assistant_text).not.toBe(authored);
+
+    const unavailable = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: authored, answer_text_valid: true },
+      selectedDependenciesEvidence: {
+        status: 'coverage_unavailable',
+        reason: 'graph_coverage_unavailable',
+      },
+    });
+    expect(unavailable.assistant_text).toContain('was withheld from this turn');
+    expect(unavailable.assistant_text).not.toContain('phased pilot');
+
+    const structural = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: authored, answer_text_valid: true },
+      selectedDependenciesEvidence: {
+        status: 'coverage_unavailable',
+        reason: 'structural_semantics_unlicensed',
+      },
+    });
+    expect(structural.assistant_text).toContain('structural connector');
+    expect(structural.assistant_text).toContain('cannot safely treat');
+    expect(structural.assistant_text).not.toContain('was withheld');
+    expect(structural.assistant_text).not.toContain('phased pilot');
+  });
+
   it('legacy omission cannot let an authored relationship claim bypass typed authority', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({

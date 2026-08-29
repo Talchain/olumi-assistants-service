@@ -135,6 +135,11 @@ export const OLUMI_ACTION_TOOL = {
               'direction, sign, bidirected relationships, confidence and ' +
               'reachability. Do not compose a pathway from separate connectors ' +
               'or invent detail that the supplied structure withholds. ' +
+              'When the user asks what one selected model element ' +
+              'directly depends on, populate action.structure_query with kind ' +
+              '"dependencies" and that element\'s exact canonical graph id. ' +
+              'This asks only for direct incoming dependencies; do not include ' +
+              'upstream-of-upstream or outgoing connectors. ' +
               'When — and only when — the user asks about the direct ' +
               'relationship between two named model elements, populate ' +
               'action.structure_query with kind "direct_relationship" and ' +
@@ -342,6 +347,8 @@ export const OLUMI_ACTION_TOOL = {
             additionalProperties: false,
             description:
               'Populate whenever handler_id is explain_from_structure. Use ' +
+              'dependencies when the user asks what one selected ' +
+              'Living Model element directly depends on. Use ' +
               'direct_relationship when the user specifically asks whether two ' +
               'Living Model elements have a direct relationship, and use ' +
               'reachability when the user asks whether a named option reaches ' +
@@ -354,10 +361,11 @@ export const OLUMI_ACTION_TOOL = {
             properties: {
               kind: {
                 type: 'string',
-                enum: ['general', 'direct_relationship', 'reachability'],
+                enum: ['general', 'dependencies', 'direct_relationship', 'reachability'],
                 description:
                   'The exact structural question. general preserves an open ' +
-                  'explanation; direct_relationship asks only ' +
+                  'explanation; dependencies asks only for direct incoming ' +
+                  'connectors to element_id; direct_relationship asks only ' +
                   'about a connector between element_ids; reachability asks only ' +
                   'whether source_element_id reaches target_element_id.',
               },
@@ -369,6 +377,12 @@ export const OLUMI_ACTION_TOOL = {
                 items: { type: 'string', minLength: 1 },
                 description:
                   'Required only for direct_relationship: exactly two distinct canonical element ids.',
+              },
+              element_id: {
+                type: 'string',
+                minLength: 1,
+                description:
+                  'Required only for dependencies: the exact canonical id of the element whose direct incoming dependencies were asked about.',
               },
               source_element_id: {
                 type: 'string',

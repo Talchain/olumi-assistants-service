@@ -80,7 +80,10 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { ProposalAction } from '../routing/types.js';
-import type { StructuralPairEvidence } from '../routing/structural-pair-evidence.js';
+import type {
+  SelectedDependenciesEvidence,
+  StructuralPairEvidence,
+} from '../routing/structural-pair-evidence.js';
 import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
 import type { EnrichedTurnContext } from '../build-turn-context.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
@@ -317,6 +320,12 @@ export interface HandlerInvocation {
    * deterministic evidence instead of trusting free-form topology prose.
    */
   readonly structuralPairEvidence?: StructuralPairEvidence;
+  /**
+   * Canonical direct-dependency evidence for one selected item. When
+   * present it outranks free-form structural prose, just as the typed
+   * two-element carrier above does for pair questions.
+   */
+  readonly selectedDependenciesEvidence?: SelectedDependenciesEvidence;
   /**
    * V5 D1: per-turn graph (post-fallback selection between
    * `options.graphState` and persisted scenarios.graph). Mutation

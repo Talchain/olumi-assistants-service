@@ -8,9 +8,14 @@
  * canonical graph. Neither can substitute for the other.
  */
 
-import type { ContextPackGraph } from '../context/context-pack-assembler.js';
+import type {
+  ContextPackFocus,
+  ContextPackGraph,
+} from '../context/context-pack-assembler.js';
 import type { GraphContextStatus } from '../context/context-graph-snapshot.js';
 import type { StructureQuery } from './types.js';
+import type { GroundedSelection } from '../context/grounded-selection.js';
+import { isLegalStructuralEdge } from '../../cee/utils/structural-edge-classifier.js';
 import {
   formatGraphForContext,
   type DisplaySafeEdge,
@@ -19,6 +24,7 @@ import {
 import {
   buildGraphNodeLookupFromGraph,
   buildLabelIndex,
+  resolveLabelToId,
   resolveTypedCanonicalProseEntityRefs,
 } from '../compose/phase3-blocks.js';
 
@@ -70,6 +76,28 @@ export type StructuralPairEvidence =
       readonly second_label: string;
     };
 
+/**
+ * Canonical direct-dependency evidence for one selected Living Model item.
+ *
+ * This is intentionally separate from {@link StructuralPairEvidence}: a
+ * selected-item question establishes its subject by canonical canvas identity
+ * and its predicate through a separately typed `dependencies` query,
+ * while the pair carrier establishes two subjects from current-message prose.
+ * Neither identity warrant may substitute for the other.
+ */
+export type SelectedDependenciesEvidence =
+  | { readonly status: 'ambiguous' }
+  | {
+      readonly status: 'coverage_unavailable';
+      readonly reason: 'graph_coverage_unavailable' | 'structural_semantics_unlicensed';
+    }
+  | {
+      readonly status: 'resolved';
+      readonly selected_label: string;
+      readonly dependencies: readonly StructuralPairRelationship[];
+      readonly bidirected: readonly StructuralPairRelationship[];
+    };
+
 export interface BuildStructuralPairEvidenceOptions {
   readonly messageText: string;
   readonly structureQuery: StructureQuery | undefined;
@@ -77,6 +105,36 @@ export interface BuildStructuralPairEvidenceOptions {
   readonly graphAuthority: StructuralGraphAuthority;
   readonly graphWasTrimmed: boolean;
 }
+
+export interface BuildSelectedDependenciesEvidenceOptions {
+  readonly structureQuery: StructureQuery | undefined;
+  /**
+   * The original ingress selection, before node-only focus projection. A mixed
+   * node/edge gesture must not masquerade as a single selected node merely
+   * because edge references are intentionally absent from ContextPack focus.
+   */
+  readonly requestedSelection:
+    | {
+        readonly node_ids: readonly string[];
+        readonly edge_ids: readonly string[];
+      }
+    | null
+    | undefined;
+  readonly focus: ContextPackFocus | undefined;
+  readonly groundedSelection: GroundedSelection | null;
+  readonly proposalEntity:
+    | {
+        readonly id: string;
+        readonly label?: string;
+        readonly resolution_status: string;
+      }
+    | undefined;
+  readonly graphContextStatus: GraphContextStatus | undefined;
+  readonly graphAuthority: StructuralGraphAuthority;
+  readonly graphWasTrimmed: boolean;
+}
+
+const SELECTED_DEPENDENCIES_MAX_RELATIONSHIPS = 24;
 
 interface RelationshipWithIds extends StructuralPairRelationship {
   readonly from_id: string;
@@ -162,6 +220,121 @@ function publicRelationships(
   return relationships.map(({ from_id: _from, to_id: _to, ...relationship }) => relationship);
 }
 
+/**
+ * Return deterministic incoming-dependency evidence only when the typed query,
+ * selected identity, validated proposal target and canonical graph all identify
+ * the same one element.
+ *
+ * A `general` structural answer remains free-form model prose because identity
+ * answers "which item?", not "which question?". The distinct query avoids
+ * replacing valid selected-item answers such as "why does this matter?" while
+ * making an observed invented option-to-factor dependency unrepresentable.
+ */
+export function buildSelectedDependenciesEvidence(
+  graph: ContextPackGraph,
+  options: BuildSelectedDependenciesEvidenceOptions,
+): SelectedDependenciesEvidence | null {
+  if (options.structureQuery?.kind !== 'dependencies') return null;
+
+  const selectedIds = options.groundedSelection?.element_ids ?? [];
+  const requestedNodeIds = options.requestedSelection?.node_ids ?? [];
+  const requestedEdgeIds = options.requestedSelection?.edge_ids ?? [];
+  if (
+    requestedNodeIds.length !== 1 ||
+    requestedEdgeIds.length !== 0 ||
+    requestedNodeIds[0] !== options.structureQuery.element_id ||
+    options.focus === undefined ||
+    options.focus.elements.length !== 1 ||
+    options.focus.requested_count !== 1 ||
+    options.focus.unresolved_count !== 0 ||
+    options.focus.unresolved !== 'none' ||
+    options.focus.elements_omitted !== undefined ||
+    selectedIds.length !== 1 ||
+    options.groundedSelection?.unresolved !== 'none' ||
+    options.focus.elements[0]?.id !== selectedIds[0] ||
+    options.proposalEntity?.resolution_status !== 'resolved' ||
+    options.proposalEntity.id !== selectedIds[0] ||
+    options.structureQuery.element_id !== selectedIds[0]
+  ) {
+    return { status: 'ambiguous' };
+  }
+
+  const selectedId = selectedIds[0]!;
+  if (
+    options.graphContextStatus !== 'canonical' ||
+    options.graphAuthority !== 'canonical_strict' ||
+    options.graphWasTrimmed
+  ) {
+    return { status: 'coverage_unavailable', reason: 'graph_coverage_unavailable' };
+  }
+
+  const displayGraph = formatGraphForContext(graph);
+  const idCounts = countNodeIds(displayGraph.nodes);
+  const selectedNodes = displayGraph.nodes.filter((node) => node.id === selectedId);
+  if (selectedNodes.length !== 1 || idCounts.get(selectedId) !== 1) {
+    return { status: 'ambiguous' };
+  }
+  const selectedNode = selectedNodes[0]!;
+
+  // A repeated visible label makes relationship prose ambiguous even when the
+  // selected id itself is unique. Require every endpoint we may render to map
+  // back to its one canonical id.
+  const lookup = buildGraphNodeLookupFromGraph(displayGraph);
+  const labelIndex = buildLabelIndex(lookup);
+  if (resolveLabelToId(labelIndex, selectedNode.label) !== selectedId) {
+    return { status: 'ambiguous' };
+  }
+
+  const relevantEdges = displayGraph.edges.filter(
+    (edge) =>
+      (edge.edge_type === 'bidirected' &&
+        (edge.from === selectedId || edge.to === selectedId)) ||
+      (edge.edge_type !== 'bidirected' && edge.to === selectedId),
+  );
+  const kindById = new Map(displayGraph.nodes.map((node) => [node.id, node.kind]));
+  // decision→option and option→factor connectors encode model structure, not
+  // causal influence. The display formatter intentionally carries them for
+  // topology, but its generic relationship phrase is not a licence to call
+  // them dependencies or describe a causal magnitude. Until a dedicated
+  // provenance-bearing structural answer exists, fail weak for the whole
+  // selected-item dependency answer rather than silently mixing semantics.
+  if (relevantEdges.some((edge) =>
+    isLegalStructuralEdge(kindById.get(edge.from), kindById.get(edge.to)))) {
+    return { status: 'coverage_unavailable', reason: 'structural_semantics_unlicensed' };
+  }
+  for (const edge of relevantEdges) {
+    if (
+      edge.from === edge.to ||
+      idCounts.get(edge.from) !== 1 ||
+      idCounts.get(edge.to) !== 1 ||
+      resolveLabelToId(labelIndex, edge.from_label) !== edge.from ||
+      resolveLabelToId(labelIndex, edge.to_label) !== edge.to
+    ) {
+      return { status: 'ambiguous' };
+    }
+  }
+
+  const relationships = uniqueRelationships(relevantEdges, 'canonical_strict');
+  if (relationships === null) return { status: 'ambiguous' };
+  if (relationships.length > SELECTED_DEPENDENCIES_MAX_RELATIONSHIPS) {
+    return { status: 'coverage_unavailable', reason: 'graph_coverage_unavailable' };
+  }
+
+  return {
+    status: 'resolved',
+    selected_label: selectedNode.label,
+    dependencies: publicRelationships(
+      relationships.filter(
+        (relationship) =>
+          relationship.edge_type === 'directed' && relationship.to_id === selectedId,
+      ),
+    ),
+    bidirected: publicRelationships(
+      relationships.filter((relationship) => relationship.edge_type === 'bidirected'),
+    ),
+  };
+}
+
 function rawReaches(graph: ContextPackGraph, sourceId: string): readonly string[] | null {
   const candidates = graph.nodes.filter(
     (raw): raw is Record<string, unknown> =>
@@ -188,6 +361,7 @@ export function buildStructuralPairEvidence(
   if (options.graphAuthority === 'unavailable') return null;
   if (options.structureQuery === undefined) return null;
   if (options.structureQuery.kind === 'general') return null;
+  if (options.structureQuery.kind === 'dependencies') return null;
 
   const displayGraph = formatGraphForContext(graph);
   const lookup = buildGraphNodeLookupFromGraph(displayGraph);

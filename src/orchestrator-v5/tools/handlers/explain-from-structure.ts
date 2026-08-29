@@ -49,6 +49,7 @@ import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
 import {
   composeExplainFromStructureFallback,
+  composeSelectedDependenciesEvidenceAnswer,
   composeStructuralPairEvidenceAnswer,
 } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
@@ -73,6 +74,8 @@ export function createExplainFromStructureHandler(): HandlerFn {
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
+    const hasSelectedDependenciesEvidence =
+      invocation.selectedDependenciesEvidence !== undefined;
     const hasStructuralPairEvidence = invocation.structuralPairEvidence !== undefined;
     // A valid authored answer is licensed only when the router explicitly
     // classified the question as the open-ended `general` arm. Direct-link and
@@ -82,14 +85,21 @@ export function createExplainFromStructureHandler(): HandlerFn {
     // topology authority introduced for the mounted failure.
     const mayUseAuthoredGeneralAnswer =
       invocation.proposal?.structure_query?.kind === 'general';
-    const useSonnetAnswer = sonnetValid && mayUseAuthoredGeneralAnswer;
-    const assistantText = hasStructuralPairEvidence
-      ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
-      : useSonnetAnswer
-        ? explanation!.answer_text
-        : composeExplainFromStructureFallback(invocation.structureProjection, {
-            canRunAnalysis,
-          });
+    const useSonnetAnswer =
+      sonnetValid &&
+      mayUseAuthoredGeneralAnswer &&
+      !hasSelectedDependenciesEvidence;
+    const assistantText = hasSelectedDependenciesEvidence
+      ? composeSelectedDependenciesEvidenceAnswer(
+          invocation.selectedDependenciesEvidence!,
+        )
+      : hasStructuralPairEvidence
+        ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
+        : useSonnetAnswer
+          ? explanation!.answer_text
+          : composeExplainFromStructureFallback(invocation.structureProjection, {
+              canRunAnalysis,
+            });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -98,8 +108,10 @@ export function createExplainFromStructureHandler(): HandlerFn {
       result: {
         option_count: optionCount,
         answer_source:
-          useSonnetAnswer && !hasStructuralPairEvidence ? 'sonnet' : 'deterministic_fallback',
-        fallback_reason: hasStructuralPairEvidence
+          useSonnetAnswer && !hasStructuralPairEvidence && !hasSelectedDependenciesEvidence
+            ? 'sonnet'
+            : 'deterministic_fallback',
+        fallback_reason: hasStructuralPairEvidence || hasSelectedDependenciesEvidence
           ? null
           : useSonnetAnswer
           ? null

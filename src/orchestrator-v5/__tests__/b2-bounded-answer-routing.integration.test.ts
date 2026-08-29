@@ -207,8 +207,13 @@ function answeringAdapter(
   answer: string,
   structureQuery?:
     | { kind: 'general' }
+    | { kind: 'dependencies'; element_id: string }
     | { kind: 'direct_relationship'; element_ids: [string, string] }
     | { kind: 'reachability'; source_element_id: string; target_element_id: string },
+  entity: { readonly id: string; readonly label: string; readonly kind?: 'node' | 'goal' } = {
+    id: 'goal',
+    label: 'Reach 1,500 paid teams',
+  },
 ) {
   return {
     chatWithTools: vi.fn(async (): Promise<ChatWithToolsResult> => toolResult({
@@ -216,9 +221,9 @@ function answeringAdapter(
       action: {
         handler_id: 'explain_from_structure',
         entity: {
-          id: 'goal',
-          kind: 'goal',
-          label: 'Reach 1,500 paid teams',
+          id: entity.id,
+          kind: entity.kind ?? 'goal',
+          label: entity.label,
           resolution_status: 'resolved',
           resolution_method: 'id_match',
         },
@@ -522,6 +527,160 @@ describe('B2 real executor convergence', () => {
     expect(response.assistant_text).not.toContain(
       'from the goal back to the adoption factor',
     );
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('uses typed selected canonical dependencies instead of valid prose that invents an edge', async () => {
+    const wrongAnswer =
+      'Replace CRM has a direct connector into Reach 1,500 paid teams, so the selected goal depends directly on choosing that option.';
+    const contradictoryRequestGraph = structuredClone(GRAPH);
+    contradictoryRequestGraph.edges = [
+      { from: 'opt_new', to: 'goal', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ];
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'dependencies',
+      element_id: 'goal',
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response, groundedSelection } = await runTurnExecutor(
+      payload('What does this depend on?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: contradictoryRequestGraph,
+        selectedElements: { node_ids: ['goal'], edge_ids: [] },
+      },
+    );
+
+    expect(groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
+    expect(response.assistant_text).toContain(
+      'from Sales Rep Adoption Rate to Reach 1,500 paid teams',
+    );
+    expect(response.assistant_text).toContain(
+      'from Team Capacity Consumed to Reach 1,500 paid teams',
+    );
+    expect(response.assistant_text).not.toContain(
+      'Replace CRM has a direct connector into Reach 1,500 paid teams',
+    );
+    expect(response.assistant_text).not.toContain('from Replace CRM to Reach 1,500 paid teams');
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it.each([
+    ['multiple nodes', { node_ids: ['goal', 'adoption'], edge_ids: [] }],
+    ['mixed node and edge', { node_ids: ['goal'], edge_ids: ['adoption→goal'] }],
+  ])('fails weak on %s rather than restoring malicious dependency prose', async (_name, selectedElements) => {
+    const wrongAnswer =
+      'Replace CRM definitely feeds the selected goal directly and is its only dependency.';
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'dependencies',
+      element_id: 'goal',
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('What does this depend on?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+        selectedElements,
+      },
+    );
+
+    expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(response.assistant_text).not.toContain('only dependency');
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('does not promote a provisional request graph into selected dependency truth', async () => {
+    persistedGraph = null;
+    const wrongAnswer =
+      'Replace CRM definitely feeds the selected goal directly in the saved Living Model.';
+    const adapter = answeringAdapter(wrongAnswer, {
+      kind: 'dependencies',
+      element_id: 'goal',
+    });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('What does this depend on?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+        selectedElements: { node_ids: ['goal'], edge_ids: [] },
+      },
+    );
+
+    expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(response.assistant_text).not.toContain('in the saved Living Model');
+    // The pre-existing validated first-touch path may persist the provisional
+    // graph once. The dependency answer must not cause a second graph write or
+    // treat those request bytes as already-saved reasoning truth.
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(1);
+  });
+
+  it('does not narrate a structural option-to-factor connector as a causal dependency', async () => {
+    const wrongAnswer =
+      'Replace CRM is a strong positive causal dependency of Sales Rep Adoption Rate.';
+    const adapter = answeringAdapter(
+      wrongAnswer,
+      { kind: 'dependencies', element_id: 'adoption' },
+      { id: 'adoption', label: 'Sales Rep Adoption Rate', kind: 'node' },
+    );
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('What does this depend on?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+        selectedElements: { node_ids: ['adoption'], edge_ids: [] },
+      },
+    );
+
+    expect(response.assistant_text).toContain('structural connector');
+    expect(response.assistant_text).toContain('cannot safely treat');
+    expect(response.assistant_text).not.toContain('strong positive');
+    expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('leaves a selected open-ended general explanation byte-exact', async () => {
+    const authored =
+      'This goal matters because it states the outcome the team is trying to improve, while the surrounding model records the factors and options the team is still examining.';
+    const adapter = answeringAdapter(authored, { kind: 'general' });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('Why does this one matter?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+        selectedElements: { node_ids: ['goal'], edge_ids: [] },
+      },
+    );
+
+    expect(response.assistant_text).toBe(authored);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 
