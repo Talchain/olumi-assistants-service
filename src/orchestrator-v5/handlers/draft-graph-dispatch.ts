@@ -96,6 +96,7 @@ import {
   buildErrorV5DiagnosticTrace,
   type V5DiagnosticTrace,
 } from '../diagnostics/v5-diagnostic-trace.js';
+import { PromptAttributionCollector } from '../../orchestrator/pipeline/prompt-attribution.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -521,13 +522,33 @@ export async function dispatchDraftGraph(
   // server-side (see DispatchDraftGraphParams.briefOverride).
   const effectiveBrief = params.briefOverride ?? payload.message;
 
+  // ── SERVED-PROMPT + MODEL ATTRIBUTION FOR THE PIPELINE'S OTHER LLM CALLS ──
+  // A draft turn is not one LLM call. It is the structural draft, plus the
+  // post-draft coaching pass (~19.8 s, ungated), plus `validate_graph` (a real
+  // o4-mini call behind CEE_VALIDATION_PIPELINE_ENABLED). Only the first rides
+  // `DraftGraphResult`, so the trace attributed all three to `draft_graph`.
+  //
+  // CREATED HERE, NOT IN THE PIPELINE, and that is the point rather than a
+  // style choice: `handleDraftGraph` THROWS on a pipeline failure, so a
+  // collector owned by the pipeline would be lost with the stack that raised.
+  // Owning it in the dispatcher means the catch block below can still read
+  // what ran — and a failing turn is exactly when "which prompt produced
+  // this?" is worth the most.
+  //
+  // Purely observational: nothing downstream reads it except the two trace
+  // builders, and both ignore it when the flag is off.
+  const promptAttribution = new PromptAttributionCollector();
+
   let draftResult: DraftGraphResult;
   try {
     draftResult = await handleDraftGraph(
       effectiveBrief,
       request,
       payload.turn_id,
-      params.requestStartMs !== undefined ? { requestStartMs: params.requestStartMs } : undefined,
+      {
+        ...(params.requestStartMs !== undefined ? { requestStartMs: params.requestStartMs } : {}),
+        promptAttribution,
+      },
     );
   } catch (err) {
     log.error(
@@ -555,6 +576,12 @@ export async function dispatchDraftGraph(
       requestId,
       error: err,
       toolLLMTelemetry: errToolTel,
+      // Whatever the coaching pass / validate_graph recorded before the throw.
+      // Omitted when nothing ran, so an early failure honestly reports no
+      // extra calls rather than an empty-but-present block.
+      ...(promptAttribution.isEmpty()
+        ? {}
+        : { promptAttribution: promptAttribution.snapshot() }),
     });
     if (diagnosticTraceOnError !== undefined && err && typeof err === 'object') {
       (err as { diagnosticTrace?: V5DiagnosticTrace }).diagnosticTrace = diagnosticTraceOnError;
@@ -1090,6 +1117,12 @@ export async function dispatchDraftGraph(
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
+      // The coaching pass + validate_graph calls this turn made. Omitted when
+      // neither ran (both are conditional: coaching skips on budget, Pass 2 is
+      // gated) so an absent block means "they did not run", not "we forgot".
+      ...(promptAttribution.isEmpty()
+        ? {}
+        : { promptAttribution: promptAttribution.snapshot() }),
     });
 
     log.info(

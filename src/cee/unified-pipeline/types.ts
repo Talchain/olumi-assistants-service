@@ -58,6 +58,24 @@ export interface UnifiedPipelineOpts {
    * site (see `emitStageEvent` in ./index.ts).
    */
   onStage?: PipelineStageEmitter;
+
+  /**
+   * Served-prompt attribution sink for the LLM calls this pipeline makes that
+   * are NOT the structural draft — the post-draft coaching pass and
+   * `validate_graph`. Both were previously invisible to the V5 diagnostic
+   * trace: neither rides `DraftGraphResult`, which is the only channel the
+   * trace builder reads.
+   *
+   * OWNED BY THE CALLER and passed down, never created here. The dispatcher
+   * keeps the reference, so whatever a stage recorded before the pipeline
+   * THREW is still readable in its catch block — attribution survives the
+   * failure, which is the turn on which it matters most.
+   *
+   * ABSENT ⇒ every recording site is a guarded no-op and the pipeline runs
+   * exactly as before. Recording is strictly observational: it cannot change
+   * the graph, the response body, or whether a stage succeeds.
+   */
+  promptAttribution?: import('../../orchestrator/pipeline/prompt-attribution.js').PromptAttributionCollector;
 }
 
 // ---------------------------------------------------------------------------

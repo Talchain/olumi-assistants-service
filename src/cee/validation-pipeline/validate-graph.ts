@@ -16,7 +16,8 @@
  * Source of truth: validate_graph_v1_3.txt system prompt.
  */
 
-import { getSystemPrompt } from '../../adapters/llm/prompt-loader.js';
+import { getSystemPrompt, getSystemPromptSnapshot } from '../../adapters/llm/prompt-loader.js';
+import type { PromptAttributionCollector } from '../../orchestrator/pipeline/prompt-attribution.js';
 import { getAdapter, getMaxTokensFromConfig } from '../../adapters/llm/router.js';
 import { isDraftTruncated } from '../../adapters/llm/draft-budget.js';
 import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
@@ -111,9 +112,33 @@ export async function callValidateGraph(
   nodes: Pass2NodeInput[],
   edges: Pass2EdgeInput[],
   callOpts: CallOpts,
+  promptAttribution?: PromptAttributionCollector,
 ): Promise<Pass2Response> {
   // ── System prompt ──────────────────────────────────────────────────────────
-  const systemPrompt = await getSystemPrompt('validate_graph');
+  // BOUND resolution, so the identity recorded below names the bytes this call
+  // actually received. `getSystemPromptSnapshot` derives content and meta from
+  // ONE resolution and asserts `entry.promptHash === sha256(content)`; the
+  // separate-read pattern (`getSystemPrompt` here, `getSystemPromptMeta`
+  // afterwards) can disagree when the cache moves between the two, and a
+  // divergent digest in `prompt_identity` would CERTIFY bytes that were never
+  // sent.
+  //
+  // ⚠ DEGRADES, NEVER THROWS. The snapshot's only failure mode over the plain
+  // `getSystemPrompt` this replaced is that hash invariant — a NEW way for a
+  // draft turn to fail. Pass 2 runs on every draft turn behind
+  // CEE_VALIDATION_PIPELINE_ENABLED, so promoting an attribution failure into a
+  // validation failure would trade a real capability for an observability one.
+  // Caught, degraded to no identity, and the bytes re-resolve through the old
+  // path — and because the identity is recorded only when the snapshot bound,
+  // an unbound resolution can never be attributed. (Same treatment as the
+  // repair-prompt resolution in `orchestrator/tools/edit-graph.ts`.)
+  let promptSnapshot: Awaited<ReturnType<typeof getSystemPromptSnapshot>> | null = null;
+  try {
+    promptSnapshot = await getSystemPromptSnapshot('validate_graph');
+  } catch {
+    promptSnapshot = null; // identity is observability-only
+  }
+  const systemPrompt = promptSnapshot?.content ?? (await getSystemPrompt('validate_graph'));
 
   // ── Adapter (o4-mini via TASK_TO_CONFIG_KEY → 'validation') ───────────────
   const adapter = getAdapter('validate_graph');
@@ -163,6 +188,38 @@ export async function callValidateGraph(
     },
     'cee.validation_pipeline.pass2_call_complete',
   );
+
+  // ── SERVED-PROMPT + MODEL ATTRIBUTION (the diagnostic trace) ───────────────
+  // Pass 2 is a real LLM call on every draft turn (gate
+  // CEE_VALIDATION_PIPELINE_ENABLED, measured ACTIVE), served by a model NOBODY
+  // CHOSE FOR IT: `getAdapter('validate_graph')` routes through
+  // TASK_TO_CONFIG_KEY → 'validation' → o4-mini. It contributed nothing to
+  // `_diagnostic_trace`, so a draft whose edge parameters came back wrong
+  // attributed the whole turn to `draft_graph`. Recording the model is how we
+  // find out whether the small model matters — no new benchmarking required.
+  //
+  // RECORDED BEFORE THE TRUNCATION GUARD BELOW, deliberately. That guard throws
+  // on a budget-exhausted completion, and a truncated Pass 2 is precisely the
+  // failure a reader needs the model and cap attributed for; recording after it
+  // would make the trace silent on the one outcome it is most needed for.
+  //
+  // `promptSnapshot === null` ⇒ the bytes resolved but could not be BOUND, so
+  // the call is recorded with its model and NO prompt identity — a positive
+  // statement that the model is known and the prompt is not.
+  promptAttribution?.record({
+    taskId: 'validate_graph',
+    role: 'validate_graph',
+    provider: adapter.name,
+    model: adapter.model,
+    inputTokens: result.usage.input_tokens,
+    outputTokens: result.usage.output_tokens,
+    latencyMs: result.latencyMs,
+    stopReason: result.stopReason ?? null,
+    promptHash: promptSnapshot?.meta.prompt_hash,
+    promptVersion: promptSnapshot?.meta.prompt_version,
+    promptId: promptSnapshot?.meta.promptId,
+    promptSource: promptSnapshot?.meta.source,
+  });
 
   // ── Truncation guard ───────────────────────────────────────────────────────
   // A completion that stopped because it ran out of budget is a BUDGET failure,
