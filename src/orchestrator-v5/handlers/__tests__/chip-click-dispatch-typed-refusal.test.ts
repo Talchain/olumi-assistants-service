@@ -165,7 +165,21 @@ describe('chip-click run_analysis — a PLoT 503 reaches the USER as a 200, not 
 
     // A clean graceful body, not an error envelope.
     expect(out.response.blocks).toEqual([]);
-    expect(out.commitPerformed).toBe(false);
+    // ⚠ CONTRACT CHANGED — ROADMAP 2.1353. This read `.toBe(false)` and was
+    // pinning half of a conflation: ONE predicate
+    // (`isAnalysisRefusalContinuityCause`) decided both "does this refusal
+    // acquire durable analysis-refusal continuity?" and "should this TURN be
+    // written to conversation history?". Those are different questions
+    // (CLAUDE.md trap 21), and answering the second with the first meant 7 of
+    // the 9 recoverable causes — `analysis_engine_busy` among them — answered
+    // the user and left NO TURN ROW. `commitPerformed` now means what it says:
+    // A TURN ROW LANDED. The engine-busy recovery is still NOT a continuity
+    // cause, so it still writes no durable refusal FACT — that half is
+    // unchanged and is asserted directly in
+    // `chip-click-dispatch-recoverable.test.ts`. The opposite direction is
+    // already pinned in this very file at the `analysis_blocked` case below,
+    // which is a continuity cause and was `true` before and after.
+    expect(out.commitPerformed).toBe(true);
     const serialised = JSON.stringify(out.response);
     expect(serialised).not.toContain('INTERNAL_ERROR');
     expect(serialised).not.toContain('BoundaryError');

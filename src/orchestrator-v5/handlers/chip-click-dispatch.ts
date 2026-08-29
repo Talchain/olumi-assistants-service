@@ -372,9 +372,20 @@ export type DispatchChipClickRunAnalysisResult =
       // analysis). The dispatcher composes a clean graceful body via the SAME
       // composeRecoverableHandlerResponse machinery the Sonnet path uses;
       // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
-      // `commitPerformed:true` only for a science/readiness refusal, whose
+      //
+      // ⚠ CORRECTED BY ROADMAP 2.1353. This field's contract USED to read
+      // "`commitPerformed:true` only for a science/readiness refusal, whose
       // continuity marker is durably recorded. Other recovery classes preserve
-      // the historical false/no-commit shape.
+      // the historical false/no-commit shape." That conflated the durable
+      // REFUSAL FACT with the TURN ROW — see the long note at the emit site —
+      // and the consequence was that 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+      // answered the user and left no trace, including the ask-shaped
+      // `options_not_configured` copy. `commitPerformed` now means exactly what
+      // it says: A TURN ROW LANDED. It is `true` for every recovered cause whose
+      // commit succeeded, and the refusal FACT still rides only on a continuity
+      // cause. Nothing on the chip-click `handler_recovered` path reads this
+      // field as a gate (route-v2's `!commitPerformed` 500s are on the DRAFT and
+      // EDIT dispatch results, not this one) — it is diagnostic here.
       //
       // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
       // "no analysis ran, so the UI retains its prior store value". ROADMAP
@@ -774,13 +785,62 @@ async function tryComposeRecoverableChipOutcome(
     'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
   );
 
-  const persistsRefusal = isAnalysisRefusalContinuityCause(err.cause_kind);
-  if (persistsRefusal) {
-    const refusalFact = buildAnalysisRefusalFact({
-      scenarioId,
-      reasonCode: blockedReason,
-      graphHash: freshness?.current_graph_hash ?? null,
-    });
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROADMAP 2.1353 — TWO QUESTIONS THAT WERE SHARING ONE PREDICATE.
+  //
+  // ⚠ THIS BLOCK USED TO READ `if (persistsRefusal) { …commit… }`, so ONE
+  // predicate decided BOTH of the following, and they are not the same question
+  // (CLAUDE.md trap 21 — two authorities under one name is this estate's
+  // chronic defect, and here it was one authority answering two):
+  //
+  //   Q1  "Does this refusal acquire ANALYSIS-REFUSAL CONTINUITY?" — i.e. does a
+  //       durable non-result `run_analysis` fact get written, so the freshness
+  //       and canonical selectors carry the refused attempt forward? That is
+  //       correctly narrow: only a science/readiness refusal is evidence about
+  //       the MODEL. A transient engine-busy or an args failure is not.
+  //
+  //   Q2  "Should this TURN be written to conversation history?" — i.e. does the
+  //       next turn's model get to see that this exchange happened at all? That
+  //       is not narrow. It is true of EVERY turn that produced a user-visible
+  //       answer.
+  //
+  // Answering Q2 with Q1's predicate meant 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+  // shipped HTTP 200 with a composed reply and NO TURN ROW. The most
+  // user-visible of them is `options_not_configured`, whose copy is
+  //
+  //     "…it won't appear in the comparison until you tell me. Tell me what
+  //      {option} changes and I'll write it into the model."
+  //
+  // — the DEPLOYED post-add-option case. It solicits a reply and recorded
+  // nothing, so the reply arrived at a model with no memory of the request. Same
+  // defect class as ROADMAP 2.1352 (CEE #1213) fixed at the Stage-4A intercepts,
+  // reached through a different mechanism: this path DOES have a commit, it was
+  // simply gated on the wrong question.
+  //
+  // THE FIX IS TO NAME THE CONCEPTS APART, not to widen the continuity set. The
+  // refusal FACT still rides only on a continuity cause; the TURN ROW is now
+  // written for every recovered cause.
+  //
+  // ⚠ NO PENDING REFERENT IS ARMED, and that is a deliberate fail-closed, not an
+  // omission. The `options_not_configured` copy names an option by LABEL only —
+  // `details` carries `first_option_label` and `option_count` and NO id
+  // (`run-analysis.ts`, both throw sites) — so there is no cell identity to
+  // record, and a pending naming a bare label could not be bound by identity.
+  // Committing the turn gives the next turn the question in its conversation
+  // history, which is the half that is available here. Recording an id-bearing
+  // referent needs the throw sites to carry the option id, which is a separate
+  // change to a separate file.
+  // ══════════════════════════════════════════════════════════════════════════
+  const acquiresRefusalContinuity = isAnalysisRefusalContinuityCause(err.cause_kind);
+  let turnPersisted = false;
+  {
+    const refusalFact = acquiresRefusalContinuity
+      ? buildAnalysisRefusalFact({
+          scenarioId,
+          reasonCode: blockedReason,
+          graphHash: freshness?.current_graph_hash ?? null,
+        })
+      : null;
     try {
       await commitDirectAnswer(recovered.response, {
         scenario_id: scenarioId,
@@ -790,38 +850,53 @@ async function tryComposeRecoverableChipOutcome(
         request_hash: computeRequestHash(payload),
         llm_calls_used: 0,
         duration_ms: Date.now() - startedAt,
-        handler_facts: [refusalFact],
+        handler_facts: refusalFact === null ? [] : [refusalFact],
         coaching_state: coachingState,
         userMessage: payload.message,
         contentGraph: graph,
       });
+      turnPersisted = true;
     } catch (commitError) {
       log.error(
         {
           event: 'v5.state_commit_failed',
           request_id: requestId,
           scenario_id: scenarioId,
-          failure_origin: 'analysis_refusal_continuity',
+          failure_origin: acquiresRefusalContinuity
+            ? 'analysis_refusal_continuity'
+            : 'recovered_turn_history',
+          cause_kind: err.cause_kind,
           err:
             commitError instanceof Error
               ? { name: commitError.name, message: commitError.message }
               : { message: String(commitError) },
         },
-        'V5 chip_click run_analysis refusal could not be persisted',
+        'V5 chip_click run_analysis recovery could not be persisted',
       );
-      return {
-        outcome: 'commit_failed',
-        response: recovered.response,
-        commitPerformed: false,
-        graph,
-      };
+      // ⚠ THE COMMIT-FAILED ESCALATION STAYS BOUNDED TO THE CONTINUITY CAUSES.
+      // A failed commit on a continuity refusal loses DURABLE EVIDENCE the
+      // freshness selectors depend on, and that has always surfaced as
+      // `commit_failed` (→ a typed 500). A failed commit on the other recovered
+      // causes loses only this question's MEMORY, which is strictly less than
+      // the user loses today — so it degrades to the pre-2.1353 shape (a
+      // graceful 200 with no row) rather than converting a working 200 into a
+      // 500. Widening the escalation would make this repair capable of BREAKING
+      // a turn that works today, which is the wrong trade for a memory fix.
+      if (acquiresRefusalContinuity) {
+        return {
+          outcome: 'commit_failed',
+          response: recovered.response,
+          commitPerformed: false,
+          graph,
+        };
+      }
     }
   }
 
   return {
     outcome: 'handler_recovered',
     response: recovered.response,
-    commitPerformed: persistsRefusal,
+    commitPerformed: turnPersisted,
     causeKind: err.cause_kind,
     analysisReady,
     // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR

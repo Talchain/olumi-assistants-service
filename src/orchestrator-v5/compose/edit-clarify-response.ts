@@ -194,26 +194,9 @@ export function buildEditClarifyFallbackParts(
 function buildClarifyChips(
   nodes: readonly EditClarifyComposerNode[],
 ): readonly SuggestedAction[] {
-  const factorChips: SuggestedAction[] = [];
-  const optionChips: SuggestedAction[] = [];
-  const seen = new Set<string>();
-
-  for (const node of nodes) {
-    if (factorChips.length + optionChips.length >= 3) break;
-    const label = typeof node.label === 'string' ? node.label.trim() : '';
-    if (label.length < 3) continue;
-    const dedupKey = label.toLowerCase();
-    if (seen.has(dedupKey)) continue;
-    if (node.kind === 'factor') {
-      seen.add(dedupKey);
-      factorChips.push(buildLabelChip(node.id, label));
-    } else if (node.kind === 'option' && factorChips.length + optionChips.length < 3) {
-      seen.add(dedupKey);
-      optionChips.push(buildLabelChip(node.id, label));
-    }
-  }
-
-  const labelChips = [...factorChips, ...optionChips].slice(0, 3);
+  const labelChips = selectEditClarifyTargets(nodes).map((t) =>
+    buildLabelChip(t.node_id, t.label),
+  );
 
   if (labelChips.length === 0) {
     return [CANCEL_CHIP];
@@ -222,6 +205,57 @@ function buildClarifyChips(
     return [...labelChips, CANCEL_CHIP];
   }
   return labelChips;
+}
+
+/**
+ * ⭐ ROADMAP 2.1353 — THE TARGETS THIS COMPOSER OFFERS, as identities.
+ *
+ * ⚠ WHY THIS IS EXPORTED RATHER THAN RE-DERIVED AT THE ROUTE. The two Stage-4A
+ * intercepts that call `composeEditClarifyResponse` must now PERSIST what they
+ * offered, so a reply on the next turn has something to bind to. A route-side
+ * re-derivation of "which nodes get chips" would be a second copy of the
+ * selection rules below — the hand-maintained mirror this estate keeps paying
+ * for (CLAUDE.md trap 12): the ORDER, the 3-cap, the `< 3` length floor, the
+ * case-insensitive dedup and the factors-before-options precedence would all
+ * have to be kept in step by hand, and a drift would read green because the
+ * chips and the persisted referent are never compared to each other.
+ *
+ * Extracted, both the chips and the referent are the SAME function of the same
+ * nodes and CANNOT disagree. `buildClarifyChips` is now its only other caller.
+ *
+ * Selection order (unchanged, and this comment is the contract):
+ *   1. Factor-kind nodes — the most common edit target — in graph order.
+ *   2. Option-kind nodes, same order.
+ *   3. At most three in total.
+ * Labels shorter than 3 chars are skipped: single-letter labels are vanishingly
+ * rare in real graphs and a 1-char chip label looks broken to the user.
+ *
+ * Returns the trimmed labels — the bytes the user actually read — not the raw
+ * node labels.
+ */
+export function selectEditClarifyTargets(
+  nodes: readonly EditClarifyComposerNode[] | null | undefined,
+): readonly { readonly node_id: string; readonly label: string }[] {
+  const factors: { node_id: string; label: string }[] = [];
+  const options: { node_id: string; label: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const node of nodes ?? []) {
+    if (factors.length + options.length >= 3) break;
+    const label = typeof node.label === 'string' ? node.label.trim() : '';
+    if (label.length < 3) continue;
+    const dedupKey = label.toLowerCase();
+    if (seen.has(dedupKey)) continue;
+    if (node.kind === 'factor') {
+      seen.add(dedupKey);
+      factors.push({ node_id: node.id, label });
+    } else if (node.kind === 'option' && factors.length + options.length < 3) {
+      seen.add(dedupKey);
+      options.push({ node_id: node.id, label });
+    }
+  }
+
+  return [...factors, ...options].slice(0, 3);
 }
 
 function buildLabelChip(nodeId: string, label: string): SuggestedAction {

@@ -101,6 +101,92 @@ export interface ElicitOptionEffectFields {
   readonly factor_label: string;
 }
 
+/**
+ * ONE OFFERED (option, factor) CELL, as the user was shown it.
+ *
+ * Structurally identical to {@link ElicitOptionEffectFields}, and NOT reused
+ * from it on purpose: that type is ONE asked cell, this is ONE MEMBER of an
+ * offered SET. Both ids and both labels for the same reason given there — the
+ * ids are identity (labels collide across options; the duplicate-label dead end
+ * at `route-v2.ts` exists because of exactly that), the labels are the copy the
+ * user actually read.
+ */
+export interface ElicitEffectTargetCandidate {
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly factor_id: string;
+  readonly factor_label: string;
+}
+
+/**
+ * THE VALUE THE USER ALREADY GAVE, plus the cells it might belong to.
+ *
+ * ⚠ THE QUESTION THIS ANSWERS, written down before the shape (CLAUDE.md trap
+ * 21 — two authorities under similar names that answer different questions is
+ * this estate's chronic defect). It is: *"you have given me a number; WHICH
+ * (option, factor) cell does it belong to?"* That question has exactly two
+ * askers today, and they ask it about differently-SOURCED candidate sets:
+ *
+ *   - `repair_value_ask` (`composeRepairValueAskResponse`) — the user typed a
+ *     bare compliant value ("Set it to 0.12.") and MORE THAN ONE effect value
+ *     is still unset, so the candidates are the OUTSTANDING cells read off the
+ *     readiness blockers.
+ *   - `option_effect_ask` (`composeOptionEffectAskResponse`) — the sentence is
+ *     unmistakably an option-effect request carrying a value, and the ENTITY is
+ *     ambiguous, so the candidates are the cells the user's own message reaches.
+ *
+ * They are ONE kind because the REFERENT A REPLY BINDS TO is identical: the
+ * value, and the set it must be assigned to. The provenance difference is real
+ * and is RECORDED in `source` rather than forked into a second kind — a reply
+ * of "the first one" needs the same two facts either way, and two kinds would
+ * double the parse surface for no reader.
+ *
+ * `value_text` is the user's own bytes AS THE COPY QUOTED THEM — never a
+ * re-formatted number. The composers put that exact string on screen
+ * ("You gave 0.12, and more than one effect value is still missing…"), so a
+ * resume can restate the question in the user's own terms.
+ */
+export interface ElicitEffectTargetFields {
+  readonly source: 'repair_value_ask' | 'option_effect_ask';
+  readonly value_text: string;
+  /** Non-empty, and in the order the user was offered them. */
+  readonly candidates: readonly ElicitEffectTargetCandidate[];
+}
+
+/**
+ * ONE OFFERED EDIT TARGET, as the user was shown it.
+ */
+export interface ElicitEditTargetOffer {
+  readonly node_id: string;
+  readonly label: string;
+}
+
+/**
+ * THE GENERIC EDIT CLARIFICATION, and its offered targets.
+ *
+ * ⚠ THE QUESTION THIS ANSWERS is deliberately WEAKER than its two siblings
+ * above, and saying so is the point. `composeEditClarifyResponse` asks
+ * *"tell me the specific factor, edge, option, or value to change"* — it names
+ * NO cell, because at its two call sites there is nothing to name: the user
+ * said something vague ("update the model") or clicked the legacy simplify
+ * chip. So the only honest referent is (a) WHICH of the two intercepts asked,
+ * and (b) the targets the reply was offered.
+ *
+ * ⚠⚠ AND `offered_targets` IS ROUTINELY EMPTY ON THE LIVE WIRE. Both call sites
+ * read their nodes from `extensions.graphState`, and the UI sends a turn, NOT a
+ * graph — so `buildClarifyChips` falls through to the cancel-only chip and
+ * there is no target to record. That is why the emit sites arm this pending
+ * ONLY when a graph arrived, and commit the turn REGARDLESS: on the path that
+ * actually has the defect, the durable conversation-history row IS the fix and
+ * the structured referent is a bonus. Refusing to commit for want of a referent
+ * would discard the whole repair on exactly the turns that need it.
+ */
+export interface ElicitEditTargetFields {
+  readonly reason: 'chip_simplify' | 'vague_edit';
+  /** Non-empty when armed; the emit sites decline rather than arm an empty one. */
+  readonly offered_targets: readonly ElicitEditTargetOffer[];
+}
+
 export type PendingActionAction =
   | {
       readonly kind: 'set_factor_value';
@@ -321,6 +407,31 @@ export type PendingActionAction =
        */
       readonly kind: 'elicit_option_effect';
     } & ElicitOptionEffectFields)
+  | ({
+      /**
+       * ROADMAP 2.1353 — the two value-ask exits' offered cells.
+       *
+       * Server-only: never chip-derived, and it introduces no wire-level
+       * `action_type`. Persisted in the existing `pending_actions` JSONB
+       * column, whose DB CHECK enforces only array + length <= 3, so no
+       * migration is required.
+       *
+       * Deliberately ABSENT from `CONFIRMATION_EXPECTING_ACTION_TYPES`, on the
+       * same reasoning as `elicit_option_effect`: a bare "yes" answers no
+       * "which of these does your number belong to?" question.
+       */
+      readonly kind: 'elicit_effect_target';
+    } & ElicitEffectTargetFields)
+  | ({
+      /**
+       * ROADMAP 2.1353 — the two Stage-4A edit-clarify intercepts' offered
+       * targets. Server-only, no wire `action_type`, no migration; and
+       * deliberately absent from `CONFIRMATION_EXPECTING_ACTION_TYPES`,
+       * because a bare "yes" answers no "which factor, edge, option or value?"
+       * question either.
+       */
+      readonly kind: 'elicit_edit_target';
+    } & ElicitEditTargetFields)
   | {
       /**
        * V5 P0 proposal-memory continuation. Captures a noun-phrase
@@ -393,6 +504,18 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // Deliberately ABSENT from the short-confirm resumer's local
   // RESUMABLE_KINDS: a bare "yes" answers no "give me a number" question.
   'elicit_option_effect',
+  // ROADMAP 2.1353 — the value-ask and edit-clarify exits' offered referents.
+  // MANDATORY here for the SAME structural reason 2.1352 records above, and it
+  // is worth restating because it is not obvious from the set's name:
+  // `parsePendingAction` gates EVERY read on this set, so a kind omitted from
+  // it is WRITE-ONLY — it would round-trip to the column and then be dropped on
+  // the way back out, which is indistinguishable from never having persisted
+  // it. Readers today are the context projection
+  // (`most_recent_pending_actions`) and `derivePendingActivity`'s ORIENT tally.
+  // Both are deliberately ABSENT from the short-confirm resumer's local
+  // RESUMABLE_KINDS: a bare "yes" answers neither question.
+  'elicit_effect_target',
+  'elicit_edit_target',
 ]);
 
 /**
@@ -799,6 +922,46 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.option_label !== 'string' || a.option_label.length === 0) return null;
     if (typeof a.factor_id !== 'string' || a.factor_id.length === 0) return null;
     if (typeof a.factor_label !== 'string' || a.factor_label.length === 0) return null;
+  }
+  if (a.kind === 'elicit_effect_target') {
+    // ROADMAP 2.1353 — all three fields REQUIRED, and `candidates` NON-EMPTY.
+    //
+    // ⚠ SAME NON-OPTIONAL BLOCK AS ABOVE, for the same reason: this is a flat
+    // `if` chain, NOT a switch. A kind admitted to RESUMABLE_ACTION_TYPES with
+    // no block here clears the envelope checks and is returned by a CAST, so a
+    // corrupted row would reach the readers with zero field validation.
+    //
+    // An EMPTY candidate list is refused rather than tolerated: this pending's
+    // whole purpose is to name the set a reply can choose from, and a row that
+    // names none can neither restate the question nor bind an answer. The emit
+    // sites already decline in that state; this refuses it at the read too, so
+    // a hand-written or partially-migrated row cannot surface as a pending that
+    // names nothing.
+    if (a.source !== 'repair_value_ask' && a.source !== 'option_effect_ask') return null;
+    if (typeof a.value_text !== 'string' || a.value_text.length === 0) return null;
+    if (!Array.isArray(a.candidates) || a.candidates.length === 0) return null;
+    for (const raw of a.candidates as readonly unknown[]) {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      const c = raw as Record<string, unknown>;
+      if (typeof c.option_id !== 'string' || c.option_id.length === 0) return null;
+      if (typeof c.option_label !== 'string' || c.option_label.length === 0) return null;
+      if (typeof c.factor_id !== 'string' || c.factor_id.length === 0) return null;
+      if (typeof c.factor_label !== 'string' || c.factor_label.length === 0) return null;
+    }
+  }
+  if (a.kind === 'elicit_edit_target') {
+    // ROADMAP 2.1353 — both fields REQUIRED, `offered_targets` NON-EMPTY.
+    // Same flat-chain reasoning as the two blocks above. `reason` is a closed
+    // set because it is the composer's own `EditClarifyReason`, and a row
+    // carrying a third value could not be attributed to either intercept.
+    if (a.reason !== 'chip_simplify' && a.reason !== 'vague_edit') return null;
+    if (!Array.isArray(a.offered_targets) || a.offered_targets.length === 0) return null;
+    for (const raw of a.offered_targets as readonly unknown[]) {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      const t = raw as Record<string, unknown>;
+      if (typeof t.node_id !== 'string' || t.node_id.length === 0) return null;
+      if (typeof t.label !== 'string' || t.label.length === 0) return null;
+    }
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

@@ -231,8 +231,22 @@ describe('chip-click run_analysis — recoverable-cause escape (cause gating)', 
     expect(out.analysisReady).toBeDefined();
     expect(out.analysisReady.status).toBe('blocked');
     expect(out.analysisReady.blocked_reason).toBe('options_not_configured');
-    // Still no commit and still no graph mutation — that half is unchanged.
-    expect(out.commitPerformed).toBe(false);
+    // ⚠⚠ CONTRACT CHANGED AGAIN — ROADMAP 2.1353, and this assertion was PINNING
+    // THE DEFECT exactly as its neighbour above once did. It read
+    //   `// Still no commit and still no graph mutation — that half is unchanged.`
+    //   `expect(out.commitPerformed).toBe(false);`
+    // and it was pinning the SECOND half of a conflation: ONE predicate
+    // (`isAnalysisRefusalContinuityCause`) decided both "does this refusal
+    // acquire durable analysis-refusal continuity?" and "should this TURN be
+    // written to conversation history?" — two different questions (CLAUDE.md
+    // trap 21). So 7 of the 9 RECOVERABLE_HANDLER_CAUSES answered the user and
+    // left NO TURN ROW, `options_not_configured` among them — whose copy is
+    // "Tell me what {option} changes and I'll write it into the model", the
+    // deployed post-add-option case. It solicits a reply and recorded nothing.
+    // The turn row is now written for every recovered cause; the refusal FACT
+    // still rides only on a continuity cause (asserted below). Corrected at
+    // source rather than absorbed into a baseline.
+    expect(out.commitPerformed).toBe(true);
     expect(out.causeKind).toBe('options_not_configured');
   });
 
@@ -391,5 +405,179 @@ describe('chip-click run_analysis — shape funnel through the REAL handler', ()
     expect(out.outcome).toBe('handler_recovered');
     if (out.outcome === 'handler_recovered') expect(out.causeKind).toBe('options_not_configured');
     expect((plot.run as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⭐⭐ ROADMAP 2.1353 — THE PRODUCT ASKS A QUESTION AND DOES NOT REMEMBER
+// ASKING IT (the sixth exit, on a different mechanism from the other five).
+//
+// ROADMAP 2.1352 (CEE #1213) fixed one instance of this class at a route-level
+// `sendFinalised200` exit; that lane enumerated all 23 such exits and found its
+// instance was one of six. Four of the others are route-level and are pinned in
+// `tests/integration/orchestrator/route-v2-*-persists-question.test.ts`. THIS
+// one is different: the chip-click path DOES reach `commitDirectAnswer` — it
+// was simply gated on a predicate that answers a different question.
+//
+//   Q1  "Does this refusal acquire ANALYSIS-REFUSAL CONTINUITY?" — a durable
+//       non-result `run_analysis` fact, so the freshness/canonical selectors
+//       carry the refused attempt forward. Correctly narrow: only a
+//       science/readiness refusal is evidence about the MODEL.
+//   Q2  "Should this TURN be written to conversation history?" — true of EVERY
+//       turn that produced a user-visible answer.
+//
+// `isAnalysisRefusalContinuityCause` answered both, so 7 of the 9 recoverable
+// causes shipped HTTP 200 with a composed reply and no row. The user-visible
+// one is `options_not_configured`, whose copy is ask-shaped.
+//
+// ⚠ ASSERTING THE WRITE, NOT THE RESPONSE. Every case below reads
+// `commitDirectAnswerMock`'s ARGUMENT. The suite above asserts the response
+// body and `commitPerformed`, and `commitPerformed` is precisely the field the
+// conflation made untrustworthy — so a response-shaped or flag-shaped assertion
+// could not have seen this.
+// ══════════════════════════════════════════════════════════════════════════
+describe('chip-click run_analysis — a recovered turn must be REMEMBERED (2.1353)', () => {
+  // ⚠ THE FILE-LEVEL `beforeEach` SETS THIS MOCK'S RESOLUTION BUT NEVER CLEARS
+  // ITS CALL LOG, and the RED-first run caught the consequence in this very
+  // block: `WRITES A TURN ROW` read `expected 2 to be 1`, and the
+  // no-refusal-fact case read a fact that belonged to a PREVIOUS test's commit.
+  // Call-count and first-call assertions across a shared spy are worthless
+  // without this — the numbers were about the file, not the case.
+  beforeEach(() => {
+    commitDirectAnswerMock.mockClear();
+  });
+
+  /** The single metadata object handed to `commitDirectAnswer`, if any. */
+  function commitMetadata(): Record<string, unknown> | undefined {
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'exactly one commit is expected on this turn; a different count means the assertion below ' +
+        'would be reading some other call',
+    ).toBe(1);
+    const call = commitDirectAnswerMock.mock.calls[0] as unknown[] | undefined;
+    return call?.[1] as Record<string, unknown> | undefined;
+  }
+
+  it('options_not_configured (the deployed post-add-option ask) WRITES A TURN ROW', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-onc',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    expect(out.outcome).toBe('handler_recovered');
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'the reply says "Tell me what {option} changes and I\'ll write it into the model" and then ' +
+        'recorded nothing — so the answer arrives at a model with no memory of the request',
+    ).toBe(1);
+  });
+
+  it("the written row carries the user's message, so the next turn can project it", async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-msg',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    const meta = commitMetadata();
+    expect(meta, 'no commit at all — see the previous case').toBeDefined();
+    expect(meta!.scenario_id).toBe(SCENARIO_ID);
+    expect(meta!.turn_id).toBe(TURN_ID);
+    // ⚠ `userMessage` is the WRITE OBJECT's field; `user_message` is the COLUMN
+    // the store maps it to. Asserting the column name here manufactures a false
+    // RED against correct code.
+    expect(meta!.userMessage).toBe('Run the analysis.');
+  });
+
+  // ─── THE DISCRIMINATION: the two questions stay apart ────────────────────
+  // The fix must NOT be "widen the continuity set". A refusal fact is durable
+  // evidence that the MODEL was refused, and writing one for an args failure or
+  // an engine-busy retry would corrupt the freshness selectors that read it.
+  it('a NON-continuity recovered cause commits the turn but writes NO refusal fact', async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-nofact',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    const meta = commitMetadata();
+    expect(meta, 'no commit at all').toBeDefined();
+    expect(
+      meta!.handler_facts,
+      'options_not_configured is not a science/readiness refusal — a durable refusal fact here ' +
+        'would be evidence about the model that the model never produced',
+    ).toEqual([]);
+  });
+
+  it('OPPOSITE DIRECTION — a CONTINUITY cause still writes its refusal fact (unchanged)', async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-fact',
+      handlerRegistry: registryThrowing('analysis_not_ready'),
+    });
+    const meta = commitMetadata();
+    expect(meta, 'no commit at all').toBeDefined();
+    const facts = meta!.handler_facts as ReadonlyArray<Record<string, unknown>>;
+    expect(
+      facts.length,
+      'analysis_not_ready IS a science/readiness refusal and its continuity marker must survive ' +
+        'this change untouched',
+    ).toBe(1);
+    expect(facts[0]!.fact_type).toBe('run_analysis');
+    expect(
+      ((facts[0]!.result as Record<string, unknown>).enrichment as Record<string, unknown>)
+        .analysis_status,
+    ).toBe('refused');
+  });
+
+  // ─── EVERY RECOVERED CAUSE, not just the one that motivated the row ──────
+  it('EVERY RECOVERABLE_HANDLER_CAUSES cause now leaves a turn row (7 of 9 previously did not)', async () => {
+    for (const cause of RECOVERABLE_HANDLER_CAUSES) {
+      commitDirectAnswerMock.mockClear();
+      const out = await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: `req-2-1353-${cause}`,
+        handlerRegistry: registryThrowing(cause),
+      });
+      expect(out.outcome, `${cause} should still map to handler_recovered`).toBe(
+        'handler_recovered',
+      );
+      expect(
+        commitDirectAnswerMock.mock.calls.length,
+        `${cause} produced a user-visible answer and left no trace of the turn`,
+      ).toBe(1);
+    }
+  });
+
+  // ─── THE FAILURE MODE, in BOTH directions ───────────────────────────────
+  // A failed commit must not convert a working 200 into a 500 for a cause that
+  // only loses this turn's memory — but it must STILL escalate for a continuity
+  // cause, where the loss is durable evidence the freshness selectors depend on.
+  it('a commit FAILURE on a non-continuity cause degrades gracefully (still a 200-shaped recovery)', async () => {
+    commitDirectAnswerMock.mockRejectedValueOnce(new Error('commit exploded'));
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-failsoft',
+      handlerRegistry: registryThrowing('options_not_configured'),
+    });
+    expect(
+      out.outcome,
+      'losing this question’s memory is strictly less than the user loses today — a memory fix ' +
+        'must not become capable of BREAKING a turn that works',
+    ).toBe('handler_recovered');
+    if (out.outcome !== 'handler_recovered') throw new Error('unreachable');
+    expect(out.commitPerformed).toBe(false);
+  });
+
+  it('OPPOSITE DIRECTION — a commit FAILURE on a CONTINUITY cause still escalates to commit_failed', async () => {
+    commitDirectAnswerMock.mockRejectedValueOnce(new Error('commit exploded'));
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-2-1353-failhard',
+      handlerRegistry: registryThrowing('analysis_not_ready'),
+    });
+    expect(
+      out.outcome,
+      'a failed commit on a continuity refusal loses DURABLE EVIDENCE the freshness selectors ' +
+        'depend on, and that escalation must survive this change',
+    ).toBe('commit_failed');
   });
 });

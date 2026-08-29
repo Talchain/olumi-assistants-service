@@ -84,7 +84,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { BoundaryError, OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
@@ -203,7 +203,12 @@ import {
   type AssembledExplicitGenerateBrief,
 } from '../orchestrator-v5/routing/assemble-explicit-generate-brief.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
-import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
+import {
+  composeEditClarifyResponse,
+  // ⭐ ROADMAP 2.1353 — the composer's OWN target selection, so the persisted
+  // referent and the rendered chips are one function of one input.
+  selectEditClarifyTargets,
+} from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import type {
   PendingAction,
@@ -258,6 +263,10 @@ import {
   type RepairValueBindingResolution,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
+// ⭐⭐ ROADMAP 2.1353 — every exit that solicits a reply persists the question.
+// The fail-closed ordering (proposal ≫ memory ≫ referent) lives in ONE place;
+// each site below derives its own referent and hands it in.
+import { persistAskedQuestion } from '../orchestrator-v5/routing/persist-asked-question.js';
 // ⭐ ROADMAP 2.1266 / A2 — the ONE owner of "is this message an answer to the
 // missing-value ask?". Used HERE only as the cheap text gate that decides
 // whether the pre-route pays for its reads; the slot resolution belongs to the
@@ -5038,6 +5047,79 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const bypassEditHandling =
       proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical;
 
+    // ══════════════════════════════════════════════════════════════════════
+    // ⭐⭐ ROADMAP 2.1353 — THE TWO EDIT-CLARIFY INTERCEPTS MUST REMEMBER ASKING.
+    //
+    // Both `chip_simplify` and `vague_edit` below return via
+    // `sendFinalised200` — an early return that never reaches
+    // `commitDirectAnswer` — so no turn row is written and the next turn's model
+    // receives neither the question nor a referent. Same mechanism as ROADMAP
+    // 2.1352 (CEE #1213) fixed for the configure-option clarify; that lane
+    // enumerated all 23 `sendFinalised200` exits and found its instance was one
+    // of six. These are two of the other five.
+    //
+    // ⚠ THE REFERENT HERE IS WEAKER THAN 2.1352'S, AND THE COPY IS WHY.
+    // `composeEditClarifyResponse` names NO cell — it asks "tell me the specific
+    // factor, edge, option, or value to change" and offers up to three graph
+    // labels as chips. So the only honest referent is WHICH intercept asked plus
+    // WHAT it offered, and the offered set is taken from
+    // `selectEditClarifyTargets` — the SAME function the composer's own chip
+    // builder calls — so the chips and the persisted referent cannot drift.
+    //
+    // ⚠⚠ AND ON THE LIVE WIRE THERE IS USUALLY NOTHING TO OFFER. `interceptNodes`
+    // is `extensions.graphState?.nodes`, and the UI sends a turn, NOT a graph —
+    // so the composer falls through to its cancel-only chip and this derivation
+    // yields an empty set. That is exactly why the helper's fail-closed ordering
+    // withholds only the PENDING in that state and still commits the turn: the
+    // durable `user_message` / `assistant_message` row is what the model's
+    // conversation history reads, and it is the larger half of the repair.
+    // Refusing to commit for want of a structured referent would discard the
+    // whole fix on precisely the turns that carry the defect.
+    // ══════════════════════════════════════════════════════════════════════
+    const persistEditClarifyAsk = async (
+      reason: 'chip_simplify' | 'vague_edit',
+      composed: OlumiResponse,
+    ): Promise<OlumiResponse> => {
+      const offered = selectEditClarifyTargets(interceptNodes);
+      // Hash the graph the OFFER was made against, and only when one arrived on
+      // the request. `computeAnalysisAffectingGraphHash` is the same hash the
+      // carry-forward compares against, so a later edit correctly invalidates
+      // this referent instead of leaving it naming cells that have moved.
+      const graphHash =
+        extensions.graphState != null
+          ? ((): string | null => {
+              try {
+                return computeAnalysisAffectingGraphHash(extensions.graphState as GraphStateIngress);
+              } catch {
+                return null;
+              }
+            })()
+          : null;
+      const persisted = await persistAskedQuestion({
+        response: composed,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
+        requestId,
+        userMessage: ingress.message,
+        requestHash: computeRequestHash(ingress),
+        startedAtMs: routeStartedAt,
+        // A STABLE synthetic handle, per intercept: key-level supersession in
+        // carry-forward then retires a previous ask from the SAME intercept
+        // instead of accumulating one pending slot per re-ask (the column is
+        // capped at 3 by the DB CHECK). Per-REASON rather than shared, so a
+        // vague-edit ask does not silently retire a chip-simplify one — they
+        // are different questions and a resume must be able to tell them apart.
+        pendingChipId: `chip_edit_clarify_${reason}`,
+        pendingAction:
+          offered.length > 0
+            ? { kind: 'elicit_edit_target', reason, offered_targets: offered }
+            : null,
+        graphHash,
+        siteLabel: `edit-clarify:${reason}`,
+      });
+      return persisted.response;
+    };
+
     const chipSimplify = tryChipSimplifyIntercept(ingress.message);
     if (chipSimplify.matched && !bypassEditHandling) {
       emit(TelemetryEvents.V5InterceptedChipClarify, {
@@ -5052,7 +5134,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         nodes: interceptNodes,
         priorAnalysisIsFresh,
       });
-      return sendFinalised200(reply, requestId, 'edit_graph', response, {
+      // ROADMAP 2.1353 — persist the ask. The chokepoint may APPEND to the
+      // response it was handed, so the SHIPPED body is the one it returns:
+      // otherwise the wire and the persisted row disagree about what was said.
+      const chipSimplifyResponse = await persistEditClarifyAsk('chip_simplify', response);
+      return sendFinalised200(reply, requestId, 'edit_graph', chipSimplifyResponse, {
         graph: null,
         // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
         // the permission belongs to the fact this response DISPLAYS, not to
@@ -5136,7 +5222,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         prior_analysis_is_fresh: priorAnalysisIsFresh,
         chips_emitted: response.suggested_actions.length,
       });
-      return sendFinalised200(reply, requestId, 'edit_graph', response, {
+      // ROADMAP 2.1353 — persist the ask; ship the chokepoint's response.
+      const vagueEditResponse = await persistEditClarifyAsk('vague_edit', response);
+      return sendFinalised200(reply, requestId, 'edit_graph', vagueEditResponse, {
         graph: null,
         // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
         // the permission belongs to the fact this response DISPLAYS, not to
@@ -5527,7 +5615,67 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             valueText: resolution.valueText,
             stage: ingress.stage,
           });
-          return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          // ══════════════════════════════════════════════════════════════
+          // ⭐⭐ ROADMAP 2.1353 — PERSIST THE QUESTION THIS TURN ASKED.
+          //
+          // The copy is "You gave 0.12, and more than one effect value is
+          // still missing, so I want to be sure where to apply it… Pick one
+          // below, or name the option and factor in your reply." That is an
+          // explicit solicitation, and until now it returned via
+          // `sendFinalised200` without ever reaching `commitDirectAnswer` —
+          // so the reply landed on a turn whose model had no record of the
+          // question and no referent to bind to. Same mechanism as ROADMAP
+          // 2.1352 (CEE #1213); one of the five siblings that lane found by
+          // enumerating all 23 `sendFinalised200` exits.
+          //
+          // THE REFERENT IS THE USER'S OWN VALUE PLUS THE OFFERED CELLS, and
+          // both are taken from `resolution` — the SAME object the composer
+          // above was handed — so the pending cannot describe a different
+          // question from the one on screen. `valueText` is carried verbatim
+          // rather than as a number because that is the string the copy
+          // quoted back; a resume must be able to restate it in the user's
+          // own bytes.
+          //
+          // NOT A RESUMER. Nothing here binds a later reply — the ruling on
+          // this predicate family is refuse-by-shape (a wider bare-numeric
+          // gate was tried and reverted at this very site), and four rounds
+          // were once lost to fixing one direction and reopening the other.
+          // Deterministic binding is a follow-on that can now be built
+          // against recorded state instead of re-derived from prose.
+          // ══════════════════════════════════════════════════════════════
+          const repairAskGraphHash = ((): string | null => {
+            try {
+              return computeAnalysisAffectingGraphHash(persistedForRepair as GraphStateIngress);
+            } catch {
+              return null;
+            }
+          })();
+          const repairAskPersisted = await persistAskedQuestion({
+            response,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            requestId,
+            userMessage: ingress.message,
+            requestHash: computeRequestHash(ingress),
+            startedAtMs: routeStartedAt,
+            // Stable synthetic handle — a re-ask supersedes its predecessor by
+            // key rather than consuming another of the column's three slots.
+            pendingChipId: 'chip_repair_value_ask',
+            pendingAction: {
+              kind: 'elicit_effect_target',
+              source: 'repair_value_ask',
+              value_text: resolution.valueText,
+              candidates: resolution.pairs.map((p) => ({
+                option_id: p.optionId,
+                option_label: p.optionLabel,
+                factor_id: p.factorId,
+                factor_label: p.factorLabel,
+              })),
+            },
+            graphHash: repairAskGraphHash,
+            siteLabel: 'repair-value-ask',
+          });
+          return sendFinalised200(reply, requestId, 'edit_graph', repairAskPersisted.response, {
             // Gate-reason integrity (same rule as the L16 intercept above):
             // readiness is derived from the UNCHANGED persisted graph, so the
             // disambiguation turn is not the turn the blocker disappears.
@@ -5831,7 +5979,73 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           optionLabels: optionEffectAsk.optionLabels,
           stage: ingress.stage,
         });
-        return sendFinalised200(reply, requestId, 'edit_graph', askResponse, {
+        // ══════════════════════════════════════════════════════════════════
+        // ⭐⭐ ROADMAP 2.1353 — PERSIST THE QUESTION THIS TURN ASKED.
+        //
+        // The copy is "Your message names 2 options … so I do not know which
+        // one 0.4 belongs to" plus a chip per candidate. It solicits a reply
+        // and, until now, returned via `sendFinalised200` without reaching
+        // `commitDirectAnswer` — no turn row, so the answer arrived at a model
+        // that had no record of the question. Same mechanism as ROADMAP 2.1352
+        // (CEE #1213); one of the five siblings found by enumerating all 23
+        // `sendFinalised200` exits rather than grepping for the reported one.
+        //
+        // ONE KIND, TWO SOURCES — and the reason is written down at
+        // `ElicitEffectTargetFields`. This ask and the repair-value ask above
+        // pose the SAME question ("which cell does your number belong to?")
+        // about differently-SOURCED candidate sets, so the referent a reply
+        // binds to is identical and the provenance rides in `source`.
+        //
+        // ⚠ FAIL-CLOSED ON AN EMPTY CANDIDATE SET, which is a REACHABLE state
+        // here and NOT reachable at the repair-value site (that one asks only
+        // when two or more pairs are outstanding). `candidates` is documented
+        // "may be empty when no chip is honest": the user is then told the
+        // sentence is ambiguous with nothing named back. A pending listing no
+        // candidate could neither restate the question nor bind an answer, so
+        // the turn is committed for its conversation history and no referent is
+        // armed. The parse refuses an empty list at the read for the same
+        // reason, so the two ends agree.
+        //
+        // `value` is a NUMBER on this path (the grammar admits only a model-unit
+        // number), and the pending's `value_text` is a string — so it is
+        // stringified HERE rather than the field being widened. The composer
+        // interpolates the same number into its copy, so the persisted text and
+        // the sentence the user read are the same bytes.
+        // ══════════════════════════════════════════════════════════════════
+        const optionEffectAskGraphHash = ((): string | null => {
+          try {
+            return computeAnalysisAffectingGraphHash(effectiveGraphState as GraphStateIngress);
+          } catch {
+            return null;
+          }
+        })();
+        const optionEffectAskPersisted = await persistAskedQuestion({
+          response: askResponse,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          requestId,
+          userMessage: ingress.message,
+          requestHash: computeRequestHash(ingress),
+          startedAtMs: routeStartedAt,
+          pendingChipId: 'chip_option_effect_ask',
+          pendingAction:
+            optionEffectAsk.candidates.length > 0
+              ? {
+                  kind: 'elicit_effect_target',
+                  source: 'option_effect_ask',
+                  value_text: String(optionEffectAsk.value),
+                  candidates: optionEffectAsk.candidates.map((c) => ({
+                    option_id: c.optionId,
+                    option_label: c.optionLabel,
+                    factor_id: c.factorId,
+                    factor_label: c.factorLabel,
+                  })),
+                }
+              : null,
+          graphHash: optionEffectAskGraphHash,
+          siteLabel: 'option-effect-ask',
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', optionEffectAskPersisted.response, {
           ...(askReadiness !== undefined ? { analysisReady: askReadiness } : {}),
           graph: null,
           // T1 claim safety — INHERITED from the turn-entry read. Never a
