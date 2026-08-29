@@ -850,3 +850,195 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     expect(results.refuses.carries).toBe(true);
   });
 });
+
+/**
+ * ⭐⭐ THE PROSE HALF OF THE SAME REFUSAL — UNGUARDED ON THIS ARM UNTIL NOW.
+ *
+ * Every test above pins the TYPED payload (`out.analysisReady`). Not one pins
+ * that the refusal REACHES THE USER as words. That gap was found on 2026-08-29
+ * while re-diagnosing this exact seam: a reader inspecting the golden-journey
+ * capture `20260829T143150Z-fresh-extended-3fef3e` step `T5B_REANALYSE` saw
+ * `blocks: []` and concluded the refusal shipped in silence. It had not — the
+ * turn carried 543 characters of the handler's own refusal in top-level
+ * `body.assistant_text` (`blocks: []` is the ordinary shape for a prose turn;
+ * `T2_FOLLOWUP` and `T5C_CONFIRM` in the same capture carry zero blocks too).
+ *
+ * The premise was wrong. The absence of a guard was not:
+ *
+ *   · `chip-click-dispatch-recoverable.test.ts:220` asserts
+ *     `assistant_text.length > 0` — a VALUE PREDICATE any string satisfies
+ *     (CLAUDE.md trap 19). If the composer stopped reading `details.next_step`
+ *     and fell back to its generic `'This scenario needs a quick fix before it
+ *     can be analysed.'`, that assertion stays GREEN, every other test on this
+ *     arm stays GREEN, and the user loses the whole specific refusal.
+ *   · `analysis-not-ready-carry-through.spec.ts` pins the carry-through at the
+ *     COMPOSER. This arm has been fixed one-arm-only TWICE already (see
+ *     `chip-click-dispatch.ts:701-706` and `buildAnalysisRefusalReadiness`'s
+ *     "THE CHIP ARM IS NO LONGER ONE OF THEM"). A composer guard is not a guard
+ *     about the arm the deployed "Run analysis" chip actually takes.
+ *
+ * So this block asks the arm's own question — *what does the user read?* — and
+ * asks it in BOTH directions (CLAUDE.md trap 22b): a refusal that HAS a reason
+ * must say it verbatim, and a refusal that has NONE must refuse gracefully and
+ * INVENT nothing.
+ */
+describe('EXT-2 / 2.1085 — the refusal reaches the USER, not only the payload', () => {
+  /**
+   * THE SENTENCE A USER ACTUALLY RECEIVED, copied byte-for-byte out of
+   * `20260829T143150Z-fresh-extended-3fef3e-raw/step-T5B_REANALYSE.json`
+   * `body.assistant_text` (deployed CEE `d6aa2f9`, signed-in fresh witness).
+   * Produced by `run-analysis.ts:666` with `named = 'Annual CRM Licence Cost'`.
+   *
+   * ⚠ A CAPTURED SENTENCE, NOT A FIXTURE OF MY OWN (CLAUDE.md trap 16-inverse:
+   * a fixture you wrote yourself is not evidence about the wire). It is not
+   * edited to keep it current either — it is a record of what the product said
+   * on a dated build (trap 14b).
+   */
+  const WITNESSED_BASELINE_NEXT_STEP =
+    "I can't run this analysis safely. Annual CRM Licence Cost is recorded as a bare "
+    + "amount with no range for me to measure it against, so I can't tell the analysis "
+    + 'engine what it means next to everything else, and the numbers would not be the '
+    + "ones your model states — I've stopped rather than show you a confident wrong "
+    + 'answer. Nothing in your model has changed, and this is a limit in how I record '
+    + 'and prepare values, not a verdict on your model. Telling me the same amount '
+    + "again won't clear it; ask me to run it again after any change and I'll re-check.";
+
+  /**
+   * The composer's own fallback when a refusal carries no `next_step`
+   * (`handler-failure-responses.ts`, `analysis_not_ready` branch). Named here
+   * so the two directions below can be told apart by IDENTITY rather than by
+   * "is it non-empty".
+   */
+  const GENERIC_FALLBACK = 'This scenario needs a quick fix before it can be analysed.';
+
+  /** The baseline-scale gate's throw, `run-analysis.ts:617-668`. */
+  function baselineScaleRefusal(): HandlerInvocationFailedError {
+    return new HandlerInvocationFailedError(
+      'Outbound analysis payload carries value scales CEE cannot safely resolve',
+      {
+        cause_kind: 'analysis_not_ready',
+        retryable: false,
+        details: {
+          handler_id: 'run_analysis',
+          scenario_id: SCENARIO_ID,
+          reason_code: 'baseline_scale_unresolved',
+          next_step: WITNESSED_BASELINE_NEXT_STEP,
+        },
+      },
+    );
+  }
+
+  /**
+   * A recoverable analyse refusal that carries NEITHER a reason code NOR a next
+   * step. Constructible today: `run-analysis.ts:336-337` omits both keys when
+   * the read-boundary verdict supplies neither, so the composer's fallback arm
+   * is a real arm and not a hypothetical.
+   */
+  function reasonlessRefusal(): HandlerInvocationFailedError {
+    return new HandlerInvocationFailedError('Persisted graph is not analysis-ready', {
+      cause_kind: 'analysis_not_ready',
+      retryable: false,
+      details: { handler_id: 'run_analysis', scenario_id: SCENARIO_ID },
+    });
+  }
+
+  it('⭐ CARRY-THROUGH: the handler\'s own next_step is what the user reads, verbatim', async () => {
+    const refusal = baselineScaleRefusal();
+    handlerFnMock.mockRejectedValueOnce(refusal);
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-prose-carry',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+
+    // PRECONDITION PINNED IN-TEST (CLAUDE.md trap 13b): this refusal carries NO
+    // `readiness_questions`, so the composer's list branch is not what produced
+    // the text. The equality below is therefore testing the plain carry-through
+    // and nothing else.
+    expect(refusal.details.readiness_questions).toBeUndefined();
+
+    // ⭐ BOUND BY IDENTITY to the producer's own string — not "contains a
+    // keyword", which a different sentence could satisfy (CLAUDE.md trap 19).
+    expect(out.response.assistant_text).toBe(refusal.details.next_step);
+    // And, stated separately so a mutant's failure is legible: what the user
+    // reads is NOT the composer's generic stand-in.
+    expect(out.response.assistant_text).not.toBe(GENERIC_FALLBACK);
+
+    // The typed payload and the prose must name the SAME refusal. One arm
+    // telling the truth while the other says something else is the two-arms
+    // defect this seam has already shipped twice (CLAUDE.md trap 21).
+    expect((out.analysisReady as { blocked_reason?: string }).blocked_reason).toBe(
+      'baseline_scale_unresolved',
+    );
+    // A route out, still typed so the election gate cannot demote it.
+    expect(out.response.suggested_actions.map((a) => a.action_type)).toContain(
+      'analysis_readiness',
+    );
+  });
+
+  it('⚠ OPPOSITE DIRECTION — a refusal with NO reason refuses gracefully and FABRICATES NOTHING', async () => {
+    handlerFnMock.mockRejectedValueOnce(reasonlessRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-prose-reasonless',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+
+    // Still a graceful 200-shaped recovery with a route, never silence.
+    expect(out.response.assistant_text).toBe(GENERIC_FALLBACK);
+    expect(out.response.suggested_actions.map((a) => a.action_type)).toContain(
+      'analysis_readiness',
+    );
+
+    // ⭐ AND IT INVENTS NOTHING. No borrowed specificity from the refusal that
+    // DOES have a reason — bound to that sentence's own distinguishing tokens,
+    // which nothing else in the generic arm can supply.
+    expect(out.response.assistant_text).not.toContain('Annual CRM Licence Cost');
+    expect(out.response.assistant_text).not.toContain('bare amount');
+    expect(out.response.assistant_text).not.toContain('baseline_scale_unresolved');
+
+    // Honest rather than empty: with no declared reason the payload falls back
+    // to the cause kind, which names the class and claims nothing more.
+    expect(out.analysisReady.status).toBe('blocked');
+    expect((out.analysisReady as { blocked_reason?: string }).blocked_reason).toBe(
+      'analysis_not_ready',
+    );
+  });
+
+  it('⭐ DISCRIMINATION: two different refusals on ONE arm produce two different sentences', async () => {
+    // Neither test above can catch an arm that has learned ONE canned refusal:
+    // each asserts a single sentence in isolation. This one runs both through
+    // the same arm and requires them to differ — so a mutant that always
+    // returns the same prose is caught even when that prose happens to be one
+    // of the two correct ones.
+    const seen: string[] = [];
+    for (const [name, refusal] of [
+      ['baseline', baselineScaleRefusal()],
+      ['mixed', mixedScaleRefusal()],
+    ] as const) {
+      handlerFnMock.mockRejectedValueOnce(refusal);
+      loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+      const out = await dispatchChipClickRunAnalysis({
+        payload: payload(),
+        requestId: `req-ext2-prose-${name}`,
+      });
+      if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+      seen.push(out.response.assistant_text);
+    }
+    // PRECONDITION: the two producers really do author different sentences, so
+    // a failure below is the ARM collapsing them and not the fixtures agreeing
+    // (CLAUDE.md trap 13b — a discriminator must pin its own precondition).
+    expect(baselineScaleRefusal().details.next_step).not.toBe(
+      mixedScaleRefusal().details.next_step,
+    );
+    expect(seen[0]).toBe(baselineScaleRefusal().details.next_step);
+    expect(seen[1]).toBe(mixedScaleRefusal().details.next_step);
+    expect(seen[0]).not.toBe(seen[1]);
+  });
+});
