@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
-import { buildStructuralPairEvidence } from '../structural-pair-evidence.js';
+import {
+  buildSelectedDependenciesEvidence,
+  buildStructuralPairEvidence,
+} from '../structural-pair-evidence.js';
 import type { StructureQuery } from '../types.js';
 
 function graph(
@@ -69,6 +72,16 @@ const DIRECT_GRAPH = graph(
 );
 
 describe('buildStructuralPairEvidence', () => {
+  it('leaves typed dependency questions exclusively to the dependency evidence carrier', () => {
+    expect(buildStructuralPairEvidence(DIRECT_GRAPH, {
+      graphContextStatus: 'canonical',
+      graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+      messageText: 'What feeds this?',
+      structureQuery: { kind: 'dependencies', element_id: 'risk' },
+    })).toBeNull();
+  });
+
   it('resolves current-message labels to canonical ids and preserves stored direction when asked in reverse order', () => {
     const evidence = build(
       DIRECT_GRAPH,
@@ -491,5 +504,311 @@ describe('buildStructuralPairEvidence', () => {
     expect(build(currentGraph, message, query, {
       graphAuthority: 'canonical_structural_fallback',
     })).toMatchObject({ status: 'coverage_unavailable' });
+  });
+});
+
+describe('buildSelectedDependenciesEvidence', () => {
+  const selectedNodes: readonly Record<string, unknown>[] = [
+      { id: 'improve', kind: 'option', label: 'Improve current CRM' },
+      { id: 'hubspot', kind: 'option', label: 'Move to HubSpot' },
+      { id: 'pilot', kind: 'option', label: 'Phased pilot' },
+      { id: 'automation', kind: 'factor', label: 'Sales process automation level' },
+      { id: 'adoption', kind: 'factor', label: 'CRM adoption and usability' },
+      { id: 'ramp', kind: 'factor', label: 'Ramp and disruption time' },
+      { id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities' },
+      { id: 'goal', kind: 'goal', label: 'Improve sales productivity' },
+    ];
+  const selectedEdges: readonly Record<string, unknown>[] = [
+      { from: 'improve', to: 'automation', strength: 1 },
+      { from: 'hubspot', to: 'automation', strength: 1 },
+      { from: 'pilot', to: 'ramp', strength: 1 },
+      { from: 'automation', to: 'selling_time', strength: 0.35 },
+      { from: 'adoption', to: 'selling_time', strength: 0.55 },
+      { from: 'selling_time', to: 'goal', strength: 0.6 },
+    ];
+  const selectedGraph = graph(selectedNodes, selectedEdges);
+
+  function buildSelected(
+    overrides: Partial<Parameters<typeof buildSelectedDependenciesEvidence>[1]> = {},
+    currentGraph = selectedGraph,
+  ) {
+    return buildSelectedDependenciesEvidence(currentGraph, {
+      structureQuery: { kind: 'dependencies', element_id: 'selling_time' },
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{
+          id: 'selling_time',
+          kind: 'outcome',
+          label: 'Sales rep time on selling activities',
+          analysis_link: 'no_analysis',
+        }],
+        unresolved: 'none',
+        requested_count: 1,
+        unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: {
+        id: 'selling_time',
+        label: 'Sales rep time on selling activities',
+        resolution_status: 'resolved',
+      },
+      graphContextStatus: 'canonical',
+      graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+      ...overrides,
+    });
+  }
+
+  it('projects only the selected identity direct neighbourhood and cannot invent an upstream option edge', () => {
+    const evidence = buildSelected();
+    expect(evidence?.status).toBe('resolved');
+    if (evidence?.status !== 'resolved') return;
+
+    expect(evidence.selected_label).toBe('Sales rep time on selling activities');
+    expect(evidence.dependencies.map((relationship) => relationship.from_label)).toEqual([
+      'Sales process automation level',
+      'CRM adoption and usability',
+    ].sort());
+    expect(evidence.bidirected).toEqual([]);
+    expect(JSON.stringify(evidence)).not.toContain('Phased pilot');
+    expect(JSON.stringify(evidence)).not.toContain('Improve sales productivity');
+
+    const permutedGraph = graph(
+      [...selectedNodes].reverse(),
+      [...selectedEdges].reverse(),
+    );
+    expect(JSON.stringify(buildSelected({}, permutedGraph))).toBe(JSON.stringify(evidence));
+  });
+
+  it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {
+    expect(buildSelected({
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: ['automation→selling_time'] },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      requestedSelection: { node_ids: ['selling_time', 'adoption'], edge_ids: [] },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      requestedSelection: { node_ids: ['goal'], edge_ids: [] },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({ groundedSelection: null })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      groundedSelection: { element_ids: ['selling_time', 'adoption'], unresolved: 'none' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      structureQuery: { kind: 'dependencies', element_id: 'goal' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      focus: {
+        elements: [{
+          id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities',
+          analysis_link: 'no_analysis',
+        }],
+        unresolved: 'not_in_model', requested_count: 2, unresolved_count: 1,
+      },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      focus: {
+        elements: [{
+          id: 'goal', kind: 'goal', label: 'Improve sales productivity',
+          analysis_link: 'no_analysis',
+        }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'not_in_model' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      proposalEntity: {
+        id: 'goal',
+        label: 'Improve sales productivity',
+        resolution_status: 'resolved',
+      },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      proposalEntity: {
+        id: 'selling_time',
+        label: 'Sales rep time on selling activities',
+        resolution_status: 'ambiguous',
+      },
+    })).toEqual({ status: 'ambiguous' });
+  });
+
+  it('fails weak when canonical relationship coverage is unavailable', () => {
+    expect(buildSelected({ graphContextStatus: 'provisional' })).toEqual({
+      status: 'coverage_unavailable',
+      reason: 'graph_coverage_unavailable',
+    });
+    expect(buildSelected({ graphAuthority: 'canonical_structural_fallback' })).toEqual({
+      status: 'coverage_unavailable',
+      reason: 'graph_coverage_unavailable',
+    });
+    expect(buildSelected({ graphWasTrimmed: true })).toEqual({
+      status: 'coverage_unavailable',
+      reason: 'graph_coverage_unavailable',
+    });
+
+    const structuralOptionLink = graph(
+      [
+        { id: 'option', kind: 'option', label: 'Phased pilot' },
+        { id: 'factor', kind: 'factor', label: 'Ramp and disruption time' },
+      ],
+      [{ from: 'option', to: 'factor', strength: 0.8 }],
+    );
+    expect(buildSelectedDependenciesEvidence(structuralOptionLink, {
+      structureQuery: { kind: 'dependencies', element_id: 'factor' },
+      requestedSelection: { node_ids: ['factor'], edge_ids: [] },
+      focus: {
+        elements: [{
+          id: 'factor', kind: 'factor', label: 'Ramp and disruption time',
+          analysis_link: 'no_analysis',
+        }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['factor'], unresolved: 'none' },
+      proposalEntity: { id: 'factor', resolution_status: 'resolved' },
+      graphContextStatus: 'canonical',
+      graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+    })).toEqual({
+      status: 'coverage_unavailable',
+      reason: 'structural_semantics_unlicensed',
+    });
+  });
+
+  it('does not compete with separately typed pair and reachability questions', () => {
+    expect(buildSelected({ structureQuery: { kind: 'general' } })).toBeNull();
+    expect(buildSelected({
+      structureQuery: {
+        kind: 'direct_relationship',
+        element_ids: ['automation', 'selling_time'],
+      },
+    })).toBeNull();
+    expect(buildSelected({ structureQuery: undefined })).toBeNull();
+  });
+
+  it('fails weak on duplicate visible identity and conflicting relationship twins', () => {
+    const duplicateLabel = graph(
+      [...selectedNodes, { id: 'selling_time_twin', kind: 'outcome', label: 'Sales rep time on selling activities' }],
+      selectedEdges,
+    );
+    expect(buildSelectedDependenciesEvidence(duplicateLabel, {
+      structureQuery: { kind: 'dependencies', element_id: 'selling_time' },
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{ id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities', analysis_link: 'no_analysis' }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: { id: 'selling_time', resolution_status: 'resolved' },
+      graphContextStatus: 'canonical',
+      graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+    })).toEqual({ status: 'ambiguous' });
+
+    const conflicting = graph(
+      selectedNodes,
+      [
+        ...selectedEdges,
+        { from: 'automation', to: 'selling_time', strength: -0.9 },
+      ],
+    );
+    expect(buildSelectedDependenciesEvidence(conflicting, {
+      structureQuery: { kind: 'dependencies', element_id: 'selling_time' },
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{ id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities', analysis_link: 'no_analysis' }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: { id: 'selling_time', resolution_status: 'resolved' },
+      graphContextStatus: 'canonical',
+      graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+    })).toEqual({ status: 'ambiguous' });
+  });
+
+  it('deduplicates exact twins, preserves bidirected non-causal semantics, and ignores outgoing density', () => {
+    const exactTwinAndBidirected = graph(
+      selectedNodes,
+      [
+        ...selectedEdges,
+        { from: 'automation', to: 'selling_time', strength: 0.35 },
+        { from: 'ramp', to: 'selling_time', strength: 0.4, edge_type: 'bidirected' },
+        { from: 'selling_time', to: 'improve', strength: 0.2 },
+        { from: 'selling_time', to: 'hubspot', strength: 0.2 },
+      ],
+    );
+    const evidence = buildSelectedDependenciesEvidence(exactTwinAndBidirected, {
+      structureQuery: { kind: 'dependencies', element_id: 'selling_time' },
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{ id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities', analysis_link: 'no_analysis' }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: { id: 'selling_time', resolution_status: 'resolved' },
+      graphContextStatus: 'canonical', graphAuthority: 'canonical_strict', graphWasTrimmed: false,
+    });
+    expect(evidence?.status).toBe('resolved');
+    if (evidence?.status !== 'resolved') return;
+    expect(evidence.dependencies).toHaveLength(2);
+    expect(evidence.bidirected).toEqual([
+      expect.objectContaining({
+        from_label: 'Ramp and disruption time',
+        to_label: 'Sales rep time on selling activities',
+        edge_type: 'bidirected',
+      }),
+    ]);
+    expect(JSON.stringify(evidence)).not.toContain('Improve current CRM');
+    expect(JSON.stringify(evidence)).not.toContain('Move to HubSpot');
+  });
+
+  it('fails weak on self-loops, duplicate endpoint ids and over-bound incoming coverage', () => {
+    const common = {
+      structureQuery: { kind: 'dependencies' as const, element_id: 'selling_time' },
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{ id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities', analysis_link: 'no_analysis' as const }],
+        unresolved: 'none' as const, requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' as const },
+      proposalEntity: { id: 'selling_time', resolution_status: 'resolved' },
+      graphContextStatus: 'canonical' as const,
+      graphAuthority: 'canonical_strict' as const,
+      graphWasTrimmed: false,
+    };
+    expect(buildSelectedDependenciesEvidence(graph(
+      selectedNodes,
+      [...selectedEdges, { from: 'selling_time', to: 'selling_time', strength: 1 }],
+    ), common)).toEqual({ status: 'ambiguous' });
+
+    expect(buildSelectedDependenciesEvidence(graph(
+      [...selectedNodes, { id: 'automation', kind: 'factor', label: 'Automation duplicate' }],
+      selectedEdges,
+    ), common)).toEqual({ status: 'ambiguous' });
+
+    expect(buildSelectedDependenciesEvidence(graph(
+      [...selectedNodes, { id: 'selling_time', kind: 'outcome', label: 'Selected duplicate' }],
+      selectedEdges,
+    ), common)).toEqual({ status: 'ambiguous' });
+
+    const manyNodes = Array.from({ length: 25 }, (_, index) => ({
+      id: `driver-${index}`, kind: 'factor', label: `Driver ${index}`,
+    }));
+    const manyEdges = manyNodes.map((node) => ({
+      from: node.id, to: 'selling_time', strength: 0.2,
+    }));
+    expect(buildSelectedDependenciesEvidence(graph(
+      [...selectedNodes, ...manyNodes.slice(0, 24)],
+      manyEdges.slice(0, 24),
+    ), common)).toMatchObject({ status: 'resolved' });
+    expect(buildSelectedDependenciesEvidence(graph(
+      [...selectedNodes, ...manyNodes],
+      manyEdges,
+    ), common)).toEqual({
+      status: 'coverage_unavailable',
+      reason: 'graph_coverage_unavailable',
+    });
   });
 });

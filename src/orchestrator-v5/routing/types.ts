@@ -167,12 +167,12 @@ export type ProposalExplanation = z.infer<typeof ProposalExplanationSchema>;
  * Optional typed structure question carried by the frontier router.
  *
  * `handler_id: explain_from_structure` answers several different English
- * questions. Merely seeing two labels therefore cannot license a direct-
- * relationship answer. The router must explicitly say that the user asked
- * this one question and bind both referents to canonical graph ids; the
+ * questions. A selected identity answers "which item?", not whether the user
+ * asked for dependencies, importance or analysis. The router must explicitly
+ * type the predicate and bind its referents to canonical graph ids; the
  * deterministic structure reader then exact-joins those ids before using
  * them. This preserves model understanding without introducing a keyword
- * classifier or reusing the single action entity for a two-entity claim.
+ * classifier or reusing one authority to answer two questions.
  */
 const DirectRelationshipQuerySchema = z
   .object({
@@ -200,6 +200,13 @@ const ReachabilityQuerySchema = z
     },
   );
 
+const DependenciesQuerySchema = z
+  .object({
+    kind: z.literal('dependencies'),
+    element_id: z.string().min(1),
+  })
+  .strict();
+
 const GeneralStructureQuerySchema = z
   .object({
     kind: z.literal('general'),
@@ -208,6 +215,7 @@ const GeneralStructureQuerySchema = z
 
 export const StructureQuerySchema = z.union([
   GeneralStructureQuerySchema,
+  DependenciesQuerySchema,
   DirectRelationshipQuerySchema,
   ReachabilityQuerySchema,
 ]);

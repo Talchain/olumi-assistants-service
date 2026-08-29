@@ -29,6 +29,7 @@ import type {
   StructureProjectionSummary,
 } from '../../context/projection-summaries.js';
 import type {
+  SelectedDependenciesEvidence,
   StructuralPairEvidence,
   StructuralPairRelationship,
 } from '../../routing/structural-pair-evidence.js';
@@ -908,6 +909,71 @@ export function composeStructuralPairEvidenceAnswer(
     `The saved Living Model lists no direct connector between ${evidence.first_label} and ${evidence.second_label}. ` +
     'That answers direct connectivity only; it does not decide the separate reachability question.'
   );
+}
+
+function composeDependencyRelationship(
+  relationship: StructuralPairRelationship,
+): string {
+  const confidence = relationship.coefficient_confidence === undefined
+    ? ''
+    : ` Its recorded strength-confidence band is ${relationship.coefficient_confidence}.`;
+  if (relationship.edge_type === 'bidirected') {
+    return (
+      `The saved connector between ${relationship.from_label} and ${relationship.to_label} is bidirected. ` +
+      `It is described as ${relationship.relationship ?? 'co-movement with unavailable detail'}; that does not license causal influence in either direction.${confidence}`
+    );
+  }
+  return (
+    `The saved Living Model has a direct, directed connector from ${relationship.from_label} to ${relationship.to_label}, ` +
+    `described as ${relationship.relationship ?? 'having unavailable relationship detail'}.${confidence}`
+  );
+}
+
+/**
+ * Render the complete direct incoming dependency set of one canonically
+ * selected item.
+ * The response is deliberately local: it never walks one step further back,
+ * composes a path, or ranks connectors. Those were the exact freedoms that let
+ * otherwise fluent model prose invent an unlisted option-to-factor edge.
+ */
+export function composeSelectedDependenciesEvidenceAnswer(
+  evidence: SelectedDependenciesEvidence,
+): string {
+  if (evidence.status === 'ambiguous') {
+    return (
+      'I cannot establish one unique selected Living Model element and matching dependency question, so I will not guess its relationships. ' +
+      'Select one element and ask again.'
+    );
+  }
+  if (evidence.status === 'coverage_unavailable') {
+    if (evidence.reason === 'structural_semantics_unlicensed') {
+      return (
+        'The saved Living Model includes a structural connector for this selected item, but this response cannot safely treat that connector as a causal dependency. ' +
+        'I will not infer causal direction or strength from it.'
+      );
+    }
+    return (
+      'Some relationship detail needed to answer this dependency question was withheld from this turn. ' +
+      'I therefore cannot safely say which direct dependencies are present or absent, and I will not reconstruct them from conversation or caller state.'
+    );
+  }
+
+  const relationships = [
+    ...evidence.dependencies,
+    ...evidence.bidirected,
+  ];
+  if (relationships.length === 0) {
+    return (
+      `The saved Living Model lists no direct incoming dependency for ${evidence.selected_label}. ` +
+      'That statement is limited to direct, directed connectors; it does not prove that no indirect route or non-causal association exists.'
+    );
+  }
+
+  const sentences = relationships.map(composeDependencyRelationship);
+  sentences.push(
+    'These are the complete direct incoming dependencies and bidirected associations recorded for the selected item; bidirected associations do not establish a dependency direction, and this answer does not add an indirect route or rank importance.',
+  );
+  return sentences.join(' ');
 }
 
 export function composeExplainFromStructureFallback(
