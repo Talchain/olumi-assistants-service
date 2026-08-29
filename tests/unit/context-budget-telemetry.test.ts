@@ -33,11 +33,15 @@ import {
   projectBrief,
   projectConversation,
   CONTEXT_PACK_RECENT_TURNS_CAP,
+  assembleContextPack,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { capConversationText, CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
 import type { ConversationContext } from '../../src/orchestrator/types.js';
 import type { GraphV3T } from '../../src/schemas/cee-v3.js';
+import { bindCanonicalNodeSourceEvidence } from '../../src/orchestrator-v5/context/node-source-quote-context.js';
+import { compactSelectedGraphForContextPack } from '../../src/orchestrator-v5/context/compact-graph-for-contextpack.js';
+import { selectContextGraphSnapshot } from '../../src/orchestrator-v5/context/context-graph-snapshot.js';
 
 let emitSpy: ReturnType<typeof vi.spyOn>;
 
@@ -165,6 +169,96 @@ describe('emitContextBudget (v5.context_budget)', () => {
     expect(over).toContain('display_graph');
     expect(over).toContain('total'); // 60,000 > 55,000
     expect(over).not.toContain('brief');
+  });
+
+  it('carries the exact counts-only source-quote marker without quote or node content', () => {
+    const quoteCanary = 'SECRET RECORDED WORDING '.repeat(30);
+    const nodeIdCanary = 'node-secret-id';
+    const labelCanary = 'CONFIDENTIAL LABEL CANARY';
+    const canonicalGraph = {
+      nodes: [
+        {
+          id: nodeIdCanary,
+          kind: 'factor',
+          label: labelCanary,
+          source_quote: quoteCanary,
+          label_authored: true,
+        },
+      ],
+      edges: [],
+    };
+    const selection = selectContextGraphSnapshot({
+      canonicalRead: { status: 'ok_present', graph: canonicalGraph },
+      requestGraph: null,
+    });
+    const outcome = compactSelectedGraphForContextPack(selection, {
+      requestId: 'req-source-quotes',
+    });
+    expect(outcome.kind).toBe('compacted');
+    if (outcome.kind !== 'compacted') throw new Error('expected compacted graph');
+    const basePack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        source: 'composer',
+        turn_id: '71111111-1111-4111-8111-111111111111',
+        scenario_id: '72222222-2222-4222-8222-222222222222',
+        message: 'What was recorded?',
+        turn_class: 'review',
+        stage: 'frame',
+      } as never,
+      priorTurns: [],
+      graphContext: { status: 'canonical' },
+      compactedGraph: outcome.compact,
+    });
+    const finalPack = bindCanonicalNodeSourceEvidence({
+      basePack,
+      compactedGraph: outcome.compact,
+      message: 'What was recorded?',
+    });
+    const sourceQuotes = finalPack.context_budget?.source_quotes;
+    expect(sourceQuotes).toBeDefined();
+    emitContextBudget({
+      call_site: 'routing',
+      model: 'claude-sonnet-5',
+      prompt_version: 'v42.2j',
+      prompt_hash: 'abc123',
+      request_id: 'req-source-quotes',
+      scenario_id: 'scn-source-quotes',
+      section_chars: { display_graph: 2_000 },
+      total_chars: 2_000,
+      truncations: [],
+      source_quotes: sourceQuotes!,
+      summary_lag_turns: null,
+      ui_narrowed: null,
+      usage: undefined,
+    });
+
+    const [event] = eventsNamed(TelemetryEvents.V5ContextBudget);
+    expect(event.source_quotes).toEqual(sourceQuotes);
+    const bytes = JSON.stringify(event);
+    expect(bytes).not.toContain(quoteCanary);
+    expect(bytes).not.toContain(nodeIdCanary);
+    expect(bytes).not.toContain(labelCanary);
+    expect(Object.keys(event.source_quotes as object)).toEqual(Object.keys(sourceQuotes));
+  });
+
+  it('omits source_quotes telemetry when no in-pack withholding marker exists', () => {
+    emitContextBudget({
+      call_site: 'routing',
+      model: 'claude-sonnet-5',
+      prompt_version: 'v42.2j',
+      prompt_hash: 'abc123',
+      request_id: 'req-no-source-quotes',
+      scenario_id: 'scn-no-source-quotes',
+      section_chars: { display_graph: 100 },
+      total_chars: 100,
+      truncations: [],
+      summary_lag_turns: null,
+      ui_narrowed: null,
+      usage: undefined,
+    });
+    const [event] = eventsNamed(TelemetryEvents.V5ContextBudget);
+    expect(event).not.toHaveProperty('source_quotes');
   });
 
   it('is null-safe when usage is unavailable (no tokens → chars_per_token null)', () => {

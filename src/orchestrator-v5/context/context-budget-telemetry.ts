@@ -27,6 +27,7 @@ import {
   emitContextPolicyDivergence,
   type BudgetTelemetryCallSite,
 } from './context-policy.js';
+import type { SourceQuotesContextBudgetDisclosure } from './node-source-quote-contract.js';
 
 // ---------------------------------------------------------------------------
 // Budget tables — a DERIVED VIEW of CONTEXT_POLICY (ROADMAP 1.199, Q1 rule 2)
@@ -125,6 +126,8 @@ export interface ContextBudgetArgs {
   readonly total_chars: number;
   /** Truncations that shaped this context (may be empty). */
   readonly truncations: readonly ContextTruncationRecord[];
+  /** Exact counts-only copy of the in-pack source-quote disclosure. */
+  readonly source_quotes?: SourceQuotesContextBudgetDisclosure;
   /** Summary staleness in turns — null until S4 ships the summary layer. */
   readonly summary_lag_turns: number | null;
   /**
@@ -165,6 +168,9 @@ export function emitContextBudget(args: ContextBudgetArgs): void {
       budget_chars: CONTEXT_SECTION_BUDGETS[args.call_site].total,
       over_budget: computeOverBudget(args.call_site, args.section_chars, args.total_chars),
       truncations: args.truncations,
+      ...(args.source_quotes !== undefined
+        ? { source_quotes: args.source_quotes }
+        : {}),
       summary_lag_turns: args.summary_lag_turns,
       ui_narrowed: args.ui_narrowed,
       usage: {

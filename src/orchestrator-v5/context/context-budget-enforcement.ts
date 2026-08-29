@@ -45,6 +45,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import { log } from '../../utils/telemetry.js';
 import type { AnalysisResponseSummaryWithSignals } from './analysis-signals.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
+import type { SourceQuotesContextBudgetDisclosure } from './node-source-quote-contract.js';
 
 /**
  * One in-pack disclosure record for a budget-trimmed section. Mirrors the
@@ -65,7 +66,10 @@ export interface ContextBudgetTrimRecord {
  * carries no marker and stays byte-identical).
  */
 export interface ContextBudgetDisclosure {
-  readonly truncations: readonly ContextBudgetTrimRecord[];
+  /** Present only when ordinary graph/analysis budgeting cut a section. */
+  readonly truncations?: readonly ContextBudgetTrimRecord[];
+  /** Present only when at least one authoritative node quote was withheld. */
+  readonly source_quotes?: SourceQuotesContextBudgetDisclosure;
 }
 
 export interface ApplyContextBudgetArgs {

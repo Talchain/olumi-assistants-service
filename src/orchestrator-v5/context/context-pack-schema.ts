@@ -45,6 +45,14 @@ import { z } from 'zod';
 
 import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
 import { GRAPH_CONTEXT_STATUSES } from './context-graph-snapshot.js';
+import {
+  SOURCE_QUOTE_CANDIDATE_NODE_LIMIT,
+  SOURCE_QUOTE_DISCLOSURE_UTF16_LIMIT,
+  SOURCE_QUOTE_PER_NODE_CODE_POINT_LIMIT,
+  SOURCE_QUOTE_POLICY,
+  SOURCE_QUOTE_POLICY_VERSION,
+  SOURCE_QUOTE_PROMPT_DELTA_UTF16_LIMIT,
+} from './node-source-quote-contract.js';
 
 /**
  * The single allowed value for `version`. Bumping this is a cross-team
@@ -477,11 +485,92 @@ const ContextBudgetTrimRecordSchema = z
   })
   .strict();
 
+const SourceQuotesContextBudgetDisclosureSchema = z
+  .object({
+    policy: z.literal(SOURCE_QUOTE_POLICY),
+    version: z.literal(SOURCE_QUOTE_POLICY_VERSION),
+    per_quote_code_point_limit: z.literal(SOURCE_QUOTE_PER_NODE_CODE_POINT_LIMIT),
+    candidate_node_limit: z.literal(SOURCE_QUOTE_CANDIDATE_NODE_LIMIT),
+    prompt_delta_utf16_limit: z.literal(SOURCE_QUOTE_PROMPT_DELTA_UTF16_LIMIT),
+    candidate_count: z.number().int().positive(),
+    retained_count: z.number().int().nonnegative(),
+    empty_quote_withheld_count: z.number().int().nonnegative(),
+    per_quote_withheld_count: z.number().int().nonnegative(),
+    node_limit_withheld_count: z.number().int().nonnegative(),
+    aggregate_withheld_count: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const withheld =
+      value.empty_quote_withheld_count +
+      value.per_quote_withheld_count +
+      value.node_limit_withheld_count +
+      value.aggregate_withheld_count;
+    if (withheld === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_quotes marker requires at least one withheld feature',
+      });
+    }
+    if (
+      value.retained_count > value.candidate_count ||
+      value.empty_quote_withheld_count > value.candidate_count ||
+      value.per_quote_withheld_count > value.candidate_count ||
+      value.node_limit_withheld_count > value.candidate_count ||
+      value.aggregate_withheld_count > value.candidate_count ||
+      value.empty_quote_withheld_count + value.per_quote_withheld_count >
+        value.candidate_count
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_quotes counts exceed candidate_count',
+      });
+    }
+    if (
+      value.node_limit_withheld_count > 0 &&
+      (value.candidate_count <= SOURCE_QUOTE_CANDIDATE_NODE_LIMIT ||
+        value.node_limit_withheld_count !== value.candidate_count ||
+        value.retained_count !== 0 ||
+        value.empty_quote_withheld_count !== 0 ||
+        value.per_quote_withheld_count !== 0 ||
+        value.aggregate_withheld_count !== 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_quotes node-wall disclosure is whole-feature only',
+      });
+    }
+    if (
+      value.node_limit_withheld_count === 0 &&
+      value.candidate_count > SOURCE_QUOTE_CANDIDATE_NODE_LIMIT
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_quotes over-wall candidates require node-wall disclosure',
+      });
+    }
+    if (JSON.stringify(value).length > SOURCE_QUOTE_DISCLOSURE_UTF16_LIMIT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_quotes disclosure exceeds its compact UTF-16 bound',
+      });
+    }
+  });
+
 const ContextBudgetDisclosureSchema = z
   .object({
-    truncations: z.array(ContextBudgetTrimRecordSchema).min(1).readonly(),
+    truncations: z.array(ContextBudgetTrimRecordSchema).min(1).readonly().optional(),
+    source_quotes: SourceQuotesContextBudgetDisclosureSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.truncations === undefined && value.source_quotes === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'context_budget requires truncations or source_quotes',
+      });
+    }
+  });
 
 /**
  * Selection-aware answering (hop 4) — the analysis outputs attached to a

@@ -57,7 +57,11 @@ import {
   GOAL_TARGET_INSTRUCTION,
   BRIEF_INSTRUCTION,
   GRAPH_CONTEXT_INSTRUCTION,
+  SOURCE_QUOTES_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
+import { compactSelectedGraphForContextPack } from '../compact-graph-for-contextpack.js';
+import { selectContextGraphSnapshot } from '../context-graph-snapshot.js';
+import { bindCanonicalNodeSourceEvidence } from '../node-source-quote-context.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
 // the same serialised bytes; a private copy here would be a third variant of a
@@ -142,6 +146,10 @@ const CODE_OWNED_INSTRUCTIONS = [
   // the pack. It licences continuity while keeping historical framing below
   // the current Living Model and explicit current-user corrections.
   ['BRIEF_INSTRUCTION', BRIEF_INSTRUCTION],
+  // Exact recorded node wording. The maximal fixture below uses the real
+  // selector-aware strict compaction path and contains both one retained quote
+  // and one 513-code-point withheld quote, so emission cannot pass vacuously.
+  ['SOURCE_QUOTES_INSTRUCTION', SOURCE_QUOTES_INSTRUCTION],
 ] as const satisfies ReadonlyArray<readonly [string, string]>;
 
 const MODEL_FACING_CORPUS = [
@@ -258,10 +266,56 @@ const ANALYSIS = {
   analysis_status: 'computed',
 } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
 
+function buildAttestedSourceQuoteFixture() {
+  const graph = {
+    nodes: [
+      {
+        id: 'dec_hire',
+        kind: 'decision',
+        label: 'Hire two senior engineers locally',
+        source_quote: 'Should we build the team locally?',
+        label_authored: true,
+      },
+      {
+        id: 'goal_rev',
+        kind: 'goal',
+        label: 'Revenue growth over the next year',
+        source_quote: 'x'.repeat(513),
+        label_authored: true,
+      },
+      { id: 'opt_local', kind: 'option', label: 'Hire locally' },
+      { id: 'factor_salary', kind: 'factor', label: 'Engineer salary in the local market' },
+    ],
+    edges: [
+      {
+        from: 'factor_salary',
+        to: 'goal_rev',
+        strength: { mean: 0.4, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: 'positive',
+        provenance: { source: 'brief_extraction' },
+      },
+    ],
+  } as never;
+  const selection = selectContextGraphSnapshot({
+    canonicalRead: { status: 'ok_present', graph },
+    requestGraph: null,
+  });
+  const outcome = compactSelectedGraphForContextPack(selection, {
+    requestId: 'req-prompt-sanction-source-quotes',
+  });
+  if (outcome.kind !== 'compacted' || outcome.via !== 'strict_parse') {
+    throw new Error('prompt sanction fixture must produce canonical strict compaction');
+  }
+  return outcome.compact;
+}
+
+const ATTESTED_SOURCE_QUOTE_COMPACT = buildAttestedSourceQuoteFixture();
+
 function assembleMaximalPack(
   overrides: Partial<Parameters<typeof assembleContextPack>[0]> = {},
 ): ContextPack {
-  return assembleContextPack({
+  const input: Parameters<typeof assembleContextPack>[0] = {
     payload: makeMessagePayload({
       scenario_id: 'scen-sanction-gate',
       // Trips the compound detector (action verb either side of a conjunction)
@@ -375,28 +429,11 @@ function assembleMaximalPack(
       without_value_count: 2,
       factors_omitted: 1,
     } as never,
-    // A LARGE COMPACT graph — production supplies `compactedGraph`, and it is
-    // the input the context-budget module actually trims, so this is what makes
-    // the pack carry the `context_budget` disclosure key (FIXTURE_COMPLETENESS).
-    compactedGraph: {
-      nodes: [
-        { id: 'dec_hire', kind: 'decision', label: 'Hire two senior engineers locally' },
-        { id: 'goal_rev', kind: 'goal', label: 'Revenue growth over the next year' },
-        ...Array.from({ length: 4000 }, (_, i) => ({
-          id: `factor_${i}`,
-          kind: 'factor',
-          label: `Cost driver ${i} affecting the delivery schedule and the quarterly revenue outlook`,
-          note: 'padding to push the compacted graph past the 25% graph slice of the context budget',
-        })),
-      ],
-      edges: Array.from({ length: 4000 }, (_, i) => ({
-        from: `factor_${i}`,
-        to: 'goal_rev',
-        relationship: 'increases',
-      })),
-      _node_count: 4002,
-      _edge_count: 4000,
-    } as never,
+    // Real selector-aware canonical strict compaction. Its retained quote plus
+    // 513-code-point withheld sibling populate BOTH the display feature and
+    // `context_budget.source_quotes`, so the sanction/emission gate proves the
+    // actual path rather than a hand-built marker.
+    compactedGraph: ATTESTED_SOURCE_QUOTE_COMPACT,
     graph: {
       nodes: [
         { id: 'dec_hire', kind: 'decision', label: 'Hire two senior engineers locally' },
@@ -417,6 +454,12 @@ function assembleMaximalPack(
       ],
     } as never,
     ...overrides,
+  };
+  const basePack = assembleContextPack(input);
+  return bindCanonicalNodeSourceEvidence({
+    basePack,
+    compactedGraph: input.compactedGraph ?? null,
+    message: input.payload.message,
   });
 }
 
@@ -589,6 +632,33 @@ describe('prompt ↔ pack sanction gate', () => {
 
     expect(serialised.graph_context).toEqual({ status: 'unavailable' });
     expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
+  });
+
+  it('SOURCE WORDING — fixture carries real retained bytes, a real withholding marker and its instruction once', () => {
+    const graph = SERIALISED.graph as {
+      nodes: ReadonlyArray<Record<string, unknown>>;
+    };
+    const contextBudget = SERIALISED.context_budget as {
+      source_quotes?: Record<string, unknown>;
+    };
+
+    expect(
+      graph.nodes.some(
+        (node) => node.source_quote === 'Should we build the team locally?',
+      ),
+    ).toBe(true);
+    expect(contextBudget.source_quotes).toMatchObject({
+      policy: 'exact_or_withheld',
+      version: 1,
+      per_quote_code_point_limit: 512,
+      candidate_node_limit: 50,
+      prompt_delta_utf16_limit: 4096,
+      candidate_count: 2,
+      retained_count: 2,
+      empty_quote_withheld_count: 0,
+      per_quote_withheld_count: 1,
+    });
+    expect(RENDERED.split(SOURCE_QUOTES_INSTRUCTION)).toHaveLength(2);
   });
 
   it('THE GATE — every prose-bearing model-facing field is NAMED in the text the model receives', () => {

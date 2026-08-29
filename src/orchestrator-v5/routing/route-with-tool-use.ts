@@ -1231,6 +1231,21 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // legacy omission is normalised above to `unavailable`, so absence can never
   // mean permission to trust caller or conversational graph claims.
   parts.push('', GRAPH_CONTEXT_INSTRUCTION);
+  // Direct/legacy test and migration callers may still supply a partial pack.
+  // Missing display_graph is the weakest safe state: no evidence instruction.
+  const nodeSourceFeaturePresent = [
+    ...(contextPack.display_graph?.nodes ?? []),
+    ...(contextPack.display_graph?.goals ?? []),
+  ].some(
+    (node) =>
+      typeof node.source_quote === 'string' || node.label_authored === true,
+  );
+  if (
+    nodeSourceFeaturePresent ||
+    contextPack.context_budget?.source_quotes !== undefined
+  ) {
+    parts.push('', SOURCE_QUOTES_INSTRUCTION);
+  }
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
   // `coaching_context` pack was injected (flag on). Flag-off → the field is
@@ -1442,6 +1457,21 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
   '- `absent`: no Living Model exists yet. Do not reconstruct one from conversation or claim that a model fact is recorded.',
   '- `unavailable`: canonical model state could not be established. Do not substitute caller input, conversation or summaries as model truth, and do not turn this into a claim that no model exists.',
   '- Never expose this status token, graph identifiers, read failures or internal field names to the user; express only the warranted substance in plain language.',
+].join('\n');
+
+/**
+ * Producer-recorded wording and display-label authorship are separate facts.
+ * This block is conditional on either retained feature bytes or the in-pack
+ * withholding marker, so the field and its interpretation cannot drift across
+ * the separately managed PMS prompt.
+ */
+export const SOURCE_QUOTES_INSTRUCTION = [
+  '## Recorded source wording (deterministic authority)',
+  '- A retained `source_quote` is exact recorded data. Use it verbatim if quoting it; do not normalise, paraphrase, complete or ellipsise it.',
+  '- When `context_budget.source_quotes` is present, a node without `source_quote` may have had its quote withheld. Treat the missing wording as unknown or unavailable in this prompt, never as evidence that no recorded wording exists.',
+  '- The presence of `source_quote` does not prove who said or authored it. Never call it the user’s, a participant’s or the assistant’s words without separate producer-attested provenance.',
+  '- `label_authored: true` means only that the visible node label was producer-authored rather than verbatim source wording. Absence does not mean false, and this flag does not identify a human author.',
+  '- Do not expose policy names, limits, counts or internal field names to the user; express only the warranted substance in plain language.',
 ].join('\n');
 
 /**

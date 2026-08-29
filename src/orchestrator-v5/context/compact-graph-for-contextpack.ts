@@ -123,6 +123,30 @@ export function compactGraphForContextPack(
 // end of turn.
 const CANONICAL_STRICT_COMPACTIONS = new WeakSet<object>();
 
+/**
+ * Producer evidence that is deliberately kept OUT of GraphV3Compact.
+ *
+ * The overlay is keyed by the exact selector-attested compact object. A clone,
+ * a direct compactor caller, a provisional graph, or a structural fallback has
+ * no accessor result. Nodes stay positional so duplicate IDs cannot transfer
+ * quote/authorship authority between records.
+ */
+export interface CanonicalStrictNodeSourceEvidenceNode {
+  readonly id: string;
+  readonly kind: string;
+  readonly source_quote?: string;
+  readonly label_authored?: true;
+}
+
+export interface CanonicalStrictNodeSourceEvidence {
+  readonly nodes: readonly CanonicalStrictNodeSourceEvidenceNode[];
+}
+
+const CANONICAL_STRICT_NODE_SOURCE_EVIDENCE = new WeakMap<
+  object,
+  CanonicalStrictNodeSourceEvidence
+>();
+
 function deepFreezeContextCompaction<T>(value: T, seen = new WeakSet<object>()): T {
   if (value === null || typeof value !== 'object') return value;
   const object = value as object;
@@ -153,6 +177,16 @@ export function compactSelectedGraphForContextPack(
   ) {
     deepFreezeContextCompaction(outcome.compact);
     CANONICAL_STRICT_COMPACTIONS.add(outcome.compact);
+    const evidence = deriveCanonicalStrictNodeSourceEvidence(
+      selection.graph,
+      outcome.compact,
+    );
+    if (evidence !== null) {
+      CANONICAL_STRICT_NODE_SOURCE_EVIDENCE.set(
+        outcome.compact,
+        deepFreezeContextCompaction(evidence),
+      );
+    }
   }
   return outcome;
 }
@@ -166,6 +200,63 @@ export function isCanonicalStrictContextGraphCompaction(
     Object.isFrozen(graph) &&
     CANONICAL_STRICT_COMPACTIONS.has(graph)
   );
+}
+
+/**
+ * Return source evidence only for the exact canonical+strict compact object.
+ * Identity is the licence: structurally identical clones fail weak.
+ */
+export function getCanonicalStrictNodeSourceEvidence(
+  graph: GraphV3Compact | null | undefined,
+): CanonicalStrictNodeSourceEvidence | undefined {
+  if (!isCanonicalStrictContextGraphCompaction(graph)) return undefined;
+  return CANONICAL_STRICT_NODE_SOURCE_EVIDENCE.get(graph);
+}
+
+function deriveCanonicalStrictNodeSourceEvidence(
+  graphState: GraphStateIngress | null,
+  compact: GraphV3Compact,
+): CanonicalStrictNodeSourceEvidence | null {
+  if (graphState === null) return null;
+  const parsed = GraphV3.safeParse(graphState);
+  if (!parsed.success) return null;
+
+  // compactGraph uses this exact stable comparator. Sorting a copy preserves
+  // same-ID source order, which keeps the positional join valid even when the
+  // canonical graph contains duplicate identities. We never look up by ID.
+  const sourceNodes = [...parsed.data.nodes].sort((a, b) =>
+    a.id.localeCompare(b.id),
+  );
+  if (sourceNodes.length !== compact.nodes.length) return null;
+
+  const nodes: CanonicalStrictNodeSourceEvidenceNode[] = [];
+  for (let index = 0; index < sourceNodes.length; index += 1) {
+    const source = sourceNodes[index];
+    const projected = compact.nodes[index];
+    if (
+      source === undefined ||
+      projected === undefined ||
+      source.id !== projected.id ||
+      source.kind !== projected.kind
+    ) {
+      return null;
+    }
+    const evidence: {
+      id: string;
+      kind: string;
+      source_quote?: string;
+      label_authored?: true;
+    } = { id: source.id, kind: source.kind };
+    if (
+      Object.prototype.hasOwnProperty.call(source, 'source_quote') &&
+      typeof source.source_quote === 'string'
+    ) {
+      evidence.source_quote = source.source_quote;
+    }
+    if (source.label_authored === true) evidence.label_authored = true;
+    nodes.push(evidence);
+  }
+  return { nodes };
 }
 
 /**

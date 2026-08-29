@@ -390,7 +390,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // All three are legitimately CONDITIONAL, so none is `always_expected`.
     // None carries an enforceable ceiling, so all are honestly `telemetry_only`
     // with a null budget rather than a false `enforced` (Q5).
-    { name: 'context_budget', source: 'budget_disclosure', projection: 'applyContextBudgetToAssemblyInputs disclosure (key ABSENT when nothing was trimmed)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'context_budget', source: 'budget_disclosure', projection: 'graph/analysis trim disclosure plus exact-or-withheld source-quote counts (key ABSENT when neither ordinary trimming nor quote withholding occurred)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'compound_segments', source: 'compound', projection: 'detectCompound segments (present IFF compound_detected)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'coaching_context', source: 'coaching_context', projection: 'CoachingStatePack (hash-free prompt-safe canonical state; unconditional since O-7 wave 2 but absent when no freshness verdict was derived)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Readiness — status + the OPEN ITEMS behind it. `coaching_context` above
@@ -412,7 +412,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'graph_context', source: 'graph_authority', projection: 'selectContextGraphSnapshot (canonical|provisional|absent|unavailable; omission fails weak to unavailable)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
-    { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext plus canonical-strict exact-or-withheld node source wording', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_ROUTING_CONVERSATION_SUMMARY, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Budget slot that is NOT itself a model-facing prompt key:
     { name: 'rest', source: 'aggregate', char_budget: T_ROUTING_REST, enforcement: 'telemetry_only', cut_rank: null, model_facing: false },

@@ -48,6 +48,10 @@ export interface DisplaySafeNode {
   readonly id: string;
   readonly label: string;
   readonly kind: string;
+  /** Exact producer-recorded wording, admitted only by an attested accessor. */
+  readonly source_quote?: string;
+  /** Literal producer attestation; absence is not converted to false. */
+  readonly label_authored?: true;
   /** Producer-attested status-quo identity (option nodes only). */
   readonly is_baseline?: true;
   /** Saved Living Model detail, bounded without local interpretation. */

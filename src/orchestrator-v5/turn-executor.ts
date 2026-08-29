@@ -308,6 +308,7 @@ import {
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactSelectedGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { bindCanonicalNodeSourceEvidence } from './context/node-source-quote-context.js';
 import { selectContextGraphSnapshot } from './context/context-graph-snapshot.js';
 import { projectGoalTargetRecord } from './context/goal-target-record.js';
 import { projectFactorValueRecord } from './context/factor-value-record.js';
@@ -939,6 +940,96 @@ function projectZeroResolvedSelectionResponse(
       stage_indicator: response.stage_indicator,
     },
   };
+}
+
+/**
+ * One derived telemetry projection for every `routeWithToolUse` invocation.
+ *
+ * Keeping this outside the ordinary-routing branch is load-bearing: the
+ * bounded re-election can be the turn's only routing invocation after a deterministic
+ * first proposal. Its exact final ContextPack — including source-quote loss
+ * disclosure — must remain observable too. A router-internal REPAIR_ONCE is
+ * represented by that invocation's aggregate result rather than a second
+ * event; a bounded re-election is a distinct invocation and emits distinctly.
+ * Telemetry never affects the turn.
+ */
+function emitRoutingContextBudgetForCall(args: {
+  readonly contextPack: ContextPack;
+  readonly message: string;
+  readonly routingResult: RoutingResult;
+  readonly requestId: string;
+  readonly scenarioId: string;
+  readonly summaryLagTurns: number | null;
+  readonly olderFactsProjection: DecisionRecordsProjection | null;
+  readonly analysisState: unknown;
+}): void {
+  try {
+    const packJsonChars = (value: unknown): number =>
+      value == null ? 0 : JSON.stringify(value).length;
+    const sectionChars: Record<string, number> = {
+      conversation: packJsonChars(args.contextPack.conversation),
+      conversation_summary: packJsonChars(args.contextPack.conversation_summary),
+      older_relevant_facts: packJsonChars(args.contextPack.older_relevant_facts),
+      brief: packJsonChars(args.contextPack.brief),
+      display_analysis: packJsonChars(args.contextPack.display_analysis),
+      graph_context: packJsonChars(args.contextPack.graph_context),
+      display_graph: packJsonChars(args.contextPack.display_graph),
+    };
+    const truncations = [
+      ...(args.contextPack.brief?.truncated === true
+        ? [
+            {
+              section: 'brief',
+              original_chars: args.contextPack.brief.original_chars,
+              kept_chars: args.contextPack.brief.text.length,
+              disclosed: true,
+            },
+          ]
+        : []),
+      ...(args.contextPack.context_budget?.truncations ?? []).map((record) => ({
+        section: record.section,
+        original_chars: record.original_chars,
+        kept_chars: record.kept_chars,
+        disclosed: true,
+      })),
+      ...(args.olderFactsProjection?.truncated === true
+        ? [
+            {
+              section: 'older_relevant_facts',
+              original_chars: args.olderFactsProjection.projectableChars,
+              kept_chars: args.olderFactsProjection.bodyChars,
+              original_records: args.olderFactsProjection.totalCount,
+              kept_records: args.olderFactsProjection.includedCount,
+              disclosed: true,
+            },
+          ]
+        : []),
+    ];
+    const narrowingMarker = (
+      args.analysisState as Record<string, unknown> | null | undefined
+    )?.narrowing as Record<string, unknown> | undefined;
+    const servedPrompt = getCachedRoutingPromptIdentity();
+    emitContextBudget({
+      call_site: 'routing',
+      model: args.routingResult.rawResult?.model ?? null,
+      prompt_version: String(servedPrompt?.version ?? ROUTING_PROMPT_VERSION),
+      prompt_hash: servedPrompt?.sent_hash ?? ROUTING_PROMPT_HASH,
+      request_id: args.requestId,
+      scenario_id: args.scenarioId,
+      section_chars: sectionChars,
+      total_chars: buildUserMessage(args.contextPack, args.message).length,
+      truncations,
+      ...(args.contextPack.context_budget?.source_quotes !== undefined
+        ? { source_quotes: args.contextPack.context_budget.source_quotes }
+        : {}),
+      summary_lag_turns: args.summaryLagTurns,
+      ui_narrowed:
+        narrowingMarker == null ? null : narrowingMarker.narrowed === true,
+      usage: args.routingResult.rawResult?.usage,
+    });
+  } catch {
+    // Accounting and prompt identity are observe-only.
+  }
 }
 
 /**
@@ -7933,10 +8024,10 @@ export async function runTurnExecutor(
         // requires a typed `action_type` pill, and no affordance carries both.
         // The pin is a test, not a comment.
         //
-        // The `v5.context_budget` measurement at :7927 reads
-        // `buildUserMessage(contextPack, payload.message)` — the RAW message,
-        // deliberately unchanged here, so the budget series stays comparable
-        // across the arm landing.
+        // `v5.context_budget.total_chars` is intentionally measured from the
+        // exact composed message handed to the router. Older code measured the
+        // raw message and therefore under-counted this directive; the route-
+        // level test pins the corrected wire truth so that error cannot return.
         const coachingIntent = resolveCoachingIntent(payload);
         const coachingDirective =
           coachingIntent === undefined
@@ -7996,8 +8087,19 @@ export async function runTurnExecutor(
             ? payload.message
             : composeCoachingRoutingMessage(payload.message, coachingDirective.directive);
 
+        // Canonical source wording is an ADDITIVE final-egress feature. Every
+        // ordinary budget and input gate has finished, and this branch proves a
+        // real model call will occur. Compare candidates with the exact message
+        // the router will send; deterministic/no-LLM turns never pay or fail
+        // this model-facing bound.
+        const routingContextPack = bindCanonicalNodeSourceEvidence({
+          basePack: contextPack,
+          compactedGraph,
+          message: routingMessage,
+        });
+
         const routingStartedAt = timingsEnabled ? Date.now() : 0;
-        routingResult = await routeWithToolUse(contextPack, routingMessage, {
+        routingResult = await routeWithToolUse(routingContextPack, routingMessage, {
           requestId,
           sessionId: context.session_id,
           signal: turnAbort.signal,
@@ -8100,7 +8202,7 @@ export async function runTurnExecutor(
         // deterministic pre-route answer was grounded on it. Moving this back
         // above the pre-route gates is a mutant killed by the selected advice-
         // gate negative control; removing it is killed by the routed positive.
-        capturedFocus = contextPack.focus;
+        capturedFocus = routingContextPack.focus;
         // ROADMAP 1.42 — stash VERBATIM reasoning immediately after the real
         // LLM call. Undefined when the flag was off or no thinking blocks
         // were emitted (see ChatWithToolsResult.reasoning jsdoc).
@@ -8118,112 +8220,16 @@ export async function runTurnExecutor(
         // exactness is not derivable and the sum omits indentation/wrapper
         // overhead by design. Telemetry-additive only; a fault here must
         // never affect the turn.
-        try {
-          const packJsonChars = (v: unknown): number =>
-            v == null ? 0 : JSON.stringify(v).length;
-          // Compact per-section composition proxy (display_* mirror the
-          // prompt's projections; conversation/brief are embedded as-is).
-          const routingSectionChars: Record<string, number> = {
-            conversation: packJsonChars(contextPack.conversation),
-            // Context v2 S4-INJECT: the rolling-summary block's compact
-            // size. 0 below 'inject' / when no stored summary — the key is
-            // always present so the dashboard shows the layer arriving
-            // (03 §1 pre-declared the 1,300-char routing budget for it).
-            conversation_summary: packJsonChars(contextPack.conversation_summary),
-            // Knowledge-over-time (P6): the decision-records read slice. Always
-            // present (0 when the scenario has no records) so the dashboard shows
-            // the layer arriving; bounded by POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET
-            // (enforced), so the divergence tripwire stays silent on healthy turns.
-            older_relevant_facts: packJsonChars(contextPack.older_relevant_facts),
-            brief: packJsonChars(contextPack.brief),
-            display_analysis: packJsonChars(contextPack.display_analysis),
-            // Always emitted by production assembly. Keeping it in the same
-            // realised decomposition as the policy row makes a dark authority
-            // marker observable rather than producing a false under-emit alarm.
-            graph_context: packJsonChars(contextPack.graph_context),
-            display_graph: packJsonChars(contextPack.display_graph),
-          };
-          // Exact embedded prompt length (ground truth for budgeting).
-          const routingTotalChars = buildUserMessage(
-            contextPack,
-            payload.message,
-          ).length;
-          // `truncations` carries only records with EXACT numbers here (the
-          // brief slice discloses original_chars in-pack). The window slice
-          // is on the per-cut `v5.context_truncation` stream with exact
-          // chars — the pack only knows turn counts at this altitude.
-          // O-3: budget-trim records are DERIVED from the pack's in-band
-          // `context_budget` marker (never re-estimated here), so the
-          // accounting event and the prompt-visible disclosure can't drift.
-          const routingTruncations = [
-            ...(contextPack.brief?.truncated === true
-              ? [
-                  {
-                    section: 'brief',
-                    original_chars: contextPack.brief.original_chars,
-                    kept_chars: contextPack.brief.text.length,
-                    disclosed: true,
-                  },
-                ]
-              : []),
-            ...(contextPack.context_budget?.truncations ?? []).map((t) => ({
-              section: t.section,
-              original_chars: t.original_chars,
-              kept_chars: t.kept_chars,
-              disclosed: true,
-            })),
-            // Knowledge-over-time (P6): a decision record dropped by the read's
-            // SQL LIMIT used to be invisible on every channel — this event's
-            // `truncations` read `[]` while a record was being evicted, because
-            // the projection's own `truncated` flag was discarded at the call
-            // site. It is DERIVED from the projection, never re-estimated.
-            ...(olderFactsProjectionForBudget?.truncated === true
-              ? [
-                  {
-                    section: 'older_relevant_facts',
-                    // Records dropped at the SQL LIMIT never entered the
-                    // process, so their chars are unknowable and are not
-                    // fabricated: these two are equal on a pure record drop and
-                    // differ only when the CHAR budget also cut.
-                    original_chars: olderFactsProjectionForBudget.projectableChars,
-                    kept_chars: olderFactsProjectionForBudget.bodyChars,
-                    original_records: olderFactsProjectionForBudget.totalCount,
-                    kept_records: olderFactsProjectionForBudget.includedCount,
-                    disclosed: true,
-                  },
-                ]
-              : []),
-          ];
-          // S8u tolerance (02 Seam 4 [R8]): the UI's pre-narrowing marker
-          // rides INSIDE the analysis_state passthrough carrier. Absent on
-          // pre-S8u UIs → null (unknown), never fabricated.
-          const narrowingMarker = (
-            options.analysisState as Record<string, unknown> | null | undefined
-          )?.narrowing as Record<string, unknown> | undefined;
-          const servedPromptForBudget = getCachedRoutingPromptIdentity();
-          emitContextBudget({
-            call_site: 'routing',
-            model: routingResult.rawResult?.model ?? null,
-            prompt_version: String(servedPromptForBudget?.version ?? ROUTING_PROMPT_VERSION),
-            prompt_hash: servedPromptForBudget?.sent_hash ?? ROUTING_PROMPT_HASH,
-            request_id: requestId,
-            scenario_id: context.session_id,
-            section_chars: routingSectionChars,
-            total_chars: routingTotalChars,
-            truncations: routingTruncations,
-            // Context v2 S4-INJECT: populated (≥0) when a stored summary
-            // entered this prompt; null otherwise (flag below 'inject', no
-            // stored summary, or store read failure).
-            summary_lag_turns: summaryLagForBudget,
-            ui_narrowed:
-              narrowingMarker == null
-                ? null
-                : narrowingMarker.narrowed === true,
-            usage: routingResult.rawResult?.usage,
-          });
-        } catch {
-          // Accounting must never affect the turn.
-        }
+        emitRoutingContextBudgetForCall({
+          contextPack: routingContextPack,
+          message: routingMessage,
+          routingResult,
+          requestId,
+          scenarioId: context.session_id,
+          summaryLagTurns: summaryLagForBudget,
+          olderFactsProjection: olderFactsProjectionForBudget,
+          analysisState: options.analysisState,
+        });
         if (timingsEnabled) {
           turnTimings.routing_llm_ms = Date.now() - routingStartedAt;
           // Per-call attribution for `_diagnostic_trace.llm_calls`: the routing
@@ -8315,8 +8321,13 @@ export async function runTurnExecutor(
         );
         if (boundedHandler !== null) {
           const firstElectionCalls = routingResult.llmCallCount;
+          const reElectionContextPack = bindCanonicalNodeSourceEvidence({
+            basePack: contextPackForLog,
+            compactedGraph,
+            message: payload.message,
+          });
           const reElected = await routeWithToolUse(
-            contextPackForLog,
+            reElectionContextPack,
             payload.message,
             {
               requestId,
@@ -8327,6 +8338,16 @@ export async function runTurnExecutor(
               forcedExplanationReason: 'bounded_non_mutation',
             },
           );
+          emitRoutingContextBudgetForCall({
+            contextPack: reElectionContextPack,
+            message: payload.message,
+            routingResult: reElected,
+            requestId,
+            scenarioId: context.session_id,
+            summaryLagTurns: summaryLagForBudget,
+            olderFactsProjection: olderFactsProjectionForBudget,
+            analysisState: options.analysisState,
+          });
           routingResult = {
             ...reElected,
             llmCallCount: firstElectionCalls + reElected.llmCallCount,

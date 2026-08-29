@@ -353,7 +353,7 @@ describe('a typed coaching intent routes end-to-end and reaches the coach', () =
   );
 
   it('emits the routing telemetry with the intent it routed', async () => {
-    const { adapter } = makeCapturingAdapter();
+    const { adapter, seen } = makeCapturingAdapter();
     await runTurnExecutor(chipPayload('challenge_frame', 'frame'), 'req-wire-telemetry', {
       routingAdapter: adapter as never,
       graphState: READY_GRAPH as never,
@@ -363,6 +363,10 @@ describe('a typed coaching intent routes end-to-end and reaches the coach', () =
     const routed = events.filter(e => e.event === TelemetryEvents.V5TypedCoachingIntentRoute);
     expect(routed).toHaveLength(1);
     expect(routed[0]!.data.intent).toBe('challenge_frame');
+    const budgets = events.filter(e => e.event === TelemetryEvents.V5ContextBudget);
+    expect(budgets).toHaveLength(1);
+    expect(seen).toHaveLength(1);
+    expect(budgets[0]!.data.total_chars).toBe(seen[0]!.length);
   });
 
   it('CONTRAST CONTROL — the SAME message from the composer carries NO directive', async () => {

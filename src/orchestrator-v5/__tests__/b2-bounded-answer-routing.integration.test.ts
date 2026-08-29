@@ -311,6 +311,47 @@ describe('B2 real executor convergence', () => {
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 
+  it('emits source-evidence disclosure for both ordinary election and bounded re-election', async () => {
+    persistedGraph = {
+      ...structuredClone(GRAPH),
+      nodes: GRAPH.nodes.map((node) =>
+        node.id === 'adoption'
+          ? {
+              ...node,
+              source_quote: 'x'.repeat(513),
+              label_authored: true,
+            }
+          : node,
+      ),
+    };
+    const budgetEvents: Array<Record<string, unknown>> = [];
+    setTestSink((eventName, data) => {
+      if (eventName === 'v5.context_budget') budgetEvents.push(data);
+    });
+    const adapter = mutatingThenAnsweringAdapter(
+      'The strongest challenge is the modelled adoption relationship.',
+    );
+    const { handlers } = registry();
+
+    await runTurnExecutor(payload(PRODUCT_CHALLENGE), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(budgetEvents).toHaveLength(2);
+    for (const event of budgetEvents) {
+      expect(event.source_quotes).toMatchObject({
+        candidate_count: 1,
+        retained_count: 1,
+        per_quote_withheld_count: 1,
+      });
+      expect(JSON.stringify(event)).not.toContain('x'.repeat(64));
+      expect(JSON.stringify(event)).not.toContain('adoption');
+    }
+  });
+
   it('answers a safety question before run_analysis and does not execute the run', async () => {
     const answer =
       'It is safe only as an exploratory run because the current facts do not attest adoption evidence quality.';
