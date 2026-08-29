@@ -1,0 +1,135 @@
+{
+  "option_comparison": [
+    {
+      "option_id": "5f6f5e36",
+      "option_label": "replace our current CRM with HubSpot next quarter",
+      "id": "5f6f5e36",
+      "label": "replace our current CRM with HubSpot next quarter",
+      "outcome": {
+        "mean": 0.1709315709036639,
+        "std": 0.22347818503975597,
+        "p10": -0.10860219392912529,
+        "p50": 0.17254380461299262,
+        "p90": 0.4563143607416079,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1,
+        "percentiles_source": "samples"
+      },
+      "status": "computed",
+      "win_probability": 0.7581999999999611,
+      "downside": {
+        "cvar_10": -0.22566248202336012,
+        "p05": -0.19728331045263128,
+        "expected_regret": 0
+      }
+    },
+    {
+      "option_id": "a551345f",
+      "option_label": "keep what we have",
+      "id": "a551345f",
+      "label": "keep what we have",
+      "outcome": {
+        "mean": 0.011740725903194959,
+        "std": 0.15567957189893655,
+        "p10": -0.19414142612210802,
+        "p50": 0.02718741257112612,
+        "p90": 0.18980763297708286,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1,
+        "percentiles_source": "samples"
+      },
+      "status": "computed",
+      "win_probability": 0.12090000000000044,
+      "downside": {
+        "cvar_10": -0.30167315662528094,
+        "p05": -0.27699912744068916,
+        "expected_regret": 0.15919084500046893
+      }
+    },
+    {
+      "option_id": "a7d7b5cf",
+      "option_label": "Phased HubSpot Pilot (subset of team first)",
+      "id": "a7d7b5cf",
+      "label": "Phased HubSpot Pilot (subset of team first)",
+      "outcome": {
+        "mean": 0.07541706390338253,
+        "std": 0.17288226432226966,
+        "p10": -0.14785314601126776,
+        "p50": 0.08210457520841419,
+        "p90": 0.2831397224140047,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1,
+        "percentiles_source": "samples"
+      },
+      "status": "computed",
+      "win_probability": 0.12090000000000044,
+      "downside": {
+        "cvar_10": -0.25903202536486414,
+        "p05": -0.2298372723141382,
+        "expected_regret": 0.09551450700028138
+      }
+    }
+  ],
+  "decision_brief": {
+    "brief_id": "0ddf22c8-4108-43aa-9a70-88b86b83e0b2",
+    "version": "1",
+    "headline": "replace our current CRM with HubSpot next quarter currently leads, but the outcome is highly uncertain. Key uncertainty: HubSpot Adoption has high impact but low evidence quality. Gather evidence on HubSpot Adoption before deciding.",
+    "options": [
+      {
+        "option_id": "5f6f5e36",
+        "label": "replace our current CRM with HubSpot next quarter",
+        "win_probability": 0.7581999999999611,
+        "rank": 1
+      },
+      {
+        "option_id": "a551345f",
+        "label": "keep what we have",
+        "win_probability": 0.12090000000000044,
+        "rank": 2
+      },
+      {
+        "option_id": "a7d7b5cf",
+        "label": "Phased HubSpot Pilot (subset of team first)",
+        "win_probability": 0.12090000000000044,
+        "rank": 3
+      }
+    ],
+    "warnings": [
+      {
+        "code": "GOAL_ANCESTOR_DATA_GAP",
+        "message": "Goal node 'caf5d6ce' is scored from its forward-propagated outcome distribution, but root ancestor(s) '415c0614' carry no observed value or ParameterUncertainty and defaulted to 0.0 \u2014 goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+        "severity": "warning"
+      },
+      {
+        "code": "INFLUENTIAL_EXTERNALS",
+        "message": "External factors HubSpot Adoption, Annual CRM Spend significantly affect your outcome but are inherently uncertain. How might you bound these?",
+        "severity": "warning"
+      },
+      {
+        "code": "M2_UNAVAILABLE",
+        "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+        "severity": "warning"
+      }
+    ],
+    "warning_codes": [],
+    "headline_banded": {
+      "text": "replace our current CRM with HubSpot next quarter is clearly ahead.",
+      "band": "clearly_ahead",
+      "leader_option_id": "5f6f5e36",
+      "leader_label": "replace our current CRM with HubSpot next quarter",
+      "runner_up_option_id": "a551345f",
+      "runner_up_label": "keep what we have",
+      "win_probability_gap": 0.6372999999999607,
+      "robustness_gated": false,
+      "doctrine": "provisional_doctrine_v0"
+    },
+    "analysis_summary": {
+      "leading_option": "replace our current CRM with HubSpot next quarter",
+      "win_probability": 0.7581999999999611,
+      "robustness_band": "moderate"
+    }
+  }
+}
