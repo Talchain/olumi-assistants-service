@@ -243,6 +243,125 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(identity!.source).toBe('default');
   });
 
+  // ── CLEAN vs MIXED edit records ─────────────────────────────────────────
+  //
+  // Repair attempts are served by the `repair_edit_graph` prompt, not by
+  // `edit_graph`. Before this fix the trace paired the INITIAL call's prompt
+  // identity with the LAST attempt's stop reason and dropped `repair_attempts`
+  // entirely — so a reader could not tell a single-attempt record from a
+  // repaired one, and would attribute the outcome to the wrong prompt.
+  //
+  // These two cases are a MATCHED PAIR and neither is sufficient alone.
+  // Asserting only "two identities exist" would pass against a builder that
+  // emitted a repair entry unconditionally; the clean case is what forbids
+  // that. The distinction IS the fix.
+  it('a CLEAN edit record (no repair) carries the edit identity ONLY and declares one attempt', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      editLlmCall: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        input_tokens: 3100,
+        output_tokens: 210,
+        latency_ms: 1450,
+        stop_reason: 'end_turn',
+        repair_attempts: 0,
+        prompt_hash: 'sha256:editgraphhash',
+        prompt_version: 'edit_graph_default@v12',
+        prompt_source: 'default',
+        // No repair ran, so the producer captured no repair identity.
+        repair_prompt_hash: undefined,
+        repair_prompt_version: undefined,
+        repair_prompt_source: undefined,
+      },
+    });
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'edit_graph')).toBe(true);
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'repair_edit_graph')).toBe(false);
+    // A reader must be able to see "one attempt, no repair" WITHOUT inferring
+    // it from the absence of a second identity.
+    expect(trace!.retry?.retry_count).toBe(0);
+    expect(trace!.retry?.llm_attempt_count).toBe(1);
+  });
+
+  it('a MIXED edit record (repaired) carries BOTH identities and declares the repair count', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      editLlmCall: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        input_tokens: 3100,
+        output_tokens: 210,
+        latency_ms: 1450,
+        // `stop_reason` belongs to the LAST attempt — i.e. to the REPAIR call.
+        stop_reason: 'end_turn',
+        repair_attempts: 2,
+        prompt_hash: 'sha256:editgraphhash',
+        prompt_version: 'edit_graph_default@v12',
+        prompt_source: 'default',
+        repair_prompt_hash: 'sha256:repairhash',
+        repair_prompt_version: 'repair_edit_graph_store@v4',
+        repair_prompt_source: 'store',
+      },
+    });
+    const edit = trace!.prompt_identity.find((p) => p.task_id === 'edit_graph');
+    const repair = trace!.prompt_identity.find((p) => p.task_id === 'repair_edit_graph');
+    expect(edit).toBeDefined();
+    expect(repair).toBeDefined();
+    // Bound by identity: each entry carries ITS OWN prompt's hash. A fix that
+    // copied one hash into both slots would satisfy "two entries exist".
+    expect(edit!.hash).toBe('sha256:editgraphhash');
+    expect(repair!.hash).toBe('sha256:repairhash');
+    expect(repair!.version).toBe('repair_edit_graph_store@v4');
+    expect(repair!.source).toBe('store');
+    // The count that makes the record self-evidently mixed.
+    expect(trace!.retry?.retry_count).toBe(2);
+    expect(trace!.retry?.llm_attempt_count).toBe(3);
+  });
+
+  // A repair genuinely ran but the loader could not bind an identity to the
+  // bytes it served. Recording a repair entry anyway — or reusing the edit
+  // prompt's hash for it — would be the same untruth this fix removes, so the
+  // repair entry is absent while `retry_count` still declares the repair.
+  it('a repaired edit whose repair identity could not be bound declares the repair but attributes no repair prompt', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      editLlmCall: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        input_tokens: 3100,
+        output_tokens: 210,
+        latency_ms: 1450,
+        stop_reason: 'end_turn',
+        repair_attempts: 1,
+        prompt_hash: 'sha256:editgraphhash',
+        prompt_version: 'edit_graph_default@v12',
+        prompt_source: 'default',
+        repair_prompt_hash: undefined,
+        repair_prompt_version: undefined,
+        repair_prompt_source: undefined,
+      },
+    });
+    expect(trace!.prompt_identity.some((p) => p.task_id === 'repair_edit_graph')).toBe(false);
+    // The mixed-ness is STILL visible — this is what stops the absent identity
+    // reading as a clean single-attempt record.
+    expect(trace!.retry?.retry_count).toBe(1);
+  });
+
   it('falls back to the honest model sentinel when the edit adapter did not expose a model', async () => {
     process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
     const trace = buildMinimalV5DiagnosticTrace({
@@ -446,6 +565,93 @@ describe('buildErrorV5DiagnosticTrace', () => {
     expect(trace!.retry?.retry_count).toBe(2);
     expect(trace!.benchmarking.substage_timings.llm_call_ms).toBe(30000);
     expect(trace!.benchmarking.substage_timings.parse_ms).toBe(30050);
+  });
+
+  // ── Prompt attribution on the ERROR path ────────────────────────────────
+  //
+  // A failing turn is exactly when "which prompt produced this?" matters most,
+  // and this builder answered `prompt_identity: []` on EVERY error — while the
+  // same hash it was withholding sat one field away in `correlation_ids`.
+  //
+  // The assertions below bind BY TASK ID, never by array position or by a
+  // value predicate another record could satisfy (trap 19): the error path may
+  // one day carry more than one identity, and a positional assertion would
+  // then start passing on whichever record happened to land first.
+  it('records the served draft_graph prompt identity on the error path', () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildErrorV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      error: new Error('SO parse failed'),
+      toolLLMTelemetry: {
+        tool: 'draft_graph',
+        model: 'claude-opus-4-7',
+        provider: 'anthropic',
+        input_tokens: 1234,
+        output_tokens: 0,
+        latency_ms: 30000,
+        stop_reason: 'max_tokens',
+        thinking_enabled: false,
+        structured_outputs_used: true,
+        prompt_version: 'draft_graph_store@v41',
+        prompt_hash: 'sha256:errorpathdrafthash',
+      },
+    });
+    const draft = trace!.prompt_identity.find((p) => p.task_id === 'draft_graph');
+    expect(draft).toBeDefined();
+    expect(draft!.hash).toBe('sha256:errorpathdrafthash');
+    expect(draft!.version).toBe('draft_graph_store@v41');
+    expect(draft!.prompt_id).toBe('draft_graph_store@v41');
+    // The hash the builder already published in correlation_ids must be the
+    // SAME hash it now attributes — a second, divergent digest would be worse
+    // than the empty array it replaces.
+    expect(trace!.correlation_ids.prompt_hash).toBe(draft!.hash);
+  });
+
+  // OPPOSITE-DIRECTION TWIN (trap 22b). Without this case a fix that filled
+  // the slot with '' / 'unknown' whenever the loader reported no hash would
+  // pass the positive test above and start attributing every cache-miss
+  // failure to a prompt that does not exist. An honest absence, never a
+  // fabricated digest — the same guard the four success-path sites carry.
+  it('records NO prompt identity on the error path when the loader reported no hash', () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildErrorV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      error: new Error('SO parse failed'),
+      toolLLMTelemetry: {
+        tool: 'draft_graph',
+        model: 'claude-opus-4-7',
+        provider: 'anthropic',
+        input_tokens: 1234,
+        output_tokens: 0,
+        latency_ms: 30000,
+        stop_reason: 'max_tokens',
+        thinking_enabled: false,
+        structured_outputs_used: true,
+        // No prompt_hash: cold start / cache miss.
+      },
+    });
+    expect(trace!.prompt_identity).toEqual([]);
+  });
+
+  // The error builder is reached on paths that carry NO tool telemetry at all
+  // (a throw before the LLM ran). Nothing to attribute, so nothing recorded.
+  it('records no prompt identity when the error carried no tool telemetry', () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildErrorV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      error: new Error('threw before the call'),
+    });
+    expect(trace!.prompt_identity).toEqual([]);
+    expect(trace!.llm_calls).toEqual([]);
   });
 });
 

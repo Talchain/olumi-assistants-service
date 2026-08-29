@@ -436,10 +436,16 @@ export async function build() {
   await logFeatureHealth();
 
   // Startup health summary — single structured log line for deployment diagnostics
-  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
-  const diagnosticTraceEnabled = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined
-    ? config.features.diagnosticTraceEnabled
-    : nodeEnv !== 'production';
+  //
+  // ⚠ THIS LINE USED TO LIE (ISSUE-9020). It computed the LOGGED value as
+  // `env unset ? nodeEnv !== 'production' : <real flag>`, while the real gate
+  // (`config.features.diagnosticTraceEnabled`) defaults FALSE. So with the
+  // variable unset on any non-production deploy the startup log printed
+  // `diagnostic_trace: true` while the trace was off — a capability reported
+  // as ON when it was OFF, which is the one thing a startup health summary
+  // must never do. It now reports the gate the code actually consults; there
+  // is no second value to keep in step with it.
+  const diagnosticTraceEnabled = config.features.diagnosticTraceEnabled;
   log.info({
     event: 'config.startup_health',
     pipeline: 'unified_v2',
