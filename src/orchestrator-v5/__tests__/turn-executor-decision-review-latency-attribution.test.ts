@@ -104,7 +104,7 @@ const DR_OUTPUT_TOKENS = 876;
 // identity, never by a value another object could satisfy).
 const DR_PROMPT_HASH = 'sha256:decisionreviewhash01';
 const DR_PROMPT_VERSION = 'decision_review_default@v11.1';
-const DR_PROMPT_SOURCE = 'default';
+const DR_PROMPT_SOURCE = 'default' as const;
 // Measurable enricher delay so `decision_review_ms` is unambiguously non-trivial
 // and the de-absorption of `compose_ms` is discriminating with a WIDE margin.
 // Real compose work in this heavily-logged harness runs ~tens-to-few-hundred ms
@@ -216,7 +216,7 @@ function mockDecisionReviewInvoke() {
       output_tokens: DR_OUTPUT_TOKENS,
       prompt_version: DR_PROMPT_VERSION,
       prompt_hash: DR_PROMPT_HASH,
-      prompt_source: DR_PROMPT_SOURCE as const,
+      prompt_source: DR_PROMPT_SOURCE,
       resolution: MOCK_RESOLUTION,
     };
   });
