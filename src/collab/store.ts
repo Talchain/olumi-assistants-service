@@ -66,6 +66,60 @@ function toRound(r: RoundRecord): CollabRound {
   };
 }
 
+/**
+ * ⭐⭐ THE MODEL'S OWN NUMBER FOR ONE NODE, OR NULL — and this is a
+ * DIFFERENTLY-NAMED-TWIN REPAIR, not a widening for luck.
+ *
+ * ── WHAT WAS DARK ─────────────────────────────────────────────────────────
+ * `getModelValuesAtVersion` read `node.value`. **Nothing writes a top-level
+ * `node.value`.** `NodeV3` (`schemas/cee-v3.ts:156-285`) declares no such
+ * field, and it is a plain `z.object` — "declared fields only, unknown fields
+ * stripped" — so a top-level `value` could not survive the parse even if some
+ * producer emitted one. The canonical carrier is `observed_state.value`
+ * (`ObservedStateV3.value: z.number()`, required).
+ *
+ * The consequence reached the screen. Both collaboration surfaces are written
+ * to say "The model held 0.35 for this when the round opened"
+ * (`ParticipantPacketPage.tsx`, `DisagreementBody.tsx`), and CEE composes the
+ * same sentence for its digest (`disagreement-read-model.ts:349`). All three
+ * are gated on `model_value_at_version !== null`, so all three had **never
+ * rendered**: measured null on six targets across two freshly-drafted staging
+ * models. The comparison a facilitator most wants — *the model says X, your
+ * team says 0.18 to 0.62* — was absent, silently, with no error anywhere.
+ *
+ * ── ⚠ `display_value` IS DELIBERATELY NOT READ HERE ───────────────────────
+ * It is tempting as a third fallback and it is the WRONG TYPE:
+ * `NodeV3.display_value` is `z.string().optional()` — a formatted human string
+ * ("£40,000", "18 months"), per its own docstring. This function's contract is
+ * `number | null`, and every consumer is typed that way
+ * (`collab/types.ts:440`, `disagreement-read-model.ts:110`, and the UI's
+ * `model_value_at_version: number | null`). Coercing a formatted string into
+ * that slot would put a parsed-out number on screen that no producer ever
+ * asserted, which is the fabrication class this whole feature exists to refuse.
+ * If the formatted string is wanted on screen it needs its OWN field and its
+ * own trip through the contract — not this one's.
+ *
+ * ── ABSENT STAYS ABSENT ───────────────────────────────────────────────────
+ * There is no `?? 0` and there must never be one. A zero here is a claim that
+ * the model held zero, which is a different and much worse statement than
+ * "the model had no number for this". Null is the honest answer and every
+ * consumer already renders nothing for it.
+ *
+ * `node.value` is retained LAST purely as a defensive read for any historic or
+ * externally-authored graph that does carry one; it is not the live shape.
+ */
+export function readNodeValue(node: unknown): number | null {
+  if (typeof node !== 'object' || node === null) return null;
+  const n = node as { value?: unknown; observed_state?: unknown };
+  const observed =
+    typeof n.observed_state === 'object' && n.observed_state !== null
+      ? (n.observed_state as { value?: unknown }).value
+      : undefined;
+  if (typeof observed === 'number' && Number.isFinite(observed)) return observed;
+  if (typeof n.value === 'number' && Number.isFinite(n.value)) return n.value;
+  return null;
+}
+
 export class SupabaseCollabStore implements CollabStore {
   constructor(private readonly db: SupabaseClient) {}
 
@@ -292,10 +346,10 @@ export class SupabaseCollabStore implements CollabStore {
     const nodes = (graph as { nodes?: unknown[] } | null)?.nodes;
     if (!Array.isArray(nodes)) return out;
     for (const node of nodes) {
-      const n = node as { id?: unknown; value?: unknown };
-      if (typeof n.id === 'string' && n.id in out && typeof n.value === 'number') {
-        out[n.id] = n.value;
-      }
+      const n = node as { id?: unknown };
+      if (typeof n.id !== 'string' || !(n.id in out)) continue;
+      const value = readNodeValue(node);
+      if (value !== null) out[n.id] = value;
     }
     return out;
   }
