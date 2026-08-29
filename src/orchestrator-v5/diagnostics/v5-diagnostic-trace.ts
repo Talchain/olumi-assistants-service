@@ -57,6 +57,7 @@ import {
   DiagnosticTraceCollector,
   emptyDiagnosticTrace,
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
+import type { PromptAttributionSnapshot } from '../../orchestrator/pipeline/prompt-attribution.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
@@ -457,6 +458,15 @@ export interface BuildV5DiagnosticTraceInput {
   readonly scenarioId: string;
   readonly turnId: string;
   readonly requestId: string;
+  /**
+   * Attribution for the pipeline's NON-DRAFT LLM calls — the post-draft
+   * coaching pass and `validate_graph`. Both run on every draft turn and
+   * neither rides `DraftGraphResult`, so before this the trace attributed a
+   * multi-call turn entirely to `draft_graph`. Collected by the dispatcher and
+   * threaded down through `UnifiedPipelineOpts`; see
+   * `orchestrator/pipeline/prompt-attribution.ts`.
+   */
+  readonly promptAttribution?: PromptAttributionSnapshot;
 }
 
 export interface BuildMinimalV5DiagnosticTraceInput {
@@ -489,6 +499,13 @@ export interface BuildErrorV5DiagnosticTraceInput {
   readonly toolLLMTelemetry?: DraftGraphResult['toolLLMTelemetry'];
   readonly pipelineOutcome?: PipelineOutcome;
   readonly draftGraphTimings?: DraftGraphTimings;
+  /**
+   * Attribution for the pipeline's non-draft LLM calls, for whatever ran
+   * BEFORE the failure. This is the whole reason the collector is owned by the
+   * dispatcher rather than created inside the pipeline: a turn that threw
+   * after the coaching pass still knows which prompt and model that pass used.
+   */
+  readonly promptAttribution?: PromptAttributionSnapshot;
 }
 
 // ─── Builders ──────────────────────────────────────────────────────────────
@@ -505,6 +522,9 @@ export function buildV5DiagnosticTrace(
 
   const collector = new DiagnosticTraceCollector();
   populateCollectorFromDraftResult(collector, input.draftResult);
+  if (input.promptAttribution) {
+    populateCollectorFromPromptAttribution(collector, input.promptAttribution);
+  }
 
   const frozen = collector.freeze();
   const benchmarking = buildBenchmarkingForDraftGraph(input);
@@ -649,6 +669,16 @@ export function buildErrorV5DiagnosticTrace(
     }
   }
 
+  // Whatever the pipeline's non-draft calls recorded BEFORE the failure. A
+  // draft that threw in validation still reports the coaching pass's prompt
+  // and model; a draft that threw inside Pass 2 still reports Pass 2's model,
+  // because the recording site runs before the truncation guard that throws.
+  // Outside the `toolLLMTelemetry` guard above deliberately: these calls
+  // happen whether or not the structural draft surfaced any telemetry.
+  if (input.promptAttribution) {
+    populateCollectorFromPromptAttribution(collector, input.promptAttribution);
+  }
+
   const benchmarking: V5BenchmarkingTimings = {
     total_duration_ms: totalDurationMs,
     substage_timings: {
@@ -717,6 +747,39 @@ function assembleTrace(input: AssembleInput): V5DiagnosticTrace {
     exit_path: input.exitPath,
     trace_version: 1,
   };
+}
+
+/**
+ * Replay the pipeline's non-draft LLM calls into the trace collector.
+ *
+ * The recording sites (the coaching pass, `validate_graph`) already decided
+ * what is TRUE — which is why this function makes no decisions of its own and
+ * derives nothing. It stamps exactly one field the sites do not carry:
+ * `is_staging`, which the four sibling sites in this module all spell as
+ * `config.server.nodeEnv !== 'production'`. Stamping it here keeps that
+ * expression in one place instead of letting a fifth spelling appear in the
+ * pipeline, and keeps `prompt-attribution.ts` free of `config`.
+ *
+ * Appended AFTER the draft's own records, which is chronologically honest:
+ * both calls run after the structural draft returns.
+ */
+function populateCollectorFromPromptAttribution(
+  collector: DiagnosticTraceCollector,
+  attribution: PromptAttributionSnapshot,
+): void {
+  for (const call of attribution.llm_calls) {
+    collector.recordLLMCall(call);
+  }
+  for (const identity of attribution.prompt_identity) {
+    collector.recordPromptIdentity({
+      task_id: identity.task_id,
+      prompt_id: identity.prompt_id,
+      version: identity.version,
+      hash: identity.hash,
+      source: identity.source,
+      is_staging: config.server.nodeEnv !== 'production',
+    });
+  }
 }
 
 function populateCollectorFromDraftResult(

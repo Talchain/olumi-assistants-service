@@ -215,6 +215,16 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         prompt_hash: 'sha256:editgraphhash',
         prompt_version: 'edit_graph_default@v12',
         prompt_source: 'default',
+        // Stated, not omitted. `EditGraphLlmCallTelemetry` declares these
+        // `string | undefined` rather than optional precisely so every fixture
+        // has to take a position on them — a repair that ran with no bound
+        // identity and a repair that never ran are different facts, and an
+        // omitted key would let a future reader read one as the other. This
+        // case is `repair_attempts: 1` with no repair identity: the repaired
+        // turn whose repair prompt could not be bound.
+        repair_prompt_hash: undefined,
+        repair_prompt_version: undefined,
+        repair_prompt_source: undefined,
       },
     });
     expect(trace!.exit_path).toBe('edit_graph');
@@ -382,6 +392,11 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         prompt_hash: undefined,
         prompt_version: undefined,
         prompt_source: undefined,
+        // `repair_attempts: 0` — no repair ran, so there is no repair prompt
+        // to bind. Stated rather than omitted, for the reason above.
+        repair_prompt_hash: undefined,
+        repair_prompt_version: undefined,
+        repair_prompt_source: undefined,
       },
     });
     expect(trace!.llm_calls.length).toBe(1);

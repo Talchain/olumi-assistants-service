@@ -396,6 +396,47 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
     // projection (the same object the message carried — derived, not re-measured);
     // both are declared `telemetry_only`, so a healthy pass stays silent.
     // Observe-only: emitContextBudget never throws (the pass is strictly non-fatal).
+    // ── SERVED-PROMPT + MODEL ATTRIBUTION (the diagnostic trace) ───────────
+    // Every fact below was ALREADY computed at this call site and thrown into
+    // a log line: the hash and version are module constants, the model comes
+    // back on `result`, and the elapsed time was measured for the completion
+    // log. Nothing is derived here; the only thing that was missing was a
+    // channel to the trace builder, and `ctx.opts.promptAttribution` is it.
+    //
+    // Why it mattered: this pass is a SECOND, ungated LLM call on every draft
+    // turn — the dominant one by wall-clock — and the trace attributed the
+    // whole turn to `draft_graph`. Anyone reading a bad draft's trace was
+    // being pointed at the wrong prompt AND the wrong 19.8 seconds.
+    //
+    // `source: 'code'` is the truthful value and is deliberately NOT the
+    // sibling sites' `'pms'`. `COACHING_SYSTEM` is a constant in this file
+    // with no PMS row (see COACHING_PROMPT_VERSION's `@code` label); labelling
+    // it store-managed would be exactly the class of untruth this attribution
+    // exists to remove.
+    //
+    // Recorded BEFORE the parse below, so a pass whose JSON was unusable
+    // ('failed_degraded') still reports the prompt and model that produced the
+    // unusable output — the case a reader is most likely to be investigating.
+    // Guarded on the collector being threaded; absent ⇒ no-op.
+    ctx.opts.promptAttribution?.record({
+      taskId: 'draft_coaching',
+      role: 'draft_coaching',
+      // The pass never resolves a provider of its own — it inherits the draft
+      // adapter's, exactly as it inherits the model (see COACHING_MODEL_SOURCE).
+      provider:
+        typeof ctx.draftAdapter?.name === 'string' ? ctx.draftAdapter.name : 'unknown',
+      model: typeof result.model === 'string' ? result.model : undefined,
+      inputTokens: result.usage?.input_tokens,
+      outputTokens: result.usage?.output_tokens,
+      // Wall-clock for the pass, the same figure the completion log reports.
+      latencyMs: Date.now() - startTime,
+      stopReason: typeof result.stopReason === 'string' ? result.stopReason : null,
+      promptHash: COACHING_PROMPT_HASH,
+      promptVersion: COACHING_PROMPT_VERSION,
+      promptId: COACHING_PROMPT_VERSION,
+      promptSource: 'code',
+    });
+
     const structuralGraphChars = structuralGraphJson.length;
     emitContextBudget({
       call_site: "draft_coaching",

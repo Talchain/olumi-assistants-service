@@ -169,6 +169,10 @@ export async function runValidationPipeline(
       requestId,
       timeoutMs: VALIDATION_PIPELINE_TIMEOUT_MS,
     },
+    // Served-prompt + model attribution sink. Threaded from the turn's opts
+    // rather than created here, so the record survives a Pass-2 throw: the
+    // dispatcher owns the collector and reads it in its catch block.
+    ctx.opts.promptAttribution,
   );
   const pass2LatencyMs = Date.now() - pass2StartMs;
 
