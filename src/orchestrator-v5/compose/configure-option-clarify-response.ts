@@ -146,6 +146,37 @@ export const QUALITATIVE_VALUE_KNOWN_DROPPED: readonly string[] = [
  */
 export const CONFIGURE_OPTION_EXAMPLE_VALUE = '0.6';
 
+/**
+ * Reply shapes this module KNOWINGLY CANNOT READ, pinned as data so the suite
+ * REDs if the set GROWS or SHRINKS (the honest-gap protocol
+ * `MISSING_VALUE_ANSWER_KNOWN_DROPPED` already uses one module over).
+ *
+ * ⚠⚠ THE SECOND MEMBER WAS THE PRODUCT'S OWN SUGGESTION UNTIL 2026-08-29.
+ * The copy below ended `— 0.6, say.` and carried a comment calling the exemplar
+ * "wire-proven to route". The exemplar was; the SHAPE the copy wrapped it in was
+ * not. Measured against all three deterministic readers
+ * (`matchBareRepairValue`, `messageAnswersMissingValueAsk`,
+ * `readMissingValueAnswer`), `"0.6, say"` reads null/false/null — the same as a
+ * fabricated control. `parameter-user-phrasing.ts` already states the rule this
+ * broke: *recovery copy must only recommend an input the system can CURRENTLY
+ * accept*, because recommending one it cannot manufactures a dead-end loop out
+ * of a refusal that was recoverable in a single step.
+ *
+ * ⚠ THE FIRST MEMBER IS NOT CLOSED AND IS NOT CLOSEABLE HERE. Witnessed in
+ * Paul's live session: he replied *"I think 0.6 makes sense."* and got the same
+ * demand back. Widening a reader to accept an ordinary-English wrapper is the
+ * pattern-only rule this codebase has already lost four consecutive rounds to,
+ * each round fixing one direction and reopening the other. Its real exit is the
+ * PENDING-QUESTION CONTRACT — persist the cell the product asked about, and bind
+ * a short reply to it deterministically instead of re-deriving the referent from
+ * prose every turn. That lives in the finalise path, not in this module, and is
+ * a separate lane.
+ */
+export const SUGGESTED_PHRASING_KNOWN_DROPPED: readonly string[] = [
+  'I think 0.6 makes sense.',
+  '0.6, say',
+];
+
 /** Join labels as readable English: "A", "A and B", "A, B and C". */
 function joinLabels(labels: readonly string[]): string {
   if (labels.length === 1) return labels[0];
@@ -279,12 +310,25 @@ export function composeConfigureOptionClarifyResponse(
         // binding as an effect value of 1.0 while the user meant "the first
         // one"), so the one token this gloss most invites — `1` — is exactly the
         // one that will not bind. `0.6` is the estate's existing exemplar
-        // (`CONFIGURE_OPTION_EXAMPLE_VALUE`) and is wire-proven to route.
+        // (`CONFIGURE_OPTION_EXAMPLE_VALUE`).
+        //
+        // ⚠⚠ THE SENTENCE USED TO END `— <value>, say.` AND THAT SHAPE DID NOT
+        // PARSE. The claim here was "wire-proven to route", which was true of
+        // the TOKEN and false of the FORM: measured 2026-08-29 against all three
+        // deterministic readers, `"0.6, say"` reads null/false/null, identical
+        // to a fabricated control. Witnessed live the same day — the user
+        // replied in ordinary English around that exemplar and got the identical
+        // demand back. The copy now names the shape the readers actually accept
+        // (a bare number), which is the rule `parameter-user-phrasing.ts`
+        // already applies to edge strengths: only ever recommend an input the
+        // system can CURRENTLY accept. THE READERS ARE DELIBERATELY UNTOUCHED —
+        // see `SUGGESTED_PHRASING_KNOWN_DROPPED` for the wrapper this does NOT
+        // close, and for why widening a predicate is the wrong exit.
         //
         // This branch asks for a BARE number where the old copy advised a whole
         // sentence, so it raises the odds of that collision rather than
         // inheriting it — the exemplar is how this change pays for that.
-        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully) — ${CONFIGURE_OPTION_EXAMPLE_VALUE}, say.`,
+        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully). Reply with just the number, like ${CONFIGURE_OPTION_EXAMPLE_VALUE}.`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
       ].join(' ')
     : qualitativeText !== null
