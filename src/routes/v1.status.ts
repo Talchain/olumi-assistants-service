@@ -18,6 +18,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getAdapter } from "../adapters/llm/router.js";
+import {
+  resolveModelRoutingSnapshot,
+  buildEffectiveTaskModels,
+} from "../adapters/llm/model-routing-report.js";
 import { getStorageStats } from "../utils/share-storage.js";
 import { SERVICE_VERSION } from "../version.js";
 import { getPerformanceMetrics } from "../plugins/performance-monitoring.js";
@@ -66,6 +70,22 @@ interface StatusResponse {
 
   // LLM adapter status
   llm: {
+    /**
+     * ⚠ THE UNTASKED DEFAULT ADAPTER — `getAdapter()` with no task, which
+     * lands on precedence rank 6 (`llm_model_fallback`) because the ranks
+     * that can select a real model (store pin, `CEE_MODEL_*`,
+     * `TASK_MODEL_DEFAULTS`) are ALL keyed on `task`.
+     *
+     * NO USER TURN IS SERVED BY THIS ADAPTER. Every untasked `getAdapter()`
+     * call site in `src/` reads `.name`/`.model` for reporting and never
+     * invokes a method. Reading `llm.model` as "the model the product runs
+     * on" is a live misreading this field name invites — a deployed capture
+     * of this endpoint reported `gpt-4o-mini` while real turns were routing
+     * to `claude-sonnet-5`.
+     *
+     * For what real turns actually run on, read `model_routing` below.
+     */
+    scope: "untasked_default_adapter";
     provider: string;
     model: string;
     cache_enabled: boolean;
@@ -77,6 +97,29 @@ interface StatusResponse {
     };
     failover_enabled: boolean;
     failover_providers?: string[];
+  };
+
+  /**
+   * THE MODELS REAL TURNS RUN ON — the per-task routing the product actually
+   * serves, as opposed to the untasked default reported in `llm` above.
+   *
+   * Derived from `resolveModelRoutingSnapshot()`, the same adapter-free
+   * projection that boot logs as `config.task_models` and that
+   * `/admin/models/routing` serves, so this endpoint cannot drift from them.
+   *
+   * Deliberately NOT the full `tasks[]` rows: those carry configuration key
+   * NAMES (`CEE_MODEL_*`, `providers.json...`) and configuration-error
+   * messages, and `/v1/status` is unauthenticated. Those stay on the
+   * admin-key-gated `/admin/models/routing`.
+   */
+  model_routing: {
+    /** Provider the untasked fallback would use — same value as /admin/models/routing. */
+    default_provider: string;
+    /**
+     * task id → resolved model id, for every task with an executable path
+     * that is not behind a default-off gate or a configuration error.
+     */
+    effective_task_models: Readonly<Record<string, string>>;
   };
 
   // Share storage statistics
@@ -116,6 +159,9 @@ interface StatusResponse {
 export async function statusRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/status", async (request: FastifyRequest, reply: FastifyReply) => {
     const adapter = getAdapter();
+    // Adapter-free projection: constructs no adapter and makes no network
+    // call, so adding it costs this endpoint nothing.
+    const modelRoutingSnapshot = resolveModelRoutingSnapshot();
 
     // Calculate uptime
     const uptimeSeconds = Math.floor((Date.now() - SERVICE_START_TIME) / 1000);
@@ -165,12 +211,18 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       },
 
       llm: {
+        scope: "untasked_default_adapter",
         provider: adapter.name,
         model: adapter.model,
         cache_enabled: cacheStats?.enabled ?? false,
         cache_stats: cacheStats,
         failover_enabled: failoverEnabled,
         failover_providers: failoverProviders,
+      },
+
+      model_routing: {
+        default_provider: modelRoutingSnapshot.default_provider,
+        effective_task_models: buildEffectiveTaskModels(modelRoutingSnapshot),
       },
 
       share: {
