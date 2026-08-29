@@ -34,6 +34,7 @@ import {
 import {
   buildQualitativeValueRefusalText,
   phrasingForParameter,
+  renderNumberlessPhrasing,
   renderParameterPhrasing,
 } from './parameter-user-phrasing.js';
 import { readMissingValueAnswer } from '../routing/missing-value-answer.js';
@@ -70,6 +71,31 @@ function messageEvidencesUnit(message: string, unit: string | undefined): boolea
   if (family === null) return lowered.includes(unit.trim().toLowerCase());
   const tokens = lowered.match(/[%£$€]|[a-z][a-z'-]*/g) ?? [];
   return tokens.some((token) => unitFamilyOf(token) === family);
+}
+
+/**
+ * ⭐ THE SAME QUESTION AS `messageEvidencesUnit` ABOVE, ASKED OF THE NUMBER:
+ * did the user's own message contain a figure at all?
+ *
+ * It is a FACT CHECK, not an intent parse, and that is the whole design. It
+ * does not read "strengthen", does not rank magnitude words, and does not
+ * decide what the user meant. Constraint parsing in this estate has already
+ * oscillated through four consecutive rounds of exactly that kind of
+ * predicate — each round fixing one direction and reopening the other, every
+ * round under a fully green suite — and the ruling out of it is that no further
+ * pattern-only rule settles such a question: where the value cannot be
+ * determined, ASK THE USER. This predicate is what licenses the ask; it never
+ * resolves the value.
+ *
+ * ⚠ IT ONLY EVER LICENSES THE HONEST COPY, so its unknowns fail OPEN to today's
+ * bytes: a digit anywhere in the message (a label like "Q3", a quantity of a
+ * different kind) makes it decline and the historical refusal stands. Those
+ * cases are pinned in `NUMBERLESS_MAGNITUDE_KNOWN_DROPPED` rather than chased,
+ * because declining leaves the user with an unhelpful reply while firing
+ * wrongly would leave them with a FALSE one.
+ */
+function messageStatesNoNumber(message: string): boolean {
+  return !/\d/.test(message);
 }
 
 const ENTITY_SIBLING_CAP = 4;
@@ -914,6 +940,54 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
   // `!== 'unknown'` still catches a non-empty string that sanitises to empty.
   const showActual = isGenuineScalar(details.actual_value) && actual !== 'unknown';
   const phrasing = phrasingForParameter(readString(details.parameter));
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // THE NUMBERLESS MAGNITUDE ASK — copy may only describe what the input
+  // actually contained.
+  //
+  // WITNESSED (deployed cee-staging, 2026-08-29, signed-in fresh journey, run
+  // `20260829T163926Z-c2-d2842c`): the user typed
+  //   "Strengthen the link from Current Monthly Churn Rate to Churn Remaining
+  //    Elevated."
+  // — an edge derived from the graph in hand, and NO number anywhere — and the
+  // product answered "I couldn't use THAT as the strength of that link", then
+  // recited a numeric range. There was no "that". `echo_actual` in
+  // parameter-user-phrasing.ts already records why: on this path the number is
+  // the ROUTING MODEL's proposal, never the user's. So the refusal attributes a
+  // proposal property to the user, which is the defect class ROADMAP 2.1261
+  // closed one parameter over.
+  //
+  // ⭐ IT ASKS; IT DOES NOT GUESS. Mapping "stronger" to a number would cross
+  // THE FABRICATION BOUNDARY (`routing/readiness-answer-chips.ts`) and would
+  // pick one of six disagreeing band ladders on the user's behalf.
+  //
+  // ⚠ ORDERING IS LOAD-BEARING: this sits BELOW the `value` qualitative branch
+  // (2.384), which is richer — it quotes the user's word and anchors on the
+  // factor's own display value — and `value` declares no
+  // `problem_when_numberless`, so the two cannot both fire.
+  if (typeof ctx.userMessage === 'string' && messageStatesNoNumber(ctx.userMessage)) {
+    const numberless = renderNumberlessPhrasing(phrasing);
+    if (numberless !== null) {
+      return {
+        body: {
+          assistant_text: numberless,
+          // The SAME retry chip the generic branch offers. It carries no
+          // number, so it cannot put a product-chosen value in the user's
+          // mouth when it becomes their next turn.
+          suggested_actions: [
+            {
+              id: chipId('prompt', 'param-retry'),
+              label: 'Try a different value',
+              message: phrasing.chip_message,
+            },
+          ],
+        },
+        template_id: 'parameter_invalid_numberless_magnitude',
+        chip_type: 'text_prompt',
+      };
+    }
+  }
+
   return {
     body: {
       assistant_text: renderParameterPhrasing(phrasing, showActual ? actual : null),

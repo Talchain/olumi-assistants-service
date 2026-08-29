@@ -55,6 +55,30 @@ export interface ParameterPhrasing {
    * strength.") put a schema field name in the user's own mouth.
    */
   readonly chip_message: string;
+  /**
+   * The `problem` sentence to use when the user's message carried NO NUMBER AT
+   * ALL, so the value the validator rejected cannot have been theirs.
+   *
+   * ⭐ THE SAME DOCTRINE AS `messageEvidencesUnit` (ROADMAP 2.1261, one
+   * parameter over): COPY MAY ONLY DESCRIBE WHAT THE INPUT ACTUALLY CONTAINED.
+   * On the edge-strength path the number is the ROUTING MODEL's proposal — see
+   * `echo_actual` above, which already says so — so "I couldn't use THAT as the
+   * strength" names an input the user never gave. Witnessed on deployed
+   * staging, 2026-08-29: "Strengthen the link from A to B." (no digit anywhere)
+   * was answered with the numeric-range refusal.
+   *
+   * ⚠ PRESENT ONLY ON PARAMETERS WHOSE VALUE THE USER MAY LEGITIMATELY EXPRESS
+   * AS A WORD. It is deliberately ABSENT on `value`, which owns its own richer
+   * qualitative branch (2.384, `buildQualitativeValueRefusalText`) and must not
+   * be intercepted by this coarser one, and on `label`/`unit`/`constraint_type`,
+   * which are not magnitudes and where "no number" is the normal case.
+   *
+   * The sentence must ASK, never fill the slot: "high" resolves to three
+   * different numbers across the estate's six band ladders, and
+   * `routing/readiness-answer-chips.ts` THE FABRICATION BOUNDARY bans the
+   * product choosing one on the user's behalf.
+   */
+  readonly problem_when_numberless?: string;
 }
 
 /** Assemble the rendered text. `actual` is already sanitised by the caller and
@@ -192,12 +216,14 @@ export const PARAMETER_USER_PHRASING: Readonly<Record<string, ParameterPhrasing>
       // See `echo_actual` — the number here is the routing model's, not the user's.
       echo_actual: false,
       chip_message: 'Use a different strength for that link.',
+      problem_when_numberless: "I don't have a number to set that link's strength to.",
     },
     std: {
       problem: "I couldn't use that as the uncertainty on that link.",
       guidance: 'It needs to be a small positive amount, and it cannot be zero. Try something like 0.1.',
       echo_actual: false,
       chip_message: 'Use a different uncertainty for that link.',
+      problem_when_numberless: "I don't have a number to set that link's uncertainty to.",
     },
     value: {
       problem: "I couldn't use that as the value.",
@@ -245,3 +271,39 @@ export function phrasingForParameter(parameter: string | undefined): ParameterPh
   if (parameter === undefined) return GENERIC_PARAMETER_PHRASING;
   return PARAMETER_USER_PHRASING[parameter] ?? GENERIC_PARAMETER_PHRASING;
 }
+
+/**
+ * The numberless ask: the parameter's own `problem_when_numberless` followed by
+ * its EXISTING sanctioned `guidance`, quoted rather than re-worded so the two
+ * refusals cannot drift apart (the same construction
+ * `buildQualitativeValueRefusalText` uses for `value`).
+ *
+ * Returns null for any parameter that declares no numberless sentence, which is
+ * what keeps this branch off `value`, `label`, `unit` and `constraint_type`.
+ * No echo: there is by definition nothing of the user's to echo.
+ */
+export function renderNumberlessPhrasing(phrasing: ParameterPhrasing): string | null {
+  if (phrasing.problem_when_numberless === undefined) return null;
+  return `${phrasing.problem_when_numberless} ${phrasing.guidance}`;
+}
+
+/**
+ * Phrasings the numberless ask KNOWINGLY DOES NOT REACH, pinned as data so the
+ * suite REDs if the set GROWS or SHRINKS (the honest-gap protocol
+ * `MISSING_VALUE_ANSWER_KNOWN_DROPPED` already uses one module over).
+ *
+ * Both members carry a digit that is NOT a stated strength — one inside a label
+ * ("Q3"), one a quantity of a different kind ("by 20 percent"). Telling them
+ * apart from a stated strength is precisely the natural-language predicate this
+ * estate lost four consecutive rounds to, each round fixing one direction and
+ * reopening the other. So the predicate DECLINES and today's copy stands.
+ *
+ * ⭐ THE DIRECTION OF THE GAP IS THE POINT. Declining leaves the user with a
+ * reply that is unhelpful; firing wrongly would leave them with one that is
+ * FALSE ("I don't have a number" when they gave one). A gap is not a lie, and
+ * the two harms may not share a window.
+ */
+export const NUMBERLESS_MAGNITUDE_KNOWN_DROPPED: readonly string[] = [
+  'Strengthen the link from Q3 revenue to churn.',
+  'Strengthen the link from churn to revenue by 20 percent.',
+];
