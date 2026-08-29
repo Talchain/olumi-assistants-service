@@ -113,7 +113,8 @@ describe('buildTurnContext coaching_state — a degraded fact read is not "analy
     // nothing about the degraded path at all.
     expect(ctx.prior_facts).toEqual([]);
     expect(ctx.prior_facts_read_ok).toBe(false);
-    expect(ctx.scenario_analysis_fact_set.status).toBe('degraded');
+    expect(ctx.scenario_analysis_fact_set).toBeDefined();
+    expect(ctx.scenario_analysis_fact_set?.status).toBe('degraded');
 
     // The defect, stated as the product harm: this is the signal that would be
     // committed into the `coaching_state` column and replayed forward.

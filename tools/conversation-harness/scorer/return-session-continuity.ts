@@ -684,6 +684,28 @@ function createSessionStoreFacade(
           };
         });
     },
+    readScenarioRunAnalysisFactsFor: async (scenarioId, limit) => {
+      const record = read('session.readScenarioRunAnalysisFactsFor', scenarioId, limit);
+      const rows = mutant === 'drop_facts'
+        ? []
+        : record.facts.filter(
+            (row) => row.fact.fact_type === 'run_analysis' && row.fact.noop === false,
+          );
+      const facts = rows.slice(0, limit).map((row) => {
+        if (row.fact_row_id === undefined) {
+          throw new Error('durable fixture analysis fact lacks persisted row identity');
+        }
+        return {
+          fact: row.fact,
+          fact_row_id: row.fact_row_id,
+          fact_created_at: row.fact_created_at,
+        };
+      });
+      return {
+        facts,
+        total_count: rows.length,
+      };
+    },
     readNewestAnalysisFactFor: async (scenarioId) => {
       const record = read('session.readNewestAnalysisFactFor', scenarioId);
       if (mutant === 'drop_facts') return null;

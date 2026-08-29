@@ -232,7 +232,13 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
   const { createMockSessionStore } = await import('../utils/mock-session-store.js');
   return {
     ...original,
-    getSessionStore: () => createMockSessionStore(),
+    getSessionStore: () =>
+      createMockSessionStore({
+        readScenarioRunAnalysisFactsFor: async () => ({
+          facts: [],
+          total_count: 0,
+        }),
+      }),
     resetSessionStoreForTests: () => {},
   };
 });

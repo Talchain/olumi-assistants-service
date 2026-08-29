@@ -92,6 +92,14 @@ export function createMockSessionStore(
     // that omitted the method would report "degraded" forever. Tests exercising
     // the scenario-scoped claim-safety path override it.
     readNewestAnalysisFactFor: async () => null,
+    // Keep the scenario-wide analysis read consistent with the other empty
+    // defaults above: the read succeeded and the scenario has no matching
+    // facts. This must not throw or omit the method, either of which would
+    // manufacture an unavailable analysis state in unrelated harness tests.
+    readScenarioRunAnalysisFactsFor: async () => ({
+      facts: [],
+      total_count: 0,
+    }),
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,
       entries_invalidated: [],
