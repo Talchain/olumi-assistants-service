@@ -50,7 +50,6 @@ import {
   findForbiddenPhraseHit,
 } from '../compose/forbidden-user-facing-phrases.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
-import { extractProposedConcept } from '../coaching/proposal-continuation.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import { CHANGES_UNAVAILABLE_TEXT } from '../routing/state-query-guard.js';
@@ -513,10 +512,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       expect(evt!.data.current_graph_hash).toBe(POST_EDIT_HASH);
     });
 
-    it('grounds the exact standalone consequence question on canonical state without creating authority', async () => {
-      const answer =
-        'In the saved model, the cost relationship now carries more downside weight when reasoning about the Q3 goal. The previous result is stale, so rerun it before comparing options.';
-      const adapter = consequenceRoutingAdapter(answer);
+    it('answers the exact consequence question from durable history without inventing untyped values', async () => {
+      const adapter = throwingRoutingAdapter();
       const requestGraphCanary = {
         ...PRE_EDIT_GRAPH,
         nodes: PRE_EDIT_GRAPH.nodes.map((node) =>
@@ -543,18 +540,15 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         { routingAdapter: adapter, graphState: requestGraphCanary as never },
       );
 
-      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-      const call = adapter.chatWithTools.mock.calls[0]![0];
-      expect(call.tool_choice).toEqual({ type: 'tool', name: OLUMI_ACTION_TOOL_NAME });
-      const prompt = String(call.messages[0]!.content);
-      expect(prompt).toMatch(/"graph_context":\s*\{\s*"status": "canonical"/);
-      expect(prompt).toContain(SAFE_SUMMARY);
-      expect(prompt).toContain('Incremental Hiring Cost');
-      expect(prompt).not.toContain('REQUEST GRAPH CANARY');
-      expect(prompt).toContain('Requested answer (non-mutating)');
-
-      expect(result.response.assistant_text).toContain('saved model');
-      expect(result.response.suggested_actions ?? []).toEqual([]);
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toContain('saved model history');
+      expect(result.response.assistant_text).toContain('Recorded an edit to the saved model');
+      expect(result.response.assistant_text).toContain(
+        'does not include a trustworthy before-and-after value and unit',
+      );
+      expect(result.response.assistant_text).not.toContain('0.5');
+      expect(result.response.assistant_text).not.toContain('0.7');
+      expect(result.response.assistant_text).not.toContain('REQUEST GRAPH CANARY');
       expect(result.response).not.toHaveProperty('model_version_receipt');
 
       const committed = mockState.appendWrites.find(
@@ -562,7 +556,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       );
       expect(committed).toBeDefined();
       expect(committed).toHaveProperty('graph', undefined);
-      expect(committed?.handler_id).toBe('explain_from_structure');
+      expect(committed?.handler_id).toBeNull();
       // #1149 review gate 2 — `not.toEqual(arrayContaining([a, b, c]))` asks
       // whether ALL THREE are present, so the negation was satisfied by an
       // array containing exactly ONE of them: it passed while
@@ -584,8 +578,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         expect.objectContaining({ id: existingPending.id, chip_id: existingPending.chip_id }),
       ]);
       expect(events.find((event) => event.event === 'v5.state_query_guard')?.data).toMatchObject({
-        matched: false,
-        dispatch: null,
+        matched: true,
+        dispatch: 'with_recent_change',
         recent_change_count: 1,
       });
     });
@@ -735,15 +729,13 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         });
     });
 
-    it('carries a degraded known receipt and its status into the read-only consequence prompt', async () => {
+    it('answers from a degraded known receipt without promoting it to complete history', async () => {
       mockState.priorTurns = [PRIOR_EDIT_TURN];
       mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
       mockState.persistedGraph = POST_EDIT_GRAPH;
       mockState.priorTurnsTotal = 41;
       mockState.durableMutationReadFails = true;
-      const adapter = consequenceRoutingAdapter(
-        'The saved cost link is stronger, but I cannot confirm the edit history is complete.',
-      );
+      const adapter = throwingRoutingAdapter();
 
       const result = await runTurnExecutor(
         mkPayload('What did that update do?'),
@@ -751,12 +743,13 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         { routingAdapter: adapter, graphState: PRE_EDIT_GRAPH as never },
       );
 
-      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-      const prompt = adapter.chatWithTools.mock.calls[0]![0].messages[0]!
-        .content as string;
-      expect(prompt).toContain('"recent_changes_status": "degraded"');
-      expect(prompt).toContain(SAFE_SUMMARY);
-      expect(prompt).toContain('Conversation turns and rolling summaries are not');
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.response.assistant_text).toContain('Recorded an edit to the saved model');
+      expect(result.response.assistant_text).toContain(
+        'cannot confirm that the recent edit history is complete',
+      );
+      expect(result.response.assistant_text).not.toContain('0.5');
+      expect(result.response.assistant_text).not.toContain('0.7');
       expect(result.response).not.toHaveProperty('model_version_receipt');
       expect(committedPendingActions()).toEqual([]);
       expect(mockState.appendWrites.some((write) => write.graph !== undefined)).toBe(false);
@@ -849,20 +842,10 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
   });
 
   // -------------------------------------------------------------------------
-  // Layer A.6 — #1149 review gate 1: the consequence turn's two SUPPRESSION
-  // arms, pinned.
-  //
-  // `explainAcceptedEditConsequenceForRun` drives five effects. Three were
-  // already pinned by the acceptance test above (state-query bypass, forced
-  // `explain_from_structure`, bounded-analytical chips). The remaining two —
-  // the graph-write suppression and the proposal-capture suppression — read
-  // GREEN under mutation on that fixture, because that fixture cannot reach
-  // either arm: it has a populated canonical graph (so the graph write is
-  // already `undefined` via ROW E) and a proposal-free answer (so the capture
-  // already returns `undefined`). An arm that changes nothing observable is
-  // the worst of both worlds — a later lane deletes it as dead or leans on it
-  // as a guarantee, and neither is checkable. These two tests supply fixtures
-  // that DO reach each arm, so removing either clause turns one RED.
+  // Layer A.6 — the deterministic consequence read is read-only by
+  // construction. It returns before the router, graph adoption and proposal
+  // capture paths, so neither uncommitted request bytes nor model prose can
+  // create fresh authority while answering from durable history.
   // -------------------------------------------------------------------------
   describe('the consequence turn creates no authority it was not asked to create', () => {
     it('does NOT adopt the request graph as the canonical model (ROW-A first-touch adopt suppressed)', async () => {
@@ -877,9 +860,7 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
       mockState.persistedGraph = null;
 
-      const adapter = consequenceRoutingAdapter(
-        'In the saved model, the cost relationship now carries more downside weight.',
-      );
+      const adapter = throwingRoutingAdapter();
       await runTurnExecutor(
         mkPayload('What did that update do?'),
         'req-consequence-no-adopt',
@@ -894,7 +875,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       // because nothing was adoptable rather than because the clause fired.
       expect(PRE_EDIT_GRAPH.nodes.length).toBeGreaterThan(0); // request graph IS adoptable
       expect(mockState.persistedGraph).toBeNull(); // canonical has NO server model
-      expect(committed?.handler_id).toBe('explain_from_structure'); // the flagged path ran
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(committed?.handler_id).toBeNull();
       // The pin.
       expect(committed).toHaveProperty('graph', undefined);
     });
@@ -936,14 +918,9 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
       mockState.priorFacts = [ACCEPTED_EDIT_GRAPH_FACT];
       mockState.persistedGraph = PRE_EDIT_GRAPH;
 
-      const answerWithProposal =
-        'In the saved model, the cost relationship now carries more downside weight. Would you like me to add supplier concentration as a risk?';
-      // Precondition pin — the answer under test genuinely IS proposal-bearing.
-      // If the extractor's breadth ever moves off this phrasing the test REDs
-      // here instead of passing because nothing was there to capture.
-      expect(extractProposedConcept(answerWithProposal)).not.toBeNull();
-
-      const adapter = consequenceRoutingAdapter(answerWithProposal);
+      const adapter = consequenceRoutingAdapter(
+        'Invented router prose. Would you like me to add supplier concentration as a risk?',
+      );
       await runTurnExecutor(
         mkPayload('What did that update do?'),
         'req-consequence-no-proposal-capture',
@@ -954,7 +931,8 @@ describe('V5 edit_graph → state-query — Layer A acceptance proof (forced com
         (write) => write.turn_id === 'req-consequence-no-proposal-capture',
       );
       expect(committed).toBeDefined();
-      expect(committed?.handler_id).toBe('explain_from_structure'); // the flagged path ran
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(committed?.handler_id).toBeNull();
       // The pin: a read-only consequence answer must not leave behind a
       // resumable `proposed_concept` pending — the next turn's "yes" would
       // turn it into a graph mutation the user never asked this turn for.

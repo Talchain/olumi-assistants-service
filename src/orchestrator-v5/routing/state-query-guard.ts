@@ -128,6 +128,12 @@ export type StateQueryGuardOutcome =
  * `changed`, `updated`). Generic verbs (`do`, `did`) are deliberately
  * NOT in the alternation — keep the gate narrow.
  */
+// Shared by both guard admission and consequence classification. Keeping one
+// pattern prevents a natural wrapper around the question from being admitted
+// as an effect query while later being treated as an ordinary receipt readback.
+const EDIT_EFFECT_QUERY_PATTERN =
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i;
+
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // "what changed", "what's changed", "what has changed", "what just changed"
   /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i,
@@ -144,7 +150,7 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // "what did that update do", "what did the change do", "what did that
   // edit do" — asks the effect of a just-applied mutation. The trailing
   // "do" disambiguates from a fresh imperative.
-  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
+  EDIT_EFFECT_QUERY_PATTERN,
   // "did you change/update/apply/add" — change-word required.
   /\bdid\s+you\s+(?:change|update|apply|add)\b/i,
   // "I can't see it", "I cannot see this", "I can't see this constraint",
@@ -589,6 +595,7 @@ export function tryStateQueryGuard(
       head,
       recent.length,
       recentChangesStatus,
+      EDIT_EFFECT_QUERY_PATTERN.test(input.message),
     ),
     recent_change: head,
     recent_change_count: recent.length,
@@ -596,10 +603,11 @@ export function tryStateQueryGuard(
 }
 
 /**
- * Deterministic answer copy. The persisted mutation summary is quoted VERBATIM
- * so the response is grounded in the handler fact (i.e. the answer references
- * the actual £50k value, not a generic safe phrase). Suffix is short and asks
- * the user to confirm whether they want to follow up with an analysis run.
+ * Deterministic answer copy. A bare readback quotes the persisted mutation
+ * summary verbatim. An effect question does the same only when the projection
+ * came from a typed transition; free-form `edit_graph` summaries receive a
+ * generic saved-edit acknowledgement because neither their prose nor even a
+ * value-looking target label can license an exact before/after value or unit.
  *
  * ⭐⭐ AND IT IS ATTRIBUTED TO THE RECORD RATHER THAN TO THIS TURN, WHICH IS THE
  * WHOLE POINT OF THE PREFIX. Emitted BARE, the summary is a perfective mutation
@@ -635,6 +643,7 @@ function composeRecentChangeAnswer(
   head: RecentMutation,
   totalCount: number,
   status: RecentChangesHistoryStatus,
+  isEffectQuestion: boolean,
 ): string {
   const tail =
     status === 'capped'
@@ -647,7 +656,10 @@ function composeRecentChangeAnswer(
   // Terminate the receipt so the multi-change tail is a separate sentence rather
   // than being welded onto it ("…and spend If you want…"). `cap()` closes a
   // truncated summary with `…`, which is already terminal.
-  const receipt = head.summary.trimEnd();
+  const receipt =
+    isEffectQuestion && head.action === 'graph_edited'
+      ? `Recorded an edit to the saved model. That saved edit does not include a trustworthy before-and-after value and unit, so I can't quantify its effect without guessing.`
+      : head.summary.trimEnd();
   const terminated = /[.!?…]$/u.test(receipt) ? receipt : `${receipt}.`;
   return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${tail}`;
 }
