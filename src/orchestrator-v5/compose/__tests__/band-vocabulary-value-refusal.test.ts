@@ -335,10 +335,54 @@ describe('ROADMAP 2.384 — neighbouring refusals are untouched', () => {
       ctxWith('Set the link from A to B to high.', graphWith([TARGET_ID])),
       'frame',
     );
-    expect(template_id).toBe('parameter_invalid');
-    expect(response.assistant_text).toContain("I couldn't use that as the strength of that link.");
+    // ⚠⚠ THE COPY MOVED ON 2026-08-29, THE GUARANTEE DID NOT — AND THE
+    // GUARANTEE IS WHAT THIS TEST IS FOR. Its job is to prove the 2.384 BAND
+    // branch never swallows a `strength` rejection: no quoting the user's word
+    // as a value, no word suggestions, no adjective→number mapping. All three
+    // still hold and are asserted below. What changed is that this message
+    // carries NO DIGIT, so the numberless-magnitude ask answers it instead of
+    // the "I couldn't use that" sentence, which named an input the user never
+    // gave (`numberless-magnitude-ask.test.ts` carries the wire witness).
+    // The original assertion is NOT lost — it is kept verbatim in the
+    // digit-bearing twin immediately below, which is the case that still
+    // produces it.
+    expect(template_id).toBe('parameter_invalid_numberless_magnitude');
+    expect(template_id).not.toBe('parameter_invalid_qualitative_value');
+    expect(response.assistant_text).toBe(
+      "I don't have a number to set that link's strength to. Strength runs from minus one " +
+        'to plus one, where the sign sets the direction and the size sets how much it ' +
+        'matters. Try a number in that range, like 0.7.',
+    );
     // ⭐ AND IT STILL DOES NOT SUGGEST WORDS. 2.384's own standing rule: the
     // adjective→number path does not exist for strengths either.
+    expect(response.assistant_text).not.toContain('"high"');
+    for (const word of ['strong', 'moderate', 'weak', 'slight']) {
+      expect(response.assistant_text.toLowerCase()).not.toContain(`'${word}'`);
+    }
+  });
+
+  it('a DIGIT-BEARING strength message keeps the historical parameter copy (the twin)', () => {
+    // The assertion this file made before 29 Aug, preserved for the input class
+    // that still produces it. Same fixture, same branch, one number added to
+    // the user's sentence — so the pair discriminates the CHANGE rather than
+    // merely recording it.
+    const { response, template_id } = composeValidationFailure(
+      {
+        code: 'PARAMETER_INVALID',
+        message: 'Parameter "strength" failed schema',
+        details: {
+          parameter: 'strength',
+          issue: 'Number must be less than or equal to 1',
+          constraint_description: 'a valid strength',
+          actual_value: 30,
+          target_id: TARGET_ID,
+        },
+      },
+      ctxWith('Set the link from A to B to 30.', graphWith([TARGET_ID])),
+      'frame',
+    );
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain("I couldn't use that as the strength of that link.");
     expect(response.assistant_text).not.toContain('"high"');
   });
 
