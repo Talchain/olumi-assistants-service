@@ -159,7 +159,20 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   When the user HAS said what they are trying to achieve, that is the goal.
   Quote it, even if it is unquantified, modest or awkwardly worded, and even if
   you can see a sharper objective behind it. Theirs is the one that counts.
-- \`option\` — a course of action the user named
+- \`option\` — a course of action the user named: something they could DO.
+  Quote the span that NAMES the action, not the sentence it sits in. A shorter
+  span is still verbatim, and that span is what the reader sees on the node.
+  "the events budget, which everyone loves but I've never seen a deal come out
+  of one" names one option — "the events budget" — and then comments on it:
+  quote the option, and put the comment in a \`claim\` if it bears on the
+  decision.
+  The question the user is deciding is not an option. It is the decision, and
+  the options are its branches. Neither is something they say they do not know,
+  something that already happened, nor a description of how things work today:
+  those belong in a \`figure\` or a \`claim\`, or nowhere. Every option is put on
+  the graph to be scored and ranked against the others, so a span that is not a
+  course of action is compared with the user's real alternatives as though it
+  were one of them.
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
