@@ -38,6 +38,15 @@ const RESOLUTION_TABLE: ReadonlyArray<{
   // ── LIVE standalone /assist/* ───────────────────────────────────────────
   { site: "C13 critique_graph", source: "TASK_MODEL_DEFAULTS.critique_graph", expected: "claude-sonnet-5" },
   { site: "C15 suggest_options", source: "TASK_MODEL_DEFAULTS.suggest_options", expected: "gpt-5.2" },
+  // clarify_brief, pinned 2026-08-29. NOT a pre-refactor capture and NOT a
+  // drift: a DELIBERATE default change. This task previously had no row here
+  // because it had no TASK_MODEL_DEFAULTS entry at all — it was declared
+  // env-only, CEE_MODEL_CLARIFICATION is unset on the deployed posture, and it
+  // therefore resolved to the OpenAI provider default (gpt-4o-mini) by falling
+  // past every rank that expresses an intent. Pinned to the drafting tier
+  // because clarify_brief is the first reasoning pass over the user's brief and
+  // everything downstream inherits its interpretation.
+  { site: "C-clarify assist clarify-brief (LIVE standalone)", source: "TASK_MODEL_DEFAULTS.clarify_brief", expected: "claude-sonnet-5" },
   // ── DARK but registry-covered (governed by the drift guard) ─────────────
   { site: "C10 m2_graph_review (dark)", source: "TASK_MODEL_DEFAULTS.m2_graph_review", expected: "claude-opus-4-8" },
   // ── R-7 COVERAGE ROWS (30 Jul) — drift alarms, not pre-refactor captures ─
