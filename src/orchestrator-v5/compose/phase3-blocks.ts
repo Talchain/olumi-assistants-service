@@ -649,6 +649,7 @@ export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
  */
 interface ProseEntityReferenceOptions {
   readonly allowGenericSingleWordLabels?: boolean;
+  readonly genericAllowedIds?: ReadonlySet<string>;
 }
 
 /**
@@ -787,9 +788,12 @@ function resolveProseEntityRefsWithOptions(
     // require a distinctive single word or a multi-word phrase (same rule as the
     // lever-naming guard's Finding-5 tempering).
     if (
-      options.allowGenericSingleWordLabels !== true &&
       !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle)
+      GENERIC_LEVER_TOKENS.has(needle) &&
+      !(
+        options.allowGenericSingleWordLabels === true &&
+        options.genericAllowedIds?.has(ref.id) === true
+      )
     ) continue;
     const at = firstBoundedPhraseAt(hay, needle);
     if (at < 0) continue;
@@ -837,7 +841,10 @@ export function resolveTypedCanonicalProseEntityRefs(
 ): readonly TargetRef[] | null {
   const expected = new Set(expectedIds);
   if (expected.size !== expectedIds.length) return null;
-  const options = { allowGenericSingleWordLabels: true } as const;
+  const options = {
+    allowGenericSingleWordLabels: true,
+    genericAllowedIds: expected,
+  } as const;
   if (hasAmbiguousProseEntityReferenceWithOptions(index, prose, options)) return null;
   const refs = resolveProseEntityRefsWithOptions(lookup, index, prose, options);
   if (refs.length !== expected.size || refs.some((ref) => !expected.has(ref.id))) return null;
