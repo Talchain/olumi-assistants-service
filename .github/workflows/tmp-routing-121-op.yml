@@ -20,11 +20,11 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'before | ship | sample | reload | turn | draftprobe | rollback'
+        description: 'before | ship | repin | sample | reload | turn | draftprobe | rollback'
         required: true
         default: 'before'
         type: choice
-        options: [before, ship, sample, reload, turn, draftprobe, rollback]
+        options: [before, ship, repin, sample, reload, turn, draftprobe, rollback]
 
 permissions:
   contents: read
@@ -344,6 +344,45 @@ jobs:
             done
             echo "-------------------------------------------------"
             echo "ARM v${R_VER}/${R_HASH}: ${PASS} passed / ${FAIL} failed out of 6 draws on the identical brief."
+            ;;
+
+          repin)
+            # Re-pin an ALREADY-CREATED, already-hash-verified version 121.
+            # Same safety as `ship` minus the create: the stored bytes are
+            # re-verified at the store's own contentHash BEFORE the pointer moves.
+            probe "gate-1" || exit 1
+            if [ "$R_VER" != "$BEFORE_VERSION" ] || [ "$R_HASH" != "$BEFORE_HASH16" ]; then
+              echo "STOP: expected served v${BEFORE_VERSION}/${BEFORE_HASH16}, got v${R_VER}/${R_HASH}."
+              exit 1
+            fi
+            curl -sS -o p.json --fail --max-time 60 \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Accept: application/json' \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}"
+            STORED_HASH=$(jq -r --argjson v ${NEW_VERSION} '.versions[]|select(.version==$v)|.contentHash // "MISSING"' p.json)
+            STORED_CHARS=$(jq -r --argjson v ${NEW_VERSION} '.versions[]|select(.version==$v)|.content|length' p.json)
+            CUR_ACTIVE=$(jq -r '.activeVersion' p.json)
+            echo "Stored v${NEW_VERSION}: contentHash=${STORED_HASH} chars=${STORED_CHARS} (activeVersion=${CUR_ACTIVE})"
+            if [ "$STORED_HASH" != "$EXPECT_SHA256" ]; then
+              echo "FAIL: stored v${NEW_VERSION} hash != expected. NOT pinning."; exit 1
+            fi
+            if [ "$STORED_CHARS" != "$EXPECT_CHARS" ]; then
+              echo "FAIL: stored v${NEW_VERSION} chars ${STORED_CHARS} != ${EXPECT_CHARS}. NOT pinning."; exit 1
+            fi
+            echo "OK: stored bytes re-verified at the store's own hash."
+            status=$(curl -sS -o pa.json -w '%{http_code}' --max-time 60 -X PATCH \
+              -H "x-admin-key: ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+              -H 'Accept: application/json' -d "{\"stagingVersion\": ${NEW_VERSION}}" \
+              "${CEE_BASE_URL%/}/admin/prompts/${PROMPT_ID}" || echo "000")
+            echo "PATCH stagingVersion=${NEW_VERSION} -> HTTP ${status}"
+            if [ "$status" != "200" ]; then echo "FAIL"; head -c 600 pa.json || true; exit 1; fi
+            AFTER_STAGING=$(jq -r '.stagingVersion' pa.json)
+            AFTER_ACTIVE=$(jq -r '.activeVersion' pa.json)
+            echo "Pointer now: stagingVersion=${AFTER_STAGING} activeVersion=${AFTER_ACTIVE}"
+            if [ "$AFTER_STAGING" != "$NEW_VERSION" ]; then echo "FAIL: pin did not take"; exit 1; fi
+            if [ "$AFTER_ACTIVE" != "$CUR_ACTIVE" ]; then echo "FAIL: activeVersion moved"; exit 1; fi
+            for i in $(seq 1 10); do do_reload "reload-${i}" || exit 1; sleep 4; done
+            echo "--- immediate post-reload samples ---"
+            for i in $(seq 1 5); do probe "post-${i}" || exit 1; sleep 5; done
             ;;
 
           rollback)
