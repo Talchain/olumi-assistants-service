@@ -148,6 +148,97 @@ describe("the governed corpus: what authors, and nothing else", () => {
       expect(result.authored, quote).toBe(canonical(result.label) !== canonical(quote));
     }
   });
+
+  /**
+   * ⭐⭐⭐ NO TWO DISTINCT QUOTES MAY LEAVE WITH ONE NAME.
+   *
+   * The sharpest harm this module could do is not a clumsy label — it is
+   * SILENTLY MERGING TWO ALTERNATIVES. Two options wearing one name read as one
+   * option to every human looking at the canvas, and narrowing the user's own
+   * choice set is the single thing this pipeline may never do. Measured over
+   * the 37 real governed quotes: 37 in, 37 distinct out.
+   *
+   * ⚠ The derivation does NOT de-duplicate and must not start: collapsing two
+   * rows into one name would be de-duplication by accident, performed by the
+   * component least able to tell two alternatives apart.
+   */
+  it("maps distinct quotes to DISTINCT labels — it may never merge two alternatives into one name", () => {
+    const quotes = governedStatedOptionQuotes();
+    const labels = quotes.map((q) => deriveOptionActionLabel(q).label);
+    expect(new Set(labels).size, `expected ${quotes.length} distinct labels`).toBe(quotes.length);
+  });
+});
+
+/**
+ * ⭐⭐ THE LIVE DUPLICATE PAIR — deployed staging, build `e67d151`, a brief
+ * stating no objective. The drafter emitted ONE course of action TWICE,
+ * differing only by the interrogative prefix:
+ *
+ *   "Should we open a second bakery location in Leeds next quarter"
+ *   "open a second bakery location in Leeds next quarter"
+ *
+ * Two options that are the same option is a WRONG COMPARISON — any win
+ * probability over that set splits one course of action's support across two
+ * rows. This module does not and must not fix that; what it must do is neither
+ * make it worse nor hide it. Both outcomes are asserted:
+ *
+ *   · it must NOT produce two identically-clean labels (that would be worse
+ *     than today: a duplicate that now looks deliberate);
+ *   · it must NOT collapse them (that would be de-duplication performed by the
+ *     component least able to tell two alternatives apart — "Open in Leeds" and
+ *     "Open in Leeds next quarter" may be one option or two, and guessing wrong
+ *     silently removes an alternative the user wanted. A visible duplicate is
+ *     recoverable; a deleted option is not).
+ *
+ * The pair is left VISIBLE, verbatim, exactly as it is today.
+ */
+describe("the live duplicate pair is neither collapsed nor made to look deliberate", () => {
+  const INTERROGATIVE = "Should we open a second bakery location in Leeds next quarter";
+  const BARE = "open a second bakery location in Leeds next quarter";
+
+  it("refuses BOTH members, each for its own structural reason", () => {
+    const asked = deriveOptionActionLabel(INTERROGATIVE);
+    expect(asked.authored).toBe(false);
+    // ⚠ NOT `asks_a_question` — the drafter quoted the user's question WITHOUT
+    // its terminal `?`, so the new punctuation predicate does not see it and
+    // the pre-existing deliberation-frame list does. Recorded because it would
+    // be easy to read the `?` rule as the thing that covers this class; it is
+    // the second line of defence here, not the first.
+    expect(asked.reason).toBe("deliberation_frame");
+    expect(asked.label).toBe(INTERROGATIVE);
+
+    const bare = deriveOptionActionLabel(BARE);
+    expect(bare.authored).toBe(false);
+    expect(bare.reason).toBe("no_concise_form");
+    expect(bare.label).toBe(BARE);
+  });
+
+  it("does NOT normalise the two into one name", () => {
+    expect(deriveOptionActionLabel(INTERROGATIVE).label).not.toBe(
+      deriveOptionActionLabel(BARE).label,
+    );
+  });
+
+  /**
+   * ⭐ AND IT CANNOT, STRUCTURALLY, FOR THIS SHAPE — which is stronger than the
+   * one measured pair. A `should we` / `do we` prefix is a deliberation frame,
+   * and a deliberation frame is an unconditional refusal, so an interrogative
+   * twin can never be reduced onto its bare twin's name however short it is.
+   * Asserted over twins that are BOTH inside the word bound, where the bare
+   * member authors and the interrogative one still does not.
+   */
+  it.each([
+    ["Should we hire a sales lead", "hire a sales lead", "Hire a Sales Lead"],
+    ["Do we switch to HubSpot", "switch to HubSpot", "Switch to HubSpot"],
+    ["Should we open in Leeds", "open in Leeds", "Open in Leeds"],
+  ])("keeps %j apart from %j even when the bare twin authors", (asked, bare, expected) => {
+    const askedResult = deriveOptionActionLabel(asked);
+    const bareResult = deriveOptionActionLabel(bare);
+    expect(askedResult.authored).toBe(false);
+    expect(askedResult.reason).toBe("deliberation_frame");
+    expect(bareResult.label).toBe(expected);
+    expect(askedResult.label).not.toBe(bareResult.label);
+  });
 });
 
 /**
