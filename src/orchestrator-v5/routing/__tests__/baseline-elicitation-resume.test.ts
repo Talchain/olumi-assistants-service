@@ -216,7 +216,11 @@ describe('R2918B resume — an ANSWER the product cannot read is TOLD, not swall
       expect(r.targetLabel).toBe('Churn rate');
       expect(r.pending.action.target_id).toBe('o-churn-rate');
     } else {
-      throw new Error(`expected unreadable_answer, got ${String(r.skip_reason)}`);
+      // `r` is the FULL union here: the else arm is reached both when the
+      // dispatch bound (`matched: true`, which carries no `skip_reason`) and
+      // when it skipped for another reason. Serialising the whole value keeps
+      // the diagnostic type-safe AND says more than the missing field could.
+      throw new Error(`expected unreadable_answer, got ${JSON.stringify(r)}`);
     }
   });
 
@@ -253,6 +257,12 @@ describe('R2918B resume — an ANSWER the product cannot read is TOLD, not swall
       skip_reason: 'no_pending_question',
     });
     // ...while the SAME message with the question live does re-ask.
-    expect(run({ message: 'maybe 12%' }).skip_reason).toBe('unreadable_answer');
+    // Narrowed on `matched` before the field is read: `skip_reason` exists on
+    // every `matched: false` member and on none of the bound one, so reading it
+    // off the bare union is a type error. The discrimination is unchanged — a
+    // bind here still fails this assertion, it just fails by name.
+    const live = run({ message: 'maybe 12%' });
+    expect(live.matched, 'the live-question arm must not bind').toBe(false);
+    expect(live.matched === false ? live.skip_reason : '(matched)').toBe('unreadable_answer');
   });
 });
