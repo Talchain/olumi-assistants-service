@@ -98,11 +98,15 @@ function drive(goalQuote: string, brief: string): Observed {
   // goal_node_id, ... }`. Reading `.nodes` off the envelope yields `undefined`
   // and every provenance assertion below would then pass or fail on nothing.
   // Asserted, not assumed.
-  const v3 = projectGraphAndOptionsToV3(
-    projection.graph as never,
-    undefined,
+  // ⚠ THE SECOND ARGUMENT IS A CONTEXT OBJECT, NOT A POSITIONAL BRIEF. An
+  // earlier draft of this helper passed `(graph, undefined, brief)`; the third
+  // argument is silently DISCARDED, so the transform ran with no brief at all
+  // and every verdict below was being read off a context the caller thought it
+  // had supplied. Caught by the full `tsc` ratchet, not by the build gate
+  // (which excludes tests) and not by the suite (which was green throughout).
+  const v3 = projectGraphAndOptionsToV3(projection.graph as never, {
     brief,
-  ) as unknown as { graph?: { nodes?: readonly Record<string, unknown>[] } };
+  }) as unknown as { graph?: { nodes?: readonly Record<string, unknown>[] } };
   const wireNodes = v3.graph?.nodes;
   if (!wireNodes || wireNodes.length === 0) {
     throw new Error("V3 envelope carried no graph.nodes — the probe is blind, not the code green");
