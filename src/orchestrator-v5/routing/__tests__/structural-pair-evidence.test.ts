@@ -635,23 +635,45 @@ describe('buildSelectedDependenciesEvidence', () => {
     expect(buildNamed(undefined, {
       groundedSelection: { element_ids: [], unresolved: 'could_not_check' },
     })).toEqual({ status: 'ambiguous' });
-    expect(buildSelected({ messageText: 'What does CRM adoption and usability depend on?' }))
+    expect(buildSelected({
+      messageText: 'What does CRM adoption and usability depend on?',
+      structureQuery: { kind: 'dependencies', element_id: 'adoption' },
+      proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
+    }))
       .toEqual({ status: 'ambiguous' });
     expect(buildSelected({ messageText: 'What does Sales rep time on selling activities depend on?' }))
       .toEqual(buildNamed());
   });
 
-  it('does not silently drop a conflicting generic object from named or selected questions', () => {
+  it('does not silently drop a second generic named object or a typed selected-identity conflict', () => {
     const withCost = graph(
       [...selectedNodes, { id: 'cost', kind: 'factor', label: 'Cost' }], selectedEdges,
     );
     expect(buildNamed(undefined, {}, withCost)?.status).toBe('resolved');
     expect(buildNamed('What do Sales rep time on selling activities and Cost depend on?', {}, withCost))
       .toEqual({ status: 'ambiguous' });
-    expect(buildSelected({ messageText: 'What does Cost depend on?' }, withCost))
+    expect(buildSelected({
+      messageText: 'What does Cost depend on?',
+      structureQuery: { kind: 'dependencies', element_id: 'cost' },
+      proposalEntity: { id: 'cost', resolution_status: 'resolved' },
+    }, withCost))
       .toEqual({ status: 'ambiguous' });
     expect(buildSelected({ messageText: 'What does this depend on?' }, withCost)?.status)
       .toBe('resolved');
+  });
+
+  it.each([
+    ['incidental generic mention', 'What does this depend on? I mostly care about cost.', true],
+    ['same prose with no generic node', 'What does this depend on? I mostly care about cost.', false],
+    ['incidental multiword mention', 'What does this depend on? CRM adoption and usability seems relevant.', true],
+  ])('preserves canonical selected evidence with %s', (_case, messageText, includeCost) => {
+    const currentGraph = graph([
+      ...selectedNodes,
+      ...(includeCost ? [{ id: 'cost', kind: 'factor', label: 'Cost' }] : []),
+    ], selectedEdges);
+    const expected = buildSelected({}, currentGraph);
+    expect(expected?.status).toBe('resolved');
+    expect(buildSelected({ messageText }, currentGraph)).toEqual(expected);
   });
 
   it('distinguishes a nested label from a separately named second object', () => {
@@ -671,7 +693,6 @@ describe('buildSelectedDependenciesEvidence', () => {
         `What do ${extra} and Engineering Build Cost depend on?`,
       ]) {
         expect(buildNamed(messageText, {}, nested)).toEqual({ status: 'ambiguous' });
-        expect(buildSelected({ messageText }, nested)).toEqual({ status: 'ambiguous' });
       }
     }
     // A nested short label cannot corroborate the wrong typed object either.
@@ -713,7 +734,23 @@ describe('buildSelectedDependenciesEvidence', () => {
     for (const order of [twins, [...twins].reverse()]) {
       const currentGraph = graph([...selectedNodes, ...order], selectedEdges);
       expect(buildNamed(messageText, {}, currentGraph)).toEqual({ status: 'ambiguous' });
-      expect(buildSelected({ messageText }, currentGraph)).toEqual({ status: 'ambiguous' });
+    }
+  });
+
+  it('preserves selected evidence when duplicate ids are unrelated to the selected neighbourhood', () => {
+    const twins = [
+      { id: 'collision', kind: 'factor', label: 'Cost' },
+      { id: 'collision', kind: 'factor', label: 'Budget' },
+    ];
+    const expected = buildSelected();
+    expect(expected?.status).toBe('resolved');
+    for (const order of [twins, [...twins].reverse()]) {
+      const currentGraph = graph([...selectedNodes, ...order], selectedEdges);
+      expect(buildSelected({ messageText: 'What does this depend on?' }, currentGraph))
+        .toEqual(expected);
+      // The named path uses the complete lookup to corroborate identity, so
+      // unrelated duplicate ids still invalidate that different authority.
+      expect(buildNamed(undefined, {}, currentGraph)).toEqual({ status: 'ambiguous' });
     }
   });
 

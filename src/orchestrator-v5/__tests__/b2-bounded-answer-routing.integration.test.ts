@@ -665,9 +665,53 @@ describe('B2 real executor convergence', () => {
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 
-  it('fails weak when the selected identity conflicts with the dependency subject explicitly named now', async () => {
+  it.each([
+    ['incidental generic mention', 'What does this depend on? I mostly care about cost.', true],
+    ['same prose with no generic node', 'What does this depend on? I mostly care about cost.', false],
+    ['incidental multiword mention', 'What does this depend on? Team Capacity Consumed seems relevant.', false],
+  ])('keeps the resolved selected answer with %s instead of asking for the existing selection again', async (_case, message, includeCost) => {
+    const wrongAnswer =
+      'Replace CRM has a direct connector into Reach 1,500 paid teams, so the selected goal depends directly on choosing that option.';
+    const currentGraph = {
+      ...structuredClone(GRAPH),
+      nodes: [
+        ...structuredClone(GRAPH.nodes),
+        ...(includeCost ? [{ id: 'cost', kind: 'factor', label: 'Cost', observed_state: { value: 0.5 } }] : []),
+      ],
+    };
+    persistedGraph = structuredClone(currentGraph);
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const options = {
+      handlerRegistry: handlers,
+      graphState: currentGraph,
+      selectedElements: { node_ids: ['goal'], edge_ids: [] },
+    };
+    const baseline = await runTurnExecutor(payload('What does this depend on?'), `req-${randomUUID()}`, {
+      ...options,
+      routingAdapter: answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' }),
+    });
+    const result = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      ...options,
+      routingAdapter: answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' }),
+    });
+
+    expect(result.groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
+    expect(baseline.response.assistant_text).toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');
+    expect(result.response.assistant_text).toBe(baseline.response.assistant_text);
+    expect(result.response.assistant_text).not.toContain('Name or select');
+    expect(persistedGraph).toEqual(currentGraph);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('fails weak when the selected identity conflicts with the model-typed dependency subject', async () => {
     const wrongAnswer = 'The selected goal has exactly the dependencies you asked about.';
-    const adapter = answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' });
+    const adapter = answeringAdapter(
+      wrongAnswer,
+      { kind: 'dependencies', element_id: 'capacity' },
+      { id: 'capacity', label: 'Team Capacity Consumed', kind: 'node' },
+    );
     const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
       ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
     ]);
@@ -683,8 +727,8 @@ describe('B2 real executor convergence', () => {
       },
     );
 
-    // Selection itself resolved correctly; it must not erase the contrary
-    // subject in the user's current message or manufacture an answer to it.
+    // Preserve the deployed identity guard: the resolved selection cannot be
+    // replaced by a different otherwise-valid model-typed canonical subject.
     expect(groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
     expect(response.assistant_text).toContain('will not guess');
     expect(response.assistant_text).not.toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');

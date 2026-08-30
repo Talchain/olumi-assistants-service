@@ -283,9 +283,10 @@ export function buildSelectedDependenciesEvidence(
 
   const displayGraph = formatGraphForContext(graph);
   const idCounts = countNodeIds(displayGraph.nodes);
-  // The whole lookup now corroborates/contradicts the user's named subject.
-  // An unrelated duplicate id must not erase a conflicting label by map order.
-  if ([...idCounts.values()].some((count) => count !== 1)) {
+  // Only the named path uses the whole lookup to corroborate its typed id.
+  // The selected path retains its scoped endpoint checks below: an unrelated
+  // duplicate must not invalidate an otherwise unambiguous selected item.
+  if (!hasSelection && [...idCounts.values()].some((count) => count !== 1)) {
     return { status: 'ambiguous' };
   }
   const selectedNodes = displayGraph.nodes.filter((node) => node.id === selectedId);
@@ -304,28 +305,15 @@ export function buildSelectedDependenciesEvidence(
   }
 
   if (!hasSelection) {
-    // Existence of the model-proposed id is not proof of user intent. Reuse the
-    // pair-query corroborator: precisely this canonical id must be named in
-    // the current message, with no duplicate labels or extra references.
+    // Existence of the model-proposed id does not corroborate a user reference.
+    // Reuse the pair-query identity check: precisely this canonical id must be
+    // named, with no duplicate labels or extra references. Intent remains the
+    // router's typed query, not a classification made from these mentions.
     const named = resolveTypedCanonicalProseEntityRefs(
       lookup, labelIndex, options.messageText ?? '', [selectedId],
       { rejectOtherGenericReferences: true },
     );
     if (named?.length !== 1 || named[0]?.id !== selectedId) {
-      return { status: 'ambiguous' };
-    }
-  } else if (options.messageText !== undefined) {
-    // Current explicit references are contradiction evidence only; they never
-    // silently redirect a canvas selection to another canonical object.
-    const named = resolveTypedCanonicalProseEntityRefs(
-      lookup, labelIndex, options.messageText, [selectedId],
-      { rejectOtherGenericReferences: true },
-    );
-    const unnamed = resolveTypedCanonicalProseEntityRefs(
-      lookup, labelIndex, options.messageText, [],
-      { rejectOtherGenericReferences: true },
-    );
-    if (named === null && unnamed === null) {
       return { status: 'ambiguous' };
     }
   }
