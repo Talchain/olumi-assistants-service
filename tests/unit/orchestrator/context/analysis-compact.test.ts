@@ -56,7 +56,9 @@ describe("compactAnalysis", () => {
       ],
     });
     const enrichment = attestedConsumerFixture(response, "opt_b", response.results as Record<string, unknown>[]);
-    const summary = compactAnalysis(enrichment, undefined, { factResult: {
+    // The helper preserves the typed response and validates its added objective
+    // contract, but returns the broader enrichment type.
+    const summary = compactAnalysis(enrichment as unknown as V2RunResponseEnvelope, undefined, { factResult: {
       enrichment, leading_option_id: "opt_b", win_probabilities: boundFixtureShares(enrichment),
     } });
     expect(summary).not.toBeNull();
