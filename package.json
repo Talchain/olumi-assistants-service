@@ -80,7 +80,8 @@
     "eval:draft-quality:test": "vitest run tools/draft-quality-eval",
     "preharness:typecheck": "pnpm openapi:generate",
     "harness:typecheck": "tsc -p tools/conversation-harness/tsconfig.json --noEmit",
-    "harness:test": "vitest run --config tools/conversation-harness/vitest.config.ts"
+    "harness:test": "vitest run --config tools/conversation-harness/vitest.config.ts",
+    "verify:served-conformance": "tsx scripts/verify-served-prompt-conformance.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
