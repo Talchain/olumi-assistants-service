@@ -4951,8 +4951,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       !analyticalQuestionDetected &&
       !stateQuerySuppressed;
     // Proposal-confirmation suppressor (behaviour #1) + no-live-proposal
-    // clarification (amendment #3). Only a confirmation-shaped, edit-verb-bearing
-    // message pays the pending-actions read (hot path unchanged). Live graph-safe
+    // clarification (amendment #3). Confirmation/replay-shaped edit candidates
+    // pay the pending-actions read (ordinary typed edit hot path unchanged). Live graph-safe
     // proposal → suppress (TurnExecutor's tryShortConfirmResume applies it); no
     // proposal → return the no-live-proposal clarification (not the legacy edit
     // no-op dead-end); read failure → suppress (degraded, distinct trace).
@@ -4974,24 +4974,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isProposalReplayCandidate =
       !isConfirmationShaped &&
       (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
-    // #644 adversarial P2-2 (KNOWN ASYMMETRY, currently zero blast radius —
-    // deliberately NOT folded in): `structuralRestructureIntent` is absent from
-    // this proposal-confirm resolution gate, so a structural-restructure REPLAY
-    // (a chip_click / affirmative-prefixed message that matches
-    // detectStructuralRestructureIntent) skips resolveProposalConfirmAtRoute
-    // and re-dispatches the edit lane instead of resuming the exact live hold.
-    // This is unreachable today: every structural hold's rendered chip copy is
-    // built by describe-changeset.ts, whose per-op verbs lead with
-    // add/remove/change/update/adjust — ALL in EDIT_GRAPH_POSITIVE_REGEX — so
-    // `editVerbCandidate` already claims the replay here; and the only edit-verb-
-    // free copy it emits ("link 'X' to 'Y'", "rename 'X' to 'Y'") never carries a
-    // per-option / each-option-own clause, so it never matches the structural
-    // detector either. The omission would only bite if a FUTURE hold rendered a
-    // restructure-phrased, edit-verb-free chip label (e.g. "Split 'Cost' into
-    // per-option links"). Folding `|| structuralRestructureIntent` in now would
-    // be symmetry with no discriminating (non-vacuous) mutation-pin — rowed for
-    // ROADMAP follow-up (add it in the SAME change that introduces such copy).
-    if ((editVerbCandidate || configureOptionIntent) && (isConfirmationShaped || isProposalReplayCandidate)) {
+    // #1231 closes #644 P2-2's former asymmetry: the structural detector now
+    // recognises quoted rename commands, including the product's own
+    // "Rename 'X' to 'Y'" held-chip label. Resolve that replay before edit
+    // dispatch, or confirming an existing hold would draft a second one.
+    // Structural intent is only eligibility for the existing exact-copy
+    // resolver, never consent: unrelated copy still returns replay_no_match.
+    if (
+      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent)
+      && (isConfirmationShaped || isProposalReplayCandidate)
+    ) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
         requestId,

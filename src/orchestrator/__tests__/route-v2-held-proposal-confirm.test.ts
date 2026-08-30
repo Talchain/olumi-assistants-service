@@ -41,6 +41,10 @@ import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import { _resetConfigCache } from '../../config/index.js';
+import {
+  buildGmHeldPublicCopy,
+  describeHeldOperationsSubject,
+} from '../../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 
 const dispatchEditGraphMock = vi.fn();
 vi.mock('../../orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
@@ -245,6 +249,49 @@ function gmHeldPending(overrides: { expiresAtIso?: string; graphHash?: string } 
   } as PendingAction;
 }
 
+// Use the producer's actual persisted/rendered copy, not a test-authored alias.
+// A rename label is itself a structural command; its replay must resume THIS
+// batch rather than asking the edit LLM to draft another one (#1231 / #644 P2-2).
+function renameHold(newLabel = 'Acquisition spend') {
+  const operations = [{ op: 'update_node', path: 'fac-marketing', value: { label: newLabel } }];
+  const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(operations, STRICT_GRAPH));
+  const base = gmHeldPending();
+  if (base.action.kind !== 'apply_proposed_change') throw new Error('Invalid held fixture');
+  const pending: PendingAction = {
+    ...base,
+    action: {
+      ...base.action,
+      public_label: copy.label,
+      public_message: copy.message,
+      inline_patch: {
+        ...base.action.inline_patch,
+        candidate_kind: 'rename_node',
+        mutation_class: 'tunable',
+        blocker_code: null,
+        operations,
+        operations_count: operations.length,
+      },
+    },
+  };
+  return { copy, pending, newLabel };
+}
+
+function expectAppliedRenameHold(newLabel: string): void {
+  expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  expect(chatWithToolsMock).not.toHaveBeenCalled();
+  expect(appendMock).toHaveBeenCalledTimes(1);
+  const write = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+  expect(write.graph).toEqual({
+    ...STRICT_GRAPH,
+    nodes: STRICT_GRAPH.nodes.map((node) => node.id === 'fac-marketing' ? { ...node, label: newLabel } : node),
+  });
+  expect(write.handler_facts).toEqual([
+    expect.objectContaining({ fact_type: 'edit_graph' }),
+  ]);
+  // Consumed once; no replacement pending or second hold is minted.
+  expect(write.pending_actions).toEqual([]);
+}
+
 function makeEditGraphMockResult(assistantText = 'Mocked edit pipeline reply.') {
   return {
     response: {
@@ -310,6 +357,83 @@ describe('POST /orchestrate/v2/turn — held proposal survives the confirm turn 
     appendMock.mockClear();
     chatWithToolsMock.mockClear();
     pendingActionsForRead = [gmHeldPending()];
+  });
+
+  it.each(['label', 'message'] as const)(
+    'the emitted rename chip %s resumes the exact held rename, never redrafts',
+    async (field) => {
+      const held = renameHold();
+      expect(held.copy.label).toBe("Rename 'Marketing' to 'Acquisition spend'");
+      pendingActionsForRead = [held.pending];
+      const res = await app.inject({
+        method: 'POST', url: '/orchestrate/v2/turn',
+        payload: payload({ message: held.copy[field], source: 'chip_click' }),
+      });
+      expect(res.statusCode).toBe(200);
+      expectAppliedRenameHold(held.newLabel);
+      expect(JSON.parse(res.body).assistant_text).toContain('Confirmed:');
+    },
+  );
+
+  it.each(['label', 'message'] as const)(
+    'a long rename uses the emitted clamped %s/full message contract to resume its hold',
+    async (field) => {
+      const held = renameHold('International audience campaign acquisition spend');
+      expect(held.copy.detail).toBeDefined();
+      expect(held.copy.label).not.toBe(held.copy.detail);
+      pendingActionsForRead = [held.pending];
+      const res = await app.inject({
+        method: 'POST', url: '/orchestrate/v2/turn',
+        payload: payload({ message: held.copy[field], source: 'chip_click' }),
+      });
+      expect(res.statusCode).toBe(200);
+      expectAppliedRenameHold(held.newLabel);
+    },
+  );
+
+  it('the emitted rename label cannot revive an expired hold or redraft it', async () => {
+    const held = renameHold();
+    pendingActionsForRead = [{ ...held.pending, expires_at_iso: '2020-01-01T00:00:00.000Z' }];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: held.copy.label, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).assistant_text).toBe(NO_LIVE_PROPOSAL_TEXT);
+    for (const [write] of appendMock.mock.calls) {
+      expect(write.graph).toBeUndefined();
+      expect(write.handler_facts ?? []).toEqual([]);
+      expect(write.pending_actions ?? []).toEqual([]);
+    }
+  });
+
+  it('a fresh typed quoted rename still dispatches without consuming a different live hold', async () => {
+    const held = renameHold();
+    pendingActionsForRead = [held.pending];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: "Rename 'Revenue' to 'Recurring income'", source: 'composer' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).assistant_text).not.toContain('Confirmed:');
+  });
+
+  it('an unrelated quoted rename chip does not acquire consent from the live hold', async () => {
+    pendingActionsForRead = [renameHold().pending];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: "Rename 'Revenue' to 'Recurring income'", source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).assistant_text).not.toContain('Confirmed:');
   });
 
   // ── Paul's exact sequence: the chip replays its LABEL text ─────────────
