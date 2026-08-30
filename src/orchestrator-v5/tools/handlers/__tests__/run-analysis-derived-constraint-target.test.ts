@@ -35,6 +35,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import type { PLoTClient, PLoTClientRunOpts } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
@@ -45,8 +46,18 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from '../run-analysis.js';
-import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+
+// Read the fixture via fs rather than a `with { type: 'json' }` import
+// attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
+// config) rejects import attributes with TS2823, and this file must stay OUT
+// of the frozen error baseline.
+const happyFixture = JSON.parse(
+  readFileSync(
+    new URL('../../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url),
+    'utf8',
+  ),
+) as Record<string, unknown>;
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-r1225-derived-target';
@@ -110,15 +121,16 @@ function makeScenarioSnapshot(graph: Record<string, unknown>): RunAnalysisScenar
 }
 
 function makeScenarioReader(snapshot: RunAnalysisScenarioSnapshot): ScenarioReader {
-  return vi.fn<[string, AbortSignal | undefined], Promise<RunAnalysisScenarioSnapshot>>(
-    () => Promise.resolve(snapshot),
-  );
+  return vi.fn<ScenarioReader>(() => Promise.resolve(snapshot));
 }
 
 function makePlotClient(response: Record<string, unknown>): PLoTClient {
   const run = vi.fn<
-    [Record<string, unknown>, string, PLoTClientRunOpts | undefined],
-    Promise<V2RunResponseEnvelope>
+    (
+      payload: Record<string, unknown>,
+      requestId: string,
+      opts?: PLoTClientRunOpts,
+    ) => Promise<V2RunResponseEnvelope>
   >(() => Promise.resolve(JSON.parse(JSON.stringify(response)) as V2RunResponseEnvelope));
   const validatePatch = vi.fn().mockResolvedValue({});
   return { run, validatePatch } as unknown as PLoTClient;
