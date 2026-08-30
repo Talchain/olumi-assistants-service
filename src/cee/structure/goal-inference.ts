@@ -82,6 +82,77 @@ const GOAL_PATTERNS = [
 ];
 
 /**
+ * ⭐⭐ WHERE THE OBJECTIVE CLAUSE ENDS — the connectives that introduce a trailing
+ * QUALIFIER rather than more objective.
+ *
+ * ⚠ THE LIVE DEFECT. A 15-journey battery captured an objective node reading
+ * *"Bring first-response time back under four hours without going over budget"* —
+ * the budget CONSTRAINT swallowed into the OBJECTIVE, so the analysis optimised
+ * for a compound thing the user never set as their goal. The patterns above use a
+ * lazy capture bounded only by sentence end, so with no comma and no full stop
+ * before the trailing clause, `(.+?)` runs to `$` and takes the qualifier with it.
+ *
+ * ⭐ WHY THIS IS TRACTABLE WHERE THE SEMANTIC QUESTION WAS NOT. PR #1214 attacked
+ * a different seam by asking *"is this span a limit or an objective?"* — a
+ * judgement about MEANING, and a sibling proved by execution that the identical
+ * quote is an objective in one brief and a constraint in another with
+ * byte-identical inputs. That is unwinnable at the span level and #1214 is parked.
+ * This list answers only *"where does the objective clause END?"* — a boundary
+ * question about clause STRUCTURE. In `X without Y`, `X while keeping Y`, the
+ * objective is X and the trailing clause qualifies it, whatever X and Y mean.
+ *
+ * ⛔⛔ THIS LIST IS CLOSED, AND EVERY EXCLUSION BELOW WAS MEASURED, NOT ASSUMED.
+ * Adding a member is a predicate change over natural language and carries the
+ * full risk of one regardless of diff size (CLAUDE.md trap 22d). The exclusions,
+ * each run before being rejected:
+ *
+ *   - `but`  — bought NOTHING on any governed brief and broke two real
+ *              constructions: *"eliminate nothing but waste"* → "Eliminate
+ *              nothing", *"cut all but essential spend"* → "Cut all". `but` is
+ *              both a coordinator and half of a quantifier idiom, with no
+ *              structural discriminator at this layer. Trap 22f's "genuinely
+ *              ambiguous" condition — the exit is to leave it, NOT to add a
+ *              length constant with a hard cliff either side.
+ *   - `and`  — drops a CO-EQUAL objective (*"grow revenue and cut churn"* →
+ *              "Grow revenue"). This is the exact predicate on which this estate
+ *              lost FOUR consecutive rounds. Not reopened.
+ *   - `within` / `so that` — a deadline is part of the objective's specification.
+ *              Adding `within` re-truncates four of the very governed briefs this
+ *              fix repairs (02, 09, 11, 12). Measured.
+ *
+ * All four exclusions are pinned in `cee.goal-objective-clause-boundary.test.ts`
+ * under KNOWN-UNHANDLED, so this set REDs if it grows OR shrinks.
+ */
+export const TRAILING_QUALIFIER_CONNECTIVES = ["without", "while", "whilst"] as const;
+
+/**
+ * Cut an extracted objective at the first trailing-qualifier connective.
+ *
+ * ⚠ THE OPPOSITE-DIRECTION HARM, and why the fallback below is not decoration.
+ * Two harms sit under this one predicate and they cannot share one window: trim
+ * too little and a constraint is swallowed into the objective; trim too much and
+ * a legitimate objective is TRUNCATED — which is the WORSE harm, because a
+ * truncated objective reads as a complete one. So a trim that leaves nothing
+ * viable is discarded and the untrimmed text stands. The floor is this module's
+ * OWN existing 5-character minimum, deliberately not a new invented constant.
+ */
+function trimTrailingQualifier(text: string): string {
+  const boundary = new RegExp(
+    `\\s+(?:${TRAILING_QUALIFIER_CONNECTIVES.join("|")})\\s+\\S.*$`,
+    "i",
+  );
+  const trimmed = text.replace(boundary, "").trim();
+  return trimmed.length >= MIN_GOAL_LABEL_LENGTH ? trimmed : text;
+}
+
+/**
+ * The module's existing viability floor for an inferred label, named so the
+ * boundary trim and the acceptance check cannot drift apart (CLAUDE.md trap 12).
+ */
+const MIN_GOAL_LABEL_LENGTH = 5;
+const MAX_GOAL_LABEL_LENGTH = 200;
+
+/**
  * Default placeholder goal when no objective can be inferred
  */
 export const DEFAULT_GOAL_LABEL = "Achieve the best outcome for this decision";
@@ -135,9 +206,10 @@ export function inferGoalFromBrief(brief: string): GoalInferenceResult {
     const match = brief.match(pattern);
     if (match && match[1]) {
       const extracted = match[1].trim();
-      // Clean up the extracted text
-      const cleaned = cleanGoalText(extracted);
-      if (cleaned.length >= 5 && cleaned.length <= 200) {
+      // Clean up the extracted text, then cut it at the objective's clause
+      // boundary so a trailing qualifier is not carried into the goal.
+      const cleaned = cleanGoalText(trimTrailingQualifier(cleanGoalText(extracted)));
+      if (cleaned.length >= MIN_GOAL_LABEL_LENGTH && cleaned.length <= MAX_GOAL_LABEL_LENGTH) {
         return {
           found: true,
           label: capitalizeFirst(cleaned),
