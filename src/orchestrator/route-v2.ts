@@ -188,6 +188,7 @@ import {
   markDraftGraphWriteFailed,
   loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
+  loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
@@ -260,8 +261,10 @@ import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compos
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
   resolveRepairValueBinding,
+  resolveRecordedOptionEffectAnswer,
   deriveMissingEffectPairs,
   type RepairValueBindingResolution,
+  type RecordedEffectAnswer,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
 // ⭐⭐ ROADMAP 2.1353 — every exit that solicits a reply persists the question.
@@ -5641,6 +5644,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // ONE reading of "did the user answer?", shared with both resolvers — never
     // a second text predicate at the route (trap 12).
     const repairAnswerReading = readMissingValueAnswer(ingress.message);
+    let recordedEffectAnswer: RecordedEffectAnswer | null = null;
+    let recordedEffectGraph: GraphStateIngress | null = null;
+    let repairPriorPendings: readonly PendingAction[] | null = null;
+    let recordedQuestionOwnsAnswer = false;
     if (
       !bypassEditHandling &&
       !configureOptionIntent &&
@@ -5649,35 +5656,68 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       repairAnswerReading !== null &&
       repairAnswerReading.kind === 'numeric'
     ) {
-      let repairClaimBlocked = false;
       try {
-        const pendings = await loadMostRecentPendingActionsStrict(ingress.scenario_id, requestId);
-        const nowMs = Date.now();
-        repairClaimBlocked = pendings.some(
-          (pa) => pa.action.kind === 'set_factor_value' && !isPendingActionExpired(pa, nowMs),
-        );
-        // ⚠ NO WIDER GATE HERE, AND THAT IS A CORRECTION TO THIS LANE'S OWN FIRST
-        // CUT. It briefly stood down for ANY live pending, to cover a naked "1"
-        // colliding with ordinal selection of an offered proposal. That
-        // over-declined — it withheld a legitimate bare answer for a full TTL
-        // window whenever any unrelated offer was outstanding — and it also
-        // under-covered, because this lane's own ask arm persists no pending at
-        // all. The collision is now refused by SHAPE in
-        // `isModelUnitEffectValueText` (a bare integer is never claimed), which
-        // is where it cannot go stale.
+        repairPriorPendings = await loadMostRecentPendingActionsIntegrityStrict(ingress.scenario_id, requestId);
       } catch {
-        // A pendings read must never fail the turn; it only withdraws this
-        // claim (the turn proceeds exactly as before this pre-route existed).
-        repairClaimBlocked = true;
+        // Unreadable pending state is not permission to infer a different ask.
+        repairPriorPendings = null;
       }
       let persistedForRepair: unknown = null;
-      if (!repairClaimBlocked) {
+      if (repairPriorPendings !== null) {
         try {
           persistedForRepair = await loadPersistedGraphOnce();
         } catch {
           persistedForRepair = null;
         }
       }
+      const repairGraphParse = GraphStateIngressSchema.safeParse(persistedForRepair);
+      const repairGraph = repairGraphParse.success ? persistedForRepair as GraphStateIngress : null;
+      const recorded = resolveRecordedOptionEffectAnswer({
+        message: ingress.message, pendings: repairPriorPendings, graph: repairGraph,
+        readiness: repairGraph ? buildCanonicalAnalysisReadyFromGraph(repairGraph) : undefined,
+        scenarioId: ingress.scenario_id, nowMs: Date.now(),
+      });
+      recordedQuestionOwnsAnswer = recorded.kind !== 'unrelated' && recorded.kind !== 'unrecorded';
+      if (recorded.kind === 'bind') {
+        recordedEffectAnswer = recorded.answer;
+        recordedEffectGraph = repairGraph;
+      } else if (recorded.kind === 'ask' || recorded.kind === 'stale'
+        || recorded.kind === 'ambiguous' || recorded.kind === 'unavailable') {
+        let response: OlumiResponse = recorded.kind === 'ask'
+          ? composeConfigureOptionClarifyResponse({
+              optionLabel: recorded.pair.optionLabel,
+              factorLabels: [recorded.pair.factorLabel], stage: ingress.stage,
+              message: ingress.message,
+            })
+          : { response_version: 2, assistant_text:
+              'I cannot safely match that answer to the previous question. Nothing has changed. Please name the option and factor you want to set.',
+              blocks: [], suggested_actions: [], insights: [], stage_indicator: ingress.stage };
+        if (recorded.kind === 'ask') {
+          response = { ...response, assistant_text:
+            `For "${recorded.pair.optionLabel}" on "${recorded.pair.factorLabel}": ${response.assistant_text}` };
+        }
+        // Keep the existing question on a refused value. Do not reissue/reset its
+        // TTL, consume it, or replace an unreadable history with an empty row.
+        if (repairPriorPendings !== null) {
+          const committed = await commitDirectAnswer(response, {
+            scenario_id: ingress.scenario_id, turn_id: ingress.turn_id,
+            turn_class: 'clarify', handler_id: null, request_hash: computeRequestHash(ingress),
+            llm_calls_used: 0, duration_ms: Date.now() - routeStartedAt,
+            handler_facts: [], pending_actions: [], priorPendingActions: repairPriorPendings,
+            coaching_state: null, userMessage: ingress.message,
+          });
+          response = committed.response;
+        }
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          ...(repairGraph ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(repairGraph) } : {}),
+          graph: null, ...(await claimSafety.forExit()), answerKind: 'functional',
+          requestStartedAt: routeStartedAt, scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id, userMessage: ingress.message,
+        });
+      }
+      const repairClaimBlocked = recordedQuestionOwnsAnswer || repairPriorPendings === null
+        || repairPriorPendings.some(pa => pa.action.kind === 'set_factor_value'
+          && !isPendingActionExpired(pa, Date.now()));
       if (
         !repairClaimBlocked &&
         persistedForRepair != null &&
@@ -5812,6 +5852,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // its own right — the claim anchor + the sole-missing-pair derivation
       // above ARE its gates (bypassEditHandling was already required to claim).
       (editVerbCandidate || configureOptionIntent || structuralRestructureIntent ||
+        recordedEffectAnswer !== null ||
         repairValueBinding !== null ||
         // ⭐ ROADMAP 2.1266 / A2 — an answer to the product's own outstanding ask
         // is an edit-lane intent in its own right, on exactly the same footing
@@ -5849,7 +5890,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         intent_class: classifyAnalyticalIntent(ingress.message),
       });
     }
-    let resolvedGraphState: GraphStateIngress | null = null;
+    let resolvedGraphState: GraphStateIngress | null = recordedEffectGraph;
     if (editIntentDetected) {
       if (extensions.graphState != null) {
         emit(TelemetryEvents.V5EditGraphGraphStatePresent, {
@@ -6179,13 +6220,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // resolves them against this exact edit graph and admits prompt focus
           // only after a strict GraphV3 parse; client labels never cross.
           selectedElements: extensions.selectedElements,
+          ...(recordedEffectAnswer !== null ? { recordedEffectAnswer } : {}),
           // ⭐ ROADMAP 2.1261 — the BIND path's instruction. The edit LLM
           // receives the advised-format sentence (probe P1 verbatim) carrying
           // the user's value bound to the sole missing option×factor pair;
           // `payload.message` stays the user's own bytes everywhere it is
           // recorded (commit `userMessage`, wire echo, telemetry).
-          ...(repairValueBinding !== null
-            ? { editInstructionOverride: repairValueBinding.instruction }
+          ...(recordedEffectAnswer !== null || repairValueBinding !== null
+            ? { editInstructionOverride: recordedEffectAnswer?.instruction ?? repairValueBinding!.instruction }
             : {}),
           // ROADMAP 2.684 — the turn's wall-clock baseline, threaded so the
           // structural-edit composer can derive what is LEFT of the turn rather

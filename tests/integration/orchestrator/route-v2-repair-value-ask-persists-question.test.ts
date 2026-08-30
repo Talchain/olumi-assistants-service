@@ -34,6 +34,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import type { FastifyInstance } from 'fastify';
 
 const dispatchEditGraphMock = vi.fn();
@@ -320,7 +321,7 @@ describe('the repair-value ask must PERSIST the question it asked', () => {
           public_label: 'Switch the courier contract',
           public_message: 'Switch the courier contract',
         },
-        preconditions: {},
+        preconditions: { graph_hash: computeAnalysisAffectingGraphHash(buildGraph()) },
         // ONE turn left: it lapses at THIS commit.
         expires_at_turn_count: 1,
         expires_at_iso: new Date(Date.now() + 10 * 60 * 1000).toISOString(),

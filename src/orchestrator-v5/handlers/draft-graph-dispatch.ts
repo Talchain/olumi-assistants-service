@@ -83,7 +83,8 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
-import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   attachModelVersionMutationReceipt,
   modelVersionMutationReceiptFromResponse,
@@ -830,10 +831,17 @@ export async function dispatchDraftGraph(
       payload.scenario_id,
       requestId,
     );
+    // Explicit pendings are not re-pinned by commitDirectAnswer. Use the same
+    // idempotent projection as its atomic write before binding the asked cell.
+    const draftGraphForCommit = projectGraphForPersistence(draftResult.graphOutput, {
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      turnClass: 'direct_answer',
+    });
     const postDraftGraphHash = ((): string | null => {
       try {
         return computeAnalysisAffectingGraphHash(
-          draftResult.graphOutput as GraphStateIngress | null | undefined,
+          draftGraphForCommit as GraphStateIngress | null | undefined,
         );
       } catch {
         return null;
@@ -841,8 +849,8 @@ export async function dispatchDraftGraph(
     })();
     const holdThread = threadHoldsThroughMutatingCommit({
       priorPendingActions,
-      graphAfterCommit: draftResult.graphOutput ?? null,
-      graphHashAfterCommit: draftResult.graphOutput != null ? postDraftGraphHash : null,
+      graphAfterCommit: draftGraphForCommit ?? null,
+      graphHashAfterCommit: draftGraphForCommit != null ? postDraftGraphHash : null,
       // No per-operation record on a draft — the whole NEW graph IS the
       // mutation. Fulfilment detection (round-3 concern 1) falls back to
       // the post-draft end state: a concept the redraft itself delivered
@@ -859,6 +867,15 @@ export async function dispatchDraftGraph(
       turnId: payload.turn_id,
       site: 'draft_graph_dispatch',
     });
+    const askedEffect = draftGraphForCommit != null && postDraftGraphHash !== null
+      ? buildReadinessEffectPending({
+          analysisReady: draftResult.analysisReady,
+          nodes: draftGraphForCommit.nodes,
+          scenarioId: payload.scenario_id,
+          graphHash: postDraftGraphHash,
+          emittedAtIso: new Date().toISOString(),
+        })
+      : null;
 
     // Capture persistence_ms for the diagnostic trace's substage timings.
     // Cheap: two Date.now() calls regardless of flag state — the timing is
@@ -886,6 +903,9 @@ export async function dispatchDraftGraph(
       // user brief (userMessage) — it is graphPersisted-independent and
       // side-effect-free. Capturing the draft narrative without a second write
       // or breaking the telemetry-after-persistence invariant is a follow-up.
+      // The code-owned missing-effect referent DOES persist below, atomically
+      // with this graph: no prose parsing or second write is needed to retain
+      // the exact question that the successful response will render.
       { response_version: 2, assistant_text: holdThread.notice ?? '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
@@ -911,12 +931,13 @@ export async function dispatchDraftGraph(
         // scenarios and `no_expected`/`not_instrumented` on redrafts — that
         // IS the coverage metric for this path, not a gap to "fix" by
         // trusting the request.
-        graph: draftResult.graphOutput ?? undefined,
+        graph: draftGraphForCommit ?? undefined,
         briefText: briefTextForCommit,
         // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
         // carry-forward runs on this path; graph_hash is the NEW draft's
         // analysis-affecting hash (only when a graph is actually written).
         priorPendingActions: holdThread.threaded,
+        ...(askedEffect !== null ? { pending_actions: [askedEffect] } : {}),
         // ROADMAP 2.63 C3/C4 — retire the honoured draft-offer pending
         // atomically with the draft it produced (see the param doc).
         ...(params.consumedPendingRefs !== undefined

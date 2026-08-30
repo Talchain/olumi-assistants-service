@@ -42,7 +42,10 @@ import type { FastifyRequest } from 'fastify';
 
 import { _resetConfigCache } from '../../../config/index.js';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import type { PatchOperation } from '../../../orchestrator/types.js';
+import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
+import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 
 // ── module-level mocks (same posture as the #1016 sibling) ─────────
 
@@ -54,6 +57,7 @@ vi.mock('../../../orchestrator/tools/edit-graph.js', async (importOriginal) => {
     // operation must canonicalise through the SAME parser the model's output
     // goes through, and mocking it would make that claim unfalsifiable.
     handleEditGraph: vi.fn(),
+    parseEditGraphResponse: vi.fn(actual.parseEditGraphResponse),
   };
 });
 
@@ -82,10 +86,20 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 // ── imports after mocks ────────────────────────────────────────────
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
-import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+import { handleEditGraph, parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { formatOptionEffectWriteAck } from '../../routing/option-effect-write.js';
-import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { GraphStateIngressSchema, type GraphStateIngress } from '../../boundary/request-extensions.js';
+import { getAdapter } from '../../../adapters/llm/router.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import type { PendingAction } from '../../session/pending-action.js';
+import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
+import { finalizeChips } from '../../compose/chip-finalizer.js';
+import {
+  resolveRecordedOptionEffectAnswer,
+  type RecordedEffectAnswer,
+} from '../../routing/repair-value-binding.js';
 
 // ── the witnessed bytes ────────────────────────────────────────────
 
@@ -390,4 +404,246 @@ describe('the deterministic path does not widen beyond the edit lane it replaces
 
     expect(editOpts()?.preComposedOperations).toBeUndefined();
   });
+});
+
+describe('recorded missing-effect answer survives the dispatcher boundary by identity', () => {
+  const DUPLICATE_OPTION_ID = '862169d7';
+  const MESSAGE = 'Set it to about 0.9.';
+
+  function duplicateLabelGraph(): GraphStateIngress {
+    const graph = clone(WITNESS.draft_graph);
+    const other = graph.nodes.find((node) => node.id === DUPLICATE_OPTION_ID);
+    expect(other).toBeDefined();
+    other!.label = OPTION_LABEL;
+    expect(graph.nodes.filter((node) => node.label === OPTION_LABEL)).toHaveLength(2);
+    return graph as unknown as GraphStateIngress;
+  }
+
+  function recordedAnswer(graph: GraphStateIngress): RecordedEffectAnswer {
+    const now = Date.now();
+    const graphHash = computeAnalysisAffectingGraphHash(graph);
+    if (graphHash === null) throw new Error('Recorded-answer fixture did not hash');
+    const pending: PendingAction = {
+      id: '00000000-0000-4000-8000-000000000001',
+      scenario_id: WITNESS.ids.scenario_id,
+      chip_id: 'chip_configure_option_clarify',
+      action: {
+        kind: 'elicit_option_effect', option_id: OPTION_ID, option_label: OPTION_LABEL,
+        factor_id: FACTOR_ID, factor_label: FACTOR_LABEL,
+      },
+      preconditions: { graph_hash: graphHash },
+      emitted_at_iso: new Date(now).toISOString(),
+      expires_at_iso: new Date(now + 600000).toISOString(),
+      expires_at_turn_count: 2,
+    };
+    const run: PendingAction = {
+      ...pending, id: '00000000-0000-4000-8000-000000000002',
+      chip_id: 'chip_run_analysis', action: { kind: 'run_analysis' },
+    };
+    const resolution = resolveRecordedOptionEffectAnswer({
+      message: MESSAGE, graph, pendings: [pending, run],
+      readiness: buildCanonicalAnalysisReadyFromGraph(graph),
+      scenarioId: WITNESS.ids.scenario_id, nowMs: now,
+    });
+    expect(resolution.kind).toBe('bind');
+    if (resolution.kind !== 'bind') throw new Error('Recorded-answer fixture did not bind');
+    return resolution.answer;
+  }
+
+  function appliedAskedGraph(graph: GraphStateIngress, value: number): GraphV3T {
+    const changed = clone(graph);
+    const option = changed.nodes.find((node) => node.id === OPTION_ID)!;
+    option.interventions = { [FACTOR_ID]: { value, source: 'user_specified' } };
+    return changed as unknown as GraphV3T;
+  }
+
+  function dispatchRecorded(graph: GraphStateIngress, answer: RecordedEffectAnswer, message = MESSAGE) {
+    return dispatchEditGraph({
+      payload: makePayload(message), requestId: 'req-recorded-effect', request: STUB_REQUEST,
+      graphState: graph, analysisState: null, recordedEffectAnswer: answer,
+    });
+  }
+
+  it('uses the real parser and exact asked cell despite duplicate labels; consumes only that question', async () => {
+    const graph = duplicateLabelGraph();
+    const answer = recordedAnswer(graph);
+    editMock().mockResolvedValue(appliedResult(appliedAskedGraph(graph, 0.9), {
+      op: 'update_node', path: OPTION_ID,
+    }));
+
+    const result = await dispatchRecorded(graph, answer);
+
+    expect(parseEditGraphResponse).toHaveBeenCalled();
+    const operation = editOpts()?.preComposedOperations?.[0];
+    expect(operation).toMatchObject({ op: 'update_node', path: OPTION_ID });
+    expect(operation?.value).toEqual({
+      [`data/interventions/${FACTOR_ID}`]: { value: 0.9 },
+    });
+    const commit = commitMock().mock.calls[0]![1];
+    expect(commit.graph).toBeDefined();
+    const committed = GraphV3.parse(commit.graph);
+    const before = GraphV3.parse(graph);
+    expect(commit.consumedPendingRefs).toEqual([answer.pending.chip_id]);
+    expect(commit.priorPendingActions).toEqual(answer.priorPendingActions);
+    expect(committed.nodes.find((node) => node.id === FACTOR_ID)).toEqual(
+      before.nodes.find((node) => node.id === FACTOR_ID),
+    );
+    expect(committed.nodes.find((node) => node.id === DUPLICATE_OPTION_ID)).toEqual(
+      before.nodes.find((node) => node.id === DUPLICATE_OPTION_ID),
+    );
+    expect(result.response.assistant_text).toContain('effect value of 0.9');
+  });
+
+  it('recomputes the operation from durable question plus message, never trusting supplied derived fields', async () => {
+    const graph = duplicateLabelGraph();
+    const answer = recordedAnswer(graph);
+    const forged: RecordedEffectAnswer = {
+      ...answer, valueText: '0.2', instruction: 'Set the factor baseline to 0.2.',
+      pair: { ...answer.pair, optionId: DUPLICATE_OPTION_ID },
+    };
+    editMock().mockResolvedValue(appliedResult(appliedAskedGraph(graph, 0.9), {
+      op: 'update_node', path: OPTION_ID,
+    }));
+
+    await dispatchRecorded(graph, forged);
+
+    const operation = editOpts()?.preComposedOperations?.[0];
+    expect(operation?.path).toBe(OPTION_ID);
+    expect(operation?.value).toEqual({
+      [`data/interventions/${FACTOR_ID}`]: { value: 0.9 },
+    });
+  });
+
+  it('the exact precomposed operation survives the real applier, encoder, and JSON readback', async () => {
+    const graph = duplicateLabelGraph();
+    const answer = recordedAnswer(graph);
+    const base = GraphV3.parse(graph);
+    editMock().mockImplementation(async (_context, _instruction, _adapter, _requestId, _turnId, options) => {
+      expect(options?.preComposedOperations).toHaveLength(1);
+      const operations = [...options!.preComposedOperations!] as PatchOperation[];
+      const applied = applyPatchOperations(base, operations);
+      const encoded = encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]));
+      expect(encoded.unresolvedOptionIds).toEqual([]);
+      return appliedResult(encoded.graph, { ...operations[0]! });
+    });
+
+    await dispatchRecorded(graph, answer);
+
+    const commit = commitMock().mock.calls[0]![1];
+    expect(commit.graph).toBeDefined();
+    const reloaded = GraphV3.parse(clone(commit.graph));
+    expect(reloaded.nodes.find((node) => node.id === OPTION_ID)?.interventions?.[FACTOR_ID])
+      .toMatchObject({ value: 0.9 });
+    expect(reloaded.nodes.find((node) => node.id === FACTOR_ID)).toEqual(
+      base.nodes.find((node) => node.id === FACTOR_ID),
+    );
+    expect(reloaded.nodes.find((node) => node.id === DUPLICATE_OPTION_ID)).toEqual(
+      base.nodes.find((node) => node.id === DUPLICATE_OPTION_ID),
+    );
+    expect(commit.consumedPendingRefs).toEqual([answer.pending.chip_id]);
+    const readiness = buildCanonicalAnalysisReadyFromGraph(reloaded);
+    expect(readiness?.options.find((option) => option.option_id === OPTION_ID)?.status).toBe('ready');
+    expect(readiness?.options.find((option) => option.option_id === DUPLICATE_OPTION_ID)?.status)
+      .not.toBe('ready');
+  });
+
+  it.each([false, true])('arms the next asked cell only if its recovery chip survives real finalization (duplicate=%s)', async (duplicate) => {
+    const graph: GraphStateIngress = {
+      goal_node_id: 'goal',
+      nodes: [
+        { id: 'decision', kind: 'decision', label: 'Delivery approach' },
+        { id: 'goal', kind: 'goal', label: 'Protect margin' },
+        { id: OPTION_ID, kind: 'option', label: OPTION_LABEL },
+        { id: DUPLICATE_OPTION_ID, kind: 'option', label: 'Other courier' },
+        { id: FACTOR_ID, kind: 'factor', label: FACTOR_LABEL },
+      ],
+      edges: [['decision', OPTION_ID], ['decision', DUPLICATE_OPTION_ID],
+        [OPTION_ID, FACTOR_ID], [DUPLICATE_OPTION_ID, FACTOR_ID], [FACTOR_ID, 'goal']]
+        .map(([from, to]) => ({
+          from: from!, to: to!, strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 1, effect_direction: 'positive',
+        })),
+    };
+    const answer = recordedAnswer(graph);
+    const applied = appliedAskedGraph(graph, 0.9);
+    const readiness = buildCanonicalAnalysisReadyFromGraph(applied);
+    expect(readiness?.status).toBe('needs_user_input');
+    const recovery = buildReadinessRecoveryChip(readiness);
+    expect(recovery?.id).toBe('chip_prompt_repair_effect_value');
+    const result = appliedResult(applied, { op: 'update_node', path: OPTION_ID });
+    editMock().mockResolvedValue({
+      ...result,
+      suggestedActions: [{
+        label: 'Continue considering the model',
+        prompt: duplicate ? recovery!.message : 'Discuss the remaining delivery risks.',
+        role: 'facilitator',
+      }],
+    });
+
+    const dispatched = await dispatchRecorded(graph, answer);
+
+    // The dispatcher returns pre-egress chips. Invoke the actual shared
+    // finalizer to assert what survives, not a hand-maintained budget mirror.
+    const final = finalizeChips(dispatched.response.suggested_actions, { logSuppressions: false });
+    expect(final.chips.some((chip) => chip.id === recovery!.id)).toBe(!duplicate);
+    if (duplicate) expect(final.report.deduped).toBe(1);
+    const commit = commitMock().mock.calls[0]![1];
+    const nextAsks = (commit.pending_actions ?? []).filter((pending) => pending.action.kind === 'elicit_option_effect');
+    expect(nextAsks).toHaveLength(duplicate ? 0 : 1);
+    if (!duplicate) {
+      expect(nextAsks[0]?.action).toMatchObject({
+        kind: 'elicit_option_effect', option_id: DUPLICATE_OPTION_ID, factor_id: FACTOR_ID,
+      });
+      expect(nextAsks[0]?.preconditions.graph_hash).toBe(
+        computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(commit.graph)),
+      );
+    }
+    expect(commit.consumedPendingRefs).toEqual([answer.pending.chip_id]);
+  });
+
+  it.each(['no applied graph', 'no target value', 'different target value', 'wrong entity'] as const)(
+    'does not consume the recorded question when %s reaches the commit boundary', async (mode) => {
+      const graph = duplicateLabelGraph();
+      const answer = recordedAnswer(graph);
+      const applied = mode === 'no applied graph' ? null
+        : mode === 'no target value' ? graph as unknown as GraphV3T
+          : mode === 'different target value' ? appliedAskedGraph(graph, 0.2)
+            : WRONG_ENTITY_GRAPH();
+      editMock().mockResolvedValue(appliedResult(applied, {
+        op: 'update_node', path: mode === 'wrong entity' ? FACTOR_ID : OPTION_ID,
+      }));
+
+      const result = await dispatchRecorded(graph, answer);
+
+      expect(commitMock()).toHaveBeenCalledTimes(1);
+      expect(commitMock().mock.calls[0]![1].consumedPendingRefs).toBeUndefined();
+      expect(commitMock().mock.calls[0]![1].priorPendingActions).toEqual(answer.priorPendingActions);
+      expect(result.response.assistant_text).not.toContain('effect value of 0.9');
+      if (mode === 'wrong entity') expect(commitMock().mock.calls[0]![1].graph).toBeUndefined();
+    },
+  );
+
+  it.each(['invalid value', 'stale graph', 'expired pending', 'invalid strict graph'] as const)(
+    'rejects a direct %s carrier before asking any adapter or writing', async (mode) => {
+      const graph = duplicateLabelGraph();
+      let answer = recordedAnswer(graph);
+      if (mode === 'stale graph') graph.nodes.push({
+        id: 'new-canonical-factor', kind: 'factor', label: 'New canonical factor',
+      });
+      if (mode === 'expired pending') {
+        const expired = { ...answer.pending, expires_at_turn_count: 0 };
+        answer = { ...answer, priorPendingActions: [expired] };
+      }
+      if (mode === 'invalid strict graph') {
+        graph.edges.push({ from: OPTION_ID, to: FACTOR_ID } as GraphStateIngress['edges'][number]);
+      }
+
+      await expect(dispatchRecorded(graph, answer, mode === 'invalid value' ? '20' : MESSAGE))
+        .rejects.toThrow('Recorded option-effect answer no longer matches');
+
+      expect(getAdapter).not.toHaveBeenCalled();
+      expect(handleEditGraph).not.toHaveBeenCalled();
+      expect(commitDirectAnswer).not.toHaveBeenCalled();
+    },
+  );
 });
