@@ -449,13 +449,47 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
     expect(response.assistant_text).toContain('One number is enough');
     expect(response.assistant_text).toContain('What percentage is Churn rate at right now?');
 
-    // The question is RE-PERSISTED, so the next attempt still has a referent.
+    // The question SURVIVES the re-ask, so the next attempt still has a
+    // referent to bind through. It survives by carry-forward (this branch
+    // consumes nothing), NOT by an explicit re-persist: an explicit list
+    // REPLACES the carried-forward set, so writing one here would drop every
+    // sibling pending. Both halves are asserted below.
     const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
     const reAsked = persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
     expect(reAsked).toHaveLength(1);
     expect(
       (reAsked[0]!.action as { target_id: string }).target_id,
     ).toBe('o-churn-rate');
+  });
+
+  it('a SIBLING pending survives the re-ask too (an explicit list would have dropped it)', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    const sibling = {
+      id: 'pa-run-1',
+      scenario_id: 'scn-1',
+      chip_id: 'chip_run_analysis',
+      action: { kind: 'run_analysis' },
+      preconditions: {},
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-08-08T00:00:00.000Z',
+    } as unknown as PendingAction;
+    // The ask turn routinely ships a "Run the analysis" chip in the same
+    // commit as the question, so this is the ordinary state, not an exotic one.
+    mockedPendingActions = [elicitPending(liveHash), sibling];
+    const { adapter } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('10-15%'), 'req-r2918b-sibling', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
+    expect(persisted.map((p) => p.action.kind).sort()).toEqual([
+      'elicit_target_baseline',
+      'run_analysis',
+    ]);
   });
 
   it('"120%" re-asks about the RANGE (the reason reaches the copy, not just the branch)', async () => {

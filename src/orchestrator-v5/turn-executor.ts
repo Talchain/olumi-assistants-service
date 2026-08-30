@@ -5869,12 +5869,17 @@ export async function runTurnExecutor(
               llm_calls_used: 0,
               duration_ms: Date.now() - startedAt,
               handler_facts: [],
-              // Re-persist the SAME question (not a new one): the graph has
-              // not moved, so the pending's `graph_hash` precondition still
-              // holds and the next answer can bind through it. Without this
-              // the re-ask would name a target the next turn could no longer
-              // resolve, which is the silent-drop defect one turn later.
-              pending_actions: [pending],
+              // NO `pending_actions` OVERRIDE, deliberately. The commit's
+              // default is `priorPendingActions: most_recent_pending_actions`,
+              // so omitting the field carries the question forward untouched
+              // AND preserves anything else that was live (the ask turn's own
+              // "Run the analysis" chip pending is the routine co-occurrence).
+              // Passing `[pending]` here would have looked like belt-and-braces
+              // and silently DROPPED those siblings: an explicit list REPLACES
+              // the carried-forward set rather than adding to it. Caught by a
+              // surviving mutant, which is the only reason it is not in this
+              // commit. The question survives because this branch does not set
+              // `consumedPendingAction` (the pair below pins exactly that).
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
