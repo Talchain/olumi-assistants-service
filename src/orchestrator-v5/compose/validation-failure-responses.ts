@@ -607,6 +607,35 @@ function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): B
     };
   }
 
+  // A stored placeholder/distribution is different from an absent number.
+  // Quote the shared selection kind; do not infer authority from the value.
+  if (rejectionReason === 'delta_baseline_unresolved') {
+    const subject = factorLabel !== undefined
+      ? safeLabel({ label: factorLabel, kind: undefined })
+      : 'That factor';
+    const quantityKind = readString(details.factor_quantity_kind);
+    const explanation = quantityKind === 'fallback'
+      ? 'has only a fallback starting value'
+      : quantityKind === 'ambiguous'
+        ? 'has conflicting current quantities'
+        : quantityKind === 'distribution'
+          ? 'has a range rather than a single current value'
+          : 'needs a confirmed current value';
+    return {
+      body: {
+        assistant_text: `${subject} ${explanation}, so I can't apply a relative change. ` +
+          'Confirm the starting value or tell me the complete value you want to set.',
+        suggested_actions: [{
+          id: chipId('prompt', 'param-absolute-set'),
+          label: 'Set its value',
+          message: `Set ${subject} to a specific value.`,
+        }],
+      },
+      template_id: 'parameter_invalid_delta_baseline_unresolved',
+      chip_type: 'text_prompt',
+    };
+  }
+
   // Item B — relative-edit honesty. A delta ("increase X by 10%") was
   // refused because the factor has no recorded current value to adjust
   // from. Name the entity and steer toward an absolute set.

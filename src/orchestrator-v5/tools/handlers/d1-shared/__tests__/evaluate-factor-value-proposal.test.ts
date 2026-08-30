@@ -27,6 +27,20 @@ import { normaliseFactorValue } from '../normalise-factor-value.js';
 import { D1HandlerError } from '../errors.js';
 
 describe('evaluateFactorValueProposal — predicate semantics', () => {
+  it('keeps exact-cap decimal products without rounding tiny quantities to zero', () => {
+    expect(applyFactorValueOperator(12000, 'multiply', 1.1)).toBe(13200);
+    expect(applyFactorValueOperator(1e-12, 'multiply', 1.1)).toBe(1.1e-12);
+    expect(applyFactorValueOperator(-0.12, 'multiply', 0.5)).toBe(-0.06);
+    expect(applyFactorValueOperator(Number.MIN_VALUE, 'multiply', 2)).toBe(1e-323);
+    expect(applyFactorValueOperator(1e308, 'multiply', 10)).toBe(Infinity);
+    const input = {
+      rawInput: 1.1, operator: 'multiply' as const,
+      factorExistingRaw: 12000, factorUnit: '£', inputHasUnit: false,
+    };
+    expect(evaluateFactorValueProposal({ ...input, factorCap: 13200 }).ok).toBe(true);
+    expect(evaluateFactorValueProposal({ ...input, factorCap: 13199 }).ok).toBe(false);
+  });
+
   it('returns ok for absolute in-range value with explicit unit', () => {
     const result = evaluateFactorValueProposal({
       rawInput: 50,
@@ -349,23 +363,15 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       expect(r.ok).toBe(true);
     });
 
-    it('rejects a bare MULTIPLY on an UNCAPPED factor (no cap to bound it → delta_no_cap_and_no_unit)', () => {
-      // An uncapped multiply has no cap-range guard to contain it, so a bare
-      // multiplier (× -0.5 → -6, or × 1e9) could write a nonsensical /
-      // unbounded value. It is rejected at gate 3b like any uncapped bare
-      // delta. (Capped multiply is exempted at gate 3c, where the cap-range
-      // guard contains the product.)
+    it.each(['people', undefined])('accepts nonnegative uncapped scalar multiplication (unit %s)', (factorUnit) => {
       const r = evaluateFactorValueProposal({
         rawInput: 0.3,
         operator: 'multiply',
-        factorUnit: 'people',
+        factorUnit,
         factorExistingRaw: 12,
         inputHasUnit: false,
-        // no cap
       });
-      expect(r.ok).toBe(false);
-      if (!r.ok)
-        expect(r.reason).toBe<ProposalRejectionReason>('delta_no_cap_and_no_unit');
+      expect(r.ok).toBe(true);
     });
 
     it('rejects a NEGATIVE bare MULTIPLY on an UNCAPPED factor (no -6 people)', () => {

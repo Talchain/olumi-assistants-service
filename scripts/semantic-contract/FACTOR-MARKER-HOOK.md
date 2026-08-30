@@ -43,12 +43,44 @@ The existing normaliser enforces `DECLARED_SCALE_BOUNDS` on every result with
 a recognised declaration. A declared raw count refuses a nontrivial divisor,
 including at zero; retaining its label beside a normalised value is not fidelity.
 
+## Relative edits cannot establish their own starting quantity
+
+Independent review of `d6fb5b11` found that fallback 12% + 5 percentage points
+became an apparently supplied 17%. It also found that the relative-percent
+resolver hid the same dependency by compiling fallback GBP12000 +10% into an
+absolute set. Merely guarding the final non-set operator would miss that path.
+
+The correction retains the existing `multiply` operator and a dimensionless
+RHS for relative percentages on non-percent factors. `buildGraphLookup` carries
+the shared `selectFactorQuantity` result by canonical ID. Before arithmetic,
+the validator, deterministic precheck and handler all require a selected point
+on `observed_state`. Missing selection transport fails closed. No local source
+classification or new quantitative-authority field is introduced.
+
+Fallback, unknown, distribution and conflicting quantities receive clarification
+without graph mutation. The conversation distinguishes a fallback starting value
+from an absent value or competing quantities. Explicit complete values still
+replace fallback markers atomically, including equal-number corrections. A
+source-neutral/nonfallback estimated point is not relabelled fallback merely
+because it lacks a user source; these existing relative-edit semantics remain.
+An old unattributed prior survives a supplied-point edit; a genuinely supplied
+competing prior remains ambiguous and cannot license relative arithmetic.
+
+Nonnegative scalar multiplication preserves the established scale even without
+a cap or unit; it never puts a currency on the multiplier. Existing finite-value,
+cap and declared-scale checks still apply. Decimal operands are multiplied before
+the single conversion back to a JavaScript number: GBP12000 × 1.1 reaches exactly
+GBP13200 rather than exceeding that cap by floating-point dust. There is no
+fixed-place rounding that erases tiny quantities or tolerance widening of caps.
+
 ## Replay
 
 ```sh
 pnpm exec vitest run \
   src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-qualifier-cleanup.test.ts \
-  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-prior-scale.test.ts
+  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-prior-scale.test.ts \
+  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-relative-authority.test.ts \
+  src/orchestrator-v5/__tests__/turn-executor-relative-delta.test.ts
 ```
 
 This executes the actual handler, mutation validation, persistence merge and
@@ -61,6 +93,13 @@ Removing the production hook must also make the same assertions fail.
 Replay the unchanged cross-service percentage fixture using the instructions
 in `README.md`. It remains the supplied 12% to 24% versus old unflagged-prior
 control through the actual PLoT/ISL analysis adapters.
+Its historical percentage-point arm starts with an unattributed 4% observation
+AND an unattributed prior, so the shared selector calls that arm ambiguous and
+the corrected guard refuses its +2pp operation. The original script is retained
+unchanged and must not be reported 14/14 green on this candidate. The relative
+authority fixture pairs this exact 4%→6% case with explicit `user_override`:
+the supplied twin succeeds with the old prior preserved; the unattributed twin
+refuses without mutation. This is not permission to infer which carrier wins.
 
 ## UI handoff: deletion does not survive overlay
 
@@ -96,6 +135,13 @@ helper alone does not establish that freshness contract.
 FQ's separate CEE prior-schema adoption is required for nonnumeric unknown
 priors; the current CEE boundary still requires numeric distribution support.
 This fixture uses accepted numeric priors and does not bypass that boundary.
+
+The broader `validator-executor-parity.test.ts` retains a pre-existing failing
+legacy case: value-only 4%, no cap/frame, plus one percentage point expects
+acceptance, but the handler refuses an unlicensed scale. The identical failure
+was replayed on frozen `d6fb5b11` with the same .53 dependency. Do not call that
+suite wholly green, infer probability framing from magnitude, or relax the
+percentage guard to hide this separate admission-parity gap.
 
 CC retains integration and merge authority. Adopt the hook with the matching
 FQ and Science consumers; it is not a standalone release clearance. After

@@ -57,7 +57,7 @@ const POUND_FACTOR: FactorObservedStateSnapshot = {
 };
 
 describe('resolveRelativeFactorDelta — accepts', () => {
-  it('structured percent increase on a £ factor → absolute set in £', () => {
+  it('structured percent increase on a £ factor → dimensionless multiply', () => {
     const outcome = resolveRelativeFactorDelta(
       makeAction({ value: 5, unit: '%' }, 'increase'),
       makeGraphLookup(POUND_FACTOR),
@@ -65,8 +65,9 @@ describe('resolveRelativeFactorDelta — accepts', () => {
     expect(outcome.resolved).toBe(true);
     if (!outcome.resolved) return;
     const param = outcome.action.parameters[0]!;
-    expect(param.operator).toBe('set');
-    expect(param.value).toEqual({ value: 42000, unit: '£' });
+    expect(param.operator).toBe('multiply');
+    expect(param.unit).toBeUndefined();
+    expect(param.value).toEqual(1.05);
     expect(outcome.telemetry).toEqual({
       target_id: 'f-budget',
       direction: 'increase',
@@ -81,7 +82,7 @@ describe('resolveRelativeFactorDelta — accepts', () => {
     );
     expect(outcome.resolved).toBe(true);
     if (!outcome.resolved) return;
-    expect(outcome.action.parameters[0]!.value).toEqual({ value: 36000, unit: '£' });
+    expect(outcome.action.parameters[0]!.value).toEqual(0.9);
   });
 
   it('string "+5%" resolves without an operator (sign gives direction)', () => {
@@ -91,7 +92,7 @@ describe('resolveRelativeFactorDelta — accepts', () => {
     );
     expect(outcome.resolved).toBe(true);
     if (!outcome.resolved) return;
-    expect(outcome.action.parameters[0]!.value).toEqual({ value: 42000, unit: '£' });
+    expect(outcome.action.parameters[0]!.value).toEqual(1.05);
     expect(outcome.telemetry.source_shape).toBe('string_percent');
   });
 
@@ -103,25 +104,25 @@ describe('resolveRelativeFactorDelta — accepts', () => {
     expect(outcome.resolved).toBe(true);
   });
 
-  it('legacy capped factor without raw_value de-normalises the LHS (value*cap)', () => {
+  it('legacy capped factor leaves LHS interpretation to the consumer', () => {
     const outcome = resolveRelativeFactorDelta(
       makeAction({ value: 5, unit: '%' }, 'increase'),
       makeGraphLookup({ value: 0.4, unit: '£', cap: 100000 }),
     );
     expect(outcome.resolved).toBe(true);
     if (!outcome.resolved) return;
-    // 0.4 * 100000 = £40,000 → +5% → £42,000 (NOT 0.4 * 1.05 = 0.42).
-    expect(outcome.action.parameters[0]!.value).toEqual({ value: 42000, unit: '£' });
+    // Retain the operation; the handler recovers £40,000 before applying it.
+    expect(outcome.action.parameters[0]!.value).toEqual(1.05);
   });
 
-  it('unitless factor resolves to a bare absolute number', () => {
+  it('unitless factor retains relative multiplication', () => {
     const outcome = resolveRelativeFactorDelta(
       makeAction({ value: 5, unit: '%' }, 'increase'),
       makeGraphLookup({ raw_value: 200, value: 200 }),
     );
     expect(outcome.resolved).toBe(true);
     if (!outcome.resolved) return;
-    expect(outcome.action.parameters[0]!.value).toBe(210);
+    expect(outcome.action.parameters[0]!.value).toBe(1.05);
     expect(outcome.action.parameters[0]!.unit).toBeUndefined();
   });
 });

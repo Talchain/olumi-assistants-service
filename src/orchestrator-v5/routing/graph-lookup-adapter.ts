@@ -25,6 +25,7 @@
  */
 
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { selectFactorQuantity, type FactorQuantitySelection } from '@talchain/schemas';
 import type { EntityKind } from './types.js';
 import type { FactorObservedStateSnapshot, GraphLookup } from './validator.js';
 
@@ -165,6 +166,7 @@ export function buildGraphLookup(
   // Bounded surface: only the four fields the shared
   // `evaluateFactorValueProposal` predicate reads.
   const factorObservedById = new Map<string, FactorObservedStateSnapshot>();
+  const factorQuantityById = new Map<string, FactorQuantitySelection>();
 
   let droppedByMissingId = 0;
   let droppedByUnknownKind = 0;
@@ -204,6 +206,7 @@ export function buildGraphLookup(
     // contribute (per V3 schema convention — outcomes/risks/decisions
     // don't carry observed_state with cap/raw_value).
     if (node.kind === 'factor') {
+      factorQuantityById.set(node.id, selectFactorQuantity(node));
       const obs = (node as { observed_state?: unknown }).observed_state;
       if (obs && typeof obs === 'object' && !Array.isArray(obs)) {
         const o = obs as {
@@ -271,6 +274,9 @@ export function buildGraphLookup(
   const optionsList = normaliseOptions(graph.options);
 
   const lookup: GraphLookupWithOptions = {
+    findFactorQuantity(id: string) {
+      return factorQuantityById.get(id) ?? null;
+    },
     findEntityById(id: string) {
       return byId.get(id) ?? null;
     },

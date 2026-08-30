@@ -76,6 +76,7 @@ const PROPOSAL_REJECTION_REASONS = new Set<string>([
   'bare_number_outside_cap',
   'value_exceeds_cap',
   'delta_no_existing_value',
+  'delta_baseline_unresolved',
   'delta_no_cap_and_no_unit',
   'bare_ratio_on_unit_factor',
 ]);

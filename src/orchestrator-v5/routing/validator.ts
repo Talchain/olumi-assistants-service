@@ -43,8 +43,10 @@
  */
 
 import { z } from 'zod';
+import type { FactorQuantitySelection } from '@talchain/schemas';
 
 import { describeSchema } from '../compose/helpers.js';
+import { evaluateFactorDeltaAuthority } from '../tools/handlers/d1-shared/evaluate-factor-delta-authority.js';
 import {
   canonicaliseUnitForDisplay,
   evaluateFactorValueProposal,
@@ -107,6 +109,8 @@ export interface FactorObservedStateSnapshot {
 }
 
 export interface GraphLookup {
+  /** Canonical quantity selection by ID. Missing transport cannot license a delta. */
+  findFactorQuantity?(id: string): FactorQuantitySelection | null;
   /** Find a node by id — any kind. Returns null when absent. */
   findEntityById(id: string): { id: string; kind: EntityKind; label: string | null } | null;
   /**
@@ -123,11 +127,9 @@ export interface GraphLookup {
    * earlier with `PARAMETER_INVALID`, routing into the existing
    * recoverable path.
    *
-   * Optional because not every GraphLookup adapter implements it
-   * (older test mocks, simple synthetic graphs). When absent, the
-   * validator skips the value precheck and relies on the handler-side
-   * guard — same behaviour as before this widening. The production
-   * `buildGraphLookup` adapter does implement it.
+   * Optional for older adapters. Missing numeric transport cannot license
+   * relative arithmetic: the precheck still runs and refuses an unresolved
+   * starting quantity. Production `buildGraphLookup` implements both reads.
    *
    * Returns null when the id does not resolve to a factor node or when
    * the factor has no `observed_state` block at all.
@@ -614,10 +616,9 @@ export function validateToolCall(
   //       cannot let a malformed proposal through to the handler.
   //
   //   (b) Graph-DEPENDENT range / unit / delta / existing-value
-  //       checks. These need observed_state, so they only run when
-  //       both `graph` and `findFactorObservedState` are available.
-  //       Test mocks that don't expose observed_state still
-  //       benefit from (a); they just skip the cap/unit checks.
+  //       checks. Run whenever graph exists, including when an older
+  //       adapter lacks quantity/numeric transport. Such absence must not
+  //       bypass relative-edit authority.
   //
   // Gated on the REPAIRED kind. A proposal the model mislabelled (say
   // kind 'goal' on a factor id) is now admitted by the registry check, so
@@ -630,7 +631,7 @@ export function validateToolCall(
   ) {
     const structuralResult = preexecuteSetFactorValueStructural(effectiveProposal);
     if (structuralResult) return { valid: false, error: structuralResult };
-    if (graph && typeof graph.findFactorObservedState === 'function') {
+    if (graph) {
       const precheckResult = preexecuteSetFactorValue(effectiveProposal, graph);
       if (precheckResult) return { valid: false, error: precheckResult };
     }
@@ -817,8 +818,7 @@ function preexecuteSetFactorValueStructural(
  * recoverable-validator path.
  *
  * Caller has already run `preexecuteSetFactorValueStructural` above
- * AND established that `graph.findFactorObservedState` exists and
- * that the entity kind is `'node'`. Defensive null returns inside
+ * AND established that the entity kind is `'node'`. Defensive null returns inside
  * this function are type-safety guards only — by construction the
  * `value` param is present and parseable when we get here.
  */
@@ -843,8 +843,8 @@ function preexecuteSetFactorValue(
       ? rawOperator
       : 'set';
 
-  // `findFactorObservedState` is defined per the caller's guard, but
-  // narrow defensively in case the adapter widening drifts.
+  // Older adapters may lack numeric transport; keep that absence explicit
+  // so a relative proposal cannot bypass the baseline checks below.
   const obs = graph.findFactorObservedState
     ? graph.findFactorObservedState(proposal.entity.id)
     : null;
@@ -860,7 +860,9 @@ function preexecuteSetFactorValue(
     ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
     ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
   });
-  const evaluation = evaluateFactorValueProposal({
+  const selection = graph.findFactorQuantity?.(proposal.entity.id);
+  const authority = evaluateFactorDeltaAuthority(operator, selection);
+  const evaluation = !authority.ok ? authority : evaluateFactorValueProposal({
     rawInput: parsed.numeric,
     operator,
     ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
@@ -914,6 +916,8 @@ function preexecuteSetFactorValue(
       value: parsed.numeric,
       operator,
       factor_id: proposal.entity.id,
+      ...(evaluation.reason === 'delta_baseline_unresolved' && selection
+        ? { factor_quantity_kind: selection.kind } : {}),
       ...(factorLabel !== undefined && factorLabel !== null ? { factor_label: factorLabel } : {}),
       ...(effectiveUnit !== undefined ? { unit: effectiveUnit } : {}),
       ...(suggestedCap !== undefined ? { suggested_cap: suggestedCap } : {}),

@@ -11,11 +11,9 @@
  * Fix under test: when the proposal carries a relative percent
  * expression (structured { value, unit:'%' } with an increase/decrease
  * operator, or a string "+5%"/"-10%"), the dispatch seam resolves it
- * against the factor's CURRENT value into an absolute `set` BEFORE
- * validation — so validator, P0-A containment, and handler all see the
- * resolved absolute proposal. When the current value is unavailable or
- * ambiguous, the proposal is left untouched and today's clarify/recovery
- * path fires (never guess).
+ * into dimensionless multiplication BEFORE validation. The validator and
+ * handler must select a usable canonical starting point; fallback/ambiguous
+ * quantities receive clarification, never an apparent absolute user value.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -194,9 +192,7 @@ describe('B: relative-delta resolution at the set_factor_value dispatch seam', (
       { routingAdapter, graphState: ingressGraph },
     );
 
-    // Today (RED): validator PARAMETER_INVALID → recovered direct_answer.
-    // After the fix: the proposal is resolved to an absolute set and the
-    // handler executes.
+    // Relative semantics survive routing; the handler computes the result.
     expect(telemetry.turn_class).toBe('handler');
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.stages_completed).toContain('execute');
@@ -250,6 +246,53 @@ describe('B: relative-delta resolution at the set_factor_value dispatch seam', (
       direction: 'decrease',
       source_shape: 'string_percent',
     });
+  });
+
+  it.each(['increase it slightly by 5%', 'increase Budget by 5%'])(
+    'asks for a complete value without promoting a fallback: %s',
+    async (message) => {
+      const ingressGraph = buildBudgetGraph();
+      const budget = ingressGraph.nodes.find((n) => n.id === 'f-budget')!;
+      budget.observed_state = {
+        ...budget.observed_state!, source: 'cee_inference', value_tier: 'fallback_default',
+      };
+      const original = JSON.stringify(ingressGraph);
+      const { response, telemetry } = await runTurnExecutor(payload(message), 'req-relative-fallback', {
+        routingAdapter: mockRoutingAdapter(setFactorValueProposal({ value: 5, unit: '%' }, 'increase')),
+        graphState: ingressGraph,
+      });
+      expect(telemetry.turn_class).toBe('direct_answer');
+      expect(telemetry.validation_error_code).toBe('PARAMETER_INVALID');
+      expect(response.assistant_text).toContain('fallback starting value');
+      expect(response.assistant_text).toContain('complete value');
+      expect(response.assistant_text).not.toContain("doesn't have a recorded value");
+      expect(appendCalls.filter((w) => w.graph != null)).toHaveLength(0);
+      expect(JSON.stringify(ingressGraph)).toBe(original);
+    },
+  );
+
+  it.each([13200, 13199])('relative decimal result respects the actual cap %s', async (cap) => {
+    const ingressGraph = buildBudgetGraph();
+    ingressGraph.nodes[1]!.observed_state = {
+      value: 12000 / cap, raw_value: 12000, unit: '£', cap, source: 'user_override',
+    };
+    const { telemetry, response } = await runTurnExecutor(payload('increase it by 10%'), 'req-relative-cap', {
+      routingAdapter: mockRoutingAdapter(setFactorValueProposal({ value: 10, unit: '%' }, 'increase')),
+      graphState: ingressGraph,
+    });
+    const writes = appendCalls.filter((w) => w.graph != null);
+    if (cap === 13200) {
+      expect(telemetry.turn_class).toBe('handler');
+      expect(writes).toHaveLength(1);
+      const graph = writes[0]!.graph as GraphV3T;
+      expect(graph.nodes[1]!.observed_state).toMatchObject({
+        value: 1, raw_value: 13200, cap, source: 'user_override',
+      });
+      expect(response.assistant_text).toContain('£13,200');
+    } else {
+      expect(telemetry.validation_error_code).toBe('PARAMETER_INVALID');
+      expect(writes).toHaveLength(0);
+    }
   });
 
   it('CONTROL (91a45b0a shape): an absolute set_factor_value still succeeds unchanged', async () => {

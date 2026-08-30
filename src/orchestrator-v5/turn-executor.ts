@@ -168,6 +168,8 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
+import { selectFactorQuantity } from '@talchain/schemas';
+import { evaluateFactorDeltaAuthority } from './tools/handlers/d1-shared/evaluate-factor-delta-authority.js';
 import {
   applyCompoundValueUpdateChain,
   preflightCompoundBatch,
@@ -6473,7 +6475,8 @@ export async function runTurnExecutor(
             ...(factorCap !== undefined ? { cap: factorCap } : {}),
           });
           const inputHasUnit = unit !== undefined && unit.length > 0;
-          const evaluation = evaluateFactorValueProposal({
+          const authority = evaluateFactorDeltaAuthority(operator, selectFactorQuantity(nodeKind));
+          const evaluation = !authority.ok ? authority : evaluateFactorValueProposal({
             rawInput: userUnitValue,
             operator: operator as FactorValueOperator,
             ...(unit !== undefined ? { unit } : {}),
@@ -8720,21 +8723,11 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
-      // Lane CEE-D (edit-loop reliability) — relative-delta resolution for
-      // set_factor_value, BEFORE validateToolCall so the validator, the
-      // P0-A value/unit containment, and the handler all see the same
-      // resolved absolute proposal. Live trace request_id baca4f1c:
-      // "increase it slightly by 5%" → structured percent delta on a £
-      // factor → unit_mismatch → PARAMETER_INVALID → recovered template,
-      // while an absolute set succeeded in the same session (91a45b0a).
-      // The resolver rewrites an unambiguous relative percent expression
-      // (structured '%' with increase/decrease, or a "+5%"/"-10%" string)
-      // into an absolute `set` against the factor's CURRENT value. When
-      // the current value is unavailable/ambiguous — or the factor itself
-      // is a % factor (pp semantics already work) — it declines and the
-      // proposal flows through today's clarify/recovery path unchanged
-      // (never guess). Every downstream guard still runs against the
-      // resolved value (cap range, finiteness, unit match).
+      // Keep relative percentages as dimensionless multiplication. Validation
+      // and execution must still establish a usable canonical starting point;
+      // an absolute rewrite would erase that dependency. Percent-factor point
+      // deltas remain unchanged. The containment skip below applies only to a
+      // recognised expression transformed by this resolver.
       let relativeDeltaResolved = false;
       if (proposedHandlerId === 'set_factor_value') {
         const relOutcome = resolveRelativeFactorDelta(action, graphLookupForValidate);

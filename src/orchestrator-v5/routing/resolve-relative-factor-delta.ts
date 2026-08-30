@@ -1,58 +1,20 @@
 /**
- * Lane CEE-D (edit-loop reliability) — relative-delta resolution for
- * `set_factor_value` proposals at the TurnExecutor dispatch seam.
- *
- * Live trace (request_id baca4f1c): user "increase it slightly by 5%" →
- * Sonnet proposed `set_factor_value` with a percent-relative value
- * (`{ value: 5, unit: '%' }`, operator `increase`) against a £ factor →
- * the validator's unit_mismatch guard rejected it with PARAMETER_INVALID
- * parameter:"value" → recovered template. An ABSOLUTE set_factor_value
- * succeeded in the same session (turn 91a45b0a). The proposal was not
- * malformed — it was a legitimate relative expression the pipeline had no
- * way to ground.
- *
- * This module resolves the relative expression against the factor's
- * CURRENT value into an absolute `set` proposal BEFORE validateToolCall
- * runs, so the validator, the P0-A value/unit containment, and the
- * handler all see the same resolved absolute proposal (the existing
- * validator/handler parity contract is preserved — every downstream
- * guard still runs against the resolved value: cap range, finiteness,
- * unit match).
- *
- * Recognised relative shapes (conservative, unambiguous only):
- *
- *   1. STRUCTURED PERCENT — `{ value: N, unit: '%' }` (or a bare number
- *      with a parameter-level `unit: '%'`) combined with operator
- *      `increase` | `decrease`, targeting a factor whose OWN unit is NOT
- *      `%`. A percent delta against a non-percent factor can only mean
- *      "N% of the current value".
- *   2. STRING PERCENT — `value` is the string "+5%" / "-10%" / "5%". The
- *      sign gives the direction; a signless string needs an
- *      increase/decrease operator. (A signless "5%" with operator `set`
- *      means "set to 5%" — absolute, NOT relative — and is left alone.)
- *
- * NEVER-GUESS rules (proposal left untouched → today's clarify/recovery
- * path fires):
- *   - factor's own unit is '%' (percentage-point addition semantics
- *     already work today and "increase by 5%" is genuinely ambiguous
- *     between pp and relative on a % factor);
- *   - factor's current value is missing or ambiguous
- *     (resolveExistingRawValue !== 'resolved');
- *   - percent is non-finite, zero, or negative after sign extraction;
- *   - a decrease of more than 100% (nonsensical — would go negative);
- *   - operator `multiply` or `set` on the structured shape (multiply RHS
- *     is already a scalar; `set` with '%' is an absolute unit mismatch).
+ * Preserve an unambiguous relative percentage as the existing dimensionless
+ * multiply operator. Never compile it to a baseline-derived absolute set:
+ * that would hide its dependency on a fallback/unknown starting quantity.
+ * Validator and handler select the current canonical quantity before arithmetic.
+ * Percent-on-percent retains the existing percentage-point interpretation.
  */
 
 import type { ProposalAction, ProposalParameter } from './types.js';
 import type { GraphLookup } from './validator.js';
-import { resolveExistingRawValue } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { relativePercentMultiplier } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 export type RelativeDeltaSourceShape = 'structured_percent' | 'string_percent';
 
 export interface RelativeDeltaResolution {
   readonly resolved: true;
-  /** The rewritten proposal — absolute `set` in the factor's own unit. */
+  /** The rewritten proposal retains a relative, dimensionless `multiply`. */
   readonly action: ProposalAction;
   /** Telemetry payload (system ids + closed enums only — no user values). */
   readonly telemetry: {
@@ -122,18 +84,7 @@ function readRelativePercent(param: ProposalParameter): RelativePercentExpressio
   return { percent: numeric, direction: operator, sourceShape: 'structured_percent' };
 }
 
-/** Strip float dust (40000 * 1.05 → 42000.000000000004 class). */
-function stripFloatDust(x: number): number {
-  return Math.round(x * 1e9) / 1e9;
-}
-
-/**
- * Attempt to resolve a relative percent delta on a `set_factor_value`
- * proposal into an absolute `set` against the factor's current value.
- * Returns `{ resolved: false }` in every case where the resolution is not
- * unambiguous — the caller must then leave the proposal untouched so
- * today's clarify/recovery path fires (never guess).
- */
+/** Return an equivalent relative operator, or leave ambiguous input unchanged. */
 export function resolveRelativeFactorDelta(
   action: ProposalAction,
   graph: GraphLookup | undefined,
@@ -161,41 +112,16 @@ export function resolveRelativeFactorDelta(
   // and the existing pipeline already applies pp addition successfully.
   if (obs.unit === '%') return NOT_RESOLVED;
 
-  const existing = resolveExistingRawValue({
-    ...(obs.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
-    ...(obs.value !== undefined ? { value: obs.value } : {}),
-    ...(obs.unit !== undefined ? { unit: obs.unit } : {}),
-    ...(obs.cap !== undefined ? { cap: obs.cap } : {}),
-  });
-  if (existing.kind !== 'resolved' || !Number.isFinite(existing.raw)) return NOT_RESOLVED;
+  const multiplier = relativePercentMultiplier(rel.percent, rel.direction);
+  if (!Number.isFinite(multiplier)) return NOT_RESOLVED;
 
-  // provisional_doctrine_v0 — interpretation doctrine: a percent delta
-  // against a NON-percent factor means "N% of the factor's current value"
-  // (compounding relative change), and the user-facing receipt then states
-  // the resolved ABSOLUTE change via the existing handler wording
-  // ("Updated X from A to B"). Percent-on-percent is deliberately NOT
-  // interpreted here (pp-addition stays the live semantics). If doctrine
-  // later prefers e.g. clarify-always for relative asks, this is the
-  // single site to change.
-  const multiplier =
-    rel.direction === 'increase' ? 1 + rel.percent / 100 : 1 - rel.percent / 100;
-  const afterRaw = stripFloatDust(existing.raw * multiplier);
-  if (!Number.isFinite(afterRaw)) return NOT_RESOLVED;
-
-  const factorUnit = typeof obs.unit === 'string' && obs.unit.length > 0 ? obs.unit : undefined;
-
-  // Rewritten value: absolute, in the factor's OWN unit when it has one
-  // (inputHasUnit=true downstream, so the cap-range guard still applies
-  // as `value_exceeds_cap`); a bare number for an untyped factor.
-  const newValue: unknown =
-    factorUnit !== undefined ? { value: afterRaw, unit: factorUnit } : afterRaw;
-
+  // The RHS has no currency/unit. The selected factor retains its own scale;
+  // downstream admission still checks baseline authority, bounds and finiteness.
   const newParam: ProposalParameter = {
     name: 'value',
-    value: newValue,
-    operator: 'set',
+    value: multiplier,
+    operator: 'multiply',
     source: param.source,
-    ...(factorUnit !== undefined ? { unit: factorUnit } : {}),
   };
   const parameters = action.parameters.map((p, i) => (i === paramIndex ? newParam : p));
 

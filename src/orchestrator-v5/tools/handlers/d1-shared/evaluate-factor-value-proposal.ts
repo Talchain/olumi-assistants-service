@@ -125,6 +125,7 @@ export type ProposalRejectionReason =
   | 'cap_non_positive' // cap <= 0 (nonsensical)
   | 'unit_mismatch' // proposal.unit and factor.unit both defined and differ
   | 'delta_no_existing_value' // operator !== 'set' AND factor has no finite raw_value
+  | 'delta_baseline_unresolved' // canonical selection does not license observed-point arithmetic
   | 'delta_no_cap_and_no_unit' // operator !== 'set' AND no cap AND no unit (ambiguous)
   | 'bare_number_outside_cap' // !inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
   | 'value_exceeds_cap' // inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
@@ -224,8 +225,39 @@ export function applyFactorValueOperator(
     case 'decrease':
       return current - rhs;
     case 'multiply':
-      return current * rhs;
+      return multiplyDecimalValues(current, rhs);
   }
+}
+
+/** Decimal coefficient/exponent of a finite recorded Number. */
+function decimalParts(value: number): { coefficient: bigint; exponent: number } {
+  const [mantissa, exponent = '0'] = String(value).split('e');
+  const [whole, fraction = ''] = mantissa!.split('.');
+  return {
+    coefficient: BigInt(`${whole}${fraction}`),
+    exponent: Number(exponent) - fraction.length,
+  };
+}
+
+/** One rounding to Number avoids both cap overshoot from binary dust and
+ * the loss of tiny quantities caused by fixed decimal-place rounding.
+ */
+function multiplyDecimalValues(left: number, right: number): number {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return left * right;
+  const a = decimalParts(left);
+  const b = decimalParts(right);
+  return Number(`${a.coefficient * b.coefficient}e${a.exponent + b.exponent}`);
+}
+
+/** Preserve the stated percentage before converting to the existing multiplier. */
+export function relativePercentMultiplier(percent: number, direction: 'increase' | 'decrease'): number {
+  if (!Number.isFinite(percent)) return NaN;
+  const p = decimalParts(percent);
+  const exponent = Math.min(p.exponent - 2, 0);
+  const one = 10n ** BigInt(-exponent);
+  const delta = p.coefficient * 10n ** BigInt(p.exponent - 2 - exponent);
+  const coefficient = direction === 'increase' ? one + delta : one - delta;
+  return Number(`${coefficient}e${exponent}`);
 }
 
 /**
@@ -562,17 +594,13 @@ function evaluateFactorValueProposalImpl(
       };
     }
 
-    // 3b. delta_no_cap_and_no_unit. An uncapped, unitless delta has no
-    //     bounded interpretation ("increase by 10" — 10 of what?). Surface
-    //     as a clarification rather than writing a boundless value. This
-    //     INCLUDES `multiply`: an UNCAPPED multiply has no upper or lower
-    //     bound (no cap-range guard runs below to contain it), so a bare
-    //     `× -0.5` or `× 1e9` would otherwise write a nonsensical or
-    //     unbounded value (e.g. `12 people × -0.5 = -6 people`). Capped
-    //     multiply is unaffected (cap is defined here) and is exempted from
-    //     the bare-ratio gate at 3c instead, where the cap-range guard
-    //     contains it.
-    if (cap === undefined && !inputHasUnit) {
+    // An additive delta needs a unit/cap. A nonnegative multiplier scales
+    // the established LHS without adding a unit or changing its scale. This
+    // also preserves relative-percent edits on uncapped/untagged quantities.
+    // The caller checks canonical quantity authority; numerical finiteness,
+    // caps and the normalizer's declared bounds still apply to the result.
+    const scalesExistingPoint = operator === 'multiply' && rawInput >= 0;
+    if (cap === undefined && !inputHasUnit && !scalesExistingPoint) {
       return {
         ok: false,
         reason: 'delta_no_cap_and_no_unit',
@@ -600,8 +628,8 @@ function evaluateFactorValueProposalImpl(
   //     and the "give me a £ amount" clarification would be wrong guidance
   //     for a scaling operation. Sub-1 multipliers are the normal way to
   //     scale down, so on a capped factor they pass to the cap-range guard
-  //     below (which contains overshoot/negative products). An UNCAPPED
-  //     multiply is rejected earlier at gate 3b (no cap to bound it).
+  //     below (which contains overshoot/negative products). Uncapped
+  //     nonnegative multiplication is likewise dimensionless (gate 3b).
   //
   //     NOTE on multiply + explicit unit: a multiply RHS is treated as a
   //     pure scalar — its unit is NOT dimensionally validated. A unit that

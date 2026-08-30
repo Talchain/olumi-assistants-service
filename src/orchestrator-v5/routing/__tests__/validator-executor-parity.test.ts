@@ -263,11 +263,11 @@ const CASES: readonly PropertyCase[] = [
     expected: { kind: 'accept' },
   },
   {
-    label: 'bare MULTIPLY on an UNCAPPED count factor (no cap to bound it — rejected)',
-    entityId: 'f-uncapped', // no cap → delta_no_cap_and_no_unit
+    label: 'bare MULTIPLY on an UNCAPPED count factor preserves its established scale',
+    entityId: 'f-uncapped',
     value: 0.3,
     operator: 'multiply',
-    expected: { kind: 'reject', reason: 'delta_no_cap_and_no_unit' },
+    expected: { kind: 'accept' },
   },
   {
     label: 'NEGATIVE bare MULTIPLY on an UNCAPPED count factor (no -6 people)',

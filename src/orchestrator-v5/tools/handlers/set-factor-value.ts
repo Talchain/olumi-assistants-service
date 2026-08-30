@@ -57,6 +57,7 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+import { evaluateFactorDeltaAuthority } from './d1-shared/evaluate-factor-delta-authority.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 import { log } from '../../../utils/telemetry.js';
 
@@ -382,7 +383,8 @@ export function createSetFactorValueHandler(): HandlerFn {
     // enforces exactly what the validator and executor precheck do (AC.1).
     // A non-`resolved` existing value omits `factorExistingRaw`, so any delta
     // fails closed via `delta_no_existing_value`.
-    const preEvaluation = evaluateFactorValueProposal({
+    const authority = evaluateFactorDeltaAuthority(operator, selection);
+    const preEvaluation = !authority.ok ? authority : evaluateFactorValueProposal({
       rawInput: parsed.numeric,
       operator,
       ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
