@@ -326,7 +326,7 @@ describe('explain_from_structure — answer-carrying contract', () => {
       explanation: { answer_text: authored, answer_text_valid: true },
       selectedDependenciesEvidence: { status: 'ambiguous' },
     });
-    expect(ambiguous.assistant_text).toContain('cannot establish one unique selected');
+    expect(ambiguous.assistant_text).toContain('cannot establish one unique Living Model element');
     expect(ambiguous.assistant_text).not.toBe(authored);
 
     const unavailable = await handler({

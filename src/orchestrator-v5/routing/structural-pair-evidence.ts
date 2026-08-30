@@ -77,10 +77,11 @@ export type StructuralPairEvidence =
     };
 
 /**
- * Canonical direct-dependency evidence for one selected Living Model item.
+ * Canonical direct-dependency evidence for one identified Living Model item.
  *
  * This is intentionally separate from {@link StructuralPairEvidence}: a
- * selected-item question establishes its subject by canonical canvas identity
+ * question establishes its subject by canonical canvas identity or an exact
+ * current-message reference corroborating the typed canonical id,
  * and its predicate through a separately typed `dependencies` query,
  * while the pair carrier establishes two subjects from current-message prose.
  * Neither identity warrant may substitute for the other.
@@ -107,6 +108,8 @@ export interface BuildStructuralPairEvidenceOptions {
 }
 
 export interface BuildSelectedDependenciesEvidenceOptions {
+  /** Required for named references; omitted legacy callers remain selection-only. */
+  readonly messageText?: string;
   readonly structureQuery: StructureQuery | undefined;
   /**
    * The original ingress selection, before node-only focus projection. A mixed
@@ -222,8 +225,9 @@ function publicRelationships(
 
 /**
  * Return deterministic incoming-dependency evidence only when the typed query,
- * selected identity, validated proposal target and canonical graph all identify
- * the same one element.
+ * selected or current-message identity, validated proposal target and canonical
+ * graph all identify the same one element. A named reference never creates a
+ * canvas selection, and an unresolved/conflicting selection cannot be bypassed.
  *
  * A `general` structural answer remains free-form model prose because identity
  * answers "which item?", not "which question?". The distinct query avoids
@@ -239,7 +243,17 @@ export function buildSelectedDependenciesEvidence(
   const selectedIds = options.groundedSelection?.element_ids ?? [];
   const requestedNodeIds = options.requestedSelection?.node_ids ?? [];
   const requestedEdgeIds = options.requestedSelection?.edge_ids ?? [];
+  const hasSelection = requestedNodeIds.length > 0 || requestedEdgeIds.length > 0 ||
+    options.focus !== undefined || selectedIds.length > 0 ||
+    (options.groundedSelection != null && options.groundedSelection.unresolved !== 'none');
+  const selectedId = options.structureQuery.element_id;
   if (
+    options.proposalEntity?.resolution_status !== 'resolved' ||
+    options.proposalEntity.id !== selectedId
+  ) {
+    return { status: 'ambiguous' };
+  }
+  if (hasSelection && (
     requestedNodeIds.length !== 1 ||
     requestedEdgeIds.length !== 0 ||
     requestedNodeIds[0] !== options.structureQuery.element_id ||
@@ -255,11 +269,10 @@ export function buildSelectedDependenciesEvidence(
     options.proposalEntity?.resolution_status !== 'resolved' ||
     options.proposalEntity.id !== selectedIds[0] ||
     options.structureQuery.element_id !== selectedIds[0]
-  ) {
+  )) {
     return { status: 'ambiguous' };
   }
 
-  const selectedId = selectedIds[0]!;
   if (
     options.graphContextStatus !== 'canonical' ||
     options.graphAuthority !== 'canonical_strict' ||
@@ -270,6 +283,11 @@ export function buildSelectedDependenciesEvidence(
 
   const displayGraph = formatGraphForContext(graph);
   const idCounts = countNodeIds(displayGraph.nodes);
+  // The whole lookup now corroborates/contradicts the user's named subject.
+  // An unrelated duplicate id must not erase a conflicting label by map order.
+  if ([...idCounts.values()].some((count) => count !== 1)) {
+    return { status: 'ambiguous' };
+  }
   const selectedNodes = displayGraph.nodes.filter((node) => node.id === selectedId);
   if (selectedNodes.length !== 1 || idCounts.get(selectedId) !== 1) {
     return { status: 'ambiguous' };
@@ -283,6 +301,33 @@ export function buildSelectedDependenciesEvidence(
   const labelIndex = buildLabelIndex(lookup);
   if (resolveLabelToId(labelIndex, selectedNode.label) !== selectedId) {
     return { status: 'ambiguous' };
+  }
+
+  if (!hasSelection) {
+    // Existence of the model-proposed id is not proof of user intent. Reuse the
+    // pair-query corroborator: precisely this canonical id must be named in
+    // the current message, with no duplicate labels or extra references.
+    const named = resolveTypedCanonicalProseEntityRefs(
+      lookup, labelIndex, options.messageText ?? '', [selectedId],
+      { rejectOtherGenericReferences: true },
+    );
+    if (named?.length !== 1 || named[0]?.id !== selectedId) {
+      return { status: 'ambiguous' };
+    }
+  } else if (options.messageText !== undefined) {
+    // Current explicit references are contradiction evidence only; they never
+    // silently redirect a canvas selection to another canonical object.
+    const named = resolveTypedCanonicalProseEntityRefs(
+      lookup, labelIndex, options.messageText, [selectedId],
+      { rejectOtherGenericReferences: true },
+    );
+    const unnamed = resolveTypedCanonicalProseEntityRefs(
+      lookup, labelIndex, options.messageText, [],
+      { rejectOtherGenericReferences: true },
+    );
+    if (named === null && unnamed === null) {
+      return { status: 'ambiguous' };
+    }
   }
 
   const relevantEdges = displayGraph.edges.filter(

@@ -941,14 +941,14 @@ export function composeSelectedDependenciesEvidenceAnswer(
 ): string {
   if (evidence.status === 'ambiguous') {
     return (
-      'I cannot establish one unique selected Living Model element and matching dependency question, so I will not guess its relationships. ' +
-      'Select one element and ask again.'
+      'I cannot establish one unique Living Model element and matching dependency question, so I will not guess its relationships. ' +
+      'Name or select one element and ask again.'
     );
   }
   if (evidence.status === 'coverage_unavailable') {
     if (evidence.reason === 'structural_semantics_unlicensed') {
       return (
-        'The saved Living Model includes a structural connector for this selected item, but this response cannot safely treat that connector as a causal dependency. ' +
+        'The saved Living Model includes a structural connector for this item, but this response cannot safely treat that connector as a causal dependency. ' +
         'I will not infer causal direction or strength from it.'
       );
     }
@@ -971,7 +971,7 @@ export function composeSelectedDependenciesEvidenceAnswer(
 
   const sentences = relationships.map(composeDependencyRelationship);
   sentences.push(
-    'These are the complete direct incoming dependencies and bidirected associations recorded for the selected item; bidirected associations do not establish a dependency direction, and this answer does not add an indirect route or rank importance.',
+    'These are the complete direct incoming dependencies and bidirected associations recorded for this item; bidirected associations do not establish a dependency direction, and this answer does not add an indirect route or rank importance.',
   );
   return sentences.join(' ');
 }

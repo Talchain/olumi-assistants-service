@@ -580,6 +580,143 @@ describe('buildSelectedDependenciesEvidence', () => {
     expect(JSON.stringify(buildSelected({}, permutedGraph))).toBe(JSON.stringify(evidence));
   });
 
+  function buildNamed(
+    messageText = 'What does Sales rep time on selling activities depend on?',
+    overrides: Partial<Parameters<typeof buildSelectedDependenciesEvidence>[1]> = {},
+    currentGraph = selectedGraph,
+  ) {
+    return buildSelected({
+      messageText, requestedSelection: undefined, focus: undefined,
+      groundedSelection: null, ...overrides,
+    }, currentGraph);
+  }
+
+  it('answers an exact named canonical object without inventing a selection', () => {
+    const named = buildNamed();
+    expect(named).toEqual(buildSelected({ messageText: 'What does this depend on?' }));
+    expect(named?.status).toBe('resolved');
+    expect(buildNamed(undefined, {}, graph(
+      [...selectedNodes].reverse(), [...selectedEdges].reverse(),
+    ))).toEqual(named);
+  });
+
+  it.each([
+    'What does that depend on?',
+    'What does Missing Object depend on?',
+    'What does CRM adoption and usability depend on?',
+    'What do Sales rep time on selling activities and CRM adoption and usability depend on?',
+    '',
+  ])('does not promote a valid existing proposed id without matching user identity: %s', (message) => {
+    expect(buildNamed(message)).toEqual({ status: 'ambiguous' });
+  });
+
+  it('requires query and validated entity agreement independently of the matching name', () => {
+    expect(buildNamed(undefined, {
+      proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildNamed(undefined, {
+      proposalEntity: { id: 'selling_time', resolution_status: 'unresolved' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildNamed(undefined, {
+      structureQuery: { kind: 'dependencies', element_id: 'adoption' },
+      proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildNamed(undefined, { messageText: undefined })).toEqual({ status: 'ambiguous' });
+  });
+
+  it('does not bypass unresolved, multiple, foreign or conflicting selection with a matching name', () => {
+    for (const selection of [
+      { node_ids: ['ghost'], edge_ids: [] },
+      { node_ids: ['selling_time', 'adoption'], edge_ids: [] },
+      { node_ids: [], edge_ids: ['automation-selling_time'] },
+    ]) {
+      expect(buildNamed(undefined, { requestedSelection: selection })).toEqual({ status: 'ambiguous' });
+    }
+    expect(buildNamed(undefined, {
+      groundedSelection: { element_ids: [], unresolved: 'could_not_check' },
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({ messageText: 'What does CRM adoption and usability depend on?' }))
+      .toEqual({ status: 'ambiguous' });
+    expect(buildSelected({ messageText: 'What does Sales rep time on selling activities depend on?' }))
+      .toEqual(buildNamed());
+  });
+
+  it('does not silently drop a conflicting generic object from named or selected questions', () => {
+    const withCost = graph(
+      [...selectedNodes, { id: 'cost', kind: 'factor', label: 'Cost' }], selectedEdges,
+    );
+    expect(buildNamed(undefined, {}, withCost)?.status).toBe('resolved');
+    expect(buildNamed('What do Sales rep time on selling activities and Cost depend on?', {}, withCost))
+      .toEqual({ status: 'ambiguous' });
+    expect(buildSelected({ messageText: 'What does Cost depend on?' }, withCost))
+      .toEqual({ status: 'ambiguous' });
+    expect(buildSelected({ messageText: 'What does this depend on?' }, withCost)?.status)
+      .toBe('resolved');
+  });
+
+  it('distinguishes a nested label from a separately named second object', () => {
+    const nested = graph([
+      { id: 'driver', kind: 'factor', label: 'Adoption Rate' },
+      { id: 'selling_time', kind: 'outcome', label: 'Engineering Build Cost' },
+      { id: 'cost', kind: 'factor', label: 'Cost' },
+      { id: 'build_cost', kind: 'factor', label: 'Build Cost' },
+    ], [{ from: 'driver', to: 'selling_time', strength: 0.35 }]);
+    const message = 'What does "Engineering Build Cost" depend on?';
+    expect(buildNamed(message, {}, nested)?.status).toBe('resolved');
+    expect(buildSelected({ messageText: message }, nested))
+      .toEqual(buildSelected({ messageText: 'What does this depend on?' }, nested));
+    for (const extra of ['Cost', 'Build Cost']) {
+      for (const messageText of [
+        `What do Engineering Build Cost and ${extra} depend on?`,
+        `What do ${extra} and Engineering Build Cost depend on?`,
+      ]) {
+        expect(buildNamed(messageText, {}, nested)).toEqual({ status: 'ambiguous' });
+        expect(buildSelected({ messageText }, nested)).toEqual({ status: 'ambiguous' });
+      }
+    }
+    // A nested short label cannot corroborate the wrong typed object either.
+    expect(buildNamed(message, {
+      structureQuery: { kind: 'dependencies', element_id: 'build_cost' },
+      proposalEntity: { id: 'build_cost', resolution_status: 'resolved' },
+    }, nested)).toEqual({ status: 'ambiguous' });
+  });
+
+  it.each(['provisional', 'absent', 'unavailable'] as const)('withholds named coverage for %s authority', (status) => {
+    expect(buildNamed(undefined, { graphContextStatus: status })).toEqual({
+      status: 'coverage_unavailable', reason: 'graph_coverage_unavailable',
+    });
+  });
+
+  it('preserves trim, fallback, duplicate identity and semantic twin guards for named queries', () => {
+    for (const overrides of [
+      { graphWasTrimmed: true },
+      { graphAuthority: 'canonical_structural_fallback' as const },
+    ]) expect(buildNamed(undefined, overrides)).toEqual({
+      status: 'coverage_unavailable', reason: 'graph_coverage_unavailable',
+    });
+    for (const duplicate of [
+      { id: 'twin', kind: 'outcome', label: 'Sales rep time on selling activities' },
+      { id: 'selling_time', kind: 'outcome', label: 'Other subject' },
+    ]) expect(buildNamed(undefined, {}, graph([...selectedNodes, duplicate], selectedEdges)))
+      .toEqual({ status: 'ambiguous' });
+    expect(buildNamed(undefined, {}, graph(selectedNodes, [
+      ...selectedEdges, { from: 'automation', to: 'selling_time', strength: -0.9 },
+    ]))).toEqual({ status: 'ambiguous' });
+  });
+
+  it('cannot hide an additional named object by overwriting an unrelated duplicate id', () => {
+    const twins = [
+      { id: 'collision', kind: 'factor', label: 'Cost' },
+      { id: 'collision', kind: 'factor', label: 'Budget' },
+    ];
+    const messageText = 'What do Sales rep time on selling activities and Cost depend on?';
+    for (const order of [twins, [...twins].reverse()]) {
+      const currentGraph = graph([...selectedNodes, ...order], selectedEdges);
+      expect(buildNamed(messageText, {}, currentGraph)).toEqual({ status: 'ambiguous' });
+      expect(buildSelected({ messageText }, currentGraph)).toEqual({ status: 'ambiguous' });
+    }
+  });
+
   it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {
     expect(buildSelected({
       requestedSelection: { node_ids: ['selling_time'], edge_ids: ['automation→selling_time'] },
