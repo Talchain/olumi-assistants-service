@@ -22,6 +22,7 @@ import type { FlipSummary } from '../../../compose/flip-proposal.js';
 import { NEAR_TIE_PP_THRESHOLD } from '../../../coaching/robustness-honesty.js';
 import {
   composeExplainFromStructureFallback,
+  composeSelectedDependenciesEvidenceAnswer,
   composeExplainResultsFallback,
   composeRobustnessVerdict,
   composeStructuralPairEvidenceAnswer,
@@ -860,6 +861,28 @@ describe('composeExplainFromStructureFallback', () => {
     });
     expect(text).toContain('cannot establish one unique Living Model factor');
     expect(text).not.toContain('strongest visible direct influence');
+  });
+
+  // PR #1229 review guard (4). "Name or select one element and ask again" is
+  // false advice for a user who already has exactly one resolved element
+  // selected — the producer marks that turn, and this copy must never reach it.
+  it('never asks a user with one resolved selected element to name or select one', () => {
+    const forbidden = [
+      'Name or select one element',
+      'Select one element',
+      'select one element',
+    ];
+    const marked = composeSelectedDependenciesEvidenceAnswer({
+      status: 'ambiguous', subject_selection: 'single_resolved',
+    });
+    for (const phrase of forbidden) expect(marked).not.toContain(phrase);
+    expect(marked).toContain('will not guess its relationships');
+    // In-suite CONTRAST: the unmarked verdict — no selection, or a selection
+    // that did not resolve to one element — still carries the instruction, so
+    // the assertions above discriminate rather than testing an empty string.
+    const unmarked = composeSelectedDependenciesEvidenceAnswer({ status: 'ambiguous' });
+    expect(unmarked).toContain('Name or select one element and ask again.');
+    expect(unmarked).not.toBe(marked);
   });
 
   it('handles an empty graph gracefully without crashing or leaking internal terms', () => {

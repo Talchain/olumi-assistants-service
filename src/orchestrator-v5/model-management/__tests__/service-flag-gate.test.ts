@@ -14,7 +14,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { config } from '../../../config/index.js';
 import { ModelManagementService } from '../service.js';
 import type { ModelVersionStorePort } from '../store-adapter.js';
-import type { VersionEventSink } from '../types.js';
+import type { ModelVersionRecord, VersionEventSink } from '../types.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const VERSION_A = '11111111-1111-4111-8111-111111111111';
@@ -31,6 +31,7 @@ function explodingStore(): ModelVersionStorePort {
     getVersion: vi.fn(boom),
     restoreVersion: vi.fn(boom),
     getCurrentVersionId: vi.fn(boom),
+    getVersionForCommittedTurn: vi.fn(boom),
   };
 }
 
@@ -48,7 +49,7 @@ const GRAPH = {
 };
 
 describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EVERY entry point', () => {
-  it('saveVersion / restoreVersion / listVersions / getVersion / getCurrentVersion / compareVersions all return disabled', async () => {
+  it('saveVersion / restoreVersion / listVersions / getVersion / committed-turn read / getCurrentVersion / compareVersions all return disabled', async () => {
     const store = explodingStore();
     const sink = explodingSink();
     const service = new ModelManagementService({
@@ -62,6 +63,7 @@ describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EV
       await service.restoreVersion({ scenario_id: SCENARIO, version_id: VERSION_A }),
       await service.listVersions(SCENARIO),
       await service.getVersion(SCENARIO, VERSION_A),
+      await service.getVersionForCommittedTurn(SCENARIO, 'source-turn', 'mutation-id'),
       await service.getCurrentVersion(SCENARIO),
       await service.compareVersions(SCENARIO, VERSION_A, VERSION_B),
     ];
@@ -73,6 +75,87 @@ describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EV
       expect(method).not.toHaveBeenCalled();
     }
     expect(sink.emit).not.toHaveBeenCalled();
+  });
+});
+
+describe('ModelManagementService — committed-turn reads fail weak without other version authority', () => {
+  const sourceTurn = 'source-turn';
+  const mutationId = 'mutation-id';
+  const committedVersion: ModelVersionRecord = {
+    id: VERSION_B,
+    scenario_id: SCENARIO,
+    owner_user_id: 'owner-user',
+    version_number: 2,
+    graph_identity_hash: 'a'.repeat(64),
+    hash_algorithm: 'sha256',
+    identity_projection_version: 'identity.v1',
+    identity_normaliser_version: '1',
+    graph_schema_version: 'graph_v3',
+    analysis_affecting_hash: 'b'.repeat(64),
+    mutation_id: mutationId,
+    parent_version_id: VERSION_A,
+    root_version_id: VERSION_A,
+    actor_kind: 'known',
+    authored_by: 'owner-user',
+    creation_kind: 'committed_mutation',
+    source_version_id: null,
+    source_turn_id: sourceTurn,
+    label: null,
+    provenance: null,
+    restored_from_version_id: null,
+    created_at: '2026-08-30T10:00:00.000Z',
+    graph: GRAPH,
+  };
+
+  it('returns the exact committed child from its port without using the current head or emitting events', async () => {
+    const read = vi.fn(async () => committedVersion);
+    const store = { ...explodingStore(), getVersionForCommittedTurn: read };
+    const sink = explodingSink();
+    const service = new ModelManagementService({ store, eventSink: sink, isEnabled: () => true });
+    expect(await service.getVersionForCommittedTurn(SCENARIO, sourceTurn, mutationId))
+      .toEqual({ status: 'ok', value: committedVersion });
+    expect(read).toHaveBeenCalledExactlyOnceWith(SCENARIO, sourceTurn, mutationId);
+    expect(store.getCurrentVersionId).not.toHaveBeenCalled();
+    expect(store.getVersion).not.toHaveBeenCalled();
+    expect(store.saveVersion).not.toHaveBeenCalled();
+    expect(store.restoreVersion).not.toHaveBeenCalled();
+    expect(sink.emit).not.toHaveBeenCalled();
+  });
+
+  it('a legacy store without the optional reader reports unavailable, not authoritative absence', async () => {
+    const store = { ...explodingStore(), getVersionForCommittedTurn: undefined };
+    const service = new ModelManagementService({ store, isEnabled: () => true });
+    expect(await service.getVersionForCommittedTurn(SCENARIO, sourceTurn, mutationId)).toEqual({
+      status: 'error',
+      error: { code: 'store_error', recoverable: true, message: 'Committed model history is unavailable.' },
+    });
+    for (const method of Object.values(store)) {
+      if (method) expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an absent exact committed version is an error, not an empty-history result or current-head fallback', async () => {
+    const read = vi.fn(async () => null);
+    const store = { ...explodingStore(), getVersionForCommittedTurn: read };
+    const service = new ModelManagementService({ store, isEnabled: () => true });
+    expect(await service.getVersionForCommittedTurn(SCENARIO, sourceTurn, mutationId)).toEqual({
+      status: 'error',
+      error: { code: 'version_not_found', recoverable: true, message: 'Committed model version is unavailable.' },
+    });
+    expect(read).toHaveBeenCalledExactlyOnceWith(SCENARIO, sourceTurn, mutationId);
+    expect(store.getCurrentVersionId).not.toHaveBeenCalled();
+    expect(store.getVersion).not.toHaveBeenCalled();
+  });
+
+  it('a failed committed-version read maps to an error without retrying another authority', async () => {
+    const read = vi.fn(async () => { throw new Error('durable read unavailable'); });
+    const store = { ...explodingStore(), getVersionForCommittedTurn: read };
+    const service = new ModelManagementService({ store, isEnabled: () => true });
+    expect(await service.getVersionForCommittedTurn(SCENARIO, sourceTurn, mutationId))
+      .toMatchObject({ status: 'error', error: { code: 'store_error', recoverable: false } });
+    expect(read).toHaveBeenCalledExactlyOnceWith(SCENARIO, sourceTurn, mutationId);
+    expect(store.getCurrentVersionId).not.toHaveBeenCalled();
+    expect(store.getVersion).not.toHaveBeenCalled();
   });
 });
 

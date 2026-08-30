@@ -9876,6 +9876,7 @@ export async function runTurnExecutor(
       const selectedDependenciesEvidence =
         proposedHandlerId === 'explain_from_structure' && contextPackForLog
           ? buildSelectedDependenciesEvidence(contextPackForLog.graph, {
+              messageText: payload.message,
               structureQuery: action.structure_query,
               requestedSelection: options.selectedElements,
               focus: contextPackForLog.focus,

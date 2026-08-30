@@ -40,6 +40,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { isNoopFact } from '../tools/fact-noop.js';
 import { sanitiseUserFacingText } from '../../orchestrator/shared/output-safety.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
+import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 import {
   formatConstraintAdded,
   formatConstraintUpdated,
@@ -101,6 +102,8 @@ export type RecentChangeAction =
 export interface RecentMutation {
   /** Discriminator. Used by Sonnet and the deterministic state-query guard. */
   readonly action: RecentChangeAction;
+  /** Additional qualitative licence; absence retains the existing generic policy. */
+  readonly transition?: 'node_label_changed';
   /**
    * One-line decision-language summary. No identifiers, no internal
    * terms. Capped at {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}; truncated
@@ -135,13 +138,28 @@ export interface RecentMutation {
  */
 export function projectRecentChanges(
   priorFacts: readonly HandlerFact[] | undefined,
+  entries?: readonly IdentifiedHandlerFact[],
 ): readonly RecentMutation[] {
   if (!priorFacts || priorFacts.length === 0) return Object.freeze([]);
 
   const out: RecentMutation[] = [];
-  for (const fact of priorFacts) {
+  for (const [index, fact] of priorFacts.entries()) {
     if (out.length >= RECENT_CHANGES_CAP) break;
+    const entry = entries?.[index];
+    const transition = entry?.fact === fact ? entry.label_transition : undefined;
     const summarised = summariseMutation(fact);
+    if (summarised?.action === 'graph_edited' && transition?.kind === 'node_label_changed') {
+      const summary = `Renamed ${JSON.stringify(transition.before_label)} to ${JSON.stringify(transition.after_label)}.`;
+      const canShowExact = summary.length <= RECENT_CHANGES_SUMMARY_MAX_CHARS &&
+        sanitiseUserFacingText(summary, null).matches.length === 0;
+      out.push({
+        action: 'graph_edited',
+        transition: 'node_label_changed',
+        summary: canShowExact ? summary : 'Renamed a model element; its exact labels are withheld from this summary.',
+        target_label: canShowExact ? transition.after_label : '',
+      });
+      continue;
+    }
     if (summarised) out.push(summarised);
   }
   return Object.freeze(out);
@@ -506,6 +524,7 @@ export function computeRecentChangesHash(items: readonly RecentMutation[]): stri
     action: m.action,
     summary: m.summary,
     target_label: m.target_label,
+    ...(m.transition !== undefined ? { transition: m.transition } : {}),
   }));
   return createHash('sha256')
     .update(JSON.stringify(canonical))

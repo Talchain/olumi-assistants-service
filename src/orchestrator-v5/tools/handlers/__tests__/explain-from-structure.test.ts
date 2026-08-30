@@ -317,6 +317,25 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(bidirected.assistant_text).not.toContain('direct, directed connector');
   });
 
+  // PR #1229 review guard (4), at the surface the user actually reads.
+  it('does not tell a user with one resolved selected element to name or select one', async () => {
+    const handler = createExplainFromStructureHandler();
+    const marked = await handler({
+      ...makeInvocation(),
+      selectedDependenciesEvidence: {
+        status: 'ambiguous', subject_selection: 'single_resolved',
+      },
+    });
+    expect(marked.assistant_text.toLowerCase()).not.toContain('select one element');
+    expect(marked.assistant_text).toContain('will not guess its relationships');
+    // In-suite CONTRAST: the unmarked verdict still carries the instruction.
+    const unmarked = await handler({
+      ...makeInvocation(),
+      selectedDependenciesEvidence: { status: 'ambiguous' },
+    });
+    expect(unmarked.assistant_text).toContain('Name or select one element');
+  });
+
   it('selected neighbourhood ambiguity and unavailable coverage fail weak instead of restoring authored prose', async () => {
     const handler = createExplainFromStructureHandler();
     const authored =
@@ -326,7 +345,7 @@ describe('explain_from_structure — answer-carrying contract', () => {
       explanation: { answer_text: authored, answer_text_valid: true },
       selectedDependenciesEvidence: { status: 'ambiguous' },
     });
-    expect(ambiguous.assistant_text).toContain('cannot establish one unique selected');
+    expect(ambiguous.assistant_text).toContain('cannot establish one unique Living Model element');
     expect(ambiguous.assistant_text).not.toBe(authored);
 
     const unavailable = await handler({
