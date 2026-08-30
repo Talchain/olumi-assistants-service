@@ -8,7 +8,7 @@
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
 import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
-import { stampFallbackDefault } from "../../cee/provenance/factor-value-provenance.js";
+import { buildUnquantifiedPrior } from "../../cee/provenance/unquantified-factor.js";
 
 // ============================================================================
 // Types
@@ -894,29 +894,56 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 }
 
 /**
- * Ensure all controllable factors have baseline values (data.value).
+ * Ensure every controllable factor states its baseline — as a number if the
+ * model gave one, and otherwise as an EXPLICIT UNKNOWN.
  *
  * Controllable factors are factors with incoming option→factor edges.
- * When LLM fails to output data.value for a controllable factor,
- * we add a default value of **0.5** with extractionType: "inferred".
- * 0.5 is the neutral midpoint on the 0–1 scale per prompt instructions.
  *
- * Must agree with `fixControllableMissingData()` in deterministic-sweep.ts,
- * which acts as a safety net with the same 0.5 default.
+ * ── WHAT THIS FUNCTION USED TO DO, AND WHY IT STOPPED ──────────────────────
+ * It wrote `data.value = 0.5` with `extractionType: "inferred"` for every
+ * controllable factor the model left without a value, because
+ * `graph-validator.ts` treated a valueless factor as an INVALID GRAPH. The
+ * number was chosen to satisfy that gate and carried no information.
  *
- * This ensures ISL can compute sensitivity analysis.
+ * It was never inert. ISL's elasticity is `(causal path gain) x (the factor's
+ * baseline) / (baseline outcome mean)`, so the placeholder is a multiplicative
+ * term in the headline sensitivity — measured against ISL `28fe0c95`, three
+ * factors at 0.5 produced identical elasticity to 17 s.f., and moving one to
+ * 0.8 scaled its elasticity by exactly 1.6. PLoT separately derives sigma as
+ * `|value| * 0.15`. Downstream the placeholder carried the SAME label as a
+ * genuinely reasoned estimate, because the `value_tier` stamp died at the CEE
+ * boundary.
+ *
+ * The gate now accepts an explicit unknown (`graph-validator.ts`
+ * `validateFactorData`), so the honest answer is finally expressible and this
+ * function gives it: no number, `prior: uniform(0,1)`, `prior_is_unquantified`.
+ *
+ * ⚠ THIS IS A GENERALISATION, NOT A SECOND MECHANISM. The shape and the
+ * wording come from `unquantified-factor.ts`, which `unreachable-factors.ts`
+ * also writes through. Two same-purpose mechanisms under different names is
+ * this estate's chronic defect.
+ *
+ * ⚠ SAFETY NET AGREEMENT. `fixControllableMissingData()` (deterministic-sweep)
+ * still writes `0.5`, and it is gated on the validator reporting
+ * CONTROLLABLE_MISSING_DATA. Because the factors this function marks no longer
+ * raise that violation, it does not inherit this population. That coupling is
+ * load-bearing and is pinned by test (block D of
+ * `provenance/__tests__/honest-unknown-factor.test.ts`) — if the validator
+ * relaxation is ever reverted alone, the marking here becomes a no-op and the
+ * `0.5` returns through the safety net with nothing red.
  *
  * @param response - Draft graph response
- * @returns Response with baseline values ensured on controllable factors
+ * @returns Response with every controllable factor's baseline stated, and the
+ *          ids of those stated as UNKNOWN rather than as a number
  */
 export function ensureControllableFactorBaselines(response: unknown): {
   response: unknown;
-  defaultedFactors: string[];
+  unquantifiedFactors: string[];
 } {
-  const defaultedFactors: string[] = [];
+  const unquantifiedFactors: string[] = [];
 
   if (!response || typeof response !== 'object') {
-    return { response, defaultedFactors };
+    return { response, unquantifiedFactors };
   }
 
   const obj = response as Record<string, unknown>;
@@ -924,7 +951,7 @@ export function ensureControllableFactorBaselines(response: unknown): {
   const edges = obj.edges as Array<Record<string, unknown>> | undefined;
 
   if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-    return { response, defaultedFactors };
+    return { response, unquantifiedFactors };
   }
 
   // Build set of controllable factor IDs (factors with incoming option→factor edges)
@@ -971,47 +998,61 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node; // Already has value
     }
 
-    // Add default baseline value.
-    // 0.5 is the neutral midpoint on the 0–1 scale, matching prompt instructions
-    // ("Unknown baseline: 0.5 with extractionType: inferred") and the safety-net
-    // default in fixControllableMissingData() (deterministic-sweep.ts).
-    defaultedFactors.push(nodeId);
+    // ⛔ NO SUBSTITUTION. State the unknown instead of inventing a midpoint.
+    //
+    // The `value_tier: "fallback_default"` stamp is deliberately NOT written
+    // here any more: it tiers a VALUE, and there is now no value to tier. A
+    // stamp saying "this number is a fallback" on a node carrying no number
+    // would be a second, contradictory account of the same fact — and the
+    // discriminator downstream is `prior_is_unquantified`, which travels inside
+    // the prior it qualifies and cannot be orphaned.
+    // ⚠ AN UNUSABLE `value` MUST GO, NOT MERELY BE IGNORED. Reaching here means
+    // `data.value` is absent, or present and NOT coercible to a finite number
+    // (the two returns above take every usable case). The old code overwrote it
+    // with `0.5`; simply spreading `data` would now PRESERVE it — and the
+    // validator's `data?.value === undefined` gate reads a garbage string as
+    // "present", so it would ship a non-numeric level downstream under a clean
+    // validation. Dropping it is what makes the node's state honest AND
+    // well-formed; the explicit unknown is then the only account of the level.
+    const { value: _unusableValue, ...dataWithoutUnusableValue } = data ?? {};
+
+    unquantifiedFactors.push(nodeId);
     log.info({
-      event: 'llm.normalisation.factor_baseline_defaulted',
+      event: 'llm.normalisation.factor_baseline_left_unquantified',
       factor_id: nodeId,
-      default_value: 0.5,
       extraction_type: 'inferred',
-    }, `Controllable factor ${nodeId} missing data.value, defaulting to 0.5`);
+    }, `Controllable factor ${nodeId} has no stated value; left explicitly unquantified rather than defaulted`);
 
     const existingType = data?.extractionType;
     return {
       ...node,
+      // MARK, NEVER SUPPRESS. The factor stays visibly present and carries
+      // maximal uncertainty — the one range over the unit interval that
+      // asserts nothing. Withholding the prior entirely would strip the node of
+      // support and leave any constraint targeting it evaluating trivially
+      // (P=1.0/P=0.0 at intercept=0), which is the failure the original prior
+      // synthesis was written to prevent.
+      prior: buildUnquantifiedPrior(),
       data: {
-        // ⭐ STAMPED, NOT LEFT TO BE GUESSED (quantities lane, 2026-08-18).
-        // This 0.5 carries no information, and the ONE place that knows it is
-        // right here. Downstream readers previously had to recover the fact
-        // from the magnitude (`value === 0.5`), which misreads a genuinely
-        // stated 0.5 as an invention and vice versa — CLAUDE.md trap 19. The
-        // stamp is what stops `unreachable-factors` narrowing this into a
-        // prior range that reads as a measurement.
-        ...stampFallbackDefault(data || {}),
-        value: 0.5,
+        ...dataWithoutUnusableValue,
         // Preserve LLM-emitted extractionType if present; only default when
         // truly absent — matches the guard in fixControllableMissingData().
+        // The validator requires this field independently of `value`, and the
+        // relaxation above is scoped to `value` alone.
         extractionType: existingType ?? 'inferred',
       },
     };
   });
 
-  if (defaultedFactors.length > 0) {
+  if (unquantifiedFactors.length > 0) {
     emit(TelemetryEvents.FactorBaselineDefaulted, {
-      defaulted_count: defaultedFactors.length,
-      factor_ids: defaultedFactors,
+      defaulted_count: unquantifiedFactors.length,
+      factor_ids: unquantifiedFactors,
     });
   }
 
   return {
     response: { ...obj, nodes: updatedNodes },
-    defaultedFactors,
+    unquantifiedFactors,
   };
 }

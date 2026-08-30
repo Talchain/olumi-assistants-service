@@ -239,28 +239,44 @@ describe("B — an unquantified factor stays visibly present", () => {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe("C — end to end: an unvalued factor never acquires uniform(0.25, 0.75)", () => {
-  it("stamps at the defaulting site and declines to narrow at the reclassifying site", () => {
-    // Start from the genuine precondition: a factor with NO value at all.
+  it("never invents the number in the first place, and the reclassifier leaves that alone", () => {
+    // ⚠ UPDATED, NOT WEAKENED — and the reason belongs in the record.
+    //
+    // This test used to assert the INTERMEDIATE state of the old two-step
+    // laundering-containment: the sweep wrote `value: 0.5` stamped
+    // `fallback_default`, and `handleUnreachableFactors` then read that stamp
+    // and refused to narrow it into `uniform(0.25, 0.75)`.
+    //
+    // The invented number is now not written at all (the validator accepts an
+    // EXPLICIT unknown, so the sweep no longer has to satisfy it with a
+    // fabricated level). The containment step therefore has nothing to contain:
+    // `handleUnreachableFactors`' prior synthesis is wholly inside
+    // `if (originalValue !== undefined)`, so with no value it does not run and
+    // the honest prior written by the sweep survives untouched.
+    //
+    // THE SPEC THIS BLOCK EXISTS FOR IS UNCHANGED and is still asserted at
+    // step 3: an unvalued factor never acquires `uniform(0.25, 0.75)`. What
+    // changed is that it is now true one step earlier, for a better reason.
     const graph = unreachableFactorGraph({});
     delete (factorNode(graph) as any).data;
 
-    // 1. The real defaulting producer runs.
+    // 1. The real producer runs.
     const sweepRepairs = fixObservableMissingData(graph, [
       { code: "OBSERVABLE_MISSING_DATA", path: "nodes[fac_x]" } as any,
     ]);
     expect(sweepRepairs.length).toBeGreaterThan(0);
-    expect(factorNode(graph).data.value).toBe(0.5);
-    expect(factorNode(graph).data[FACTOR_VALUE_TIER_FIELD]).toBe("fallback_default");
+    expect(factorNode(graph).data?.value).toBeUndefined();
+    expect(factorNode(graph).prior.prior_is_unquantified).toBe(true);
 
     // 2. The real reclassifying producer runs.
     handleUnreachableFactors(graph, EDGE_FORMAT);
 
-    // 3. The invented number never becomes a range that reads as evidence.
-    expect(factorNode(graph).prior).toEqual({
-      distribution: "uniform",
-      range_min: 0.0,
-      range_max: 1.0,
-    });
+    // 3. THE UNCHANGED INVARIANT: no range that reads as evidence.
+    expect(factorNode(graph).prior.range_min).toBe(0.0);
+    expect(factorNode(graph).prior.range_max).toBe(1.0);
+    // Bound by IDENTITY of the laundered shape this suite is named for, so a
+    // future change that reintroduces it REDs here specifically.
+    expect(factorNode(graph).prior).not.toMatchObject({ range_min: 0.25, range_max: 0.75 });
   });
 });
 
@@ -297,9 +313,13 @@ describe("C2 — which stampers can actually FEED the launderer", () => {
       ],
     };
 
-    // Stage 1 DOES fire here — the node has an option edge.
-    const { defaultedFactors } = ensureControllableFactorBaselines(optionConnected);
-    expect(defaultedFactors).toContain("fac_x");
+    // Stage 1 DOES fire here — the node has an option edge. (The returned list
+    // is now `unquantifiedFactors`: Stage 1 states the unknown rather than
+    // defaulting a baseline. The STRUCTURAL claim this test makes — which set
+    // of nodes Stage 1 reaches — is unchanged, which is why the rename is the
+    // only edit needed here.)
+    const { unquantifiedFactors } = ensureControllableFactorBaselines(optionConnected);
+    expect(unquantifiedFactors).toContain("fac_x");
 
     // …and the launderer does NOT reclassify it, precisely because of that edge.
     const result = handleUnreachableFactors(optionConnected as GraphT, EDGE_FORMAT);
@@ -324,8 +344,8 @@ describe("C2 — which stampers can actually FEED the launderer", () => {
       ],
     };
 
-    const { defaultedFactors } = ensureControllableFactorBaselines(unreachable);
-    expect(defaultedFactors).not.toContain("fac_x");
+    const { unquantifiedFactors } = ensureControllableFactorBaselines(unreachable);
+    expect(unquantifiedFactors).not.toContain("fac_x");
   });
 });
 
