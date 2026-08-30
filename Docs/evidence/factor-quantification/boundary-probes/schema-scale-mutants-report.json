@@ -1,0 +1,49 @@
+{
+  "source_worktree": "/private/tmp/factor-quantification-20260830/schemas",
+  "mutant_worktree": "/var/folders/hk/lxwdz7xx5rs8wnmbl3m4f10c0000gp/T/factor-schema-scale-mutants-hfq5_yci",
+  "results": [
+    {
+      "case": "unknown-scale-metadata-dropped",
+      "exit_code": 1,
+      "collected": 81,
+      "failed": 1,
+      "failed_assertions": [
+        " factor quantification carriers retains already-declared scale metadata on prior carrier 0 through the canonical graph"
+      ]
+    },
+    {
+      "case": "unknown-numeric-fields-accepted",
+      "exit_code": 1,
+      "collected": 81,
+      "failed": 10,
+      "failed_assertions": [
+        " factor quantification carriers rejects a numeric-claim carrier value on the unknown-only branch",
+        " factor quantification carriers rejects a numeric-claim carrier std on the unknown-only branch",
+        " factor quantification carriers rejects a numeric-claim carrier range_min on the unknown-only branch",
+        " factor quantification carriers rejects a numeric-claim carrier range_max on the unknown-only branch",
+        " factor quantification carriers rejects a numeric-claim carrier distribution on the unknown-only branch",
+        " factor quantification carriers protects unattributed legacy ignorance without calling it system-created",
+        " factor quantification carriers makes explicitly system-created ignorance replaceable",
+        " factor quantification carriers preserves supplied ignorance as protected fallback support",
+        " selected quantity and estimator protection a system fallback point cannot hide a protected prior 2",
+        " selected quantity and estimator protection a system fallback point cannot hide a protected prior 3"
+      ]
+    },
+    {
+      "case": "prior-cap-missing-from-hash",
+      "exit_code": 1,
+      "collected": 81,
+      "failed": 1,
+      "failed_assertions": [
+        " factor hash-input contract v3 (not a second canonical digest) prior cap change moves the declared hash input"
+      ]
+    },
+    {
+      "case": "unrelated-description-control",
+      "exit_code": 0,
+      "collected": 81,
+      "failed": 0,
+      "failed_assertions": []
+    }
+  ]
+}

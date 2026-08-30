@@ -1,0 +1,311 @@
+{
+  "storage": "local_file_session_fixture",
+  "source_identity": {
+    "captured_at": "2026-08-30T13:56:46.061Z",
+    "git_head": "8deefc63f79c6e1afa93da2387e752824a30cf6c",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "9485231a71d552a103c20166df2edc89e5db37a79060552f5249462377f1c84b",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "id": "9684086d-c177-4619-b92e-9374db27ad30",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_service",
+        "kind": "goal",
+        "label": "Dependable service"
+      },
+      {
+        "id": "opt_manual",
+        "kind": "option",
+        "label": "Keep manual recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 0,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_automate",
+        "kind": "option",
+        "label": "Automate recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_automation",
+        "kind": "factor",
+        "label": "Recovery automation",
+        "observed_state": {
+          "value": 0,
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 1
+      },
+      {
+        "id": "fac_preparedness",
+        "kind": "factor",
+        "label": "Recovery preparedness",
+        "observed_state": {
+          "std": 0.15,
+          "reasoning": {
+            "rationale": "The brief gives qualitative evidence: a written manual recovery checklist and an on-call rota exist (indicating some documented process, above 0), but recovery has never been rehearsed (so it is not 'fully rehearsed automatic recovery' at 1). This places readiness above the 'no documented process' floor but below any rehearsed/tested state. This is a provisional qualitative judgment, not a measured probability, so a point estimate with wide uncertainty is more defensible than treating the full 0-1 span as equally likely (a checklist+rota clearly rules out the extremes). I estimate a modest-low value reflecting documented-but-unrehearsed status, with a large std to reflect the lack of any measurement or rehearsal data.",
+            "context_basis": [
+              "brief"
+            ]
+          },
+          "value": 0.35,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "category": "external",
+        "scale_frame": 1
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_manual",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_automate",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_automation",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_preparedness",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "briefText": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+  "write": {
+    "scenario_id": "7d9413f8-d326-4f25-a88f-646e29fbe99b",
+    "turn_id": "4c08917d-93e2-4f00-8513-6ce34d8c3f19",
+    "turn_class": "direct_answer",
+    "handler_id": null,
+    "request_hash": "sha256:d72383ebaf146af64b182dfcd033075aaca9f05b720c9e1ad09e556797b7892f",
+    "response_emitted": true,
+    "llm_calls_used": 1,
+    "duration_ms": 4517,
+    "handler_facts": [],
+    "graph": {
+      "nodes": [
+        {
+          "id": "goal_service",
+          "kind": "goal",
+          "label": "Dependable service"
+        },
+        {
+          "id": "opt_manual",
+          "kind": "option",
+          "label": "Keep manual recovery",
+          "interventions": {
+            "fac_automation": {
+              "value": 0,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_automation",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": true
+        },
+        {
+          "id": "opt_automate",
+          "kind": "option",
+          "label": "Automate recovery",
+          "interventions": {
+            "fac_automation": {
+              "value": 1,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_automation",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": false
+        },
+        {
+          "id": "fac_automation",
+          "kind": "factor",
+          "label": "Recovery automation",
+          "observed_state": {
+            "value": 0,
+            "source": "brief_extraction",
+            "extractionType": "explicit"
+          },
+          "category": "controllable",
+          "scale_frame": 1
+        },
+        {
+          "id": "fac_preparedness",
+          "kind": "factor",
+          "label": "Recovery preparedness",
+          "observed_state": {
+            "std": 0.15,
+            "reasoning": {
+              "rationale": "The brief gives qualitative evidence: a written manual recovery checklist and an on-call rota exist (indicating some documented process, above 0), but recovery has never been rehearsed (so it is not 'fully rehearsed automatic recovery' at 1). This places readiness above the 'no documented process' floor but below any rehearsed/tested state. This is a provisional qualitative judgment, not a measured probability, so a point estimate with wide uncertainty is more defensible than treating the full 0-1 span as equally likely (a checklist+rota clearly rules out the extremes). I estimate a modest-low value reflecting documented-but-unrehearsed status, with a large std to reflect the lack of any measurement or rehearsal data.",
+              "context_basis": [
+                "brief"
+              ]
+            },
+            "value": 0.35,
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "category": "external",
+          "scale_frame": 1
+        }
+      ],
+      "edges": [
+        {
+          "from": "opt_manual",
+          "to": "fac_automation",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "opt_automate",
+          "to": "fac_automation",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_automation",
+          "to": "goal_service",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_preparedness",
+          "to": "goal_service",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        }
+      ]
+    },
+    "briefText": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+    "pending_actions": [],
+    "userMessage": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+    "assistantMessage": "Local Factor Quantification witness."
+  }
+}

@@ -1,0 +1,11 @@
+--- a/src/cee/factor-quantification/select.ts
++++ b/src/cee/factor-quantification/select.ts
+@@ -150,7 +150,7 @@
+     if (!['missing', 'unknown', 'fallback'].includes(selection.kind)) continue;
+     eligible.push({
+       factor_id: node.id, label: node.label, snapshot, node_snapshot: JSON.stringify(node), requirement,
+-      reason: `Required baseline for ${requirement.operation} in ${requirement.option_ids.join(', ')}; impact unassessed.`,
++      reason: `Analysis baseline for ${requirement.operation} in ${requirement.option_ids.join(', ')}; impact unassessed.`,
+       requested_by: [requirement.operation],
+       unit: knownFactorScale(node).unit,
+       category: node.category,

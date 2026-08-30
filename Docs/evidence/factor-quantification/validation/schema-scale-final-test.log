@@ -1,0 +1,129 @@
+
+> @talchain/schemas@0.53.0 test
+> npm run check:contracts && npm run build && npm run typecheck:tests && vitest run
+
+
+> @talchain/schemas@0.53.0 check:contracts
+> npm run check:adoption && npm run check:populations && npm run check:compat && npm run generate:contract-constants:check && npm run generate:population-ref:check
+
+
+> @talchain/schemas@0.53.0 check:adoption
+> node scripts/check-adoption-manifest.mjs
+
+adoption-manifest: 35 row(s) · today=2026-08-30
+adoption-manifest: contract_manifest_sha=167e1245d3d8bff1955eff65e018b7c4e691eb473ff364913320c4e5a2133069
+adoption-manifest: test-file existence: SKIPPED (OLUMI_ESTATE_ROOT unset — repo-key validation only)
+adoption-manifest: OK
+
+> @talchain/schemas@0.53.0 check:populations
+> node scripts/check-population-registry.mjs
+
+population-registry: isl.metric_populations — 2 live label(s) [model_only, noise_inflated] all mapped
+population-registry: 2 population(s), 1 transform(s)
+population-registry: OK
+
+> @talchain/schemas@0.53.0 check:compat
+> node scripts/check-compat-gate.mjs
+
+compat-gate: isl-response-v2 — baseline 3aea011 vs candidate 7d144c7
+compat-gate:   POST /api/v1/robustness/analyze/v2 [request] RobustnessRequestV2 — 0 advisory finding(s)
+compat-gate:   POST /api/v1/robustness/analyze/v2 [response] ISLResponseV2 — 1 advisory finding(s)
+compat-gate:     · response: ISLResponseV2.sample_population_provenance added (optional) — additive
+compat-gate: OK (1 seam(s), both directions)
+
+> @talchain/schemas@0.53.0 generate:contract-constants:check
+> node scripts/generate-contract-constants.mjs
+
+contract-constants: OK (generated-constants.ts is current)
+
+> @talchain/schemas@0.53.0 generate:population-ref:check
+> node scripts/generate-population-ref.mjs
+
+population-ref: 2 population(s) [olumi.mc.model_only@1=raw, olumi.mc.auto_noise_sqrt2@1=transformed]
+population-ref: OK (generated-population-ref.ts matches the registry)
+
+> @talchain/schemas@0.53.0 build
+> tsc
+
+
+> @talchain/schemas@0.53.0 typecheck:tests
+> tsc -p tsconfig.test.json
+
+
+ RUN  v1.6.1 /private/tmp/factor-quantification-20260830/schemas
+
+ ✓ tests/orchestrator/editable-fields.test.ts  (31 tests) 42ms
+ ✓ tests/orchestrator/edit-tool-ops.test.ts  (47 tests) 36ms
+ ✓ tests/boundary/enrichment.test.ts  (52 tests) 53ms
+ ✓ tests/boundary/blocks-phase3a.test.ts  (159 tests) 112ms
+ ✓ tests/contracts/analysis-fact.test.ts  (66 tests) 30ms
+ ✓ tests/schemas.test.ts  (146 tests) 189ms
+ ✓ tests/orchestrator/v5-bcd.test.ts  (75 tests) 118ms
+ ✓ tests/boundary/turn-payload-0.50.test.ts  (51 tests) 113ms
+ ✓ tests/boundary/analysis-state-0.46.test.ts  (48 tests) 152ms
+ ✓ tests/boundary/group-a.test.ts  (34 tests) 18ms
+ ✓ tests/boundary/additive-0.31.test.ts  (39 tests) 196ms
+ ✓ tests/contracts/absence-semantics/absence-census.test.ts  (15 tests) 279ms
+ ✓ tests/orchestrator/handler-fact-edit-graph.test.ts  (66 tests) 163ms
+ ✓ contract-tests/cee-to-ui.contract.test.ts  (18 tests) 18ms
+ ✓ tests/boundary/decision-record.test.ts  (42 tests) 72ms
+ ✓ tests/factor-quantification.test.ts  (81 tests) 271ms
+ ✓ tests/boundary/turn-payload-0.48.test.ts  (26 tests) 73ms
+ ✓ tests/boundary/turn-payload-0.42.test.ts  (60 tests) 91ms
+ ✓ tests/boundary/olumi-response.test.ts  (44 tests) 52ms
+ ✓ tests/fixtures/maximality.test.ts  (19 tests) 1804ms
+ ✓ tests/fixtures/completeness.test.ts  (8 tests) 8ms
+ ✓ tests/orchestrator/constraint-verdict-0.25.test.ts  (25 tests) 67ms
+ ✓ tests/boundary/collab-0.39.test.ts  (31 tests) 86ms
+ ✓ tests/orchestrator/stub.test.ts  (23 tests) 45ms
+ ✓ tests/boundary/turn-payload.test.ts  (39 tests) 71ms
+ ✓ tests/exports.test.ts  (24 tests) 22ms
+ ✓ tests/coaching.test.ts  (41 tests) 315ms
+ ✓ tests/boundary/model-versions.test.ts  (15 tests) 65ms
+ ✓ tests/boundary/wave2-producer-fields.test.ts  (43 tests) 35ms
+ ✓ tests/contracts/population-ref.test.ts  (32 tests) 1875ms
+ ✓ tests/boundary/ui-directive-panel-section.test.ts  (32 tests) 80ms
+ ✓ tests/boundary/model-version-receipt-persisted-sigma.test.ts  (10 tests) 19ms
+ ✓ tests/boundary/turn-payload-0.22.test.ts  (19 tests) 19ms
+ ✓ tests/boundary/turn-payload-0.34.test.ts  (20 tests) 131ms
+ ✓ tests/json-schema.test.ts  (14 tests) 2131ms
+ ✓ tests/boundary/run-delta-0.39.test.ts  (18 tests) 316ms
+ ✓ tests/boundary/v020-readiness-and-signal-fields.test.ts  (30 tests) 745ms
+ ✓ tests/boundary/dsk-claim-provenance-0.39.test.ts  (21 tests) 16ms
+ ✓ tests/boundary/held-proposal-block.test.ts  (21 tests) 289ms
+ ✓ tests/boundary/evidence-loop-0.40.test.ts  (14 tests) 69ms
+ ✓ contract-tests/isl-to-plot.contract.test.ts  (14 tests) 160ms
+ ✓ tests/boundary/canonical-committed-graph-receipt-0.43.test.ts  (8 tests) 14ms
+ ✓ tests/boundary/model-version-mutation-receipt.test.ts  (10 tests) 314ms
+ ✓ tests/boundary/turn-payload-0.29.test.ts  (13 tests) 9ms
+ ✓ tests/boundary/ui-directive-block.test.ts  (25 tests) 17ms
+ ✓ tests/boundary/model-building-notices-0.45.test.ts  (20 tests) 30ms
+ ✓ contract-tests/plot-to-cee.contract.test.ts  (11 tests) 14ms
+ ✓ tests/boundary/enrichment-outcome-honest-absence.test.ts  (8 tests) 44ms
+ ✓ tests/goal-direction.test.ts  (23 tests) 229ms
+ ✓ tests/boundary/exercise-dsk-provenance.test.ts  (9 tests) 47ms
+ ✓ tests/boundary/s1-graph-hash.test.ts  (11 tests) 11ms
+ ✓ tests/boundary/evidence-loop-0.40-vocabulary.test.ts  (10 tests) 13ms
+ ✓ tests/contracts/s0-gates.test.ts  (35 tests) 6714ms
+ ✓ tests/boundary/evidence-citation-0.41.test.ts  (9 tests) 158ms
+ ✓ tests/orchestrator/handler-fact-0.34.test.ts  (14 tests) 186ms
+ ✓ tests/boundary/fixtures.test.ts  (10 tests) 14ms
+ ✓ tests/boundary/draft-goal-constraint-value-frame.test.ts  (6 tests) 10ms
+ ✓ tests/boundary/critique-transport-seam.test.ts  (7 tests) 13ms
+ ✓ tests/boundary/turn-payload-0.23.test.ts  (6 tests) 34ms
+ ✓ tests/fixtures/roundtrip.test.ts  (210 tests) 470ms
+ ✓ tests/boundary/ui-directive-source-0.39.test.ts  (12 tests) 8ms
+ ✓ tests/contracts/additivity-0.40.test.ts  (163 tests) 496ms
+ ✓ tests/boundary/actiontype-what-changed.test.ts  (3 tests) 68ms
+ ✓ tests/boundary/exercise-kind-0.38-members.test.ts  (4 tests) 12ms
+ ✓ tests/contracts/additivity-0.39.test.ts  (136 tests) 256ms
+ ✓ tests/boundary/errors.test.ts  (7 tests) 8ms
+ ✓ tests/boundary/run-patch.test.ts  (4 tests) 158ms
+ ✓ tests/fixtures/exports-dist.test.ts  (4 tests) 262ms
+ ✓ tests/contracts/test-typecheck-coverage.test.ts  (5 tests) 11ms
+
+ Test Files  69 passed (69)
+      Tests  2396 passed (2396)
+   Start at  14:37:31
+   Duration  21.62s (transform 10.51s, setup 10ms, collect 61.56s, tests 20.07s, environment 41ms, prepare 50.67s)
+

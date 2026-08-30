@@ -1,0 +1,313 @@
+{
+  "storage": "local_file_session_fixture",
+  "source_identity": {
+    "captured_at": "2026-08-30T13:56:46.061Z",
+    "git_head": "8deefc63f79c6e1afa93da2387e752824a30cf6c",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "9485231a71d552a103c20166df2edc89e5db37a79060552f5249462377f1c84b",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "id": "cb575c90-3417-4c3d-87dc-99055ae54364",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_retention",
+        "kind": "goal",
+        "label": "Retained customers"
+      },
+      {
+        "id": "fac_churn",
+        "kind": "factor",
+        "label": "Current churn",
+        "observed_state": {
+          "value": 0.12,
+          "unit": "%",
+          "source": "user_override",
+          "raw_value": 12,
+          "extractionType": "inferred"
+        },
+        "category": "observable",
+        "scale_frame": 1,
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0,
+          "range_max": 1,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      },
+      {
+        "id": "fac_followup",
+        "kind": "factor",
+        "label": "Additional follow-up",
+        "observed_state": {
+          "value": 0,
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 1
+      },
+      {
+        "id": "opt_keep",
+        "kind": "option",
+        "label": "Keep current contact cadence",
+        "interventions": {
+          "fac_followup": {
+            "value": 0,
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "fac_followup",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_followup",
+        "kind": "option",
+        "label": "Add follow-up",
+        "interventions": {
+          "fac_followup": {
+            "value": 1,
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "fac_followup",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      }
+    ],
+    "edges": [
+      {
+        "from": "fac_churn",
+        "to": "goal_retention",
+        "strength": {
+          "mean": -0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_keep",
+        "to": "fac_followup",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_followup",
+        "to": "fac_followup",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_followup",
+        "to": "goal_retention",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "briefText": "Improve retained customers. I set the current churn rate to 12%; keep that number unchanged. A stale unknown marker may remain from an earlier draft. We are not asking for an estimate or replacement of churn. Compare keeping current contact cadence (additional follow-up 0) with adding follow-up (additional follow-up 1). These options do not set the current churn rate.",
+  "write": {
+    "scenario_id": "e1123184-c2c6-42a5-836e-c92aec08f356",
+    "turn_id": "4f9973a9-7536-4f12-a4f2-544a66c57ed2",
+    "turn_class": "direct_answer",
+    "handler_id": null,
+    "request_hash": "sha256:0e1c6236032f8fbaae8b982d7429e6e0d63298b29868be286dc30e97f875519c",
+    "response_emitted": true,
+    "llm_calls_used": 0,
+    "duration_ms": 2,
+    "handler_facts": [],
+    "graph": {
+      "nodes": [
+        {
+          "id": "goal_retention",
+          "kind": "goal",
+          "label": "Retained customers"
+        },
+        {
+          "id": "fac_churn",
+          "kind": "factor",
+          "label": "Current churn",
+          "observed_state": {
+            "value": 0.12,
+            "unit": "%",
+            "source": "user_override",
+            "raw_value": 12,
+            "extractionType": "inferred"
+          },
+          "category": "observable",
+          "scale_frame": 1,
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0,
+            "range_max": 1,
+            "source": "cee_repair",
+            "value_tier": "fallback_default",
+            "prior_is_unquantified": true
+          }
+        },
+        {
+          "id": "fac_followup",
+          "kind": "factor",
+          "label": "Additional follow-up",
+          "observed_state": {
+            "value": 0,
+            "source": "brief_extraction",
+            "extractionType": "explicit"
+          },
+          "category": "controllable",
+          "scale_frame": 1
+        },
+        {
+          "id": "opt_keep",
+          "kind": "option",
+          "label": "Keep current contact cadence",
+          "interventions": {
+            "fac_followup": {
+              "value": 0,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_followup",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": true
+        },
+        {
+          "id": "opt_followup",
+          "kind": "option",
+          "label": "Add follow-up",
+          "interventions": {
+            "fac_followup": {
+              "value": 1,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "fac_followup",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": false
+        }
+      ],
+      "edges": [
+        {
+          "from": "fac_churn",
+          "to": "goal_retention",
+          "strength": {
+            "mean": -0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "opt_keep",
+          "to": "fac_followup",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "opt_followup",
+          "to": "fac_followup",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_followup",
+          "to": "goal_retention",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        }
+      ]
+    },
+    "briefText": "Improve retained customers. I set the current churn rate to 12%; keep that number unchanged. A stale unknown marker may remain from an earlier draft. We are not asking for an estimate or replacement of churn. Compare keeping current contact cadence (additional follow-up 0) with adding follow-up (additional follow-up 1). These options do not set the current churn rate.",
+    "pending_actions": [],
+    "userMessage": "Improve retained customers. I set the current churn rate to 12%; keep that number unchanged. A stale unknown marker may remain from an earlier draft. We are not asking for an estimate or replacement of churn. Compare keeping current contact cadence (additional follow-up 0) with adding follow-up (additional follow-up 1). These options do not set the current churn rate.",
+    "assistantMessage": "Local Factor Quantification witness."
+  }
+}

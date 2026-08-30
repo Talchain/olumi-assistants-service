@@ -1,0 +1,74 @@
+{
+  "source_worktree": "/private/tmp/factor-quantification-20260830/schemas",
+  "mutant_worktree": "/var/folders/hk/lxwdz7xx5rs8wnmbl3m4f10c0000gp/T/factor-schema-review-mutants-71rjnx9y",
+  "results": [
+    {
+      "case": "accepted-override-not-selected",
+      "exit_code": 1,
+      "collected": 73,
+      "failed": 9,
+      "failed_assertions": [
+        " selected quantity and estimator protection selects accepted user override 0.12 without deleting or reattributing source-absent prior 0",
+        " selected quantity and estimator protection selects accepted user override 0.12 without deleting or reattributing source-absent prior 1",
+        " selected quantity and estimator protection selects accepted user override 0.12 without deleting or reattributing source-absent prior 2",
+        " selected quantity and estimator protection selects accepted user override 0.24 without deleting or reattributing source-absent prior 3",
+        " selected quantity and estimator protection selects accepted user override 0.24 without deleting or reattributing source-absent prior 4",
+        " selected quantity and estimator protection selects accepted user override 0.24 without deleting or reattributing source-absent prior 5",
+        " selected quantity and estimator protection does not call an unattributed ignorance prior superseded system residue when selecting an accepted user point",
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.12 visibly protected fallback, not ordinary knowledge",
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.24 visibly protected fallback, not ordinary knowledge"
+      ]
+    },
+    {
+      "case": "source-absence-invented-as-system",
+      "exit_code": 1,
+      "collected": 73,
+      "failed": 14,
+      "failed_assertions": [
+        " factor quantification carriers protects unattributed legacy ignorance without calling it system-created",
+        " factor quantification carriers protects an unattributed explicit unknown",
+        " selected quantity and estimator protection selects accepted user override 0.12 without deleting or reattributing source-absent prior 1",
+        " selected quantity and estimator protection selects accepted user override 0.12 without deleting or reattributing source-absent prior 2",
+        " selected quantity and estimator protection selects accepted user override 0.24 without deleting or reattributing source-absent prior 4",
+        " selected quantity and estimator protection selects accepted user override 0.24 without deleting or reattributing source-absent prior 5",
+        " selected quantity and estimator protection does not call an unattributed ignorance prior superseded system residue when selecting an accepted user point",
+        " selected quantity and estimator protection a system fallback point cannot hide a protected prior 0",
+        " selected quantity and estimator protection a system fallback point cannot hide a protected prior 2",
+        " selected quantity and estimator protection does not treat malformed source null as absent system attribution",
+        " selected quantity and estimator protection does not treat malformed source 42 as absent system attribution",
+        " selected quantity and estimator protection does not treat malformed source {} as absent system attribution",
+        " accepted user mutation cleanup never removes genuine or unattributed-source supplied priors",
+        " accepted user mutation cleanup never removes genuine or unattributed-source supplied priors"
+      ]
+    },
+    {
+      "case": "accepted-edit-cleanup-missing",
+      "exit_code": 1,
+      "collected": 73,
+      "failed": 4,
+      "failed_assertions": [
+        " accepted user mutation cleanup keeps fresh value 0.12 and clears only old system qualifiers",
+        " accepted user mutation cleanup keeps fresh value 0.24 and clears only old system qualifiers",
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.12 visibly protected fallback, not ordinary knowledge",
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.24 visibly protected fallback, not ordinary knowledge"
+      ]
+    },
+    {
+      "case": "supplied-source-hides-fallback",
+      "exit_code": 1,
+      "collected": 73,
+      "failed": 2,
+      "failed_assertions": [
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.12 visibly protected fallback, not ordinary knowledge",
+        " accepted user mutation cleanup a missing cleanup leaves user value 0.24 visibly protected fallback, not ordinary knowledge"
+      ]
+    },
+    {
+      "case": "unrelated-description-control",
+      "exit_code": 0,
+      "collected": 73,
+      "failed": 0,
+      "failed_assertions": []
+    }
+  ]
+}

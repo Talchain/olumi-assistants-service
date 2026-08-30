@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, isDeepStrictEqual, promisify } from 'node:util';
 import type { GraphV3T, NodeV3T } from '../../src/schemas/cee-v3.js';
 import type { SessionStore, SessionTurnWrite } from '../../src/orchestrator-v5/session/store.js';
+import type { FactorEstimate } from '../../src/cee/factor-quantification/types.js';
 
 const sha256 = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 const USAGE = 'Use --live --out <new-directory>. Supply ANTHROPIC_API_KEY and CEE_MODEL_FACTOR_QUANTIFICATION in the process environment; do not provide Supabase credentials.';
@@ -24,6 +25,11 @@ const USAGE = 'Use --live --out <new-directory>. Supply ANTHROPIC_API_KEY and CE
 /** A recorded strict failure is a FAILED case, even when fallback is zero. */
 export function passesStrictQuantificationEvaluation(metrics: { fallback: number; strict_evaluation_pass?: boolean }): boolean {
   return metrics.strict_evaluation_pass === true && metrics.fallback === 0;
+}
+
+/** This scientific expectation is stricter than structured-output validity. */
+export function matchesRequiredUnknown(answer: FactorEstimate | undefined): boolean {
+  return answer?.estimate_type === 'unknown';
 }
 
 /** Read-only binding. No shell, credential discovery, or raw diff output. */
@@ -170,7 +176,7 @@ async function main(): Promise<void> {
   type Case = {
     id: string; input_kind: 'records_replay' | 'authored_control'; brief: string;
     build(): Promise<{ graph: GraphV3T; replay?: unknown }>;
-    expected: 'rich_point' | 'provisional_or_unknown' | 'unknown' | 'no_call_diagnostic' | 'no_call_protected';
+    expected: 'rich_point' | 'unknown' | 'no_call_diagnostic' | 'no_call_protected';
     target_label?: string; target_id?: string;
   };
   const suppliedGraph = GraphV3.parse(structuredClone(suppliedValueControl.graph));
@@ -198,7 +204,7 @@ async function main(): Promise<void> {
         return { graph: GraphV3.parse(projection.graph), replay };
       } },
     { id: figurePoor.id, input_kind: 'authored_control', brief: figurePoor.brief,
-      expected: 'provisional_or_unknown', target_id: 'fac_preparedness', build: authored(figurePoor.graph) },
+      expected: 'unknown', target_id: 'fac_preparedness', build: authored(figurePoor.graph) },
     { id: diagnostic.id, input_kind: 'authored_control', brief: diagnostic.brief,
       expected: 'no_call_diagnostic', build: authored(diagnostic.graph) },
     { id: insufficientInformation.id, input_kind: 'authored_control', brief: insufficientInformation.brief,
@@ -279,9 +285,7 @@ async function main(): Promise<void> {
         check(stated?.observed_state?.value === 0.12 && stated.observed_state.source === 'brief_extraction',
           'The records path must preserve the user-stated .12 before estimation');
       } else if (item.expected === 'unknown') {
-        check(targetEstimate?.estimate_type === 'unknown', 'Insufficient information must produce a model-authored unknown');
-      } else if (item.expected === 'provisional_or_unknown') {
-        check(targetEstimate !== undefined, 'Anchored strategic target must get an explicit answer, including justified unknown');
+        check(matchesRequiredUnknown(targetEstimate), 'Insufficient quantitative calibration must produce a model-authored unknown');
       } else if (item.expected === 'no_call_diagnostic') {
         check(!outcome.graph.nodes.some(n => n.kind === 'option'), 'Diagnostic must not gain options');
         check(isDeepStrictEqual(outcome.graph, graph), 'Diagnostic without comparison inputs must stay unchanged');
@@ -373,6 +377,7 @@ async function main(): Promise<void> {
       adapter_latency_ms: sum(item => item.metrics?.call.latency_ms ?? 0),
       persistence_latency_ms: sum(item => item.persistence_latency_ms ?? 0), cost_usd: null },
     interpretation: 'Parsed/adopted estimates are candidates for independent semantic review; schema and basis-ID compliance do not prove factual correctness.',
+    superseded_evaluation: 'The banked run at 8deefc63f79c6e1afa93da2387e752824a30cf6c passed the old pipeline checks, but its figure-poor 0.35/std 0.15 was semantically flagged as unsupported. The old 66.7% adoption rate is not a defensible-quality rate. This unchanged brief now requires unknown; archived artifacts are not rewritten.',
     instrument_warnings: estimates === 0 && gaps > 0 ? ['All requested cases returned no adopted estimate; the rich positive target has failed.'] : [],
   };
   await atomicJson(join(out, 'summary.json'), summary);

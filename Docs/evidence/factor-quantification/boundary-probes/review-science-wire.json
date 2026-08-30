@@ -1,0 +1,232 @@
+{
+  "plot_sha": "75e7f9747977a28214533ce4af0efdb9ca28b155",
+  "cases": {
+    "estimated_point": {
+      "input": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "observed_state": {
+          "value": 0.75,
+          "std": 0.05,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "Controlled fixture reasoning, not model output or evidence.",
+            "context_basis": [
+              "fixture_capacity"
+            ]
+          }
+        }
+      },
+      "normalised": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "observed_state": {
+          "value": 0.75,
+          "std": 0.05,
+          "source": "cee_inference"
+        },
+        "category": "external"
+      },
+      "node": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "observed_state": {
+          "value": 0.75,
+          "source": "cee_inference",
+          "std": 0.05
+        },
+        "intercept": 0,
+        "epsilon_std": 0
+      },
+      "parameter_uncertainties": [
+        {
+          "node_id": "fac_test",
+          "distribution": "normal",
+          "std": 0.05
+        }
+      ]
+    },
+    "point_wide_std": {
+      "input": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "observed_state": {
+          "value": 75,
+          "std": 5,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "Controlled fixture reasoning, not model output or evidence.",
+            "context_basis": [
+              "fixture_capacity"
+            ]
+          }
+        }
+      },
+      "normalised": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "observed_state": {
+          "value": 75,
+          "std": 5,
+          "source": "cee_inference"
+        },
+        "category": "external"
+      },
+      "node": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "observed_state": {
+          "value": 75,
+          "source": "cee_inference",
+          "std": 5
+        },
+        "intercept": 0,
+        "epsilon_std": 0
+      },
+      "parameter_uncertainties": [
+        {
+          "node_id": "fac_test",
+          "distribution": "normal",
+          "std": 2
+        }
+      ]
+    },
+    "estimated_range": {
+      "input": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "Controlled fixture reasoning, not model output or evidence.",
+            "context_basis": [
+              "fixture_capacity"
+            ]
+          }
+        }
+      },
+      "normalised": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "Controlled fixture reasoning, not model output or evidence.",
+            "context_basis": [
+              "fixture_capacity"
+            ]
+          }
+        }
+      },
+      "node": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "intercept": 0,
+        "epsilon_std": 0
+      },
+      "parameter_uncertainties": [
+        {
+          "node_id": "fac_test",
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85
+        }
+      ]
+    },
+    "fallback_range": {
+      "input": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      },
+      "normalised": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      },
+      "node": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "intercept": 0,
+        "epsilon_std": 0
+      },
+      "parameter_uncertainties": [
+        {
+          "node_id": "fac_test",
+          "distribution": "uniform",
+          "range_min": 0.65,
+          "range_max": 0.85
+        }
+      ]
+    },
+    "explicit_unknown": {
+      "input": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external",
+        "prior": {
+          "prior_is_unquantified": true,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "Controlled fixture reasoning, not model output or evidence.",
+            "context_basis": [
+              "fixture_capacity"
+            ]
+          }
+        }
+      },
+      "normalised": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "category": "external"
+      },
+      "node": {
+        "id": "fac_test",
+        "kind": "factor",
+        "label": "Controlled fixture",
+        "intercept": 0,
+        "epsilon_std": 0
+      }
+    }
+  }
+}

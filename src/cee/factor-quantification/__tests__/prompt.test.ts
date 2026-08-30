@@ -28,5 +28,7 @@ describe('focused quantification prompt context boundary', () => {
     expect(FACTOR_QUANTIFICATION_SYSTEM_PROMPT).toContain('do not assume options or interventions');
     expect(FACTOR_QUANTIFICATION_SYSTEM_PROMPT).toContain('never claim the estimate was stated by the user');
     expect(FACTOR_QUANTIFICATION_SYSTEM_PROMPT).toContain('Mere absence of shape knowledge does not justify a uniform distribution');
+    expect(FACTOR_QUANTIFICATION_SYSTEM_PROMPT).toContain('do not supply an interior scoring rubric or a standard deviation');
+    expect(FACTOR_QUANTIFICATION_SYSTEM_PROMPT).toContain("Never borrow a graph edge's strength/std");
   });
 });

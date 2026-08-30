@@ -1,0 +1,38 @@
+ WARN  Issue while reading "/private/tmp/factor-quantification-20260830/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/factor-quantification-20260830/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/factor-quantification-20260830/cee
+
+{"level":30,"time":1788098376680,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376686,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":40,"time":1788098376707,"pid":35699,"hostname":"Mac.net","msg":"PLOT_BASE_URL configured but PLOT_AUTH_TOKEN missing — PLoT calls will fail if auth is enabled"}
+{"level":30,"time":1788098376707,"pid":35699,"hostname":"Mac.net","base_url":"http://snapshot-objective.test","auth_configured":false,"msg":"PLoT client configured"}
+{"level":30,"time":1788098376721,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376723,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376746,"pid":35699,"hostname":"Mac.net","url":"/v2/run","request_id":"snapshot-objective","timeout_ms":75000,"msg":"PLoT run request"}
+{"level":30,"time":1788098376754,"pid":35699,"hostname":"Mac.net","elapsed_ms":5,"request_id":"snapshot-objective","msg":"PLoT run success"}
+{"level":30,"time":1788098376760,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376772,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376775,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":40,"time":1788098376779,"pid":35699,"hostname":"Mac.net","msg":"PLOT_BASE_URL configured but PLOT_AUTH_TOKEN missing — PLoT calls will fail if auth is enabled"}
+{"level":30,"time":1788098376779,"pid":35699,"hostname":"Mac.net","base_url":"http://snapshot-objective.test","auth_configured":false,"msg":"PLoT client configured"}
+{"level":30,"time":1788098376783,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376789,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376792,"pid":35699,"hostname":"Mac.net","url":"/v2/run","request_id":"snapshot-objective","timeout_ms":75000,"msg":"PLoT run request"}
+{"level":30,"time":1788098376793,"pid":35699,"hostname":"Mac.net","elapsed_ms":1,"request_id":"snapshot-objective","msg":"PLoT run success"}
+{"level":30,"time":1788098376806,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376828,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376829,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":40,"time":1788098376833,"pid":35699,"hostname":"Mac.net","msg":"PLOT_BASE_URL configured but PLOT_AUTH_TOKEN missing — PLoT calls will fail if auth is enabled"}
+{"level":30,"time":1788098376833,"pid":35699,"hostname":"Mac.net","base_url":"http://snapshot-objective.test","auth_configured":false,"msg":"PLoT client configured"}
+{"level":30,"time":1788098376834,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376839,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":30,"time":1788098376844,"pid":35699,"hostname":"Mac.net","url":"/v2/run","request_id":"snapshot-objective","timeout_ms":75000,"msg":"PLoT run request"}
+{"level":30,"time":1788098376845,"pid":35699,"hostname":"Mac.net","elapsed_ms":1,"request_id":"snapshot-objective","msg":"PLoT run success"}
+{"level":30,"time":1788098376846,"pid":35699,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"goal","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  14:59:27
+   Duration  8.93s (transform 6.55s, setup 555ms, import 7.77s, tests 200ms, environment 0ms)
+

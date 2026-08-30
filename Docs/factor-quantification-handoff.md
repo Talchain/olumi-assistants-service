@@ -31,6 +31,14 @@ CEE readiness blocks only actually consumed nonnumeric unknowns; recovery-only r
 
 Strict evaluation fails remaining required fallback and failed/skipped required generation even if an illustrative computation would otherwise be permitted. Unknown is a legitimate parsed answer. Broken output, provenance/uncertainty loss, overwrite attempts, stale snapshots, irrelevant/fabricated context IDs, expired budgets, do-overridden roots and unrelated high-degree factors have discriminating controls.
 
+## Banked live producer and canonical witness
+
+`Docs/evidence/factor-quantification/live-sonnet-banked/summary.json` and its per-case/atomic-store JSON bind the actual live run to clean CEE `8deefc63f79c6e1afa93da2387e752824a30cf6c`. All five historical structural checks passed, but the subsequent semantic review FAILED the figure-poor estimate. The two parsed/adopted estimates (66.7%) MUST NOT be reported as a defensible-resolution rate: qualitative endpoint anchors did not justify the returned `.35/std .15`. See the adjacent `semantic-review.json`. The other missing-input result was a supported model-authored unknown. Remaining fallback, operational failures, skipped eligible gaps, unresolved-origin quantities in this live corpus, and changed protected quantities were all zero. Separate authored controls exercise unresolved origin and illustrative fallback; their absence from the small live corpus is not a population incidence estimate.
+
+Both estimates retained exact provenance and uncertainty through canonical commit and fresh local-file readback (2/2). Provider calls took 4.114s, 4.512s and 4.540s; total token usage was 13,373 input / 764 output. Cost is unavailable. These counts assess parsed/adopted candidates and do not independently certify their factual quality or Science consumption. A prior run falsely counted omission of `baseline: undefined` as a protected mutation; the corrected predicate ignores only undefined object properties and retains adverse value/source/unit/range controls.
+
+Relevant FQ/transport/regression collection: 494 passing tests; the separately imported objective snapshot fixture dependency was then supplied unchanged by its owner and all three previously uncollected snapshot cases passed. Shared contract gate: 2,396 passing tests. These are implementation controls, not deployed or user-facing acceptance.
+
 ## Outstanding boundaries — no release clearance
 
 At independently executed PLoT `75e7f974` / ISL `28fe0c95`, a `.75` point with `.05` standard deviation reached sampling numerically, but prior provenance/ignorance qualifiers were lost; estimated and fallback uniform priors became identical, and numeric-free unknown became an ISL zero. Large standard deviations were also clamped. Science owns the exact fixes and the final consuming witness. The fixture success here is not Science closure.
@@ -40,3 +48,5 @@ Current UI ownership is CCUX/UI. Existing placeholder classification can mislabe
 Prompt/Consumer owns the separate claim-mediated percentage loss: a direct stated quantity survives, but a claim referring to it can still lose unit/frame/source. The direct-stated control here does not claim that twin is fixed.
 
 The bounded alternative-model comparison comes after a working canonical-to-Science path, not before it. It has not been used as a dependency or as a numerical fill-rate contest.
+
+The estimator-specific v2 prompt now requires separate numerical support for a central value and dispersion, forbids inventing a spread from qualitative anchors or graph-edge uncertainty, and distinguishes observed variation from measurement error. The unchanged figure-poor brief is being tightened to mandatory unknown. The restart handoff records whether that corrected prompt has a fresh live witness; historical v1 outputs are retained rather than relabelled.

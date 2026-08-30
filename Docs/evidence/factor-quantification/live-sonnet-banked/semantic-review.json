@@ -1,0 +1,25 @@
+{
+  "reviewed_source_head": "8deefc63f79c6e1afa93da2387e752824a30cf6c",
+  "scope": "Independent sub-agent check of exact supplied briefs and actual returned quantities, not release or Science certification",
+  "overall": "FAILED semantic estimation quality despite historical runner checks passing",
+  "records_figure_rich": {
+    "assessment": "Numerically supported inference with a required interpretation caveat",
+    "value": 0.75,
+    "std": 0.05,
+    "basis": "15 available out of 20 scheduled; explicitly reported daily available-share standard deviation",
+    "caveat": "Daily variability is not measurement error in today's exact count; using today's share as a planning centre must remain an explicit provisional assumption."
+  },
+  "figure_poor_anchored": {
+    "assessment": "Unsupported numeric calibration; must not count as defensibly resolved",
+    "value": 0.35,
+    "std": 0.15,
+    "reason": "Endpoint anchors and documented-but-unrehearsed context supply neither an interior scoring rubric nor calibrated spread. Describing std as large does not justify its numerical value.",
+    "required_control": "Same unchanged brief must return explicit unknown until a quantitative mapping and supported uncertainty are available."
+  },
+  "insufficient_information": {
+    "assessment": "Appropriate explicit unknown",
+    "reason": "No audience/campaign observations support a conversion rate; unrelated rent and existing fallback were not used as evidence."
+  },
+  "historical_metrics_limit": "The 2/3 and 66.7% figures in summary.json are parsed/adopted estimates, not a defensible-resolution rate. One of those two estimates failed semantic review.",
+  "action": "Estimator-specific prompt v2 and mandatory-unknown poor-case control; bounded live rerun on current supported model. No numerical fallback or evidence attribution introduced."
+}

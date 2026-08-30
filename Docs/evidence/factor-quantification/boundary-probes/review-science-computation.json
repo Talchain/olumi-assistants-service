@@ -1,0 +1,52 @@
+{
+  "plot_sha": "75e7f9747977a28214533ce4af0efdb9ca28b155",
+  "isl_sha": "28fe0c950f6ca5737f4555c863353d37b734dddf",
+  "seed": 4242,
+  "authorship": "controlled fixtures through actual normaliser/translator/parser/sampler; no LLM call or deployed route claimed",
+  "rows": [
+    {
+      "case": "estimated_point",
+      "central_value": 0.75,
+      "parsed_source": "cee_inference",
+      "sample_count": 5000,
+      "sample_mean": 0.7496761048990785,
+      "sample_std": 0.049707347347601634,
+      "draws_sha256": "097a4c659be5176a8b212270c00daf3ea9e5df9918200fd2267063ec1f51eddf"
+    },
+    {
+      "case": "point_wide_std",
+      "central_value": 75.0,
+      "parsed_source": "cee_inference",
+      "sample_count": 5000,
+      "sample_mean": 74.98704419596315,
+      "sample_std": 1.9882938939040653,
+      "draws_sha256": "5f872960240f971bf4629a37e6a015dad1880ffefb015d8ebf56e961ae849db4"
+    },
+    {
+      "case": "estimated_range",
+      "central_value": 0.75,
+      "parsed_source": null,
+      "sample_count": 5000,
+      "sample_mean": 0.7511323955359215,
+      "sample_std": 0.057241215114255964,
+      "draws_sha256": "f3f71f3c3464a3fc0ae9cdbb23c760b7c1866a7195b1ae19c6955361cc191efd"
+    },
+    {
+      "case": "fallback_range",
+      "central_value": 0.75,
+      "parsed_source": null,
+      "sample_count": 5000,
+      "sample_mean": 0.7511323955359215,
+      "sample_std": 0.057241215114255964,
+      "draws_sha256": "f3f71f3c3464a3fc0ae9cdbb23c760b7c1866a7195b1ae19c6955361cc191efd"
+    },
+    {
+      "case": "explicit_unknown",
+      "central_value": 0.0,
+      "parsed_source": null,
+      "sampled_factors": {},
+      "actual_goal_without_quantity": 0.0
+    }
+  ],
+  "range_estimate_fallback_draws_identical": true
+}

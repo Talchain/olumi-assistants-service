@@ -1,0 +1,11 @@
+--- a/src/cee/factor-quantification/index.ts
++++ b/src/cee/factor-quantification/index.ts
+@@ -29,7 +29,7 @@
+   const result = await callFactorQuantification({ brief: input.brief, gaps: selection.gaps,
+     context: { basis, nodes: input.graph.nodes, relationships: input.graph.edges },
+     requestId: input.requestId, deadlineMs: factorEstimationDeadline(input.requestStartMs) });
+-  const adoption = adoptFactorEstimates(input.graph, selection.gaps, result.kind === 'ok' ? result.estimates : [], basis);
++  const adoption = adoptFactorEstimates(input.graph, selection.gaps, [], basis);
+   const resolved = new Set([...adoption.estimated, ...adoption.unknown]);
+   // Even queue overflow is explicit unknown; no generic value becomes knowledge.
+   const graph = markUnresolved(adoption.graph, selection.eligible, resolved, input.graph);
