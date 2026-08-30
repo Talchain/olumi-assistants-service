@@ -1,0 +1,23 @@
+{
+  "authorship": "Independent bounded corpus author, authored before any generated outputs were inspected, Lane D 2026-08-31",
+  "pairs": [{
+    "id": "logistics-disagreement-reworded-v1",
+    "diagnostic": "Our aim is fewer missed delivery windows. Operations' view is that drivers are assigned too many stops; dispatch's view is that parcels leave the depot too late. Neither explanation has been established as fact. Before choosing any changes, what evidence would help us tell these accounts apart?",
+    "decision": "To reduce missed delivery windows, assess two possible changes: assigning fewer stops to each route, and bringing forward dispatch from the depot. Neither change has been selected. Explain the effects each could have on missed delivery windows.",
+    "diagnosticOracle": {
+      "id": "logistics-disagreement-reworded-v1.diagnostic.v1", "pairId": "logistics-disagreement-reworded-v1", "direction": "diagnostic",
+      "briefSha256": "1ee4955b8bf65a17a3cf3b1abd48902a7cdf64055a50da869bf18b16423df97c", "forbidOptions": true, "actions": [],
+      "attributedClaims": [{"id":"operations-overload","sourceQuote":"Operations' view is that drivers are assigned too many stops"},{"id":"dispatch-lateness","sourceQuote":"dispatch's view is that parcels leave the depot too late"}],
+      "noAbsoluteMeasurementsSupplied": true, "openEndedActions": false
+    },
+    "decisionOracle": {
+      "id": "logistics-disagreement-reworded-v1.decision.v1", "pairId": "logistics-disagreement-reworded-v1", "direction": "decision",
+      "briefSha256": "085724cc6a4520e1b5cac062bacb7d1a70abdfd739cbb7eda71988d363d970c3", "forbidOptions": false,
+      "actions": [
+        {"id":"fewer-stops","sourceQuote":"assigning fewer stops to each route","acceptedConsumerLabels":["Assign fewer stops to each route","Reduce stops per route","Fewer stops per route"]},
+        {"id":"earlier-dispatch","sourceQuote":"bringing forward dispatch from the depot","acceptedConsumerLabels":["Bring forward dispatch from the depot","Move depot dispatch earlier","Earlier depot dispatch"]}
+      ],
+      "attributedClaims": [], "noAbsoluteMeasurementsSupplied": true, "openEndedActions": false
+    }
+  }]
+}
