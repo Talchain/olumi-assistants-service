@@ -113,6 +113,46 @@ describe('the on-screen ask carries the hint', () => {
     expect(projection.nextStep).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
   });
 
+  it('⭐⭐ THE OUTCOME METRIC — the ask says how many more there are', () => {
+    // MEASURED wire-level on the same deployed build: recovery clears the
+    // blocker it asked about 9 of 10 times, and terminates in a RUN 1 of 10.
+    // Drafts carry 3-8 missing effect values and the affordance surfaces one, so
+    // a user who answers perfectly clears one of eight and cannot tell whether
+    // they are one step from a run or seven. Trap 23 in the live product.
+    const many = {
+      status: 'needs_user_input',
+      blockers: [1, 2, 3, 4, 5].map((n) => ({
+        blocker_type: 'missing_value',
+        option_id: `opt-${n}`, option_label: `Option ${n}`,
+        factor_id: `fac-${n}`, factor_label: `Factor ${n}`,
+      })),
+    };
+    const p = projectReadinessRecovery(many as never, [] as never);
+    expect(p.kind).toBe('provide_value');
+    expect(p.nextStep).toContain('There are 4 more effect values to set after this one');
+    // ⚠⚠ AND IT NAMES A COUNT, NOT THE PAIRS — the discriminating half, and the
+    // reason is a misbind class. If the ask LISTED all five, a user replying
+    // "60%" would have it bound to `blockers[0]` by `deriveOnScreenEffectAsk`,
+    // whose entire justification is that a bare figure's only antecedent is the
+    // ONE question on screen. A batched ASK is fine; a batched order-guessed
+    // WRITE is banned, and listing the set is one edit away from it.
+    for (const n of [2, 3, 4, 5]) {
+      expect(p.nextStep, `Option ${n}`).not.toContain(`Option ${n}`);
+      expect(p.nextStep, `Factor ${n}`).not.toContain(`Factor ${n}`);
+    }
+    // Exactly one question is live, and it is the head.
+    expect(p.nextStep).toContain('Option 1');
+    expect(p.nextStep).toContain('Factor 1');
+  });
+
+  it('⚠ THE TWIN — with ONE outstanding value the ask says nothing about more', () => {
+    // "and 0 more after this" is noise, and the single-blocker case is the one
+    // that actually ends in a run.
+    const p = projectReadinessRecovery(READINESS as never, [] as never);
+    expect(p.kind).toBe('provide_value');
+    expect(p.nextStep).not.toMatch(/more effect value/);
+  });
+
   it('⚠ the hint is NOT added to asks that are about something else', () => {
     // The DISCRIMINATING half: a guard that fired everywhere would prove nothing
     // about the branch it names. A blocked graph renders "resolve the model

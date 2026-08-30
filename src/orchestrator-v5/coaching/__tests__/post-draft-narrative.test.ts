@@ -369,8 +369,16 @@ describe('buildPostDraftNarrative', () => {
 
     const blocks = text.split('\n\n');
     const nextStep = blocks[blocks.length - 1] ?? '';
+    // ⭐ THE COUNT SENTENCE IS EXPECTED HERE, and it does not weaken what this
+    // test is about. This fixture carries TWO missing-value blockers, so the ask
+    // now tells the user one more follows — the difference between clearing a
+    // blocker and finishing the journey (measured: recovery clears the blocker
+    // 9 of 10 times and terminates in a run 1 of 10). It names a COUNT and never
+    // the second pair, which the assertions below still enforce.
     expect(nextStep).toBe(
-      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`,
+      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}"`
+      + ` so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`
+      + ' There is 1 more effect value to set after this one, and I will ask for it next.',
     );
     expect(nextStep).toContain(OPTION_A.label);
     expect(nextStep).toContain(FACTOR_QUALITY.label);
@@ -386,7 +394,19 @@ describe('buildPostDraftNarrative', () => {
     // So: the scale's ENDPOINTS are admitted (they are the scale, not a
     // suggestion) and NOTHING BETWEEN THEM is — a mid-scale specimen is exactly
     // the number-in-the-user's-mouth this guard exists to prevent.
-    const figuresInAsk = nextStep.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+    // ⭐ THE PROGRESS CLAUSE IS SEPARATED FIRST, and its figure is a COUNT of
+    // remaining questions, not a value for this slot. Conflating the two would
+    // either forbid the product from telling the user how many steps remain, or
+    // silently license a figure in the ask — so they are checked apart.
+    const progress = nextStep.match(/ There (?:is|are) \d+ more effect values? to set[^.]*\./) ?? [];
+    expect(progress.length, 'this fixture has two blockers, so the count must be present')
+      .toBe(1);
+    const askOnly = nextStep.replace(progress[0]!, '');
+    const countFigures = progress[0]!.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+    expect(countFigures, 'the progress clause carries exactly one figure: the count')
+      .toStrictEqual(['1']);
+
+    const figuresInAsk = askOnly.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
     expect(
       figuresInAsk.every((f) => f === '0' || f === '100'),
       figuresInAsk.join(','),
