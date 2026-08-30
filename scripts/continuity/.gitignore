@@ -1,0 +1,5 @@
+# Wire captures are evidence from a specific run against a specific build.
+# They are written for the operator of that run and are not source. Committing
+# them would put redacted-but-real user-facing prose into git history and make
+# every run a diff.
+evidence/
