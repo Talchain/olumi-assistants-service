@@ -2,8 +2,43 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
-import { listDraftFailureBundles, getDraftFailureBundleById } from '../cee/draft-failures/store.js';
+import {
+  listDraftFailureBundles,
+  getDraftFailureBundleById,
+  DraftFailureStoreUnavailableError,
+} from '../cee/draft-failures/store.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
+
+/**
+ * Render a store unavailability as a 503 that NAMES the reason.
+ *
+ * 503, not 500, and not an empty 200: the store is a dependency this route
+ * could not reach, which is a different fact from "the route is broken" and a
+ * different fact again from "there are no failures". Each of the three used to
+ * arrive as one of the other two.
+ *
+ * ⚠ DISCRIMINATES BY IDENTITY (`instanceof`), never by inspecting a message
+ * string another error could satisfy. An unexpected throw is deliberately NOT
+ * laundered into a 503 — it stays a 500 so a genuine bug is investigated as a
+ * bug instead of being reported to on-call as a dependency outage. The
+ * opposite-direction twin for that is pinned in
+ * `tests/unit/cee.draft-failure-store-honesty.test.ts`.
+ */
+function replyStoreUnavailable(
+  reply: FastifyReply,
+  err: DraftFailureStoreUnavailableError,
+): FastifyReply {
+  return reply.status(503).send({
+    error: 'draft_failure_store_unavailable',
+    reason: err.reason,
+    // The cause, verbatim. This endpoint is admin-key gated and its whole
+    // purpose is diagnosis: a reader who cannot see WHY has to go to the Render
+    // logs, which is the round-trip this field exists to remove. The message is
+    // PostgREST's own (a relation name, a permission, a network fault) and
+    // carries no user brief content — the reader functions never see one.
+    message: err.message,
+  });
+}
 
 const ListQuerySchema = z.object({
   request_id: z.string().optional(),
@@ -44,12 +79,20 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const result = await listDraftFailureBundles({
-      requestId: query.data.request_id,
-      correlationId: query.data.correlation_id,
-      limit: query.data.limit,
-      since: query.data.since,
-    });
+    let result: Awaited<ReturnType<typeof listDraftFailureBundles>>;
+    try {
+      result = await listDraftFailureBundles({
+        requestId: query.data.request_id,
+        correlationId: query.data.correlation_id,
+        limit: query.data.limit,
+        since: query.data.since,
+      });
+    } catch (err) {
+      if (err instanceof DraftFailureStoreUnavailableError) {
+        return replyStoreUnavailable(reply, err);
+      }
+      throw err;
+    }
 
     return reply.status(200).send({
       failures: result.failures.map((f) => ({
@@ -87,7 +130,17 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const failure = await getDraftFailureBundleById(params.data.id);
+    let failure: Awaited<ReturnType<typeof getDraftFailureBundleById>>;
+    try {
+      failure = await getDraftFailureBundleById(params.data.id);
+    } catch (err) {
+      if (err instanceof DraftFailureStoreUnavailableError) {
+        return replyStoreUnavailable(reply, err);
+      }
+      throw err;
+    }
+    // Reached only when the store ANSWERED. `not_found` is now a claim about
+    // the table rather than about our ability to read it.
     if (!failure) {
       return reply.status(404).send({
         error: 'not_found',
