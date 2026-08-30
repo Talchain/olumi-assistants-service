@@ -32,7 +32,7 @@ function runAnalysisFact(overrides: {
   enrichment?: Record<string, unknown>;
   leading_option_id?: string | null;
   attest?: boolean;
-} = {}): HandlerFact {
+} = {}): Extract<HandlerFact, { fact_type: 'run_analysis' }> {
   const declaredId = 'leading_option_id' in overrides ? overrides.leading_option_id! : 'opt-1';
   const enrichment = overrides.attest && overrides.enrichment && declaredId
     ? attestedConsumerFixture(overrides.enrichment, declaredId,

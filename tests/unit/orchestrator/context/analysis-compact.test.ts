@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { compactAnalysis } from "../../../../src/orchestrator/context/analysis-compact.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import { attestedConsumerFixture, boundFixtureShares } from "../../../fixtures/plot/attested-consumer-fixture.js";
 
 // ============================================================================
 // Fixtures
@@ -47,21 +48,24 @@ describe("compactAnalysis", () => {
     expect(compactAnalysis(response)).toBeNull();
   });
 
-  it("extracts winner as highest win_probability option", () => {
+  it("preserves an explicitly recommended producer option and its related share", () => {
     const response = makeResponse({
       results: [
         makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.3 }),
         makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.7 }),
       ],
     });
-    const summary = compactAnalysis(response);
+    const enrichment = attestedConsumerFixture(response, "opt_b", response.results as Record<string, unknown>[]);
+    const summary = compactAnalysis(enrichment, undefined, { factResult: {
+      enrichment, leading_option_id: "opt_b", win_probabilities: boundFixtureShares(enrichment),
+    } });
     expect(summary).not.toBeNull();
     expect(summary!.winner.option_id).toBe("opt_b");
     expect(summary!.winner.option_label).toBe("Option B");
     expect(summary!.winner.win_probability).toBe(0.7);
   });
 
-  it("tiebreaks winner by option_id lexicographic when win_probability tied", () => {
+  it("does not invent a winner from tied legacy probabilities", () => {
     const response = makeResponse({
       results: [
         makeOption({ option_id: "opt_z", option_label: "Option Z", win_probability: 0.5 }),
@@ -70,7 +74,8 @@ describe("compactAnalysis", () => {
       ],
     });
     const summary = compactAnalysis(response);
-    expect(summary!.winner.option_id).toBe("opt_a");
+    expect(summary!.winner.option_id).toBe("");
+    expect(summary!.options).toHaveLength(3);
   });
 
   it("sorts options by win_probability descending in summary", () => {
@@ -457,7 +462,7 @@ describe("compactAnalysis", () => {
   // =========================================================================
 
   describe("margin", () => {
-    it("computes margin as winner - runner_up when 2+ options", () => {
+    it("does not convert two raw shares into a permitted margin", () => {
       const response = makeResponse({
         results: [
           makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.65 }),
@@ -466,8 +471,7 @@ describe("compactAnalysis", () => {
       });
       const summary = compactAnalysis(response);
       expect(summary).not.toBeNull();
-      // 0.65 - 0.35 = 0.30
-      expect(summary!.margin).toBeCloseTo(0.30, 5);
+      expect(summary!.margin).toBeNull();
     });
 
     it("returns margin=null when only 1 option", () => {
@@ -481,7 +485,7 @@ describe("compactAnalysis", () => {
       expect(summary!.margin).toBeNull();
     });
 
-    it("computes margin correctly with 3+ options (winner vs second place)", () => {
+    it("does not convert three raw shares into a permitted margin", () => {
       const response = makeResponse({
         results: [
           makeOption({ option_id: "opt_a", win_probability: 0.5 }),
@@ -490,8 +494,7 @@ describe("compactAnalysis", () => {
         ],
       });
       const summary = compactAnalysis(response);
-      // 0.5 - 0.3 = 0.2
-      expect(summary!.margin).toBeCloseTo(0.2, 5);
+      expect(summary!.margin).toBeNull();
     });
   });
 
@@ -632,7 +635,7 @@ describe("compactAnalysis", () => {
 
       const summary = compactAnalysis(response);
       expect(summary).not.toBeNull();
-      expect(summary!.winner.option_id).toBe("opt_a");
+      expect(summary!.winner.option_id).toBe(""); // legacy data does not license a current recommendation
       expect(summary!.options).toHaveLength(2);
       expect(summary!.options[0].win_probability).toBe(0.65);
     });
