@@ -19,7 +19,8 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, isReasoningModel, supportsExtendedThinking, anthropicTemperatureFor } from '../config/models.js';
+import { MODEL_REGISTRY, isReasoningModel, anthropicTemperatureFor } from '../config/models.js';
+import { THINKING_CAPABLE_MODELS } from '../adapters/llm/anthropic-model-capabilities.js';
 import {
   ModelAssignmentError,
   resolveModelAssignment,
@@ -40,6 +41,29 @@ function needsMaxCompletionTokens(model: string): boolean {
   return assignment.provider === 'openai'
     ? requiresMaxCompletionTokens(assignment.model)
     : false;
+}
+
+/**
+ * Whether this model's API accepts `thinking: { type: 'enabled', budget_tokens }`.
+ *
+ * THE SAME AUTHORITY THE LIVE PATH CONSULTS. Every live Anthropic call site gates
+ * thinking on `isThinkingSupported` (adapters/llm/anthropic.ts:619-620), which
+ * reads `THINKING_CAPABLE_MODELS` — the set DERIVED from the live-probed
+ * capability map. This harness previously used `MODEL_REGISTRY.extendedThinking`
+ * instead, which `anthropic-model-capabilities.ts:47-52` records as measured WRONG
+ * IN BOTH DIRECTIONS on 2026-08-08 and explicitly says not to infer this verdict
+ * from: it claims `true` for claude-sonnet-5 (which returns HTTP 400 for
+ * `thinking.type:'enabled'`) and `false` for claude-sonnet-4-6 (which returns
+ * HTTP 200 and emits thinking blocks).
+ *
+ * The consequence was that the operator harness could not measure a prompt
+ * candidate against the model staging actually serves: `budget_tokens` passed
+ * local validation on sonnet-5 and was then 400'd by the API, and sonnet-4-6 was
+ * refused a thinking budget its API accepts. Two authorities answering one
+ * question under similar names is CLAUDE.md trap 21; there is now one.
+ */
+function acceptsThinkingBudget(model: string): boolean {
+  return THINKING_CAPABLE_MODELS.has(model);
 }
 
 /**
@@ -310,7 +334,7 @@ async function callAnthropicWithPrompt(
 
   // Extended thinking models need longer timeout AND streaming
   // Anthropic requires streaming for operations that may take >10 minutes
-  const hasExtendedThinking = supportsExtendedThinking(model) && budgetTokens !== undefined;
+  const hasExtendedThinking = acceptsThinkingBudget(model) && budgetTokens !== undefined;
   const effectiveTimeout = hasExtendedThinking ? ADMIN_REASONING_HIGH_TIMEOUT_MS : ADMIN_LLM_TIMEOUT_MS;
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
@@ -331,10 +355,19 @@ async function callAnthropicWithPrompt(
   const reportedTemperature: number | null = effectiveTemperature ?? null;
 
   try {
-    // Build request params - add thinking block for extended thinking models
+    // Build request params — send an EXPLICIT thinking posture, NEVER omit the
+    // field. This mirrors the LIVE draft path (adapters/llm/anthropic.ts:974-976)
+    // and exists for the reason its comment gives: a thinking-class model routed
+    // here — claude-sonnet-5 is the live `draft_graph` default and its own
+    // registry description says "adaptive thinking on by default" — runs ADAPTIVE
+    // thinking when `thinking` is absent, which burns the token budget invisibly.
+    // Omitting the field is therefore not "no thinking", it is "unmeasured
+    // thinking", and it made a sonnet-5 prompt candidate unmeasurable through this
+    // harness. Live-probed on the draft path: the API accepts
+    // `thinking:{type:'disabled'}` with and without output_config.
     const thinkingParam = hasExtendedThinking
       ? { thinking: { type: 'enabled' as const, budget_tokens: budgetTokens } }
-      : {};
+      : { thinking: { type: 'disabled' as const } };
 
     // Use streaming for extended thinking (required by Anthropic for long operations)
     // and also recommended for Opus models which can have long response times
@@ -1049,12 +1082,14 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // budget_tokens is only valid for Anthropic extended thinking models
-      const hasExtThinking = supportsExtendedThinking(model);
+      // budget_tokens is only valid for models whose API accepts the
+      // `thinking:{type:'enabled',budget_tokens}` mechanism — the live-probed
+      // verdict, not MODEL_REGISTRY.extendedThinking (see acceptsThinkingBudget).
+      const hasExtThinking = acceptsThinkingBudget(model);
       if (budgetTokensOverride !== undefined && !hasExtThinking) {
         return reply.status(400).send({
           error: 'validation_error',
-          message: `budget_tokens is only valid for Anthropic models with extended thinking. ${model} does not support extended thinking.`,
+          message: `budget_tokens is only valid for Anthropic models that accept thinking.type='enabled'. ${model} does not — the request would be rejected by the API. Re-run without budget_tokens; the harness sends thinking:{type:'disabled'}, matching the live draft path.`,
         });
       }
 
@@ -1301,7 +1336,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         max_tokens: config.maxTokens,
         // Capability flags for UI to show/hide appropriate controls
         is_reasoning: isReasoningModel(id),
-        supports_extended_thinking: supportsExtendedThinking(id),
+        supports_extended_thinking: acceptsThinkingBudget(id),
         supports_temperature: !doesNotSupportCustomTemperature(id),
         // Source tracking
         source: 'registry' as const,
