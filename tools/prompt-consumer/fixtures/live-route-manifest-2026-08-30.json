@@ -1,10 +1,10 @@
 {
   "format": "olumi.prompt-consumer.v1",
-  "generatedAt": "2026-08-30T13:47:35.698Z",
-  "sourceHead": "ca65d66da89cd95753c4573e6273b4ed4d46cd6e",
+  "generatedAt": "2026-08-30T14:04:48.592Z",
+  "sourceHead": "8543a46311c1064d0e9bb9428ff6e2a586aad253",
   "sourceDirty": false,
   "runtime": {
-    "observedAt": "2026-08-30T13:47:31.850Z",
+    "observedAt": "2026-08-30T14:04:48.039Z",
     "deployedHead": "a18e1943ad9134b24bcd8b04bac5cf363247af34",
     "healthBuild": "a18e194"
   },
@@ -30,7 +30,7 @@
         "id": "draft_graph_default",
         "version": 195,
         "sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
-        "loadedAt": "2026-08-30T13:41:23.793Z",
+        "loadedAt": "2026-08-30T14:02:14.316Z",
         "verifiedLoadedHash": "152998b447819c2e",
         "evidence": "selected PMS bytes + runtime loaded digest; not provider-bound"
       },
@@ -844,7 +844,7 @@
         "id": "validate_graph_default",
         "version": 4,
         "sha256": "45073b566184e4e8a6ce5047378e1d1e51c4e68294f8dd524e26c1219b51f066",
-        "loadedAt": "2026-08-30T13:41:43.281Z",
+        "loadedAt": "2026-08-30T14:02:39.589Z",
         "verifiedLoadedHash": "45073b566184e4e8",
         "evidence": "selected PMS bytes + runtime loaded digest; not provider-bound"
       },
@@ -898,7 +898,7 @@
               "role": "schema",
               "path": "tools/prompt-consumer/validation.ts",
               "exportName": "validationWireContract (descriptor, not provider participation)",
-              "fileSha256": "48419775721770bb092d6574cf8a1aab663b4315f54c2700712d97f0d2172b99",
+              "fileSha256": "cf524b5400f0230626f1aaf477d8db857a087af5b1b7678345bd264d9d069069",
               "calls": 1
             },
             {
@@ -944,6 +944,252 @@
       "status": "UNVERIFIED"
     }
   ],
+  "activationCoverage": {
+    "coverageStatus": "PASS",
+    "issues": [],
+    "evidence": {
+      "archiveSha256": "1b9114c4081dbf9f954e9c86b274c02bc31f863b15d146ffa9b71a995b78f638",
+      "supplementSha256": "a85b96b75de5bd37f5f2c66ca685062867c38fa7df8e5e035acb7bc88e7b4a4f",
+      "archiveHead": "8eb8e1912a99a6e361df8c398bb9148faa862750",
+      "codeOnlyHead": "9878b1f66ce59e23300de6f6645c6984773374ab"
+    },
+    "combinations": [
+      {
+        "combination": "old-pms-old-instruction",
+        "cases": 18,
+        "diagnostic": {
+          "cases": 9,
+          "emittedOptions": [
+            5,
+            5,
+            4,
+            2,
+            2,
+            2,
+            6,
+            6,
+            5
+          ],
+          "consumedOptions": [
+            5,
+            5,
+            4,
+            2,
+            2,
+            2,
+            4,
+            6,
+            5
+          ],
+          "nonCollapse": "FAIL"
+        },
+        "decision": {
+          "cases": 9,
+          "emittedOptions": [
+            3,
+            3,
+            3,
+            3,
+            3,
+            3,
+            5,
+            5,
+            5
+          ],
+          "consumedOptions": [
+            3,
+            3,
+            3,
+            3,
+            3,
+            3,
+            5,
+            5,
+            5
+          ],
+          "semanticCarriage": "UNVERIFIED: option counts do not prove legitimate alternatives survived"
+        },
+        "checkedPrimaryRequests": 18,
+        "primaryBindings": {
+          "model": "claude-sonnet-4-6",
+          "promptSha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "instructionSha256": "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1",
+          "grammarSha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7",
+          "evidence": "immutable archived request/field hashes"
+        },
+        "hypothesisPreservation": "UNVERIFIED: no typed attributed carrier; omission or relabelling cannot pass",
+        "semanticVerdict": "UNVERIFIED"
+      },
+      {
+        "combination": "old-pms-new-instruction",
+        "cases": 2,
+        "diagnostic": {
+          "cases": 1,
+          "emittedOptions": [
+            2
+          ],
+          "consumedOptions": [
+            2
+          ],
+          "nonCollapse": "FAIL"
+        },
+        "decision": {
+          "cases": 1,
+          "emittedOptions": [
+            3
+          ],
+          "consumedOptions": [
+            3
+          ],
+          "semanticCarriage": "UNVERIFIED: option counts do not prove legitimate alternatives survived"
+        },
+        "checkedPrimaryRequests": 2,
+        "primaryBindings": {
+          "model": "claude-sonnet-4-6",
+          "promptSha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "instructionSha256": "51d260e6bc07b8d80ea170533e2ec2f565ed8ee83fbe63be1aed351ac35770fa",
+          "grammarSha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7",
+          "evidence": "full captured request"
+        },
+        "hypothesisPreservation": "UNVERIFIED: no typed attributed carrier; omission or relabelling cannot pass",
+        "semanticVerdict": "UNVERIFIED"
+      },
+      {
+        "combination": "candidate-new-instruction",
+        "cases": 18,
+        "diagnostic": {
+          "cases": 9,
+          "emittedOptions": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "consumedOptions": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "nonCollapse": "UNVERIFIED: zero options alone is not preserved meaning"
+        },
+        "decision": {
+          "cases": 9,
+          "emittedOptions": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            5,
+            5,
+            5
+          ],
+          "consumedOptions": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            5,
+            5,
+            5
+          ],
+          "semanticCarriage": "UNVERIFIED: option counts do not prove legitimate alternatives survived"
+        },
+        "checkedPrimaryRequests": 18,
+        "primaryBindings": {
+          "model": "claude-sonnet-4-6",
+          "promptSha256": "9feaff0ba020adcca99ffc22ffbb99e298f41dec9fc26e64e2c84bf5178a1717",
+          "instructionSha256": "51d260e6bc07b8d80ea170533e2ec2f565ed8ee83fbe63be1aed351ac35770fa",
+          "grammarSha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7",
+          "evidence": "immutable archived request/field hashes"
+        },
+        "hypothesisPreservation": "UNVERIFIED: no typed attributed carrier; omission or relabelling cannot pass",
+        "semanticVerdict": "UNVERIFIED"
+      }
+    ],
+    "destroyedControl": {
+      "combination": "destroyed-prompt-without-records-instruction",
+      "cases": 18,
+      "diagnostic": {
+        "cases": 9,
+        "emittedOptions": [
+          2,
+          2,
+          2,
+          0,
+          1,
+          1,
+          4,
+          5,
+          1
+        ],
+        "consumedOptions": [
+          2,
+          2,
+          2,
+          0,
+          1,
+          1,
+          4,
+          5,
+          1
+        ],
+        "nonCollapse": "FAIL"
+      },
+      "decision": {
+        "cases": 9,
+        "emittedOptions": [
+          3,
+          6,
+          2,
+          4,
+          4,
+          4,
+          6,
+          6,
+          6
+        ],
+        "consumedOptions": [
+          3,
+          6,
+          2,
+          2,
+          4,
+          4,
+          6,
+          6,
+          6
+        ],
+        "semanticCarriage": "UNVERIFIED: option counts do not prove legitimate alternatives survived"
+      },
+      "checkedPrimaryRequests": 18,
+      "primaryBindings": {
+        "model": "claude-sonnet-4-6",
+        "promptSha256": "dd1b3b78f323617859642b5109f8b4296231387273704bbaf540659f15be01a4",
+        "instructionSha256": null,
+        "grammarSha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7",
+        "evidence": "immutable archived request/field hashes"
+      },
+      "hypothesisPreservation": "UNVERIFIED: no typed attributed carrier; omission or relabelling cannot pass",
+      "semanticVerdict": "UNVERIFIED"
+    },
+    "activationPermission": "NOT_GRANTED",
+    "limitation": "Local real-provider captures and captured consumer counts, not deployment or independent semantic review. Old instructions were replayed at the provider boundary against the same consumer, not an old deployment. The 54-case archive retains request/field hashes, not full request bodies; only the two-case code-only supplement retains full requests. Initial projection is replayed; completion/repair is not rerun."
+  },
   "mutations": [
     {
       "id": "draft.stated-percent",
@@ -1108,6 +1354,11 @@
           "status": "FAIL"
         },
         {
+          "id": "dropped-reasoning",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
           "id": "unrelated",
           "kind": "unrelated",
           "status": "PASS"
@@ -1119,14 +1370,17 @@
     "status": "UNVERIFIED",
     "registered": false,
     "interface": "FactorQuantificationRegistration<SharedQuantityContract>",
-    "requires": [
-      "actual runtime task",
-      "exact head",
-      "schema/parser/consumer exports",
-      "shared quantity definition import",
-      "fixtures"
-    ],
-    "owner": "Factor Quantification"
+    "owner": "Factor Quantification",
+    "ownerHandoff": {
+      "head": "8deefc63f79c6e1afa93da2387e752824a30cf6c",
+      "task": "factor_quantification",
+      "producer": "src/cee/factor-quantification/model-call.ts#callFactorQuantification",
+      "schemaAndParser": "src/cee/factor-quantification/estimate-response.ts#FACTOR_ESTIMATES_JSON_SCHEMA/parseFactorEstimates",
+      "consumer": "src/cee/factor-quantification/adopt.ts#adoptFactorEstimates/markUnresolved",
+      "integration": "src/cee/factor-quantification/index.ts#quantifyDraftFactors",
+      "fixturesSha256": "b818ecc9962850ced07bd97bbdbdf41ea6a9dff43f0586626e634b6dedbe41ae"
+    },
+    "reason": "Handoff supplied; not integrated into this source authority and default-off, so not registered as a live route. Import owner shared definitions after CC integration, never mirror them."
   },
   "promotionEvidence": {
     "status": "UNVERIFIED",
