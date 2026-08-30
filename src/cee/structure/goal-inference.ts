@@ -126,28 +126,74 @@ const GOAL_PATTERNS = [
 export const TRAILING_QUALIFIER_CONNECTIVES = ["without", "while", "whilst"] as const;
 
 /**
+ * ⛔⛔ `a while` IS A NOUN — the determiner guard, and why it is a FIX and not a
+ * KNOWN-UNHANDLED entry.
+ *
+ * The first cut of this fix sliced straight through `a while`. In *"pause the
+ * rollout for a while before deciding"*, `while` is a NOUN inside the noun
+ * phrase `a while`, not a subordinating conjunction, and the boundary produced
+ * *"Pause the rollout for a"* — a label ending on a bare determiner. Five for
+ * five, all NEW harms, in the direction this module calls the worse one.
+ *
+ * ⭐ THE DISTINCTION THAT DECIDES FIX-VS-PIN, because it is easy to get backwards.
+ * `but` sits in KNOWN-UNHANDLED because it was MEASURED that no structural
+ * discriminator separates the coordinator (*"X but keep Y"*) from the quantifier
+ * idiom (*"nothing but"*). Here a discriminator DOES exist — a determiner
+ * immediately before the connective — and it fixes 5/5, leaves the live case
+ * untouched, and regresses nothing across the 16 governed briefs. Trap 22f's
+ * *"genuinely ambiguous, so leave it"* exit is EARNED BY MEASUREMENT, never
+ * claimed by analogy from a neighbouring member of the same list.
+ */
+const DETERMINER_BEFORE_CONNECTIVE = "(?<!\\b(?:a|an|the))";
+
+/**
  * Cut an extracted objective at the first trailing-qualifier connective.
  *
- * ⚠ THE OPPOSITE-DIRECTION HARM, and why the fallback below is not decoration.
+ * ⚠ THE OPPOSITE-DIRECTION HARM, and why the floor below is not decoration.
  * Two harms sit under this one predicate and they cannot share one window: trim
  * too little and a constraint is swallowed into the objective; trim too much and
- * a legitimate objective is TRUNCATED — which is the WORSE harm, because a
- * truncated objective reads as a complete one. So a trim that leaves nothing
- * viable is discarded and the untrimmed text stands. The floor is this module's
- * OWN existing 5-character minimum, deliberately not a new invented constant.
+ * a legitimate objective is TRUNCATED — the WORSE harm, because a truncated
+ * objective reads as a complete one.
+ *
+ * ⚠⚠ THE FLOOR IS STRUCTURAL, NOT A CHARACTER COUNT — corrected under review.
+ * This first shipped reusing the module's 5-character minimum, on the reasoning
+ * that an existing constant beats an invented one. That was the right instinct
+ * and the wrong constant: it made `"Scale"` (5) survive while `"Grow"` (4) did
+ * not, so the outcome turned on SPELLING. That is exactly the *"length constant
+ * with a hard cliff either side"* this module's own header cites trap 22f to
+ * reject — the defect was in the guard written to prevent it. A token count is
+ * structural and belongs beside a CLAUSE-boundary question: an objective reduced
+ * to one bare token has lost its object, whatever its length.
+ *
+ * ⚠ ONLY THE TRAILING-PUNCTUATION LIMB MAY RUN AFTER THE TRIM. `cleanGoalText`'s
+ * prefix strip is NON-GLOBAL and therefore NOT idempotent, so running the whole
+ * cleaner again strips a SECOND prefix and changes labels on briefs carrying no
+ * connective at all — a silent change outside this fix's scope.
  */
 function trimTrailingQualifier(text: string): string {
   const boundary = new RegExp(
-    `\\s+(?:${TRAILING_QUALIFIER_CONNECTIVES.join("|")})\\s+\\S.*$`,
+    `${DETERMINER_BEFORE_CONNECTIVE}\\s+(?:${TRAILING_QUALIFIER_CONNECTIVES.join("|")})\\s+\\S.*$`,
     "i",
   );
-  const trimmed = text.replace(boundary, "").trim();
-  return trimmed.length >= MIN_GOAL_LABEL_LENGTH ? trimmed : text;
+  const trimmed = text.replace(boundary, "").replace(/[.,;:!?]+$/, "").trim();
+  return countTokens(trimmed) >= MIN_GOAL_LABEL_TOKENS ? trimmed : text;
+}
+
+function countTokens(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
 }
 
 /**
- * The module's existing viability floor for an inferred label, named so the
- * boundary trim and the acceptance check cannot drift apart (CLAUDE.md trap 12).
+ * A trimmed objective must retain at least a verb and its object. Structural,
+ * deliberately not a character threshold — see `trimTrailingQualifier`.
+ */
+const MIN_GOAL_LABEL_TOKENS = 2;
+
+/**
+ * The module's existing viability bounds for an inferred label, named so the
+ * acceptance check cannot drift (CLAUDE.md trap 12). UNCHANGED from pristine —
+ * these arbitrate whether an extraction is usable at all, which is a different
+ * question from where a clause ends.
  */
 const MIN_GOAL_LABEL_LENGTH = 5;
 const MAX_GOAL_LABEL_LENGTH = 200;
@@ -208,7 +254,7 @@ export function inferGoalFromBrief(brief: string): GoalInferenceResult {
       const extracted = match[1].trim();
       // Clean up the extracted text, then cut it at the objective's clause
       // boundary so a trailing qualifier is not carried into the goal.
-      const cleaned = cleanGoalText(trimTrailingQualifier(cleanGoalText(extracted)));
+      const cleaned = trimTrailingQualifier(cleanGoalText(extracted));
       if (cleaned.length >= MIN_GOAL_LABEL_LENGTH && cleaned.length <= MAX_GOAL_LABEL_LENGTH) {
         return {
           found: true,

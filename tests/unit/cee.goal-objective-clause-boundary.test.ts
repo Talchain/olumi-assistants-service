@@ -207,11 +207,105 @@ describe("goal inference — objective clause boundary", () => {
 
   /**
    * The conservative fallback. Trimming must never manufacture a stub: if cutting
-   * at the connective leaves nothing viable, the untrimmed text stands. This is
-   * the module's own existing 5-character floor, not a new invented constant.
+   * at the connective leaves fewer than two tokens, the untrimmed text stands.
    */
   it("keeps the untrimmed text when trimming would leave no viable objective", () => {
     const result = inferGoalFromBrief("We want to win without spending anything at all");
     expect(result.label).toBe("Win without spending anything at all");
+  });
+
+  /**
+   * ⛔⛔ `a while` IS A NOUN, AND THE FIRST CUT OF THIS FIX SLICED THROUGH IT.
+   *
+   * Found by independent adversarial review of #1219. The idiom test correctly
+   * applied to `but` was NOT applied to `while`: in *"pause the rollout for a
+   * while before deciding"*, `while` is a NOUN inside `a while`, not a
+   * subordinating conjunction. The boundary cut straight through it and produced
+   * a label ending on a bare determiner — *"Pause the rollout for a"*. Five for
+   * five, ALL NEW: pristine handled every one correctly.
+   *
+   * ⭐ WHY THIS IS FIXED RATHER THAN PINNED, and the distinction is the whole
+   * point. `but` was left in KNOWN-UNHANDLED because it was MEASURED that no
+   * structural discriminator exists between the coordinator and the quantifier
+   * idiom. Here one DOES exist — a determiner immediately before the connective —
+   * and it fixes 5/5, leaves the live case untouched, and regresses nothing
+   * across the 16 governed briefs. Trap 22f's *"genuinely ambiguous, leave it"*
+   * exit is earned by measurement, not claimed by analogy; it was earned for
+   * `but` and it is NOT available here.
+   */
+  describe("'a while' is a noun — the determiner guard", () => {
+    it.each([
+      { text: "We want to pause the rollout for a while before deciding.", label: "Pause the rollout for a while before deciding" },
+      { text: "We want to wait a while and see how demand settles.", label: "Wait a while and see how demand settles" },
+      { text: "We want to hold the price for a while longer.", label: "Hold the price for a while longer" },
+      { text: "Our goal is to keep the team steady for a while yet.", label: "Keep the team steady for a while yet" },
+      { text: "We need to sit on the cash a while and reassess.", label: "Sit on the cash a while and reassess" },
+    ])("does not cut through 'a while': $label", ({ text, label }) => {
+      expect(inferGoalFromBrief(text).label).toBe(label);
+    });
+  });
+
+  /**
+   * ⚠ THE CLEANER RUNS ONCE. Its leading-prefix strip
+   * `^(?:a |an |the |to |for |in |on |by )` is NON-GLOBAL and therefore NOT
+   * idempotent, so running it twice strips a SECOND prefix where one is exposed —
+   * changing labels on briefs containing no connective at all, i.e. outside this
+   * fix's stated scope entirely. Only the trailing-punctuation limb may run after
+   * the trim. Every case below contains no `without`/`while`/`whilst` and must be
+   * byte-identical to pristine.
+   */
+  describe("the prefix cleaner is applied exactly once (no connective present)", () => {
+    it.each([
+      { text: "We want to for the moment hold prices steady.", label: "The moment hold prices steady" },
+      { text: "We want to in the meantime freeze hiring.", label: "The meantime freeze hiring" },
+      { text: "Our goal is to by the end of Q4 double revenue.", label: "The end of Q4 double revenue" },
+      { text: "We need to on the whole simplify the estate.", label: "The whole simplify the estate" },
+      { text: "We want to for a start cut the vendor list.", label: "A start cut the vendor list" },
+    ])("leaves the second prefix alone: $label", ({ text, label }) => {
+      expect(inferGoalFromBrief(text).label).toBe(label);
+    });
+
+    it("still strips trailing punctuation exposed by the trim", () => {
+      // The trailing-punctuation limb DOES legitimate work after a cut, and is
+      // the only limb permitted to run twice.
+      expect(
+        inferGoalFromBrief("We want to reduce vendor spend; without hiring more staff").label
+      ).toBe("Vendor spend");
+    });
+  });
+
+  /**
+   * ⚠ THE FLOOR IS STRUCTURAL, NOT A CHARACTER COUNT.
+   *
+   * The first cut reused this module's existing 5-character minimum as the
+   * safety net. The review's objection is exact and this file's own header had
+   * already argued it: that is *"a length constant with a hard cliff either
+   * side"* — the very thing trap 22f condemns. `"Scale"` (5) squeaked through
+   * while `"Grow"` (4) did not, so the cliff was one character wide and the
+   * outcome turned on spelling rather than on structure.
+   *
+   * A token count is structural and sits naturally beside a CLAUSE-boundary
+   * question: an objective that has been reduced to a single bare token has lost
+   * its object, whatever its length.
+   */
+  describe("a trim may not reduce the objective to a single bare token", () => {
+    it.each([
+      { text: "We want to survive without external funding", label: "Survive without external funding" },
+      { text: "We want to operate without a dedicated ops team", label: "Operate without a dedicated ops team" },
+      { text: "We want to scale without burning cash", label: "Scale without burning cash" },
+      { text: "We want to decide while the option is still open", label: "Decide while the option is still open" },
+      { text: "We want to compete without discounting", label: "Compete without discounting" },
+      { text: "We want to grow without burning cash", label: "Grow without burning cash" },
+    ])("keeps the whole clause rather than a lone verb: $label", ({ text, label }) => {
+      expect(inferGoalFromBrief(text).label).toBe(label);
+    });
+
+    it("still trims when two or more tokens survive", () => {
+      // The opposite-direction twin for the token floor: it must not become an
+      // excuse to stop trimming.
+      expect(inferGoalFromBrief("We want to grow revenue without new headcount").label).toBe(
+        "Grow revenue"
+      );
+    });
   });
 });
