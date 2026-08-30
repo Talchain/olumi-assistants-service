@@ -135,9 +135,12 @@ export const OLUMI_ACTION_TOOL = {
               'direction, sign, bidirected relationships, confidence and ' +
               'reachability. Do not compose a pathway from separate connectors ' +
               'or invent detail that the supplied structure withholds. ' +
-              'When the user asks what one selected model element ' +
+              'When the user asks what one explicitly named or selected model element ' +
               'directly depends on, populate action.structure_query with kind ' +
               '"dependencies" and that element\'s exact canonical graph id. ' +
+              'The action entity must identify that same element. A name must ' +
+              'uniquely match a current canonical node; do not guess a missing ' +
+              'or conflicting reference from a nearby object. ' +
               'This asks only for direct incoming dependencies; do not include ' +
               'upstream-of-upstream or outgoing connectors. ' +
               'When — and only when — the user asks about the direct ' +
@@ -347,7 +350,7 @@ export const OLUMI_ACTION_TOOL = {
             additionalProperties: false,
             description:
               'Populate whenever handler_id is explain_from_structure. Use ' +
-              'dependencies when the user asks what one selected ' +
+              'dependencies when the user asks what one explicitly named or selected ' +
               'Living Model element directly depends on. Use ' +
               'direct_relationship when the user specifically asks whether two ' +
               'Living Model elements have a direct relationship, and use ' +
