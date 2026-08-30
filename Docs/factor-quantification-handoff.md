@@ -51,4 +51,13 @@ The bounded alternative-model comparison comes after a working canonical-to-Scie
 
 V2 was executed at clean `86246ce4`: two appropriate unknowns and one mechanically accepted but semantically unsupported estimate. Its rich rationale incorrectly equated today's exact count with the centre of a repeated-day distribution. The 33.3% adopted rate is not a defensible-resolution rate. Raw outputs and independent assessment are retained in `live-sonnet-v2/`.
 
-V3 adds an explicit target/population/time-basis rule. The unchanged rich snapshot is now an unknown control. A separate records planning-day fixture supplies a comparable historical mean and daily spread plus explicit provisional same-process assumption. V3's live semantic witness is pending; the deterministic positive has moved to that unambiguous fixture. Source/typecheck, strict parser and persistence controls alone do not validate model reasoning.
+V3 adds an explicit target/population/time-basis rule. The unchanged rich snapshot is now an unknown control. A separate records planning-day fixture supplies a comparable historical mean and daily spread plus explicit provisional same-process assumption. V3's actual live witness at clean `fc358ca02bf11e64020b0de230c25334cb4763b3` now distinguishes the two: original snapshot unknown, separate planning-day `.75/std .05` with the stated reuse assumption. See the exact raw output and independent review in `live-sonnet-v3/`; source/typecheck or parsing alone do not validate model reasoning.
+
+
+## Resumed v3 result and remaining handoff
+
+The six-case constructed corpus has4 required gaps:1 supported provisional estimate (25%) and3 appropriate unknowns (75%). Required fallback2 entering ->0 remaining. Protected writes, operational failures, skipped gaps and unresolved-origin quantities were0. All four model results preserve inference rationale/basis through actual local-file commit/reload; the one estimate preserves exact value/std. Science-input survival is still unverified and must not be reported as100% from these persistence checks.
+
+Four actual Sonnet5 calls took5.137–7.753 seconds (26.156 seconds summed across separate cases), with21095 input/1396 output tokens; adapter cost is unavailable. The unchanged original and prior failed runs are retained. Independent review found no blocking numerical/provenance issue in this producer scope and recorded two nonblocking rationale caveats. Repeated mechanism mutants on the new planning positive discriminate discarded output, dropped std/source and unrelated wording; all target collection and failure-location checks pass.
+
+**Next boundary remains actual Science adoption**, followed by independent integration and truthful UI exposure. Graph Truth's relative-fallback arithmetic repair is separate; its older14/14 statement must not be inherited as current whole-corpus acceptance. No feature enablement, merge, release certification or alternate-model comparison has been performed.

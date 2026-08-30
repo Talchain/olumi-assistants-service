@@ -1,0 +1,293 @@
+{
+  "scope": "deterministic existing records-dispatch test with mocked LLM and in-memory storage; no live provider, PLoT or ISL call",
+  "started_utc": "2026-08-30T15:32:32.801701+00:00",
+  "head": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+  "isolated_worktree": "/Users/paulslee/CodexWork/factor-quantification/mutants-v3-cee",
+  "artifact_directory": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3",
+  "target_test_file": "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+  "target_leaf_name": "commits the supported missing point with uncertainty while preserving the stated value",
+  "source_sha256": {
+    "src/cee/factor-quantification/__tests__/dispatch.test.ts": "ff698c40de8853d19801c757a6354394edbd85ee925cbd2fb10d338b34e0368d",
+    "src/cee/factor-quantification/adopt.ts": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+    "src/cee/factor-quantification/index.ts": "304e0a0d1f24347305f71f5f3d4152fc11444762e9ced366bb412de5b86797dd",
+    "src/cee/factor-quantification/select.ts": "706da21a71133792bb1f0517b6c57a453420ab46481ee08fee57810de853afc6"
+  },
+  "root_source_sha256_before": {
+    "src/cee/factor-quantification/adopt.ts": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+    "src/cee/factor-quantification/select.ts": "706da21a71133792bb1f0517b6c57a453420ab46481ee08fee57810de853afc6",
+    "src/cee/factor-quantification/__tests__/dispatch.test.ts": "ff698c40de8853d19801c757a6354394edbd85ee925cbd2fb10d338b34e0368d",
+    "src/cee/factor-quantification/index.ts": "304e0a0d1f24347305f71f5f3d4152fc11444762e9ced366bb412de5b86797dd"
+  },
+  "dependency_policy": {
+    "node_modules": "symlink to root dependencies, no install or dependency mutation",
+    "vitest_cache": false,
+    "config_loader": "runner"
+  },
+  "max_vitest_workers": 2,
+  "runs": [
+    {
+      "id": "base",
+      "expected_target_status": "passed",
+      "exit_code": 0,
+      "duration_seconds": 5.62,
+      "command": [
+        "/usr/local/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+        "--testNamePattern",
+        "commits the supported missing point with uncertainty while preserving the stated value$",
+        "--maxWorkers",
+        "2",
+        "--no-file-parallelism",
+        "--no-cache",
+        "--configLoader",
+        "runner",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/base.vitest.json"
+      ],
+      "num_total_tests_reported": 8,
+      "num_passed_tests": 1,
+      "num_failed_tests": 0,
+      "num_pending_tests": 7,
+      "assertions_collected": 8,
+      "matching_target_count": 1,
+      "executed_assertion_count": 1,
+      "target": [
+        {
+          "fullName": "records replay \u2192 real dispatch/model wrapper \u2192 real commit \u2192 in-memory reload commits the supported missing point with uncertainty while preserving the stated value",
+          "title": "commits the supported missing point with uncertainty while preserving the stated value",
+          "status": "passed",
+          "failureMessages": [],
+          "duration": 94.7704160000003
+        }
+      ],
+      "raw_vitest_report": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/base.vitest.json",
+      "control_passed": true
+    },
+    {
+      "id": "remove_estimator_output",
+      "expected_target_status": "failed",
+      "exit_code": 1,
+      "duration_seconds": 5.579,
+      "command": [
+        "/usr/local/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+        "--testNamePattern",
+        "commits the supported missing point with uncertainty while preserving the stated value$",
+        "--maxWorkers",
+        "2",
+        "--no-file-parallelism",
+        "--no-cache",
+        "--configLoader",
+        "runner",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/remove_estimator_output.vitest.json"
+      ],
+      "num_total_tests_reported": 8,
+      "num_passed_tests": 0,
+      "num_failed_tests": 1,
+      "num_pending_tests": 7,
+      "assertions_collected": 8,
+      "matching_target_count": 1,
+      "executed_assertion_count": 1,
+      "target": [
+        {
+          "fullName": "records replay \u2192 real dispatch/model wrapper \u2192 real commit \u2192 in-memory reload commits the supported missing point with uncertainty while preserving the stated value",
+          "title": "commits the supported missing point with uncertainty while preserving the stated value",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError: expected undefined to deeply equal { value: 0.75, std: 0.05, \u2026(3) }\n    at /Users/paulslee/CodexWork/factor-quantification/mutants-v3-cee/src/cee/factor-quantification/__tests__/dispatch.test.ts:155:64\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at file:///Users/paulslee/CodexWork/factor-quantification/cee/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ],
+          "duration": 105.62770899999941
+        }
+      ],
+      "raw_vitest_report": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/remove_estimator_output.vitest.json",
+      "control_passed": true
+    },
+    {
+      "id": "drop_estimate_standard_deviation",
+      "expected_target_status": "failed",
+      "exit_code": 1,
+      "duration_seconds": 5.033,
+      "command": [
+        "/usr/local/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+        "--testNamePattern",
+        "commits the supported missing point with uncertainty while preserving the stated value$",
+        "--maxWorkers",
+        "2",
+        "--no-file-parallelism",
+        "--no-cache",
+        "--configLoader",
+        "runner",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/drop_estimate_standard_deviation.vitest.json"
+      ],
+      "num_total_tests_reported": 8,
+      "num_passed_tests": 0,
+      "num_failed_tests": 1,
+      "num_pending_tests": 7,
+      "assertions_collected": 8,
+      "matching_target_count": 1,
+      "executed_assertion_count": 1,
+      "target": [
+        {
+          "fullName": "records replay \u2192 real dispatch/model wrapper \u2192 real commit \u2192 in-memory reload commits the supported missing point with uncertainty while preserving the stated value",
+          "title": "commits the supported missing point with uncertainty while preserving the stated value",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError: expected { reasoning: { \u2026(2) }, \u2026(3) } to deeply equal { value: 0.75, std: 0.05, \u2026(3) }\n    at /Users/paulslee/CodexWork/factor-quantification/mutants-v3-cee/src/cee/factor-quantification/__tests__/dispatch.test.ts:155:64\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at file:///Users/paulslee/CodexWork/factor-quantification/cee/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ],
+          "duration": 71.52120900000045
+        }
+      ],
+      "raw_vitest_report": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/drop_estimate_standard_deviation.vitest.json",
+      "control_passed": true
+    },
+    {
+      "id": "drop_estimate_provenance",
+      "expected_target_status": "failed",
+      "exit_code": 1,
+      "duration_seconds": 5.451,
+      "command": [
+        "/usr/local/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+        "--testNamePattern",
+        "commits the supported missing point with uncertainty while preserving the stated value$",
+        "--maxWorkers",
+        "2",
+        "--no-file-parallelism",
+        "--no-cache",
+        "--configLoader",
+        "runner",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/drop_estimate_provenance.vitest.json"
+      ],
+      "num_total_tests_reported": 8,
+      "num_passed_tests": 0,
+      "num_failed_tests": 1,
+      "num_pending_tests": 7,
+      "assertions_collected": 8,
+      "matching_target_count": 1,
+      "executed_assertion_count": 1,
+      "target": [
+        {
+          "fullName": "records replay \u2192 real dispatch/model wrapper \u2192 real commit \u2192 in-memory reload commits the supported missing point with uncertainty while preserving the stated value",
+          "title": "commits the supported missing point with uncertainty while preserving the stated value",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError: expected { Object (std, reasoning, ...) } to deeply equal { value: 0.75, std: 0.05, \u2026(3) }\n    at /Users/paulslee/CodexWork/factor-quantification/mutants-v3-cee/src/cee/factor-quantification/__tests__/dispatch.test.ts:155:64\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at file:///Users/paulslee/CodexWork/factor-quantification/cee/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ],
+          "duration": 70.49729099999968
+        }
+      ],
+      "raw_vitest_report": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/drop_estimate_provenance.vitest.json",
+      "control_passed": true
+    },
+    {
+      "id": "unrelated_gap_description",
+      "expected_target_status": "passed",
+      "exit_code": 0,
+      "duration_seconds": 3.82,
+      "command": [
+        "/usr/local/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/cee/factor-quantification/__tests__/dispatch.test.ts",
+        "--testNamePattern",
+        "commits the supported missing point with uncertainty while preserving the stated value$",
+        "--maxWorkers",
+        "2",
+        "--no-file-parallelism",
+        "--no-cache",
+        "--configLoader",
+        "runner",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/unrelated_gap_description.vitest.json"
+      ],
+      "num_total_tests_reported": 8,
+      "num_passed_tests": 1,
+      "num_failed_tests": 0,
+      "num_pending_tests": 7,
+      "assertions_collected": 8,
+      "matching_target_count": 1,
+      "executed_assertion_count": 1,
+      "target": [
+        {
+          "fullName": "records replay \u2192 real dispatch/model wrapper \u2192 real commit \u2192 in-memory reload commits the supported missing point with uncertainty while preserving the stated value",
+          "title": "commits the supported missing point with uncertainty while preserving the stated value",
+          "status": "passed",
+          "failureMessages": [],
+          "duration": 69.84929199999988
+        }
+      ],
+      "raw_vitest_report": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/mutants-v3/unrelated_gap_description.vitest.json",
+      "control_passed": true
+    }
+  ],
+  "mutants": [
+    {
+      "id": "remove_estimator_output",
+      "expected": "failed",
+      "file": "src/cee/factor-quantification/index.ts",
+      "old": "result.kind === 'ok' ? result.estimates : []",
+      "new": "[]",
+      "purpose": "Discard the parsed estimator response before canonical adoption; model invocation remains intact.",
+      "before_sha256": "304e0a0d1f24347305f71f5f3d4152fc11444762e9ced366bb412de5b86797dd",
+      "mutated_sha256": "2e8586331ab3655fda0b313a564d43e5375f4893275999f2b52bad9022012fb4"
+    },
+    {
+      "id": "drop_estimate_standard_deviation",
+      "expected": "failed",
+      "file": "src/cee/factor-quantification/adopt.ts",
+      "old": "value: estimate.value, std: estimate.std, source: 'cee_inference', reasoning,",
+      "new": "value: estimate.value, source: 'cee_inference', reasoning,",
+      "purpose": "Remove uncertainty from the adopted point while retaining value, provenance and reasoning.",
+      "before_sha256": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+      "mutated_sha256": "972ce7f3dc9051a7f2520b6271ff649f1b562ee0bbb3c9f6cff4229dfd3a5204"
+    },
+    {
+      "id": "drop_estimate_provenance",
+      "expected": "failed",
+      "file": "src/cee/factor-quantification/adopt.ts",
+      "old": "value: estimate.value, std: estimate.std, source: 'cee_inference', reasoning,",
+      "new": "value: estimate.value, std: estimate.std, reasoning,",
+      "purpose": "Remove the adopted point's AI source stamp while retaining value, uncertainty and reasoning.",
+      "before_sha256": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+      "mutated_sha256": "aaa7734383983b777b4dedbd96b5bd0317c1db90b313ba15b2621bb7929b7401"
+    },
+    {
+      "id": "unrelated_gap_description",
+      "expected": "passed",
+      "file": "src/cee/factor-quantification/select.ts",
+      "old": "reason: `Required baseline for ${requirement.operation}",
+      "new": "reason: `Analysis baseline for ${requirement.operation}",
+      "purpose": "Change only the nonnumeric descriptive wording in the requested gap prompt; identities and computation stay unchanged.",
+      "before_sha256": "706da21a71133792bb1f0517b6c57a453420ab46481ee08fee57810de853afc6",
+      "mutated_sha256": "2be407f3cc41cdbbb53c9c7ba82d0d86320f714277726c65d69d7d03e6a957f1"
+    }
+  ],
+  "all_controls_passed": true,
+  "worktree_status_after_restore": "",
+  "head_after": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+  "root_source_sha256_after": {
+    "src/cee/factor-quantification/adopt.ts": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+    "src/cee/factor-quantification/select.ts": "706da21a71133792bb1f0517b6c57a453420ab46481ee08fee57810de853afc6",
+    "src/cee/factor-quantification/__tests__/dispatch.test.ts": "ff698c40de8853d19801c757a6354394edbd85ee925cbd2fb10d338b34e0368d",
+    "src/cee/factor-quantification/index.ts": "304e0a0d1f24347305f71f5f3d4152fc11444762e9ced366bb412de5b86797dd"
+  },
+  "root_source_unchanged": true,
+  "finished_utc": "2026-08-30T15:32:58.358970+00:00"
+}

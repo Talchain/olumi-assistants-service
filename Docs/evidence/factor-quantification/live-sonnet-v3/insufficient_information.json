@@ -1,0 +1,944 @@
+{
+  "case_id": "insufficient_information",
+  "scope": {
+    "witness": "live_estimator_with_local_file_commit_reload",
+    "first_pass": "fixed_records_replay_or_authored_control_not_a_live_draft_model_call",
+    "records_projection": "replayRecordSet_then_projectGraphAndOptionsToV3",
+    "persistence": "real_commitDirectAnswer_with_injected_local_file_SessionStore_not_Supabase",
+    "model_version_history": "disabled_for_this_local_witness",
+    "rolling_summary": "not_witnessed_no_Supabase_configuration",
+    "provider_grammar_enforcement": "unobserved_adapter_does_not_report_fallback",
+    "science_and_ui": "not_witnessed_by_this_runner"
+  },
+  "source_identity": {
+    "captured_at": "2026-08-30T15:31:14.530Z",
+    "git_head": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "b865cc7f0133def1b2dfcf8300606ea01cd70d79837662780df2aff94aae87e8",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "input_kind": "authored_control",
+  "brief": "Grow trial signups. Spend £10,000 on campaign A or £20,000 on campaign B. We have no previous campaign data, no audience definition and no observed conversion rate. Conversion rate means the fraction of reached people who sign up, from 0 to 1. Our annual office rent is £250,000; this says nothing about conversion.",
+  "request_id": "factor-live-53aca51b-ae4d-496c-8642-5bac04468294",
+  "scenario_id": "2a06e7c9-0881-4c7c-99e2-8eca48c52d2c",
+  "turn_id": "ef79416b-e45c-4903-9f84-9ee503ee0b86",
+  "input_graph": {
+    "nodes": [
+      {
+        "id": "goal_signups",
+        "kind": "goal",
+        "label": "Trial signups"
+      },
+      {
+        "id": "opt_a",
+        "kind": "option",
+        "label": "Campaign A",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_b",
+        "kind": "option",
+        "label": "Campaign B",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.2,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_spend",
+        "kind": "factor",
+        "label": "Campaign spend",
+        "observed_state": {
+          "value": 0.1,
+          "unit": "GBP",
+          "source": "brief_extraction",
+          "raw_value": 10000,
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 100000
+      },
+      {
+        "id": "fac_conversion",
+        "kind": "factor",
+        "label": "Campaign conversion rate",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0,
+          "range_max": 1,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_a",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_b",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_spend",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_conversion",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "factor_id": "fac_conversion",
+      "operation": "isl.factor_baseline_sampling",
+      "option_ids": [
+        "opt_a",
+        "opt_b"
+      ],
+      "target_id": "goal_signups",
+      "impact": "unassessed"
+    }
+  ],
+  "selection": {
+    "gaps": [
+      {
+        "factor_id": "fac_conversion",
+        "label": "Campaign conversion rate",
+        "snapshot": "907dc8c0781a02f302ed9898c28e11809a2ba811cd7c8c4cdfa4ce3a1fb32d1d",
+        "node_snapshot": "{\"id\":\"fac_conversion\",\"kind\":\"factor\",\"label\":\"Campaign conversion rate\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_conversion",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_a",
+            "opt_b"
+          ],
+          "target_id": "goal_signups",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_a, opt_b; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_conversion",
+            "to": "goal_signups",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "eligible": [
+      {
+        "factor_id": "fac_conversion",
+        "label": "Campaign conversion rate",
+        "snapshot": "907dc8c0781a02f302ed9898c28e11809a2ba811cd7c8c4cdfa4ce3a1fb32d1d",
+        "node_snapshot": "{\"id\":\"fac_conversion\",\"kind\":\"factor\",\"label\":\"Campaign conversion rate\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_conversion",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_a",
+            "opt_b"
+          ],
+          "target_id": "goal_signups",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_a, opt_b; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_conversion",
+            "to": "goal_signups",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "unresolved_origin": [],
+    "protected_ids": []
+  },
+  "request_input": {
+    "brief": "Grow trial signups. Spend £10,000 on campaign A or £20,000 on campaign B. We have no previous campaign data, no audience definition and no observed conversion rate. Conversion rate means the fraction of reached people who sign up, from 0 to 1. Our annual office rent is £250,000; this says nothing about conversion.",
+    "gaps": [
+      {
+        "factor_id": "fac_conversion",
+        "label": "Campaign conversion rate",
+        "snapshot": "907dc8c0781a02f302ed9898c28e11809a2ba811cd7c8c4cdfa4ce3a1fb32d1d",
+        "node_snapshot": "{\"id\":\"fac_conversion\",\"kind\":\"factor\",\"label\":\"Campaign conversion rate\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_conversion",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_a",
+            "opt_b"
+          ],
+          "target_id": "goal_signups",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_a, opt_b; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_conversion",
+            "to": "goal_signups",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "context": {
+      "basis": [
+        {
+          "id": "brief",
+          "text": "Grow trial signups. Spend £10,000 on campaign A or £20,000 on campaign B. We have no previous campaign data, no audience definition and no observed conversion rate. Conversion rate means the fraction of reached people who sign up, from 0 to 1. Our annual office rent is £250,000; this says nothing about conversion.",
+          "factor_ids": [
+            "fac_conversion"
+          ],
+          "kind": "brief_context"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "goal_signups",
+          "kind": "goal",
+          "label": "Trial signups"
+        },
+        {
+          "id": "opt_a",
+          "kind": "option",
+          "label": "Campaign A",
+          "interventions": {
+            "fac_spend": {
+              "value": 0.1,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_spend",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": true
+        },
+        {
+          "id": "opt_b",
+          "kind": "option",
+          "label": "Campaign B",
+          "interventions": {
+            "fac_spend": {
+              "value": 0.2,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_spend",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": false
+        },
+        {
+          "id": "fac_spend",
+          "kind": "factor",
+          "label": "Campaign spend",
+          "observed_state": {
+            "value": 0.1,
+            "unit": "GBP",
+            "source": "brief_extraction",
+            "raw_value": 10000,
+            "extractionType": "explicit"
+          },
+          "category": "controllable",
+          "scale_frame": 100000
+        },
+        {
+          "id": "fac_conversion",
+          "kind": "factor",
+          "label": "Campaign conversion rate",
+          "category": "external",
+          "scale_frame": 1,
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0,
+            "range_max": 1,
+            "source": "cee_repair",
+            "value_tier": "fallback_default",
+            "prior_is_unquantified": true
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "from": "opt_a",
+          "to": "fac_spend",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "opt_b",
+          "to": "fac_spend",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_spend",
+          "to": "goal_signups",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_conversion",
+          "to": "goal_signups",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        }
+      ]
+    }
+  },
+  "expected_request_hash": "1cd5bf3ae0a570430c24e90aa6017e9083ac9f5789db1c0eba38771d6915e135",
+  "parsed_model_result": {
+    "kind": "ok",
+    "estimates": [
+      {
+        "factor_id": "fac_conversion",
+        "reasoning": "The brief explicitly states there is no previous campaign data, no audience definition, and no observed conversion rate. The existing prior is already a full-range [0,1] uniform fallback default explicitly marked as unquantified, not a positively supported distribution shape. No context provides a rationale for why conversion rates across the full 0-1 range should have equal density (in practice conversion rates cluster at low values, but no data here supports even that reference class). There is no quantitative mapping, benchmark, or population data to derive a central value, a narrower bounded range, or a standard deviation for this factor.",
+        "estimate_type": "unknown",
+        "basis": [
+          "brief"
+        ]
+      }
+    ],
+    "metadata": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v3",
+      "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+      "request_hash": "1cd5bf3ae0a570430c24e90aa6017e9083ac9f5789db1c0eba38771d6915e135",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 4756,
+      "output_tokens": 238,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 5137,
+      "provider_latency_ms": 5137,
+      "cost_usd": null
+    }
+  },
+  "metrics": {
+    "required_inputs": 1,
+    "materiality": "required_input_impact_unassessed",
+    "gaps_entering": 1,
+    "fallback_entering": 1,
+    "gaps_requested": 1,
+    "estimated": 0,
+    "model_unknown": 1,
+    "explicit_unknown": 1,
+    "operational_unresolved": 0,
+    "skipped_gaps": 0,
+    "rejected": [],
+    "fallback": 0,
+    "strict_evaluation_pass": true,
+    "unresolved_origin": [],
+    "protected_values_changed": 0,
+    "call": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v3",
+      "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+      "request_hash": "1cd5bf3ae0a570430c24e90aa6017e9083ac9f5789db1c0eba38771d6915e135",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 4756,
+      "output_tokens": 238,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 5137,
+      "provider_latency_ms": 5137,
+      "cost_usd": null
+    }
+  },
+  "canonical_graph": {
+    "nodes": [
+      {
+        "id": "goal_signups",
+        "kind": "goal",
+        "label": "Trial signups"
+      },
+      {
+        "id": "opt_a",
+        "kind": "option",
+        "label": "Campaign A",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_b",
+        "kind": "option",
+        "label": "Campaign B",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.2,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_spend",
+        "kind": "factor",
+        "label": "Campaign spend",
+        "observed_state": {
+          "value": 0.1,
+          "unit": "GBP",
+          "source": "brief_extraction",
+          "raw_value": 10000,
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 100000
+      },
+      {
+        "id": "fac_conversion",
+        "kind": "factor",
+        "label": "Campaign conversion rate",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "prior_is_unquantified": true,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "The brief explicitly states there is no previous campaign data, no audience definition, and no observed conversion rate. The existing prior is already a full-range [0,1] uniform fallback default explicitly marked as unquantified, not a positively supported distribution shape. No context provides a rationale for why conversion rates across the full 0-1 range should have equal density (in practice conversion rates cluster at low values, but no data here supports even that reference class). There is no quantitative mapping, benchmark, or population data to derive a central value, a narrower bounded range, or a standard deviation for this factor.",
+            "context_basis": [
+              "brief"
+            ]
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_a",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_b",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_spend",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_conversion",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "reloaded_graph": {
+    "nodes": [
+      {
+        "id": "goal_signups",
+        "kind": "goal",
+        "label": "Trial signups"
+      },
+      {
+        "id": "opt_a",
+        "kind": "option",
+        "label": "Campaign A",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_b",
+        "kind": "option",
+        "label": "Campaign B",
+        "interventions": {
+          "fac_spend": {
+            "value": 0.2,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_spend",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_spend",
+        "kind": "factor",
+        "label": "Campaign spend",
+        "observed_state": {
+          "value": 0.1,
+          "unit": "GBP",
+          "source": "brief_extraction",
+          "raw_value": 10000,
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 100000
+      },
+      {
+        "id": "fac_conversion",
+        "kind": "factor",
+        "label": "Campaign conversion rate",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "prior_is_unquantified": true,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "The brief explicitly states there is no previous campaign data, no audience definition, and no observed conversion rate. The existing prior is already a full-range [0,1] uniform fallback default explicitly marked as unquantified, not a positively supported distribution shape. No context provides a rationale for why conversion rates across the full 0-1 range should have equal density (in practice conversion rates cluster at low values, but no data here supports even that reference class). There is no quantitative mapping, benchmark, or population data to derive a central value, a narrower bounded range, or a standard deviation for this factor.",
+            "context_basis": [
+              "brief"
+            ]
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_a",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_b",
+        "to": "fac_spend",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_spend",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_conversion",
+        "to": "goal_signups",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "session_file": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/live-sonnet-v3-20260830/insufficient_information.session.json",
+  "commit": {
+    "performed": true,
+    "graph_persisted": true,
+    "persisted_row_id": "34f7ecc0-16c2-492c-8115-30cbac1e1dbb",
+    "persistence_latency_ms": 7
+  },
+  "final_readiness": {
+    "options": [
+      {
+        "option_id": "opt_a",
+        "label": "Campaign A",
+        "status": "ready",
+        "interventions": {
+          "fac_spend": 0.1
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_spend": {
+            "display_value": "£10k",
+            "normalised_value": 0.1,
+            "raw_value": 10000,
+            "unit": "GBP"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "opt_b",
+        "label": "Campaign B",
+        "status": "ready",
+        "interventions": {
+          "fac_spend": 0.2
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "fac_spend": {
+            "display_value": "£20k",
+            "normalised_value": 0.2,
+            "raw_value": 20000,
+            "unit": "GBP"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "goal_signups",
+    "status": "blocked",
+    "bias_findings": [],
+    "blocked_reason": "NO_DECISION",
+    "readiness_issues": [
+      {
+        "issue_id": "structural_1",
+        "code": "NO_DECISION",
+        "category": "graph_structure",
+        "message": "The model has no decision node.",
+        "repairability": "human_input_required",
+        "provenance": "unattributed",
+        "obligation": "required"
+      },
+      {
+        "issue_id": "factor_quantity_fac_conversion",
+        "code": "FACTOR_QUANTITY_UNKNOWN",
+        "category": "numeric_integrity",
+        "message": "The baseline for \"Campaign conversion rate\" remains unknown and is needed for this comparison. Calibrate it with a grounded value or range before analysis.",
+        "repairability": "human_input_required",
+        "factor_id": "fac_conversion",
+        "factor_label": "Campaign conversion rate",
+        "provenance": "unattributed",
+        "obligation": "required"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "structural_1",
+        "factor_quantity_fac_conversion"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "structural_1",
+          "kind": "model_structure",
+          "prompt": "The model has no decision node.",
+          "obligation": "required",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "factor_quantity_fac_conversion",
+          "kind": "factor_value",
+          "prompt": "The baseline for \"Campaign conversion rate\" remains unknown and is needed for this comparison. Calibrate it with a grounded value or range before analysis.",
+          "factor_id": "fac_conversion",
+          "obligation": "required",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "may_run": false
+  },
+  "result": {
+    "id": "insufficient_information",
+    "passed": true,
+    "failures": [],
+    "metrics": {
+      "required_inputs": 1,
+      "materiality": "required_input_impact_unassessed",
+      "gaps_entering": 1,
+      "fallback_entering": 1,
+      "gaps_requested": 1,
+      "estimated": 0,
+      "model_unknown": 1,
+      "explicit_unknown": 1,
+      "operational_unresolved": 0,
+      "skipped_gaps": 0,
+      "rejected": [],
+      "fallback": 0,
+      "strict_evaluation_pass": true,
+      "unresolved_origin": [],
+      "protected_values_changed": 0,
+      "call": {
+        "call_made": true,
+        "provider": "anthropic",
+        "resolved_model": "claude-sonnet-5",
+        "model": "claude-sonnet-5",
+        "prompt_version": "factor-quantification-v3",
+        "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+        "request_hash": "1cd5bf3ae0a570430c24e90aa6017e9083ac9f5789db1c0eba38771d6915e135",
+        "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+        "structured_output_requested": true,
+        "structured_output_enforced": null,
+        "input_tokens": 4756,
+        "output_tokens": 238,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "latency_ms": 5137,
+        "provider_latency_ms": 5137,
+        "cost_usd": null
+      }
+    },
+    "protected_values_changed": 0,
+    "estimates": 0,
+    "provenance_survived": 0,
+    "uncertainty_survived": 0,
+    "case_latency_ms": 5147,
+    "persistence_latency_ms": 7
+  }
+}

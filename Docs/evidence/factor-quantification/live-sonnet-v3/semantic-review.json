@@ -1,0 +1,58 @@
+{
+  "reviewer": "independent read-only semantic_review subagent; no release certification",
+  "source_head": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+  "summary_sha256": "cd74dd293d1694611fc51e53b7cbeeff2a49caa000d79534c35a1b80769a025c",
+  "scope": "Exact six-case producer and injected local-file commit/reload, not PLoT/ISL, Supabase, deployed runtime or UI",
+  "mechanical_pass": true,
+  "blocking_numerical_or_provenance_issue_found": false,
+  "cases": [
+    {
+      "id": "records_figure_rich",
+      "verdict": "appropriate_unknown",
+      "reason": "Known single-day arithmetic does not supply a supported mean/spread stochastic representation."
+    },
+    {
+      "id": "records_planning_day",
+      "verdict": "supported_provisional_estimate",
+      "value": 0.75,
+      "std": 0.05,
+      "reason": "Historical daily count mean15 / fixed20 gives daily-share centre.75; supplied daily spread.05 applies under the explicit same-process planning-day assumption, not as uncertainty in the mean."
+    },
+    {
+      "id": "figure_poor_anchored",
+      "verdict": "appropriate_unknown",
+      "reason": "Endpoint anchors do not calibrate an interior score or dispersion."
+    },
+    {
+      "id": "insufficient_information",
+      "verdict": "appropriate_unknown",
+      "reason": "No campaign, population or conversion measurements supply a defensible quantitative representation."
+    },
+    {
+      "id": "diagnostic_open_problem",
+      "verdict": "appropriate_no_call",
+      "reason": "No comparison requirement; no invented option or intervention."
+    },
+    {
+      "id": "supplied_value_prevents_estimation",
+      "verdict": "appropriate_no_call",
+      "reason": "The actually required existing user quantity is protected."
+    }
+  ],
+  "requested_gaps": 4,
+  "defensibly_justified_provisional_estimates": 1,
+  "appropriate_unknowns": 3,
+  "fallback_entering": 2,
+  "required_fallback_remaining": 0,
+  "protected_values_changed": 0,
+  "operational_failures": 0,
+  "skipped_gaps": 0,
+  "unresolved_origin_quantities": 0,
+  "independent_persistence_inspection": "Opened all six session files; asserted exact saved graph/readback, unchanged supplied quantities, inference rationale/basis on all four model results, exact .75/.05 on the estimate and absent numerical claims on unknowns.",
+  "nonblocking_rationale_limitations": [
+    "Campaign rationale includes an unsupported generalisation while explicitly disclaiming its applicability. It produces no number or evidence-backed source.",
+    "Rich refusal unnecessarily implies sampling requires a planning day; sampling can also express current epistemic uncertainty. The absence of a supported snapshot uncertainty representation still justifies unknown."
+  ],
+  "interpretation": "One supported provisional estimate out of four constructed required gaps is 25%; three appropriate unknowns are75%. This is not a population quality or factual calibration rate. Required-input fallback incidence is0, not a claim that all unrelated graph placeholders disappeared. No Science/UI closure or release clearance.",
+  "next_boundary": "Actual Science adoption of typed .53 representations and exact producer fixtures; no alternate-model comparison before that vertical path works."
+}

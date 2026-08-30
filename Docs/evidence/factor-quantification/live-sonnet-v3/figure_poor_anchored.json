@@ -1,0 +1,932 @@
+{
+  "case_id": "figure_poor_anchored",
+  "scope": {
+    "witness": "live_estimator_with_local_file_commit_reload",
+    "first_pass": "fixed_records_replay_or_authored_control_not_a_live_draft_model_call",
+    "records_projection": "replayRecordSet_then_projectGraphAndOptionsToV3",
+    "persistence": "real_commitDirectAnswer_with_injected_local_file_SessionStore_not_Supabase",
+    "model_version_history": "disabled_for_this_local_witness",
+    "rolling_summary": "not_witnessed_no_Supabase_configuration",
+    "provider_grammar_enforcement": "unobserved_adapter_does_not_report_fallback",
+    "science_and_ui": "not_witnessed_by_this_runner"
+  },
+  "source_identity": {
+    "captured_at": "2026-08-30T15:31:14.530Z",
+    "git_head": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "b865cc7f0133def1b2dfcf8300606ea01cd70d79837662780df2aff94aae87e8",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "input_kind": "authored_control",
+  "brief": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+  "request_id": "factor-live-e95ea627-4ae4-4050-8a4d-43039edb7e27",
+  "scenario_id": "a6f57dd4-3a85-401c-92eb-df9edc59edc9",
+  "turn_id": "06146c59-62d3-42a0-9462-cccf770ba2f7",
+  "input_graph": {
+    "nodes": [
+      {
+        "id": "goal_service",
+        "kind": "goal",
+        "label": "Dependable service"
+      },
+      {
+        "id": "opt_manual",
+        "kind": "option",
+        "label": "Keep manual recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 0,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_automate",
+        "kind": "option",
+        "label": "Automate recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_automation",
+        "kind": "factor",
+        "label": "Recovery automation",
+        "observed_state": {
+          "value": 0,
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 1
+      },
+      {
+        "id": "fac_preparedness",
+        "kind": "factor",
+        "label": "Recovery preparedness",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0,
+          "range_max": 1,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_manual",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_automate",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_automation",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_preparedness",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "factor_id": "fac_preparedness",
+      "operation": "isl.factor_baseline_sampling",
+      "option_ids": [
+        "opt_manual",
+        "opt_automate"
+      ],
+      "target_id": "goal_service",
+      "impact": "unassessed"
+    }
+  ],
+  "selection": {
+    "gaps": [
+      {
+        "factor_id": "fac_preparedness",
+        "label": "Recovery preparedness",
+        "snapshot": "fcf1a609ac30f46d6e4a495c5d9f12dac6e00ad5023b579270d32095453993bf",
+        "node_snapshot": "{\"id\":\"fac_preparedness\",\"kind\":\"factor\",\"label\":\"Recovery preparedness\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_preparedness",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_manual",
+            "opt_automate"
+          ],
+          "target_id": "goal_service",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_manual, opt_automate; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_preparedness",
+            "to": "goal_service",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "eligible": [
+      {
+        "factor_id": "fac_preparedness",
+        "label": "Recovery preparedness",
+        "snapshot": "fcf1a609ac30f46d6e4a495c5d9f12dac6e00ad5023b579270d32095453993bf",
+        "node_snapshot": "{\"id\":\"fac_preparedness\",\"kind\":\"factor\",\"label\":\"Recovery preparedness\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_preparedness",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_manual",
+            "opt_automate"
+          ],
+          "target_id": "goal_service",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_manual, opt_automate; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_preparedness",
+            "to": "goal_service",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "unresolved_origin": [],
+    "protected_ids": []
+  },
+  "request_input": {
+    "brief": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+    "gaps": [
+      {
+        "factor_id": "fac_preparedness",
+        "label": "Recovery preparedness",
+        "snapshot": "fcf1a609ac30f46d6e4a495c5d9f12dac6e00ad5023b579270d32095453993bf",
+        "node_snapshot": "{\"id\":\"fac_preparedness\",\"kind\":\"factor\",\"label\":\"Recovery preparedness\",\"category\":\"external\",\"scale_frame\":1,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0,\"range_max\":1,\"source\":\"cee_repair\",\"value_tier\":\"fallback_default\",\"prior_is_unquantified\":true}}",
+        "requirement": {
+          "factor_id": "fac_preparedness",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "opt_manual",
+            "opt_automate"
+          ],
+          "target_id": "goal_service",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in opt_manual, opt_automate; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {
+          "scale_frame": 1
+        },
+        "relationships": [
+          {
+            "from": "fac_preparedness",
+            "to": "goal_service",
+            "strength": {
+              "mean": 0.4,
+              "std": 0.15
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+            }
+          }
+        ]
+      }
+    ],
+    "context": {
+      "basis": [
+        {
+          "id": "brief",
+          "text": "We want dependable service. Keep manual recovery or automate recovery. For recovery preparedness, 0 means no documented recovery process and 1 means fully rehearsed automatic recovery. We have a written manual recovery checklist and an on-call rota, but have never rehearsed recovery. Treat readiness as provisional, not a measured reliability probability.",
+          "factor_ids": [
+            "fac_preparedness"
+          ],
+          "kind": "brief_context"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "goal_service",
+          "kind": "goal",
+          "label": "Dependable service"
+        },
+        {
+          "id": "opt_manual",
+          "kind": "option",
+          "label": "Keep manual recovery",
+          "interventions": {
+            "fac_automation": {
+              "value": 0,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_automation",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": true
+        },
+        {
+          "id": "opt_automate",
+          "kind": "option",
+          "label": "Automate recovery",
+          "interventions": {
+            "fac_automation": {
+              "value": 1,
+              "source": "brief_extraction",
+              "value_confidence": "high",
+              "target_match": {
+                "node_id": "fac_automation",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          },
+          "is_baseline": false
+        },
+        {
+          "id": "fac_automation",
+          "kind": "factor",
+          "label": "Recovery automation",
+          "observed_state": {
+            "value": 0,
+            "source": "brief_extraction",
+            "extractionType": "explicit"
+          },
+          "category": "controllable",
+          "scale_frame": 1
+        },
+        {
+          "id": "fac_preparedness",
+          "kind": "factor",
+          "label": "Recovery preparedness",
+          "category": "external",
+          "scale_frame": 1,
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0,
+            "range_max": 1,
+            "source": "cee_repair",
+            "value_tier": "fallback_default",
+            "prior_is_unquantified": true
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "from": "opt_manual",
+          "to": "fac_automation",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "opt_automate",
+          "to": "fac_automation",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_automation",
+          "to": "goal_service",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_preparedness",
+          "to": "goal_service",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        }
+      ]
+    }
+  },
+  "expected_request_hash": "5f4ccc0b905a3738395ca0276e85b02c258799b31b778db46c52a5b3b42f794f",
+  "parsed_model_result": {
+    "kind": "ok",
+    "estimates": [
+      {
+        "factor_id": "fac_preparedness",
+        "reasoning": "The brief describes qualitative evidence (a written manual recovery checklist and on-call rota exist, but no rehearsal has occurred) that places recovery preparedness above the 0 anchor (no documented process) but below any point associated with rehearsal or automation. However, the 0-1 scale has no interior scoring rubric: no defined mapping specifies how much credit a 'documented but unrehearsed' state earns versus a 'partially rehearsed' or 'fully rehearsed' state. The brief explicitly warns to treat this as provisional, not a measured probability, meaning there is no defensible way to assign a specific value or standard deviation, nor to justify uniform density across any sub-range (the existing prior's 0-1 uniform is a fallback default, not evidence-based support for full-range equal density, and using it would mean returning the same unquantified fallback already present rather than a genuine estimate). No quantitative benchmark, rubric, or comparable case is supplied to convert 'checklist + rota, never rehearsed' into a number or interval with defensible bounds narrower than the trivial full range. Therefore no defensible point or bounded-range estimate can be derived from the supplied context.",
+        "estimate_type": "unknown",
+        "basis": [
+          "brief"
+        ]
+      }
+    ],
+    "metadata": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v3",
+      "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+      "request_hash": "5f4ccc0b905a3738395ca0276e85b02c258799b31b778db46c52a5b3b42f794f",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 4747,
+      "output_tokens": 439,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 7753,
+      "provider_latency_ms": 7753,
+      "cost_usd": null
+    }
+  },
+  "metrics": {
+    "required_inputs": 1,
+    "materiality": "required_input_impact_unassessed",
+    "gaps_entering": 1,
+    "fallback_entering": 1,
+    "gaps_requested": 1,
+    "estimated": 0,
+    "model_unknown": 1,
+    "explicit_unknown": 1,
+    "operational_unresolved": 0,
+    "skipped_gaps": 0,
+    "rejected": [],
+    "fallback": 0,
+    "strict_evaluation_pass": true,
+    "unresolved_origin": [],
+    "protected_values_changed": 0,
+    "call": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v3",
+      "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+      "request_hash": "5f4ccc0b905a3738395ca0276e85b02c258799b31b778db46c52a5b3b42f794f",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 4747,
+      "output_tokens": 439,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 7753,
+      "provider_latency_ms": 7753,
+      "cost_usd": null
+    }
+  },
+  "canonical_graph": {
+    "nodes": [
+      {
+        "id": "goal_service",
+        "kind": "goal",
+        "label": "Dependable service"
+      },
+      {
+        "id": "opt_manual",
+        "kind": "option",
+        "label": "Keep manual recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 0,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_automate",
+        "kind": "option",
+        "label": "Automate recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_automation",
+        "kind": "factor",
+        "label": "Recovery automation",
+        "observed_state": {
+          "value": 0,
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 1
+      },
+      {
+        "id": "fac_preparedness",
+        "kind": "factor",
+        "label": "Recovery preparedness",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "prior_is_unquantified": true,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "The brief describes qualitative evidence (a written manual recovery checklist and on-call rota exist, but no rehearsal has occurred) that places recovery preparedness above the 0 anchor (no documented process) but below any point associated with rehearsal or automation. However, the 0-1 scale has no interior scoring rubric: no defined mapping specifies how much credit a 'documented but unrehearsed' state earns versus a 'partially rehearsed' or 'fully rehearsed' state. The brief explicitly warns to treat this as provisional, not a measured probability, meaning there is no defensible way to assign a specific value or standard deviation, nor to justify uniform density across any sub-range (the existing prior's 0-1 uniform is a fallback default, not evidence-based support for full-range equal density, and using it would mean returning the same unquantified fallback already present rather than a genuine estimate). No quantitative benchmark, rubric, or comparable case is supplied to convert 'checklist + rota, never rehearsed' into a number or interval with defensible bounds narrower than the trivial full range. Therefore no defensible point or bounded-range estimate can be derived from the supplied context.",
+            "context_basis": [
+              "brief"
+            ]
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_manual",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_automate",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_automation",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_preparedness",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "reloaded_graph": {
+    "nodes": [
+      {
+        "id": "goal_service",
+        "kind": "goal",
+        "label": "Dependable service"
+      },
+      {
+        "id": "opt_manual",
+        "kind": "option",
+        "label": "Keep manual recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 0,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "opt_automate",
+        "kind": "option",
+        "label": "Automate recovery",
+        "interventions": {
+          "fac_automation": {
+            "value": 1,
+            "source": "brief_extraction",
+            "value_confidence": "high",
+            "target_match": {
+              "node_id": "fac_automation",
+              "match_type": "exact_id",
+              "confidence": "high"
+            }
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "fac_automation",
+        "kind": "factor",
+        "label": "Recovery automation",
+        "observed_state": {
+          "value": 0,
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "category": "controllable",
+        "scale_frame": 1
+      },
+      {
+        "id": "fac_preparedness",
+        "kind": "factor",
+        "label": "Recovery preparedness",
+        "category": "external",
+        "scale_frame": 1,
+        "prior": {
+          "prior_is_unquantified": true,
+          "source": "cee_inference",
+          "reasoning": {
+            "rationale": "The brief describes qualitative evidence (a written manual recovery checklist and on-call rota exist, but no rehearsal has occurred) that places recovery preparedness above the 0 anchor (no documented process) but below any point associated with rehearsal or automation. However, the 0-1 scale has no interior scoring rubric: no defined mapping specifies how much credit a 'documented but unrehearsed' state earns versus a 'partially rehearsed' or 'fully rehearsed' state. The brief explicitly warns to treat this as provisional, not a measured probability, meaning there is no defensible way to assign a specific value or standard deviation, nor to justify uniform density across any sub-range (the existing prior's 0-1 uniform is a fallback default, not evidence-based support for full-range equal density, and using it would mean returning the same unquantified fallback already present rather than a genuine estimate). No quantitative benchmark, rubric, or comparable case is supplied to convert 'checklist + rota, never rehearsed' into a number or interval with defensible bounds narrower than the trivial full range. Therefore no defensible point or bounded-range estimate can be derived from the supplied context.",
+            "context_basis": [
+              "brief"
+            ]
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "opt_manual",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "opt_automate",
+        "to": "fac_automation",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_automation",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_preparedness",
+        "to": "goal_service",
+        "strength": {
+          "mean": 0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "session_file": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/live-sonnet-v3-20260830/figure_poor_anchored.session.json",
+  "commit": {
+    "performed": true,
+    "graph_persisted": true,
+    "persisted_row_id": "a669d38b-0134-4c8e-8d91-5266c6d73240",
+    "persistence_latency_ms": 7
+  },
+  "final_readiness": {
+    "options": [
+      {
+        "option_id": "opt_manual",
+        "label": "Keep manual recovery",
+        "status": "ready",
+        "interventions": {
+          "fac_automation": 0
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_automation": {
+            "display_value": "0",
+            "normalised_value": 0
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "opt_automate",
+        "label": "Automate recovery",
+        "status": "ready",
+        "interventions": {
+          "fac_automation": 1
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "fac_automation": {
+            "display_value": "1",
+            "normalised_value": 1
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "goal_service",
+    "status": "blocked",
+    "bias_findings": [],
+    "blocked_reason": "NO_DECISION",
+    "readiness_issues": [
+      {
+        "issue_id": "structural_1",
+        "code": "NO_DECISION",
+        "category": "graph_structure",
+        "message": "The model has no decision node.",
+        "repairability": "human_input_required",
+        "provenance": "unattributed",
+        "obligation": "required"
+      },
+      {
+        "issue_id": "factor_quantity_fac_preparedness",
+        "code": "FACTOR_QUANTITY_UNKNOWN",
+        "category": "numeric_integrity",
+        "message": "The baseline for \"Recovery preparedness\" remains unknown and is needed for this comparison. Calibrate it with a grounded value or range before analysis.",
+        "repairability": "human_input_required",
+        "factor_id": "fac_preparedness",
+        "factor_label": "Recovery preparedness",
+        "provenance": "unattributed",
+        "obligation": "required"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "structural_1",
+        "factor_quantity_fac_preparedness"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "structural_1",
+          "kind": "model_structure",
+          "prompt": "The model has no decision node.",
+          "obligation": "required",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "factor_quantity_fac_preparedness",
+          "kind": "factor_value",
+          "prompt": "The baseline for \"Recovery preparedness\" remains unknown and is needed for this comparison. Calibrate it with a grounded value or range before analysis.",
+          "factor_id": "fac_preparedness",
+          "obligation": "required",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "may_run": false
+  },
+  "result": {
+    "id": "figure_poor_anchored",
+    "passed": true,
+    "failures": [],
+    "metrics": {
+      "required_inputs": 1,
+      "materiality": "required_input_impact_unassessed",
+      "gaps_entering": 1,
+      "fallback_entering": 1,
+      "gaps_requested": 1,
+      "estimated": 0,
+      "model_unknown": 1,
+      "explicit_unknown": 1,
+      "operational_unresolved": 0,
+      "skipped_gaps": 0,
+      "rejected": [],
+      "fallback": 0,
+      "strict_evaluation_pass": true,
+      "unresolved_origin": [],
+      "protected_values_changed": 0,
+      "call": {
+        "call_made": true,
+        "provider": "anthropic",
+        "resolved_model": "claude-sonnet-5",
+        "model": "claude-sonnet-5",
+        "prompt_version": "factor-quantification-v3",
+        "prompt_hash": "d50f7d021f47b801d662fb05052ddb135c7429bd030e51f6f2f3c73b9e210cd9",
+        "request_hash": "5f4ccc0b905a3738395ca0276e85b02c258799b31b778db46c52a5b3b42f794f",
+        "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+        "structured_output_requested": true,
+        "structured_output_enforced": null,
+        "input_tokens": 4747,
+        "output_tokens": 439,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "latency_ms": 7753,
+        "provider_latency_ms": 7753,
+        "cost_usd": null
+      }
+    },
+    "protected_values_changed": 0,
+    "estimates": 0,
+    "provenance_survived": 0,
+    "uncertainty_survived": 0,
+    "case_latency_ms": 7769,
+    "persistence_latency_ms": 7
+  }
+}

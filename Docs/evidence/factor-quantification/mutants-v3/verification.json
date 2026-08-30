@@ -1,0 +1,11 @@
+{
+  "head": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+  "all_five_expected_outcomes": true,
+  "each_run_collected_exact_target": true,
+  "all_reds_from_exact_canonical_assertion": true,
+  "root_git_status_after": "",
+  "root_head_after": "fc358ca02bf11e64020b0de230c25334cb4763b3",
+  "isolated_git_status_after": "",
+  "root_selected_source_unchanged": true,
+  "scope": "Deterministic records replay through dispatch, model wrapper, parsed structured response, canonical commit and in-memory reload. The adapter is mocked. No live LLM, database, PLoT, ISL, deployed or UI assertion."
+}

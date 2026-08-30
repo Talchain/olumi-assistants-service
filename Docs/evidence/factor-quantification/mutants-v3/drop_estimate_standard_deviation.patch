@@ -1,0 +1,11 @@
+--- a/src/cee/factor-quantification/adopt.ts
++++ b/src/cee/factor-quantification/adopt.ts
+@@ -51,7 +51,7 @@
+       next.prior = { distribution: 'uniform', range_min: estimate.range_min, range_max: estimate.range_max,
+         ...scale, source: 'cee_inference', reasoning };
+     } else {
+-      next.observed_state = { ...scale, value: estimate.value, std: estimate.std, source: 'cee_inference', reasoning,
++      next.observed_state = { ...scale, value: estimate.value, source: 'cee_inference', reasoning,
+         extractionType: 'inferred',
+         ...(scale.declared_scale === 'unit_interval' && scale.cap !== undefined && scale.cap > 0
+           ? { raw_value: estimate.value * scale.cap } : {}),
