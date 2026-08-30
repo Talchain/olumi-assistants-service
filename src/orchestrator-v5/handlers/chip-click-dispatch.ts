@@ -868,9 +868,29 @@ async function tryComposeRecoverableChipOutcome(
   //   - continuity causes report `commit_failed` (→ typed 500), the same
   //     escalation a failed commit has always produced on them, because the
   //     durable refusal fact the freshness selectors depend on is equally
-  //     absent either way. In practice the two are near-identical: this loader
-  //     throws only on store-unavailable / `SessionReadError`, the same class
-  //     that would fail the write against the same store.
+  //     absent either way — BUT ONLY FOR THE STORE-UNAVAILABLE CLASS.
+  //
+  // ⚠⚠ THE ESCALATION IS SPLIT BY ERROR CODE, because this loader does NOT
+  // throw only on store-unavailability. An earlier version of this comment
+  // said it did; that was FALSE, and the falsity had teeth. `validation:
+  // 'strict'` ALSO throws `SessionReadError { code: 'pending_actions_corrupt' }`
+  // on a non-array column, on ANY entry `parsePendingAction` returns null for,
+  // and on a scenario mismatch (`supabase-store.ts` :2296-2299, :2345-2351).
+  // `parsePendingAction` returns null for any kind outside
+  // `RESUMABLE_ACTION_TYPES` (`pending-action.ts` :831) — and THIS change adds
+  // two kinds to that set, so the most plausible trigger is a ROLLBACK of this
+  // build over rows it has already written. None of those states would have
+  // failed the WRITE, so escalating them converts a graceful 200 refusal into
+  // a typed 500 on exactly the causes a user hits most.
+  //
+  // So: `pending_actions_corrupt` degrades to the graceful shape on BOTH
+  // halves. It does NOT relax the fail-closed no-commit — an unreadable row
+  // still aborts the commit, because committing over pendings this build
+  // cannot parse is the wipe. It only declines to turn a working answer into
+  // a hard failure, which is the same trade already stated at the
+  // commit-failure escalation below. (The shared helper
+  // `routing/persist-asked-question.ts:219` degrades on the same failure; this
+  // asymmetry is now removed rather than merely noted.)
   // ══════════════════════════════════════════════════════════════════════════
   let priorPendingActions: readonly PendingAction[] | null = null;
   try {
@@ -879,6 +899,14 @@ async function tryComposeRecoverableChipOutcome(
       requestId,
     );
   } catch (priorReadError) {
+    // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
+    // a dozen suites mock that class as a bare `class extends Error {}`, so an
+    // identity check would silently stop discriminating under a mock.
+    const priorReadCode =
+      typeof (priorReadError as { code?: unknown } | null)?.code === 'string'
+        ? (priorReadError as { code: string }).code
+        : null;
+    const priorRowUnreadableNotStoreDown = priorReadCode === 'pending_actions_corrupt';
     log.warn(
       {
         event: 'v5.recovered_turn_prior_pending_read_failed',
@@ -886,6 +914,8 @@ async function tryComposeRecoverableChipOutcome(
         scenario_id: scenarioId,
         cause_kind: err.cause_kind,
         acquires_refusal_continuity: acquiresRefusalContinuity,
+        prior_read_code: priorReadCode,
+        degraded_not_escalated: priorRowUnreadableNotStoreDown,
         err:
           priorReadError instanceof Error
             ? { name: priorReadError.name, message: priorReadError.message }
@@ -893,7 +923,7 @@ async function tryComposeRecoverableChipOutcome(
       },
       'V5 chip_click run_analysis recovery — prior-pending read failed; not committing, because a commit without carry-forward would wipe live proposals',
     );
-    if (acquiresRefusalContinuity) {
+    if (acquiresRefusalContinuity && !priorRowUnreadableNotStoreDown) {
       return {
         outcome: 'commit_failed',
         response: recovered.response,

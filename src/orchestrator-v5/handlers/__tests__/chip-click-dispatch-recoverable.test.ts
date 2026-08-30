@@ -705,6 +705,49 @@ describe('chip-click run_analysis — a recovered turn must not WIPE a live hold
     expect(commitDirectAnswerMock.mock.calls.length).toBe(0);
   });
 
+  it('A CORRUPT PRIORS ROW IS NOT STORE-UNAVAILABILITY — `pending_actions_corrupt` on a CONTINUITY cause degrades to the graceful 200, never a typed 500', async () => {
+    // `readMostRecentPendingActions` throws this code for a non-array column,
+    // ANY unparseable entry (incl. a pending whose `kind` this build does not
+    // know — the rollback case, since this PR adds two kinds), or a scenario
+    // mismatch. None of those would have failed the WRITE, so escalating them
+    // converts a turn that works today into a hard failure.
+    const corrupt = Object.assign(
+      new Error('readMostRecentPendingActions(sc): newest row pending_actions failed lossless validation'),
+      { code: 'pending_actions_corrupt' },
+    );
+    priorPendingsMock.mockRejectedValue(corrupt);
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-corrupt-continuity',
+      handlerRegistry: registryThrowing('analysis_blocked'),
+    });
+    expect(out.outcome).toBe('handler_recovered');
+    expect(out.commitPerformed).toBe(false);
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'the fail-closed no-commit STILL stands — committing over an unparseable row would wipe pendings this build cannot read',
+    ).toBe(0);
+    // Precondition pinned in-test: the outcome above is the loader's doing, not
+    // a stub that silently stopped rejecting.
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+  });
+
+  it('OPPOSITE DIRECTION — a read failure carrying ANY OTHER code still escalates on a continuity cause (the degrade binds to `pending_actions_corrupt`, not to "the read threw")', async () => {
+    const unavailable = Object.assign(
+      new Error('readMostRecentPendingActions(sc) failed: ECONNRESET'),
+      { code: 'ECONNRESET' },
+    );
+    priorPendingsMock.mockRejectedValue(unavailable);
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r2-unavailable-continuity',
+      handlerRegistry: registryThrowing('analysis_blocked'),
+    });
+    expect(out.outcome).toBe('commit_failed');
+    expect(commitDirectAnswerMock.mock.calls.length).toBe(0);
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+  });
+
   it('EVERY recoverable cause that commits threads the priors — none of the nine is a wipe sharer', async () => {
     for (const cause of RECOVERABLE_HANDLER_CAUSES) {
       commitDirectAnswerMock.mockClear();
