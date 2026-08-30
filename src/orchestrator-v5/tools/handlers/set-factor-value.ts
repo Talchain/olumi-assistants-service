@@ -425,8 +425,14 @@ export function createSetFactorValueHandler(): HandlerFn {
     // A first stated percentage may establish its own divisor, but cannot
     // silently reframe existing option values on that factor. Use the same
     // intervention reader as analysis; do not guess from their magnitudes.
-    if (normalised.scale_frame !== undefined && graph.nodes.some((node) =>
-      node.kind === 'option' && targetId in mergeInterventionSourceObjects(node)
+    const persistedOptions = (rawGraph as { options?: unknown }).options;
+    const optionCarriers = [
+      ...graph.nodes.filter((node) => node.kind === 'option'),
+      ...(Array.isArray(persistedOptions) ? persistedOptions : []),
+    ];
+    if (normalised.scale_frame !== undefined && optionCarriers.some((option) =>
+      option !== null && typeof option === 'object' &&
+      targetId in mergeInterventionSourceObjects(option)
     )) {
       throw new D1HandlerError(
         'PARAMETER_INVALID',
