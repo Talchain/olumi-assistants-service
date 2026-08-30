@@ -79,6 +79,19 @@ selection for both environments. Candidate numeric PMS version is not invented.
 Actual promotion, rollback, refreshed post-action cache evidence and fleet
 convergence remain UNVERIFIED and CC-owned.
 
+`replayed-packets.tar.gz` SHA-256:
+`f59667bf6a84493e221ff2a781ffbf7573bc42618f9e576ecefea6de2107ed5a`.
+The two packets were generated without new model calls by clean replay head
+`76e45892a558653c463258a11decfbb4899759b6`. Both correctly return FAIL for
+semantic comparison and UNVERIFIED for mismatched foundation source and absent
+post-promotion/cache evidence. The exact recorder source binding is PASS.
+The archive also contains the named-suite report: 14 files, 113 tests PASS at
+that head. All new compatibility families have breaking and unrelated controls;
+native replay asserts zero network attempts and exact expected collection.
+Repository lint and production build pass; lint retains two unchanged warnings.
+Hosted required CI and the independent review are recorded separately on the PR
+at its delivery head, not inferred from this local evidence.
+
 ## Boundaries
 
 The registry still covers draft records, deterministic recovery and validation
