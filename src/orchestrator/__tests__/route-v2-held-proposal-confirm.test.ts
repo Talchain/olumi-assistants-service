@@ -256,7 +256,9 @@ function renameHold(newLabel = 'Acquisition spend') {
   const operations = [{ op: 'update_node', path: 'fac-marketing', value: { label: newLabel } }];
   const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(operations, STRICT_GRAPH));
   const base = gmHeldPending();
-  if (base.action.kind !== 'apply_proposed_change') throw new Error('Invalid held fixture');
+  if (base.action.kind !== 'apply_proposed_change' || base.action.__legacy_no_public_copy === true) {
+    throw new Error('Rename hold requires the standard persisted public-copy fixture');
+  }
   const pending: PendingAction = {
     ...base,
     action: {
