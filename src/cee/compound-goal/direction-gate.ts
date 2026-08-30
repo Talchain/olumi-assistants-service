@@ -151,7 +151,28 @@ export type UnresolvedReason =
   /** A negation is present in the sentence and unaccounted for. */
   | 'unspent_negation'
   /** Two producers put opposite operators on one node, and it is not a band. */
-  | 'producer_disagreement';
+  | 'producer_disagreement'
+  /**
+   * ⭐ NOT A DIRECTION FAILURE — A BINDING FAILURE, AND THE SIXTH MEMBER OF
+   * THIS ENUM IS A DIFFERENT QUESTION UNDER THE SAME CHANNEL (CLAUDE.md trap
+   * 21: name the concepts apart, share the transport).
+   *
+   * The five reasons above all mean "we cannot tell WHICH WAY this limit
+   * points". This one means the opposite: the direction is known and the limit
+   * is well-formed, but it could not be attached to any node on the model, so
+   * it was dropped at `remapConstraintTargets` step 6 and the analysis will
+   * never see it.
+   *
+   * ⚠⚠ IT MUST NEVER BE ASKED THE FLOOR-OR-CEILING QUESTION. Measured over 10
+   * deployed runs of one brief (2026-08-30): "…our support budget for the year
+   * is £240,000 … without going over budget" states its direction
+   * unambiguously and is extracted as `<=` every single time. Asking the user
+   * whether £240,000 is a floor or a ceiling would be a confident WRONG
+   * question about a sentence they wrote perfectly clearly — worse than the
+   * silence it replaces. {@link composeQuestion} and
+   * {@link renderDirectionClarifications} therefore both branch on it.
+   */
+  | 'target_unmatched';
 
 /** Why a row was declined as never having been a limit. */
 export type NonLimitReason = 'possibility_framed_delta' | 'range_valued_delta';
@@ -1060,9 +1081,28 @@ function composeDirectionChoiceQuestion(metric: string, amount: string): string 
   return `Should ${metric} stay at or above ${amount}, or at or below it?`;
 }
 
+/**
+ * THE binding question, typed ONCE — the `target_unmatched` twin of
+ * {@link composeDirectionChoiceQuestion}, and separated from it for the same
+ * reason that constant exists: two call sites (the record's `question` and the
+ * coaching card's `detail`) that must never drift into asking one thing two
+ * ways.
+ *
+ * It names the AMOUNT and asks for the REFERENT. It deliberately does not
+ * enumerate candidate nodes: the drop happens precisely because two or more
+ * labels matched, and listing our two guesses would present a binary choice
+ * where the honest set is "any part of your model, including one you have not
+ * drawn yet".
+ */
+function composeTargetChoiceQuestion(amount: string): string {
+  return `Which part of your model does ${amount} apply to?`;
+}
+
 /** The user-answerable question, phrased once, surface-agnostic. */
 function composeQuestion(reason: UnresolvedReason, metric: string, amount: string): string {
   switch (reason) {
+    case 'target_unmatched':
+      return composeTargetChoiceQuestion(amount);
     case 'explicit_ambiguity':
       return `You said you hadn't settled whether ${amount} is a floor or a ceiling for ${metric}. Which is it?`;
     case 'producer_disagreement':
@@ -1106,6 +1146,62 @@ export function buildUnresolvedItem(
     question: composeQuestion(reason, metric_text, amount_text),
     options: OPTION_SET,
     ...(nodeLabel ? { node_label: nodeLabel } : {}),
+  };
+}
+
+/**
+ * The row shape {@link targetUnmatchedItem} reads — the EXTRACTOR's camelCase
+ * constraint, which is what falls off `remapConstraintTargets` step 6. It is
+ * deliberately a separate minimal interface rather than an import of
+ * `ExtractedGoalConstraint`: this module must not depend on the extractor
+ * (the extractor already depends on the reconciler, and a cycle here would be
+ * a build failure), and the four fields below are all that is read.
+ */
+export interface UnbindableConstraintRow {
+  readonly targetName?: unknown;
+  readonly value?: unknown;
+  readonly unit?: unknown;
+  readonly label?: unknown;
+  readonly sourceQuote?: unknown;
+}
+
+/**
+ * Build the reusable record for a limit that was extracted, kept its direction,
+ * and could not be attached to any node on the model.
+ *
+ * ⚠ THE AMOUNT IS DERIVED FROM THE USER'S OWN SENTENCE FIRST
+ * ({@link deriveAmountText} scans the source quote for the literal the user
+ * typed) and falls back to a formatted value only when the scan finds nothing.
+ * The whole point of this record is to show the user a number they recognise;
+ * a re-formatted one is how "£240,000" reaches the screen as "240000".
+ *
+ * `options` is EMPTY on purpose. The five direction reasons offer a binary
+ * because the answer genuinely is binary. Here it is not: the referent could be
+ * any node on the model, or one that has not been drawn. Offering two guesses —
+ * the very two whose collision caused the drop — would invite the user to pick
+ * one of our mistakes.
+ */
+export function targetUnmatchedItem(row: UnbindableConstraintRow): DirectionUnresolvedItem {
+  const value = typeof row.value === 'number' && Number.isFinite(row.value) ? row.value : null;
+  const unit = typeof row.unit === 'string' && row.unit.length > 0 ? row.unit : null;
+  const sentence = typeof row.sourceQuote === 'string' ? row.sourceQuote : '';
+  const subject = typeof row.targetName === 'string' && row.targetName.length > 0
+    ? row.targetName
+    : null;
+  let metric_text = deriveMetricText(subject, row.label ?? null, row.sourceQuote ?? null);
+  if (metric_text === FALLBACK_METRIC) {
+    const trailing = trailingMetric(sentence);
+    if (trailing) metric_text = deriveMetricText(trailing, null, null);
+  }
+  const amount_text = deriveAmountText(sentence, value, unit);
+  return {
+    metric_text,
+    amount_text,
+    value,
+    unit,
+    reason: 'target_unmatched',
+    question: composeTargetChoiceQuestion(amount_text),
+    options: [],
   };
 }
 
@@ -1828,7 +1924,39 @@ export function renderDirectionClarifications(
   if (unique.length === 0) return [];
 
   const shown = unique.slice(0, MAX_DIRECTION_CLARIFICATIONS);
-  const out: DirectionStrengthenItem[] = shown.map((it, n) => ({
+  const out: DirectionStrengthenItem[] = shown.map((it, n) =>
+    // ⭐ THE BINDING QUESTION IS A DIFFERENT CARD, NOT A DIFFERENT WORDING OF
+    // THIS ONE (trap 21). Every branch below this point asks floor-or-ceiling
+    // unconditionally — including for records whose `reason` says the direction
+    // was never in doubt — so a `target_unmatched` record routed through it
+    // would ask the user to settle a question their brief already settled. The
+    // five direction reasons keep byte-identical copy; only the sixth diverts.
+    it.reason === 'target_unmatched'
+      ? {
+          id: `${DIRECTION_CLARIFICATION_ID_PREFIX}${n + 1}`,
+          label:
+            it.metric_text === FALLBACK_METRIC
+              ? 'Say which part of the model this limit applies to'
+              : `Say which part of the model the ${it.metric_text} limit applies to`,
+          // ⚠ THE QUESTION IS IN THE FIRST TWO SENTENCES, for the reason the
+          // sibling copy below documents: the V5 turn ships no structured
+          // `strengthen_items`, so this reaches the user as PROSE and any
+          // consumer taking a leading slice must still be holding a QUESTION.
+          //
+          // ⚠ AND IT NEVER SAYS THE LIMIT WAS KEPT. It was not: the row is
+          // dropped at `remapConstraintTargets` step 6 and reaches neither
+          // `goal_constraints[]` nor the analysis. "It is not being enforced"
+          // is the true statement; "it stays on your model" would be a lie
+          // this product has shipped before under a neighbouring voice.
+          detail:
+            `You set a limit of ${it.amount_text} in your brief and I could not ` +
+            `match it to anything on the model. ` +
+            `${composeTargetChoiceQuestion(it.amount_text)} ` +
+            `Until then it is not being enforced — add it as a constraint on the ` +
+            `right factor to make it binding.`,
+          action_type: 'add_constraint' as const,
+        }
+      : {
     id: `${DIRECTION_CLARIFICATION_ID_PREFIX}${n + 1}`,
     // ⚠ GRAMMAR, NOT DECORATION. When no user word survives, `metric_text` is
     // the generic fallback and "Confirm the direction of the this measure
@@ -1863,12 +1991,19 @@ export function renderDirectionClarifications(
       `I could not tell from the wording, so it ` +
       `is not being enforced yet. Add it as a constraint to make it binding.`,
     action_type: 'add_constraint' as const,
-  }));
+  });
 
   const overflow = unique.length - shown.length;
   if (overflow > 0) {
     out.push({
       id: `${DIRECTION_CLARIFICATION_ID_PREFIX}more`,
+      // ⚠ KNOWN RESIDUAL, DISCLOSED NOT DISCOVERED. This overflow card speaks
+      // the DIRECTION language for whatever spills past the cap, including a
+      // `target_unmatched` record whose question is a referent, not a
+      // direction. It is left as-is deliberately: reaching it needs four or
+      // more clarifications on one draft, which no measured brief produces,
+      // and the copy is pinned by `direction-gate-surfacing.test.ts`. Rowed
+      // rather than changed inside a lane commissioned for the disclosure.
       label: `${overflow} more limit${overflow === 1 ? ' needs' : 's need'} a direction`,
       detail:
         `${overflow} further limit${overflow === 1 ? '' : 's'} in your brief could be read as ` +

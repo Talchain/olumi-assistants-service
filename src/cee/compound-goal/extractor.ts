@@ -1722,6 +1722,43 @@ export interface RemapResult {
   remapped: number;
   rejected_junk: number;
   rejected_no_match: number;
+  /**
+   * THE ROWS THEMSELVES that fell off step 6 (no match), so a caller can ASK
+   * the user about them rather than only COUNT them.
+   *
+   * ⚠⚠ WHY THIS FIELD EXISTS AT ALL. Until now `rejected_no_match` was a bare
+   * integer with EXACTLY ONE READER in the whole service — a `log.info` field
+   * (`unified-pipeline/stages/repair/compound-goals.ts`). Measured across 10
+   * runs of one brief on two deployed staging builds (2026-08-30): a user's
+   * "£240,000" ceiling was extracted DETERMINISTICALLY every single time and
+   * dropped here in 8 of them, reaching no numeric field of the graph and no
+   * sentence the user could see. A count cannot be shown to anybody; the row
+   * can.
+   *
+   * ⚠ IT IS A STRICT SUBSET OF `rejected_no_match`, NOT ITS TWIN, and the gap
+   * is deliberate. `noMatchCount` also counts the STEP-0 temporal drop
+   * ("no_goal_node"), and ROADMAP 2.349 established that a deadline is not a
+   * hard constraint and must NOT generate a limit question — surfacing those
+   * here would re-open exactly the defect 2.349 closed. So step 0 increments
+   * the count and contributes nothing to this array.
+   *
+   * `unbindable.length <= rejected_no_match` is the invariant. It is asserted
+   * by `unified-pipeline/stages/repair/__tests__/constraint-target-unmatched-ask.test.ts`
+   * ("unbindable is a strict subset of rejected_no_match") — a positive control
+   * proving a step-6 drop really lands in the array, the strict case proving a
+   * temporal drop is counted but never carried, and the end-to-end consequence
+   * that a deadline brief produces no ask.
+   *
+   * ⚠ THAT SENTENCE WAS A FABRICATION WHEN FIRST WRITTEN, and is corrected here
+   * rather than quietly deleted. It claimed the invariant was "asserted by spec"
+   * while NO spec anywhere read `.unbindable` — measured at review with a
+   * positive control (`rejected_no_match` → 28 hits) and a fabricated contrast
+   * (0). The behaviour was already correct; the claim about our own
+   * verification was not, and a sentence asserting a guard that does not exist
+   * is how a later session inherits false confidence (CLAUDE.md trap 14). The
+   * spec was written to make the claim true.
+   */
+  unbindable: ExtractedGoalConstraint[];
 }
 
 /**
@@ -1755,6 +1792,8 @@ export function remapConstraintTargets(
   let remapCount = 0;
   let junkCount = 0;
   let noMatchCount = 0;
+  // Step-6 drops only — see `RemapResult.unbindable` for why step 0 is excluded.
+  const unbindable: ExtractedGoalConstraint[] = [];
 
   for (const constraint of constraints) {
     // Step 0: Temporal constraints — bind to goal node or drop with reason
@@ -1862,8 +1901,11 @@ export function remapConstraintTargets(
       continue;
     }
 
-    // Step 6: No match — drop this constraint
+    // Step 6: No match — drop this constraint, and KEEP IT so the caller can
+    // ask the user which part of the model it belongs to. The drop itself is
+    // unchanged: the row still does not reach `goal_constraints[]`.
     noMatchCount++;
+    unbindable.push(constraint);
     log.info({
       event: "cee.compound_goal.target_no_match",
       request_id: requestId,
@@ -1895,6 +1937,7 @@ export function remapConstraintTargets(
     remapped: remapCount,
     rejected_junk: junkCount,
     rejected_no_match: noMatchCount,
+    unbindable,
   };
 }
 

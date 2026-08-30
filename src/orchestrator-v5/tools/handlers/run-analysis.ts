@@ -50,6 +50,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
+  collectUnmeasuredConstraintTargetIds,
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
@@ -1469,11 +1470,64 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // checked limit) and the seam's third answer (we could not reconcile which
     // condition was evaluated) come from this single call, so no two surfaces
     // can disagree about what the constraint evidence said.
+    //
+    // ⭐ AND THE FOURTH ARGUMENT — the constraints whose TARGET NODE CARRIES NO
+    // NUMBER, derived here because this is the one place that holds both the
+    // ratified rows and the graph they point at.
+    //
+    // WIRE-WITNESSED (2026-08-30, 10 runs of one brief, two staging builds): a
+    // "£240,000" ceiling CEE itself extracted, bound by the shared matcher to a
+    // `risk` node with no `observed_state`, no `scale_frame` and no unit, then
+    // read back as "a condition the engine did not check" — nulling the leading
+    // option on every run where it existed, while the 8 runs that dropped the
+    // constraint entirely gave the user a working analysis. The absence of a
+    // score for such a row is guaranteed by OUR node shape, not by the engine,
+    // so it is not evidence and must not withhold. See
+    // `ConstraintVerdict.unmeasuredTargetConstraints`.
+    //
+    // Reads the SAME two mirrors `readRatifiedConstraints` does, in the same
+    // order, so the rows and the node lookup can never come from different
+    // snapshots.
+    const unmeasuredTargetIds = collectUnmeasuredConstraintTargetIds(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      snapshot.rawPersistedGraph ?? snapshot.graph,
+    );
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      unmeasuredTargetIds,
     );
+    // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
+    // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
+    // reason, as the intake axis makes ~50 lines below.
+    //
+    // The first version of this change DID emit, reusing
+    // `V5RunAnalysisConstraintUnevaluated` with a CEE-minted discriminating
+    // code. Review measured three divergences and it was withdrawn:
+    //   - that event's declared semantics include "the leading-option claim is
+    //     withheld" (`utils/telemetry.ts`), and this partition fires precisely
+    //     when it is NOT;
+    //   - its `codes` field is documented as PRODUCER codes, and a CEE-minted
+    //     one filed there is a drafter defect recorded inside a producer
+    //     statistic — the first dashboard to read it would be wrong about both;
+    //   - a single turn could emit the event twice, from two different
+    //     questions.
+    // That is trap 21 in the shape this module already names: two questions
+    // under one name. A registered `V5RunAnalysisConstraintTargetUnmeasured`
+    // is its own change — the telemetry-validation workflow owns that registry
+    // and its own instructions require the dashboard queries, the alert
+    // configurations and `observability/README.md` to move with it.
+    //
+    // STATED EXACTLY, BECAUSE A WRONG OBSERVABILITY CLAIM IS WORSE THAN NONE.
+    // What is now unmeasured: the RATE at which a ratified constraint binds to
+    // a node carrying no quantity. Nothing else regresses — the two existing
+    // constraint emits are untouched and still fire on their own states, and
+    // this partition never enters those states, so no dashboard loses a
+    // datapoint it has today. The signals that remain are the user-facing
+    // disclosure (the `unmeasured_target` voice) and the draft-time
+    // `cee.compound_goal.target_unmatched_asked` log, which covers the
+    // never-bound half of the same defect but not this one.
     if (constraintVerdict.state === 'unevaluated') {
       emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
         request_id: invocation.requestId,
