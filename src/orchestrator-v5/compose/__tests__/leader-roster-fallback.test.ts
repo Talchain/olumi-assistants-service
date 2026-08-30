@@ -106,8 +106,8 @@ function responseWith(text: string): any {
 }
 
 /** The repo's own balanced-paren scan, so two guards cannot disagree about the population. */
-function enumerateSendCalls(source: string): Array<{ graphIsNullLiteral: boolean }> {
-  const calls: Array<{ graphIsNullLiteral: boolean }> = [];
+function enumerateSendCalls(source: string): Array<{ graphIsNullLiteral: boolean; callSource: string }> {
+  const calls: Array<{ graphIsNullLiteral: boolean; callSource: string }> = [];
   for (const m of source.matchAll(/sendFinalised200\(/g)) {
     const start = m.index!;
     if (/function\s+$/.test(source.slice(Math.max(0, start - 20), start))) continue;
@@ -122,7 +122,8 @@ function enumerateSendCalls(source: string): Array<{ graphIsNullLiteral: boolean
         if (depth === 0) break;
       }
     }
-    calls.push({ graphIsNullLiteral: /\bgraph:\s*null\b/.test(source.slice(open, j + 1)) });
+    const callSource = source.slice(open, j + 1);
+    calls.push({ graphIsNullLiteral: /\bgraph:\s*null\b/.test(callSource), callSource });
   }
   return calls;
 }
@@ -352,12 +353,22 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });
 
-    it('TRIPWIRE: the exit population is 23 — a new exit must be looked at, not assumed', () => {
+    it('TRIPWIRE: the exit population is 24 — a new exit must be looked at, not assumed', () => {
       const calls = enumerateSendCalls(source);
       // Not a mirror to keep green: if you added an exit, confirm it funnels
       // through sendFinalised200 (it must, or the guard above fails too) and
       // then update this number deliberately.
-      expect(calls.length).toBe(23);
+      expect(calls.length).toBe(24);
+      // #1246's additional exit is a functional recorded-answer refusal, not
+      // a new claim authority. It still funnels through the shared finalizer,
+      // forwards claim safety, and uses only the canonical repair graph roster.
+      const recordedRefusals = calls.filter((c) => c.callSource.includes(
+        'buildCanonicalAnalysisReadyFromGraph(repairGraph)',
+      ));
+      expect(recordedRefusals).toHaveLength(1);
+      expect(recordedRefusals[0]!.graphIsNullLiteral).toBe(true);
+      expect(recordedRefusals[0]!.callSource).toContain('claimSafety.forExit()');
+      expect(recordedRefusals[0]!.callSource).toContain("answerKind: 'functional'");
       // Both classes still exist, so the scan is genuinely classifying.
       expect(calls.some((c) => c.graphIsNullLiteral)).toBe(true);
       expect(calls.some((c) => !c.graphIsNullLiteral)).toBe(true);

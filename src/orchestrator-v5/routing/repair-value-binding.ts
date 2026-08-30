@@ -73,6 +73,14 @@ import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text
  * Re-exported so this module's existing consumers and specs are unaffected.
  */
 import { readMissingValueAnswer } from './missing-value-answer.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import {
+  filterLivePendingActions,
+  parsePendingAction,
+  PENDING_KIND_CLAIMS_BARE_NUMBER,
+  type PendingAction,
+} from '../session/pending-action.js';
 
 export { BARE_REFERENTS } from './missing-value-answer.js';
 
@@ -471,6 +479,74 @@ export type RepairValueBindingResolution =
       /** The canonical 0–1 spelling — see the `bind` arm's note. */
       readonly valueText: string;
     };
+
+/** Server-only binding to a recorded question, never an ingress instruction. */
+export interface RecordedEffectAnswer {
+  readonly pending: PendingAction;
+  readonly priorPendingActions: readonly PendingAction[];
+  readonly pair: MissingEffectPair;
+  readonly valueText: string;
+  readonly instruction: string;
+}
+
+export type RecordedEffectAnswerResolution =
+  | { readonly kind: 'unrelated' | 'unrecorded' | 'other_question' | 'unavailable' | 'stale' | 'ambiguous' }
+  | { readonly kind: 'ask'; readonly pair: MissingEffectPair }
+  | { readonly kind: 'bind'; readonly answer: RecordedEffectAnswer };
+
+/** Which recorded cell does this answer belong to? This is not a number parser. */
+export function resolveRecordedOptionEffectAnswer(params: {
+  readonly message: string;
+  readonly pendings: readonly PendingAction[] | null;
+  readonly graph: GraphStateIngress | null;
+  readonly readiness: AnalysisReadyPayload | null | undefined;
+  readonly scenarioId: string;
+  readonly nowMs: number;
+}): RecordedEffectAnswerResolution {
+  const reading = readMissingValueAnswer(params.message);
+  if (reading?.kind !== 'numeric' || reading.leadingContext !== '') return { kind: 'unrelated' };
+  if (params.pendings === null || params.pendings.some(
+    (pa) => parsePendingAction(pa) === null || pa.scenario_id !== params.scenarioId,
+  )) return { kind: 'unavailable' };
+
+  const claimants = filterLivePendingActions(params.pendings, params.nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
+  );
+  if (claimants.length > 1) return { kind: 'ambiguous' };
+  const pending = claimants[0];
+  if (pending === undefined) {
+    // A known expired question cannot be reconstructed from today's blocker order.
+    return { kind: params.pendings.some(pa => pa.action.kind === 'elicit_option_effect')
+      ? 'stale' : 'unrecorded' };
+  }
+  if (pending.action.kind !== 'elicit_option_effect') return { kind: 'other_question' };
+  const asked = pending.action;
+  const graph = params.graph;
+  if (graph === null) return { kind: 'unavailable' };
+  try {
+    if (!pending.preconditions.graph_hash
+      || pending.preconditions.graph_hash !== computeAnalysisAffectingGraphHash(graph)) {
+      return { kind: 'stale' };
+    }
+  } catch { return { kind: 'unavailable' }; }
+  const options = graph.nodes.filter(node => node.id === asked.option_id);
+  const factors = graph.nodes.filter(node => node.id === asked.factor_id);
+  if (options.length !== 1 || factors.length !== 1
+    || options[0]!.kind !== 'option' || factors[0]!.kind !== 'factor') return { kind: 'stale' };
+  const pair = deriveMissingEffectPairs(params.readiness).find(
+    p => p.optionId === asked.option_id && p.factorId === asked.factor_id,
+  );
+  if (pair === undefined) return { kind: 'stale' };
+  // The sole recorded question disambiguates 0/1; it never turns bare 20 into 20%.
+  if (!isModelUnitEffectValueText(reading, { ordinalCollisionPossible: false })) {
+    return { kind: 'ask', pair };
+  }
+  const valueText = reading.modelUnitText!;
+  return { kind: 'bind', answer: {
+    pending, priorPendingActions: params.pendings, pair, valueText,
+    instruction: buildRepairBindingInstruction(pair, valueText),
+  } };
+}
 
 /**
  * Resolve the binding verdict for one message against one readiness payload.
