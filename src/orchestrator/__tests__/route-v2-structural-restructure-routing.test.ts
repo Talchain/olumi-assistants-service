@@ -30,6 +30,7 @@ import type { FastifyInstance } from 'fastify';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { _resetConfigCache } from '../../config/index.js';
+import { TurnSource } from '@talchain/schemas/boundary';
 import { detectStructuralRestructureIntent } from '../../orchestrator-v5/routing/structural-restructure-intent.js';
 import {
   buildGmHeldPublicCopy,
@@ -395,18 +396,42 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
       expect(chatWithToolsMock).not.toHaveBeenCalled();
     });
 
-    it("(b) REPLAYED as the product's own chip, that exact string does NOT re-enter the edit lane", async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/orchestrate/v2/turn',
-        payload: payload({ message: PRODUCT_CHIP.label, source: 'chip_click' }),
-      });
-      expect(res.statusCode).toBe(200);
-      // No second hold is drafted: the edit lane — the sole structural-proposal
-      // producer — is never called, so no new confirm chip can be minted.
-      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
-      expect(chatWithToolsMock).toHaveBeenCalled();
+    /**
+     * ⚠⚠ THIS TEST USED TO DRIVE `chip_click` ALONE, AND THAT IS EXACTLY HOW
+     * THE GUARD SHIPPED DARK. The wire union has FOUR members and the deployed
+     * UI sends a held-confirm chip as `'chip'` (buildPayload.ts promotes to
+     * `chip_click` only for a chip carrying a published, CEE-accepted
+     * `action_type`; the held-confirm chip carries none). A single-member twin
+     * cannot see a guard bound to the wrong member — it agrees with itself on
+     * the one value it was written for. The `it.each` below drives EVERY
+     * replayed member on the SAME string, and the exhaustiveness assertion
+     * makes a contract widening RED here rather than silently untested.
+     */
+    const REPLAYED_SOURCES = ['chip', 'chip_click', 'retry'] as const;
+    const FRESHLY_AUTHORED_SOURCES = ['composer'] as const;
+
+    it('precondition: the twin below covers the WHOLE contract source union', () => {
+      // Not derived from the routing code under test — from the CONTRACT. If a
+      // fifth member lands, this REDs until it is adjudicated into one arm.
+      expect([...REPLAYED_SOURCES, ...FRESHLY_AUTHORED_SOURCES].sort())
+        .toEqual([...TurnSource.options].sort());
     });
+
+    it.each(REPLAYED_SOURCES)(
+      "(b) REPLAYED as the product's own chip via source=%s, that exact string does NOT re-enter the edit lane",
+      async (source) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({ message: PRODUCT_CHIP.label, source }),
+        });
+        expect(res.statusCode).toBe(200);
+        // No second hold is drafted: the edit lane — the sole structural-proposal
+        // producer — is never called, so no new confirm chip can be minted.
+        expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+        expect(chatWithToolsMock).toHaveBeenCalled();
+      },
+    );
 
     // The chip's MESSAGE variant ("Yes, rename 'Cost' to 'Delivery effort'.")
     // is affirmative-prefixed, so it never matched the anchored rename arm in
@@ -416,29 +441,35 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
     // large. Without this, widening the exclusion to every structural trigger
     // would look identical to the fix, and #644 P2-2's genuine future case (a
     // chip rendering restructure-phrased copy) would be silently switched off.
-    it('(d) a per-option chip_click is untouched by the guard and still reaches the edit lane', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/orchestrate/v2/turn',
-        payload: payload({
-          message: 'split the shared factor into per-option links',
-          source: 'chip_click',
-        }),
-      });
-      expect(res.statusCode).toBe(200);
-      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
-      expect(chatWithToolsMock).not.toHaveBeenCalled();
-    });
+    it.each(REPLAYED_SOURCES)(
+      '(d) a per-option replay via source=%s is untouched by the guard and still reaches the edit lane',
+      async (source) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({
+            message: 'split the shared factor into per-option links',
+            source,
+          }),
+        });
+        expect(res.statusCode).toBe(200);
+        expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+        expect(chatWithToolsMock).not.toHaveBeenCalled();
+      },
+    );
 
     it("(c) the chip's MESSAGE variant likewise does not re-enter the edit lane", async () => {
       expect(PRODUCT_CHIP.message).toBe("Yes, rename 'Cost' to 'Delivery effort'.");
-      const res = await app.inject({
-        method: 'POST',
-        url: '/orchestrate/v2/turn',
-        payload: payload({ message: PRODUCT_CHIP.message, source: 'chip_click' }),
-      });
-      expect(res.statusCode).toBe(200);
-      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      for (const source of REPLAYED_SOURCES) {
+        dispatchEditGraphMock.mockClear();
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({ message: PRODUCT_CHIP.message, source }),
+        });
+        expect(res.statusCode).toBe(200);
+        expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      }
     });
   });
 });

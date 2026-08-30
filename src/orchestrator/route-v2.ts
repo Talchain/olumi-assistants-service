@@ -85,6 +85,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-authorship.js';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
@@ -4959,10 +4960,23 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //   · "is this a fresh authoring command?"  → NO for a chip replay.
     //   · "may this resume/clarify a held proposal?" → YES, always.
     // `productChipRenameReplay` answers the second and is passed to the gate.
+    //
+    // ⚠⚠ #1231 REVIEW CORRECTION — THIS COMPARED AGAINST `'chip_click'` ALONE,
+    // AND WAS THEREFORE DARK ON THE ONLY INGRESS REAL USERS HIT. The wire union
+    // has FOUR members (`TurnSource`, @talchain/schemas/boundary), and the
+    // deployed UI sends the held-confirm chip as `'chip'`: buildPayload.ts
+    // promotes to `'chip_click'` only for a chip carrying a PUBLISHED,
+    // CEE-ACCEPTED `action_type`, and the held-confirm chip carries none. So
+    // the guard is bound to the DERIVED classifier instead of a hand-written
+    // subset — `isReplayedTurnSource` is exhaustive over the contract type, so
+    // a fifth member is a typecheck error there rather than a silent default.
+    // Measured, all four members, one string, `source` the only difference:
+    // route-v2-structural-restructure-routing.test.ts and
+    // route-v2-held-proposal-confirm.test.ts both run the full union.
     const productChipRenameReplay =
       structuralRestructureDetection.matched &&
       structuralRestructureDetection.trigger === 'quoted_rename_command' &&
-      ingress.source === 'chip_click';
+      isReplayedTurnSource(ingress.source);
     const structuralRestructureIntent =
       structuralRestructureDetection.matched &&
       !productChipRenameReplay &&
@@ -5049,7 +5063,25 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // be redrafted). `replay_no_match` therefore falls to the coach, which
         // is exactly where this copy went before the rename arm existed.
         || productChipRenameReplay)
-      && (isConfirmationShaped || isProposalReplayCandidate)
+      && (isConfirmationShaped
+        || isProposalReplayCandidate
+        // ⚠⚠ #1231 REVIEW CORRECTION — WITHOUT THIS TERM THE WIDENED GUARD
+        // ABOVE RE-OPENS THE AUTHOR'S OWN MEASURED DEFECT ON `chip`/`retry`.
+        // `isProposalReplayCandidate` is the pre-existing DGAI #340 term and
+        // recognises `chip_click` only, so a rename replay arriving as `chip`
+        // (the deployed UI's actual held-confirm ingress) or `retry` satisfied
+        // the first conjunct and FAILED this one: it skipped
+        // `resolveProposalConfirmAtRoute` — and route-level EXPIRY is enforced
+        // there — so an EXPIRED hold resumed and APPLIED instead of returning
+        // the honest no-live-proposal clarification. Measured on all four
+        // members before and after (route-v2-held-proposal-confirm.test.ts,
+        // "an EXPIRED rename hold cannot be revived by ANY replay source").
+        //
+        // Deliberately narrow: only the rename-replay IDENTITY gains gate
+        // eligibility. `isProposalReplayCandidate` is left exactly as it was,
+        // so no other chip copy changes routing — the smallest change that
+        // makes the guard above correct, not a general widening of #340.
+        || productChipRenameReplay)
     ) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
