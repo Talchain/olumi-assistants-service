@@ -323,7 +323,7 @@ describe("P0d · buildPriorAttemptDirective — the retry's corrective context",
     expect(
       buildPriorAttemptDirective({
         statusCode: 504,
-        body: buildCeeErrorResponse("CEE_LLM_TIMEOUT", "timeout", { retryable: true }),
+        body: buildCeeErrorResponse("CEE_TIMEOUT", "timeout", { retryable: true }),
       }),
     ).toBeUndefined();
     expect(buildPriorAttemptDirective(undefined)).toBeUndefined();
