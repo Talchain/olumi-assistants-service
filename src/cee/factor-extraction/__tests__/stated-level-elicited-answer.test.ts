@@ -23,7 +23,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deriveElicitedBaselineAnswerPercent } from '../stated-level.js';
+import {
+  classifyElicitedBaselineAnswer,
+  deriveElicitedBaselineAnswerPercent,
+} from '../stated-level.js';
 
 const LABEL = 'Churn rate';
 
@@ -142,5 +145,74 @@ describe('2.918 — degenerate inputs fail closed like the parent', () => {
     expect(deriveElicitedBaselineAnswerPercent('12%', undefined)).toBeUndefined();
     expect(deriveElicitedBaselineAnswerPercent('12%', null)).toBeUndefined();
     expect(deriveElicitedBaselineAnswerPercent('12%', '')).toBeUndefined();
+  });
+});
+
+describe('R2918B — the THREE-WAY verdict: bound / unresolved / not answering', () => {
+  it('a readable answer is bound', () => {
+    expect(classifyElicitedBaselineAnswer('roughly 30', LABEL)).toEqual({
+      outcome: 'bound',
+      percent: 30,
+    });
+  });
+
+  const unresolved: ReadonlyArray<readonly [string, string]> = [
+    ['120%', 'out_of_range'],
+    ['0.3', 'ambiguous_scale'],
+    ['maybe 12%', 'unreadable'],
+    ['10-15%', 'unreadable'],
+  ];
+  it.each(unresolved)('"%s" is an ANSWER the product cannot read (%s)', (message, reason) => {
+    expect(classifyElicitedBaselineAnswer(message, LABEL)).toEqual({
+      outcome: 'unresolved',
+      reason,
+    });
+  });
+
+  it('an explicit unit settles the scale, so "0.3%" binds where bare "0.3" refuses', () => {
+    // The pair matters: without it, "ambiguous_scale" could be a blanket
+    // sub-1 refusal rather than the unit-less carve-out it claims to be.
+    expect(classifyElicitedBaselineAnswer('0.3%', LABEL)).toEqual({
+      outcome: 'bound',
+      percent: 0.3,
+    });
+  });
+
+  const notAnswering: readonly string[] = [
+    'run the analysis',
+    'what do you mean by that?',
+    'about 12% if things improve',
+    'Win rate is 12% today.',
+  ];
+  it.each(notAnswering)('"%s" is not answering this question at all', (message) => {
+    expect(classifyElicitedBaselineAnswer(message, LABEL)).toEqual({ outcome: 'not_an_answer' });
+  });
+});
+
+describe('R2918B — the attempt classifier has BOUNDS, and both are load-bearing', () => {
+  it('the CLOSED VOCABULARY bounds it: one word outside the set means not answering', () => {
+    // Identical but for a single token the set does not carry.
+    expect(classifyElicitedBaselineAnswer('about 12 or 15', LABEL)).toEqual({
+      outcome: 'unresolved',
+      reason: 'unreadable',
+    });
+    expect(classifyElicitedBaselineAnswer('about 12 or 15 tomorrow', LABEL)).toEqual({
+      outcome: 'not_an_answer',
+    });
+  });
+
+  it('the TOKEN CAP bounds it: an in-vocabulary message past the cap is not an attempt', () => {
+    // Every token below is inside the closed vocabulary, so ONLY the cap
+    // refuses this one. Measured before it was pinned: an unpinned cap
+    // survived its own mutant, which is how a guard quietly becomes decorative.
+    const atCap = 'about around roughly now today still at 12 or 15';
+    const pastCap = `${atCap} maybe`;
+    expect(atCap.split(/\s+/)).toHaveLength(10);
+    expect(pastCap.split(/\s+/)).toHaveLength(11);
+    expect(classifyElicitedBaselineAnswer(atCap, LABEL)).toEqual({
+      outcome: 'unresolved',
+      reason: 'unreadable',
+    });
+    expect(classifyElicitedBaselineAnswer(pastCap, LABEL)).toEqual({ outcome: 'not_an_answer' });
   });
 });
