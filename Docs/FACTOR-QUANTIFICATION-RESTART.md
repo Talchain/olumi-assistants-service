@@ -34,7 +34,7 @@ The rich `.75` derives from 15/20; `.05` is explicitly supplied daily variation.
 - Shared final gate: 69 files / 2,396 tests, including 81 focused controls, plus discriminating metadata/unknown/hash/authority mutants.
 - CEE v1 FQ and relevant transport/regression collection: 494 passing tests. The separate objective snapshot suite initially could not collect because its owner-supplied fixture was missing; after copying that exact fixture, all three cases passed. Logs preserve both facts.
 - Source build typecheck and scoped production lint passed at `cb636b0e1` before the v2 prompt-only change.
-- V2 mandatory-unknown corpus/runner control plus adoption suites: 60/60 passed before pause. No live v2 claim.
+- V2 mandatory-unknown corpus/runner control plus adoption suites: 60/60 passed before pause. Additional prompt/dispatch/stage controls collected 28/28 passing tests; the log is banked as validation/pause-v2-controls.log. No live v2 claim.
 - Isolated source mutants at `8deef`: base GREEN; removed estimator output RED; dropped std RED; dropped provenance RED; unrelated wording GREEN. Each executed the exact rich dispatch target once; seven other tests skipped. Patches, reports and raw results are banked under `mutants/`.
 - The live v1 witness is fixed records replay or authored control, real estimator, and local file persistence. It is NOT first-pass live generation, Supabase, deployed service, UI, or a completed scientific journey.
 
