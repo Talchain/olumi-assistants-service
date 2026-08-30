@@ -1,0 +1,628 @@
+{
+  "150852": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "3b077843",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "85c477db",
+      "kind": "risk",
+      "label": "Backlog Persistence"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "a1261e67",
+      "kind": "option",
+      "label": "Hire One Engineer (Partial Hire)"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "b87d004b",
+      "kind": "risk",
+      "label": "Budget Overrun"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "e2b48e3d",
+      "kind": "factor",
+      "label": "Remaining Annual Budget"
+    },
+    {
+      "id": "fdf91ffb",
+      "kind": "factor",
+      "label": "Ticket Backlog Volume"
+    }
+  ],
+  "54a08b": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added"
+    },
+    {
+      "id": "15bdc1c6",
+      "kind": "factor",
+      "label": "Annual Support Spend",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "26b710e3",
+      "kind": "risk",
+      "label": "Backlog Accumulation"
+    },
+    {
+      "id": "602816d9",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "b87d004b",
+      "kind": "risk",
+      "label": "Budget Overrun"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "eedd5ad7",
+      "kind": "option",
+      "label": "Hire one or two engineers (partial hire)"
+    },
+    {
+      "id": "fdf91ffb",
+      "kind": "factor",
+      "label": "Ticket Backlog Volume"
+    }
+  ],
+  "a2da4f": [
+    {
+      "id": "110090aa",
+      "kind": "risk",
+      "label": "Budget overrun"
+    },
+    {
+      "id": "12b74ef6",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "30557218",
+      "kind": "factor",
+      "label": "Ticket backlog volume",
+      "display_value": "0.4 to 1"
+    },
+    {
+      "id": "4efed93e",
+      "kind": "risk",
+      "label": "Ongoing backlog pressure"
+    },
+    {
+      "id": "54c07c85",
+      "kind": "outcome",
+      "label": "First-response time improvement"
+    },
+    {
+      "id": "6705c986",
+      "kind": "factor",
+      "label": "Support headcount added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0
+      },
+      "display_value": "0"
+    },
+    {
+      "id": "6da13d86",
+      "kind": "option",
+      "label": "Hire one support engineer (partial scale-up)"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "bb8989de",
+      "kind": "factor",
+      "label": "Automation or tooling investment",
+      "observed_state": {
+        "value": 0
+      },
+      "display_value": "Low (0)"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d0883865",
+      "kind": "factor",
+      "label": "Annual support staff cost",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.975
+      },
+      "display_value": "195,000"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    }
+  ],
+  "272c16": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "3b077843",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "542e8555",
+      "kind": "factor",
+      "label": "Annual Support Budget Consumed",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "a1261e67",
+      "kind": "option",
+      "label": "Hire One Engineer (Partial Hire)"
+    },
+    {
+      "id": "a8ea72b6",
+      "kind": "factor",
+      "label": "Ticket Backlog Pressure"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "b8f1cfe6",
+      "kind": "risk",
+      "label": "Ongoing Backlog Accumulation"
+    },
+    {
+      "id": "c0ffc795",
+      "kind": "risk",
+      "label": "Recruitment and Onboarding Delay"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "dac3fdc3",
+      "kind": "risk",
+      "label": "Budget Overrun Risk"
+    }
+  ],
+  "f887d4": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "3b077843",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "542e8555",
+      "kind": "factor",
+      "label": "Annual Support Budget Consumed",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "a1261e67",
+      "kind": "option",
+      "label": "Hire One Engineer (Partial Hire)"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "dac3fdc3",
+      "kind": "risk",
+      "label": "Budget Overrun Risk"
+    },
+    {
+      "id": "e6343ab4",
+      "kind": "risk",
+      "label": "Ongoing Backlog Pressure"
+    },
+    {
+      "id": "fdf91ffb",
+      "kind": "factor",
+      "label": "Ticket Backlog Volume"
+    }
+  ],
+  "f869d0": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "542e8555",
+      "kind": "factor",
+      "label": "Annual Support Budget Consumed",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "912ed2cc",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "a8ea72b6",
+      "kind": "factor",
+      "label": "Ticket Backlog Pressure"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d1554402",
+      "kind": "risk",
+      "label": "Ongoing Burn Rate Sustainability"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "dac3fdc3",
+      "kind": "risk",
+      "label": "Budget Overrun Risk"
+    },
+    {
+      "id": "de9f3c3e",
+      "kind": "option",
+      "label": "Hire One Engineer Plus Tooling Investment"
+    }
+  ],
+  "75900a": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "26b710e3",
+      "kind": "risk",
+      "label": "Backlog Accumulation"
+    },
+    {
+      "id": "542e8555",
+      "kind": "factor",
+      "label": "Annual Support Budget Consumed",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "602816d9",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "b87d004b",
+      "kind": "risk",
+      "label": "Budget Overrun"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "d24acd8c",
+      "kind": "goal",
+      "label": "Bring First-Response Time Back Under Four Hours"
+    },
+    {
+      "id": "eedd5ad7",
+      "kind": "option",
+      "label": "Hire one or two engineers (partial hire)"
+    }
+  ],
+  "63d377": [
+    {
+      "id": "1325530a",
+      "kind": "factor",
+      "label": "Support Headcount Added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "542e8555",
+      "kind": "factor",
+      "label": "Annual Support Budget Consumed"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "9795ad4e",
+      "kind": "decision",
+      "label": "Decision"
+    },
+    {
+      "id": "9ca40e93",
+      "kind": "goal",
+      "label": "bring first-response time back under four hours without going over budget"
+    },
+    {
+      "id": "aaccd9ad",
+      "kind": "outcome",
+      "label": "First-Response Time Improvement"
+    },
+    {
+      "id": "b87d004b",
+      "kind": "risk",
+      "label": "Budget Overrun"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "dadc3704",
+      "kind": "risk",
+      "label": "Persistent Backlog Pressure"
+    },
+    {
+      "id": "fdf91ffb",
+      "kind": "factor",
+      "label": "Ticket Backlog Volume"
+    }
+  ],
+  "d2a1e8": [
+    {
+      "id": "0655a63b",
+      "kind": "factor",
+      "label": "Ticket volume per engineer"
+    },
+    {
+      "id": "110090aa",
+      "kind": "risk",
+      "label": "Budget overrun"
+    },
+    {
+      "id": "177dd2b4",
+      "kind": "factor",
+      "label": "Automation and tooling investment"
+    },
+    {
+      "id": "2b43b065",
+      "kind": "option",
+      "label": "Hire two support engineers plus invest in automation tooling"
+    },
+    {
+      "id": "54c07c85",
+      "kind": "outcome",
+      "label": "First-response time improvement"
+    },
+    {
+      "id": "6705c986",
+      "kind": "factor",
+      "label": "Support headcount added",
+      "scale_frame": 5,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "83440da0",
+      "kind": "factor",
+      "label": "Annual support spend",
+      "scale_frame": 200000,
+      "observed_state": {
+        "value": 0.5
+      },
+      "display_value": "Moderate (0.5)"
+    },
+    {
+      "id": "93b9dfdd",
+      "kind": "option",
+      "label": "Hire Three More Support Engineers Next Quarter"
+    },
+    {
+      "id": "9ca40e93",
+      "kind": "goal",
+      "label": "bring first-response time back under four hours without going over budget"
+    },
+    {
+      "id": "a5c52bec",
+      "kind": "risk",
+      "label": "Backlog growth and agent burnout"
+    },
+    {
+      "id": "b120d36a",
+      "kind": "option",
+      "label": "Hire one support engineer (partial headcount increase)"
+    },
+    {
+      "id": "cdd7875d",
+      "kind": "option",
+      "label": "Hold the Headcount We Have"
+    },
+    {
+      "id": "e10e4b39",
+      "kind": "decision",
+      "label": "Decision"
+    }
+  ],
+  "4fd953": [
+    {
+      "id": "341d049c",
+      "kind": "risk",
+      "label": "Sales Team Adoption Failure"
+    },
+    {
+      "id": "7c95bd7d",
+      "kind": "factor",
+      "label": "CRM Adoption Rate",
+      "display_value": "0.25 to 0.75"
+    },
+    {
+      "id": "c5c04da3",
+      "kind": "outcome",
+      "label": "CRM-Driven Sales Productivity"
+    },
+    {
+      "id": "goal_inferred",
+      "kind": "goal",
+      "label": "Achieve the best outcome for this decision"
+    }
+  ]
+}

@@ -23,9 +23,11 @@ import {
   partitionUnprovenDirection,
   detectUncoveredNegatedBounds,
   detectorItem,
+  targetUnmatchedItem,
   findProvenUncoveredBounds,
   prepareBrief,
   type ProvenUncoveredBound,
+  type DirectionUnresolvedItem,
 } from "../../../compound-goal/direction-gate.js";
 import { generateNodeId } from "../../../compound-goal/extractor.js";
 import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
@@ -319,6 +321,12 @@ export function runCompoundGoals(ctx: StageContext): void {
   const goalNodeId = goalNode?.id;
 
   // ── Regex-extracted constraints ──────────────────────────────────────
+  //
+  // ⚠⚠ HOISTED OUT OF THE BLOCK BELOW. The rows that fall off the remap's
+  // step 6 have to survive to the `ctx.directionUnresolved` assignment near the
+  // end of this function, and they are the whole point of the disclosure added
+  // here — see `unbindableAsks`.
+  let unbindable: ExtractedGoalConstraint[] = [];
   let regexConstraints: any[] = [];
   if (compoundGoalResult.constraints.length > 0) {
     const remapResult = remapConstraintTargets(
@@ -332,6 +340,13 @@ export function runCompoundGoals(ctx: StageContext): void {
       const normalised = normaliseConstraintUnits(remapResult.constraints);
       regexConstraints = toGoalConstraints(normalised);
     }
+    // ⚠ DEFENSIVE, AND THE ABSENT VALUE IS THE SAFE ONE. `unbindable` is new on
+    // `RemapResult`, and this stage is reached with a MOCKED
+    // `remapConstraintTargets` in several existing suites — a mock that returns
+    // the old three-field shape would otherwise throw here and take the whole
+    // draft down. Absent ⇒ no ask ⇒ exactly today's behaviour, never a crash
+    // and never a fabricated question.
+    unbindable = Array.isArray(remapResult.unbindable) ? remapResult.unbindable : [];
 
     log.info({
       event: "cee.compound_goal.regex_extracted",
@@ -599,10 +614,93 @@ export function runCompoundGoals(ctx: StageContext): void {
   // the unresolved set on the wire, that is an additive `direction_unresolved[]`
   // block beside `goal_constraints` on the draft_graph body — a schemas-train
   // row, deliberately not assumed here.
+  // ⭐ THE THIRD SOURCE — A LIMIT THAT BOUND TO NOTHING (2026-08-30).
+  //
+  // WIRE-WITNESSED DEFECT, 10 runs of one brief across two deployed staging
+  // builds: "our support budget for the year is £240,000 … without going over
+  // budget" is extracted DETERMINISTICALLY every time and dropped at
+  // `remapConstraintTargets` step 6 in 8 of them, because two or more drafted
+  // node labels contain the word "budget" and the shared matcher binds only on
+  // a UNIQUE label hit. Before this, the only trace was the integer in the
+  // `constraints_rejected_no_match` log field above — nothing a user could see.
+  // The £240,000 reached no numeric field of the graph in any of the 8.
+  //
+  // ⭐ ASKING IS THE SANCTIONED EXIT, and it is the ONLY one available here.
+  // The ambiguity is genuine ("Annual Support Budget Consumed" and "Budget
+  // Overrun Risk" are both plausible), so the alternatives are both worse:
+  // widening the label predicate is the four-round oscillation trap, and
+  // narrowing the candidate set to the mint's {outcome,factor} was MEASURED in
+  // advance against all 10 real node sets — it removes the two bad bindings and
+  // buys four bindings to a factor whose values are MARGINAL in those very runs
+  // plus one to "Remaining Annual Budget", the opposite direction. That trades
+  // a silent gap for a confident wrong number.
+  //
+  // ⚠ THE ROW IS STILL DROPPED. This adds a question; it does not smuggle an
+  // unbound constraint onto the wire. Binding is sequenced AFTER the frame
+  // question (the target nodes carry `scale_frame: 200000` against a stated
+  // £240,000, i.e. 1.2 — outside the [0,1] range interventions use), and this
+  // change deliberately does not touch it.
+  //
+  // ⚠⚠ AND IT SPEAKS ONLY WHERE NOTHING ELSE DOES — A CORRECTED PREMISE THE
+  // EXISTING SUITE CAUGHT. The first version of this raised an ask for every
+  // step-6 drop, and `direction-gate-merge-boundary.test.ts` reddened on four
+  // cases. Two facts made it wrong:
+  //
+  //   (a) THE EXTRACTOR EMITS SEVERAL OVERLAPPING ROWS PER SENTENCE. Measured
+  //       at this tip: "Keep marketing spend under £1500000." yields THREE —
+  //       `marketing spend` (binds), `Keep marketing spend`, and a catch-all
+  //       `unspecified`. Asking per drop asks about a limit that a SIBLING ROW
+  //       FROM THE SAME SENTENCE just bound successfully.
+  //   (b) THE DIRECTION QUESTION OUTRANKS THIS ONE. "Don't let NRR drop below
+  //       78%" both fails to bind AND has an unproven direction. Asking the
+  //       referent instead of the direction would quietly undo ROADMAP 2.1051 —
+  //       and an unproven direction is a LIE RISK (a floor shipped as a
+  //       ceiling) where an unbound limit is a GAP. A lie outranks a gap.
+  //
+  // So the filter runs against everything that has ALREADY spoken for the
+  // quantity — surviving rows, withheld rows, declined rows and the detector's
+  // own findings — and this ask fires only on the residue. That makes the
+  // change strictly ADDITIVE: on every input where any other channel speaks,
+  // this stage's output is byte-identical to before.
+  //
+  // Deduped BY VALUE, keeping the first, because the extractor emits its more
+  // specific rows first — so "budget" wins over "unspecified" for the metric
+  // name the user is shown.
+  //
+  // APPENDED LAST so the two existing sources keep their positions in the
+  // renderer's first-three window.
+  const alreadyAsked = new Set<number>([
+    ...coveredValues,
+    ...detectorFindings
+      .map((f) => detectorItem(f).value)
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v)),
+  ]);
+  const unbindableAsks: DirectionUnresolvedItem[] = [];
+  for (const c of unbindable) {
+    const value = typeof c?.value === 'number' && Number.isFinite(c.value) ? c.value : null;
+    if (value === null || alreadyAsked.has(value)) continue;
+    alreadyAsked.add(value);
+    unbindableAsks.push(targetUnmatchedItem(c));
+  }
+
   ctx.directionUnresolved = [
     ...directionUnresolved.map((u) => u.item),
     ...detectorFindings.map((f) => detectorItem(f)),
+    ...unbindableAsks,
   ];
+
+  if (unbindableAsks.length > 0) {
+    // FAIL LOUD, same contract as this stage's other gates: counts and target
+    // names only — no thresholds, no user text.
+    log.info({
+      event: "cee.compound_goal.target_unmatched_asked",
+      request_id: ctx.requestId,
+      unbindable_count: unbindableAsks.length,
+      dropped_count: unbindable.length,
+      target_names: unbindableAsks.map((i) => i.metric_text),
+      graph_node_count: existingNodeIdList.length,
+    }, `${unbindableAsks.length} stated limit(s) matched no node on the model — asking the user which part they apply to`);
+  }
 
   // ⚠ THE MINT IS A THIRD PRODUCER, AND THIS RETURN HAS TO KNOW IT. The live
   // defect is precisely the state where BOTH original producers emit nothing:

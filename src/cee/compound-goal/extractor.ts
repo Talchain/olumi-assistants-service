@@ -1722,6 +1722,29 @@ export interface RemapResult {
   remapped: number;
   rejected_junk: number;
   rejected_no_match: number;
+  /**
+   * THE ROWS THEMSELVES that fell off step 6 (no match), so a caller can ASK
+   * the user about them rather than only COUNT them.
+   *
+   * ⚠⚠ WHY THIS FIELD EXISTS AT ALL. Until now `rejected_no_match` was a bare
+   * integer with EXACTLY ONE READER in the whole service — a `log.info` field
+   * (`unified-pipeline/stages/repair/compound-goals.ts`). Measured across 10
+   * runs of one brief on two deployed staging builds (2026-08-30): a user's
+   * "£240,000" ceiling was extracted DETERMINISTICALLY every single time and
+   * dropped here in 8 of them, reaching no numeric field of the graph and no
+   * sentence the user could see. A count cannot be shown to anybody; the row
+   * can.
+   *
+   * ⚠ IT IS A STRICT SUBSET OF `rejected_no_match`, NOT ITS TWIN, and the gap
+   * is deliberate. `noMatchCount` also counts the STEP-0 temporal drop
+   * ("no_goal_node"), and ROADMAP 2.349 established that a deadline is not a
+   * hard constraint and must NOT generate a limit question — surfacing those
+   * here would re-open exactly the defect 2.349 closed. So step 0 increments
+   * the count and contributes nothing to this array. `unbindable.length <=
+   * rejected_no_match` is the invariant, and it is asserted by spec rather
+   * than intended.
+   */
+  unbindable: ExtractedGoalConstraint[];
 }
 
 /**
@@ -1755,6 +1778,8 @@ export function remapConstraintTargets(
   let remapCount = 0;
   let junkCount = 0;
   let noMatchCount = 0;
+  // Step-6 drops only — see `RemapResult.unbindable` for why step 0 is excluded.
+  const unbindable: ExtractedGoalConstraint[] = [];
 
   for (const constraint of constraints) {
     // Step 0: Temporal constraints — bind to goal node or drop with reason
@@ -1862,8 +1887,11 @@ export function remapConstraintTargets(
       continue;
     }
 
-    // Step 6: No match — drop this constraint
+    // Step 6: No match — drop this constraint, and KEEP IT so the caller can
+    // ask the user which part of the model it belongs to. The drop itself is
+    // unchanged: the row still does not reach `goal_constraints[]`.
     noMatchCount++;
+    unbindable.push(constraint);
     log.info({
       event: "cee.compound_goal.target_no_match",
       request_id: requestId,
@@ -1895,6 +1923,7 @@ export function remapConstraintTargets(
     remapped: remapCount,
     rejected_junk: junkCount,
     rejected_no_match: noMatchCount,
+    unbindable,
   };
 }
 

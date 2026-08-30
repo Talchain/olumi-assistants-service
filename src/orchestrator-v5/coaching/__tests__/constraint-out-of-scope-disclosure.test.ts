@@ -232,8 +232,14 @@ describe('2.349 — the length budget covers the COMBINED shape', () => {
     // Derivation proves the copies agree; it can never prove the LIST is
     // complete. This is the union check: a fourth voice added to the type and
     // to `ALL_VOICES` without a decision about how it composes fails here.
+    // ⭐ THIS GUARD FIRED AS DESIGNED (2026-08-30) when `unmeasured_target` was
+    // added. The decision it demanded was taken and is visible in
+    // `CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS`: the new voice is ADDITIVE — it can
+    // ride with a state voice AND with `out_of_scope` — so the budget SUMS it
+    // rather than taking a max over it, and its grammar branch admits every
+    // pairing. Updated only after that composition decision was made.
     expect([...DISCLOSURE_VOICES_FOR_BUDGET].sort()).toEqual(
-      ['identity_unresolved', 'out_of_scope', 'unevaluated'].sort(),
+      ['identity_unresolved', 'out_of_scope', 'unevaluated', 'unmeasured_target'].sort(),
     );
   });
 

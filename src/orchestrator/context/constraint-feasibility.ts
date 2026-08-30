@@ -375,6 +375,68 @@ export interface ConstraintVerdict {
    * the other.
    */
   readonly outOfScopeConstraints: readonly RatifiedConstraint[];
+  /**
+   * ⭐ THE RATIFIED CONSTRAINTS WHOSE TARGET NODE CARRIES NO QUANTITY AT ALL —
+   * the sibling of {@link outOfScopeConstraints}, and partitioned off for
+   * EXACTLY the same reason one hop earlier.
+   *
+   * THE DEFECT THIS CLOSES, WIRE-WITNESSED (2026-08-30, 10 runs of one brief,
+   * two deployed staging builds). The brief states "our support budget for the
+   * year is £240,000". CEE's own regex extractor mints the ceiling
+   * deterministically and, in 2 of the 10 runs, the shared matcher binds it to
+   * a `risk` node labelled "Budget Overrun" — a node with NO `observed_state`,
+   * NO `scale_frame`, NO `display_value`, no unit, and no option intervening on
+   * it. The money lives on a DIFFERENT node ("Annual Support Spend",
+   * `scale_frame: 200000`) that every option does intervene on. Binding to the
+   * value-bearing node is UNREACHABLE for this brief: the matcher binds only on
+   * a unique label hit, and where the value-bearing factor is also named
+   * "budget" it supplies the second hit and the constraint is dropped instead.
+   *
+   * The engine therefore returns no score for it — GUARANTEED, by the shape of
+   * our own model, not by anything the engine did or failed to do. Rules 1-3
+   * below would read that absence as evidence and reach "withhold the leading
+   * option", and on the wire they did: `leading_option_id = null`,
+   * `withheld_reason = 'constraint_verdict_withheld'`, and the user was asked to
+   * restate a limit they had already stated unambiguously. **The 8 runs that
+   * silently ignored the limit gave the user a better product than the 2 that
+   * modelled it.**
+   *
+   * ⚠ THIS IS A NARROWING, AND ITS SAFETY ARGUMENT IS THE DIRECTION IT FAILS.
+   * The gate fires only where the target is present in the graph we hold AND
+   * carries no quantity under ANY of the fields a quantity can arrive on. A
+   * target we cannot find, a graph we cannot read, or any numeric field at all
+   * leaves the constraint in `effective` and today's withholding stands —
+   * because the dangerous direction here is a FALSE "no value", which would
+   * restore a confident leader over a limit that could have been checked.
+   *
+   * ⚠ AND IT MUST NOT BECOME A BINDING FIX. The frame question is unsettled:
+   * the same factor reads `raw_value 110000` (level) in one run and `0`
+   * (marginal) in five others with no field distinguishing them, and a stated
+   * £240,000 against `scale_frame: 200000` normalises to 1.2 — outside the
+   * [0,1] range interventions use. The surviving rows ARE frame-stamped (level),
+   * so ISL's `CONSTRAINT_FRAME_UNSPECIFIED` would NOT fire and it would compute
+   * a real Monte Carlo probability against the wrong quantity, fail-OPEN. That
+   * defect is LATENT only because binding never reaches a value-bearing node.
+   * This field moves no binding, so it stays latent.
+   *
+   * (The frame is spelled in prose above rather than as a literal on purpose:
+   * `constraint-value-frame-unattested.test.ts` scans src/ at the BYTES for a
+   * frame literal and would read a doc comment as a new stamp site.)
+   *
+   * Carried on EVERY state, like `outOfScopeConstraints`, because a turn can
+   * have both an unmeasurable target and a genuinely unscored constraint and
+   * neither disclosure may eat the other.
+   *
+   * ⚠ OPTIONAL ON THE TYPE, for the identical reason `RatifiedConstraint.
+   * source_quote` is: there is exactly ONE producer ({@link verdict}), so
+   * requiring it buys no safety, and requiring it WOULD break every hand-built
+   * `ConstraintVerdict` fixture in the estate — including files
+   * `tsconfig.build.json` excludes, i.e. breakage that surfaces only in a later
+   * CI job (CLAUDE.md trap 2's refinement). Every consumer reads it as
+   * `?? []`, and the absent value is the SAFE one: no extra disclosure, and no
+   * change to any withholding.
+   */
+  readonly unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
 }
 
 function verdict(
@@ -384,6 +446,7 @@ function verdict(
     constraints?: readonly RatifiedConstraint[];
     leaderInfeasibility?: WinnerConstraintFeasibility | null;
     outOfScopeConstraints?: readonly RatifiedConstraint[];
+    unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
   } = {},
 ): ConstraintVerdict {
   return {
@@ -393,6 +456,7 @@ function verdict(
     constraints: parts.constraints ?? [],
     leaderInfeasibility: parts.leaderInfeasibility ?? null,
     outOfScopeConstraints: parts.outOfScopeConstraints ?? [],
+    unmeasuredTargetConstraints: parts.unmeasuredTargetConstraints ?? [],
   };
 }
 
@@ -430,6 +494,111 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
       label: readString(obj.label),
       source_quote: readString(obj.source_quote),
     });
+  }
+  return out;
+}
+
+/**
+ * Every field a NUMERIC QUANTITY can arrive on a graph node under, at the shape
+ * `run_analysis` holds (`snapshot.rawPersistedGraph`, i.e. the canonicalised V3
+ * projection). A node carrying NONE of these carries no number for a threshold
+ * to be compared against, whatever else it carries.
+ *
+ * ⚠⚠ THE LIST IS DELIBERATELY OVER-BROAD, AND THAT IS THE SAFETY ARGUMENT.
+ * {@link collectUnmeasuredConstraintTargetIds} is the only caller and its
+ * verdict RELAXES a withholding, so the dangerous error is a FALSE "carries
+ * nothing" — a node whose quantity arrives on a field this list forgot. Every
+ * additional member therefore makes the gate fire LESS often and can only cost
+ * a withholding we would have made anyway. A SHORT list is the unsafe
+ * direction; a long one is not.
+ *
+ * It is a strict SUPERSET of the `carriesValue` conjunction in
+ * `cee/transforms/schema-v3.ts` (observed_state · prior · display_value ·
+ * intercept · goal_threshold · goal_threshold_raw), plus the two scale carriers
+ * that module has no reason to consult (`scale_frame`, `goal_threshold_cap`)
+ * and the V1 `data` carrier. Superset, not mirror: were the two to disagree,
+ * this one says "carries a value" wherever that one does, which is the safe
+ * side of the disagreement (CLAUDE.md §9 class 5 — two gates reading different
+ * fields is how they come to contradict each other).
+ */
+const NODE_QUANTITY_FIELDS: readonly string[] = [
+  "observed_state",
+  "prior",
+  "display_value",
+  "intercept",
+  "goal_threshold",
+  "goal_threshold_raw",
+  "goal_threshold_cap",
+  "scale_frame",
+  "data",
+];
+
+function nodeCarriesNoQuantity(node: Record<string, unknown>): boolean {
+  for (const field of NODE_QUANTITY_FIELDS) {
+    const v = node[field];
+    if (v !== undefined && v !== null) return false;
+  }
+  return true;
+}
+
+/**
+ * The constraint ids whose TARGET NODE carries no quantity to compare against.
+ *
+ * PURE, and it FAILS TOWARD TODAY'S BEHAVIOUR at every step — no graph, an
+ * unreadable graph, a target that is not in the graph, or a target carrying any
+ * quantity all yield "not unmeasured", which leaves {@link
+ * deriveConstraintVerdict} byte-identical to before this existed. That is the
+ * required direction: see {@link ConstraintVerdict.unmeasuredTargetConstraints}
+ * for why a false "no value" is the dangerous error and a false "has value" is
+ * merely today's product.
+ *
+ * ⚠ A MISSING TARGET IS NOT AN UNMEASURED TARGET. If the constraint names a
+ * node this graph does not contain, we have not established that it carries
+ * nothing — we have established that we could not look, and a sweep that could
+ * not look returns the same clean answer as one that looked and found nothing
+ * (standing brief §2). So it stays in `effective` and keeps withholding.
+ *
+ * @param constraintsSource the SAME two shapes {@link readRatifiedConstraints}
+ *   accepts — the `goal_constraints` array itself, or an object carrying one —
+ *   because `RatifiedConstraint` drops `node_id` and this needs it.
+ * @param graphSource an object carrying `nodes[]`.
+ */
+export function collectUnmeasuredConstraintTargetIds(
+  constraintsSource: unknown,
+  graphSource: unknown,
+): Set<string> {
+  const out = new Set<string>();
+
+  const rawConstraints = Array.isArray(constraintsSource)
+    ? constraintsSource
+    : constraintsSource !== null && typeof constraintsSource === "object"
+      ? (constraintsSource as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(rawConstraints) || rawConstraints.length === 0) return out;
+
+  const rawNodes =
+    graphSource !== null && typeof graphSource === "object"
+      ? (graphSource as Record<string, unknown>).nodes
+      : undefined;
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) return out;
+
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const n of rawNodes) {
+    if (n === null || typeof n !== "object") continue;
+    const id = readString((n as Record<string, unknown>).id);
+    if (id !== null) byId.set(id, n as Record<string, unknown>);
+  }
+
+  for (const item of rawConstraints) {
+    if (item === null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const constraintId = readString(obj.constraint_id);
+    const nodeId = readString(obj.node_id);
+    if (constraintId === null || nodeId === null) continue;
+    const node = byId.get(nodeId);
+    // Absent target ⇒ we could not look ⇒ NOT unmeasured. See the docstring.
+    if (node === undefined) continue;
+    if (nodeCarriesNoQuantity(node)) out.add(constraintId);
   }
   return out;
 }
@@ -608,6 +777,16 @@ export function deriveConstraintVerdict(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
   leadingOptionId: string | null | undefined,
+  /**
+   * Constraint ids whose target node carries no quantity — derived by
+   * {@link collectUnmeasuredConstraintTargetIds} at the ONE call site that
+   * holds the graph. OPTIONAL, and the omitted value is the SAFE one: an empty
+   * set makes this function byte-identical to its pre-narrowing behaviour, so a
+   * caller who forgets loses the narrowing and cannot gain a false leader
+   * (the same optionality argument `buildConstraintDisclosure`'s `brief`
+   * parameter makes, and for the same reason).
+   */
+  unmeasuredTargetIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -635,9 +814,30 @@ export function deriveConstraintVerdict(
   // about.
   const producerFiltered = collectProducerFilteredConstraintIds(envelope);
   const outOfScope: RatifiedConstraint[] = [];
+  // ⭐ STEP 0b — THE SAME PARTITION, ONE HOP EARLIER IN THE CAUSAL CHAIN.
+  //
+  // Step 0 above removes what the PRODUCER told us it never looked at. This
+  // removes what OUR OWN MODEL made unlookable: a constraint bound to a node
+  // that carries no quantity cannot be scored by any engine, so its absence
+  // from the results is guaranteed by construction and is not evidence about
+  // anything. Feeding it to rules 1-3 reaches "withhold the leading option"
+  // from a fact about our node shapes — which is exactly what the wire showed
+  // (see `unmeasuredTargetConstraints`).
+  //
+  // ⚠ PRECEDENCE: the producer's own disclosure WINS. A constraint that is both
+  // producer-filtered and unmeasured is reported as out-of-scope, because that
+  // is the stronger and more specific statement and the two disclosures must
+  // not both speak about one row.
+  const unmeasured: RatifiedConstraint[] = [];
   const effective: RatifiedConstraint[] = [];
   for (const c of ratified) {
-    (producerFiltered.has(c.constraint_id) ? outOfScope : effective).push(c);
+    if (producerFiltered.has(c.constraint_id)) {
+      outOfScope.push(c);
+    } else if (unmeasuredTargetIds?.has(c.constraint_id) === true) {
+      unmeasured.push(c);
+    } else {
+      effective.push(c);
+    }
   }
 
   if (effective.length === 0) {
@@ -645,8 +845,12 @@ export function deriveConstraintVerdict(
       ? verdict('evaluated_infeasible', {
           leaderInfeasibility: leaderRaw,
           outOfScopeConstraints: outOfScope,
+          unmeasuredTargetConstraints: unmeasured,
         })
-      : verdict('not_applicable', { outOfScopeConstraints: outOfScope });
+      : verdict('not_applicable', {
+          outOfScopeConstraints: outOfScope,
+          unmeasuredTargetConstraints: unmeasured,
+        });
   }
 
   const codes = collectNotDecisionGradeCodes(envelope);
@@ -660,6 +864,7 @@ export function deriveConstraintVerdict(
       constraints: [...effective],
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
     });
   }
 
@@ -672,6 +877,7 @@ export function deriveConstraintVerdict(
       constraints: [...effective],
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
     });
   }
 
@@ -682,6 +888,7 @@ export function deriveConstraintVerdict(
       constraints: unscored,
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
     });
   }
 
@@ -690,8 +897,12 @@ export function deriveConstraintVerdict(
     ? verdict('evaluated_infeasible', {
         leaderInfeasibility: leaderRaw,
         outOfScopeConstraints: outOfScope,
+        unmeasuredTargetConstraints: unmeasured,
       })
-    : verdict('evaluated_feasible', { outOfScopeConstraints: outOfScope });
+    : verdict('evaluated_feasible', {
+        outOfScopeConstraints: outOfScope,
+        unmeasuredTargetConstraints: unmeasured,
+      });
 }
 
 // ===========================================================================

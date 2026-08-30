@@ -169,7 +169,29 @@ const QUOTE_LEAD_IN = ' From your brief: ';
  * see {@link buildConstraintDisclosure} for the composition order and
  * {@link CONSTRAINT_GAP_DISCLOSURE_RE_SRC} for the grammar that admits it.
  */
-type DisclosureVoice = 'unevaluated' | 'identity_unresolved' | 'out_of_scope';
+type DisclosureVoice =
+  | 'unevaluated'
+  | 'identity_unresolved'
+  | 'out_of_scope'
+  /**
+   * ⭐ THE FOURTH VOICE (2026-08-30) — the limit is on the model, it is
+   * well-formed, and the node it points at CARRIES NO NUMBER, so nothing could
+   * ever have scored it.
+   *
+   * ⚠ IT IS NOT `out_of_scope` AND MUST NOT BORROW THAT VOICE. That one's own
+   * docstring says it is "deliberately NOT a repair step, because there is no
+   * repair" — true when the PRODUCER removed a dimension it does not model, and
+   * FALSE here: the user can say which part of their model the limit applies
+   * to, and the product can record it there. Shipping the closer-with-no-repair
+   * for a class that HAS one is the same shape of untruth gap 5 put on screen,
+   * one voice over.
+   *
+   * ⚠ AND IT IS NOT `unevaluated` EITHER. That voice ends "so no option can be
+   * put forward yet" — the withholding this change exists to stop. Saying it
+   * while an option IS put forward would make the two halves of one message
+   * contradict each other.
+   */
+  | 'unmeasured_target';
 
 /**
  * The STATE voices, in one place, so the grammar and the worst-case budget are
@@ -178,7 +200,7 @@ type DisclosureVoice = 'unevaluated' | 'identity_unresolved' | 'out_of_scope';
 const STATE_VOICES = ['unevaluated', 'identity_unresolved'] as const;
 
 /** Every voice, derived — the budget below must cover all of them. */
-const ALL_VOICES = [...STATE_VOICES, 'out_of_scope'] as const;
+const ALL_VOICES = [...STATE_VOICES, 'out_of_scope', 'unmeasured_target'] as const;
 
 /**
  * The repair step for the UNEVALUATED voice. Deterministic and constant — it
@@ -295,6 +317,37 @@ const UNRESOLVED_LEAD_IN =
 const OUT_OF_SCOPE_LEAD_IN = 'This analysis does not test ';
 
 /**
+ * Constant lead-in for the UNMEASURED_TARGET voice; escaped into the grammar
+ * below. It states the OBSERVABLE and nothing more: the node the limit points
+ * at records no value. It does not say the engine failed (it was never asked a
+ * question it could answer), and it does not say the limit is wrong (it is not
+ * — the user's sentence was clear; our model has no number to test it against).
+ */
+const UNMEASURED_TARGET_LEAD_IN = 'Your model records no value to test ';
+
+/**
+ * The repair step for the UNMEASURED_TARGET voice.
+ *
+ * It asks for the REFERENT, which is the one thing missing and the one thing
+ * only the user knows. "I will record it there" is the same live capability
+ * {@link UNEVALUATED_REPAIR_STEP} already claims (`add_constraint`, a
+ * registered V5 handler pinned against the registry by this module's tests) —
+ * the same verb deliberately, so the two repair steps cannot drift into
+ * promising different things.
+ *
+ * ⚠ IT DISCLOSES THE SAME RESIDUAL its sibling does. There is no conversational
+ * remove/replace constraint operation (ROADMAP 2.659), so a correction APPENDS
+ * beside the existing row rather than replacing it. Saying so is the INV-2
+ * discipline: a repair that cannot touch the defective row must disclose that
+ * the row remains.
+ */
+function unmeasuredTargetRepairStep(total: number): string {
+  return total === 1
+    ? ' Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.'
+    : ' Tell me which parts of your model they apply to and I will record them there; these stay on the model. Then run the analysis again.';
+}
+
+/**
  * The sentence that states WHAT the disclosure is about, optionally naming the
  * conditions. Split out from the body so the published grammar and the
  * worst-case budget are both derived from the same shapes the builder can
@@ -328,6 +381,20 @@ function subjectSentence(
     return total === 1
       ? `One limit on your model could not be checked: ${joinLabels(named)}.`
       : `${total} limits on your model could not be checked, including ${joinLabels(named)}.`;
+  }
+  if (voice === 'unmeasured_target') {
+    // Same authorship neutrality as its siblings: `RatifiedConstraint` carries
+    // an id and a label and nothing about who wrote the row, so this voice says
+    // nothing about who set the limit. The truth condition is about the MODEL's
+    // node, which is what the lead-in names.
+    const what =
+      total === 1
+        ? 'one of the limits on your model'
+        : `${total} of the limits on your model`;
+    if (named.length === 0) return `${UNMEASURED_TARGET_LEAD_IN}${what}.`;
+    return total === 1
+      ? `${UNMEASURED_TARGET_LEAD_IN}${what}: ${joinLabels(named)}.`
+      : `${UNMEASURED_TARGET_LEAD_IN}${what}, including ${joinLabels(named)}.`;
   }
   if (voice === 'out_of_scope') {
     // ⚠ ROADMAP 2.675 — "the conditions you set" WITHDRAWN here too, for the
@@ -387,6 +454,15 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     // unable to evaluate it.
     return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so no option can be put forward yet.`;
   }
+  if (voice === 'unmeasured_target') {
+    // NOT "so no option can be put forward" — that consequence is FALSE here,
+    // and making it false is the whole point of this voice. The comparison ran
+    // on every dimension the model does carry; the only true consequence is
+    // that this limit took no part in it.
+    return total === 1
+      ? ' It was not part of the comparison.'
+      : ' They were not part of the comparison.';
+  }
   if (voice === 'out_of_scope') {
     // NOT "so no option can be put forward" — that consequence is FALSE here.
     // The comparison ran on every dimension the model does carry; the only
@@ -405,6 +481,7 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
 function repairStep(voice: DisclosureVoice, total: number): string {
   if (voice === 'unevaluated') return UNEVALUATED_REPAIR_STEP;
   if (voice === 'out_of_scope') return outOfScopeCloser(total);
+  if (voice === 'unmeasured_target') return unmeasuredTargetRepairStep(total);
   return unresolvedRepairStep(total);
 }
 
@@ -527,14 +604,29 @@ export function buildConstraintDisclosure(
   // locked template, which is the #703 failure this module exists to prevent.
   const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints, brief);
   const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints, brief);
-  if (stateVoice.length === 0 || outOfScope.length === 0) return `${stateVoice}${outOfScope}`;
-  // COMBINED survival probe. Each half already proved it survives ALONE
+  const unmeasured = buildVoice(
+    'unmeasured_target',
+    // `?? []` — the field is optional on the type so hand-built fixtures keep
+    // compiling; see its docstring. Absent means "no such constraints", which
+    // is the same thing an empty array means and is the safe reading.
+    verdict.unmeasuredTargetConstraints ?? [],
+    brief,
+  );
+  // COMBINED survival probe. Each part already proved it survives ALONE
   // (`buildVoice`), but the allowlist sees the CONCATENATION, and only a check
-  // of the actual composed bytes can prove that shape passes. If it does not,
-  // keep the state voice — never let the additive 2.349 sentence cost the user
-  // the more serious disclosure.
-  const combined = `${stateVoice}${outOfScope}`;
-  return survivesEgress(combined) ? combined : stateVoice;
+  // of the actual composed bytes can prove that shape passes.
+  //
+  // ⚠ DEGRADE ONE PART AT A TIME, MOST-ADDITIVE FIRST — never let an additive
+  // sentence cost the user a more serious disclosure. The order below is the
+  // order the grammar publishes, and the fallbacks drop the newest, least
+  // serious voice first.
+  const parts = [stateVoice, outOfScope, unmeasured].filter((p) => p.length > 0);
+  if (parts.length <= 1) return parts.join('');
+  const all = parts.join('');
+  if (survivesEgress(all)) return all;
+  const withoutUnmeasured = [stateVoice, outOfScope].filter((p) => p.length > 0).join('');
+  if (withoutUnmeasured.length > 0 && survivesEgress(withoutUnmeasured)) return withoutUnmeasured;
+  return stateVoice.length > 0 ? stateVoice : (outOfScope.length > 0 ? outOfScope : unmeasured);
 }
 
 /**
@@ -706,6 +798,30 @@ const OUT_OF_SCOPE_RE_SRC =
   `(?:${escapeForRegex(outOfScopeCloser(1))}|${escapeForRegex(outOfScopeCloser(2))})`;
 
 /**
+ * Grammar branch for the UNMEASURED_TARGET voice. Same construction as its
+ * three siblings — every fixed sentence escaped from the very constant the
+ * builder emits, the label slot interpolated from
+ * {@link CONSTRAINT_GAP_LABEL_MAX_CHARS}.
+ *
+ * ⚠ NO QUOTE SLOT, exactly like `out_of_scope` and for the same reason: this
+ * voice's worst case is budgeted without one, so admitting a quote here would
+ * let a shape through the grammar that the length cap has not paid for. The
+ * ladder in {@link buildVoice} tries the quoted form, finds it fails egress,
+ * and returns the labelled form — which already carries the number in the
+ * label ("Keep budget at or below £240,000").
+ */
+const UNMEASURED_TARGET_RE_SRC =
+  ' ' +
+  escapeForRegex(UNMEASURED_TARGET_LEAD_IN) +
+  '(?:' +
+  `one of the limits on your model(?:: ${JOINED_LABELS})?\\.` +
+  '|' +
+  `\\d{1,3} of the limits on your model(?:, including ${JOINED_LABELS})?\\.` +
+  ')' +
+  `(?:${escapeForRegex(consequenceSentence('unmeasured_target', 1))}|${escapeForRegex(consequenceSentence('unmeasured_target', 2))})` +
+  `(?:${escapeForRegex(unmeasuredTargetRepairStep(1))}|${escapeForRegex(unmeasuredTargetRepairStep(2))})`;
+
+/**
  * Grammar source for the disclosure suffix, consumed by the registry-side
  * egress allowlist (`isAllowedRunAnalysisAssistantText`) and by this module's
  * own build-time survival probe. Each voice mirrors the four shapes its
@@ -735,8 +851,9 @@ const OUT_OF_SCOPE_RE_SRC =
  * voice — which the anchored template branch of the allowlist depends on.
  */
 export const CONSTRAINT_GAP_DISCLOSURE_RE_SRC =
-  `(?:(?:(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC}))(?:${OUT_OF_SCOPE_RE_SRC})?)` +
-  `|(?:${OUT_OF_SCOPE_RE_SRC})`;
+  `(?:(?:(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC}))(?:${OUT_OF_SCOPE_RE_SRC})?(?:${UNMEASURED_TARGET_RE_SRC})?)` +
+  `|(?:(?:${OUT_OF_SCOPE_RE_SRC})(?:${UNMEASURED_TARGET_RE_SRC})?)` +
+  `|(?:${UNMEASURED_TARGET_RE_SRC})`;
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
@@ -765,12 +882,22 @@ function worstCaseFor(voice: DisclosureVoice): number {
     Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
       'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
     ),
-    voice === 'out_of_scope' ? '' : worstQuote,
+    voice === 'out_of_scope' || voice === 'unmeasured_target' ? '' : worstQuote,
   ).length;
 }
 
+/**
+ * ⚠ THE SUM IS OVER EVERY VOICE THAT CAN RIDE TOGETHER, NOT A MAX. A turn may
+ * carry a state voice AND the out-of-scope sentence AND the unmeasured-target
+ * sentence — three different reasons a different constraint took no part — and
+ * a budget that under-counts by one character silently reverts the WHOLE
+ * summary to the locked template with no error anywhere. That is the failure
+ * this derivation exists to prevent, so it over-counts on purpose.
+ */
 export const CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS =
-  Math.max(...STATE_VOICES.map(worstCaseFor)) + worstCaseFor('out_of_scope');
+  Math.max(...STATE_VOICES.map(worstCaseFor)) +
+  worstCaseFor('out_of_scope') +
+  worstCaseFor('unmeasured_target');
 
 /**
  * Derivation guard for the budget above (CLAUDE.md trap 12d, second face): the

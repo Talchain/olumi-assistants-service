@@ -50,6 +50,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
+  collectUnmeasuredConstraintTargetIds,
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
@@ -1469,11 +1470,47 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // checked limit) and the seam's third answer (we could not reconcile which
     // condition was evaluated) come from this single call, so no two surfaces
     // can disagree about what the constraint evidence said.
+    //
+    // ⭐ AND THE FOURTH ARGUMENT — the constraints whose TARGET NODE CARRIES NO
+    // NUMBER, derived here because this is the one place that holds both the
+    // ratified rows and the graph they point at.
+    //
+    // WIRE-WITNESSED (2026-08-30, 10 runs of one brief, two staging builds): a
+    // "£240,000" ceiling CEE itself extracted, bound by the shared matcher to a
+    // `risk` node with no `observed_state`, no `scale_frame` and no unit, then
+    // read back as "a condition the engine did not check" — nulling the leading
+    // option on every run where it existed, while the 8 runs that dropped the
+    // constraint entirely gave the user a working analysis. The absence of a
+    // score for such a row is guaranteed by OUR node shape, not by the engine,
+    // so it is not evidence and must not withhold. See
+    // `ConstraintVerdict.unmeasuredTargetConstraints`.
+    //
+    // Reads the SAME two mirrors `readRatifiedConstraints` does, in the same
+    // order, so the rows and the node lookup can never come from different
+    // snapshots.
+    const unmeasuredTargetIds = collectUnmeasuredConstraintTargetIds(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      snapshot.rawPersistedGraph ?? snapshot.graph,
+    );
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      unmeasuredTargetIds,
     );
+    const unmeasuredTargets = constraintVerdict.unmeasuredTargetConstraints ?? [];
+    if (unmeasuredTargets.length > 0) {
+      // FAIL LOUD. A limit we could never have checked is a real modelling gap
+      // and it costs the user an enforced constraint every time it happens —
+      // it is simply no longer allowed to cost them the recommendation too.
+      // Redacted: ids and counts only — no labels, no thresholds, no units.
+      emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        constraint_ids: unmeasuredTargets.map((c) => c.constraint_id),
+        codes: ['CEE_CONSTRAINT_TARGET_CARRIES_NO_VALUE'],
+      });
+    }
     if (constraintVerdict.state === 'unevaluated') {
       emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
         request_id: invocation.requestId,
