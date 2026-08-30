@@ -1,0 +1,1136 @@
+{
+  "format": "olumi.prompt-consumer.v1",
+  "generatedAt": "2026-08-30T13:47:35.698Z",
+  "sourceHead": "ca65d66da89cd95753c4573e6273b4ed4d46cd6e",
+  "sourceDirty": false,
+  "runtime": {
+    "observedAt": "2026-08-30T13:47:31.850Z",
+    "deployedHead": "a18e1943ad9134b24bcd8b04bac5cf363247af34",
+    "healthBuild": "a18e194"
+  },
+  "status": "FAIL",
+  "liveClosure": "UNVERIFIED: local executable probes do not certify deployed behaviour or provider binding",
+  "routes": [
+    {
+      "route": "draft.primary-and-structural-completion",
+      "task": "draft_graph",
+      "authority": {
+        "hasExecutablePath": true,
+        "modelAuthority": "router_task_chain",
+        "checkedInModel": "claude-sonnet-5",
+        "promptAuthority": "pms_or_checked_in_default",
+        "promptTask": "draft_graph",
+        "promptIdentity": "runtime_source_version_hash",
+        "structuredContract": "DraftGraphResult + graph-schema validation/normalisation",
+        "fallback": "checked-in draft_graph prompt and registered task model",
+        "promotionGate": "none_no_real_pack"
+      },
+      "prompt": {
+        "status": "PASS",
+        "id": "draft_graph_default",
+        "version": 195,
+        "sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+        "loadedAt": "2026-08-30T13:41:23.793Z",
+        "verifiedLoadedHash": "152998b447819c2e",
+        "evidence": "selected PMS bytes + runtime loaded digest; not provider-bound"
+      },
+      "model": {
+        "configuredPms": "claude-sonnet-4-6",
+        "localProviderObservation": {
+          "path": "evidence/prompt-consumer/8eb8e19-behaviour.json",
+          "archiveSha256": "1b9114c4081dbf9f954e9c86b274c02bc31f863b15d146ffa9b71a995b78f638",
+          "scope": "local production adapter + real provider, not deployed",
+          "sourceHead": "8eb8e1912a99a6e361df8c398bb9148faa862750",
+          "capturedAt": "2026-08-30T13:16:40.208Z",
+          "model": "claude-sonnet-4-6",
+          "resolutionSource": "store_model_config",
+          "observedCalls": 86,
+          "semanticVerdict": "UNVERIFIED: independent review; no preservation claim"
+        },
+        "deployedProviderObservation": null,
+        "status": "UNVERIFIED",
+        "reason": "PMS pin and a local real-provider observation do not prove a deployed provider call"
+      },
+      "instructions": {
+        "local": {
+          "path": "src/cee/draft/records/instruction.ts",
+          "exportName": "DRAFT_RECORDS_INSTRUCTION",
+          "fileSha256": "47af7d51989fb6f953939fc038650ff2b825848d486eb2a47e86e4be58319f7e"
+        },
+        "localExportSha256": "51d260e6bc07b8d80ea170533e2ec2f565ed8ee83fbe63be1aed351ac35770fa",
+        "deployedExportSha256": "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1"
+      },
+      "grammar": {
+        "path": "src/cee/draft/records/grammar.ts",
+        "exportName": "buildDraftRecordsSchema",
+        "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+        "sha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7",
+        "modes": [
+          "attached JSON schema",
+          "embedded schema when structured output degrades"
+        ]
+      },
+      "completion": {
+        "path": "src/cee/draft/records/completion.ts",
+        "exportName": "buildRecordsCompletionSchema / mergeCompletionClaims",
+        "fileSha256": "a9f44323ab9d9fc9367f361fc5ff85db6b419d310c33f400812f92b7d9e91cb5",
+        "grammarSha256": "f1366adf74641a1d6f42e7c6b1ca7f83c21a4a0a34767a665b2f96409e9bf50a",
+        "requests": [
+          "structural claims only"
+        ],
+        "not": [
+          "factor estimation",
+          "new stated facts"
+        ],
+        "assemblyEvidence": "src/adapters/llm/__tests__/draft-prompt-consumer-assembly.test.ts"
+      },
+      "obligations": {
+        "status": "PASS",
+        "reason": "Exact inputs reviewed in #1228; this binds obligations, not model behaviour",
+        "requests": [
+          "stated-quantity-with-source",
+          "inferred-scalar",
+          "option-effect",
+          "causal-links",
+          "prior-confidence"
+        ],
+        "hypothesisRetention": "UNVERIFIED: no typed attributed-hypothesis consumer"
+      },
+      "deployedSourceComparison": {
+        "status": "PASS",
+        "paths": [
+          "src/cee/draft/records/grammar.ts",
+          "src/cee/draft/records/seam.ts",
+          "src/cee/draft/records/projector.ts",
+          "src/cee/transforms/schema-v3.ts"
+        ],
+        "limitation": "Only these immediate source files; not full deployment/route equivalence"
+      },
+      "representations": {
+        "expressible": [
+          "scalar",
+          "sets_to",
+          "basis",
+          "source_quote",
+          "unit",
+          "omitted scalar"
+        ],
+        "unsupported": [
+          "factor confidence/range",
+          "typed rationale/refusal",
+          "attributed hypotheses"
+        ],
+        "consumable": "See per-representation probes; representability is not preservation"
+      },
+      "probes": [
+        {
+          "id": "draft.required-fields",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 7
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 7
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.grammar-carriage",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.stated-percent",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.inferred-scalar",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.inferred-scalar-ownership",
+          "status": "FAIL",
+          "issues": [
+            "semantic: V3 falsely attributes an uncited AI scalar to the brief"
+          ],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.option-effect",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.cited-option-effect",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.absent-scalar",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.requested-confidence",
+          "status": "FAIL",
+          "issues": [
+            "semantic: attached grammar rejects the representation\n\nfalse !== true\n"
+          ],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "id": "draft.claim-mediated-percent",
+          "status": "FAIL",
+          "issues": [
+            "semantic: stated percent unit was lost\n\nundefined !== '%'\n"
+          ],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/cee/draft/records/grammar.ts",
+              "exportName": "buildDraftRecordsSchema",
+              "fileSha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/draft/records/seam.ts",
+              "exportName": "projectDraftRecords",
+              "fileSha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8",
+              "calls": 1
+            },
+            {
+              "role": "graphSchema",
+              "path": "src/adapters/llm/shared-schemas.ts",
+              "exportName": "LLMDraftResponse.parse",
+              "fileSha256": "d886e25f5863e6f2eca22d4f56281baae4ad73628191ce53a5e4ac06a4a8f066",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/transforms/schema-v3.ts",
+              "exportName": "projectGraphAndOptionsToV3",
+              "fileSha256": "205c58fde7cf76ca39a20576081b2e54ffdb0f0ee03fa5a6b993959d69ee24aa",
+              "calls": 1
+            }
+          ]
+        }
+      ],
+      "conditionalCapabilityQueries": [],
+      "deterministicStatus": "FAIL",
+      "status": "FAIL"
+    },
+    {
+      "route": "readiness.ask-to-bind",
+      "task": "orchestrator",
+      "authority": {
+        "hasExecutablePath": true,
+        "modelAuthority": "router_task_chain",
+        "checkedInModel": "claude-sonnet-5",
+        "promptAuthority": "routing_snapshot_or_checked_in_default",
+        "promptTask": "routing",
+        "promptIdentity": "runtime_source_version_hash",
+        "structuredContract": "Olumi action tool schema + routing validator",
+        "fallback": "checked-in routing prompt snapshot and registered orchestrator model",
+        "promotionGate": "none_no_real_pack"
+      },
+      "prompt": {
+        "kind": "deterministic product question",
+        "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+        "exportName": "projectReadinessRecovery",
+        "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+        "pms": "not involved in this fast path"
+      },
+      "model": {
+        "applicable": false,
+        "reason": "No LLM call in this question/binder seam"
+      },
+      "representations": {
+        "requested": [
+          "human percentage with 0% and 100% anchors"
+        ],
+        "acceptedExamples": [
+          {
+            "form": "the low anchor the ask names",
+            "example": "0%"
+          },
+          {
+            "form": "the high anchor the ask names",
+            "example": "100%"
+          },
+          {
+            "form": "an ordinary percentage answer",
+            "example": "60%"
+          },
+          {
+            "form": "a hedged percentage answer",
+            "example": "about 60%"
+          },
+          {
+            "form": "the internal representation, unadvertised",
+            "example": "0.6"
+          }
+        ],
+        "expressible": [
+          "absolute numeric/percentage effect",
+          "distinct no-change reading"
+        ],
+        "consumable": [
+          "canonical option/factor numeric edit operation"
+        ],
+        "excluded": [
+          "advertising internal 0–1 representation",
+          "no-change write primitive",
+          "pending-answer or referent routing",
+          "persistence/apply"
+        ]
+      },
+      "cases": [
+        {
+          "example": "0%",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "example": "100%",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "example": "60%",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "example": "about 60%",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "example": "0.6",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        },
+        {
+          "example": "no change",
+          "id": "recovery.ask-to-bind",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "src/orchestrator-v5/coaching/readiness-recovery.ts",
+              "exportName": "projectReadinessRecovery",
+              "fileSha256": "76b69ab89380426882f53661735648b5f8b4277ebbe08836cb3255ce93bff1d2",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/orchestrator-v5/routing/missing-value-answer.ts",
+              "exportName": "readMissingValueAnswer",
+              "fileSha256": "d4d5b2374761daf69a4b7606e469f29d58849424a392b56fff8444b836f9d357",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/orchestrator-v5/routing/repair-value-binding.ts",
+              "exportName": "resolveRepairValueBinding",
+              "fileSha256": "174d122048e4c6dc773ea0548a02a6c141d266556d950460868b4e13157ff9c5",
+              "calls": 1
+            }
+          ]
+        }
+      ],
+      "deterministicStatus": "PASS",
+      "status": "UNVERIFIED",
+      "limitation": "Canonical advertised examples bind and write correctly; arbitrary ask prose semantics and deployed/pending routing are not certified"
+    },
+    {
+      "route": "draft.edge-validation-pass2",
+      "task": "validate_graph",
+      "authority": {
+        "hasExecutablePath": true,
+        "modelAuthority": "router_task_chain",
+        "checkedInModel": "o4-mini",
+        "promptAuthority": "pms_or_checked_in_default",
+        "promptTask": "validate_graph",
+        "promptIdentity": "runtime_source_version_hash",
+        "structuredContract": "json_object response + Pass2Response parser/schema",
+        "fallback": "checked-in validate_graph prompt and independent registered model",
+        "promotionGate": "none_no_real_pack"
+      },
+      "prompt": {
+        "status": "PASS",
+        "id": "validate_graph_default",
+        "version": 4,
+        "sha256": "45073b566184e4e8a6ce5047378e1d1e51c4e68294f8dd524e26c1219b51f066",
+        "loadedAt": "2026-08-30T13:41:43.281Z",
+        "verifiedLoadedHash": "45073b566184e4e8",
+        "evidence": "selected PMS bytes + runtime loaded digest; not provider-bound"
+      },
+      "model": {
+        "configuredPms": null,
+        "checkedIn": "o4-mini",
+        "actualBound": null,
+        "status": "UNVERIFIED"
+      },
+      "grammar": {
+        "attachedSchema": null,
+        "mode": "json_object",
+        "authority": {
+          "path": "src/cee/validation-pipeline/validate-graph.ts",
+          "exportName": "callValidateGraph",
+          "fileSha256": "888abcdf453be5beb66c8f3b49b698db09ce12f8b2379a23b83e89b6fbf6e6ee"
+        }
+      },
+      "representations": {
+        "requested": [
+          "edge mean/std",
+          "existence probability",
+          "reasoning",
+          "basis"
+        ],
+        "expressible": [
+          "JSON object parsed as Pass2Response"
+        ],
+        "consumable": [
+          "std changes confidence-band contestation",
+          "reasoning/basis carried in comparison metadata"
+        ]
+      },
+      "obligations": {
+        "status": "PASS",
+        "reason": "Exact v4 review binding; unknown bytes require semantic review, not a keyword scan"
+      },
+      "probes": [
+        {
+          "id": "validate_graph.edge_uncertainty",
+          "status": "PASS",
+          "issues": [],
+          "identity": {
+            "status": "UNVERIFIED",
+            "issues": [
+              "no runtime identity supplied; deterministic proof is not a served-route witness"
+            ]
+          },
+          "participation": [
+            {
+              "role": "schema",
+              "path": "tools/prompt-consumer/validation.ts",
+              "exportName": "validationWireContract (descriptor, not provider participation)",
+              "fileSha256": "48419775721770bb092d6574cf8a1aab663b4315f54c2700712d97f0d2172b99",
+              "calls": 1
+            },
+            {
+              "role": "parser",
+              "path": "src/cee/validation-pipeline/validate-graph.ts",
+              "exportName": "parsePass2Response",
+              "fileSha256": "888abcdf453be5beb66c8f3b49b698db09ce12f8b2379a23b83e89b6fbf6e6ee",
+              "calls": 1
+            },
+            {
+              "role": "consumer",
+              "path": "src/cee/validation-pipeline/comparison.ts",
+              "exportName": "compareEdge",
+              "fileSha256": "3449d14380ca2b7e5d09bc9ac66b4ddaf9c3a36351ec4a2986092efec79939f5",
+              "calls": 3
+            },
+            {
+              "role": "lints",
+              "path": "src/cee/validation-pipeline/enforcement-lints.ts",
+              "exportName": "runEnforcementLints",
+              "fileSha256": "b903a176dffe2aa509ae635a4e557a642063fd44da270d922bf4c55f61155af8",
+              "calls": 1
+            },
+            {
+              "role": "bias",
+              "path": "src/cee/validation-pipeline/bias-correction.ts",
+              "exportName": "computeBiasOffsets",
+              "fileSha256": "2bba153c00878935796ae10eb26b4fc853ad666f6bb80cf180c5f05d9cb816f5",
+              "calls": 1
+            },
+            {
+              "role": "adjust",
+              "path": "src/cee/validation-pipeline/bias-correction.ts",
+              "exportName": "applyBiasCorrection",
+              "fileSha256": "2bba153c00878935796ae10eb26b4fc853ad666f6bb80cf180c5f05d9cb816f5",
+              "calls": 1
+            }
+          ]
+        }
+      ],
+      "deterministicStatus": "PASS",
+      "providerAssemblyEvidence": "tools/prompt-consumer/validation-assembly.test.ts (local SDK-bound request, not real/deployed provider)",
+      "status": "UNVERIFIED"
+    }
+  ],
+  "mutations": [
+    {
+      "id": "draft.stated-percent",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "semantic-loss",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated-content",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "draft.inferred-scalar",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "semantic-loss",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated-content",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "draft.option-effect",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "semantic-loss",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated-content",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "draft.cited-option-effect",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "semantic-loss",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated-content",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "draft.absent-scalar",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "semantic-loss",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated-content",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "ask-to-binder",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "wrong-owner",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "wrong-answer-form",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "no-change-as-zero",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "id": "edge-uncertainty",
+      "status": "PASS",
+      "issues": [],
+      "cases": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "status": "PASS"
+        },
+        {
+          "id": "missing-std",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "ignored-std",
+          "kind": "semantic_break",
+          "status": "FAIL"
+        },
+        {
+          "id": "unrelated",
+          "kind": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    }
+  ],
+  "factorQuantification": {
+    "status": "UNVERIFIED",
+    "registered": false,
+    "interface": "FactorQuantificationRegistration<SharedQuantityContract>",
+    "requires": [
+      "actual runtime task",
+      "exact head",
+      "schema/parser/consumer exports",
+      "shared quantity definition import",
+      "fixtures"
+    ],
+    "owner": "Factor Quantification"
+  },
+  "promotionEvidence": {
+    "status": "UNVERIFIED",
+    "integrated": false,
+    "reason": "No production dependency or admission hook. Require independent bound evidence before integrating with existing PMS promotion."
+  }
+}
