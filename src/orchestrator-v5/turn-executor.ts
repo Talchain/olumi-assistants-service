@@ -186,7 +186,10 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
-import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
+import {
+  formatBaselineReask,
+  formatBaselineAskCollision,
+} from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -5903,6 +5906,96 @@ export async function runTurnExecutor(
                 err: serialiseError(error),
               },
               'V5 TurnExecutor commit failure on baseline elicitation re-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        } else if (baselineAnswer.skip_reason === 'competing_ask') {
+          // ⭐⭐ TWO OF OUR OWN QUESTIONS ARE OPEN AND THIS ANSWERS BOTH SHAPES.
+          //
+          // THE DEFECT, wire-witnessed on the deployed build: with a baseline
+          // question live AND a second bare-number ask live, the sole-pending
+          // gate refused (correctly — a bare number is genuinely ambiguous
+          // between them) and the turn fell through HERE IN SILENCE. It then
+          // reached a lane that does not refuse, and the user's number was
+          // written as an effect value on a node they were never asked about.
+          // Answering "Roughly what percentage is X at right now?" minted a
+          // value somewhere else, disclosed only in the receipt.
+          //
+          // Measured at the pristine tip, the numeral FORM decided nothing: a
+          // bare "30" and "roughly 30" collapse to the same silent fall-through
+          // as "30%" the moment a competing ask is live. The competing pending
+          // is the whole mechanism, so the fix belongs here and not in a
+          // grammar.
+          //
+          // WHY AN ASK AND NOT A PRECEDENCE RULE. "Baseline always wins" would
+          // trade this harm for its mirror: a user with a live baseline
+          // question may legitimately want an effect set, and that instruction
+          // must still reach the edit lane. The resume's classifier draws
+          // exactly that line — an INSTRUCTION carrying a number classifies
+          // `not_an_answer` and never arrives here — and where the line cannot
+          // be drawn from the user's own text, the product asks rather than
+          // writes.
+          //
+          // NOTHING IS MINTED AND BOTH QUESTIONS SURVIVE, structurally: this
+          // returns before any handler runs, and the commit passes no
+          // `pending_actions` override, so the default carry-forward keeps both
+          // asks live for the disambiguating reply (same mechanism, and the
+          // same reason, as the re-ask branch above).
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: 'baseline_elicitation_competing_ask',
+          });
+          const collisionResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: formatBaselineAskCollision({
+              targetLabel: baselineAnswer.targetLabel,
+              competing: baselineAnswer.competing,
+            }),
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = collisionResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(collisionResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              // NO `pending_actions` OVERRIDE — see the re-ask branch above.
+              // An explicit list REPLACES the carried-forward set; here that
+              // would drop the very ask we are asking the user to choose.
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_competing_ask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation competing-ask',
             );
             failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
             response = buildFailureResponse(

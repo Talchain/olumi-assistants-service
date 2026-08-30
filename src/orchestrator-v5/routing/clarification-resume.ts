@@ -50,6 +50,7 @@ import type { ElicitTargetBaselinePending, PendingAction } from '../session/pend
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
+  findBaselineAskCollision,
 } from '../session/pending-action.js';
 import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
 
@@ -693,11 +694,54 @@ export type BaselineElicitationResumeDispatch =
       readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
     }
   | {
+      /**
+       * TWO OF OUR OWN QUESTIONS ARE OPEN AND THIS MESSAGE ANSWERS THE SHAPE OF
+       * BOTH. Nothing is minted and nothing binds: the caller ASKS which
+       * question was meant, and both questions stay live.
+       *
+       * Distinct from `no_pending_question` on purpose. Before this verdict the
+       * two were the same silent fall-through, and the turn landed in a lane
+       * that does not refuse — writing the user's number onto an unrelated
+       * cell. `competing` is non-empty by construction, so the ask can name the
+       * other question rather than gesture at it.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'competing_ask';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
+      readonly competing: readonly PendingAction[];
+    }
+  | {
       readonly matched: true;
       readonly pending: ElicitTargetBaselinePending;
       /** The LIVE label of the target node (used for the receipt and replay). */
       readonly targetLabel: string;
     };
+
+/**
+ * The LIVE label of a baseline question's target, or `null` when the node has
+ * gone or carries no usable label. One derivation, shared by both refusal
+ * paths, so a target that vanished can never be named in copy.
+ */
+function resolveLiveTargetLabel(
+  pending: ElicitTargetBaselinePending,
+  graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
+): string | null {
+  const target = graphNodes?.find((n) => n.id === pending.action.target_id);
+  const label = typeof target?.label === 'string' ? target.label : undefined;
+  if (target === undefined || label === undefined || label.trim() === '') return null;
+  return label;
+}
+
+/** 2.960 R2 population: EVERY other labelled node in the live graph. */
+function competingNodeLabels(
+  graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
+  targetId: string,
+): readonly (string | undefined)[] {
+  return (graphNodes ?? [])
+    .filter((n) => n.id !== targetId)
+    .map((n) => (typeof n.label === 'string' ? n.label : undefined));
+}
 
 export function tryBaselineElicitationResume(input: {
   readonly message: string;
@@ -709,22 +753,57 @@ export function tryBaselineElicitationResume(input: {
 }): BaselineElicitationResumeDispatch {
   const pending = findSoleLiveElicitBaselinePending(input.pendingActions, input.nowMs);
   if (pending === null) {
-    return { matched: false, skip_reason: 'no_pending_question' };
+    // THE SOLE-PENDING GATE REFUSES FOR TWO REASONS AND ONLY ONE OF THEM IS
+    // SILENCE. If a baseline question is live and merely COMPETING with another
+    // bare-number ask, an answer-shaped reply must resolve here — by asking
+    // which question it answers — never by falling through to a lane that binds
+    // it to something the user was not asked about.
+    const collision = findBaselineAskCollision(input.pendingActions, input.nowMs);
+    if (collision === null) {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    const collisionLabel = resolveLiveTargetLabel(collision.baseline, input.graphNodes);
+    // No target ⇒ nothing truthful to ask about ⇒ the pre-2.918 silence.
+    if (collisionLabel === null) {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    // ONE classifier decides "is this an answer at all", the SAME one the
+    // non-collision path uses — never a second text predicate (trap 12). This
+    // is what keeps the counterpart harm safe: "set the pilot's effect on cost
+    // to 0.3" is `not_an_answer`, so a genuine new INSTRUCTION still reaches
+    // the edit lane untouched. Only a message shaped like a reply to the
+    // question we asked is claimed here.
+    //
+    // NO GRAPH-HASH GATE, deliberately, and the asymmetry is the point: the
+    // mutating path below fails closed on divergence because it REPLAYS a
+    // persisted value. This branch mints nothing and writes nothing — it asks a
+    // question — so the only thing it owes the user is that the target it names
+    // still exists, which is checked immediately above.
+    const collisionVerdict = classifyElicitedBaselineAnswer(
+      input.message,
+      collisionLabel,
+      competingNodeLabels(input.graphNodes, collision.baseline.action.target_id),
+    );
+    if (collisionVerdict.outcome === 'not_an_answer') {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    return {
+      matched: false,
+      skip_reason: 'competing_ask',
+      pending: collision.baseline,
+      targetLabel: collisionLabel,
+      competing: collision.competing,
+    };
   }
   // Mutating kind: missing hash on either side is a conflict (fail closed).
   if (graphHashConflicts(pending, input.currentGraphHash)) {
     return { matched: false, skip_reason: 'graph_diverged' };
   }
-  const targetId = pending.action.target_id;
-  const target = input.graphNodes?.find((n) => n.id === targetId);
-  const liveLabel = typeof target?.label === 'string' ? target.label : undefined;
-  if (target === undefined || liveLabel === undefined || liveLabel.trim() === '') {
+  const liveLabel = resolveLiveTargetLabel(pending, input.graphNodes);
+  if (liveLabel === null) {
     return { matched: false, skip_reason: 'target_missing' };
   }
-  // 2.960 R2 population: EVERY other labelled node in the live graph.
-  const competingLabels = (input.graphNodes ?? [])
-    .filter((n) => n.id !== targetId)
-    .map((n) => (typeof n.label === 'string' ? n.label : undefined));
+  const competingLabels = competingNodeLabels(input.graphNodes, pending.action.target_id);
   const verdict = classifyElicitedBaselineAnswer(input.message, liveLabel, competingLabels);
   if (verdict.outcome === 'unresolved') {
     // The user answered; the product cannot read it. Told, not swallowed.

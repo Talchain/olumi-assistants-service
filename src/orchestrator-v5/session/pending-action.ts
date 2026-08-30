@@ -767,6 +767,63 @@ export function findSoleLiveElicitBaselinePending(
   return sole as ElicitTargetBaselinePending;
 }
 
+/** A live baseline question that a SECOND live bare-number ask is competing with. */
+export interface BaselineAskCollision {
+  readonly baseline: ElicitTargetBaselinePending;
+  /** The other live asks a bare number could equally be answering. Never empty. */
+  readonly competing: readonly PendingAction[];
+}
+
+/**
+ * THE COLLISION {@link findSoleLiveElicitBaselinePending} REFUSES ON, named so
+ * the caller can tell the two refusals apart.
+ *
+ * That function returns `null` for two very different situations, and the
+ * difference is the whole defect this exists to close:
+ *
+ *   - NOTHING WAS ASKED. Silence is correct: the elicitation is additive, so a
+ *     turn with no live question must behave exactly as it did before 2.918.
+ *   - A BASELINE QUESTION IS LIVE, and so is another ask a bare number could be
+ *     answering. Silence here is the DEFECT. The user is answering a question
+ *     the product asked, the elliptical carry correctly refuses to guess WHICH
+ *     question — and the turn then falls through to a lane that does not refuse,
+ *     which writes the number onto an unrelated cell and discloses it in the
+ *     receipt. The user answered "Roughly what percentage is X at right now?"
+ *     and got an effect value minted on a different node.
+ *
+ * Returning the collision lets the caller do what the estate already does one
+ * level up (`resolveRecordedOptionEffectAnswer`'s `ambiguous` verdict): ASK
+ * which question was meant, and mint nothing. Where direction is undetermined,
+ * Olumi asks rather than writes — a threshold tuned to guess more often is the
+ * oscillation this estate has paid for repeatedly.
+ *
+ * DERIVED FROM THE SAME `PENDING_KIND_CLAIMS_BARE_NUMBER` RECORD as the sole-
+ * pending gate, never a second list beside it: a kind added to the union is a
+ * compile error there, and this function inherits that coverage automatically
+ * (trap 12 — a mirrored claimant list would drift silently, and the drift would
+ * read as a confident wrong bind).
+ *
+ * NARROW BY CONSTRUCTION. It claims ONLY the case where exactly ONE live
+ * baseline question competes with at least one live NON-baseline bare-number
+ * ask. Two live baseline questions stay `null` here and keep the existing
+ * silent fall-through: that ambiguity is between TARGETS, the sole-pending
+ * gate's own comment already reasons about it, and widening this to cover it
+ * would change behaviour the defect never touched.
+ */
+export function findBaselineAskCollision(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): BaselineAskCollision | null {
+  const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
+  );
+  const baselines = claimants.filter((pa) => pa.action.kind === 'elicit_target_baseline');
+  if (baselines.length !== 1) return null;
+  const competing = claimants.filter((pa) => pa.action.kind !== 'elicit_target_baseline');
+  if (competing.length === 0) return null;
+  return { baseline: baselines[0]! as ElicitTargetBaselinePending, competing };
+}
+
 /**
  * Redacted read-time tally of prior-turn pending actions. Counts + closed-enum
  * kind counts only. `confirmationExpectingLiveCount` counts live pendings whose
