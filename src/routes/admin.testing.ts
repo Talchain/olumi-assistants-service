@@ -67,6 +67,79 @@ function acceptsThinkingBudget(model: string): boolean {
 }
 
 /**
+ * THE HARNESS'S MOST CONSEQUENTIAL LIMIT, DISCLOSED AT THE POINT OF USE.
+ *
+ * This harness is an operator convenience, not a replica of any live path: it
+ * sends the prompt as a SINGLE system block with no structured-outputs grammar
+ * and parses the reply as `{nodes, edges}`. A limit stated only in a merged
+ * pull-request description is a trap for the next lane — the next lane reads the
+ * RESPONSE, not the PR — so this notice rides every response and the admin UI
+ * renders it from there. It has already cost us once: a measurement lane read
+ * 6 of 9 draws as "clean" through a grammar value that does not exist, because
+ * nothing on the wire said no grammar had been sent.
+ *
+ * Unconditional by design. It makes no claim that any OTHER task's composition
+ * matches its live path — "no established divergence" is not a fidelity finding,
+ * and phrasing it as one would be the overclaim this notice exists to stop.
+ */
+export const HARNESS_FIDELITY_NOTICE =
+  'This harness is NOT a replica of any live path. It sends the prompt as a single system ' +
+  'block with no structured-outputs grammar, and parses the reply as {nodes, edges}. Read a ' +
+  'result here as evidence about the prompt TEXT only, never as a prediction of live behaviour.';
+
+/**
+ * The established divergence for a `draft_graph` candidate on Anthropic.
+ *
+ * Derived at the bytes, and CITED so the next lane can check it rather than
+ * trust it. Note what is deliberately NOT asserted: the grammar half is stated
+ * with its condition (`CEE_ANTHROPIC_STRUCTURED_OUTPUTS`, a capable model,
+ * thinking off) rather than as a flat fact, because the deployed value of that
+ * flag lives in the Render dashboard and cannot be read from this tree
+ * (CLAUDE.md trap 18). The SECOND SYSTEM BLOCK carries no such caveat: it is
+ * pushed unconditionally, with no flag and no gate.
+ */
+const DRAFT_GRAPH_DIVERGENCE =
+  'draft_graph on Anthropic: this harness sends ONE system block and no structured-outputs ' +
+  'grammar. The live draft path sends TWO system blocks — it unconditionally appends ' +
+  'DRAFT_RECORDS_INSTRUCTION ("Do not emit a graph. Emit two lists instead.", ' +
+  'src/adapters/llm/anthropic.ts:517, no flag and no gate) — and, when ' +
+  'CEE_ANTHROPIC_STRUCTURED_OUTPUTS is on for a capable model with thinking off, a records ' +
+  'grammar in the output_config slot; a deterministic projector then turns those records back ' +
+  'into a graph after the call. So a draft_graph result HERE DOES NOT PREDICT LIVE BEHAVIOUR: ' +
+  'it measures the prompt against a composition production never runs, and a records-shaped ' +
+  'reply will fail this harness’s graph parse and read as a bad prompt.';
+
+/**
+ * The composition of a request body, READ OFF THE BODY that is about to be sent.
+ *
+ * Never a restated literal. The disclosure's whole value is that it cannot drift
+ * from the wire: the day a lane closes the two-block gap, these numbers move with
+ * it, and a hand-maintained "1" would have kept saying one — a stale disclosure
+ * reads as current and is worse than none (CLAUDE.md trap 12).
+ */
+interface RequestComposition {
+  system_blocks: number;
+  structured_outputs_grammar: boolean;
+}
+
+function deriveRequestComposition(body: Record<string, unknown>): RequestComposition {
+  const system = body.system;
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const systemBlocks = Array.isArray(system)
+    ? system.length
+    : typeof system === 'string'
+      ? 1
+      : messages.filter((m) => (m as { role?: string } | null)?.role === 'system').length;
+
+  return {
+    system_blocks: systemBlocks,
+    // Anthropic's GA structured-outputs slot, and OpenAI's equivalent. Presence
+    // on the body, never an assumption about what the harness "should" send.
+    structured_outputs_grammar: 'output_config' in body || 'response_format' in body,
+  };
+}
+
+/**
  * Check if a model doesn't support custom temperature values.
  * GPT-5.x models only support temperature=1 (default).
  */
@@ -174,6 +247,31 @@ interface TestPromptLLMResponse {
       info_count: number;
     };
   };
+
+  /**
+   * WHAT THIS RESULT IS AND IS NOT EVIDENCE OF.
+   *
+   * Present on EVERY completed run, success or failure. It rides the payload —
+   * not just the admin UI — because the consumer that gets burned by the gap is
+   * as often a script as a person, and a UI-only banner would not have reached
+   * the measurement lane that read 6 of 9 draws as "clean" through a grammar
+   * value that does not exist.
+   */
+  harness_fidelity?: {
+    /** Read off the body sent to the provider SDK. Absent if no call was made. */
+    system_blocks_sent?: number;
+    /** Whether that body carried a structured-outputs grammar slot. */
+    structured_outputs_grammar_sent?: boolean;
+    /** How this harness interprets the reply, regardless of task. */
+    output_parsed_as: 'graph_nodes_edges';
+    /**
+     * ESTABLISHED divergences that apply to THIS run. An empty list is not a
+     * fidelity claim about the other paths — see `notice`.
+     */
+    divergences: string[];
+    /** Unconditional. True of every run this harness performs. */
+    notice: string;
+  };
 }
 
 // ============================================================================
@@ -270,6 +368,12 @@ interface LLMCallResult {
   budget_tokens?: number; // Anthropic extended thinking
   seed?: number;
   top_p?: number;
+  /**
+   * DERIVED from the body actually handed to the provider SDK — see
+   * `deriveRequestComposition`. Absent when no call was attempted (e.g. no API
+   * key), which is honest: "unknown" is not "one".
+   */
+  request_composition?: RequestComposition;
 }
 
 async function callLLMWithPrompt(
@@ -354,6 +458,11 @@ async function callAnthropicWithPrompt(
   // Reported value on the result envelope (number | null contract).
   const reportedTemperature: number | null = effectiveTemperature ?? null;
 
+  // The composition ACTUALLY sent, read off the body built below. Hoisted so the
+  // error paths disclose it too: a failed run is precisely when a composition gap
+  // gets misread as a bad prompt.
+  let requestComposition: RequestComposition | undefined;
+
   try {
     // Build request params — send an EXPLICIT thinking posture, NEVER omit the
     // field. This mirrors the LIVE draft path (adapters/llm/anthropic.ts:974-976)
@@ -373,6 +482,21 @@ async function callAnthropicWithPrompt(
     // and also recommended for Opus models which can have long response times
     const useStreaming = hasExtendedThinking || model.includes('opus');
 
+    // ONE body, shared by both transports — named rather than inlined twice so
+    // the fidelity disclosure can be DERIVED from it. `system` is a STRING here:
+    // that single block is the limit this harness discloses, and reading the
+    // count off the body means a lane that later appends the records block moves
+    // the disclosure with it, for free.
+    const requestBody = {
+      model,
+      max_tokens: maxTokens,
+      temperature: effectiveTemperature,
+      system: systemPrompt,
+      messages: [{ role: 'user' as const, content: userContent }],
+      ...thinkingParam,
+    };
+    requestComposition = deriveRequestComposition(requestBody);
+
     let raw_output = '';
     let inputTokens = 0;
     let outputTokens = 0;
@@ -380,19 +504,9 @@ async function callAnthropicWithPrompt(
 
     if (useStreaming) {
       // Use streaming API for extended thinking and Opus models
-      const stream = client.messages.stream(
-        {
-          model,
-          max_tokens: maxTokens,
-          temperature: effectiveTemperature,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userContent }],
-          ...thinkingParam,
-        },
-        {
-          signal: abortController.signal,
-        }
-      );
+      const stream = client.messages.stream(requestBody, {
+        signal: abortController.signal,
+      });
 
       // Collect the streamed response
       const response = await stream.finalMessage();
@@ -410,6 +524,7 @@ async function callAnthropicWithPrompt(
           model,
           provider: 'anthropic',
           budget_tokens: budgetTokens,
+          request_composition: requestComposition,
         };
       }
 
@@ -419,19 +534,9 @@ async function callAnthropicWithPrompt(
       stopReason = response.stop_reason ?? 'unknown';
     } else {
       // Use non-streaming for standard models
-      const response = await client.messages.create(
-        {
-          model,
-          max_tokens: maxTokens,
-          temperature: effectiveTemperature,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userContent }],
-          ...thinkingParam,
-        },
-        {
-          signal: abortController.signal,
-        }
-      );
+      const response = await client.messages.create(requestBody, {
+        signal: abortController.signal,
+      });
 
       // Handle response - find the text content block
       const textContent = response.content.find(c => c.type === 'text');
@@ -446,6 +551,7 @@ async function callAnthropicWithPrompt(
           model,
           provider: 'anthropic',
           budget_tokens: budgetTokens,
+          request_composition: requestComposition,
         };
       }
 
@@ -475,6 +581,7 @@ async function callAnthropicWithPrompt(
       model,
       provider: 'anthropic',
       budget_tokens: budgetTokens,
+      request_composition: requestComposition,
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -515,6 +622,7 @@ async function callAnthropicWithPrompt(
       model,
       provider: 'anthropic',
       budget_tokens: budgetTokens,
+      request_composition: requestComposition,
     };
   }
 }
@@ -551,6 +659,10 @@ async function callOpenAIWithPrompt(
   // Determine if this is a reasoning model
   const isReasoning = isReasoningModel(model);
 
+  // The composition ACTUALLY sent, read off the body built below (see the
+  // Anthropic arm for why this is derived rather than restated).
+  let requestComposition: RequestComposition | undefined;
+
   try {
     // Build request params - GPT-5.x and reasoning models need max_completion_tokens
     const useMaxCompletionTokens = needsMaxCompletionTokens(model);
@@ -577,23 +689,27 @@ async function callOpenAIWithPrompt(
     // Add top_p for nucleus sampling (default is 1.0 when not specified)
     const topPParam = topP !== undefined ? { top_p: topP } : {};
 
-    const response = await client.chat.completions.create(
-      {
-        model,
-        ...tokenParam,
-        ...tempParam,
-        ...reasoningParam,
-        ...seedParam,
-        ...topPParam,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-      },
-      {
-        signal: abortController.signal,
-      }
-    );
+    // Named rather than inlined so the fidelity disclosure is DERIVED from the
+    // body that goes to the SDK. Exactly one `system`-role message, and no
+    // `response_format` grammar — the same single-block limit the Anthropic arm
+    // discloses, counted rather than assumed.
+    const requestBody = {
+      model,
+      ...tokenParam,
+      ...tempParam,
+      ...reasoningParam,
+      ...seedParam,
+      ...topPParam,
+      messages: [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: userContent },
+      ],
+    };
+    requestComposition = deriveRequestComposition(requestBody);
+
+    const response = await client.chat.completions.create(requestBody, {
+      signal: abortController.signal,
+    });
 
     clearTimeout(timeoutId);
     const duration_ms = Date.now() - startTime;
@@ -608,6 +724,7 @@ async function callOpenAIWithPrompt(
         max_tokens: maxTokens,
         model,
         provider: 'openai',
+        request_composition: requestComposition,
       };
     }
 
@@ -632,6 +749,7 @@ async function callOpenAIWithPrompt(
       reasoning_effort: isReasoning ? (reasoningEffort ?? 'medium') : undefined,
       seed,
       top_p: topP,
+      request_composition: requestComposition,
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -671,6 +789,7 @@ async function callOpenAIWithPrompt(
       max_tokens: maxTokens,
       model,
       provider: 'openai',
+      request_composition: requestComposition,
     };
   }
 }
@@ -1138,9 +1257,37 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       // Call LLM with options
       const llmResult = await callLLMWithPrompt(compiledContent, userContent, model, llmOptions);
 
+      // ── HARNESS FIDELITY: what this result is, and is not, evidence of ──────
+      //
+      // The divergence list is bound to the run (task + provider), NOT emitted
+      // as a constant banner: a banner would be a claim about a path this run
+      // never touched, and an always-on warning is an ignored warning. The
+      // `notice` is the unconditional half and is true of every run.
+      //
+      // Scope, stated precisely (CLAUDE.md trap 20): the ONLY divergence
+      // established at the bytes is `draft_graph` on Anthropic. An empty
+      // `divergences` therefore means "none established for this composition",
+      // never "this run is faithful" — which is exactly what `notice` says.
+      const harnessDivergences: string[] = [];
+      if (prompt.taskId === 'draft_graph' && llmResult.provider === 'anthropic') {
+        harnessDivergences.push(DRAFT_GRAPH_DIVERGENCE);
+      }
+
+      const harnessFidelity: NonNullable<TestPromptLLMResponse['harness_fidelity']> = {
+        output_parsed_as: 'graph_nodes_edges',
+        divergences: harnessDivergences,
+        notice: HARNESS_FIDELITY_NOTICE,
+      };
+      if (llmResult.request_composition) {
+        harnessFidelity.system_blocks_sent = llmResult.request_composition.system_blocks;
+        harnessFidelity.structured_outputs_grammar_sent =
+          llmResult.request_composition.structured_outputs_grammar;
+      }
+
       // Build response
       const response: TestPromptLLMResponse = {
         request_id: requestId,
+        harness_fidelity: harnessFidelity,
         success: llmResult.success,
         prompt: {
           id: prompt_id,

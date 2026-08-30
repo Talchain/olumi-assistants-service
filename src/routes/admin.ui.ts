@@ -177,6 +177,14 @@ function generateAdminUI(): string {
     }
     .alert-error { background: #fee2e2; color: #dc2626; }
     .alert-success { background: #d1fae5; color: #065f46; }
+    .alert-warning { background: #fef3c7; color: #92400e; }
+    /* Harness fidelity disclosure — what a result here is, and is not, evidence
+       of. Sits directly under the PASSED/FAILED verdict because that verdict is
+       the thing being over-read. */
+    .harness-fidelity { border-left: 3px solid #d97706; font-size: 0.8rem; line-height: 1.45; }
+    .harness-fidelity strong { display: block; margin-bottom: 4px; }
+    .harness-fidelity .hf-divergence { margin-top: 6px; }
+    .harness-fidelity .hf-sent { margin-top: 6px; font-family: monospace; font-size: 0.72rem; opacity: 0.85; }
     .modal {
       position: fixed;
       top: 0;
@@ -979,6 +987,28 @@ function generateAdminUI(): string {
                               <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.llmResult.timestamp"></span>
                             </div>
                             <div class="llm-results-body">
+                              <!--
+                                HARNESS FIDELITY DISCLOSURE.
+                                Rendered from the SERVER's payload
+                                (harness_fidelity), never restated here: a copy in
+                                this file would drift from the route the first time
+                                the route changed, and a stale disclosure reads as
+                                current. Placed ABOVE the error/success split on
+                                purpose — a failed run is exactly when a
+                                composition gap gets misread as a bad prompt.
+                              -->
+                              <template x-if="tc.llmResult.fullResponse?.harness_fidelity">
+                                <div class="alert alert-warning harness-fidelity" style="padding: 10px;">
+                                  <strong>What this result is evidence of</strong>
+                                  <div x-text="tc.llmResult.fullResponse.harness_fidelity.notice"></div>
+                                  <template x-for="d in (tc.llmResult.fullResponse.harness_fidelity.divergences || [])" :key="d">
+                                    <div class="hf-divergence" x-text="d"></div>
+                                  </template>
+                                  <div class="hf-sent"
+                                       x-text="'sent: ' + (tc.llmResult.fullResponse.harness_fidelity.system_blocks_sent ?? '?') + ' system block(s) · structured-outputs grammar: ' + (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent === undefined ? '?' : (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent ? 'yes' : 'no')) + ' · reply parsed as: ' + tc.llmResult.fullResponse.harness_fidelity.output_parsed_as"></div>
+                                </div>
+                              </template>
+
                               <!-- Error Display -->
                               <template x-if="tc.llmResult.error">
                                 <div class="alert alert-error" style="padding: 10px; font-size: 0.85rem;" x-text="tc.llmResult.error"></div>
@@ -1015,6 +1045,21 @@ function generateAdminUI(): string {
                                       <div class="llm-metric">
                                         <span class="llm-metric-label">Model:</span>
                                         <span class="llm-metric-value" x-text="tc.llmResult.model"></span>
+                                      </div>
+                                    </template>
+                                    <!--
+                                      FINISH REASON. On the response envelope all
+                                      along and rendered nowhere, so a reply cut
+                                      off at max_tokens and a genuinely poor prompt
+                                      looked identical: both arrive as a short or
+                                      unparseable draft. Warn-coloured on anything
+                                      that is not a clean stop, because that is the
+                                      case where the prompt is not the culprit.
+                                    -->
+                                    <template x-if="tc.llmResult.finishReason">
+                                      <div class="llm-metric" :class="['end_turn', 'stop'].includes(tc.llmResult.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                                        <span class="llm-metric-label">Finish:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.finishReason"></span>
                                       </div>
                                     </template>
                                   </div>
@@ -1600,6 +1645,25 @@ function generateAdminUI(): string {
                   </template>
                 </div>
 
+                <!--
+                  HARNESS FIDELITY DISCLOSURE (comparison view). This panel is
+                  where prompt-iteration verdicts get drawn — "version B is
+                  better" — so the composition limit belongs here too, not only in
+                  the single-run panel. Rendered from whichever arm returned a
+                  payload; both arms run the same harness, so either is
+                  representative. Server prose, not a local copy.
+                -->
+                <template x-if="llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity">
+                  <div class="alert alert-warning harness-fidelity" style="padding: 10px; margin-bottom: 12px;"
+                       x-data="{ hf: llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity }">
+                    <strong>What this comparison is evidence of</strong>
+                    <div x-text="hf.notice"></div>
+                    <template x-for="d in (hf.divergences || [])" :key="d">
+                      <div class="hf-divergence" x-text="d"></div>
+                    </template>
+                  </div>
+                </template>
+
                 <div class="version-compare-results">
                   <!-- Version A Results -->
                   <div class="compare-panel">
@@ -1644,6 +1708,16 @@ function generateAdminUI(): string {
                             <span class="llm-metric-label">Latency:</span>
                             <span class="llm-metric-value" x-text="llmCompareResults.versionA.latencyMs + 'ms'"></span>
                           </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionA.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionA.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.finishReason"></span>
+                            </div>
+                          </template>
                           <template x-if="llmCompareResults.versionA.tokenUsage">
                             <div class="llm-metric">
                               <span class="llm-metric-label">Tokens:</span>
@@ -1739,6 +1813,16 @@ function generateAdminUI(): string {
                               <span class="compare-delta" :class="llmCompareResults.deltas.latency < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.latency > 0 ? '+' : '') + llmCompareResults.deltas.latency + 'ms'"></span>
                             </template>
                           </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionB.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionB.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.finishReason"></span>
+                            </div>
+                          </template>
                           <template x-if="llmCompareResults.versionB.tokenUsage">
                             <div class="llm-metric">
                               <span class="llm-metric-label">Tokens:</span>
@@ -3096,6 +3180,8 @@ function generateAdminUI(): string {
                 repairsApplied,
                 latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
                 tokenUsage: llmData.token_usage,
+                // Truncation vs a bad prompt: indistinguishable without this.
+                finishReason: llmData.finish_reason,
                 model: llmData.model,
                 provider: llmData.provider,
                 stages,
@@ -3335,6 +3421,11 @@ function generateAdminUI(): string {
                   repairsApplied: (pipeline.repairs_applied || []).length,
                   latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
                   tokenUsage: llmData.token_usage,
+                  finishReason: llmData.finish_reason,
+                  // The comparison panel is where prompt-iteration verdicts get
+                  // drawn, so it needs the same disclosure the single-run panel
+                  // shows. Carried from the payload, not restated.
+                  harnessFidelity: data.harness_fidelity,
                   model: llmData.model,
                   provider: llmData.provider,
                   nodeCounts: pipeline.node_counts,
