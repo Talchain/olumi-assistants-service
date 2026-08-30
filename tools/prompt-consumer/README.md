@@ -28,6 +28,11 @@ Unknown prompt bytes lose their exact semantic-review binding; a word match neve
 substitutes for review or behavioural evidence. The #1228 emitted-output corpus
 remains separate from deterministic fixture tests.
 
+The banked activation report includes old PMS/old instruction, old PMS/new
+instruction (code-only deployment), candidate/new instruction, and the destroyed
+control. Missing code-only evidence fails coverage. Coverage PASS is not semantic
+PASS or promotion permission: the real code-only diagnostic created two options.
+
 Current named failures: requested prior confidence under deployed v10;
 AI scalar source relabelled at V3; claim-mediated stated percentage loses its unit
 and scale authority. Direct stated percentage and consumed edge uncertainty are

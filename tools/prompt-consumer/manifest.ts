@@ -11,6 +11,7 @@ import { sha256, type ContractStatus, type SemanticProbeResult } from './contrac
 import { runDraftContractProbes, runDraftMutationFamilies } from './draft.js';
 import { runRecoveryProbes, runRecoveryMutations, recoveryExamples } from './recovery.js';
 import { runValidationProbe, runValidationMutations } from './validation.js';
+import { buildActivationCoverageReport } from './activation.js';
 
 export const root = resolve(import.meta.dirname, '../..');
 export const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
@@ -110,6 +111,7 @@ export function buildContractManifest(runtime?: RuntimeObservation) {
   const recovery = runRecoveryProbes();
   const validation = runValidationProbe();
   const mutations = [...runDraftMutationFamilies(), runRecoveryMutations(), runValidationMutations()];
+  const activationCoverage = buildActivationCoverageReport();
   const draftPrompt = promptIdentity(runtime?.prompts.draft_graph);
   const validationPrompt = promptIdentity(runtime?.prompts.validate_graph);
   const routes = [
@@ -151,10 +153,21 @@ export function buildContractManifest(runtime?: RuntimeObservation) {
   return {
     format: 'olumi.prompt-consumer.v1', generatedAt: new Date().toISOString(), sourceHead, sourceDirty,
     runtime: runtime ? { observedAt: runtime.observedAt, deployedHead: runtime.deployedHead, healthBuild: runtime.healthBuild } : null,
-    status: combine([...routes.map(r => r.status), ...mutations.map(m => m.status)]),
+    status: combine([...routes.map(r => r.status), ...mutations.map(m => m.status), activationCoverage.coverageStatus]),
     liveClosure: 'UNVERIFIED: local executable probes do not certify deployed behaviour or provider binding',
-    routes, mutations: mutations.map(m => ({ id: m.id, status: m.status, issues: m.issues, cases: m.cases.map(c => ({ id: c.id, kind: c.kind, status: c.result.status })) })),
-    factorQuantification: { status: 'UNVERIFIED', registered: false, interface: 'FactorQuantificationRegistration<SharedQuantityContract>', requires: ['actual runtime task', 'exact head', 'schema/parser/consumer exports', 'shared quantity definition import', 'fixtures'], owner: 'Factor Quantification' },
+    routes, activationCoverage,
+    mutations: mutations.map(m => ({ id: m.id, status: m.status, issues: m.issues, cases: m.cases.map(c => ({ id: c.id, kind: c.kind, status: c.result.status })) })),
+    factorQuantification: {
+      status: 'UNVERIFIED', registered: false, interface: 'FactorQuantificationRegistration<SharedQuantityContract>',
+      owner: 'Factor Quantification',
+      ownerHandoff: { head: '8deefc63f79c6e1afa93da2387e752824a30cf6c', task: 'factor_quantification',
+        producer: 'src/cee/factor-quantification/model-call.ts#callFactorQuantification',
+        schemaAndParser: 'src/cee/factor-quantification/estimate-response.ts#FACTOR_ESTIMATES_JSON_SCHEMA/parseFactorEstimates',
+        consumer: 'src/cee/factor-quantification/adopt.ts#adoptFactorEstimates/markUnresolved',
+        integration: 'src/cee/factor-quantification/index.ts#quantifyDraftFactors',
+        fixturesSha256: 'b818ecc9962850ced07bd97bbdbdf41ea6a9dff43f0586626e634b6dedbe41ae' },
+      reason: 'Handoff supplied; not integrated into this source authority and default-off, so not registered as a live route. Import owner shared definitions after CC integration, never mirror them.',
+    },
     promotionEvidence: { status: 'UNVERIFIED', integrated: false, reason: 'No production dependency or admission hook. Require independent bound evidence before integrating with existing PMS promotion.' },
   };
 }

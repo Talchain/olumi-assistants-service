@@ -18,6 +18,12 @@ describe('bounded route manifest is not a release certificate', () => {
     expect(m.routes[2]!.status).toBe('UNVERIFIED');
     expect(m.factorQuantification.registered).toBe(false);
     expect(m.promotionEvidence.integrated).toBe(false);
+    expect(m.activationCoverage.coverageStatus).toBe('PASS');
+    expect(m.activationCoverage.combinations.map(c => c.combination)).toEqual([
+      'old-pms-old-instruction', 'old-pms-new-instruction', 'candidate-new-instruction',
+    ]);
+    expect(m.activationCoverage.combinations[1]!.diagnostic.nonCollapse).toBe('FAIL');
+    expect(m.activationCoverage.activationPermission).toBe('NOT_GRANTED');
   });
   it('collects every semantic-breaking and unrelated family; expected red is not gate green', () => {
     collected.push('mutations');
