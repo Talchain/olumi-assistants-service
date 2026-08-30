@@ -63,8 +63,10 @@ import {
 import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
+  loadMostRecentPendingActionsIntegrityStrict,
   loadScenarioSnapshotForRunAnalysis,
 } from '../build-turn-context.js';
+import type { PendingAction } from '../session/pending-action.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
@@ -372,9 +374,20 @@ export type DispatchChipClickRunAnalysisResult =
       // analysis). The dispatcher composes a clean graceful body via the SAME
       // composeRecoverableHandlerResponse machinery the Sonnet path uses;
       // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
-      // `commitPerformed:true` only for a science/readiness refusal, whose
+      //
+      // ⚠ CORRECTED BY ROADMAP 2.1353. This field's contract USED to read
+      // "`commitPerformed:true` only for a science/readiness refusal, whose
       // continuity marker is durably recorded. Other recovery classes preserve
-      // the historical false/no-commit shape.
+      // the historical false/no-commit shape." That conflated the durable
+      // REFUSAL FACT with the TURN ROW — see the long note at the emit site —
+      // and the consequence was that 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+      // answered the user and left no trace, including the ask-shaped
+      // `options_not_configured` copy. `commitPerformed` now means exactly what
+      // it says: A TURN ROW LANDED. It is `true` for every recovered cause whose
+      // commit succeeded, and the refusal FACT still rides only on a continuity
+      // cause. Nothing on the chip-click `handler_recovered` path reads this
+      // field as a gate (route-v2's `!commitPerformed` 500s are on the DRAFT and
+      // EDIT dispatch results, not this one) — it is diagnostic here.
       //
       // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
       // "no analysis ran, so the UI retains its prior store value". ROADMAP
@@ -774,41 +787,143 @@ async function tryComposeRecoverableChipOutcome(
     'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
   );
 
-  const persistsRefusal = isAnalysisRefusalContinuityCause(err.cause_kind);
-  if (persistsRefusal) {
-    const refusalFact = buildAnalysisRefusalFact({
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROADMAP 2.1353 — TWO QUESTIONS THAT WERE SHARING ONE PREDICATE.
+  //
+  // ⚠ THIS BLOCK USED TO READ `if (persistsRefusal) { …commit… }`, so ONE
+  // predicate decided BOTH of the following, and they are not the same question
+  // (CLAUDE.md trap 21 — two authorities under one name is this estate's
+  // chronic defect, and here it was one authority answering two):
+  //
+  //   Q1  "Does this refusal acquire ANALYSIS-REFUSAL CONTINUITY?" — i.e. does a
+  //       durable non-result `run_analysis` fact get written, so the freshness
+  //       and canonical selectors carry the refused attempt forward? That is
+  //       correctly narrow: only a science/readiness refusal is evidence about
+  //       the MODEL. A transient engine-busy or an args failure is not.
+  //
+  //   Q2  "Should this TURN be written to conversation history?" — i.e. does the
+  //       next turn's model get to see that this exchange happened at all? That
+  //       is not narrow. It is true of EVERY turn that produced a user-visible
+  //       answer.
+  //
+  // Answering Q2 with Q1's predicate meant 7 of the 9 RECOVERABLE_HANDLER_CAUSES
+  // shipped HTTP 200 with a composed reply and NO TURN ROW. The most
+  // user-visible of them is `options_not_configured`, whose copy is
+  //
+  //     "…it won't appear in the comparison until you tell me. Tell me what
+  //      {option} changes and I'll write it into the model."
+  //
+  // — the DEPLOYED post-add-option case. It solicits a reply and recorded
+  // nothing, so the reply arrived at a model with no memory of the request. Same
+  // defect class as ROADMAP 2.1352 (CEE #1213) fixed at the Stage-4A intercepts,
+  // reached through a different mechanism: this path DOES have a commit, it was
+  // simply gated on the wrong question.
+  //
+  // THE FIX IS TO NAME THE CONCEPTS APART, not to widen the continuity set. The
+  // refusal FACT still rides only on a continuity cause; the TURN ROW is now
+  // written for every recovered cause.
+  //
+  // ⚠ NO PENDING REFERENT IS ARMED, and that is a deliberate fail-closed, not an
+  // omission. The `options_not_configured` copy names an option by LABEL only —
+  // `details` carries `first_option_label` and `option_count` and NO id
+  // (`run-analysis.ts`, both throw sites) — so there is no cell identity to
+  // record, and a pending naming a bare label could not be bound by identity.
+  // Committing the turn gives the next turn the question in its conversation
+  // history, which is the half that is available here. Recording an id-bearing
+  // referent needs the throw sites to carry the option id, which is a separate
+  // change to a separate file.
+  // ══════════════════════════════════════════════════════════════════════════
+  const acquiresRefusalContinuity = isAnalysisRefusalContinuityCause(err.cause_kind);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐ ROUND-2 BLOCKER — A COMMIT THAT DOES NOT THREAD PRIORS *WIPES* THEM.
+  //
+  // `commit.ts` reads `metadata.priorPendingActions ?? []` (:1116/:1164) and
+  // writes the result to the new row's `pending_actions` column (:1377); the
+  // store then reads the NEWEST ROW ONLY (`supabase-store.ts` :2272-2277,
+  // `.limit(1)`). So a commit with no priors threaded does not "carry nothing
+  // forward" — it lands an authoritative row with an EMPTY pendings list and
+  // the user's live consent hold is gone. Silently: the F-HELD lapse notice is
+  // built by the carry-forward pass, which never ran.
+  //
+  // Before 2.1353 the seven non-continuity recoverable causes wrote NO ROW, so
+  // the hold survived on the previous row. Committing them without priors
+  // would therefore make those seven causes STRICTLY WORSE than the defect this
+  // PR set out to fix — trading the user's live proposal for this turn's
+  // memory, which is the exact inversion of the ordering this lane declared:
+  //
+  //     LOSING THE USER'S PROPOSAL  ≫  LOSING THE MEMORY  ≫  LOSING THE REFERENT
+  //
+  // ⚠ THE READ IS `…IntegrityStrict`, NOT `…Strict`. This commit becomes the
+  // NEWEST turn, so its pendings column supersedes the row we are reading. The
+  // tolerant variant returns the SURVIVORS of a partially-corrupt row and does
+  // not throw (`supabase-store.ts` :2305-2347) — which would silently drop the
+  // unreadable entries into a row that then becomes authoritative. Truncation
+  // is a lossy write here, so it must fail like a read failure.
+  //
+  // ⚠ A FAILED READ ABORTS THE COMMIT ENTIRELY, both halves of the split:
+  //   - non-continuity causes degrade to exactly the pre-2.1353 shape (a
+  //     graceful 200, no row) — the user keeps their proposal and loses only
+  //     this question's memory;
+  //   - continuity causes report `commit_failed` (→ typed 500), the same
+  //     escalation a failed commit has always produced on them, because the
+  //     durable refusal fact the freshness selectors depend on is equally
+  //     absent either way — BUT ONLY FOR THE STORE-UNAVAILABLE CLASS.
+  //
+  // ⚠⚠ THE ESCALATION IS SPLIT BY ERROR CODE, because this loader does NOT
+  // throw only on store-unavailability. An earlier version of this comment
+  // said it did; that was FALSE, and the falsity had teeth. `validation:
+  // 'strict'` ALSO throws `SessionReadError { code: 'pending_actions_corrupt' }`
+  // on a non-array column, on ANY entry `parsePendingAction` returns null for,
+  // and on a scenario mismatch (`supabase-store.ts` :2296-2299, :2345-2351).
+  // `parsePendingAction` returns null for any kind outside
+  // `RESUMABLE_ACTION_TYPES` (`pending-action.ts` :831) — and THIS change adds
+  // two kinds to that set, so the most plausible trigger is a ROLLBACK of this
+  // build over rows it has already written. None of those states would have
+  // failed the WRITE, so escalating them converts a graceful 200 refusal into
+  // a typed 500 on exactly the causes a user hits most.
+  //
+  // So: `pending_actions_corrupt` degrades to the graceful shape on BOTH
+  // halves. It does NOT relax the fail-closed no-commit — an unreadable row
+  // still aborts the commit, because committing over pendings this build
+  // cannot parse is the wipe. It only declines to turn a working answer into
+  // a hard failure, which is the same trade already stated at the
+  // commit-failure escalation below. (The shared helper
+  // `routing/persist-asked-question.ts:219` degrades on the same failure; this
+  // asymmetry is now removed rather than merely noted.)
+  // ══════════════════════════════════════════════════════════════════════════
+  let priorPendingActions: readonly PendingAction[] | null = null;
+  try {
+    priorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
       scenarioId,
-      reasonCode: blockedReason,
-      graphHash: freshness?.current_graph_hash ?? null,
-    });
-    try {
-      await commitDirectAnswer(recovered.response, {
+      requestId,
+    );
+  } catch (priorReadError) {
+    // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
+    // a dozen suites mock that class as a bare `class extends Error {}`, so an
+    // identity check would silently stop discriminating under a mock.
+    const priorReadCode =
+      typeof (priorReadError as { code?: unknown } | null)?.code === 'string'
+        ? (priorReadError as { code: string }).code
+        : null;
+    const priorRowUnreadableNotStoreDown = priorReadCode === 'pending_actions_corrupt';
+    log.warn(
+      {
+        event: 'v5.recovered_turn_prior_pending_read_failed',
+        request_id: requestId,
         scenario_id: scenarioId,
-        turn_id: payload.turn_id,
-        turn_class: 'handler',
-        handler_id: 'run_analysis',
-        request_hash: computeRequestHash(payload),
-        llm_calls_used: 0,
-        duration_ms: Date.now() - startedAt,
-        handler_facts: [refusalFact],
-        coaching_state: coachingState,
-        userMessage: payload.message,
-        contentGraph: graph,
-      });
-    } catch (commitError) {
-      log.error(
-        {
-          event: 'v5.state_commit_failed',
-          request_id: requestId,
-          scenario_id: scenarioId,
-          failure_origin: 'analysis_refusal_continuity',
-          err:
-            commitError instanceof Error
-              ? { name: commitError.name, message: commitError.message }
-              : { message: String(commitError) },
-        },
-        'V5 chip_click run_analysis refusal could not be persisted',
-      );
+        cause_kind: err.cause_kind,
+        acquires_refusal_continuity: acquiresRefusalContinuity,
+        prior_read_code: priorReadCode,
+        degraded_not_escalated: priorRowUnreadableNotStoreDown,
+        err:
+          priorReadError instanceof Error
+            ? { name: priorReadError.name, message: priorReadError.message }
+            : { message: String(priorReadError) },
+      },
+      'V5 chip_click run_analysis recovery — prior-pending read failed; not committing, because a commit without carry-forward would wipe live proposals',
+    );
+    if (acquiresRefusalContinuity && !priorRowUnreadableNotStoreDown) {
       return {
         outcome: 'commit_failed',
         response: recovered.response,
@@ -818,10 +933,78 @@ async function tryComposeRecoverableChipOutcome(
     }
   }
 
+  let turnPersisted = false;
+  if (priorPendingActions !== null) {
+    const refusalFact = acquiresRefusalContinuity
+      ? buildAnalysisRefusalFact({
+          scenarioId,
+          reasonCode: blockedReason,
+          graphHash: freshness?.current_graph_hash ?? null,
+        })
+      : null;
+    try {
+      await commitDirectAnswer(recovered.response, {
+        scenario_id: scenarioId,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: refusalFact === null ? [] : [refusalFact],
+        // ⭐ THE ROUND-2 FIX. Without this key the chokepoint carries forward
+        // `[]` and this row — which becomes the newest — wipes every live
+        // pending. `pending_actions` is deliberately NOT pre-supplied: the
+        // chokepoint derives this turn's own pendings from the EGRESS-finalised
+        // chips, which is what keeps the "persisted pending ⟹ rendered chip"
+        // invariant true on the recovery chip this path emits.
+        priorPendingActions,
+        coaching_state: coachingState,
+        userMessage: payload.message,
+        contentGraph: graph,
+      });
+      turnPersisted = true;
+    } catch (commitError) {
+      log.error(
+        {
+          event: 'v5.state_commit_failed',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          failure_origin: acquiresRefusalContinuity
+            ? 'analysis_refusal_continuity'
+            : 'recovered_turn_history',
+          cause_kind: err.cause_kind,
+          err:
+            commitError instanceof Error
+              ? { name: commitError.name, message: commitError.message }
+              : { message: String(commitError) },
+        },
+        'V5 chip_click run_analysis recovery could not be persisted',
+      );
+      // ⚠ THE COMMIT-FAILED ESCALATION STAYS BOUNDED TO THE CONTINUITY CAUSES.
+      // A failed commit on a continuity refusal loses DURABLE EVIDENCE the
+      // freshness selectors depend on, and that has always surfaced as
+      // `commit_failed` (→ a typed 500). A failed commit on the other recovered
+      // causes loses only this question's MEMORY, which is strictly less than
+      // the user loses today — so it degrades to the pre-2.1353 shape (a
+      // graceful 200 with no row) rather than converting a working 200 into a
+      // 500. Widening the escalation would make this repair capable of BREAKING
+      // a turn that works today, which is the wrong trade for a memory fix.
+      if (acquiresRefusalContinuity) {
+        return {
+          outcome: 'commit_failed',
+          response: recovered.response,
+          commitPerformed: false,
+          graph,
+        };
+      }
+    }
+  }
+
   return {
     outcome: 'handler_recovered',
     response: recovered.response,
-    commitPerformed: persistsRefusal,
+    commitPerformed: turnPersisted,
     causeKind: err.cause_kind,
     analysisReady,
     // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR

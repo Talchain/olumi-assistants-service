@@ -93,8 +93,32 @@ export interface V4InterventionBinding {
    * number the user wrote and asked them to confirm it: the F2 falsehood
    * reopened from the other side, and a WORSE harm than the defect being fixed.
    * (CLAUDE.md trap 21 — two questions under one condition.)
+   *
+   * ⚠ NO LONGER THE GATE — see {@link V4InterventionBinding.withholds_brief_authority}.
+   * Exempting ONE branch from a predicate that asked the wrong question only
+   * held while that branch was the only exception; it stopped holding the
+   * moment the projector minted a third binding kind. This remains the
+   * composed branch's receipt marker, which is a separate fact.
    */
   composed_citation?: true;
+  /**
+   * ⭐⭐ THE ONLY CONDITION UNDER WHICH A BINDING MAY CLOSE THIS MODULE'S
+   * BRIEF-AUTHORITY ROUTES — an OPT-IN, set by the projector on the receipts
+   * that report a genuine contest over ownership (candidates that cannot be
+   * resolved to one stated item; a figure a rival option would equally claim).
+   *
+   * ⛔ MERE PRESENCE OF A BINDING IS NOT IT, and reading it that way was the
+   * defect. `bindDirectStatedMagnitude` matches `stated_items`;
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT. DIFFERENT SETS — a number
+   * the user typed verbatim can be absent from `stated_items` and still be
+   * genuinely stated. Once the projector began stamping UNCITED magnitudes
+   * (so an unattributed number stops passing as a fact), the presence test
+   * started re-attributing those figures to Olumi at low confidence, in a
+   * sentence saying no figure was cited. Wrongly claiming a user's value is far
+   * worse than omitting one of ours, and this is the third direction from which
+   * that same harm has now arrived.
+   */
+  withholds_brief_authority?: true;
 }
 
 /**
@@ -1094,7 +1118,7 @@ function buildInterventionsFromV4Data(
       // The first version gated on `!statedInBrief`, which lumps the two together
       // — the invariant written against the failure mode instead of the spec
       // (CLAUDE.md trap 13d).
-      // ⭐⭐ A COMPOSED-CITATION RECEIPT MUST NOT WITHDRAW BRIEF AUTHORITY.
+      // ⭐⭐ ONLY A RECEIPT THAT CONTESTS THE BRIEF MAY WITHDRAW BRIEF AUTHORITY.
       //
       // Both routes below used to gate on `binding === undefined`, which asked
       // "did the projector write anything?" when the question they mean is "may
@@ -1110,8 +1134,20 @@ function buildInterventionsFromV4Data(
       // wrongly claiming a user's value is far worse than omitting one of ours.
       // (CLAUDE.md trap 21: two questions under one condition; trap 13d: write
       // the gate against the SPEC, not the shape the first case happened to take.)
-      const bindingWithholdsBriefRoutes =
-        binding !== undefined && binding.composed_citation !== true;
+      //
+      // ⭐⭐ AND EXEMPTING ONE BRANCH WAS NOT THE FIX — IT ONLY MOVED THE DEFECT.
+      // `composed_citation !== true` still answered "did the projector write
+      // anything, other than that one case?", so it held only while the composed
+      // branch was the sole exception. The projector then minted a THIRD kind:
+      // an UNCITED magnitude, stamped `cee_hypothesis` so an unattributed number
+      // stops masquerading as a fact. That receipt reports the absence of a
+      // cited stated ITEM. It says nothing about the brief TEXT — and it landed
+      // on the suppressing side, re-attributing the user's own figures to Olumi
+      // on the dominant path. The gate is therefore now an OPT-IN, asserted by
+      // the producer on the two branches that report a genuine contest, so a
+      // future fourth binding kind fails OPEN (attribution preserved) rather
+      // than silently closed.
+      const bindingWithholdsBriefRoutes = binding?.withholds_brief_authority === true;
 
       const statedDenomination =
         !bindingWithholdsBriefRoutes && verdict === "undecidable" && rawIsFinite

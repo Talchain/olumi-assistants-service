@@ -33,6 +33,60 @@ type DraftFailureRow = {
   total_duration_ms: number | null;
 };
 
+/**
+ * Why the READERS cannot answer "none" when they mean "I could not look"
+ * (P0c, 30 Aug 2026).
+ *
+ * `/admin/v1/draft-failures` is the surface built to explain the draft-500 P0.
+ * Both readers below used to collapse UNAVAILABILITY into an ordinary answer:
+ * `listDraftFailureBundles` returned `{ failures: [], total: 0 }` and
+ * `getDraftFailureBundleById` returned `null` whenever `getClient()` produced
+ * nothing. Measured by execution at `f18d941` with both Supabase env vars
+ * empty, the route then answered:
+ *
+ *     GET /admin/v1/draft-failures        → 200 {"failures":[],"total":0}
+ *     GET /admin/v1/draft-failures/<uuid> → 404 {"error":"not_found",...}
+ *
+ * Clean, well-formed, and entirely wrong: an instrument that never reached the
+ * table reporting that the table is empty. That is the estate's most expensive
+ * defect class — an absence claim from a probe with no positive control —
+ * arriving through a null client rather than through a bad grep, and it is
+ * exactly the shape a triage lane inherits without suspicion.
+ *
+ * A PostgREST error had the mirror-image problem: rethrown as a bare `Error`
+ * into a route with no catch, it produced an opaque HTTP 500 naming neither
+ * the store nor the cause. (The deployed symptom. The table is created by
+ * `migrations/003_create_cee_draft_failures.sql` — a legacy hand-run estate
+ * SEPARATE from `supabase/migrations/`, so its application to any given
+ * database is not implied by a deploy.)
+ *
+ * These are two different failures and they get two different `reason`s
+ * (platform trap 21 — two questions must not share one silence). Neither is a
+ * result, so neither may be rendered as one.
+ *
+ * ⚠ THE WRITE PATH IS DELIBERATELY UNCHANGED. `persistDraftFailureBundle` and
+ * `cleanupOldDraftFailureBundles` still degrade quietly on an absent client:
+ * they run on the failure path of a real user's turn and on a background
+ * timer, where throwing would turn a diagnostic gap into a product outage.
+ * Only the two ADMIN READERS — whose entire job is to answer a question
+ * truthfully — are strict.
+ */
+export type DraftFailureStoreUnavailableReason =
+  /** No Supabase client could be built: URL or service-role key absent. */
+  | 'store_not_configured'
+  /** A client existed and the query failed (missing relation, permission, network). */
+  | 'store_query_failed';
+
+export class DraftFailureStoreUnavailableError extends Error {
+  readonly name = 'DraftFailureStoreUnavailableError';
+  constructor(
+    readonly reason: DraftFailureStoreUnavailableReason,
+    message?: string,
+  ) {
+    super(message ?? reason);
+  }
+}
+
 let _client: SupabaseClient | null = null;
 
 function getSupabaseConfig(): { url: string; serviceRoleKey: string } | null {
@@ -156,7 +210,7 @@ export async function listDraftFailureBundles(options: {
   since?: string;
 }): Promise<{ failures: DraftFailureRow[]; total: number }> {
   const client = getClient();
-  if (!client) return { failures: [], total: 0 };
+  if (!client) throw new DraftFailureStoreUnavailableError('store_not_configured');
 
   const limit = typeof options.limit === 'number' && Number.isFinite(options.limit)
     ? Math.min(200, Math.max(1, options.limit))
@@ -177,7 +231,7 @@ export async function listDraftFailureBundles(options: {
 
   const { data, error, count } = await query;
   if (error) {
-    throw new Error(error.message);
+    throw new DraftFailureStoreUnavailableError('store_query_failed', error.message);
   }
 
   return {
@@ -188,7 +242,7 @@ export async function listDraftFailureBundles(options: {
 
 export async function getDraftFailureBundleById(id: string): Promise<DraftFailureRow | null> {
   const client = getClient();
-  if (!client) return null;
+  if (!client) throw new DraftFailureStoreUnavailableError('store_not_configured');
 
   const { data, error } = await client
     .from('cee_draft_failures')
@@ -197,8 +251,11 @@ export async function getDraftFailureBundleById(id: string): Promise<DraftFailur
     .single();
 
   if (error) {
+    // A genuine "this id is not in the table" stays `null` — the caller renders
+    // it as 404, which is the TRUE answer from a store that was reachable. Only
+    // a failure to READ becomes an unavailability.
     if (error.message.toLowerCase().includes('no rows')) return null;
-    throw new Error(error.message);
+    throw new DraftFailureStoreUnavailableError('store_query_failed', error.message);
   }
 
   return (data ?? null) as DraftFailureRow | null;

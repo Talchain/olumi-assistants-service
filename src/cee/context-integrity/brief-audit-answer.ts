@@ -56,6 +56,7 @@ import {
   deriveNotModelledManifest,
   type NotModelledItem,
   type NotModelledManifest,
+  type QuantityKind,
 } from "./not-modelled-manifest.js";
 
 /**
@@ -452,6 +453,148 @@ export function composeBriefAuditAnswer(manifest: NotModelledManifest): string |
   );
 
   return paragraphs.join("\n\n");
+}
+
+/**
+ * How many of the user's own figures the DRAFT-TURN notice quotes before
+ * summarising the remainder.
+ *
+ * ⚠ THIS IS A DIFFERENT CAP FROM `MAX_QUOTED_LITERALS`, AND DELIBERATELY SO —
+ * the two answer different questions and must not be collapsed (trap 21).
+ * `MAX_QUOTED_LITERALS` (25) governs the PULLED audit, where the user asked
+ * "what happened to my figures?" and wants the whole account; it was raised
+ * from 12 precisely because a tight cap hid a severe loss behind "and 11 more".
+ * This one governs a PUSHED footer on a reply the user did not ask for, where
+ * the same 25 figures would be a wall rather than a disclosure. It matches
+ * `MAX_LISTED_WHEN_OVER` in `post-draft-narrative.ts`, the list cap that file
+ * already applies to everything else it names.
+ *
+ * The tight cap is only defensible because the remainder is COUNTED and the
+ * ordering DISCLOSED below, and because the full account remains one question
+ * away — this notice is a pointer to that capability, never a replacement for
+ * it.
+ */
+export const MAX_FIGURES_IN_DRAFT_NOTICE = 3;
+
+/**
+ * The kinds the pushed draft-turn notice must NOT name — those denoting a
+ * POINT IN TIME rather than a magnitude a factor can carry as a value.
+ *
+ * ⚠ EXPRESSED AS AN EXCLUSION, NEVER AS AN ALLOW-LIST, and that is trap 12 not
+ * style. A literal list of the disclosable kinds would be a mirror of
+ * `QuantityKind`: add a seventh kind and it would be silently withheld, with no
+ * error anywhere and a comment above still claiming otherwise. Testing for the
+ * two temporal members is TOTAL over the vocabulary — a new kind is disclosed
+ * by default, which is the correct direction for a clause whose entire subject
+ * is silent omission.
+ */
+const TEMPORAL_KINDS: ReadonlySet<QuantityKind> = new Set<QuantityKind>(["date", "period"]);
+
+function isDisclosableInDraftNotice(kind: QuantityKind): boolean {
+  return !TEMPORAL_KINDS.has(kind);
+}
+
+/**
+ * THE SHORT, PUSHED FORM: name the figures the model did not carry, on the
+ * draft turn, without being asked.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * `TEAM-TEST-MVP.md` criterion 2 requires that a material fact stated in the
+ * brief is either preserved in the model OR explicitly disclosed as not
+ * modelled — *"silent omission fails this"*. Every part of the derivation
+ * needed to satisfy it already shipped: the manifest classifies each stated
+ * quantity, and {@link composeBriefAuditAnswer} renders the full account. But
+ * both were reachable ONLY through `state-query-guard.ts`, which fires only
+ * when the user ASKS. A user reading their first draft has no reason to think
+ * to ask, so the answer existed and nobody ever saw it. Measured on deployed
+ * CEE `df3e542`: a brief stating £240,000 and £65,000 produced a model
+ * carrying neither and a reply mentioning neither.
+ *
+ * This adds no derivation and no new verdict. It renders, in one sentence,
+ * what {@link deriveNotModelledManifest} had already decided.
+ *
+ * ── WHAT IT DISCLOSES, AND THE TWO IT WITHHOLDS ────────────────────────────
+ * `absent` ONLY. Both other verdicts are deliberately silent:
+ *   · `in_model`   — the figure is carried; saying otherwise is a false alarm.
+ *   · `prose_only` — the figure IS in the model's own text, where the user can
+ *     read it. It is not driving anything, which the PULLED audit says in its
+ *     own paragraph; but on an unsolicited footer, telling someone we could not
+ *     find a number they can see is the cry-wolf direction.
+ *
+ * That matters more here than in the pulled answer. A notice the user did not
+ * ask for is read once and then learned from: if it fires on faithful models it
+ * trains the reader to skip it, and the one that matters goes with it. Two
+ * harms, one predicate, and they cannot share a window — so this takes the
+ * conservative side and the twin is pinned in
+ * `coaching/__tests__/dropped-figures-disclosed.test.ts`.
+ *
+ * ── ⚠ THE COPY REPORTS THE SEARCH, NEVER THE MODEL ─────────────────────────
+ * Same rule as F3 above, and for the same reason: `stated-amounts.ts` declares
+ * its own false-negative set incomplete, and every one of those misses points
+ * the same way — toward reporting a figure as missing when it is present. So
+ * this says *"could not find"* and never *"is not in the model"*. The weaker
+ * claim is the true one.
+ *
+ * ── ⚠ AND IT DISCLOSES MAGNITUDES ONLY — MEASURED, NOT ASSUMED ─────────────
+ * `date` and `period` are excluded, and the reason is this notice's own
+ * promise: *"tell me what they apply to and I'll add them."* That is only a
+ * truthful offer for a quantity the model can CARRY AS A VALUE. There is no
+ * temporal dimension on the graph for `Q3` to be added to, so naming it
+ * prescribes an action that terminates in refusal — the defect class this
+ * estate already has on record elsewhere in the product.
+ *
+ * ⚠ THIS WAS INCLUDED FIRST AND REFUTED BY THE TWIN, which is why it is stated
+ * as a measurement rather than an opinion. On a model that faithfully carried
+ * BOTH of the user's money figures, the notice still fired — on `Q3`. That is
+ * the cry-wolf direction exactly: a notice that fires on a faithful model
+ * teaches the reader to skip it, and the one that matters goes with it.
+ *
+ * ⭐ AND THE MEASUREMENT THAT SETTLES IT RATHER THAN THE INTUITION. Across all
+ * four real cold-read captures, EVERY `date`/`period` item — `FY28`,
+ * `Q3 2027`, `January 2027`, `14 May 2027` — carries `matched_node_id: null`,
+ * INCLUDING the ones verdicted `in_model`. For these kinds `in_model` means
+ * only "the string occurs in the model's prose", never "a quantity carries
+ * it". So neither verdict supports a claim about a value, in either direction.
+ *
+ * ⛔ NOTHING IS HIDDEN BY THIS. A dropped deadline is a real loss — the
+ * 2026-08-08 trace graded `14 May 2027` SEVERE — and
+ * {@link composeBriefAuditAnswer} still reports it in full, unchanged, one
+ * question away. This narrows WHAT THIS FOOTER PUSHES, never what the product
+ * admits to losing.
+ *
+ * ── ⚠ THE REMAINDER IS COUNTED, THE ORDERING DISCLOSED ─────────────────────
+ * Measured on the real captures, `absent` runs to 17, 17 and 23 figures. A
+ * pushed footer cannot carry those, and a silently short list is the same lie
+ * as an empty one. So the remainder is stated and the ordering named as
+ * positional — this sentence makes no completeness claim, and the complete
+ * account (which handles `MAX_ITEMS` truncation explicitly, F4 above) is the
+ * one the user can ask for.
+ *
+ * Returns `null` whenever there is nothing honest to say, so a caller can only
+ * choose between a grounded notice and silence.
+ */
+export function composeDroppedFigureNotice(manifest: NotModelledManifest): string | null {
+  if (manifest.status !== "derived") return null;
+  const q = manifest.quantities;
+  if (q === null || q.absent === 0) return null;
+
+  const absent = q.items.filter(
+    (i) => i.verdict === "absent" && isDisclosableInDraftNotice(i.kind),
+  );
+  if (absent.length === 0) return null;
+
+  const shown = absent.slice(0, MAX_FIGURES_IN_DRAFT_NOTICE).map((i) => i.literal);
+  const remainder = absent.length - shown.length;
+  const list =
+    remainder > 0
+      ? `${shown.join(", ")}, and ${remainder} more (the first ${shown.length} in the order ` +
+        `you wrote them, not a ranking)`
+      : shown.join(", ");
+
+  return (
+    `Figures from your brief I could not find in the model: ${list}. ` +
+    `Tell me what they apply to and I'll add them.`
+  );
 }
 
 /**

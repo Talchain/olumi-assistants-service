@@ -48,6 +48,12 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: vi.fn().mockResolvedValue({ id: 'mock-row-id' }),
     readRecent: async () => [],
+    // ROUND 2 (2.1353) — REQUIRED by the chip-click recovered/blocked commit,
+    // and its absence is not a detail: that commit reads the prior turn's
+    // pendings first and fails CLOSED when it cannot, because committing
+    // without them makes the new newest row's empty pendings authoritative and
+    // wipes a live consent hold.
+    readMostRecentPendingActions: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),

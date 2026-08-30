@@ -495,6 +495,16 @@ describe('tryClarificationResume — kind classification regression', () => {
     // invalidated by a graph change between ask and answer. Mutating, so the
     // divergence guard fires by default when a resumer is wired.
     elicit_option_effect: 'mutating',
+    // ROADMAP 2.1353 — answering "which of these cells does your 0.12 belong
+    // to?" writes an option→factor effect value, and every candidate the
+    // pending names can be invalidated by a graph change between ask and
+    // answer. Mutating, so the divergence guard fires by default.
+    elicit_effect_target: 'mutating',
+    // ROADMAP 2.1353 — the edit-clarify referent. Mutating on the same
+    // fail-closed reasoning: the copy asks for "the specific factor, edge,
+    // option, or value to change", so any answer it helps bind is an EDIT, and
+    // its offered node ids are exactly what a graph change can move.
+    elicit_edit_target: 'mutating',
     // ROADMAP 2.918 — resuming the pending baseline question replays
     // add_constraint, whose mint writes observed_state on the target:
     // graph-mutating, so ask→answer divergence fails closed.

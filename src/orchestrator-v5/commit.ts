@@ -676,8 +676,27 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  * either re-pinned or lapsed with a notice + telemetry BEFORE this
  * carry-forward runs — hash-rule drops here stay notice-less by design,
  * because consent holds can no longer reach rule 4 with a stale pin from
- * those paths). REMAINING wipe sharers (out of that lane's scope):
- * chip-click dispatch and system-event dispatch thread no priors.
+ * those paths).
+ *
+ * REMAINING wipe sharers, named INDIVIDUALLY because the module-level claim
+ * that stood here until 30 Aug 2026 ("chip-click dispatch and system-event
+ * dispatch thread no priors") had become false in both directions and so
+ * taught every later lane to stop looking at two whole modules. Derived at
+ * `7a1ea3d9` over every non-test `commitDirectAnswer(` and
+ * `appendCheckedGraphWrite(` call site in `src/`; five of the seven
+ * system-event sites and both remaining chip-click continuity sites DO
+ * thread priors. Line numbers are as of that SHA — trust the function names,
+ * re-derive the lines:
+ *   - `system-events/dispatch.ts:1543` and `:1595`, both inside
+ *     `dispatchFactorValueEdit` (a MUTATING path, so it needs
+ *     `threadHoldsThroughMutatingCommit`, not a plain thread);
+ *   - `handlers/chip-click-dispatch.ts:1679`, in
+ *     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit);
+ *   - `routes/assist.v1.scenario-graph-register.ts:435`, which writes a turn
+ *     row through `appendCheckedGraphWrite` with no `pending_actions` at all
+ *     (`supabase-store.ts:325` resolves that to `[]` — the same silent wipe).
+ *     Mounted at `server.ts:1224`; whether a user reaches it is UNVERIFIED —
+ *     no wire witness taken and the UI repo was not inspected.
  */
 function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;

@@ -168,6 +168,38 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           factor_label: 'Development throughput',
         },
       };
+    case 'elicit_effect_target':
+      // ROADMAP 2.1353 — the two value-ask exits' offered cells (server-only;
+      // carries the user's own value plus the candidate (option, factor)
+      // identities, so a reply of "the first one" has a referent to bind to).
+      return {
+        ...base,
+        action: {
+          kind,
+          source: 'repair_value_ask',
+          value_text: '0.12',
+          candidates: [
+            {
+              option_id: 'opt_sub',
+              option_label: 'subcontracting inner-city deliveries',
+              factor_id: 'fac_sub_cost',
+              factor_label: 'Subcontractor cost',
+            },
+          ],
+        },
+      };
+    case 'elicit_edit_target':
+      // ROADMAP 2.1353 — the two Stage-4A edit-clarify intercepts' offered
+      // targets. Weaker than its siblings by design: the copy names no cell,
+      // so the referent is WHICH intercept asked plus WHAT it offered.
+      return {
+        ...base,
+        action: {
+          kind,
+          reason: 'vague_edit',
+          offered_targets: [{ node_id: 'fac_hiring_cost', label: 'Hiring and Salary Cost' }],
+        },
+      };
     case 'proposed_concept':
       return {
         ...base,
@@ -213,6 +245,13 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     // must contribute ZERO to the confirmation-expecting tally even though it
     // is fully live and counted live.
     ['elicit_option_effect', 0],
+    // ROADMAP 2.1353 — same reasoning, and it is the reason these two kinds are
+    // deliberately absent from CONFIRMATION_EXPECTING_ACTION_TYPES: a bare
+    // "yes" answers neither "which of these does your number belong to?" nor
+    // "which factor, edge, option or value?". They are elicitations, not
+    // proposals, so they must contribute ZERO here while still counting live.
+    ['elicit_effect_target', 0],
+    ['elicit_edit_target', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {

@@ -94,6 +94,45 @@ import { createHash } from "node:crypto";
  * for risks and outcomes the grammar could not express), and it is closed from
  * this side.
  *
+ * ⭐⭐ WHAT v10 CHANGED (2026-08-30) — ONE SECTION, AND IT IS THE ROOT CAUSE OF
+ * THE 1-OF-23 COMPLETION RATE:
+ *   · `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES` stopped telling the model
+ *     to WITHHOLD the value. v9 said *"Where the brief does not support a
+ *     number, leave `sets_to` out … a guessed one is read as the user's own and
+ *     cannot be told apart from a figure they gave you."*
+ *
+ *     ⚠ THE SECOND CLAUSE WAS FALSE AT `f18d941b`. `projector.ts`
+ *     `bindDirectStatedMagnitude` already stamps every option→factor magnitude
+ *     `brief_extraction` (the value EQUALS a stated figure that verifies against
+ *     the brief bytes) or `cee_hypothesis` (ours) — and only the first is ever
+ *     presented as the user's. The instruction was a stale mirror of a
+ *     distinction the projector gained later (CLAUDE.md trap 12), and it was
+ *     costing the entire product: a messy strategic brief rarely states a
+ *     per-option-per-factor figure, so the model complied and omitted `sets_to`
+ *     everywhere, options reached readiness with no interventions, and every
+ *     option×factor pair raised `MISSING_OPTION_VALUE` — in 20 of 23 measured
+ *     fresh journeys. THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING.
+ *
+ *     The three legitimate states for a quantity are user fact / OUR estimate
+ *     with its provenance / genuinely unknown. v9 collapsed the middle one into
+ *     the third. v10 restores it, and the projector supplies the provenance so
+ *     the model never has to speak about it (see the rule directly below, which
+ *     is unchanged and is why this could be done at all).
+ *
+ *   · ⚠ THE HONESTY HALF SHIPS IN THE SAME CHANGE, NOT AFTER IT. `projector.ts`
+ *     now stamps an UNCITED magnitude `cee_hypothesis` rather than writing no
+ *     provenance at all — measured at `f18d941b` by executing the projector: an
+ *     uncited `sets_to` produced `interventions` and `raw_interventions` and NO
+ *     `intervention_details` whatsoever. Asking for more estimates while leaving
+ *     them unattributable would trade a refusal the user can SEE for a
+ *     fabrication they cannot. Pinned by
+ *     `__tests__/option-effect-value-provenance.test.ts`.
+ *
+ *   · THE SHAPE HALF IS BYTE-IDENTICAL to v9. In particular *"Do not invent a
+ *     number the user did not state"* on `stated_items` is UNTOUCHED: that
+ *     governs the USER's half of the record set, it is the property this whole
+ *     mechanism exists to defend, and it was never what blocked anybody.
+ *
  * ── WHAT IT DELIBERATELY DOES NOT SAY ──────────────────────────────────────
  * NOTHING ABOUT PROVENANCE. The projector owns provenance mechanically, and a
  * model that could speak about provenance could commit false authorship — the
@@ -279,10 +318,24 @@ On a \`causal_link\` FROM an option TO a factor, set \`sets_to\` to the value th
 factor would take if that option were chosen, in the same unit the factor is
 measured in.
 
-Set it only where the brief gives you the basis for it — a figure the user
-stated, or a change they described. Where the brief does not support a number,
-leave \`sets_to\` out. An absent number is a truthful answer; a guessed one is
-read as the user's own and cannot be told apart from a figure they gave you.
+Set it on every option→factor link you emit. It is the only number the analysis
+has for what an option actually does, so a link without one leaves that option
+with nothing to compare — and the user is asked to supply a value for every
+option and factor by hand before anything can be analysed at all.
+
+Where the brief gives you the figure — a number the user stated, or a change they
+described — use that, and set \`basis\` to the stated_items it came from. Where
+the brief does not give you a figure, give your best estimate, reasoned from what
+the brief does tell you: the scale of the numbers already in it, and the
+direction and rough size of the change this option describes. Keep the factor's
+own unit, and keep your estimates consistent across the options, so the
+comparison between them means something.
+
+Leave \`sets_to\` out only where you genuinely cannot form a defensible estimate
+even from the brief's own scale. That is a truthful answer, and it also stops the
+analysis running on that option — so do not reach for it merely because you are
+unsure of the exact number. An estimate you can defend is worth more to the user
+than a gap they must fill before they can see anything at all.
 `;
 
 /**

@@ -275,7 +275,16 @@ describe("what counts as a rival claim", () => {
     // the value but NO binding detail (it cites nothing, so it earns nothing),
     // which is exactly the shape this case is about.
     expect(rawOf(projection, STATUS_QUO, LICENCE)).toBe(50_000);
-    expect(bindingOf(projection, STATUS_QUO, LICENCE)).toBeUndefined();
+    // ⚠ PRECONDITION SHARPENED (option-effect-value change). This read
+    // `toBeUndefined()`, which conflated "cites nothing, so it earns no BRIEF
+    // authority" — the property this case is about — with "carries no
+    // provenance at all", which was the class-1 defect. The rival now carries
+    // the value AND an honest `cee_hypothesis` stamp; what it still does not
+    // carry is brief authority, which is what leaves FULL_SWITCH's claim intact
+    // below.
+    expect(bindingOf(projection, STATUS_QUO, LICENCE)).toMatchObject({
+      source: "cee_hypothesis",
+    });
 
     expect(bindingOf(projection, FULL_SWITCH, LICENCE)).toMatchObject({
       raw_value: 50_000,
