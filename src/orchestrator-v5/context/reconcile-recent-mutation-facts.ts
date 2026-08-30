@@ -21,6 +21,7 @@ import type {
   HandlerFactWithTurn,
   IdentifiedHandlerFact,
 } from '../types/handler-fact.js';
+import { readCommittedMutationTurnRef } from '../types/recent-mutation-transition.js';
 import { RECENT_CHANGES_CAP } from './recent-changes.js';
 
 export type RecentChangesHistoryStatus = 'complete' | 'capped' | 'degraded';
@@ -84,6 +85,8 @@ export interface ReconciledRecentMutationFacts {
    * `degraded + []` means history could not be established.
    */
   readonly recent_changes_status: RecentChangesHistoryStatus;
+  /** Exact retained occurrences; absent on legacy/unidentified recovery. */
+  readonly recent_mutation_entries?: readonly IdentifiedHandlerFact[];
 }
 
 /**
@@ -93,7 +96,7 @@ export interface ReconciledRecentMutationFacts {
  * every live routing seam. Binding the independently-reconciled mutation
  * history to that same array keeps all other fact consumers on the unchanged
  * hot-window facts while allowing the assembler to read the durable receipt
- * slice without a second store read or an executor edit. The two properties
+ * slice without a second history read or an executor edit. The metadata properties
  * are non-enumerable, so array iteration/JSON bytes remain those of the prior
  * facts themselves.
  */
@@ -101,6 +104,7 @@ export interface HandlerFactsWithRecentMutationHistory
   extends ReadonlyArray<HandlerFact> {
   readonly recent_mutation_facts: readonly HandlerFact[];
   readonly recent_changes_status: RecentChangesHistoryStatus;
+  readonly recent_mutation_entries?: readonly IdentifiedHandlerFact[];
 }
 
 interface ClassifiedFacts {
@@ -131,7 +135,7 @@ export function reconcileRecentMutationFacts(
     durable.query_limit === RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT &&
     durable.facts.length <= RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT
   ) {
-    const classifiedDurable = classifyIdentifiedFacts(durable.facts);
+    const classifiedDurable = classifyIdentifiedFacts(durable.facts, input.scenarioId);
 
     // The durable reader promises applied mutation receipts only. A malformed,
     // noop, refused, or foreign fact on this arm contradicts that promise, so
@@ -145,6 +149,7 @@ export function reconcileRecentMutationFacts(
 
       const hotIdentified = classifyIdentifiedFacts(
         input.hotWindowFactsWithIdentity ?? [],
+        input.scenarioId,
       );
       const hotIdentityComplete =
         !hotIdentified.malformed &&
@@ -188,12 +193,13 @@ export function reconcileRecentMutationFacts(
           : mergedIds.every((id) => durableIds.includes(id));
 
       if (!durableIsAuthoritativePage) {
-        return degraded(merged.ordered.map((entry) => entry.fact));
+        return freezeResult(merged.ordered.map((entry) => entry.fact), 'degraded', merged.ordered);
       }
 
       return freezeResult(
         merged.ordered.map((entry) => entry.fact),
         durableStatus,
+        merged.ordered,
       );
     }
   }
@@ -224,6 +230,7 @@ export function bindRecentMutationHistoryToPriorFacts(
   const carrier = [...priorFacts] as HandlerFact[] & {
     recent_mutation_facts: readonly HandlerFact[];
     recent_changes_status: RecentChangesHistoryStatus;
+    recent_mutation_entries?: readonly IdentifiedHandlerFact[];
   };
   Object.defineProperties(carrier, {
     recent_mutation_facts: {
@@ -234,6 +241,12 @@ export function bindRecentMutationHistoryToPriorFacts(
     },
     recent_changes_status: {
       value: history.recent_changes_status,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+    recent_mutation_entries: {
+      value: history.recent_mutation_entries,
       enumerable: false,
       writable: false,
       configurable: false,
@@ -262,6 +275,7 @@ export function readRecentMutationHistoryFromPriorFacts(
   return freezeResult(
     candidate.recent_mutation_facts,
     candidate.recent_changes_status,
+    candidate.recent_mutation_entries,
   );
 }
 
@@ -295,6 +309,7 @@ function classifyFacts(candidates: readonly unknown[]): ClassifiedFacts {
 
 function classifyIdentifiedFacts(
   candidates: readonly unknown[],
+  scenarioId: string,
 ): ClassifiedIdentifiedFacts {
   const eligible: IdentifiedHandlerFact[] = [];
   const seenIds = new Set<string>();
@@ -332,10 +347,12 @@ function classifyIdentifiedFacts(
       ineligible = true;
       continue;
     }
+    const ref = readCommittedMutationTurnRef(candidate.committed_turn_ref);
     eligible.push({
       fact,
       fact_row_id: factRowId,
       fact_created_at: factCreatedAt,
+      ...(ref?.scenario_id === scenarioId ? { committed_turn_ref: ref } : {}),
     });
   }
 
@@ -418,6 +435,16 @@ function mergeIdentifiedFacts(
       stableStringify(existing.fact) !== stableStringify(entry.fact)
     ) {
       conflict = true;
+    }
+    // Different lineage cannot license a transition even when the underlying
+    // receipt bytes agree. Keep the receipt, not either disputed linkage.
+    if (existing.committed_turn_ref && entry.committed_turn_ref &&
+      stableStringify(existing.committed_turn_ref) !== stableStringify(entry.committed_turn_ref)) {
+      byId.set(entry.fact_row_id, {
+        fact: existing.fact,
+        fact_row_id: existing.fact_row_id,
+        fact_created_at: existing.fact_created_at,
+      });
     }
   }
 
@@ -511,9 +538,19 @@ function degraded(facts: readonly HandlerFact[]): ReconciledRecentMutationFacts 
 function freezeResult(
   facts: readonly HandlerFact[],
   status: RecentChangesHistoryStatus,
+  entries?: readonly IdentifiedHandlerFact[],
 ): ReconciledRecentMutationFacts {
+  const retained = Object.freeze([...facts.slice(0, RECENT_CHANGES_CAP)]);
+  // Reference equality binds each occurrence before any display projection.
+  // Never recover an ID by equal payloads, labels, timestamps or list guesses.
+  const retainedEntries = entries?.slice(0, RECENT_CHANGES_CAP);
+  const entriesMatch = retainedEntries !== undefined &&
+    retainedEntries.length === retained.length &&
+    retainedEntries.every((entry, index) => entry.fact === retained[index]) &&
+    retainedEntries.some((entry) => entry.committed_turn_ref !== undefined);
   return Object.freeze({
-    recent_mutation_facts: Object.freeze([...facts.slice(0, RECENT_CHANGES_CAP)]),
+    recent_mutation_facts: retained,
     recent_changes_status: status,
+    ...(entriesMatch ? { recent_mutation_entries: Object.freeze(retainedEntries) } : {}),
   });
 }
