@@ -459,6 +459,169 @@ describe("C — an explicit unknown satisfies the factor-data gate; nothing else
 // that fails if half of it lands.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// F — THE EMITTED UNKNOWN MUST BE EXPRESSIBLE DOWNSTREAM, AND VALUE-LESS +
+//     PRIOR-LESS IS A HARD ERROR HERE, NOT A DOWNSTREAM DISCLOSURE PROBLEM
+//
+// ⚠⚠ WHY THIS BLOCK IS THE MOST IMPORTANT ONE IN THE FILE FOR SAFETY.
+// Measured on the PLoT/ISL half (`robustness_analyzer_v2.py:1907`): ISL never
+// fires `ROOT_NODE_DEFAULT_VALUE` for a NON-ROOT factor — and a CONTROLLABLE
+// factor is non-root by construction, because an option edge points at it.
+//
+// So if a controllable factor arrives with no value AND no prior PLoT can
+// express, ISL centres it on a SILENT `0.0` with NO disclosure anywhere. That
+// is strictly worse than the placeholder this PR removes: `0.5` was at least a
+// visible wrong number.
+//
+// PLoT correctly emits NOTHING for a prior it cannot express (NO UNIVERSAL
+// SEMANTIC FALLBACK), so the burden sits HERE, at the producer. These are
+// therefore not style assertions about a literal — they are the preconditions
+// of the whole change being safe, and each one names the harm it prevents.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("F — the emitted prior is expressible, and no factor escapes value-less AND prior-less", () => {
+  it("the prior meets every condition PLoT needs to express a uniform parameter-uncertainty", () => {
+    const prior = buildUnquantifiedPrior() as unknown as Record<string, unknown>;
+
+    // FAMILY. `schema-v3.ts`'s drift alarm logs an error for any distribution
+    // outside `PriorDistribution`, whose only member is "uniform"; a wrong
+    // family is passed through unlabelled and PLoT cannot type it.
+    expect(prior.distribution).toBe("uniform");
+
+    // FINITE BOUNDS. `NaN`/`Infinity` are numbers to `typeof` and would pass a
+    // naive shape check while being unusable as sampler parameters.
+    expect(Number.isFinite(prior.range_min as number)).toBe(true);
+    expect(Number.isFinite(prior.range_max as number)).toBe(true);
+
+    // NON-DEGENERATE, AND STRICTLY ORDERED. `min === max` is a point mass, not
+    // an expression of ignorance, and `min > max` relies on a downstream swap
+    // repair we must not depend on. Asserted with `<`, never `<=`.
+    expect(prior.range_min as number).toBeLessThan(prior.range_max as number);
+
+    // SPANS THE WHOLE NORMALISED SCALE. A narrower range would be an
+    // information claim, which is the exact defect the founder's ruling names.
+    expect(prior.range_min).toBe(0);
+    expect(prior.range_max).toBe(1);
+  });
+
+  it("HARD ERROR — W1 never leaves a factor value-less AND prior-less, across every shape it can meet", () => {
+    // A derived invariant, not a restatement: it drives the producer over the
+    // shapes that reach it and asserts the postcondition on the OUTPUT, so it
+    // REDs if any future branch returns early without writing the prior.
+    //
+    // "Leave it to downstream disclosure" is not available on this path: the
+    // ISL branch that would disclose a default does not fire for a non-root
+    // factor, and a controllable factor is non-root by construction.
+    const shapes: Array<[string, Record<string, unknown> | undefined]> = [
+      ["no data at all", undefined],
+      ["empty data bag", {}],
+      ["extractionType only", { extractionType: "inferred" }],
+      ["a non-numeric value", { value: "not a number", unit: "%" }],
+      ["a value that is null", { value: null }],
+      ["a value that is NaN-producing text", { value: "£" }],
+      ["metadata but no value", { factor_type: "cost", uncertainty_drivers: ["x"] }],
+    ];
+
+    for (const [name, data] of shapes) {
+      const graph = optionConnectedGraph(data);
+      const { response } = ensureControllableFactorBaselines(graph) as any;
+      const factor = nodeById(response, "fac_target");
+
+      const hasNumericValue = typeof factor.data?.value === "number";
+      const hasExplicitUnknown = factorIsExplicitlyUnquantified(factor);
+
+      // The invariant, written against the SPEC: every factor leaves this
+      // producer in ONE of the three legitimate states. Never in neither.
+      expect(
+        hasNumericValue || hasExplicitUnknown,
+        `shape "${name}" left the factor with no value AND no explicit unknown — ` +
+          `ISL would silently centre it on 0.0 with no disclosure`,
+      ).toBe(true);
+    }
+  });
+
+  it("DELIBERATE DIFFERENCE FROM THE PRECEDENT — the category is NOT changed to external", () => {
+    // ⭐⭐ STATED, NOT ASSUMED, because the shipped precedent does change it.
+    // `unreachable-factors.ts` performs THREE actions together:
+    //   :449  category = "external"
+    //   :496  delete data.value  (+ promote factor_type / extractionType to node level)
+    //   :731  write the prior
+    //
+    // Those are ONE decision with two consequences, not a three-part recipe for
+    // "how to say a value is unknown". The decision is the RECLASSIFICATION —
+    // the factor is genuinely unreachable from any option, so it genuinely is
+    // external. The value deletion and the metadata promotion are then FORCED
+    // by `EXTERNAL_HAS_DATA` (`graph-validator.ts:867-875`), which refuses an
+    // external factor carrying `value`, `factor_type` or `uncertainty_drivers`.
+    //
+    // This lane's decision is a different one, and CLAUDE.md trap 21 is exactly
+    // about not merging two authorities because their outputs overlap:
+    //   `handleUnreachableFactors` answers "is this factor reachable from an option?"
+    //   this change answers            "does this factor have a stated level?"
+    //
+    // Three reasons the category must stay:
+    //  1. A controllable factor with an unknown baseline is STILL controllable —
+    //     an option acts on it. Reclassifying removes it from the intervention
+    //     set, changes the maths, and deletes the very affordance ("set this
+    //     factor's value") this change exists to unlock.
+    //  2. Setting external would trigger `EXTERNAL_HAS_DATA` and force us to
+    //     strip `factor_type` and `uncertainty_drivers` — real information the
+    //     model produced, discarded to satisfy a category we chose.
+    //  3. The PLoT half is specifically dropping its `category === 'external'`
+    //     conjunct so a NON-external factor's prior becomes a uniform
+    //     parameter-uncertainty. The two halves are consistent only if the
+    //     category stays.
+    //
+    // Measured with a positive control and a fabricated contrast: no validator
+    // rule forbids a prior on a non-external factor; the only prior-adjacent
+    // rule is `EXTERNAL_HAS_DATA`, which is about an EXTERNAL factor's `data`.
+    const graph = optionConnectedGraph({
+      extractionType: "inferred",
+      factor_type: "capacity",
+      uncertainty_drivers: ["not stated in the brief"],
+    });
+
+    const { response } = ensureControllableFactorBaselines(graph) as any;
+    const factor = nodeById(response, "fac_target");
+
+    expect(factor.category).toBe("controllable");
+    // …and the information the model DID produce is still on the node, which is
+    // what the external route would have been forced to strip.
+    expect(factor.data.factor_type).toBe("capacity");
+    expect(factor.data.uncertainty_drivers).toEqual(["not stated in the brief"]);
+
+    // The graph still validates, i.e. carrying a prior on a controllable factor
+    // is not itself an offence. Pinned here so the claim above is derived from
+    // the validator rather than asserted from a reading of it.
+    const result = validateGraph({ graph: response as GraphT });
+    expect(hasErrorCode(result, "CONTROLLABLE_MISSING_DATA")).toBe(false);
+    expect(hasErrorCode(result, "EXTERNAL_HAS_DATA")).toBe(false);
+  });
+
+  it("W3 obeys the same postcondition on the observable population", () => {
+    const graph: any = {
+      nodes: [
+        { id: "dec_x", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+        { id: "fac_obs", kind: "factor", label: "Customer satisfaction", category: "observable", data: {} },
+        { id: "goal_x", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_x", to: "opt_a", edge_type: "structural" },
+        { from: "fac_obs", to: "goal_x", edge_type: "causal" },
+      ],
+    };
+    fixObservableMissingData(graph as GraphT, [
+      { code: "OBSERVABLE_MISSING_DATA", severity: "error", message: "", path: "nodes[fac_obs]" },
+    ] as any);
+
+    const factor = nodeById(graph, "fac_obs");
+    expect(typeof factor.data?.value === "number" || factorIsExplicitlyUnquantified(factor)).toBe(true);
+    expect(factor.prior.range_min).toBeLessThan(factor.prior.range_max);
+    expect(factor.category).toBe("observable"); // unchanged here too
+  });
+});
+
 describe("E — WHAT THE USER NOW SEES: the factor_values slice stops reporting a value that was never stated", () => {
   // ⭐⭐ ACCEPTANCE 5. Removing a dishonest number and saying nothing would
   // replace one dishonesty with another, so this block pins the surface that
