@@ -768,6 +768,48 @@ export function findSoleLiveElicitBaselinePending(
 }
 
 /**
+ * ⭐⭐ THE BASELINE QUESTION, AND WHAT ELSE A BARE NUMBER COULD BE ANSWERING.
+ *
+ * {@link findSoleLiveElicitBaselinePending} collapses two very different states
+ * into one `null`, and the collapse is what this function exists to undo:
+ *
+ *   - NO baseline question is live. A bare number answers nothing here, and
+ *     falling through in silence is correct and contractual.
+ *   - A baseline question IS live, and so is another ask a bare number could be
+ *     answering. The user has answered SOMETHING; we cannot tell which. Falling
+ *     through in silence hands the number to a lane that may WRITE it somewhere
+ *     the user never named — which is the harm this estate cannot ship.
+ *
+ * The soleness rule itself is unchanged and stays the licence for BINDING: with
+ * a competitor live, nothing may be minted from a bare number. This function
+ * only lets a caller tell the second state from the first, so it can ASK rather
+ * than fall silent (CLAUDE.md trap 22f — where direction cannot be determined,
+ * the ambiguity is the product).
+ *
+ * TWO live baseline questions still return `null`: the referent is ambiguous
+ * between TARGETS, which is the extractor's own unanimity doctrine one level up,
+ * and there is no single target to name in a re-ask.
+ */
+export function readLiveElicitBaselineCompetition(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): {
+  readonly pending: ElicitTargetBaselinePending;
+  /** Live asks OTHER than this one that a bare number could also be answering. */
+  readonly competingCount: number;
+} | null {
+  const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
+  );
+  const baselines = claimants.filter((pa) => pa.action.kind === 'elicit_target_baseline');
+  if (baselines.length !== 1) return null;
+  return {
+    pending: baselines[0]! as ElicitTargetBaselinePending,
+    competingCount: claimants.length - 1,
+  };
+}
+
+/**
  * Redacted read-time tally of prior-turn pending actions. Counts + closed-enum
  * kind counts only. `confirmationExpectingLiveCount` counts live pendings whose
  * kind is in {@link CONFIRMATION_EXPECTING_ACTION_TYPES} — the value the caller

@@ -247,10 +247,20 @@ export function formatBaselineElicitation(input: { readonly targetLabel: string 
  */
 export function formatBaselineReask(input: {
   readonly targetLabel: string;
-  readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
+  readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable' | 'competing_ask';
 }): string {
   const ask = `What percentage is ${input.targetLabel} at right now?`;
   switch (input.reason) {
+    // ⭐ CONTESTED — more than one open question could be taking that number,
+    // so the product says so instead of picking one. Naming the target is what
+    // makes the re-ask answerable: the user can repeat the figure against this
+    // question, or name the other one. Nothing is written on this path.
+    case 'competing_ask':
+      return (
+        `I have more than one question open, so I could not tell which one ` +
+        `that number answers, and I did not want to apply it to the wrong ` +
+        `one. ${ask} If you meant something else, say which.`
+      );
     case 'out_of_range':
       return (
         `That is outside the range I can use for a current level. ` +

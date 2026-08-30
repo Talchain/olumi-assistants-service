@@ -50,6 +50,7 @@ import type { ElicitTargetBaselinePending, PendingAction } from '../session/pend
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
+  readLiveElicitBaselineCompetition,
 } from '../session/pending-action.js';
 import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
 
@@ -690,7 +691,7 @@ export type BaselineElicitationResumeDispatch =
       readonly skip_reason: 'unreadable_answer';
       readonly pending: ElicitTargetBaselinePending;
       readonly targetLabel: string;
-      readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
+      readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable' | 'competing_ask';
     }
   | {
       readonly matched: true;
@@ -708,14 +709,36 @@ export function tryBaselineElicitationResume(input: {
   readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined;
 }): BaselineElicitationResumeDispatch {
   const pending = findSoleLiveElicitBaselinePending(input.pendingActions, input.nowMs);
-  if (pending === null) {
+  // ⭐⭐ THE CONTESTED READ. `findSoleLiveElicitBaselinePending` returns `null`
+  // for two states that must not behave alike: no question was asked, and a
+  // question WAS asked but another live ask could also be taking a bare number.
+  // The second state is where the harm lives — the user answers, nothing binds,
+  // nothing is said, and the number reaches a lane free to write it against an
+  // entity the user never named. `contested` is non-null ONLY in that second
+  // state; every other caller of the soleness rule is untouched, and NOTHING is
+  // minted from it (see the `competing_ask` exit below).
+  const contested =
+    pending === null
+      ? readLiveElicitBaselineCompetition(input.pendingActions, input.nowMs)
+      : null;
+  // ⚠ `competingCount > 0` IS READ, NOT DECORATION. Without it the contested
+  // branch would fire on a `contested` whose competitor set is empty — a state
+  // the real claimant set cannot produce (an uncontested baseline ask would
+  // have been returned by the soleness rule above), but one a future change to
+  // the claimant table could introduce silently. A returned field that nothing
+  // reads is how a guard stops discriminating without anything going red: a
+  // mutant that narrowed the claimant set to a DIFFERENT kind left every
+  // behavioural case in this suite green until this conjunct existed.
+  const active =
+    pending ?? (contested !== null && contested.competingCount > 0 ? contested.pending : null);
+  if (active === null) {
     return { matched: false, skip_reason: 'no_pending_question' };
   }
   // Mutating kind: missing hash on either side is a conflict (fail closed).
-  if (graphHashConflicts(pending, input.currentGraphHash)) {
+  if (graphHashConflicts(active, input.currentGraphHash)) {
     return { matched: false, skip_reason: 'graph_diverged' };
   }
-  const targetId = pending.action.target_id;
+  const targetId = active.action.target_id;
   const target = input.graphNodes?.find((n) => n.id === targetId);
   const liveLabel = typeof target?.label === 'string' ? target.label : undefined;
   if (target === undefined || liveLabel === undefined || liveLabel.trim() === '') {
@@ -726,12 +749,42 @@ export function tryBaselineElicitationResume(input: {
     .filter((n) => n.id !== targetId)
     .map((n) => (typeof n.label === 'string' ? n.label : undefined));
   const verdict = classifyElicitedBaselineAnswer(input.message, liveLabel, competingLabels);
+  if (pending === null) {
+    // ⭐ CONTESTED: a baseline question is live and so is a competing ask.
+    //
+    // NOTHING BINDS HERE, whatever the verdict says. The soleness rule is the
+    // licence for MINTING and it is not satisfied, so `bound` and `unresolved`
+    // are treated alike: both mean the user produced something answer-SHAPED,
+    // and the only safe move is to ask which question it answers.
+    //
+    // ⚠ THE CLASSIFIER IS USED AS A SHAPE TEST, NOT AS A BINDER, and the
+    // distinction is the whole safety argument. Its elliptical limb is
+    // documented as licensed only on a SOLE pending — that licence governs
+    // WRITING a value, which this branch never does. Declining to read the
+    // shape here because the binding licence is absent would preserve exactly
+    // the silence the branch exists to remove.
+    //
+    // A message that is not answer-shaped still falls through UNTOUCHED, which
+    // is what keeps the opposite harm closed: an explicit edit carrying its own
+    // verb and referent ("set the pilot's effect on cost to 0.3") reads as
+    // `not_an_answer` and reaches the edit lane exactly as it does today.
+    if (verdict.outcome === 'not_an_answer') {
+      return { matched: false, skip_reason: 'not_an_answer' };
+    }
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending: active,
+      targetLabel: liveLabel,
+      reason: 'competing_ask',
+    };
+  }
   if (verdict.outcome === 'unresolved') {
     // The user answered; the product cannot read it. Told, not swallowed.
     return {
       matched: false,
       skip_reason: 'unreadable_answer',
-      pending,
+      pending: active,
       targetLabel: liveLabel,
       reason: verdict.reason,
     };
@@ -742,5 +795,5 @@ export function tryBaselineElicitationResume(input: {
     // exactly as it was before 2.918.
     return { matched: false, skip_reason: 'not_an_answer' };
   }
-  return { matched: true, pending, targetLabel: liveLabel };
+  return { matched: true, pending: active, targetLabel: liveLabel };
 }
