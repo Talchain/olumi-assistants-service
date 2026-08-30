@@ -63,6 +63,11 @@
  * unparseable answer becomes a coaching moment, not a loop.
  */
 
+import {
+  CURRENCY_SYMBOL_SOURCE,
+  NUMERIC_SUFFIX_SOURCE,
+} from '../context/cqe/rules.js';
+
 /**
  * The CLOSED referent set — MOVED here from `repair-value-binding.ts`, not
  * copied (CLAUDE.md trap 12). A member is a phrase that can only point at "the
@@ -89,7 +94,7 @@ export const BARE_REFERENTS: readonly string[] = [
   'the missing effect value',
 ];
 
-const REFERENT = `(?:(${BARE_REFERENTS.join('|')})\\s+)?`;
+const REFERENT = `(?:(?<referent>${BARE_REFERENTS.join('|')})\\s+)?`;
 
 /**
  * An affirmative lead, because a human answering a question often agrees first.
@@ -102,18 +107,125 @@ const REFERENT = `(?:(${BARE_REFERENTS.join('|')})\\s+)?`;
 const AFFIRMATIVE_LEAD = `(?:(?:yes|yeah|yep|sure|ok|okay)[,!.]?\\s+)?(?:please\\s+)?`;
 
 /**
- * The value token.
+ * The digits of the value token.
  *
  * ⚠ `\\.\\d+` IS A SEPARATE ALTERNATIVE, and its absence was a real gap:
  * "Set it to .12." was pinned as dropped purely because the pattern demanded a
  * leading digit. A user writing a bare decimal is not expressing a different
  * intent.
  *
- * No unit, no currency symbol, no percent sign — the whole-message anchoring
- * below is what refuses "12%", "3 months" and "£5000" without this module
- * maintaining a vocabulary list for any of them.
+ * No unit and no currency symbol — the whole-message anchoring below is what
+ * refuses "3 months" and "£5000" without this module maintaining a vocabulary
+ * list for either.
  */
-const NUMBER = `(\\d[\\d,]*(?:\\.\\d+)?|\\.\\d+)`;
+const NUMBER_DIGITS = `\\d[\\d,]*(?:\\.\\d+)?|\\.\\d+`;
+
+/**
+ * ⭐⭐ CQE's HEDGE VOCABULARY, MIRRORED — with a DERIVED DRIFT GUARD, because a
+ * mirror this estate cannot import must fail loud instead of assuming good
+ * (CLAUDE.md trap 12).
+ *
+ * The estate already owns "which words mark an approximation": `APPROX` in
+ * `context/cqe/rules.ts:35`, which CQE uses to set `quantity.approximate`. It is
+ * not exported (`CQE_NUMERIC_SOURCE`, `CURRENCY_SYMBOL_SOURCE` and
+ * `NUMERIC_SUFFIX_SOURCE` are, for exactly this reason), and that file is not
+ * this lane's to change. So the alternatives are copied here VERBATIM and
+ * `__tests__/hedge-vocabulary-derived.test.ts` reads `rules.ts`'s source, extracts
+ * the `APPROX` literal and REDs if CQE ever gains a hedge word this set lacks.
+ * A copy that cannot drift silently is the sanctioned form of a mirror.
+ */
+const CQE_APPROX_HEDGES = 'roughly|about|approximately|around|nearly|circa';
+
+/**
+ * ⭐⭐ THE HEDGE IS ABOUT CONFIDENCE, NOT ABOUT THE VALUE — AND READING THE
+ * NUMBER THE USER WROTE IS NOT FABRICATION.
+ *
+ * ⚠⚠ THIS REVERSES A STATED REFUSAL IN THIS FILE, so the refusal is quoted
+ * rather than deleted (trap 14 — a confession must not be tidied into an
+ * excuse). `MISSING_VALUE_ANSWER_KNOWN_DROPPED` said of "Set it to about 0.12.":
+ *
+ *   "a HEDGE. Binding it would record an approximation as an exact user-stated
+ *    figure, which is the provenance lie this wave is closing one level up."
+ *
+ * THE PREMISE IS WRONG, and the distinction it collapses is the one that
+ * matters. There are two different acts:
+ *   · CHOOSING a number the user did not give ("high" → 0.7) — fabrication, and
+ *     it stays banned; `matchBareRepairValue` still refuses every qualitative
+ *     reading and the `user_specified` stamp stays truthful.
+ *   · READING the number the user DID give, through a hedge word — not
+ *     fabrication. `0.12` is the user's figure in "about 0.12" exactly as it is
+ *     in "0.12"; the hedge qualifies their CONFIDENCE and this module moves the
+ *     figure by nothing.
+ * Refusing the second bought no provenance safety and cost the journey: measured
+ * on deployed CEE `f18d941` the product's own advised phrasing "0.6, say" read
+ * null, and a user answering the product's question in ordinary English cleared
+ * the block 0 times in 13.
+ *
+ * ⭐ WHY THIS IS NOT THE OSCILLATING-PREDICATE PATTERN (trap 22f), which is the
+ * standing objection to widening a reader here. The four lost rounds were spent
+ * on a predicate that had to decide DIRECTION from prose — genuinely ambiguous,
+ * with no anchor. This is a CLOSED FILLER SET inside an unchanged `^…$` anchor:
+ * every arm still requires the WHOLE message to be nothing but hedge, number and
+ * hedge, so the widening can only ever ADMIT A MESSAGE THAT NAMES NO ENTITY. It
+ * cannot creep — the same property the header claims for `BARE_NUMBER_PATTERN`.
+ *
+ * SOURCED FROM OUTSIDE THIS LANE'S HEAD, every member:
+ *   · `CQE_APPROX_HEDGES`                       — the estate's own hedge owner.
+ *   · "0.6, say" / "I think 0.6 makes sense."   — `SUGGESTED_PHRASING_KNOWN_DROPPED`
+ *     (`compose/configure-option-clarify-response.ts:175`), both captured in
+ *     Paul's live session, both pinned there as reply shapes the product could
+ *     not read.
+ *   · "I'd say", "(ish)", "maybe"               — the 23-journey deployed
+ *     measurement that opened this lane.
+ *   · "Set it to about 0.12."                   — this file's own pinned set.
+ */
+const HEDGE_WORD =
+  `${CQE_APPROX_HEDGES}`
+  + `|maybe|perhaps|possibly|probably`
+  + `|i'?d say|i would say|i think|i reckon|i guess|i'?d go with`
+  + `|let'?s say|lets say|say|call it`;
+
+/** Hedges that FOLLOW the figure — "0.6ish", "0.6 (ish)", "0.6, say". */
+const HEDGE_TAIL_WORD =
+  `${CQE_APPROX_HEDGES}`
+  + `|ish|or so|or thereabouts|give or take`
+  + `|say|maybe|perhaps|i think|i guess|i reckon`
+  + `|makes sense|sounds right|feels right|seems right|feels about right`;
+
+/**
+ * Zero or more hedge words leading the figure, and zero or more trailing it.
+ * `~` is admitted immediately before the digits as the symbol form of the same
+ * hedge. Both sides are `*`, so today's un-hedged messages match the identical
+ * shape they match now — this is additive by construction, not by inspection.
+ */
+const HEDGE_LEAD = `(?:(?:${HEDGE_WORD})[,\\s]+)*`;
+const HEDGE_TRAIL = `(?:[,\\s]*\\(?(?:${HEDGE_TAIL_WORD})\\)?)*`;
+
+/**
+ * ⭐ PERCENT IS A NOTATION, NOT A UNIT — and that is the whole of why it is
+ * admitted here while `£`, `k` and "months" are not.
+ *
+ * An effect value is DIMENSIONLESS on the producer's 0–1 scale
+ * (`src/prompts/edit-graph-v6.ts`: "effect values are on the 0-1 scale"). "8%"
+ * denotes the dimensionless quantity 0.08 and its divisor — 100 — is carried in
+ * the notation itself. Reading it is arithmetic on what the user wrote.
+ *
+ * ⚠ CONTRAST, AND IT IS THE LINE THAT MUST NOT MOVE: "£40,000" or "3 months" is
+ * a HUMAN-SCALE quantity whose divisor is a `scale_frame` — a fact about a
+ * FACTOR, owned by `tools/handlers/d1-shared/scale-frame.ts`, and absent for an
+ * option effect. Converting one would mean inventing a frame. Those stay
+ * refused, and the range check downstream is what keeps a figure the compute
+ * would reject (PLoT gates `value < 0 || value > 1`) from ever being written.
+ */
+const PERCENT_SUFFIX = `\\s*(?:%|per\\s?cent|percent)`;
+
+/**
+ * The value token: an optionally-hedged figure, optionally written as a percent.
+ * ONE spelling, used by every arm — a second numeric grammar is the copy that
+ * rots (trap 12).
+ */
+const NUMBER =
+  `${HEDGE_LEAD}(?:~\\s*)?(?<value>${NUMBER_DIGITS})(?<pct>${PERCENT_SUFFIX})?${HEDGE_TRAIL}`;
 
 /**
  * The BARE NUMBER — the whole message is the figure and nothing else.
@@ -126,6 +238,30 @@ const NUMBER = `(\\d[\\d,]*(?:\\.\\d+)?|\\.\\d+)`;
  * `^…$` anchor is the whole guard, and it can only ever decline.
  */
 const BARE_NUMBER_PATTERN = new RegExp(`^${NUMBER}\\s*[.!]*$`);
+
+/**
+ * ⭐⭐ THE CANONICAL MODEL-UNIT SPELLING of a read figure — `null` when the text
+ * denotes no plain decimal.
+ *
+ * WHY IT IS ON THE READING AND NOT AT THE CALL SITES. Every consumer that WRITES
+ * feeds the figure back through `buildConfigureOptionAdvisedFormat`, whose
+ * sentence is re-read by `readOptionEffectValue` — which declines a percent sign
+ * AND a thousands separator. So a percent reading that reached a writer as "8%"
+ * would silently fail to land, and each call site fixing that itself is the
+ * second spelling that rots (trap 12). One reading, one canonical text.
+ *
+ * ⚠ THE EXPONENT GUARD IS NOT DECORATION. The consumer takes TEXT, so a value
+ * whose shortest round-trip spelling is exponential ("0.00001%" → `1e-7`) must
+ * not be produced at all: the writer's own grammar would decline it and the turn
+ * would dead-end. Refusing here makes the refusal visible one seam earlier.
+ */
+function toModelUnitText(digits: string, isPercent: boolean): string | null {
+  const bare = digits.replace(/,/g, '');
+  const parsed = Number(bare);
+  if (!Number.isFinite(parsed)) return null;
+  const text = isPercent ? String(parsed / 100) : bare;
+  return /^\d*\.?\d+$/.test(text) ? text : null;
+}
 
 /**
  * The bindable forms. `^…$` anchoring is load-bearing: a named target, a
@@ -330,7 +466,12 @@ const QUALITATIVE_ANSWER_PATTERN =
  * and word-numbers — is unchanged and is about PROVENANCE, not about slots.
  */
 export const MISSING_VALUE_ANSWER_KNOWN_DROPPED: readonly string[] = [
-  'Set it to about 0.12.',
+  // ⚠⚠ "Set it to about 0.12." HAS LEFT THIS SET. Its stated reason — *"a HEDGE.
+  // Binding it would record an approximation as an exact user-stated figure"* —
+  // conflated CHOOSING a number the user did not give with READING the one they
+  // did. The full argument, and what stays banned, is in the `HEDGE_WORD` header.
+  // Measured cost of the refusal: the product's own advised phrasing "0.6, say"
+  // read null on deployed `f18d941`, and a natural answer cleared the block 0/13.
   'Set it to a third.',
   'Set it to 0.12 for the subcontracting option.',
   // ⭐ ADDED 19 Aug 2026 BECAUSE A MUTANT SURVIVED AND HAD TO BE SETTLED BY
@@ -349,11 +490,298 @@ export const MISSING_VALUE_ANSWER_KNOWN_DROPPED: readonly string[] = [
   'It went up a lot,set it to 0.12.',
 ];
 
+/**
+ * ⭐⭐ THE PHRASE THE ASK TEACHES for "this option leaves that factor alone".
+ *
+ * It is the FIRST member of {@link MISSING_VALUE_NO_CHANGE_PHRASES} rather than
+ * a second spelling beside it, so the sentence the product prints and the set
+ * the reader accepts cannot drift (trap 12 — the ask is DERIVED from the
+ * vocabulary, never written next to it).
+ */
+export const MISSING_VALUE_NO_CHANGE_PHRASE = 'no change';
+
+/**
+ * ⭐⭐⭐ THE NO-CHANGE VOCABULARY — an EXACT, ANCHORED SET, deliberately not a
+ * pattern.
+ *
+ * ⚠⚠ THIS IS ONE HALF OF A TWO-HARM SEAM AND THE HALVES CANNOT SHARE A WINDOW
+ * (trap 22b). The two opposite harms:
+ *   · a user meaning **"this option doesn't touch that factor"** must NEVER
+ *     produce an intervention of `0` — that would set a real cost, duration or
+ *     headcount to zero (see the ISL measurements in the ask hint's header);
+ *   · a user meaning **"this drives it to zero"** must NEVER produce "no
+ *     intervention" — that would silently discard a genuine, decision-relevant
+ *     effect.
+ * Both directions are pinned in `__tests__/missing-value-answer.test.ts`, each
+ * with its opposite-direction twin, because a corpus that tests one direction is
+ * a guard watching one door.
+ *
+ * ⭐ WHY AN EXACT SET AND NOT A REGEX. English puts "nothing" on BOTH sides of
+ * this line — *"it does nothing **to** it"* is no change, *"it drives it **to**
+ * nothing"* is zero — and they differ by one preposition. A loose pattern over
+ * that is the natural-language predicate this estate lost four consecutive
+ * rounds to (trap 22f), each round fixing one direction and reopening the other.
+ * An exact set has no cliff and can only ever DECLINE: a phrasing outside it
+ * falls through to today's behaviour, which is the demand repeating — a gap, not
+ * a lie. Members are added on measured evidence, never on imagination.
+ *
+ * ⚠ THE LIST IS THE DATA. Nothing derives a phrase from a rule here; the ask
+ * sentence quotes member [0] and the reader matches the whole set.
+ */
+export const MISSING_VALUE_NO_CHANGE_PHRASES: readonly string[] = [
+  MISSING_VALUE_NO_CHANGE_PHRASE,
+  'no effect',
+  'unchanged',
+  'it stays the same',
+  'stays the same',
+  'it does not change',
+  'it doesn\'t change',
+  'it does nothing to it',
+  'does nothing to it',
+  'it leaves it unchanged',
+  'leaves it unchanged',
+  'it does not affect it',
+  'it doesn\'t affect it',
+  'does not affect it',
+  'doesn\'t affect it',
+];
+
+/**
+ * Optional openers a person puts in front of one of the phrases above. Stripped
+ * before the exact-set match so the SET stays the readable data and does not
+ * have to enumerate every subject a user might choose.
+ */
+const NO_CHANGE_OPENERS: readonly string[] = [
+  'this option ',
+  'the option ',
+  'that option ',
+  'it ',
+];
+
+/**
+ * Read the whole message as "this option leaves that factor alone", or `null`.
+ *
+ * ⚠ WHOLE-MESSAGE ONLY, by the same reasoning as {@link BARE_NUMBER_PATTERN}:
+ * anchored, so a verb, a figure, a referent or a second clause all fail the
+ * claim. It cannot creep, and it runs AFTER every numeric reading, so a message
+ * carrying a digit can never reach it.
+ */
+function readNoChange(text: string): boolean {
+  const stripped = text.replace(/[.!]+$/u, '').trim();
+  if (MISSING_VALUE_NO_CHANGE_PHRASES.includes(stripped)) return true;
+  for (const opener of NO_CHANGE_OPENERS) {
+    if (stripped.startsWith(opener)) {
+      const rest = stripped.slice(opener.length).trim();
+      if (MISSING_VALUE_NO_CHANGE_PHRASES.includes(rest)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * ⭐⭐ THE FORMS THE ASK MAY OFFER — and they live HERE, in the module that
+ * decides acceptance, because P8 is "never ask what you cannot accept".
+ *
+ * THE DEFECT THIS CLOSES. `coaching/readiness-recovery.ts`'s effect-value ask
+ * read, in its entirety: *"Next, choose the missing effect value for "X" on "Y"
+ * so the comparison can be prepared."* It names the slot and says NOTHING about
+ * what an answer looks like — no scale, no bound, no example — so a tester
+ * cannot know a figure outside 0–1 will be refused. The estate's own record of
+ * where that leads is `SUGGESTED_PHRASING_KNOWN_DROPPED`: a copy that advertised
+ * `— 0.6, say.` while all three readers returned null on it.
+ *
+ * ⚠ SO THE EXEMPLARS ARE THE DATA AND THE SENTENCE IS DERIVED FROM THEM, never
+ * the other way round (trap 12). `__tests__/ask-copy-acceptance-pairing.test.ts`
+ * drives {@link readMissingValueAnswer} over this exact array and REDs if any
+ * member fails to read as a numeric answer inside the 0–1 effect scale — so the
+ * copy cannot advertise a phrasing the binder refuses, in either direction.
+ */
+export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
+  /** What this shape is, for the report and for the spec's failure messages. */
+  readonly form: string;
+  /** A message of that shape, driven through the real binder by the spec. */
+  readonly example: string;
+}[] = [
+  { form: 'the low anchor the ask names', example: '0%' },
+  { form: 'the high anchor the ask names', example: '100%' },
+  { form: 'an ordinary percentage answer', example: '60%' },
+  { form: 'a hedged percentage answer', example: 'about 60%' },
+  // ⭐ STILL ACCEPTED, DELIBERATELY NOT ADVERTISED. The internal representation
+  // keeps working for anyone who knows it (and for every replayed chip message
+  // the estate already emits), but the ASK never teaches it — see the hint.
+  { form: 'the internal representation, unadvertised', example: '0.6' },
+];
+
+/**
+ * ⭐⭐⭐ THE HUMAN/INTERNAL REPRESENTATION BOUNDARY — the estate's ONE spelling
+ * of "how do I answer this?", and the reason it says PERCENTAGE and never `0.6`.
+ *
+ * ⚠⚠ THIS IS A PRODUCT RULING, NOT A PARSER CONVENIENCE (founder, 30 Aug 2026):
+ * **a strategic user must never be asked to understand Olumi's internal
+ * normalised coefficient scale.** `0.6` is our representation. Asking for it
+ * because the parser happens to read it is a workaround wearing a fix's clothes,
+ * and manual testing already found it unintuitive. The anchors are human
+ * (`0%` … `100%`); the transform to the internal value is deterministic and
+ * ours to perform.
+ *
+ * ⭐ WHY A UNIT AND NOT A MAGNITUDE HEURISTIC — the trap this design closes.
+ * If the binder accepted a bare `60` as 0.60 *and* a bare `0.6` as 0.60, there
+ * would be TWO SCALES UNDER ONE NAME, separable only by a magnitude rule with a
+ * hard cliff at 1 — and then **`1` is genuinely ambiguous: 1.0 (full effect) or
+ * 1% (almost none)?** Whichever the code picks, some user means the other, and
+ * the error is 100×. That is the two-arbitrary-constants-with-cliffs shape this
+ * estate lost four consecutive rounds to. **The `%` is written BY THE USER, so
+ * `60%` → 0.6 is a representation transform, not an inference**, and bare `0.6`
+ * keeps its meaning untouched. No cliff exists anywhere.
+ *
+ * ⚠ THE RESIDUAL, STATED: a user who types a bare `60` MEANING 60% is refused.
+ * That is a GAP, not a lie — and the refusal copy names the fix, so it costs one
+ * turn rather than dead-ending.
+ *
+ * ⚠⚠⚠ THE ANCHOR GLOSS WAS FALSE, AND IT WAS THE MOST DANGEROUS SENTENCE IN
+ * THIS MODULE. CORRECTED 30 Aug 2026 (Codex, `CHANGES_REQUIRED` on #1217) —
+ * corrected IN PLACE rather than deleted, because the estate's own record of
+ * how this gloss got here is what stops it coming back (trap 14).
+ *
+ * The withdrawn text said the anchors were "the estate's own, not minted here",
+ * glossed `0%` as *"this option does nothing to it"* and `100%` as *"it drives
+ * it fully"*, and reasoned that a `/100` transform is innocent because the
+ * contract declares `InterventionV3.value` as a bare `z.number()`. The
+ * ARITHMETIC half of that is still true. **The MEANING half was wrong, and the
+ * inherited gloss it borrowed was wrong too — a false label faithfully copied
+ * from a sibling composer is still a false label.**
+ *
+ * ⭐⭐⭐ WHAT THE NUMBER ACTUALLY IS — SETTLED BY EXECUTION, NOT BY READING.
+ * Measured against the EXACT deployed ISL `28fe0c950f6ca5737f4555c863353d37b734dddf`,
+ * `SCMEvaluatorV2` imported directly from
+ * `src/services/robustness_analyzer_v2.py` (SHA-256
+ * `823263f081eb26ee820653c91d6252cdb655742fb37a96538e75ecf84e08cf77`) — the real
+ * class, not a reimplementation:
+ *
+ *   · `evaluate`'s own docstring (`:1409`) defines the parameter as **`do(X=x)`**.
+ *   · `:1428-1431` OVERWRITE the node's structural equation:
+ *       `node_values[node_id] = interventions[node_id]`  // "Interventional
+ *                                                        //  value overrides
+ *                                                        //  structural equations"
+ *   · Baseline 0.6, unit-strength factor→goal edge:
+ *       no intervention → 0.6 · `do(x=0)` → **0** · `do(x=0.6)` → 0.6 · `do(x=1)` → 1
+ *   · CONTROL, zero edge strength, `do(x=1)` → 0 (the probe is not blind).
+ *   · CONTROL, baseline 0.8 with `do(x=0.3)` → **0.3, not 0.24** — the baseline is
+ *     OVERWRITTEN, never scaled.
+ *   · FOUR-WAY DISCRIMINATOR (baseline 0.8, `do(x=0.5)`, strength 0.5), chosen so
+ *     every rival reading predicts a DIFFERENT number: absolute assignment → 0.25 ·
+ *     change-from-baseline → 0.65 · baseline multiplier → 0.20 · causal strength →
+ *     0.40. **MEASURED 0.25.** The other three are refuted by that single run.
+ *
+ * **So the value is an ABSOLUTE ASSIGNMENT OF THE FACTOR'S OWN LEVEL.** It is not
+ * causal strength, and it is not change-from-baseline. Those are three different
+ * quantities and the withdrawn copy conflated all three.
+ *
+ * ⛔ THE EXECUTION CONSEQUENCE, which is why this was a blocker and not a nit:
+ * a colleague who followed the advertised anchor — *"0% if this option does
+ * nothing to it"* — **SET A REAL COST, DURATION OR HEADCOUNT TO ZERO** and
+ * materially changed their own analysis. The parser reading `0%` correctly never
+ * made the sentence true. ISL range-checks the value NOWHERE on this path
+ * (`InterventionOption.interventions` is a bare `Dict[str, float]`,
+ * `models/robustness_v2.py:607`), so nothing downstream would have caught it.
+ *
+ * ⭐ THE CORRECTED ANCHORS SAY WHAT THE NUMBER DOES: `0%` is the factor FALLING
+ * TO ZERO, `100%` is it reaching the TOP OF ITS SCALE. The percentage is of the
+ * FACTOR'S OWN SCALE (pass 3d's `scale_frame` divisor — `records/projector.ts`),
+ * never of "the effect". The `/100` arithmetic is untouched; only the claim about
+ * what the resulting number MEANS has changed.
+ *
+ * ⚠ AND IT CARRIES NO SPECIMEN MID-SCALE VALUE. An earlier cut of this sentence
+ * quoted exemplars verbatim and was caught by an EXISTING guard —
+ * `coaching/__tests__/post-draft-narrative.test.ts`, *"leaves the value for the
+ * user to choose"*. That guard is right and was not weakened: a copyable figure
+ * in the first thing a user reads is a number put in their mouth, and it would
+ * then be stamped `user_specified`. Only the ANCHORS appear.
+ *
+ * ⚠ PAIRED WITH ACCEPTANCE, ALWAYS. Every `example` in the list above must BIND
+ * through the real binder — asserted in
+ * `__tests__/ask-copy-acceptance-pairing.test.ts` — so the ask cannot advertise a
+ * form the product refuses (P8).
+ *
+ * ⛔⛔⛔ THE ASK DOES NOT OFFER "no change", AND REMOVING THAT CLAUSE IS THE
+ * POINT — the reader still RECOGNISES it, the ask simply stops INVITING it.
+ *
+ * This lane shipped `Say "no change" if the option leaves it alone.` and it was
+ * an invitation the product cannot honour. Measured end to end: `kind:
+ * 'no_change'` has ONE consumer, whose two call sites are gated on
+ * `detectConfigureOptionIntent`, and **0 of 225 accepted no-change phrasings
+ * match that detector** (positive control fired, fabricated control declined).
+ * The honest reply appeared in **0 of 8** live compositions. The invitation and
+ * the qualitative refusal even contradicted each other inside one message:
+ *   "I can't put 'no change' on that link — the effect value has to be a
+ *    number… Say 'no change' if the option leaves it alone."
+ *
+ * **A product that invites an answer it cannot process is worse than one that
+ * never offers it** — it spends the user's turn and their goodwill, and it is
+ * precisely the ask-invariant failure this PR exists to fix, turned inward.
+ *
+ * ⚠⚠ AND WHY THIS PR'S OWN P8 GUARD COULD NOT SEE IT — worth stating, because
+ * the guard is otherwise the strongest thing here: **P8 checks the READER, not
+ * the ROUTE.** `ask-copy-acceptance-pairing.test.ts` drives
+ * {@link readMissingValueAnswer} and proves every advertised form is
+ * *recognised*. Recognition is necessary and NOWHERE NEAR sufficient: an
+ * invitation can be perfectly readable and still reach no consumer that acts on
+ * it. A form may only be ADVERTISED once its route is witnessed end to end, not
+ * once its reader returns non-null.
+ *
+ * The recognition stays (someone will say it anyway, and they get an honest
+ * answer instead of the demand repeating). Re-advertising it needs a write path
+ * for an EMPTY intervention, which CEE does not have — rowed, not hidden.
+ *
+ * ⭐⭐ "NO CHANGE" AND "ZERO" ARE DIFFERENT ANSWERS AND THE ASK NOW OFFERS BOTH.
+ * They were previously inexpressible and indistinguishable in the WORST possible
+ * arrangement: the ask taught `0%` as the way to say "no effect" (binding the
+ * factor to zero — the harm above), while every genuine no-change phrasing read
+ * `null` and the demand simply repeated. Measured at pristine `a77979ec`:
+ * `"no change"`, `"no effect"`, `"it does nothing to it"`, `"this option does
+ * nothing to it"`, `"it leaves it unchanged"` → **all five `null`.**
+ *
+ * ⚠⚠ AND WHY `no_change` IS A DISTINCT KIND RATHER THAN THE BASELINE VALUE.
+ * The obvious implementation — write `do(X = the factor's current level)` — is
+ * WRONG, and this was settled by execution against the same deployed ISL, not
+ * reasoned. An intervention REPLACES the node's per-draw sample (`:1429`
+ * short-circuits before the `factor_values` lookup at `:1438`), so pinning at
+ * the baseline preserves the MEAN and destroys the VARIANCE. Measured on the
+ * real Monte Carlo loop, n=4000, seed 424242, `x ~ normal(0.6, 0.15)`:
+ *
+ *   `interventions={}`   → mean 0.602552, std **0.149197**
+ *   `do(x=0.6)`          → mean 0.599466, std **0.000401**   ← 372× collapse
+ *
+ * So writing the baseline would make the option look maximally robust **for a
+ * reason that has nothing to do with the decision** — a confident wrong number,
+ * which is the one thing this product may never produce. ISL already ships the
+ * honest primitive: an EMPTY `interventions={}` evaluates on the sampled draws.
+ * Recording `no_change` as its own reading keeps that door open and, until the
+ * write path can act on it, keeps the product from silently choosing either
+ * wrong answer on the user's behalf.
+ */
+export const MISSING_VALUE_ASK_FORMAT_HINT: string =
+  'That number is the level the factor reaches, not how much it moves: '
+  + `${MISSING_VALUE_ASK_EXEMPLARS[0]!.example} means zero, `
+  + `${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} means its top.`;
+
 export type MissingValueAnswer =
   | {
       readonly kind: 'numeric';
-      /** The value exactly as the user wrote it — never reformatted. */
+      /**
+       * The value as the user wrote it — never rescaled. A percent sign is
+       * carried ("8%"); only the whitespace inside the token is collapsed.
+       * This is the form to QUOTE BACK, never the form to write.
+       */
       readonly valueText: string;
+      /**
+       * ⭐ THE CANONICAL 0–1 SPELLING a writer must use — `"0.08"` for `"8%"`,
+       * `"40000"` for `"40,000"` — or `null` when the text denotes no plain
+       * decimal. See {@link toModelUnitText}. It is NOT range-checked here: this
+       * module is a text reader and the 0–1 bound belongs to the consumer that
+       * knows the slot (`repair-value-binding.ts`).
+       */
+      readonly modelUnitText: string | null;
       readonly referent: string | null;
       /**
        * ⭐⭐ THE MESSAGE IS A BARE NUMBER — no verb, no referent, nothing else.
@@ -374,6 +802,32 @@ export type MissingValueAnswer =
        * silently.
        */
       readonly elliptical: boolean;
+      /**
+       * ⭐⭐⭐ DID THIS READING DIVIDE BY 100? — the reader's OWN answer, so no
+       * consumer has to guess from the text.
+       *
+       * ⚠⚠ IT EXISTS BECAUSE A CONSUMER GUESSED AND WAS WRONG, TWICE OVER.
+       * `configure-option-clarify-response.ts` gated its "did you mean a
+       * percentage?" offer on `valueText.includes('%')` — a HAND-MAINTAINED
+       * MIRROR of this module's percent detection (trap 12). It had already
+       * drifted from the thing it mirrors by TWO spellings, because
+       * {@link PERCENT_SUFFIX} admits `percent` and `per cent` as well as the
+       * glyph. Measured at the head that introduced the mirror:
+       *
+       *   "Set it to 150 percent."  → modelUnitText 1.5, no `%` CHARACTER
+       *   composed: "If you meant 1.5% of its full scale …"
+       *
+       * The user wrote 150 percent and the product offered them 1.5% — the
+       * SAME 100× harm, in the same sentence, as the defect that gate was
+       * added to close.
+       *
+       * ⭐ THE FIX IS NOT ANOTHER SPELLING IN THE GATE — adding `percent` to
+       * the consumer maintains the mirror and it drifts again on the next
+       * notation. There is ONE owner of "was this a percentage?", and it is the
+       * reader that performed the division. Consumers ASK; they never re-derive.
+       * Anything downstream that needs the question answered reads this field.
+       */
+      readonly percentApplied: boolean;
       /**
        * ⭐ THE PROSE THAT PRECEDED THE ANSWERING CLAUSE, normalised — `''` when
        * the message is, in its entirety, the answer.
@@ -397,6 +851,29 @@ export type MissingValueAnswer =
       readonly kind: 'qualitative';
       /** The user's own words, quoted back. NEVER mapped to a number. */
       readonly term: string;
+    }
+  | {
+      /**
+       * ⭐⭐⭐ "THIS OPTION LEAVES THAT FACTOR ALONE" — a THIRD kind, and the
+       * whole point is that it is neither of the other two.
+       *
+       * It is NOT `numeric` with a value of `0`: zero is an absolute assignment
+       * that drives the factor TO zero (`do(X=0)`, measured on deployed ISL
+       * `28fe0c95` — see the ask hint's header). It is NOT `qualitative`
+       * either: a qualitative term is a word we decline to interpret, whereas
+       * this one is fully understood — we simply cannot ACT on it yet.
+       *
+       * ⚠ A CONSUMER MUST NOT SUBSTITUTE A NUMBER FOR IT, AND THAT INCLUDES THE
+       * FACTOR'S OWN BASELINE. Writing `do(X = baseline)` preserves the mean and
+       * destroys the variance (std 0.149197 → 0.000401 on the real Monte Carlo
+       * loop, n=4000) — the option would read as maximally robust for a reason
+       * unrelated to the decision. The honest primitive is ISL's empty
+       * `interventions={}`; until a write path can express that, a consumer says
+       * so plainly rather than choosing a wrong number on the user's behalf.
+       */
+      readonly kind: 'no_change';
+      /** The user's own words, quoted back — never rewritten. */
+      readonly term: string;
     };
 
 function normalise(message: string): string {
@@ -411,21 +888,37 @@ function normalise(message: string): string {
  * Numeric is tried first: a digit-bearing answer is bindable and must not be
  * demoted to the clarify branch.
  */
-function readNumericClause(
-  text: string,
-): { readonly valueText: string; readonly referent: string | null } | null {
+interface NumericClause {
+  readonly valueText: string;
+  readonly modelUnitText: string | null;
+  readonly referent: string | null;
+  readonly percentApplied: boolean;
+}
+
+/**
+ * ⚠ GROUPS ARE READ BY NAME, NOT BY POSITION, and that is a correction rather
+ * than a tidy-up. The previous reader took "the value is the LAST captured
+ * group and the referent the one before it" — true only while every alternative
+ * captured exactly one or two groups. The percent capture makes that false, and
+ * a positional reader would have silently bound the percent marker as the value
+ * on one arm and the referent on another. Names cannot come apart from what they
+ * name.
+ */
+function readNumericClause(text: string): NumericClause | null {
   for (const re of NUMERIC_ANSWER_PATTERNS) {
     const m = re.exec(text);
     if (m === null) continue;
-    // Group order differs per alternative (the `use` form has no referent), so
-    // the value is the LAST captured group and the referent the one before it
-    // when there are two. Read positionally rather than by index literal, or a
-    // fourth pattern would silently bind the wrong group.
-    const groups = m.slice(1);
-    const valueText = groups[groups.length - 1];
-    if (valueText === undefined) continue;
-    const referent = groups.length > 1 ? (groups[groups.length - 2] ?? null) : null;
-    return { valueText, referent };
+    const digits = m.groups?.['value'];
+    if (digits === undefined) continue;
+    const percent = m.groups?.['pct'];
+    const isPercent = percent !== undefined;
+    return {
+      // The user's own token, whitespace inside it collapsed ("8 %" → "8%").
+      valueText: isPercent ? `${digits}${percent.trim()}` : digits,
+      modelUnitText: toModelUnitText(digits, isPercent),
+      referent: m.groups?.['referent'] ?? null,
+      percentApplied: isPercent,
+    };
   }
   return null;
 }
@@ -463,9 +956,19 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
   // from the sentence has nothing to resolve from.
   const bare = BARE_NUMBER_PATTERN.exec(text);
   if (bare !== null) {
-    const valueText = bare[1];
-    if (valueText !== undefined) {
-      return { kind: 'numeric', valueText, referent: null, leadingContext: '', elliptical: true };
+    const digits = bare.groups?.['value'];
+    if (digits !== undefined) {
+      const percent = bare.groups?.['pct'];
+      const isPercent = percent !== undefined;
+      return {
+        kind: 'numeric',
+        valueText: isPercent ? `${digits}${percent.trim()}` : digits,
+        modelUnitText: toModelUnitText(digits, isPercent),
+        referent: null,
+        leadingContext: '',
+        elliptical: true,
+        percentApplied: isPercent,
+      };
     }
   }
 
@@ -486,6 +989,25 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
     if (trailing !== null && trailing.referent !== null) {
       return { kind: 'numeric', ...trailing, leadingContext, elliptical: false };
     }
+  }
+
+  // (3) ⭐⭐ "NO CHANGE" — LAST AMONG THE NUMERIC ARMS BY CONSTRUCTION, AND THAT
+  // ORDER IS THE SAFETY.
+  //
+  // Every numeric reading above has already declined by the time this runs, so a
+  // message carrying a figure can NEVER be read as no-change: `"0%"`, `"set it
+  // to 0"` and `"down to zero"` are claimed upstream (or, for the last, decline
+  // everywhere) and never reach here. That is the opposite-direction twin
+  // enforced STRUCTURALLY rather than by a rule this function has to get right —
+  // the zero direction cannot be stolen by the no-change direction because it is
+  // resolved first.
+  //
+  // It sits ABOVE the qualitative arm because "no change" is a phrase we
+  // UNDERSTAND, not a word we decline to interpret. Demoting it to qualitative
+  // would quote it back and re-ask for a number, which is exactly the loop this
+  // reading exists to end.
+  if (readNoChange(text)) {
+    return { kind: 'no_change', term: normalise(message).replace(/[.!]+$/u, '').trim() };
   }
 
   const q = QUALITATIVE_ANSWER_PATTERN.exec(text);
@@ -514,9 +1036,38 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
  * of messages this returns false for. The suite pins that every one of them
  * terminates.
  */
+/**
+ * ⭐⭐ A BARE HUMAN-SCALE QUANTITY — "£40,000", "40k", "3 months", "8%".
+ *
+ * ⚠ FOUND BY A TWIN THAT FAILED, NOT BY INSPECTION. This module's termination
+ * predicate required a VERB before a digit, so a user answering the on-screen
+ * effect-value question with **"£40,000"** — a wrong-scale answer, but
+ * unmistakably an answer — satisfied neither arm, and the composer repeated the
+ * identical demand at them. That is P8 reached through the most likely wrong
+ * answer to the question the product just asked.
+ *
+ * The currency and magnitude alphabets are IMPORTED from CQE, which exports
+ * them for exactly this reason; re-spelling either is the drift `rules.ts`'s own
+ * header records twice (`¥`, bare-`b`).
+ *
+ * ⚠ THIS WIDENS TERMINATION ONLY, NEVER BINDING — and the asymmetry is the
+ * safety, stated in this predicate's own header: a false positive means the
+ * product says something more useful than the demand it was about to repeat; a
+ * false negative is the witnessed loop. `readMissingValueAnswer` is untouched,
+ * so nothing here can reach a write.
+ */
+const WHOLE_MESSAGE_QUANTITY = new RegExp(
+  `^${HEDGE_LEAD}(?:${CURRENCY_SYMBOL_SOURCE})?\\s*(?:${NUMBER_DIGITS})`
+  + `(?:\\s*(?:${NUMERIC_SUFFIX_SOURCE}|%|per\\s?cent|percent))?`
+  + `(?:\\s+[a-z]+)?${HEDGE_TRAIL}\\s*[.!]*$`,
+);
+
 export function messageAnswersMissingValueAsk(message: string): boolean {
   if (typeof message !== 'string') return false;
   if (readMissingValueAnswer(message) !== null) return true;
+  const text = normalise(message);
+  // A whole-message quantity the binder cannot use: still an answer.
+  if (WHOLE_MESSAGE_QUANTITY.test(text)) return true;
   // A hedged or targeted numeric answer: unbindable, unmistakably an answer.
-  return /\b(?:set|change|update|adjust|make|put|use)\b[^.?!]*\d/.test(normalise(message));
+  return /\b(?:set|change|update|adjust|make|put|use)\b[^.?!]*\d/.test(text);
 }

@@ -404,11 +404,66 @@ describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', (
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
   });
 
-  it('a unit-bearing "Set it to 12%." is never claimed', async () => {
+  it('⭐ AT THE ROUTE: "Set it to 12%." IS now claimed, and as the fraction 0.12', async () => {
+    // ⚠⚠ THIS TEST WAS THE INVERSE ("a unit-bearing \"Set it to 12%.\" is never
+    // claimed") AND ITS PREMISE IS WITHDRAWN. A percent was grouped with
+    // currencies and durations as "unit-bearing"; that grouping was the error.
+    // A currency or a duration is a HUMAN-SCALE quantity whose divisor is a
+    // factor's `scale_frame`, a concept an option effect does not have — so
+    // converting one would INVENT a frame. A percent is NOTATION over the same
+    // dimensionless 0-1 scale and carries its own divisor, and it is now the
+    // form the product's own ask ADVISES (the human calibration: 0% … 100%).
+    //
+    // ⭐ THIS IS THE LIVE-ROUTE HALF of the unit tests, and it is the one that
+    // matters: `route-v2.ts:5471` gates the whole repair pre-route on the
+    // reading being numeric, so a unit-level pass says nothing about whether the
+    // turn is claimed. This asserts the dispatch actually happens.
     loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
     await send(app, 'Set it to 12%.');
-    expect(repairEvents()).toHaveLength(0);
-    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(1);
+    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    // The instruction the edit lane executes carries the CANONICAL spelling —
+    // `readOptionEffectValue` declines a percent sign, so a literal "12%" here
+    // would fail to land two seams later with nothing on screen to explain why.
+    // ⚠ ASSERTED ON THE INSTRUCTION, NOT ON THE WHOLE CALL. The payload also
+    // carries the user's own message verbatim — "Set it to 12%." — which is
+    // correct and must stay; a `not.toContain('12%')` over the whole call
+    // therefore fails for the RIGHT reason and would have been a wrong
+    // assertion. What matters is the sentence the edit lane EXECUTES.
+    // ⚠ ASSERTED ON THE INSTRUCTION SENTENCE, NOT ON THE WHOLE CALL. The payload
+    // also carries the user's own message verbatim — "Set it to 12%." — which is
+    // correct and must stay, so a blanket `not.toContain('12%')` would fail for
+    // the RIGHT reason and be the wrong assertion. What matters is the sentence
+    // the edit lane EXECUTES, whose value slot is re-read by
+    // `readOptionEffectValue`, and which declines a percent sign.
+    const instructions = JSON.stringify(dispatchEditGraphMock.mock.calls)
+      .match(/Set the [^"]*?option's effect on [^"]*?to [^"\s]+/g) ?? [];
+    expect(instructions.length, 'no advised-format instruction was dispatched').toBeGreaterThan(0);
+    expect(instructions.join(' | ')).toContain('to 0.12');
+    expect(instructions.join(' | ')).not.toContain('12%');
+  });
+
+  it('⚠ THE TWIN — a genuinely unit-bearing value is STILL never claimed at the route', async () => {
+    // The direction that must never move. Each of these needs a scale frame the
+    // option-effect seam does not have.
+    for (const message of ['Set it to £5000.', 'Set it to 3 months.', 'Set it to 40k.']) {
+      dispatchEditGraphMock.mockClear();
+      loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+      await send(app, message);
+      expect(dispatchEditGraphMock, message).not.toHaveBeenCalled();
+    }
+  });
+
+  it('⚠ THE OTHER TWIN — an OUT-OF-SCALE figure is never claimed at the route either', async () => {
+    // The live fabrication hole this lane closed: before the fix the
+    // verb-bearing arm applied NO range check, so "Set it to 40000." dispatched
+    // a write of 40000 into a 0-1 slot.
+    for (const message of ['Set it to 40000.', 'Set it to 8.', 'Make it 500.']) {
+      dispatchEditGraphMock.mockClear();
+      loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+      await send(app, message);
+      expect(dispatchEditGraphMock, message).not.toHaveBeenCalled();
+    }
   });
 
   it('with NOTHING missing the bare value is not claimed — no repair context, no invented referent', async () => {

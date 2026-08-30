@@ -1213,7 +1213,33 @@ export function formatOptionEffectWriteAck(params: {
   readonly committedValue: number;
 }): string {
   return (
-    `"${params.optionLabel}" now has an effect value of ${params.committedValue} `
+    `"${params.optionLabel}" now has an effect value of ${renderCommittedValue(params.committedValue)} `
     + `on "${params.factorLabel}".`
   );
+}
+
+/**
+ * ⭐⭐ THE ACK SPEAKS HUMAN, BECAUSE THE ASK NOW DOES — the display half of the
+ * same change.
+ *
+ * ⚠ THE DEFECT, MEASURED: `"2.7%"` divides to `0.027000000000000003`, and this
+ * sentence interpolated that binary artefact straight at the user. **261 of
+ * 1,001 one-decimal percentages produce a float tail** — the arithmetic is
+ * exact, the DECIMAL SPELLING of it is not, and `String(0.027000000000000003)`
+ * is what a user was shown after answering a question phrased in plain English.
+ *
+ * ⭐ IT FORMATS, IT DOES NOT ROUND THE STORED VALUE. `committedValue` is what
+ * was written and is untouched; only the rendering changes — the estate's
+ * standing rule that a display transform must never become a data transform.
+ * `parseFloat(toFixed(6))` is chosen so the shortest exact spelling survives
+ * (`0.6` stays `0.6`, not `0.600000`) while the tail is dropped, and six places
+ * is comfortably finer than any percentage a user can type.
+ *
+ * ⚠ NO CLAMP AND NO SIGN JUDGEMENT. A value outside 0–1 is refused upstream by
+ * the range guard; inventing a bound here would be a second authority on a
+ * question that already has one.
+ */
+function renderCommittedValue(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  return String(parseFloat(value.toFixed(6)));
 }

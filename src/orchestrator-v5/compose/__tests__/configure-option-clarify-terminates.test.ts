@@ -35,7 +35,7 @@ import {
 import { FORBIDDEN_USER_FACING_PHRASES } from '../forbidden-user-facing-phrases.js';
 import { CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE } from '../../configure-option-chip-text.js';
 import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
-import { messageAnswersMissingValueAsk } from '../../routing/missing-value-answer.js';
+import { messageAnswersMissingValueAsk, readMissingValueAnswer } from '../../routing/missing-value-answer.js';
 
 const OPTION = 'Hire 3 Senior Engineers';
 const FACTOR = 'Engineering Delivery Velocity';
@@ -224,5 +224,87 @@ describe('the loop terminates', () => {
       // No internal identifiers.
       expect(text).not.toMatch(/\b(?:opt|fac)_[a-z0-9]/i);
     }
+  });
+});
+
+/**
+ * ⛔⛔ THE OUT-OF-SCALE OFFER MUST NOT RESTATE THE USER'S FIGURE ON A SECOND
+ * SCALE — the 100× error this PR authored inside the argument that no 100×
+ * error may exist.
+ *
+ * The offer's premise is *"you probably meant that as a percentage"*, which can
+ * only be true of a BARE figure. `modelUnitText` has already been divided by
+ * 100 for a percent reading, so interpolating it back into a `%` sentence
+ * divides twice. Measured at `a77979ec`:
+ *
+ *   "150%"  →  "If you meant 1.5% … write it with the % and I will set it."
+ *
+ * The reviewer's mutant R1 replaced this branch with arbitrary text and
+ * SURVIVED GREEN at 543/543 — there was no coverage at all. There is now.
+ */
+describe('the out-of-scale reply never re-scales the user\'s own figure', () => {
+  it.each([
+    // the glyph
+    '150%', '250%', '2.7%', '60%',
+    // ⛔ EVERY OTHER SPELLING THE READER DIVIDES BY 100 — the drift that made
+    // the first fix incomplete. `PERCENT_SUFFIX` admits `percent` and
+    // `per cent`, and the original gate tested for the `%` CHARACTER, so:
+    //   "Set it to 150 percent."  →  "If you meant 1.5% …"   (measured)
+    // Same branch, same sentence, same 100× harm as the blocker it answers.
+    'Set it to 150 percent.', 'Set it to 150 per cent.',
+    '150 percent', '150 per cent', '250 percent',
+  ])(
+    'a figure the user ALREADY wrote as a percentage — "%s" — gets no percentage re-offer',
+    (message) => {
+      const text = compose(message);
+      // ⭐ THE HARM, AS AN ASSERTION: whatever else the reply says, it must not
+      // hand the user back a DIFFERENT number as if it were their meaning.
+      expect(text).not.toMatch(/If you meant [\d.]+% /);
+    },
+  );
+
+  it('the gate ASKS the reader rather than mirroring it', () => {
+    // ⚠ THE STRUCTURAL PIN, not another spelling. The consumer must branch on
+    // the reader's own `percentApplied`, so a NEW notation added to
+    // `PERCENT_SUFFIX` is handled by its owner and cannot drift from this
+    // branch again (trap 12 — the mirror had already drifted by two spellings).
+    //
+    // Asserted as the equivalence itself: for every form, "did the reader
+    // divide?" must predict "is the offer suppressed?" — which is a claim about
+    // the WIRING, not about any particular vocabulary.
+    //
+    // ⚠ THE CORPUS IS HELD INSIDE THE OFFER'S OWN RANGE `(1, 100]` ON PURPOSE.
+    // The offer has TWO conjuncts — `!percentApplied` AND the range — so a bare
+    // `250` is suppressed by the RANGE and would satisfy this equivalence for
+    // the wrong reason. (It failed here first for exactly that reason, which is
+    // the check earning its place.) Every member below clears the range, so the
+    // percent conjunct is the only thing that can move the answer.
+    for (const message of ['150%', '150 percent', '150 per cent', '60', '90']) {
+      const answer = readMissingValueAnswer(message);
+      expect(answer?.kind, message).toBe('numeric');
+      if (answer?.kind !== 'numeric') continue;
+      const offered = /If you meant [\d.]+% /.test(compose(message));
+      expect(offered, `${message}: offer must be suppressed iff the reader divided`)
+        .toBe(!answer.percentApplied);
+    }
+  });
+
+  it('a BARE figure still gets the offer, and at the value the user typed', () => {
+    // ⭐ THE OPPOSITE-DIRECTION TWIN. Gating the offer must not delete it: the
+    // bare-60-meaning-60% case is the one it exists for, and it is the stated
+    // residual of this PR's no-cliff design. If this goes green while the block
+    // above also goes green, the gate discriminates rather than suppressing.
+    const text = compose('60');
+    expect(text).toContain('If you meant 60% ');
+    // And the anchor is the factor's SCALE, never "the strongest effect" —
+    // the same false gloss (causal strength) Codex blocked in the ask itself.
+    expect(text).not.toContain('strongest effect');
+  });
+
+  it('the two directions are DISCRIMINATED, not merely both handled', () => {
+    // Pins the precondition (trap 13b): both cases must actually reach the
+    // out-of-scale branch, or the pair above is two tests of one empty path.
+    expect(compose('60')).toContain('outside the range');
+    expect(compose('150%')).toContain('outside the range');
   });
 });

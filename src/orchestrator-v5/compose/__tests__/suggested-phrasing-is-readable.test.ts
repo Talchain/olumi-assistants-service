@@ -52,10 +52,14 @@ import {
 import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
 import { buildRepairPairChip } from '../../configure-option-chip-text.js';
 import {
+  MISSING_VALUE_ASK_FORMAT_HINT,
   messageAnswersMissingValueAsk,
   readMissingValueAnswer,
 } from '../../routing/missing-value-answer.js';
-import { matchBareRepairValue } from '../../routing/repair-value-binding.js';
+import {
+  matchBareRepairValue,
+  resolveRepairValueBinding,
+} from '../../routing/repair-value-binding.js';
 
 const OPTION = 'Two Developers';
 const FACTOR = 'Development throughput';
@@ -78,8 +82,16 @@ describe('fixture precondition — this really is the branch that suggests a val
     expect(CHIP.message).not.toMatch(/\d/);
   });
 
-  it('the emitted copy really does suggest the exemplar (else every assertion below is vacuous)', () => {
-    expect(suggestion()).toContain(CONFIGURE_OPTION_EXAMPLE_VALUE);
+  it('the emitted copy really does invite a reply (else every assertion below is vacuous)', () => {
+    // ⚠⚠ THE PRECONDITION MOVED WITH THE COPY. It used to assert the branch
+    // emits `CONFIGURE_OPTION_EXAMPLE_VALUE` (`0.6`); that value is Olumi's
+    // INTERNAL normalised coefficient and no longer appears in any identified
+    // ask (founder ruling, 30 Aug 2026). The precondition this file needs is
+    // unchanged in substance — that this branch really does suggest a reply
+    // form — so it now pins the human calibration the branch actually emits.
+    expect(suggestion()).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    // …and the discriminating half: the internal form is gone from it.
+    expect(suggestion()).not.toMatch(/\b0\.\d/);
   });
 });
 
@@ -126,18 +138,49 @@ describe('THE INVARIANT — every reply form the product suggests, its own reade
 });
 
 describe('THE KNOWN-DROPPED SET — pinned as data, RED if it grows OR shrinks', () => {
-  it('is exactly this set', () => {
-    expect([...SUGGESTED_PHRASING_KNOWN_DROPPED]).toEqual([
-      'I think 0.6 makes sense.',
-      '0.6, say',
-    ]);
+  it('is now EMPTY — the gap closed', () => {
+    // ⚠⚠ IT SHRANK FROM TWO TO ZERO (ROADMAP P0a), and the next test is what
+    // makes that honest: an empty set is trivially satisfied by giving up, so
+    // emptiness alone asserts nothing. The two former members are named BY VALUE
+    // below and each must BIND — if either stops binding, that test REDs and the
+    // set has to grow again, consciously.
+    expect([...SUGGESTED_PHRASING_KNOWN_DROPPED]).toEqual([]);
   });
 
-  it('every member really is unreadable by ALL THREE readers (the gap is measured, not asserted)', () => {
-    for (const message of SUGGESTED_PHRASING_KNOWN_DROPPED) {
-      expect(matchBareRepairValue(message), message).toBeNull();
-      expect(messageAnswersMissingValueAsk(message), message).toBe(false);
+  it('⭐ THE TWO FORMER MEMBERS NOW BIND — the positive control on the emptiness above', () => {
+    // Paul's live session, verbatim. Measured at pristine `f18d941b2e4c`: both
+    // read null on ALL THREE readers, which is why they were pinned.
+    const readiness = {
+      status: 'needs_user_input',
+      blockers: [
+        {
+          blocker_type: 'missing_value',
+          option_id: 'o1', option_label: OPTION,
+          factor_id: 'f1', factor_label: FACTOR,
+        },
+      ],
+    };
+    for (const message of ['I think 0.6 makes sense.', '0.6, say']) {
+      expect(messageAnswersMissingValueAsk(message), message).toBe(true);
+      const read = readMissingValueAnswer(message);
+      expect(read?.kind, message).toBe('numeric');
+      const resolved = resolveRepairValueBinding({ message, readiness: readiness as never });
+      expect(resolved.matched, message).toBe(true);
+      if (!resolved.matched || resolved.kind !== 'bind') throw new Error(`no bind for ${message}`);
+      // BY IDENTITY, never by value alone (trap 19).
+      expect(resolved.pair.optionId, message).toBe('o1');
+      expect(resolved.pair.factorId, message).toBe('f1');
+      expect(resolved.valueText, message).toBe('0.6');
+    }
+  });
+
+  it('⚠ CONTRAST — a wrapper with no figure in it is still unread', () => {
+    // The widening is a closed filler set around a NUMBER, not a licence for
+    // ordinary English. Without this, "the wrapper now binds" would be
+    // consistent with the anchor having stopped discriminating altogether.
+    for (const message of ['I think that makes sense.', 'say', 'about']) {
       expect(readMissingValueAnswer(message), message).toBeNull();
+      expect(matchBareRepairValue(message), message).toBeNull();
     }
   });
 

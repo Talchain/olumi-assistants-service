@@ -17,6 +17,7 @@
  *   - the stamped envelope still satisfies the strict boundary contract.
  */
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 import type { FastifyRequest } from 'fastify';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
@@ -219,7 +220,7 @@ describe('dispatchDraftGraph — analysis_ready.coaching_summary (F1 PR A)', () 
       "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     expect(res.response.assistant_text).toContain(
-      'Next, choose the missing effect value for "Launch now" on "Revenue impact" so the comparison can be prepared.',
+      'Next, choose the missing effect value for "Launch now" on "Revenue impact" so the comparison can be prepared. ' + MISSING_VALUE_ASK_FORMAT_HINT,
     );
     expect(res.analysisReady).toBeDefined();
     expect('coaching_summary' in (res.analysisReady as object)).toBe(false);

@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 
 import { composeConfigureOptionClarifyResponse } from '../configure-option-clarify-response.js';
 import { findForbiddenPhraseHit } from '../forbidden-user-facing-phrases.js';
@@ -109,11 +110,19 @@ describe('clicking the repair chip — identification is complete', () => {
     expect(compose(CHIP.message)).not.toContain(advised);
   });
 
-  it('asks for the NUMBER, naming the slot the chip named', () => {
+  it('asks for the STRENGTH in human terms, naming the slot the chip named', () => {
+    // ⚠⚠ THE SHAPE OF THE ASK CHANGED AND THE ASSERTION FOLLOWS IT. This read
+    // `toMatch(/from 0 .*to 1/)` — Olumi's internal normalised coefficient
+    // scale, which a strategic user is never asked to understand (founder
+    // ruling, 30 Aug 2026). What this test is ACTUALLY about — that the chip
+    // click lands on an ask naming the slot and requesting the value — is
+    // unchanged and is still asserted; only the calibration is now human, and
+    // it is derived from the module that accepts it rather than transcribed.
     const text = compose(CHIP.message);
     expect(text).toContain(OPTION);
     expect(text).toContain(FACTOR);
-    expect(text).toMatch(/from 0 .*to 1/);
+    expect(text).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    expect(text).not.toMatch(/\b0\.\d/);
   });
 
   /**
@@ -184,5 +193,29 @@ describe('identification NOT complete — the teach-the-format branch is untouch
     const text = compose(message);
     expect(text).toContain(RETYPE_LEAD_IN);
     expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
+  });
+
+  // ⛔⛔ P8, ON THE BRANCH THAT BROKE IT. This lane appended the percentage
+  // anchors here, so the branch advertised the bare-decimal sentence AND a
+  // percentage in one breath — and the obvious combination is refused by BOTH
+  // readers (`resolveOptionEffectWrite("…to 60%")` →
+  // `no_single_unit_scale_value`, measured).
+  //
+  // ⚠ THE REVIEWER'S MUTANT R2 SURVIVED GREEN AT 543/543 because nothing
+  // pinned this. It is pinned now: this branch advertises exactly ONE value
+  // form, and it is the one its own reader accepts.
+  it.each([
+    ['option named, factor absent', `Configure ${OPTION}`],
+    ['nothing named', 'help me with this'],
+  ])('%s — advertises ONE value form, never a second scale', (_name, message) => {
+    const text = compose(message);
+    // The routable sentence is present …
+    expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
+    // … and the percentage anchors, whose reader does NOT run on this branch,
+    // are absent. Asserted on the anchors themselves rather than on the hint
+    // constant, so re-wording the hint cannot silently un-pin this.
+    expect(text).not.toContain('0% means');
+    expect(text).not.toContain('100% means');
+    expect(text).not.toMatch(/\bpercentage\b/i);
   });
 });
