@@ -242,13 +242,15 @@ describe("behavioural witness: new instructed shape vs the consumer", () => {
   });
 
   it("ARM B (new instructed shape) is ACCEPTED and projects to a usable graph", () => {
-    const result = projectDraftRecords(ARM_B_RECORDS) as {
-      ok: boolean;
-      projection: { graph: Record<string, any>; dropped: Array<Record<string, any>> };
-    };
+    const result = projectDraftRecords(ARM_B_RECORDS);
     expect(result.ok).toBe(true);
+    // Narrow on the discriminant rather than casting: a cast would also silence
+    // a genuine shape change in the seam's own result type.
+    if (result.ok !== true) throw new Error("unreachable: asserted above");
 
-    const graph = result.projection.graph;
+    const graph = result.projection.graph as unknown as {
+      nodes: Array<Record<string, any>>;
+    };
 
     // ⚠ BIND BY IDENTITY, NEVER BY A VALUE PREDICATE (trap 19). An earlier
     // revision of this test asserted `JSON.stringify(graph).includes("50")` and
@@ -256,7 +258,7 @@ describe("behavioural witness: new instructed shape vs the consumer", () => {
     // while the user's stated 50 was not in the graph at all. A substring probe
     // over a serialised object will find a number somewhere and call it success.
     const goal = graph.nodes.find((n: any) => n.kind === "goal");
-    expect(goal).toBeDefined();
+    if (!goal) throw new Error("no goal node in projection");
     expect(goal.provenance.provenance_class).toBe("stated");
     expect(goal.provenance.source_quote).toBe(
       "reach 200 mid-market customers within 18 months",
@@ -282,7 +284,10 @@ describe("behavioural witness: new instructed shape vs the consumer", () => {
 
     // Each option's effect reaches the graph as the estimate this lane gave it,
     // and is attributed to CEE rather than to the user.
-    const acquire = options.find((o: any) => o.label === "acquiring a smaller competitor");
+    const acquire = options.find(
+      (o: any) => o.label === "acquiring a smaller competitor",
+    );
+    if (!acquire) throw new Error("no acquire option in projection");
     const raw = Object.values(acquire.data.raw_interventions)[0];
     expect(raw).toBe(190);
     const detail: any = Object.values(acquire.data.intervention_details)[0];
@@ -294,12 +299,12 @@ describe("behavioural witness: new instructed shape vs the consumer", () => {
     // every stated figure to the goal, and the projector drops what cannot
     // reach it. Recording the exact set keeps the suite green for the RIGHT
     // reason — an unpinned drop is how a silent capability loss ships.
-    const result = projectDraftRecords(ARM_B_RECORDS) as {
-      ok: boolean;
-      projection: { dropped: Array<Record<string, any>> };
-    };
+    const result = projectDraftRecords(ARM_B_RECORDS);
+    expect(result.ok).toBe(true);
+    if (result.ok !== true) throw new Error("unreachable: asserted above");
+
     const dropped = result.projection.dropped
-      .map((d) => `${d.reason}:${d.label}`)
+      .map((d) => `${String(d.reason)}:${String(d.label)}`)
       .sort();
     expect(dropped).toEqual(
       [
