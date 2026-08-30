@@ -1654,11 +1654,10 @@ function generateAdminUI(): string {
                   representative. Server prose, not a local copy.
                 -->
                 <template x-if="llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity">
-                  <div class="alert alert-warning harness-fidelity" style="padding: 10px; margin-bottom: 12px;"
-                       x-data="{ hf: llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity }">
+                  <div class="alert alert-warning harness-fidelity" style="padding: 10px; margin-bottom: 12px;">
                     <strong>What this comparison is evidence of</strong>
-                    <div x-text="hf.notice"></div>
-                    <template x-for="d in (hf.divergences || [])" :key="d">
+                    <div x-text="(llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).notice"></div>
+                    <template x-for="d in ((llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).divergences || [])" :key="d">
                       <div class="hf-divergence" x-text="d"></div>
                     </template>
                   </div>
