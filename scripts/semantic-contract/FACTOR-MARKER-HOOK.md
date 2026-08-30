@@ -39,6 +39,9 @@ range never becomes a point estimate. Existing unit-mismatch and ambiguous
 bare-value rules still apply. The cleanup refuses to delete known scale
 metadata that was not coherently retained; it does not convert units or borrow
 a competing prior's scale.
+The existing normaliser enforces `DECLARED_SCALE_BOUNDS` on every result with
+a recognised declaration. A declared raw count refuses a nontrivial divisor,
+including at zero; retaining its label beside a normalised value is not fidelity.
 
 ## Replay
 

@@ -190,4 +190,81 @@ describe('set_factor_value: known scale on a selected system prior survives its 
     expect(JSON.stringify(node(reloaded).prior)).toBe(priorBytes);
     expect(selectFactorQuantity(node(reloaded))).toEqual({ kind: 'ambiguous', carrier: null, protected: true, source: null });
   });
+
+  it('refuses 2 on a declared unit interval even when no cap or unit was recorded', async () => {
+    const graph = fixture();
+    node(graph).prior = {
+      distribution: 'uniform', range_min: 0, range_max: 1,
+      prior_is_unquantified: true, source: 'cee_inference', declared_scale: 'unit_interval',
+    };
+    const original = JSON.stringify(graph);
+    await expect(edit(graph, 2)).rejects.toMatchObject({ cause_kind: 'parameter_invalid_at_execute' });
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it('accepts 0.75 on a declared unit interval without inventing a cap or unit', async () => {
+    const graph = fixture();
+    node(graph).prior = {
+      distribution: 'uniform', range_min: 0, range_max: 1,
+      prior_is_unquantified: true, source: 'cee_inference', declared_scale: 'unit_interval',
+    };
+    const outcome = await edit(graph, 0.75);
+    const { reloaded } = commitAndReload(outcome.mutated_graph, graph);
+    expect(node(reloaded).observed_state).toEqual({
+      value: 0.75, raw_value: 0.75, source: 'user_override', declared_scale: 'unit_interval',
+    });
+    expect(node(reloaded)).not.toHaveProperty('prior');
+    expect(node(reloaded)).not.toHaveProperty('scale_frame');
+  });
+
+  it('refuses a raw-count declaration whose recorded cap would divide the supplied GBP amount', async () => {
+    const graph = fixture();
+    node(graph).prior = { ...SYSTEM_PRIOR, declared_scale: 'raw_count' };
+    const original = JSON.stringify(graph);
+    await expect(edit(graph, 75_000, 'GBP')).rejects.toMatchObject({ cause_kind: 'parameter_invalid_at_execute' });
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it('refuses a raw-count declaration with an existing divisor even when the supplied value is zero', async () => {
+    const graph = fixture();
+    node(graph).prior = {
+      distribution: 'uniform', range_min: 0, range_max: 1,
+      prior_is_unquantified: true, source: 'cee_inference', declared_scale: 'raw_count',
+    };
+    node(graph).scale_frame = 100_000;
+    const original = JSON.stringify(graph);
+    await expect(edit(graph, 0)).rejects.toMatchObject({ cause_kind: 'parameter_invalid_at_execute' });
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it('preserves an unnormalised raw-count GBP amount when no cap or frame was recorded', async () => {
+    const graph = fixture();
+    node(graph).prior = {
+      distribution: 'uniform', range_min: 0, range_max: 1,
+      prior_is_unquantified: true, source: 'cee_inference', declared_scale: 'raw_count', unit: 'GBP',
+    };
+    const outcome = await edit(graph, 75_000, 'GBP');
+    const { reloaded } = commitAndReload(outcome.mutated_graph, graph);
+    expect(node(reloaded).observed_state).toEqual({
+      value: 75_000, raw_value: 75_000, unit: 'GBP', source: 'user_override', declared_scale: 'raw_count',
+    });
+    expect(node(reloaded)).not.toHaveProperty('prior');
+    expect(node(reloaded)).not.toHaveProperty('scale_frame');
+    expect(node(reloaded).display_value).toBe('£75k');
+  });
+
+  it('accepts a declared ratio of 2 without imposing an undeclared unit interval', async () => {
+    const graph = fixture();
+    node(graph).prior = {
+      distribution: 'uniform', range_min: 0, range_max: 1,
+      prior_is_unquantified: true, source: 'cee_inference', declared_scale: 'ratio',
+    };
+    const outcome = await edit(graph, 2);
+    const { reloaded } = commitAndReload(outcome.mutated_graph, graph);
+    expect(node(reloaded).observed_state).toEqual({
+      value: 2, raw_value: 2, source: 'user_override', declared_scale: 'ratio',
+    });
+    expect(node(reloaded)).not.toHaveProperty('prior');
+    expect(node(reloaded)).not.toHaveProperty('scale_frame');
+  });
 });

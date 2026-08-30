@@ -152,6 +152,28 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   // factor's expected range. Normalisation math is straightforward.
 
   const cap = proposalCap ?? factorCap;
+  const declared = DeclaredScale.safeParse(factorDeclaredScale);
+  const finish = (result: NormaliseResult, divisor?: number): NormaliseResult => {
+    if (declared.success) {
+      // A declared raw count is in its original unit. Even zero cannot license
+      // retaining that declaration beside a nontrivial normalising divisor.
+      if (declared.data === 'raw_count' && divisor !== undefined && divisor !== 1) {
+        throw new D1HandlerError('PARAMETER_INVALID', 'The recorded divisor conflicts with the factor’s declared raw scale.', {
+          details: { factorDeclaredScale, divisor },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        });
+      }
+      const bounds = DECLARED_SCALE_BOUNDS[declared.data];
+      if ((bounds.min !== null && result.value < bounds.min) ||
+        (bounds.max !== null && result.value > bounds.max)) {
+        throw new D1HandlerError('PARAMETER_INVALID', 'The value is outside the factor’s declared scale.', {
+          details: { factorDeclaredScale, value: result.value },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        });
+      }
+    }
+    return result;
+  };
 
   // No cap → two shapes, told apart by `resolveScaleFrame` — the factor's
   // persisted `scale_frame` first, its own before-pair second:
@@ -195,7 +217,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     if (frame !== undefined) {
       const framedValue = rawInput / frame;
       if (Number.isFinite(framedValue)) {
-        return { raw_value: rawInput, value: framedValue };
+        return finish({ raw_value: rawInput, value: framedValue }, frame);
       }
     }
     // CQE's `percentage` quantity is a fraction; its proposal adapter restores
@@ -205,7 +227,6 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     // A rejected stored frame is not an absent one. Never replace conflicting
     // canonical evidence with the percentage convention.
     if (explicitPercentage) {
-      const declared = DeclaredScale.safeParse(factorDeclaredScale);
       if (
         factorScaleFrame !== undefined ||
         factorObservedValue !== undefined || factorObservedRawValue !== undefined ||
@@ -221,18 +242,9 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
         );
       }
       const value = rawInput / 100;
-      if (declared.success) {
-        const bounds = DECLARED_SCALE_BOUNDS[declared.data];
-        if ((bounds.min !== null && value < bounds.min) || (bounds.max !== null && value > bounds.max)) {
-          throw new D1HandlerError('PARAMETER_INVALID', 'The percentage is outside the factor’s declared scale.', {
-            details: { factorDeclaredScale, value },
-            userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
-          });
-        }
-      }
-      return { raw_value: rawInput, value, scale_frame: 100 };
+      return finish({ raw_value: rawInput, value, scale_frame: 100 }, 100);
     }
-    return { raw_value: rawInput, value: rawInput };
+    return finish({ raw_value: rawInput, value: rawInput });
   }
 
   // Capped factor: model value = raw / cap. When the input arrives with
@@ -257,5 +269,5 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     );
   }
 
-  return { raw_value: rawInput, value };
+  return finish({ raw_value: rawInput, value }, cap);
 }
