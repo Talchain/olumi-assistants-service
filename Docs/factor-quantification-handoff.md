@@ -1,0 +1,42 @@
+# Factor Quantification integration handoff
+
+Status: implemented behind `CEE_FACTOR_QUANTIFICATION_ENABLED=false` by default. This lane does not merge, enable production exposure, or certify release readiness.
+
+## Implemented path
+
+`draft-graph-dispatch` adopts quantities after records have become a canonical graph and before its existing atomic commit. Readiness, returned graph and ordinary commit hashes are recomputed from that graph. The focused `factor_quantification` task uses the existing supported adapter and a code-owned prompt, at most eight selected factor gaps and one adapter invocation. Provider-internal retries and grammar enforcement are not observable and are not claimed.
+
+Selection names an actual retained-option baseline dependency, with ancestry cut at each concrete intervention. Connectivity orders eligible gaps only. Explicit status-quo recovery is separate from current Science admission; a prior-only estimate cannot manufacture a held observed point. No arbitrary empty option gains effects or a baseline requirement.
+
+The estimator returns a point with explicit standard deviation, an explicitly justified uniform support distribution, or numeric-free unknown. An unspecified interval is not silently uniform. Known unit/cap/declared scale survive; bounds use the existing shared declaration. No scale is guessed. Rationale and validated context IDs remain inference, never evidence-backed provenance.
+
+Adoption rechecks canonical identity, the original full model snapshot and the shared quantity selector. Only confirmed system unknown/fallback residue is replaceable. User values, supplied distributions and unattributed existing quantities are protected. Missing attribution remains neutral and unresolved. Operational failure is distinct from model refusal, and failed retries retain an existing reasoned unknown.
+
+## Shared contract and real consumers
+
+Shared schema `0.53.0` is stacked on the Science objective contract and Unicode ordering fix. Final factor contract source: `51dca7aa03efaef9160c8a9f806b804b7f8a68fd`; development tarball SHA256: `a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1`.
+
+Existing observed/prior carriers add durable `reasoning`, existing `value_tier`, and a strict nonnumeric prior arm. Shared exports include `selectFactorQuantity` and `clearSupersededFactorMarkers`; there is no new quantitative authority field. Source `cee_inference` identifies a model estimate/abstention, not evidence. `cee_repair` without model reasoning identifies operational residue. Explicit fallback tiers and numeric ignorance flags remain distinct from numeric-free unknown.
+
+Accepted user points `.12` and `.24` select over an old source-absent prior without deleting or reattributing that prior. A point's own stale fallback marker must be retired by the accepted-edit hook; source alone cannot hide it. Graph Truth owns that hook and scale-preserving edit plumbing.
+
+CEE readiness blocks only actually consumed nonnumeric unknowns; recovery-only requirements do not block an otherwise available comparison. Numeric fallback/ignorance does not become an absent-value blocker here. Science owns illustrative computation, recommendation authority, PLoT normalisation/translation, ISL sampling, and the private CEE analysis hash. This implementation does not add a rival Science admission policy.
+
+## Replay and evidence scope
+
+- `node --import tsx scripts/semantic-contract/factor-quantification-fixtures.ts --check` verifies nine exact producer/adoption/JSON-file-reload fixtures, including point, support distribution, model unknown, operational unknown, fallback, supplied ignorance, unattributed origin and `.12/.24` controls.
+- `node --import tsx scripts/semantic-contract/factor-quantification-live.ts --live --out <new-directory>` requires an explicitly supplied supported model and credential. It refuses Supabase configuration. It executes the real model adapter, parser, adopter and `commitDirectAnswer` with an injected atomic local-file store, then reads through a new store instance. The figure-rich input replays records through the actual graph/options projector; first-pass model generation, Supabase, deployed runtime, UI and Science are not witnessed by this runner.
+- Each live artifact binds checkout/diff/source hashes, installed schema and tarball, exact prompt/request/schema hashes, provider/model, parsed output, canonical/readback quantities, token usage, latency and strict results. Cost remains unreported because the adapter supplies no cost. No tariff is invented.
+- Counts distinguish incoming fallback, adopted estimates, model unknowns, operationally unresolved and skipped gaps, remaining fallback, unresolved origin and protected writes. `cee.factor_quantification` telemetry is explicitly precommit. Persisted incidence must be read from successful commit/reload evidence, not inferred from that event.
+
+Strict evaluation fails remaining required fallback and failed/skipped required generation even if an illustrative computation would otherwise be permitted. Unknown is a legitimate parsed answer. Broken output, provenance/uncertainty loss, overwrite attempts, stale snapshots, irrelevant/fabricated context IDs, expired budgets, do-overridden roots and unrelated high-degree factors have discriminating controls.
+
+## Outstanding boundaries — no release clearance
+
+At independently executed PLoT `75e7f974` / ISL `28fe0c95`, a `.75` point with `.05` standard deviation reached sampling numerically, but prior provenance/ignorance qualifiers were lost; estimated and fallback uniform priors became identical, and numeric-free unknown became an ISL zero. Large standard deviations were also clamped. Science owns the exact fixes and the final consuming witness. The fixture success here is not Science closure.
+
+Current UI ownership is CCUX/UI. Existing placeholder classification can mislabel inferred estimates; full receipt overlay can retain a removed prior. Accepted user edits can retain an old inferred visual label. These need truthful existing-surface adoption before user exposure; cosmetic UI work is not a prerequisite for backend verification.
+
+Prompt/Consumer owns the separate claim-mediated percentage loss: a direct stated quantity survives, but a claim referring to it can still lose unit/frame/source. The direct-stated control here does not claim that twin is fixed.
+
+The bounded alternative-model comparison comes after a working canonical-to-Science path, not before it. It has not been used as a dependency or as a numerical fill-rate contest.
