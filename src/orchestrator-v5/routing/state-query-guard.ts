@@ -661,7 +661,8 @@ export function tryStateQueryGuard(
 /**
  * Deterministic answer copy. A bare readback quotes the persisted mutation
  * summary verbatim. An effect question does the same only when the projection
- * came from a typed transition; free-form `edit_graph` summaries receive a
+ * came from a typed numeric transition or an exact canonical label transition;
+ * free-form `edit_graph` summaries receive a
  * generic saved-edit acknowledgement because neither their prose nor even a
  * value-looking target label can license an exact before/after value or unit.
  *
@@ -713,7 +714,7 @@ function composeRecentChangeAnswer(
   // than being welded onto it ("…and spend If you want…"). `cap()` closes a
   // truncated summary with `…`, which is already terminal.
   const receipt =
-    isEffectQuestion && head.action === 'graph_edited'
+    isEffectQuestion && head.action === 'graph_edited' && head.transition !== 'node_label_changed'
       ? `Recorded an edit to the saved model. That saved edit does not include a trustworthy before-and-after value and unit, so I can't quantify its effect without guessing.`
       : head.summary.trimEnd();
   const terminated = /[.!?…]$/u.test(receipt) ? receipt : `${receipt}.`;

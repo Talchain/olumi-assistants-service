@@ -85,6 +85,7 @@ import type {
   HandlerFactWithTurn,
   IdentifiedHandlerFact,
 } from '../types/handler-fact.js';
+import { readCommittedMutationTurnRef } from '../types/recent-mutation-transition.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import {
   parseConversationContent,
@@ -1871,7 +1872,8 @@ export class SupabaseSessionStore implements SessionStore {
     const receiptFactTypes = Array.from(MUTATION_RECEIPT_FACT_TYPES);
     const { data, error } = await this.client
       .from('v5_handler_facts')
-      .select('id, payload, handler_id, noop, created_at')
+      // LEFT embed: missing version lineage must not remove an applied receipt.
+      .select('id, payload, handler_id, noop, created_at, v5_conversation_turn_id, turn:v5_conversation_turns(id, turn_id, scenario_id, user_id, model_version_mutation_id, model_version_created)')
       .eq('scenario_id', scenarioId)
       .in('handler_id', receiptFactTypes)
       .eq('noop', false)
@@ -1900,6 +1902,8 @@ export class SupabaseSessionStore implements SessionStore {
       handler_id?: unknown;
       noop?: unknown;
       created_at?: unknown;
+      v5_conversation_turn_id?: unknown;
+      turn?: unknown;
     }>) {
       if (
         typeof row.id !== 'string' ||
@@ -1942,10 +1946,26 @@ export class SupabaseSessionStore implements SessionStore {
           { code: 'mutation_fact_corrupt' },
         );
       }
+      const turn = row.turn !== null && typeof row.turn === 'object' && !Array.isArray(row.turn)
+        ? row.turn as Record<string, unknown>
+        : null;
+      const committedTurnRef =
+        turn?.id === row.v5_conversation_turn_id &&
+        turn?.scenario_id === scenarioId &&
+        turn?.model_version_created === true
+          ? readCommittedMutationTurnRef({
+              conversation_row_id: turn.id,
+              source_turn_id: turn.turn_id,
+              scenario_id: turn.scenario_id,
+              owner_user_id: turn.user_id,
+              mutation_id: turn.model_version_mutation_id,
+            })
+          : null;
       out.push({
         fact: parsed.data,
         fact_row_id: row.id,
         fact_created_at: row.created_at,
+        ...(committedTurnRef ? { committed_turn_ref: committedTurnRef } : {}),
       });
     }
     return out;

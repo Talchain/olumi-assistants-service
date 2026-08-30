@@ -221,6 +221,8 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
   [
     '../commit.ts',
     '../handlers/draft-graph-dispatch.ts',
+    '../build-turn-context.ts', // bounded read-only receipt -> immutable version adoption
+    '../context/canonical-label-transition.ts', // pure pair validation, no writes
     '../../collab/store.ts',
     '../../routes/assist.v1.scenario-versions.ts',
   ].map((s) => resolve(moduleDir, s)),

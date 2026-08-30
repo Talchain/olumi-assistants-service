@@ -15,6 +15,10 @@
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type {
+  CanonicalNodeLabelTransition,
+  CommittedMutationTurnRef,
+} from './recent-mutation-transition.js';
 
 /**
  * A {@link HandlerFact} paired with its parent turn's row id and the
@@ -59,4 +63,8 @@ export interface IdentifiedHandlerFact {
   readonly fact: HandlerFact;
   readonly fact_row_id: string;
   readonly fact_created_at: string;
+  /** Optional exact parent linkage from the durable, scenario-scoped read. */
+  readonly committed_turn_ref?: CommittedMutationTurnRef;
+  /** Read-only projection from that occurrence's verified immutable versions. */
+  readonly label_transition?: CanonicalNodeLabelTransition;
 }

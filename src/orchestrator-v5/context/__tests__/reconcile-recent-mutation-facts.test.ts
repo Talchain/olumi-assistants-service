@@ -13,6 +13,8 @@ import {
   type DurableRecentMutationFactRead,
 } from '../reconcile-recent-mutation-facts.js';
 import { tryStateQueryGuard } from '../../routing/state-query-guard.js';
+import type { IdentifiedHandlerFact } from '../../types/handler-fact.js';
+import type { CommittedMutationTurnRef } from '../../types/recent-mutation-transition.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 
@@ -682,5 +684,178 @@ describe('reconcileRecentMutationFacts', () => {
     expect(
       readRecentMutationHistoryFromPriorFacts([constraint('legacy-window', 5)]),
     ).toBeNull();
+  });
+
+  describe('optional committed-occurrence enrichment', () => {
+    const committedRef: CommittedMutationTurnRef = {
+      conversation_row_id: 'parent-row-a',
+      source_turn_id: 'source-turn-a',
+      scenario_id: SCENARIO,
+      owner_user_id: 'owner-user-a',
+      mutation_id: 'mutation-a',
+    };
+    const createdAt = '2026-08-27T12:00:00.000Z';
+
+    function identified(
+      fact: HandlerFact,
+      id: string,
+      ref?: CommittedMutationTurnRef,
+      timestamp = createdAt,
+    ): IdentifiedHandlerFact {
+      return {
+        fact,
+        fact_row_id: id,
+        fact_created_at: timestamp,
+        ...(ref ? { committed_turn_ref: ref } : {}),
+      };
+    }
+
+    function readEntries(entries: readonly IdentifiedHandlerFact[]): DurableRecentMutationFactRead {
+      return {
+        status: 'ok',
+        scenario_id: SCENARIO,
+        query_limit: RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT,
+        facts: entries,
+      };
+    }
+
+    it('strips raw label-transition assertions from both durable and hot identified inputs', () => {
+      const fact = constraint('real-receipt', 2);
+      const injected = {
+        ...identified(fact, 'fact-a', committedRef),
+        label_transition: {
+          kind: 'node_label_changed' as const,
+          before_label: 'INJECTED BEFORE',
+          after_label: 'INJECTED AFTER',
+        },
+      };
+      const result = reconcile({
+        hotWindowFacts: [fact],
+        hotWindowFactsWithIdentity: [{ ...injected, turn_id: committedRef.conversation_row_id }],
+        durableRead: readEntries([injected]),
+      });
+      expect(result.recent_changes_status).toBe('complete');
+      expect(result.recent_mutation_facts).toEqual([fact]);
+      expect(result.recent_mutation_entries).toHaveLength(1);
+      expect(result.recent_mutation_entries![0]!.committed_turn_ref).toEqual(committedRef);
+      expect(result.recent_mutation_entries![0]).not.toHaveProperty('label_transition');
+      expect(JSON.stringify(result)).not.toContain('INJECTED');
+    });
+
+    it.each([
+      ['conversation_row_id', 'different-parent'],
+      ['source_turn_id', 'different-source-turn'],
+      ['owner_user_id', 'different-owner'],
+      ['mutation_id', 'different-mutation'],
+    ] as const)('same receipt id with conflicting %s drops only its enrichment proof', (field, value) => {
+      const fact = constraint('same-unchanged-receipt', 2);
+      const existing = identified(fact, 'fact-a', committedRef);
+      const conflicting = {
+        ...existing,
+        turn_id: committedRef.conversation_row_id,
+        committed_turn_ref: { ...committedRef, [field]: value },
+      };
+      const result = reconcile({
+        hotWindowFacts: [fact],
+        hotWindowFactsWithIdentity: [conflicting],
+        durableRead: readEntries([existing]),
+      });
+      expect(result).toStrictEqual({
+        recent_mutation_facts: [fact],
+        recent_changes_status: 'complete',
+      });
+      expect(result).not.toHaveProperty('recent_mutation_entries');
+    });
+
+    it('a conflicting receipt linkage does not discard another occurrence\'s valid linkage', () => {
+      const disputedFact = constraint('disputed-link', 3);
+      const otherFact = constraint('other-valid-link', 2);
+      const disputed = identified(disputedFact, 'fact-z', committedRef);
+      const otherRef = { ...committedRef, source_turn_id: 'other-source', mutation_id: 'other-mutation' };
+      const other = identified(otherFact, 'fact-a', otherRef);
+      const conflictingHot = {
+        ...disputed,
+        turn_id: committedRef.conversation_row_id,
+        committed_turn_ref: { ...committedRef, mutation_id: 'conflicting-mutation' },
+      } satisfies IdentifiedHandlerFact & { readonly turn_id: string };
+      const result = reconcile({
+        hotWindowFacts: [disputedFact],
+        hotWindowFactsWithIdentity: [conflictingHot],
+        durableRead: readEntries([disputed, other]),
+      });
+      expect(result.recent_changes_status).toBe('complete');
+      expect(result.recent_mutation_facts).toEqual([disputedFact, otherFact]);
+      expect(result.recent_mutation_entries?.map((entry) => entry.fact_row_id)).toEqual(['fact-z', 'fact-a']);
+      expect(result.recent_mutation_entries![0]).not.toHaveProperty('committed_turn_ref');
+      expect(result.recent_mutation_entries![1]!.committed_turn_ref).toEqual(otherRef);
+    });
+
+    it('binds identical receipt payloads to their own ordered identities, never to the first equal payload', () => {
+      const repeated = constraint('same-payload-different-occurrences', 2);
+      const olderRef = { ...committedRef, source_turn_id: 'older-source', mutation_id: 'older-mutation' };
+      const newerRef = { ...committedRef, source_turn_id: 'newer-source', mutation_id: 'newer-mutation' };
+      const older = identified(repeated, 'fact-a', olderRef);
+      const newer = identified(repeated, 'fact-z', newerRef);
+      const result = reconcile({ durableRead: readEntries([older, newer]) });
+      expect(result.recent_changes_status).toBe('complete');
+      expect(result.recent_mutation_facts).toEqual([repeated, repeated]);
+      expect(result.recent_mutation_entries?.map((entry) => entry.fact_row_id)).toEqual(['fact-z', 'fact-a']);
+      expect(result.recent_mutation_entries?.map((entry) => entry.committed_turn_ref))
+        .toEqual([newerRef, olderRef]);
+      result.recent_mutation_entries!.forEach((entry, index) => {
+        expect(entry.fact).toBe(result.recent_mutation_facts[index]);
+      });
+    });
+
+    it('cannot lend the fourth lookahead occurrence\'s lineage to any retained equal-payload receipt', () => {
+      const repeated = constraint('equal-payloads', 2);
+      const entries = ['fact-z', 'fact-y', 'fact-x', 'fact-w'].map((id, index) =>
+        identified(repeated, id, index === 3 ? committedRef : undefined),
+      );
+      const result = reconcile({ durableRead: readEntries(entries) });
+      expect(result).toStrictEqual({
+        recent_mutation_facts: [repeated, repeated, repeated],
+        recent_changes_status: 'capped',
+      });
+      expect(result).not.toHaveProperty('recent_mutation_entries');
+    });
+
+    it('retains identity-aligned entries when a newer hot occurrence degrades durable page completeness', () => {
+      const repeated = constraint('equal-payloads-across-snapshots', 2);
+      const hot = identified(repeated, 'fact-hot', undefined, '2026-08-27T12:01:00.000Z');
+      const saved = identified(repeated, 'fact-saved', committedRef);
+      const result = reconcile({
+        hotWindowFacts: [repeated],
+        hotWindowFactsWithIdentity: [{ ...hot, turn_id: 'hot-parent' }],
+        durableRead: readEntries([saved]),
+      });
+      expect(result.recent_changes_status).toBe('degraded');
+      expect(result.recent_mutation_entries?.map((entry) => entry.fact_row_id)).toEqual(['fact-hot', 'fact-saved']);
+      expect(result.recent_mutation_entries![0]).not.toHaveProperty('committed_turn_ref');
+      expect(result.recent_mutation_entries![1]!.committed_turn_ref).toEqual(committedRef);
+      result.recent_mutation_entries!.forEach((entry, index) => {
+        expect(entry.fact).toBe(result.recent_mutation_facts[index]);
+      });
+    });
+
+    it.each(['complete', 'capped', 'degraded'] as const)(
+      'no-lineage %s results retain their exact legacy shape and JSON bytes',
+      (status) => {
+        const facts = Array.from({ length: status === 'capped' ? 4 : 1 }, (_, i) => constraint(`legacy-${i}`, i));
+        const result = status === 'degraded'
+          ? reconcile({ hotWindowFacts: facts, durableRead: { status: 'degraded' } })
+          : reconcile({ durableRead: durable(facts) });
+        const expected = {
+          recent_mutation_facts: facts.slice(0, RECENT_CHANGES_CAP),
+          recent_changes_status: status,
+        };
+        expect(result).toStrictEqual(expected);
+        expect(Object.getOwnPropertyNames(result)).toEqual(['recent_mutation_facts', 'recent_changes_status']);
+        expect(JSON.stringify(result)).toBe(JSON.stringify(expected));
+        const carrier = bindRecentMutationHistoryToPriorFacts(facts, result);
+        expect(JSON.stringify(carrier)).toBe(JSON.stringify(facts));
+        expect(readRecentMutationHistoryFromPriorFacts(carrier)).toStrictEqual(expected);
+      },
+    );
   });
 });
