@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { getModelProvider, isModelEnabled, supportsExtendedThinking } from "../../src/config/models.js";
+import { THINKING_CAPABLE_MODELS } from "../../src/adapters/llm/anthropic-model-capabilities.js";
 import { getAffordableDraftTokens, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL } from "../../src/config/timeouts.js";
 
 // =============================================================================
@@ -91,8 +92,37 @@ describe("MODEL_REGISTRY — claude-sonnet-4-6", () => {
     expect(isModelEnabled("claude-sonnet-4-6")).toBe(true);
   });
 
-  it("does not support extended thinking (not a capability of Sonnet 4.6)", () => {
+  /**
+   * A KNOWN-WRONG REGISTRY VALUE, PINNED AS SUCH.
+   *
+   * ⚠ This test used to be titled "does not support extended thinking (not a
+   * capability of Sonnet 4.6)". That rationale is FALSE and was cementing the
+   * error it sat on: `anthropic-model-capabilities.ts` records that
+   * `MODEL_REGISTRY.extendedThinking` was measured WRONG IN BOTH DIRECTIONS on
+   * 2026-08-08, and claude-sonnet-4-6 is one of the two — the API returns HTTP
+   * 200 for `thinking.type:'enabled'` and emits thinking blocks. A stale label
+   * sitting green under a passing assertion is this estate's dominant defect
+   * class, and it is worse here than a plain gap: the next reader would have
+   * taken a green test as evidence for a capability claim that has been
+   * measured false.
+   *
+   * What is genuinely true, and all this test now claims: the REGISTRY FIELD
+   * still reports `false`, and it DISAGREES with the live-probed authority.
+   * Both halves are asserted, so the divergence is visible rather than implied,
+   * and correcting the registry REDs this test deliberately instead of silently
+   * flipping a claim nobody re-derived.
+   */
+  it("MODEL_REGISTRY.extendedThinking reports false — a value the live-probed map contradicts", () => {
+    // The registry field, as it stands.
     expect(supportsExtendedThinking("claude-sonnet-4-6")).toBe(false);
+
+    // The authority every live Anthropic call site actually consults, which says
+    // the opposite. This is the pin: the two disagree, on purpose, on the record.
+    expect(THINKING_CAPABLE_MODELS.has("claude-sonnet-4-6")).toBe(true);
+
+    // Positive control on that pin — it is only meaningful if the set
+    // DISCRIMINATES rather than answering `true` for everything it is asked.
+    expect(THINKING_CAPABLE_MODELS.has("claude-sonnet-5")).toBe(false);
   });
 });
 
