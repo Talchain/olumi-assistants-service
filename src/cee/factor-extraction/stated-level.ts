@@ -96,6 +96,116 @@ const QUALIFIER_ALT = `(?:${PRESENT_STATE_QUALIFIERS.join("|")})`;
 const FILLER = `(?:\\s+${QUALIFIER_ALT})*`;
 
 /**
+ * R2918B — THE UNIT TOKENS AN ANSWER MAY CARRY. The ask
+ * (`formatBaselineElicitation`) reads "Roughly what percentage is <target> at
+ * right now?", so the user's echo of the question's OWN noun is a unit
+ * statement exactly as the symbol is. CLOSED, like every vocabulary here.
+ */
+const PERCENT_UNIT = "(?:%|percent(?:age)?|per\\s+cent|pct)";
+
+/**
+ * R2918B — the CLOSED "this is an ATTEMPTED answer" vocabulary. It exists for
+ * ONE purpose: to tell an answer the product cannot READ ("10-15%", "maybe
+ * 12%", "it was 12%") apart from a message that is not answering the question
+ * at all ("run the analysis", "Win rate is 12% today"). The first earns a
+ * re-ask; the second must leave the flow exactly as it was, because the
+ * elicitation is additive by contract.
+ *
+ * DELIBERATELY WIDER than the binding grammar and DELIBERATELY CLOSED: a word
+ * outside this set means the message carries content only the full grammar (or
+ * the model) is entitled to judge, so classification returns `not_an_answer`
+ * and the caller stays silent. Membership NEVER binds a value: every member
+ * beyond the shared qualifiers is, by construction, a word that makes an
+ * answer UNUSABLE as a present-state level.
+ */
+const ATTEMPT_VOCABULARY: ReadonlySet<string> = new Set<string>([
+  ...PRESENT_STATE_QUALIFIERS,
+  // hedge / guesswork
+  "maybe",
+  "perhaps",
+  "probably",
+  "possibly",
+  "guess",
+  "think",
+  "reckon",
+  "ish",
+  "approx",
+  "approximately",
+  "circa",
+  "say",
+  "like",
+  // pronoun leads and copulas (the elliptical grammar's own lead, unbound)
+  "i",
+  "we",
+  "it",
+  "its",
+  "that",
+  "is",
+  "are",
+  "am",
+  "s",
+  "re",
+  "m",
+  // tense that states a level for the WRONG time
+  "was",
+  "were",
+  // range / alternation connectives
+  "or",
+  "and",
+  "to",
+  "between",
+  "somewhere",
+  "range",
+  // bound and delta words: a real attempt whose CLAIM is not a level
+  "under",
+  "over",
+  "above",
+  "below",
+  "more",
+  "less",
+  "than",
+  "higher",
+  "lower",
+  "up",
+  "down",
+  // spelled units
+  "percent",
+  "percentage",
+  "per",
+  "cent",
+  "pct",
+]);
+
+/**
+ * The most tokens a message may carry and still count as an ATTEMPTED answer.
+ * A reply to "Roughly what percentage is X at right now?" is short; past this
+ * the message is doing something else and a closed vocabulary is no longer
+ * sufficient evidence of intent. Fail direction: silence.
+ */
+const ATTEMPT_TOKEN_CAP = 10;
+
+/**
+ * Is the WHOLE message a short, number-bearing reply built only from the
+ * closed attempt vocabulary? Punctuation is stripped and range / alternation
+ * separators are split on, so "10-15%" tokenises as two numbers rather than as
+ * one unknown word (without that split it would read as "not an answer" and
+ * the user would get silence for a genuine attempt).
+ */
+function isAttemptedAnswerShape(message: string): boolean {
+  const tokens = message
+    .toLowerCase()
+    .replace(/[\u2013\u2014/-]+/g, " ")
+    .replace(/[.,!?;:"'\u2018\u2019\u201c\u201d()%]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0 || tokens.length > ATTEMPT_TOKEN_CAP) return false;
+  const isNumber = (t: string): boolean => /^\d+(?:\.\d+)?$/.test(t);
+  if (!tokens.some(isNumber)) return false;
+  return tokens.every((t) => isNumber(t) || ATTEMPT_VOCABULARY.has(t));
+}
+
+
+/**
  * Words that may follow the '%' and CHANGE the claim from a level to a delta
  * or comparison ("12% higher", "12% up on last year"). Their presence rejects
  * the match.
@@ -441,7 +551,7 @@ const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
   "^\\s*" +
     "(?:(?:it|that)(?:['’]s|\\s+is)\\s+|we(?:['’]re|\\s+are)\\s+(?:at\\s+)?)?" +
     `(?:${QUALIFIER_ALT}\\s+)*` +
-    "(?<value>\\d+(?:\\.\\d+)?)\\s*%" +
+    `(?<value>\\d+(?:\\.\\d+)?)\\s*(?<unit>${PERCENT_UNIT})?` +
     `(?:\\s+${QUALIFIER_ALT})*` +
     "\\s*[.!]?\\s*$",
   "i",
@@ -466,23 +576,111 @@ const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
  * EXTRACTION ONLY — never infers, defaults, or rounds; every refusal path
  * returns `undefined` and the caller mints nothing.
  */
+/**
+ * R2918B — WHAT THE ANSWER TURN ACTUALLY DID, as a three-way verdict.
+ *
+ * The 2.918 shipping shape was BINARY: bind, or fall through in silence. That
+ * made two very different messages indistinguishable to the caller, and the
+ * product could not tell them apart either:
+ *
+ *   - "10-15%" / "maybe 12%" / "120%" — the user is plainly ANSWERING, and the
+ *     product cannot read the answer. Silence here is the defect: the reply
+ *     lands nowhere and nothing ever says why;
+ *   - "run the analysis" / "Win rate is 12% today" — the user is not answering
+ *     this question at all. Silence here is CORRECT and contractual: the
+ *     elicitation is additive, so an ignored question must leave the flow
+ *     exactly as it was.
+ *
+ * Separating them is what lets the caller re-ask the first WITHOUT hijacking
+ * the second. `unresolved` NEVER carries a value: it is the refusal, told.
+ */
+export type ElicitedBaselineAnswer =
+  | { readonly outcome: "bound"; readonly percent: number }
+  | {
+      readonly outcome: "unresolved";
+      readonly reason: "out_of_range" | "ambiguous_scale" | "unreadable";
+    }
+  | { readonly outcome: "not_an_answer" };
+
+/**
+ * Classify an answer turn against the pending baseline question. Limbs, in
+ * order, all fail-closed:
+ *
+ *   1. the full-sentence limb IS `deriveStatedTargetBaselinePercent` — a
+ *      subject-bearing answer ("Churn rate is about 12%") binds by identity and
+ *      competitor unanimity exactly as on any other turn;
+ *   2. the elliptical limb accepts a whole-message bare answer. Its subject
+ *      binding is the QUESTION's, and so is its UNIT: the ask states
+ *      "percentage", which is why an answer may omit the symbol. Callers MUST
+ *      gate this on a live `elicit_target_baseline` pending whose target is
+ *      `targetLabel`'s node, and on that pending being the SOLE live ask a bare
+ *      number could be answering (`findSoleLiveElicitBaselinePending`) — no
+ *      pending question, or a competing one, means no elliptical binding;
+ *   3. anything else that is SHAPED like an answer is `unresolved`;
+ *   4. everything else is `not_an_answer`.
+ *
+ * THE SCALE CARVE-OUT. A UNIT-LESS decimal below 1 ("0.3") is genuinely
+ * ambiguous between "0.3 percent" and the fraction 0.3, i.e. 30 percent — a
+ * hundredfold difference, and nothing in the message decides it. It returns
+ * `unresolved`, never a guess. With an explicit unit ("0.3%") the user has said
+ * which they meant and it binds unchanged. A binder that accepts everything
+ * writes wrong values confidently; this is the one place the widened grammar
+ * would have done exactly that.
+ *
+ * EXTRACTION ONLY — never infers, defaults, or rounds.
+ */
+export function classifyElicitedBaselineAnswer(
+  message: string | null | undefined,
+  targetLabel: string | null | undefined,
+  competingLabels: readonly (string | null | undefined)[] = [],
+): ElicitedBaselineAnswer {
+  if (typeof message !== "string" || message.trim() === "") {
+    return { outcome: "not_an_answer" };
+  }
+  // No target label ⇒ no identity to bind ⇒ nothing, same rule as the parent.
+  if (typeof targetLabel !== "string" || targetLabel.trim() === "") {
+    return { outcome: "not_an_answer" };
+  }
+
+  const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
+  if (full !== undefined) return { outcome: "bound", percent: full };
+
+  const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
+  if (m !== null) {
+    const raw = m.groups?.["value"] ?? "";
+    const value = Number(raw);
+    const hasExplicitUnit = m.groups?.["unit"] !== undefined;
+    if (!Number.isFinite(value)) return { outcome: "unresolved", reason: "unreadable" };
+    // Same [0,100] rule as the parent — the mint cell this feeds is unchanged.
+    // Told, not swallowed: the user answered, and the answer is off the scale.
+    if (!(value >= 0 && value <= 100)) {
+      return { outcome: "unresolved", reason: "out_of_range" };
+    }
+    if (!hasExplicitUnit && raw.includes(".") && value < 1) {
+      return { outcome: "unresolved", reason: "ambiguous_scale" };
+    }
+    return { outcome: "bound", percent: value };
+  }
+
+  if (isAttemptedAnswerShape(message)) {
+    return { outcome: "unresolved", reason: "unreadable" };
+  }
+  return { outcome: "not_an_answer" };
+}
+
+/**
+ * The single raw percent an ANSWER TURN states for the pending question's
+ * target, or `undefined`. The BINDING view of
+ * {@link classifyElicitedBaselineAnswer} and nothing more: one classifier, no
+ * twin to drift (trap 12). Every non-`bound` outcome is `undefined` here, so
+ * both mint callers keep exactly the semantics they had — the new information
+ * is available only to callers that ask for it.
+ */
 export function deriveElicitedBaselineAnswerPercent(
   message: string | null | undefined,
   targetLabel: string | null | undefined,
   competingLabels: readonly (string | null | undefined)[] = [],
 ): number | undefined {
-  if (typeof message !== "string" || message.trim() === "") return undefined;
-  // No target label ⇒ no identity to bind ⇒ nothing, same rule as the parent.
-  if (typeof targetLabel !== "string" || targetLabel.trim() === "") return undefined;
-
-  const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
-  if (full !== undefined) return full;
-
-  const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
-  if (m === null) return undefined;
-  const value = Number(m.groups?.["value"]);
-  if (!Number.isFinite(value)) return undefined;
-  // Same [0,100] rule as the parent — the mint cell this feeds is unchanged.
-  if (!(value >= 0 && value <= 100)) return undefined;
-  return value;
+  const verdict = classifyElicitedBaselineAnswer(message, targetLabel, competingLabels);
+  return verdict.outcome === "bound" ? verdict.percent : undefined;
 }

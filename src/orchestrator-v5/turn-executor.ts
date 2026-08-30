@@ -186,6 +186,7 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
+import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -5822,6 +5823,96 @@ export async function runTurnExecutor(
           // into a second resume (the commit excludes its ref from
           // carry-forward; a successful mint also moves the graph hash).
           consumedPendingAction = pending;
+        } else if (baselineAnswer.skip_reason === 'unreadable_answer') {
+          // R2918B — THE USER ANSWERED AND WE CANNOT READ IT. Before this,
+          // every such reply fell through in silence: the answer landed
+          // nowhere and the product never said why. Say what shape is needed
+          // and re-persist the question, so the next attempt still has a
+          // referent to bind through.
+          //
+          // SCOPE — the whole safety argument for this branch. It fires ONLY
+          // on `unreadable_answer`, which the classifier reserves for messages
+          // SHAPED like an answer ("10-15%", "maybe 12%", "120%"). A message
+          // that ignores the question still returns `not_an_answer` and still
+          // falls through untouched, because a re-ask on every non-answer
+          // would hijack "run the analysis" and everything else the user might
+          // say next. The elicitation stays additive.
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: `baseline_elicitation_reask_${baselineAnswer.reason}`,
+          });
+          const reaskResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: formatBaselineReask({
+              targetLabel: baselineAnswer.targetLabel,
+              reason: baselineAnswer.reason,
+            }),
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = reaskResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(reaskResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              // NO `pending_actions` OVERRIDE, deliberately. The commit's
+              // default is `priorPendingActions: most_recent_pending_actions`,
+              // so omitting the field carries the question forward untouched
+              // AND preserves anything else that was live (the ask turn's own
+              // "Run the analysis" chip pending is the routine co-occurrence).
+              // Passing `[pending]` here would have looked like belt-and-braces
+              // and silently DROPPED those siblings: an explicit list REPLACES
+              // the carried-forward set rather than adding to it. Caught by a
+              // surviving mutant, which is the only reason it is not in this
+              // commit.
+              //
+              // WHY THE QUESTION SURVIVES, derived rather than assumed: this
+              // branch RETURNS here, thousands of lines before
+              // `consumedPendingAction` is read into `consumedPendingRefs`, so
+              // consumption cannot be expressed on this path at all and the
+              // commit's `priorPendingActions` default carries everything
+              // forward. An earlier draft of this comment credited "we do not
+              // set `consumedPendingAction`" — plausible, and false: a mutant
+              // that DOES set it survives, because nothing on this path reads
+              // it. Stated exactly, so the next reader does not inherit a
+              // mechanism that is not the one operating.
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_reask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation re-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
         }
       }
 
