@@ -36,7 +36,7 @@ export function runRecoveryProbe(message = '60%', mutation?: 'zero-for-no-change
     execute(c) {
       const producedQuestion = c.schema(readiness, graph.nodes);
       const question = mutation === 'wrong-answer-form'
-        ? { ...producedQuestion, message: 'Reply with a colour name, red or blue; no numbers.' }
+        ? { ...producedQuestion, nextStep: 'Reply with a colour name, red or blue; no numbers.' }
         : producedQuestion;
       const reading = c.parser(message);
       const bound = c.consumer({ message: mutation === 'zero-for-no-change' ? '0%' : message, readiness });
@@ -57,7 +57,7 @@ export function runRecoveryProbe(message = '60%', mutation?: 'zero-for-no-change
       // This is participation, not a claim to infer arbitrary prose semantics:
       // real readers, independent quantities and canonical writes below prove
       // the supported examples actually mean what that contract advertises.
-      assert(question.message.endsWith(MISSING_VALUE_ASK_FORMAT_HINT), 'issued question did not carry the tested answer contract');
+      assert(question.nextStep.includes(MISSING_VALUE_ASK_FORMAT_HINT), 'issued question did not carry the tested answer contract');
       assert(reading, 'answer must be understood, not just mentioned in ask copy');
       if (reading.kind === 'no_change') {
         assert(!bound.matched || bound.kind !== 'bind', 'no change must never become zero or baseline pinning');

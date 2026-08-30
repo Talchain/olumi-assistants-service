@@ -27,6 +27,30 @@ export interface RuntimeObservation {
 const source = (path: string, exportName: string) => ({ path, exportName, fileSha256: sha256(read(path)) });
 const combine = (states: readonly ContractStatus[]): ContractStatus => states.includes('FAIL') ? 'FAIL' : states.includes('UNVERIFIED') ? 'UNVERIFIED' : 'PASS';
 
+/** Reuse #1228's sealed observations; do not mistake them for deployed calls. */
+function bankedDraftProvider() {
+  const path = 'evidence/prompt-consumer/8eb8e19-behaviour.json';
+  const bytes = read(path);
+  const archiveSha256 = sha256(bytes);
+  assert.equal(archiveSha256, '1b9114c4081dbf9f954e9c86b274c02bc31f863b15d146ffa9b71a995b78f638', 'banked provider evidence changed; reverify original captures');
+  const banked = JSON.parse(bytes) as { content: {
+    identity: { sourceHead: string; capturedAt: string; modelResolution: { resolved_model: string; resolution_source: string } };
+    cases: Array<{ captures: Array<{ request: { parameters: { model: string } }; response: { model: string } }> }>;
+  } };
+  const { identity, cases } = banked.content;
+  const calls = cases.flatMap(c => c.captures);
+  assert.equal(cases.length, 54);
+  assert.equal(calls.length, 86);
+  for (const c of calls) {
+    assert.equal(c.request.parameters.model, identity.modelResolution.resolved_model);
+    assert.equal(c.response.model, c.request.parameters.model);
+  }
+  return { path, archiveSha256, scope: 'local production adapter + real provider, not deployed', sourceHead: identity.sourceHead,
+    capturedAt: identity.capturedAt, model: identity.modelResolution.resolved_model,
+    resolutionSource: identity.modelResolution.resolution_source, observedCalls: calls.length,
+    semanticVerdict: 'UNVERIFIED: independent review; no preservation claim' };
+}
+
 /** Semantic review annotations are bound to exact complete inputs, not word matches.
  * Unknown bytes require review; adding "uncertainty" to teapot prose cannot pass. */
 export function draftObligations(promptHash: string, instructionHash: string) {
@@ -92,7 +116,7 @@ export function buildContractManifest(runtime?: RuntimeObservation) {
     {
       route: 'draft.primary-and-structural-completion', task: 'draft_graph', authority: RUNTIME_AI_TASK_AUTHORITY.draft_graph,
       prompt: draftPrompt,
-      model: { configuredPms: runtime?.prompts.draft_graph.configuredModel ?? null, actualBound: null, status: 'UNVERIFIED', reason: 'PMS pin is not proof of a deployed provider call; #1228 banks local-provider observations separately' },
+      model: { configuredPms: runtime?.prompts.draft_graph.configuredModel ?? null, localProviderObservation: bankedDraftProvider(), deployedProviderObservation: null, status: 'UNVERIFIED', reason: 'PMS pin and a local real-provider observation do not prove a deployed provider call' },
       instructions: { local: source('src/cee/draft/records/instruction.ts', 'DRAFT_RECORDS_INSTRUCTION'), localExportSha256: sha256(DRAFT_RECORDS_INSTRUCTION), deployedExportSha256: deployedInstructionHash },
       grammar: { ...source('src/cee/draft/records/grammar.ts', 'buildDraftRecordsSchema'), sha256: sha256(JSON.stringify(buildDraftRecordsSchema())), modes: ['attached JSON schema', 'embedded schema when structured output degrades'] },
       completion: { ...source('src/cee/draft/records/completion.ts', 'buildRecordsCompletionSchema / mergeCompletionClaims'), grammarSha256: sha256(JSON.stringify(buildRecordsCompletionSchema())), requests: ['structural claims only'], not: ['factor estimation', 'new stated facts'], assemblyEvidence: 'src/adapters/llm/__tests__/draft-prompt-consumer-assembly.test.ts' },
