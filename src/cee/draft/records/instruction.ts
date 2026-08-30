@@ -220,11 +220,23 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   what people believe is behind a problem — "some think the product has fallen
   behind", "the CFO believes we raised prices too aggressively" — each of those
   spans answers WHY, and an answer is true or false rather than something the
-  user carries out. File each as a \`claim\`: what it says varies is a
-  \`factor\`, and what it says threatens the goal is a \`risk\`. A brief can
-  disagree about causes and name no course of action at all; when it does, the
-  options are what the user could DO about the problem, and the disagreement
-  itself is a \`claim\`, never the alternatives.
+  user carries out. It is not a stated_item of any kind: the four above are the
+  only values \`kind\` takes, and there is no fifth. Put the span in
+  \`claims\` instead, with \`claim_kind\` \`factor\` for what it says varies
+  and \`risk\` for what it says threatens the goal.
+  Keep every one of them. A disagreement about causes IS the reasoning the user
+  arrived with, and a hypothesis dropped to tidy the graph removes the thing
+  they are arguing about.
+  A brief can disagree about causes and name no course of action at all. When it
+  does, do not hunt the brief for an option that is not there, and do not promote
+  one of the causes to fill the gap. An action YOU are putting forward is an
+  \`option_refinement\` claim — that is the route by which something becomes an
+  option when the user named none. \`claims\` is already the half of the record
+  set that is yours rather than theirs, so putting it there is what lets the user
+  tell your proposal from their own words and argue with it. Set its \`basis\` to
+  whatever in the brief you built it on, and leave \`basis\` empty when you built
+  it on nothing: an option that honestly rests on nothing is worth more than one
+  resting on a basis that does not hold.
   Who said it makes no difference. "Sales says cut the price, product says hold
   and ship the integrations" names two real acts, and both are options.
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
@@ -252,7 +264,10 @@ Use \`claim_kind\`:
 - \`risk\` — something that could go wrong, or a downside the decision carries.
   Higher is worse.
 - \`causal_link\` — one thing affecting another
-- \`option_refinement\` — a sharper version of an option
+- \`option_refinement\` — an action put on the graph as an option to compare.
+  Use it to sharpen an option the user named, and ALSO when the user named no
+  course of action and the option is one you are proposing. Either way it
+  becomes an option to compare, and it is yours rather than theirs.
 - \`prior\` — what you believe about a quantity, and how sure you are
 
 Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
