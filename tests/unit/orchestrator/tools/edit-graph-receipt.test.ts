@@ -329,3 +329,131 @@ describe("buildAppliedChanges — no internal IDs in user-facing fields", () => 
     expect(result.changes[0].description).not.toContain("node_xyz_999");
   });
 });
+
+// ============================================================================
+// ROADMAP 2.1003 (c) — AUTHORED NOTES ON THE RECEIPT
+//
+// The companion to the comparator fix in `edit-outcome-binding.ts`. Once a
+// note-only edit is correctly reported as a CHANGE, the receipt is the sentence
+// the user reads (`edit-graph-dispatch.ts:1541`), so it must name what moved.
+//
+// The oracle is `isSubstantiveOperation`'s OWN declared semantics —
+// *"substantive (affects model outputs)"* — cross-read against the repo's
+// authority on what affects outputs: `computeAnalysisAffectingGraphHash`
+// (`context/graph-hash.ts:104`) names `descriptions` in its EXCLUDED list.
+// Prose cannot move a number, so a note-only edit must NOT recommend a rerun.
+// That keeps authored-content change and numerical freshness two questions
+// with two answers, which is the whole point of the comparator split.
+// ============================================================================
+
+describe("buildAppliedChanges — authored note (description/body) ops", () => {
+  const NOTE = "Board wants this framed as retention, not acquisition.";
+
+  it("names the note when one is ADDED to a node that had none", () => {
+    const ops: PatchOperation[] = [
+      { op: "update_node", path: "goal_nrr", value: { description: NOTE } },
+    ];
+    const graph = makeGraph([{ id: "goal_nrr", label: "Improve NRR", kind: "goal" }]);
+    const result = buildAppliedChanges(ops, graph, false);
+
+    // BOUND BY IDENTITY: the receipt must name THIS node, by its label.
+    expect(result.changes[0].element_ref).toBe("goal_nrr");
+    expect(result.changes[0].label).toBe("Improve NRR");
+    // PINNED EXACTLY. `toContain("note")` was too slack to bite: it is satisfied
+    // by "Added", "Updated" and "Removed" alike, so a receipt that lost the
+    // distinction survived the mutant that removed it. The copy IS the product
+    // surface on this turn, so the whole sentence is the assertion.
+    expect(result.changes[0].description).toBe("Added a note to Improve NRR");
+    // And it must not read as a bare "Updated X", which was true of a no-change
+    // apply and true of a wrong-object apply alike.
+    expect(result.changes[0].description).not.toContain("goal_nrr");
+  });
+
+  it("distinguishes UPDATING an existing note from ADDING one", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "goal_nrr",
+        value: { description: NOTE },
+        old_value: { description: "An earlier note." },
+      },
+    ];
+    const graph = makeGraph([{ id: "goal_nrr", label: "Improve NRR", kind: "goal" }]);
+    const result = buildAppliedChanges(ops, graph, false);
+    expect(result.changes[0].description).toBe("Updated the note on Improve NRR");
+    expect(result.changes[0].description).not.toContain("Added");
+  });
+
+  it("distinguishes REMOVING a note from updating one", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "goal_nrr",
+        value: { description: "" },
+        old_value: { description: "An earlier note." },
+      },
+    ];
+    const graph = makeGraph([{ id: "goal_nrr", label: "Improve NRR", kind: "goal" }]);
+    const result = buildAppliedChanges(ops, graph, false);
+    expect(result.changes[0].description).toBe("Removed the note on Improve NRR");
+  });
+
+  it("the `body` spelling of authored prose gets the same receipt", () => {
+    const ops: PatchOperation[] = [
+      { op: "update_node", path: "goal_nrr", value: { body: NOTE } },
+    ];
+    const graph = makeGraph([{ id: "goal_nrr", label: "Improve NRR", kind: "goal" }]);
+    const result = buildAppliedChanges(ops, graph, false);
+    expect(result.changes[0].description).toBe("Added a note to Improve NRR");
+  });
+
+  it("a note-only edit does NOT recommend a rerun, even with an analysis in scope", () => {
+    // THE SEPARATION THAT MUST HOLD. A note is authored content; it is not an
+    // input to the maths. Recommending a rerun for it would collapse the two
+    // questions the comparator split exists to keep apart.
+    const ops: PatchOperation[] = [
+      { op: "update_node", path: "goal_nrr", value: { description: NOTE } },
+    ];
+    const graph = makeGraph([{ id: "goal_nrr", label: "Improve NRR", kind: "goal" }]);
+    const result = buildAppliedChanges(ops, graph, true); // analysis exists
+    expect(result.rerun_recommended).toBe(false);
+  });
+
+  it("THE OPPOSITE-DIRECTION TWIN: a note carried ALONGSIDE a value edit still reruns", () => {
+    // The narrowing must be exactly "prose and nothing else". A compound op
+    // that also moves a number is substantive, and suppressing its rerun would
+    // be the inverse harm — a stale analysis presented as current.
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "fac_price",
+        value: { value: 0.9, description: NOTE },
+        old_value: { value: 0.5 },
+      },
+    ];
+    const graph = makeGraph([{ id: "fac_price", label: "Pricing" }]);
+    const result = buildAppliedChanges(ops, graph, true);
+    expect(result.rerun_recommended).toBe(true);
+    // And its receipt keeps the value transition, not the note phrasing.
+    expect(result.changes[0].description).toContain("0.5");
+    expect(result.changes[0].description).toContain("0.9");
+  });
+
+  it("a rename carried alongside a note keeps today's phrasing (unchanged behaviour)", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "fac_price",
+        value: { label: "Revenue Sensitivity", description: NOTE },
+        old_value: { label: "Pricing" },
+      },
+    ];
+    const graph = makeGraph([{ id: "fac_price", label: "Pricing" }]);
+    const result = buildAppliedChanges(ops, graph, true);
+    // Cosmetic + prose — neither moves a number.
+    expect(result.rerun_recommended).toBe(false);
+    // The prose branch requires prose AND NOTHING ELSE, so a compound op keeps
+    // exactly the phrasing it has on `staging` today.
+    expect(result.changes[0].description).toBe("Updated Pricing");
+  });
+});

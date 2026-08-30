@@ -1693,8 +1693,62 @@ function resolveExplicitGroupedTargets(
 // ============================================================================
 
 /**
+ * ROADMAP 2.1003 (c) — the fields on a node that a user AUTHORS as prose.
+ *
+ * Same list, same precedence and same provenance as
+ * `orchestrator-v5/routing/edit-outcome-binding.ts` — see that module's header
+ * for why the two spellings name one thing (`cee/transforms/schema-v3.ts:245`
+ * maps V1 `body` onto V3 `description`; `cee/extraction/intervention-extractor.ts:1655`
+ * already reads `description || body`).
+ */
+const AUTHORED_PROSE_KEYS = ['description', 'body'] as const;
+
+/** Membership view of the list above. ONE list, so the two cannot drift. */
+const AUTHORED_PROSE_KEY_SET: ReadonlySet<string> = new Set(AUTHORED_PROSE_KEYS);
+
+/** Keys on an `update_node` value that cannot move a number. Derived, not copied. */
+const NON_NUMERIC_NODE_KEYS: ReadonlySet<string> = new Set([
+  'label',
+  ...AUTHORED_PROSE_KEYS,
+]);
+
+/**
+ * The authored prose carried on an operation's `value` / `old_value`, or `null`
+ * when there is none.
+ *
+ * ⚠ STRING-ONLY and ABSENT ≡ EMPTY ≡ WHITESPACE-ONLY, for the same reasons as
+ * the comparator's own `projectAuthoredProse`: a structured annotation is not a
+ * user writing a note, and an empty string must not read as "a note was added".
+ */
+function firstAuthoredProse(value: Record<string, unknown> | undefined): string | null {
+  if (!value) return null;
+  for (const key of AUTHORED_PROSE_KEYS) {
+    const raw = value[key];
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+}
+
+/**
  * Return true if this operation is substantive (affects model outputs).
  * Label-only renames are cosmetic and do not warrant a rerun.
+ *
+ * ⚠ ROADMAP 2.1003 (c) — SO ARE NOTES, AND FOR THE SAME REASON.
+ * The oracle is not this function's own history but the repo's authority on
+ * what affects outputs: `computeAnalysisAffectingGraphHash`
+ * (`orchestrator-v5/context/graph-hash.ts:104`) names `descriptions` in its
+ * EXCLUDED list. Prose is not an input to the maths, so a note-only edit must
+ * not recommend a rerun — otherwise the fix that finally reports a note as a
+ * CHANGE would immediately start demanding a pointless recompute, collapsing
+ * "the user's model moved" into "the numbers are stale". Those are two
+ * questions and the comparator split exists to keep them apart.
+ *
+ * ⚠ THE OPPOSITE-DIRECTION TWIN: the narrowing is "prose/label AND NOTHING
+ * ELSE". A compound op that also carries a numeric field stays substantive —
+ * suppressing ITS rerun would present a stale analysis as current, which is the
+ * worse harm of the two.
  */
 function isSubstantiveOperation(op: PatchOperation): boolean {
   if (op.op === 'add_node' || op.op === 'remove_node') return true;
@@ -1702,9 +1756,13 @@ function isSubstantiveOperation(op: PatchOperation): boolean {
   if (op.op === 'update_node') {
     const newVal = op.value as Record<string, unknown> | undefined;
     if (!newVal) return false;
-    // If the only key changed is `label`, it is cosmetic
     const keys = Object.keys(newVal);
-    if (keys.length === 1 && keys[0] === 'label') return false;
+    if (keys.length === 0) return false;
+    // Cosmetic when EVERY changed key is a label or authored prose. `every` on
+    // a non-empty list, deliberately: a single unrecognised key makes the whole
+    // op substantive, so an unknown field can never be silently treated as
+    // cosmetic (fail towards recommending the rerun).
+    if (keys.every((k) => NON_NUMERIC_NODE_KEYS.has(k))) return false;
     return true;
   }
   return false;
@@ -1796,6 +1854,23 @@ function buildOperationDescription(
         const oldLabel = typeof oldVal?.label === 'string' ? oldVal.label : label;
         const newLabel = typeof newVal.label === 'string' ? newVal.label : label;
         return `Renamed "${oldLabel}" to "${newLabel}"`;
+      }
+      // ROADMAP 2.1003 (c) — a note-only edit. Once the comparator reports it as
+      // a CHANGE, this is the sentence the user reads
+      // (`edit-graph-dispatch.ts:1541`), so it must say what moved. A bare
+      // "Updated <label>" was true of a no-change apply and of a wrong-object
+      // apply alike — the same defect class the receipt was built to close.
+      //
+      // Narrow on purpose: PROSE KEYS AND NOTHING ELSE. A compound op that also
+      // carries `label` or `value` falls through to the branches below, so
+      // renames and value transitions keep today's phrasing exactly.
+      if (keys.length > 0 && keys.every((k) => AUTHORED_PROSE_KEY_SET.has(k))) {
+        const newNote = firstAuthoredProse(newVal);
+        const oldNote = firstAuthoredProse(oldVal);
+        if (newNote === null) {
+          return oldNote === null ? `Updated ${label}` : `Removed the note on ${label}`;
+        }
+        return oldNote === null ? `Added a note to ${label}` : `Updated the note on ${label}`;
       }
       if (typeof newVal.value === 'number') {
         if (oldVal && typeof oldVal.value === 'number') {
