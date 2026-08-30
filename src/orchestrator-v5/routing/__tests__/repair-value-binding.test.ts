@@ -60,11 +60,18 @@ const NEVER_CLAIMED: readonly string[] = [
   // chips must never be claimed as values.
   'Use a different value for value.',
   // Unit-bearing variants of the trapped message.
-  'Set it to 12%.',
-  'Set it to 12 percent.',
+  // ⚠⚠ THE THREE PERCENT FORMS LEFT THIS LIST (ROADMAP P0a). They were grouped
+  // with currencies and durations as "unit-bearing", and that grouping was the
+  // error: a currency or a duration is a HUMAN-SCALE quantity whose divisor is a
+  // factor's `scale_frame` — a concept an option effect does not have, so
+  // converting one would INVENT a frame. A percent is NOTATION over the same
+  // dimensionless 0-1 scale and carries its own divisor. They are now claimed,
+  // as fractions, with binding twins in `hedged-and-percent-value-binding.test.ts`
+  // and an out-of-scale twin ("400%") that still refuses.
   'Set it to £5000.',
   'Set it to 3 months.',
-  'Set it to 0.12 percent.',
+  'Set it to 40k.',
+  'Set it to 1.2m.',
   // The #998 review's boundary example — names a non-graph target + unit.
   'Update the timeline to 3 months',
   // Named targets — a value for a DIFFERENT factor must not be captured.
@@ -110,7 +117,7 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     },
   );
 
-  it('the KNOWN-DROPPED set is exactly the reviewed FIVE — it shrank by four, then grew by one', () => {
+  it('the KNOWN-DROPPED set is exactly the reviewed THREE — it shrank by four, grew by one, then shrank by two', () => {
     // ⚠⚠ THIS SET WAS EIGHT AND IS NOW FOUR. The protocol above says the set must
     // shrink CONSCIOUSLY and RED here otherwise; this is that conscious decision,
     // recorded where the next reader will find it (ROADMAP 2.1267).
@@ -135,8 +142,11 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     // discriminates identically at pristine on the `.` form — a PRE-EXISTING
     // gap on a conjunct that change never touched. Pinned in the DECLINING
     // direction rather than widened: "while we're here" work is prohibited.
+    // ⚠⚠ AND IT SHRANK AGAIN, TO THREE — 'Set it to about 0.12.' LEFT IT.
+    // A hedge qualifies the user's CONFIDENCE, not their figure; reading the
+    // number they wrote is not the fabrication the pin's stated reason claimed.
+    // The withdrawn reason is quoted in full at `HEDGE_WORD` in the owner.
     expect(REPAIR_BARE_VALUE_KNOWN_DROPPED).toEqual([
-      'Set it to about 0.12.',
       'Set it to a third.',
       // ⚠ '0.12' REMOVED — the bare-number gap is closed; it now binds to the
       // pair the product is asking about (`deriveAskedEffectPair`). See the

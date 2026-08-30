@@ -23,6 +23,7 @@ import {
 } from '../configure-option-chip-text.js';
 import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
 import { deriveAskedEffectPair } from '../routing/repair-value-binding.js';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../routing/missing-value-answer.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -332,7 +333,12 @@ export function projectReadinessRecovery(
           'provide_value',
           blockerOptionLabel,
           factorLabel,
-          `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared.`,
+          // ⭐ THE ASK NOW SAYS WHAT AN ANSWER LOOKS LIKE. The leading clause is
+          // unchanged; the hint is APPENDED, and it is imported from the module
+          // that DECIDES acceptance rather than spelled here, so the product
+          // cannot advertise a phrasing its own binder refuses (P8). See
+          // `routing/missing-value-answer.ts::MISSING_VALUE_ASK_FORMAT_HINT`.
+          `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`,
         );
       }
       if ((action === 'ambiguous_value' || action === 'confirm_value') && blockerOptionLabel && factorLabel) {

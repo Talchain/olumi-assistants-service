@@ -58,6 +58,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 
 import {
   composeConfigureOptionClarifyResponse,
@@ -211,16 +212,24 @@ describe('2.1269 — the answered reply sends the user somewhere that can save',
     expect(reply.split(OPTION).length - 1).toBe(1);
   });
 
-  it('carries a DECIMAL exemplar, and it is the estate-wide one', () => {
-    // `matchBareRepairValue` REFUSES a bare integer as "an ordinal in disguise"
-    // (a naked `1` measured binding as 1.0 where the user meant "the first
-    // one"), so copy inviting "1" would invite a token that will not bind.
+  it('⚠⚠ carries the HUMAN anchors and NOT the internal representation', () => {
+    // ⚠⚠ THIS TEST WAS THE INVERSE, AND ITS PREMISE IS WITHDRAWN. It asserted
+    // that the sentence *"carries a DECIMAL exemplar, and it is the estate-wide
+    // one"* — `0.6` — with the stated reason that a bare integer would not bind.
+    // Both halves have moved:
+    //   · `0.6` is Olumi's INTERNAL normalised coefficient, and a strategic user
+    //     is never asked to understand it (founder ruling, 30 Aug 2026). Manual
+    //     testing found the decimal ask unintuitive.
+    //   · The bare-integer reason is also stale: the ordinal refusal was
+    //     narrowed to the one state that can produce the collision, so `100%`
+    //     and `1` both bind now (see `hedged-and-percent-value-binding.test.ts`).
+    // The sentence now carries the estate's ONE human calibration, imported from
+    // the module that ACCEPTS it, so the ask and the acceptance cannot drift.
     const terminating = compose(ANSWERED);
-    expect(terminating).toMatch(/\b\d+\.\d+\b/);
-    // Derived, not transcribed: if the shipped example value moves, this moves
-    // with it instead of pinning a literal that has drifted (trap 12).
-    expect(terminating).toContain(CONFIGURE_OPTION_EXAMPLE_VALUE);
-    expect(CONFIGURE_OPTION_EXAMPLE_VALUE).toMatch(/\b\d+\.\d+\b/);
+    expect(terminating).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    // The discriminating half: the internal representation is GONE from it.
+    expect(terminating).not.toMatch(/\b0\.\d/);
+    expect(terminating).not.toContain(CONFIGURE_OPTION_EXAMPLE_VALUE);
   });
 
   it('CONTRAST CONTROL — the honest descriptive sentences survive', () => {

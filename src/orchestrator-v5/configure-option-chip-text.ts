@@ -18,6 +18,14 @@
  */
 
 
+// ⚠ THE ONE DEPENDENCY THIS MODULE TAKES, and it is deliberate. The header
+// above calls the module dependency-free to avoid CYCLES; `routing/missing-
+// value-answer.ts` imports nothing from here, so there is none. The
+// alternative — a second spelling of the human calibration anchors — is the
+// copy that rots (trap 12), and here the two spellings would disagree about
+// exactly the sentence a blocked user is reading.
+import { MISSING_VALUE_ASK_FORMAT_HINT } from './routing/missing-value-answer.js';
+
 /**
  * The load-bearing prefix. `detectConfigureOptionIntent` treats any message
  * starting with this as configure-option intent (chips replay their message
@@ -439,5 +447,10 @@ export const CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE = buildConfigureOptionAdvi
  * service owns.
  */
 export function buildConfigureOptionDirectSetSentence(): string {
-  return "Send me just the number here — 0.6, say — and I'll set it on that link.";
+  // ⚠⚠ THIS SENTENCE NAMED THE INTERNAL REPRESENTATION. It read *"Send me just
+  // the number here — 0.6, say — and I'll set it on that link."* `0.6` is
+  // Olumi's normalised coefficient, and a strategic user is never asked to
+  // understand it (founder ruling, 30 Aug 2026). The human anchors live with the
+  // binder that accepts them, so the ask and the acceptance cannot drift (P8).
+  return `Answer here and I'll set it on that link. ${MISSING_VALUE_ASK_FORMAT_HINT}`;
 }

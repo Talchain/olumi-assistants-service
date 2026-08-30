@@ -354,6 +354,7 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
       kind: 'numeric',
       elliptical: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'that would push sales headcount up a lot',
     });
@@ -567,10 +568,18 @@ describe('⭐⭐ RUN-B — the disambiguation chip must propose the OPTION EFFEC
     // …and the hedged turn really does fall through to this clarify, on the
     // asked factor alone — the redirect's own conjunct (b).
     expect(readMissingValueAnswer(HEDGED)).toBeNull();
-    expect(
-      MISSING_VALUE_ANSWER_KNOWN_DROPPED.some((m) => /\babout\b/i.test(m)),
-      'the hedge must stay pinned as a refusal next door',
-    ).toBe(true);
+    // ⚠⚠ THE STATED REASON FOR THAT NULL CHANGED, AND THE OLD ONE IS CORRECTED
+    // RATHER THAN DELETED. This used to assert that a hedge was pinned as a
+    // refusal in `MISSING_VALUE_ANSWER_KNOWN_DROPPED` — and it WAS the reason at
+    // the time. It is not any more: ROADMAP P0a binds "Set it to about 0.12.",
+    // because a hedge qualifies the user's CONFIDENCE and this sentence's figure
+    // is still theirs. THIS message nonetheless still reads null, for a reason
+    // that has not moved and must not: it NAMES A FACTOR ("sales headcount"),
+    // which is outside the closed bare-referent set, so the edit lane owns the
+    // referent. Asserted directly instead of via a pinned list, so the guard
+    // cannot be satisfied by an unrelated member of that list.
+    expect(readMissingValueAnswer('Set it to about 0.8.')?.kind).toBe('numeric');
+    expect(readMissingValueAnswer('Set sales headcount to 0.8.')).toBeNull();
     const factorIds = new Set(
       graph().nodes.filter((n) => n.kind === 'factor').map((n) => n.id as string),
     );

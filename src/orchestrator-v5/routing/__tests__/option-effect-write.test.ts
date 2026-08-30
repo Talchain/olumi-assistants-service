@@ -1194,6 +1194,7 @@ describe('A2 — ACCEPTANCE: an ordinary answer binds the pair the product asked
       kind: 'numeric',
       elliptical: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
     });
@@ -1402,6 +1403,7 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
       kind: 'numeric',
       elliptical: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'it matters a lot',
     });

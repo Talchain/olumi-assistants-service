@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 
 import { composeConfigureOptionClarifyResponse } from '../configure-option-clarify-response.js';
 import { findForbiddenPhraseHit } from '../forbidden-user-facing-phrases.js';
@@ -109,11 +110,19 @@ describe('clicking the repair chip — identification is complete', () => {
     expect(compose(CHIP.message)).not.toContain(advised);
   });
 
-  it('asks for the NUMBER, naming the slot the chip named', () => {
+  it('asks for the STRENGTH in human terms, naming the slot the chip named', () => {
+    // ⚠⚠ THE SHAPE OF THE ASK CHANGED AND THE ASSERTION FOLLOWS IT. This read
+    // `toMatch(/from 0 .*to 1/)` — Olumi's internal normalised coefficient
+    // scale, which a strategic user is never asked to understand (founder
+    // ruling, 30 Aug 2026). What this test is ACTUALLY about — that the chip
+    // click lands on an ask naming the slot and requesting the value — is
+    // unchanged and is still asserted; only the calibration is now human, and
+    // it is derived from the module that accepts it rather than transcribed.
     const text = compose(CHIP.message);
     expect(text).toContain(OPTION);
     expect(text).toContain(FACTOR);
-    expect(text).toMatch(/from 0 .*to 1/);
+    expect(text).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    expect(text).not.toMatch(/\b0\.\d/);
   });
 
   /**
