@@ -204,6 +204,51 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
     expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'Rename factor "Engineer interruption rate" to "Unplanned engineer interruptions".',
+    'Please rename the factor "Cost" to "Delivery effort".',
+    "Relabel option 'Outsource' to 'Partner delivery'",
+  ])('explicit rename reaches the existing edit dispatcher: %s', async (message) => {
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message, stage: 'frame', turn_class: 'frame' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'Should we rename factor "Cost" to "Budget"?',
+    'Should we rename factor "Cost" to "Budget"',
+    'Do not rename factor "Cost" to "Budget".',
+    'Please do not rename factor "Cost" to "Budget".',
+    'We discussed renaming factor "Cost" to "Budget".',
+    'Rename factor "Cost" to "Budget" only if I confirm.',
+    'Rename factor "Cost" to "Budget", but do not apply it yet.',
+  ])('rename discussion or withheld consent does not enter mutation: %s', async (message) => {
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message, stage: 'frame', turn_class: 'frame' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('the mounted rename shape reaches edit dispatch without caller graph_state', async () => {
+    const request = payload({
+      message: 'Rename factor "Engineer interruption rate" to "Unplanned engineer interruptions".',
+      stage: 'frame', turn_class: 'frame',
+    });
+    delete request.graph_state;
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn', payload: request,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
   it('a plain conversational message does NOT reach the edit lane (reaches the coach)', async () => {
     const res = await app.inject({
       method: 'POST',

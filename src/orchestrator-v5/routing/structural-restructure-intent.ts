@@ -70,7 +70,10 @@
  * S2 Phase 4 deletes the other routing mirrors.
  */
 
-export type StructuralRestructureTrigger = 'per_option_term' | 'each_option_own';
+export type StructuralRestructureTrigger =
+  | 'per_option_term'
+  | 'each_option_own'
+  | 'quoted_rename_command';
 
 export type StructuralRestructureDetection =
   | { readonly matched: true; readonly trigger: StructuralRestructureTrigger }
@@ -128,6 +131,19 @@ const INTERROGATIVE_LEAD =
 const TRAILING_QUESTION_MARK = /\?\s*$/;
 
 /**
+ * An explicit whole-message rename belongs to the existing edit dispatcher,
+ * not the coach whose tool deliberately cannot author structural changes.
+ * Do not broaden the unanchored edit-verb regex: "Should we rename …" is
+ * deliberation. Quoted old/new labels delimit this narrow command arm; extra
+ * clauses, negation, conditions and incomplete requests remain unclaimed by
+ * this arm.
+ * These strings are NOT resolved identities or mutation permission. The
+ * existing edit lane retains entity/state resolution, consent, validation and
+ * commit. No operation or graph is constructed here.
+ */
+const QUOTED_RENAME_COMMAND = /^\s*(?:please\s+)?(?:rename|relabel)\s+(?:(?:the\s+)?(?:node|factor|option|goal|outcome|risk)\s+)?(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^”\r\n]+)”)\s+to\s+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^”\r\n]+)”)[.!]?\s*$/i;
+
+/**
  * Detect a free-text structural-restructure intent. Pure and total — never
  * throws; returns a classified skip on any non-match. Text-only: the caller
  * owns graph presence (the edit lane reloads / recovers when no graph is
@@ -151,6 +167,14 @@ export function detectStructuralRestructureIntent(
   if (typeof message !== 'string' || message.length === 0) return NO_MATCH;
   if (INTERROGATIVE_LEAD.test(message) || TRAILING_QUESTION_MARK.test(message)) {
     return NO_MATCH;
+  }
+  const rename = QUOTED_RENAME_COMMAND.exec(message);
+  if (rename) {
+    const oldLabel = rename[1] ?? rename[2] ?? rename[3];
+    const newLabel = rename[4] ?? rename[5] ?? rename[6];
+    if (oldLabel?.trim() && newLabel?.trim()) {
+      return { matched: true, trigger: 'quoted_rename_command' };
+    }
   }
   if (EACH_OPTION_OWN.test(message)) {
     return { matched: true, trigger: 'each_option_own' };
