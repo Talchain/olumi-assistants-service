@@ -27,6 +27,11 @@ const arg = (name: string, fallback: string) => {
 const out = resolve(arg('out', '/tmp/draft-records-contract-evidence'));
 const repetitions = Number(arg('n', '3'));
 assert(Number.isInteger(repetitions) && repetitions > 0 && repetitions <= 3);
+// Independent gate requested the intermediate activation state: existing PMS
+// plus new code/instructions. This supplement is one preselected opposite pair,
+// never counted as the 54-case candidate/incumbent/destroyed protocol.
+const codeOnly = process.argv.includes('--code-only');
+assert(!codeOnly || repetitions === 1, '--code-only supplement requires --n 1');
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const root = resolve(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8');
@@ -92,7 +97,9 @@ const completionAddition = [
   'Every new claim requires a label. Return one object matching this schema, not a bare list:',
   JSON.stringify(buildRecordsCompletionSchema()),
 ].join('\n') + '\n';
-type Arm = 'incumbent' | 'candidate' | 'destroyed';
+type Arm = 'incumbent' | 'candidate' | 'destroyed' | 'code-only';
+const arms: Arm[] = codeOnly ? ['code-only'] : ['incumbent', 'candidate', 'destroyed'];
+const selectedPairs = codeOnly ? pairs.slice(0, 1) : pairs;
 type Capture = { request: unknown; response?: Message; kind: 'draft' | 'completion' };
 type Context = { arm: Arm; captures: Capture[] };
 const context = new AsyncLocalStorage<Context>();
@@ -153,19 +160,21 @@ const identity = {
   instructionSha256: sha(DRAFT_RECORDS_INSTRUCTION), incumbentInstructionSha256: sha(oldInstruction),
   grammarSha256: sha(JSON.stringify(buildDraftRecordsSchema())), modelResolution: resolution,
   corpusSha256: sha(JSON.stringify(pairs)), repetitions,
+  protocol: codeOnly ? 'code-only-activation-supplement: first authored diagnostic/action pair' : 'three-pairs-three-arms',
   limitation: 'Local production adapter and real provider, not deployed/browser evidence. Incumbent instructions replayed at provider boundary against same current consumer. Attribution and creative-action semantics require independent review. No attributed-hypothesis preservation claim.',
 };
 writeFileSync(resolve(out, 'identity.json'), JSON.stringify(identity, null, 2) + '\n');
 const summaries: unknown[] = [];
 for (let repetition = 0; repetition < repetitions; repetition++) {
-  for (const pair of pairs) for (const direction of ['diagnostic', 'decision'] as const) {
+  for (const pair of selectedPairs) for (const direction of ['diagnostic', 'decision'] as const) {
     // Paired arms in the same time window; no model comparison and no cherry-picking.
-    await Promise.all((['incumbent', 'candidate', 'destroyed'] as Arm[]).map(async arm => {
+    await Promise.all(arms.map(async arm => {
       const id = `${pair.id}-${direction}-${repetition + 1}-${arm}`;
       const path = resolve(out, `${id}.json`);
       assert(!existsSync(path), `refusing to overwrite evidence: ${path}`);
       const ctx: Context = { arm, captures: [] };
-      const content = arm === 'incumbent' ? incumbent : candidate;
+      const servedArm = arm === 'incumbent' || arm === 'code-only';
+      const content = servedArm ? incumbent : candidate;
       let consumed: Awaited<ReturnType<typeof draftGraphWithAnthropic>> | undefined;
       let error: string | undefined;
       await context.run(ctx, async () => {
@@ -174,7 +183,7 @@ for (let repetition = 0; repetition < repetitions; repetition++) {
             timeoutMs: 120_000,
             preloadedSystemPrompt: { operation: 'draft_graph', content, meta: {
               taskId: 'draft_graph', source: 'store', promptId: stored.id,
-              version: selectedVersion, prompt_version: arm === 'incumbent' ? String(selectedVersion) : 'unpromoted-candidate',
+              version: selectedVersion, prompt_version: servedArm ? String(selectedVersion) : 'unpromoted-candidate',
               prompt_hash: sha(content).slice(0, 16), modelConfig: stored.modelConfig,
             } },
           });
@@ -207,6 +216,7 @@ for (let repetition = 0; repetition < repetitions; repetition++) {
     }));
   }
 }
-assert.equal(summaries.length, 3 * 2 * 3 * repetitions, 'expected case collection');
-writeFileSync(resolve(out, 'summary.json'), JSON.stringify({ identity, expectedCases: 18 * repetitions, cases: summaries }, null, 2) + '\n');
+const expectedCases = selectedPairs.length * 2 * arms.length * repetitions;
+assert.equal(summaries.length, expectedCases, 'expected case collection');
+writeFileSync(resolve(out, 'summary.json'), JSON.stringify({ identity, expectedCases, cases: summaries }, null, 2) + '\n');
 process.exit(0);
