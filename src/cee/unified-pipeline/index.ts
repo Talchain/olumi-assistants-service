@@ -30,8 +30,10 @@ import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import {
   decideDraftAutoRetry,
   applyRetryExhaustedCopy,
+  applyRetryUnaffordableCopy,
   classifyRetryableDraftFailure,
 } from "./draft-auto-retry.js";
+import { buildPriorAttemptDirective } from "./retry-directive.js";
 import {
   MIN_DRAFT_RETRY_BUDGET_MS,
   VALIDATION_ATTACH_WAIT_MS,
@@ -690,17 +692,39 @@ export async function runUnifiedPipeline(
   const decision = decideDraftAutoRetry(first, elapsedMs);
   if (!decision.retry) {
     if (decision.reason === "budget_unaffordable") {
+      // ⭐ P0d — THE COPY ON THIS PATH WAS A FALSE CLAIM, AND THE PATH ITSELF
+      // WAS INVISIBLE.
+      //
+      // The retry is funded only when the remaining window fits a healthy
+      // draft, i.e. only when attempt 1 finished fast. A SLOW enforcement
+      // failure silently got no retry at all — while the single-attempt copy
+      // still told the user "Retrying the same brief usually succeeds". That
+      // rate is inherited from a population this user is not in: BASELINE
+      // measured 3/5 recovery on failures completing in 17.2–28.3s. Above the
+      // 55s floor there is NO measured recovery rate, so the sentence asserts a
+      // frequency we have not earned.
+      //
+      // And `details.auto_retry` was present only when a retry HAD been spent,
+      // so "the server tried twice" and "the server never tried" were
+      // indistinguishable on the wire — the two cases whose honest advice
+      // differs most. Under the no-hiding ruling an honest "I could not try
+      // again" beats a confident "retrying usually works": the copy now says
+      // which case the user is in, and the disclosure is emitted on BOTH arms.
+      const unaffordableClass = classifyRetryableDraftFailure(first);
       log.warn({
         event: TelemetryEvents.CeeEnforcementAutoRetrySkipped,
         request_id: getRequestId(request),
         // The class that WOULD have been retried — the skip is only reachable
         // when the classifier already matched.
-        retry_class: classifyRetryableDraftFailure(first),
+        retry_class: unaffordableClass,
         auto_retry_skip_reason: decision.reason,
         elapsed_ms: elapsedMs,
         retry_budget_ms: decision.retryBudgetMs,
         min_retry_budget_ms: MIN_DRAFT_RETRY_BUDGET_MS,
       }, "A retryable draft failure cannot be funded from the remaining request budget — returning the single-attempt failure");
+      if (unaffordableClass !== null) {
+        return applyRetryUnaffordableCopy(first, unaffordableClass);
+      }
     }
     return first;
   }
@@ -728,9 +752,26 @@ export async function runUnifiedPipeline(
   // Byte-identical input and rawBody (same objects — the pipeline treats
   // both as readonly); requestStartMs pinned so attempt 2's budget
   // arithmetic starts where the REQUEST started, not where the retry did.
+  //
+  // ⭐ P0d — AND THE ONE THING THAT IS NOT IDENTICAL: the corrective context.
+  // The retry used to re-draft with no prompt change and no error feedback,
+  // so two identical samples from a distribution that mostly disconnects
+  // mostly disconnected twice — 40–80s spent reproducing the failure while
+  // `revalidation.errors` sat in `first.body.details`, already naming what was
+  // wrong, and was discarded here. The directive is system-authored (fixed
+  // validator enums + counts + our own sentences; no ids, labels or validator
+  // messages) and rides `systemDirective`, OUTSIDE the untrusted markers. The
+  // INPUT still does not move — that is what keeps the brief byte-identical.
+  //
+  // ⚠ This is not a repair and must never be read as one: the post-enforcement
+  // validator still runs on attempt 2, a second degenerate draft still fails
+  // closed, and the directive itself forbids inventing a link the brief does
+  // not support.
+  const priorAttemptDirective = buildPriorAttemptDirective(first);
   const second = await runUnifiedPipelineAttempt(input, rawBody, request, {
     ...opts,
     requestStartMs: retryBaselineMs,
+    ...(priorAttemptDirective ? { priorAttemptDirective } : {}),
   });
 
   // The SECOND attempt is classified independently — it may fail in a

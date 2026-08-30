@@ -401,11 +401,28 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       // brief itself stays fully bracketed and unchanged. Mutually exclusive:
       // a truncation throws before strength detection runs, so at most one is
       // ever set on a given attempt.
-      const systemDirective = leanDraftRetried
+      //
+      // P0d — AND A THIRD, FROM AN OUTER SCOPE. `priorAttemptDirective` is set
+      // by the bounded auto-retry wrapper (`unified-pipeline/index.ts`) on the
+      // SECOND pipeline attempt only, and carries what the FIRST attempt's
+      // enforcement gate found. It is COMPOSED with the two above rather than
+      // ranked against them, because it answers a DIFFERENT question (trap 21):
+      //   - lean-retry / strength-default: "what should this LLM call do
+      //     differently from the previous call WITHIN this attempt?"
+      //   - priorAttemptDirective:         "what went wrong the last time the
+      //     whole pipeline drafted this brief?"
+      // Both can be true at once — attempt 2 can itself truncate and lean-retry
+      // — and letting either silently clobber the other would drop a correction
+      // the model needs. Absent ⇒ the joined string is exactly the old one.
+      const perAttemptDirective = leanDraftRetried
         ? DRAFT_LEAN_RETRY_DIRECTIVE
         : strengthDefaultRetried
           ? STRENGTH_DEFAULT_RETRY_NUDGE
           : undefined;
+      const systemDirective =
+        [ctx.opts.priorAttemptDirective, perAttemptDirective]
+          .filter((d): d is string => typeof d === "string" && d.length > 0)
+          .join("\n\n") || undefined;
 
       draftResult = await draftAdapter.draftGraph(
         {

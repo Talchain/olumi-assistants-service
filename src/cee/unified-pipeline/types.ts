@@ -76,6 +76,27 @@ export interface UnifiedPipelineOpts {
    * the graph, the response body, or whether a stage succeeds.
    */
   promptAttribution?: import('../../orchestrator/pipeline/prompt-attribution.js').PromptAttributionCollector;
+
+  /**
+   * P0d — the corrective context attempt 1 produced, for attempt 2's draft.
+   *
+   * Set ONLY by the bounded auto-retry wrapper in `./index.ts`, and only on the
+   * second attempt: it is built from the FIRST attempt's own typed failure by
+   * `buildPriorAttemptDirective`. Every other caller and attempt 1 leave it
+   * ABSENT, and the pipeline then runs byte-identically to before.
+   *
+   * Reaches the model through the adapter's existing `systemDirective` channel,
+   * which lands OUTSIDE the `[BEGIN/END]_UNTRUSTED_USER_CONTENT` markers so a
+   * system-authored correction is read with system authority rather than as
+   * untrusted user text (#595 review P2). It is NOT concatenated into the brief:
+   * `input` stays byte-identical across attempts, which is what the retry seam's
+   * own spec asserts.
+   *
+   * ⚠ CONTENT RULE: system-authored text only — fixed validator enums, counts
+   * and our own sentences. Never node ids, labels, or validator `message`
+   * strings, which are drafted from user input. See `retry-directive.ts`.
+   */
+  priorAttemptDirective?: string;
 }
 
 // ---------------------------------------------------------------------------
