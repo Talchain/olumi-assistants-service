@@ -3,6 +3,10 @@
  * coaching gated-hybrid composer.
  */
 import { describe, it, expect } from 'vitest';
+// ⭐ DERIVED, not re-spelled: the ask's format hint has ONE owner
+// (`routing/missing-value-answer.ts`), so a change to it re-runs these
+// assertions rather than leaving a stale copy here (trap 12).
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -365,14 +369,55 @@ describe('buildPostDraftNarrative', () => {
 
     const blocks = text.split('\n\n');
     const nextStep = blocks[blocks.length - 1] ?? '';
+    // ⭐ THE COUNT SENTENCE IS EXPECTED HERE, and it does not weaken what this
+    // test is about. This fixture carries TWO missing-value blockers, so the ask
+    // now tells the user one more follows — the difference between clearing a
+    // blocker and finishing the journey (measured: recovery clears the blocker
+    // 9 of 10 times and terminates in a run 1 of 10). It names a COUNT and never
+    // the second pair, which the assertions below still enforce.
     expect(nextStep).toBe(
-      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`,
+      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}"`
+      + ` so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`
+      + ' There is 1 more effect value to set after this one, and I will ask for it next.',
     );
     expect(nextStep).toContain(OPTION_A.label);
     expect(nextStep).toContain(FACTOR_QUALITY.label);
     expect(nextStep).not.toContain(OPTION_B.label);
     expect(nextStep).not.toContain(FACTOR_CAPACITY.label);
-    expect(nextStep).not.toMatch(/\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b/);
+    // ⚠⚠ NARROWED, CONSCIOUSLY, AND THE ORIGINAL IS QUOTED RATHER THAN DELETED.
+    // It read `expect(nextStep).not.toMatch(/\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b/)`
+    // — no figure at all. Its INTENT is "leave the value for the user to
+    // choose", and that intent is intact and still enforced below. But taken
+    // literally it also forbade the ask from stating its own SCALE, and a user
+    // who is not told the scale cannot answer: on deployed `f18d941` a natural
+    // answer to this very question cleared the block 0 times in 13.
+    // So: the scale's ENDPOINTS are admitted (they are the scale, not a
+    // suggestion) and NOTHING BETWEEN THEM is — a mid-scale specimen is exactly
+    // the number-in-the-user's-mouth this guard exists to prevent.
+    // ⭐ THE PROGRESS CLAUSE IS SEPARATED FIRST, and its figure is a COUNT of
+    // remaining questions, not a value for this slot. Conflating the two would
+    // either forbid the product from telling the user how many steps remain, or
+    // silently license a figure in the ask — so they are checked apart.
+    const progress = nextStep.match(/ There (?:is|are) \d+ more effect values? to set[^.]*\./) ?? [];
+    expect(progress.length, 'this fixture has two blockers, so the count must be present')
+      .toBe(1);
+    const askOnly = nextStep.replace(progress[0]!, '');
+    const countFigures = progress[0]!.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+    expect(countFigures, 'the progress clause carries exactly one figure: the count')
+      .toStrictEqual(['1']);
+
+    const figuresInAsk = askOnly.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+    expect(
+      figuresInAsk.every((f) => f === '0' || f === '100'),
+      figuresInAsk.join(','),
+    ).toBe(true);
+    // The discriminating half, and it now carries the founder ruling too: no
+    // mid-scale specimen, AND no `0.x` — the internal normalised representation
+    // must never appear in an ask a strategic user reads.
+    expect(nextStep).not.toMatch(/\b0\.\d/);
+    for (const specimen of ['0.6', '0.5', '0.8', '60%']) {
+      expect(nextStep, specimen).not.toContain(specimen);
+    }
     expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
   });
 
@@ -1075,7 +1120,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
   const fixedAssumption =
     "Assumption to check: whether the model's key inputs reflect your real delivery constraints";
   const typedRecovery =
-    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`;
   const needsInputReadiness = {
     status: 'needs_user_input',
     blockers: [{
@@ -1261,7 +1306,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   const acceptedSummaryMarker =
     'The review describes a trade-off between delivery speed and quality risk.';
   const typedRecovery =
-    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`;
   const gateAcceptedSummary = (modelAction: string) =>
     `${acceptedSummaryMarker} ${modelAction}`;
   const withNeedsInputSummary = (coachingSummary: string) => buildPostDraftNarrative({

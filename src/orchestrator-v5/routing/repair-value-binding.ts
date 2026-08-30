@@ -100,8 +100,13 @@ export { BARE_REFERENTS } from './missing-value-answer.js';
 export { MISSING_VALUE_ANSWER_KNOWN_DROPPED as REPAIR_BARE_VALUE_KNOWN_DROPPED } from './missing-value-answer.js';
 
 export interface BareRepairValueMatch {
-  /** The user's value, verbatim as typed (commas preserved). */
+  /** The user's value, as typed ("8%", "40,000") — the form to QUOTE, not write. */
   readonly valueText: string;
+  /**
+   * ⭐ The canonical 0–1 spelling to WRITE, or `null` when the text denotes no
+   * plain decimal. See `missing-value-answer.ts::toModelUnitText`.
+   */
+  readonly modelUnitText: string | null;
   /** The referent phrase that matched, or null for the bare "set to N" form. */
   readonly referent: string | null;
 }
@@ -136,7 +141,11 @@ export function matchBareRepairValue(message: string): BareRepairValueMatch | nu
   // rather than to the pair on screen. Trap 21: two questions, named apart —
   // `resolveRepairValueBinding` owns the elliptical route.
   if (answer.elliptical) return null;
-  return { valueText: answer.valueText, referent: answer.referent };
+  return {
+    valueText: answer.valueText,
+    modelUnitText: answer.modelUnitText,
+    referent: answer.referent,
+  };
 }
 
 /** One option×factor pair the model is still waiting on. */
@@ -357,8 +366,43 @@ export function buildRepairBindingInstruction(
  * no unit token at all — so this is a RANGE check, and it is not, and must not
  * become, a substitute for the unit handling the verb-bearing paths already own.
  */
-function isModelUnitEffectValueText(valueText: string): boolean {
-  const parsed = Number(valueText.replace(/,/g, ''));
+function isModelUnitEffectValueText(
+  reading: {
+    readonly valueText: string;
+    readonly modelUnitText: string | null;
+  },
+  opts: {
+    /**
+     * ⭐⭐ IS AN ORDINAL READING EVEN POSSIBLE ON THIS TURN? — narrowed from
+     * "always" to the one state that can produce the collision.
+     *
+     * The blanket refusal below cost a real, reachable answer: driven on
+     * deployed `f18d941` against a model with ONE outstanding blocker, `"1"` was
+     * refused, and the product never told the user that `1.0` would work. `1` is
+     * INSIDE the producer's own scale; refusing it is refusing the top of the
+     * range.
+     *
+     * ⚠ AND THE MEASURED COLLISION IS NOT DISMISSED — it is bounded at its
+     * source. The ordinal risk comes from THIS lane's own ask arm
+     * (`composeRepairValueAskResponse`), which offers numbered pair chips and
+     * persists no pending, so a following bare "1" may mean "the first one".
+     * That arm fires ONLY when TWO OR MORE pairs are outstanding
+     * (`resolveRepairValueBinding` below: `pairs.length === 1` binds, `> 1`
+     * asks). So with exactly one pair outstanding no numbered offer can have
+     * been made and there is nothing to collide with — which is precisely the
+     * case that unlocks the run.
+     */
+    readonly ordinalCollisionPossible: boolean;
+  },
+): boolean {
+  // ⭐ THE RANGE IS CHECKED ON THE CANONICAL TEXT, THE ORDINAL SHAPE ON THE
+  // USER'S — and the split is the whole correctness of the percent reading.
+  // "60%" IS a model-unit value (0.6); "60" is not. Checking the range on what
+  // the user typed would refuse the first, and checking the ordinal shape on the
+  // canonical text would refuse "100%" as an ordinal it cannot be.
+  const { valueText, modelUnitText } = reading;
+  if (modelUnitText === null) return false;
+  const parsed = Number(modelUnitText);
   if (!Number.isFinite(parsed)) return false;
   if (parsed < 0 || parsed > 1) return false;
   // ⭐⭐ AND A BARE **INTEGER** IS REFUSED, BECAUSE IT IS AN ORDINAL IN DISGUISE.
@@ -389,7 +433,7 @@ function isModelUnitEffectValueText(valueText: string): boolean {
   // could never be an ordinal. Ambiguity with an ordinal is a property of how the
   // message is WRITTEN, so that is what is inspected.
   const bareInteger = /^\d+$/.test(valueText.replace(/,/g, ''));
-  if (bareInteger && parsed !== 0) return false;
+  if (opts.ordinalCollisionPossible && bareInteger && parsed !== 0) return false;
   return true;
 }
 
@@ -408,6 +452,14 @@ export type RepairValueBindingResolution =
       readonly matched: true;
       readonly kind: 'bind';
       readonly pair: MissingEffectPair;
+      /**
+       * ⭐ THE CANONICAL 0–1 SPELLING, not the user's token — because every
+       * consumer of this field WRITES it (the instruction below, and the ask
+       * arm's chip replay message), and the writer's own grammar
+       * (`readOptionEffectValue`) declines a percent sign and a thousands
+       * separator. "8%" is carried here as "0.08" and the acknowledgement names
+       * what was written, so the user sees the figure that landed.
+       */
       readonly valueText: string;
       /** The edit-lane instruction carrying the binding. */
       readonly instruction: string;
@@ -416,6 +468,7 @@ export type RepairValueBindingResolution =
       readonly matched: true;
       readonly kind: 'ask';
       readonly pairs: readonly MissingEffectPair[];
+      /** The canonical 0–1 spelling — see the `bind` arm's note. */
       readonly valueText: string;
     };
 
@@ -461,20 +514,55 @@ export function resolveRepairValueBinding(params: {
     // saying "resolve the model issue" there is nothing here to answer.
     const asked = deriveOnScreenEffectAsk(params.readiness);
     if (asked === null) return { matched: false, reason: 'no_outstanding_ask' };
-    if (!isModelUnitEffectValueText(ellipticalReading.valueText)) {
+    if (
+      !isModelUnitEffectValueText(ellipticalReading, {
+        // The ask arm below offers numbered chips only with two or more pairs
+        // outstanding, so that is exactly when a bare integer is ambiguous.
+        ordinalCollisionPossible: deriveMissingEffectPairs(params.readiness).length > 1,
+      })
+    ) {
       return { matched: false, reason: 'bare_value_not_model_unit' };
     }
+    const modelUnitText = ellipticalReading.modelUnitText!;
     return {
       matched: true,
       kind: 'bind',
       pair: asked,
-      valueText: ellipticalReading.valueText,
-      instruction: buildRepairBindingInstruction(asked, ellipticalReading.valueText),
+      valueText: modelUnitText,
+      instruction: buildRepairBindingInstruction(asked, modelUnitText),
     };
   }
 
   const match = matchBareRepairValue(params.message);
   if (match === null) return { matched: false, reason: 'not_bare_value_shape' };
+  // ⭐ THE CANONICAL SPELLING, OR NOTHING. `null` means the text denotes no
+  // plain decimal, and a writer fed such a text would decline it two seams
+  // later with nothing on screen to explain why.
+  const written = match.modelUnitText;
+  if (written === null) return { matched: false, reason: 'not_bare_value_shape' };
+  // ⭐⭐ THE RANGE GUARD, ON THIS ARM TOO — AND ITS ABSENCE WAS A LIVE
+  // FABRICATION HOLE, measured at this tip before the fix:
+  //
+  //     resolveRepairValueBinding({ message: 'Set it to 40000.' })
+  //       → { matched: true, kind: 'bind', valueText: '40000' }
+  //     'Set it to 40,000.' → bind  ·  'Make it 500.' → bind  ·  'Use 1200.' → bind
+  //
+  // i.e. a USER-SCALE figure bound as a 0–1 effect value, on the verb-bearing
+  // path, while the elliptical path one branch up refused the identical number.
+  // ⚠ ONE PREDICATE ANSWERING ONE QUESTION APPLIED TO BOTH ARMS, never a second
+  // spelling (trap 21 — and here the two arms were not two questions, they were
+  // one question asked in one place and not the other).
+  //
+  // ⚠ THE ORDINAL CONJUNCT IS OFF HERE, and that is a real distinction rather
+  // than a convenience: this arm requires a VERB and a closed referent ("set it
+  // to 1"), which no ordinal selection carries. The ambiguity the guard exists
+  // for is a NAKED integer, which is the elliptical arm's shape.
+  if (!isModelUnitEffectValueText(
+    { valueText: match.valueText, modelUnitText: written },
+    { ordinalCollisionPossible: false },
+  )) {
+    return { matched: false, reason: 'bare_value_not_model_unit' };
+  }
   const pairs = deriveMissingEffectPairs(params.readiness);
   if (pairs.length === 0) return { matched: false, reason: 'no_missing_effect_values' };
   if (pairs.length === 1) {
@@ -483,9 +571,9 @@ export function resolveRepairValueBinding(params: {
       matched: true,
       kind: 'bind',
       pair,
-      valueText: match.valueText,
-      instruction: buildRepairBindingInstruction(pair, match.valueText),
+      valueText: written,
+      instruction: buildRepairBindingInstruction(pair, written),
     };
   }
-  return { matched: true, kind: 'ask', pairs, valueText: match.valueText };
+  return { matched: true, kind: 'ask', pairs, valueText: written };
 }

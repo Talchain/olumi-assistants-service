@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BARE_REFERENTS,
   MISSING_VALUE_ANSWER_KNOWN_DROPPED,
+  MISSING_VALUE_ASK_FORMAT_HINT,
   messageAnswersMissingValueAsk,
   readMissingValueAnswer,
 } from '../missing-value-answer.js';
@@ -106,7 +107,7 @@ describe('ordinary human answers are ACCEPTED and bound (the four forms that loo
 });
 
 describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
-  it('⭐ the pinned known-dropped set is EXACTLY these four (REDs if it grows OR shrinks)', () => {
+  it('⭐ the pinned known-dropped set is EXACTLY these three (REDs if it grows OR shrinks)', () => {
     // ⚠⚠ THE SET SHRANK AGAIN — '0.12', THE BARE NUMBER, HAS LEFT IT, and the
     // reason it was ever in it was FALSE. It was pinned on the ground that
     // "nothing in CEE records which slot the previous turn asked about"; measured
@@ -115,11 +116,21 @@ describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
     // visible and wrong about why it was open — which is the case for keeping
     // pins: this one survived precisely because it was written down.
     //
-    // The four that REMAIN are refusals about PROVENANCE, not about slots: a
-    // hedge and a word-number would record a figure the user never gave, and a
-    // named target belongs to the edit lane. No antecedent record closes those.
+    // ⚠⚠ AND IT SHRANK ONCE MORE — 'Set it to about 0.12.', THE HEDGE, HAS LEFT
+    // IT, and its stated reason was wrong in the same way. It read: *"a HEDGE.
+    // Binding it would record an approximation as an exact user-stated figure."*
+    // That collapses two different acts. CHOOSING a number the user did not give
+    // ("high" -> 0.7) is fabrication and stays banned. READING the number they
+    // DID give, through a hedge word, is not: 0.12 is the user's figure in
+    // "about 0.12" exactly as it is in "0.12", and the hedge qualifies their
+    // CONFIDENCE. Refusing it bought no provenance safety — the `user_specified`
+    // stamp is truthful either way — and cost the journey: on deployed `f18d941`
+    // a natural answer to the product's own question cleared the block 0/13.
+    //
+    // The THREE that REMAIN are refusals this lane did not disturb: a WORD
+    // NUMBER (parsing it invents precision), a NAMED TARGET (the edit lane owns
+    // it), and a space-less clause break (a pre-existing coverage gap).
     expect([...MISSING_VALUE_ANSWER_KNOWN_DROPPED]).toStrictEqual([
-      'Set it to about 0.12.',
       'Set it to a third.',
       'Set it to 0.12 for the subcontracting option.',
       'It went up a lot,set it to 0.12.',
@@ -143,15 +154,38 @@ describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
     }
   });
 
-  it('units, currencies and percentages are never bound', () => {
+  it('units and currencies are never bound — but PERCENT NOTATION now is', () => {
+    // ⚠⚠ `'Set it to 12%.'` LEFT THIS LIST, and the two halves are different
+    // claims that used to share one window.
+    //   · A CURRENCY or a UNIT is a HUMAN-SCALE quantity whose divisor is a
+    //     factor's `scale_frame` — a concept that does not exist for an option
+    //     effect. Converting one would invent a frame and persist a value the
+    //     compute refuses. STILL REFUSED, and this is the direction that must
+    //     never move.
+    //   · A PERCENT is NOTATION over a DIMENSIONLESS scale; its divisor (100) is
+    //     carried in the notation itself. Reading "12%" as 0.12 moves the user's
+    //     figure by nothing. Now bound — see the twin below.
     for (const message of [
-      'Set it to 12%.',
       'Set it to £5000.',
+      'Set it to $5000.',
       'Set it to 3 months.',
       'Make it 40k.',
+      'Set it to 1.2m.',
     ]) {
-      expect(matchBareRepairValue(message)).toBeNull();
+      expect(matchBareRepairValue(message), message).toBeNull();
     }
+  });
+
+  it('⭐ THE TWIN: percent binds, and it binds as the FRACTION, not the numeral', () => {
+    const twelvePercent = matchBareRepairValue('Set it to 12%.');
+    expect(twelvePercent).not.toBeNull();
+    // The user's own token is preserved for quoting…
+    expect(twelvePercent?.valueText).toBe('12%');
+    // …and the canonical spelling is what a writer gets, because
+    // `readOptionEffectValue` declines a percent sign.
+    expect(twelvePercent?.modelUnitText).toBe('0.12');
+    // OPPOSITE DIRECTION: the bare numeral is NOT the same claim.
+    expect(matchBareRepairValue('Set it to 12.')?.modelUnitText).toBe('12');
   });
 
   it('questions, compound sentences and trailing clauses are never bound', () => {
@@ -258,7 +292,9 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
     expect(reading).toEqual({
       kind: 'numeric',
       elliptical: true,
+      percentApplied: false,
       valueText: '0.12',
+      modelUnitText: '0.12',
       referent: null,
       leadingContext: '',
     });
@@ -269,10 +305,21 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
     // ⭐ The anchor is the entire guard, so this reading can only ever DECLINE.
     // Anything carrying a unit, a word, a second figure or a trailing clause is
     // refused, and each of these is a shape a looser numeric grab would claim.
-    for (const message of ['12%', '£5000', '0.12 for the option', 'about 0.12', '0.12 and 0.5']) {
+    // ⚠⚠ '12%' AND 'about 0.12' LEFT THIS LIST, and the anchor did NOT loosen —
+    // it gained two members inside the same `^…$`. A percent is notation over
+    // the same dimensionless scale; a hedge is a closed filler set. Neither can
+    // name an entity, which is the property the anchor exists to enforce. The
+    // discriminating half is directly below and it still holds.
+    for (const message of ['£5000', '0.12 for the option', '0.12 and 0.5', '0.12 months']) {
       const reading = readMissingValueAnswer(message);
       const isBare = reading !== null && reading.kind === 'numeric' && reading.elliptical;
-      expect(isBare).toBe(false);
+      expect(isBare, message).toBe(false);
+    }
+    // OPPOSITE DIRECTION — the two that moved, and they moved to `true`.
+    for (const message of ['12%', 'about 0.12']) {
+      const reading = readMissingValueAnswer(message);
+      const isBare = reading !== null && reading.kind === 'numeric' && reading.elliptical;
+      expect(isBare, message).toBe(true);
     }
   });
 
@@ -281,11 +328,18 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
     expect(reply).toContain('"high"');
     expect(reply).toContain(FACTOR);
     expect(reply).toContain(OPTION);
-    expect(reply).toContain('from 0');
-    expect(reply).toContain('to 1');
-    // NOTHING is guessed: no invented figure appears anywhere.
+    // ⚠ THE CALIBRATION IS NOW HUMAN. This asserted `'from 0'` / `'to 1'` —
+    // Olumi's internal normalised coefficient scale, which a strategic user is
+    // never asked to understand (founder ruling, 30 Aug 2026). The property the
+    // test is about — the ask states a calibration rather than guessing a
+    // figure — is unchanged, and the anchors are derived from the module that
+    // accepts them rather than transcribed.
+    expect(reply).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    // NOTHING is guessed: no invented figure appears anywhere, and the internal
+    // representation is not shown either.
     expect(reply).not.toContain('0.6');
     expect(reply).not.toContain('0.8');
+    expect(reply).not.toMatch(/\b0\.\d/);
   });
 
   it('an UNRELATED message still gets the demand — the guard is not a blanket', () => {
@@ -302,13 +356,22 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
 
 describe('the terminating predicate is WIDER than the bindable one (trap 21)', () => {
   it('terminates on answers it refuses to bind', () => {
+    // ⚠ `'Set it to about 0.12.'` LEFT THIS LIST because it is no longer refused
+    // — the hedge is about CONFIDENCE and the figure is the user's own. See
+    // `HEDGE_WORD`'s header for the withdrawn reason, quoted rather than deleted.
     for (const message of [
-      'Set it to about 0.12.',
       'Set it to 0.12 for the subcontracting option.',
       "Set the X option's effect on Y to high",
+      'Set it to a third.',
+      // ⭐ ADDED. A bare human-scale quantity is unbindable AND unmistakably an
+      // answer; before this lane it satisfied neither arm and the composer
+      // repeated the identical demand at it.
+      '£40,000',
+      '40k',
+      '3 months',
     ]) {
-      expect(matchBareRepairValue(message)).toBeNull();
-      expect(messageAnswersMissingValueAsk(message)).toBe(true);
+      expect(matchBareRepairValue(message), message).toBeNull();
+      expect(messageAnswersMissingValueAsk(message), message).toBe(true);
     }
   });
 
@@ -339,7 +402,9 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer(WITNESSED)).toStrictEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'doubling down on enterprise sales would push sales headcount up a lot',
     });
@@ -379,7 +444,9 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer('The costs are fixed - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'the costs are fixed',
     });
@@ -452,7 +519,9 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer(witnessed)).toEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
+      modelUnitText: '0.8',
       referent: 'it',
       leadingContext: 'that would push sales headcount up a lot',
     });
@@ -470,13 +539,19 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
       'The costs are fixed - set it to 0.12 and rerun the analysis.',
       'The costs are fixed - set it to 0.12, then tell me what changed.',
       'The costs are fixed - should I set it to 0.12?',
-      'The costs are fixed - set it to 12%.',
       'The costs are fixed - set it to £5000.',
     ]) {
       expect(matchBareRepairValue(message), message).toBeNull();
       const answer = readMissingValueAnswer(message);
       expect(answer === null || answer.kind !== 'numeric', message).toBe(true);
     }
+    // ⚠ 'The costs are fixed - set it to 12%.' LEFT THE LIST ABOVE, and only
+    // its READING moved. The trailing-clause arm now reads it as numeric,
+    // because a percent is a figure the user stated. What this test is actually
+    // about — that `matchBareRepairValue` never claims a context-bearing
+    // message — is UNCHANGED and is asserted here rather than dropped.
+    expect(matchBareRepairValue('The costs are fixed - set it to 12%.')).toBeNull();
+    expect(readMissingValueAnswer('The costs are fixed - set it to 12%.')?.kind).toBe('numeric');
   });
 
   it('⭐ `matchBareRepairValue` keeps its ENTIRELY-bare contract — one shape, one owner', () => {

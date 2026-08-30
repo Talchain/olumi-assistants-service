@@ -22,7 +22,11 @@ import {
   buildRepairPairChip,
 } from '../configure-option-chip-text.js';
 import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
-import { deriveAskedEffectPair } from '../routing/repair-value-binding.js';
+import {
+  deriveAskedEffectPair,
+  deriveMissingEffectPairs,
+} from '../routing/repair-value-binding.js';
+import { MISSING_VALUE_ASK_FORMAT_HINT } from '../routing/missing-value-answer.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -235,6 +239,55 @@ function optionFactorPair(option: string, factor: string): string {
 }
 
 /**
+ * ⭐⭐ HOW MUCH IS LEFT — the sentence that turns a symptom fix into an outcome
+ * fix, and the reason it does NOT batch the write.
+ *
+ * MEASURED, wire-level, on the same deployed build this lane was briefed
+ * against (15-journey battery, controls firing throughout):
+ *
+ *   recovery clears the blocker it asked about   9 of 10  (90%)
+ *   recovery terminates in a RUN                 1 of 10  (10%)
+ *
+ * The gap is not the parser and not the wording. Drafts carry **3, 4, 4, 5, 7
+ * and 8** missing effect values and the affordance surfaces **exactly one**, so
+ * a user who answers perfectly clears one of eight, is asked one more question
+ * that looks identical to the last, and has no way to know whether they are
+ * one step from a run or seven. **That is trap 23 in the live product: the
+ * metric the fix is aimed at moves and the user is still stuck.**
+ *
+ * ⚠⚠ AND THIS IS WHY IT NAMES A COUNT RATHER THAN LISTING THE PAIRS. A batched
+ * ASK is fine; a batched, ORDER-GUESSED WRITE is banned, and the two are one
+ * edit apart. If this sentence listed every outstanding pair, a user reading a
+ * list of eight and replying "60%" would have their figure bound to
+ * `blockers[0]` — the head — by `deriveOnScreenEffectAsk`, because that reader's
+ * whole justification is that a bare figure's only antecedent is THE ONE
+ * QUESTION ON SCREEN. Listing the set destroys that justification and silently
+ * converts an unambiguous bind into a guess about which factor the user meant.
+ * A misbind is worse than a refusal.
+ *
+ * So: exactly one question stays live, and the user is told how many follow.
+ * They can finish, and nothing has to guess.
+ *
+ * ⭐ DERIVED FROM THE ONE OWNER of "which pairs is the product saying it has no
+ * value for" (`deriveMissingEffectPairs`), never counted here — a second count
+ * would disagree with the blocker copy about exactly the pairs under dispute
+ * (trap 12).
+ *
+ * ⚠ SILENT AT ONE, deliberately: "and 0 more after this" is noise, and the
+ * single-blocker case is the one that actually ends in a run.
+ */
+function describeRemainingEffectValues(
+  analysisReady: ReadinessRecoveryInput | null | undefined,
+): string {
+  const remaining = deriveMissingEffectPairs(analysisReady as { blockers?: unknown }).length;
+  if (remaining <= 1) return '';
+  const others = remaining - 1;
+  return others === 1
+    ? ' There is 1 more effect value to set after this one, and I will ask for it next.'
+    : ` There are ${others} more effect values to set after this one — I will ask for them one at a time.`;
+}
+
+/**
  * Project a typed readiness payload into its sole deterministic recovery.
  * Exact `ready` is the only branch that returns Run copy.
  */
@@ -332,7 +385,13 @@ export function projectReadinessRecovery(
           'provide_value',
           blockerOptionLabel,
           factorLabel,
-          `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared.`,
+          // ⭐ THE ASK NOW SAYS WHAT AN ANSWER LOOKS LIKE. The leading clause is
+          // unchanged; the hint is APPENDED, and it is imported from the module
+          // that DECIDES acceptance rather than spelled here, so the product
+          // cannot advertise a phrasing its own binder refuses (P8). See
+          // `routing/missing-value-answer.ts::MISSING_VALUE_ASK_FORMAT_HINT`.
+          `Next, choose the missing effect value${optionFactorPair(blockerOptionLabel.display, factorLabel.display)} so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`
+          + describeRemainingEffectValues(analysisReady),
         );
       }
       if ((action === 'ambiguous_value' || action === 'confirm_value') && blockerOptionLabel && factorLabel) {

@@ -32,6 +32,7 @@
  */
 
 import {
+  MISSING_VALUE_ASK_FORMAT_HINT,
   messageAnswersMissingValueAsk,
   readMissingValueAnswer,
 } from '../routing/missing-value-answer.js';
@@ -173,8 +174,29 @@ export const CONFIGURE_OPTION_EXAMPLE_VALUE = '0.6';
  * a separate lane.
  */
 export const SUGGESTED_PHRASING_KNOWN_DROPPED: readonly string[] = [
-  'I think 0.6 makes sense.',
-  '0.6, say',
+  // ⭐⭐ EMPTY — AND THAT IS A MEASUREMENT, NOT A DELETION (ROADMAP P0a).
+  //
+  // Both members read now. `readMissingValueAnswer` admits a CLOSED filler set
+  // around a figure, inside its unchanged `^…$` anchor, so "0.6, say" and
+  // "I think 0.6 makes sense." both resolve to a bind on the pair the product is
+  // asking about. `__tests__/suggested-phrasing-is-readable.test.ts` asserts the
+  // emptiness AND drives both former members to a bind, so this set cannot be
+  // emptied by giving up — only by the gap actually closing.
+  //
+  // ⚠ THE SECOND MEMBER'S HEADER SAID ITS EXIT WAS ELSEWHERE — *"Widening a
+  // reader to accept an ordinary-English wrapper is the pattern-only rule this
+  // codebase has already lost four consecutive rounds to… Its real exit is the
+  // PENDING-QUESTION CONTRACT."* That objection was RIGHT about the pattern class
+  // and wrong about this shape. The four lost rounds were spent on a predicate
+  // that had to infer DIRECTION from prose with no anchor. This is a closed
+  // filler vocabulary inside a whole-message anchor: it can only ever admit a
+  // message that names NO entity, and the slot still comes from
+  // `deriveOnScreenEffectAsk` — i.e. from the product's own rendered question,
+  // which is the pending-question contract's substance arriving by the route the
+  // estate already built.
+  //
+  // The set is kept rather than removed so a future gap has its home, and so the
+  // spec that guards it stays wired.
 ];
 
 /** Join labels as readable English: "A", "A and B", "A, B and C". */
@@ -196,12 +218,6 @@ export function composeConfigureOptionClarifyResponse(
     factorLabels.length === 1
       ? `It is linked to ${primaryFactor}, and that link has no value yet.`
       : `It is linked to ${joinLabels(factorLabels)}, and those links have no values yet.`;
-
-  const example = buildConfigureOptionAdvisedFormat(
-    optionLabel,
-    primaryFactor,
-    CONFIGURE_OPTION_EXAMPLE_VALUE,
-  );
 
   // THE TERMINATING BRANCH. The user already gave a number and it did not
   // attach, so asking again in the same words says nothing new and blames them
@@ -241,10 +257,127 @@ export function composeConfigureOptionClarifyResponse(
   // exists to close (P5). So the ask CHANGES — their word is quoted back, the
   // slot is named, and the scale is stated. Progress, or a different question;
   // never the same one twice.
+  const example = buildConfigureOptionAdvisedFormat(
+    optionLabel,
+    primaryFactor,
+    CONFIGURE_OPTION_EXAMPLE_VALUE,
+  );
+
+  // ⭐⭐ THE OUT-OF-SCALE ANSWER — the user gave a NUMBER and the product refused
+  // it while saying nothing about why.
+  //
+  // MEASURED at this tip before the fix, by driving this composer: `"40000"` and
+  // `"£40,000"` produced BYTE-IDENTICAL copy to a message carrying no figure at
+  // all — *"…still has no effect value…Send me just the number here"* — i.e. the
+  // product asked for exactly what the user had just sent. Driven on deployed
+  // `f18d941` against a single outstanding blocker, the assistant instead
+  // composed a REFERENT-AMBIGUITY explanation (*"it isn't clear which one this
+  // belongs to"*), so a tester who follows that coaching and names the factor is
+  // refused again — the real blocker is the SCALE and the product never says so.
+  //
+  // ⭐ AND IT OFFERS THE PERCENTAGE READING RATHER THAN PERFORMING IT. A figure
+  // above 1 and at most 100 is exactly the shape of someone answering "how
+  // strong?" on a 0–100 calibration without writing the unit. The product does
+  // NOT convert it — that would be inferring a scale from a magnitude, the
+  // two-scales-under-one-name cliff this seam refuses (see the hint's header).
+  // It asks the user to supply the unit, which costs one turn and cannot be
+  // wrong. Above 100 there is no such reading, so none is offered.
+  const outOfScale = (() => {
+    if (answer === null || answer.kind !== 'numeric') return null;
+    const canonical = answer.modelUnitText;
+    if (canonical === null) return null;
+    const parsed = Number(canonical);
+    if (!Number.isFinite(parsed) || (parsed >= 0 && parsed <= 1)) return null;
+    // ⛔⛔ THE OFFER IS ONLY SOUND WHEN THE USER DID *NOT* ALREADY WRITE `%` —
+    // and getting this wrong authored a 100× error inside the PR whose whole
+    // argument is that no 100× error may exist.
+    //
+    // MEASURED at `a77979ec` by driving this composer:
+    //   "150%"  →  "If you meant 1.5% … write it with the % and I will set it."
+    // `canonical` is `modelUnitText`, which has ALREADY been divided by 100 for
+    // a percent reading (`toModelUnitText`). Interpolating it back into a `%`
+    // sentence divides a second time. The user wrote 150%; the product offered
+    // them 1.5% and called it their own meaning.
+    //
+    // ⭐ THE FIX IS NOT A FORMATTING ONE. The offer's PREMISE is "you probably
+    // meant this as a percentage" — which is only ever true of a BARE figure.
+    // Someone who typed the `%` has already told us the unit, so there is no
+    // second reading to offer and the honest answer is the range refusal alone.
+    // Gating on the user's own notation removes the arithmetic hazard by
+    // removing the branch that could not be right, rather than by rescaling
+    // inside it (a second scale transform is what caused this).
+    // ⭐⭐ ASK THE READER, NEVER RE-DERIVE. This gate was
+    // `answer.valueText.includes('%')` — a hand-maintained mirror of
+    // `missing-value-answer.ts`'s percent detection, which had ALREADY drifted
+    // from it by two spellings (`percent`, `per cent` — see PERCENT_SUFFIX).
+    // Measured: `"Set it to 150 percent."` divides to 1.5, carries no `%`
+    // character, and the offer said *"If you meant 1.5%"* — the same 100× harm
+    // this branch exists to prevent, one notation over.
+    //
+    // Adding the missing spellings here would maintain the mirror. The field is
+    // the reader's own answer to the only question that matters — did I divide
+    // by 100? — so a new notation is handled by the owner and this branch
+    // cannot drift from it again.
+    const asPercentage = !answer.percentApplied && parsed > 1 && parsed <= 100
+      // ⚠ "of the strongest effect" was the SAME false gloss Codex blocked in
+      // the ask itself — effect STRENGTH, not the factor's level. The figure is
+      // an absolute assignment on the factor's own scale (`do(X=x)`, measured on
+      // deployed ISL `28fe0c95`), so the anchor is the scale, never the effect.
+      ? ` If you meant ${canonical}% of its full scale, write it with the % and I will set it.`
+      : '';
+    return [
+      `I can't use ${answer.valueText} as that effect value — it is outside the range I can hold for this link.`,
+      `${MISSING_VALUE_ASK_FORMAT_HINT}${asPercentage}`,
+      ...(analysisSentence === null ? [] : [analysisSentence]),
+    ].join(' ');
+  })();
+
+  // ⭐⭐⭐ "NO CHANGE" — UNDERSTOOD, NAMED, AND HONESTLY UNRESOLVED.
+  //
+  // ⚠⚠ THE BRANCH IT REPLACES WAS THE `answered` ONE, which said *"…still has no
+  // effect value…"* and re-asked for a number. True, but it treated a fully
+  // understood answer as if the user had said nothing — and the ask that
+  // produced it used to tell them `0%` WAS the way to say this.
+  //
+  // ⛔ IT MUST NOT OFFER `0`, AND THAT IS THE WHOLE POINT. Measured on deployed
+  // ISL `28fe0c95`: an intervention is `do(X=x)`, so `0` drives the factor TO
+  // ZERO — a real cost, duration or headcount set to nothing. "This option
+  // leaves it alone" and "this option drives it to zero" are different claims
+  // and the product may never silently trade one for the other.
+  //
+  // ⛔ NOR MAY IT QUIETLY WRITE THE FACTOR'S CURRENT LEVEL. `do(X = baseline)`
+  // keeps the mean and destroys the variance (std 0.149197 → 0.000401, real
+  // Monte Carlo loop, n=4000), so the option would read as maximally robust for
+  // a reason unrelated to the decision. A confident wrong number is the one
+  // thing this product may never produce. ISL's honest primitive is an EMPTY
+  // `interventions={}`; CEE has no write path that can express it (measured:
+  // zero occurrences of any intervention-removal helper against a 447-hit
+  // `update_node` control), so the gap is NAMED rather than papered over —
+  // the no-hiding ruling, applied to a capability rather than to a surface.
+  //
+  // ⚠ IT PROMISES NO MECHANISM IT HAS NOT DRIVEN. `remove_edge` exists as a
+  // changeset (`handlers/describe-changeset.ts:297`), but whether a natural
+  // "disconnect them" routes to it is UNVERIFIED at this tip, and this composer
+  // has twice shipped a locus that turned out to be a dead end (the EdgePanel
+  // intervention row; the disabled canvas fieldset). So the copy names the two
+  // real resolutions as MODEL facts and stops there — P8: never advertise what
+  // you have not established the product accepts.
+  const noChangeText = answer !== null && answer.kind === 'no_change'
+    ? [
+        `Understood — "${answer.term}" means "${optionLabel}" leaves ${primaryFactor} where it is.`,
+        `I can't record that as an effect value: the number on that link sets the level ${primaryFactor} would REACH, so writing 0 would drive it to zero, which is a different claim about your decision.`,
+        `Two things would resolve it honestly — either tell me the level ${primaryFactor} would reach under "${optionLabel}", or take that link out of the model so the option is not claiming an effect it does not have.`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+      ].join(' ')
+    : null;
+
   const qualitativeText = answer !== null && answer.kind === 'qualitative'
     ? [
         `I can't put "${answer.term}" on that link — the effect value has to be a number.`,
-        `Give me one for ${primaryFactor} on "${optionLabel}", from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
+        // ⭐ THE HUMAN ANCHORS, from the ONE owner. This sentence used to name
+        // the internal 0-1 coefficient; a strategic user is never asked to
+        // understand our normalised representation (founder ruling, 30 Aug).
+        `Give me one for ${primaryFactor} on "${optionLabel}". ${MISSING_VALUE_ASK_FORMAT_HINT}`,
         ...(analysisSentence === null ? [] : [analysisSentence]),
       ].join(' ')
     : null;
@@ -299,7 +432,8 @@ export function composeConfigureOptionClarifyResponse(
   // underneath it — a cross-service hand-maintained mirror going stale exactly
   // as its own header warned (trap 12). It has now done that twice.
   const identificationComplete =
-    !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
+    !answered && qualitativeText === null && noChangeText === null
+    && messageNamesOptionEffectSlot(input.message);
 
   const assistant_text = identificationComplete
     ? [
@@ -328,11 +462,23 @@ export function composeConfigureOptionClarifyResponse(
         // This branch asks for a BARE number where the old copy advised a whole
         // sentence, so it raises the odds of that collision rather than
         // inheriting it — the exemplar is how this change pays for that.
-        `Give me a number from 0 (this option does nothing to it) to 1 (this option drives it fully). Reply with just the number, like ${CONFIGURE_OPTION_EXAMPLE_VALUE}.`,
+        // ⚠⚠ THE EXEMPLAR WAS THE INTERNAL REPRESENTATION. This read *"Give me a
+        // number from 0 … to 1 … Reply with just the number, like 0.6."* — and
+        // `0.6` is Olumi's normalised coefficient, not a human quantity.
+        // Manual testing found it unintuitive, and exposing an internal
+        // representation because the parser happens to read it is a workaround
+        // wearing a fix's clothes (founder ruling, 30 Aug 2026). The human
+        // anchors come from the ONE owner beside the binder, so the ask and the
+        // acceptance cannot drift (P8).
+        MISSING_VALUE_ASK_FORMAT_HINT,
         ...(analysisSentence === null ? [] : [analysisSentence]),
       ].join(' ')
+    : noChangeText !== null
+    ? noChangeText
     : qualitativeText !== null
     ? qualitativeText
+    : outOfScale !== null
+    ? outOfScale
     : answered
     ? [
         `"${optionLabel}" still has no effect value on ${primaryFactor}, so that link is not carrying anything yet.`,
@@ -351,8 +497,45 @@ export function composeConfigureOptionClarifyResponse(
     : [
         `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,
         linkSentence,
+        // ⚠⚠ THE EXEMPLAR STAYS ON THIS BRANCH, AND THAT IS A CORRECTION THIS
+        // LANE MADE TO ITSELF. I removed it — on the ground that the percentage
+        // answer binds on its own — and an EXISTING guard caught it:
+        // `repair-chip-identification-complete.test.ts`, *"identification NOT
+        // complete — the teach-the-format branch is untouched"*. It is right.
+        // This branch is reached when the product does NOT know which pair is
+        // meant, and there the user must NAME the pair; the only sentence that
+        // routes back into this lane is the advised format, whose value slot
+        // must stay a bare decimal because `readOptionEffectValue`
+        // (`option-effect-write.ts:365`) declines a percent sign.
+        //
+        // ⚠ STATED RESIDUAL: this is the one branch where the internal
+        // representation is still shown, and it is unavoidable HERE today.
+        // Closing it means teaching the routing form to read a percent, which
+        // lives in `option-effect-write.ts` — a shared writer this lane does not
+        // own. The IDENTIFIED branches, which are the common path, now carry the
+        // human anchors instead.
+        //
+        // ⛔⛔ AND THAT IS EXACTLY WHY THE HINT IS NOT APPENDED HERE. This lane
+        // shipped `MISSING_VALUE_ASK_FORMAT_HINT` on this branch and, in doing
+        // so, made a previously SELF-CONSISTENT branch contradictory: it
+        // advertised the bare-decimal sentence AND the percentage anchors in one
+        // breath, so the obvious combination —
+        //   `Set the X option's effect on Y to 60%`
+        // — is refused by BOTH readers. Measured at the head:
+        //   resolveOptionEffectWrite("…to 60%") → { matched: false,
+        //                                          reason: 'no_single_unit_scale_value' }
+        //
+        // That is a P8 violation authored by the very PR whose headline
+        // invariant is P8 — the ask and the acceptance share one owner so they
+        // cannot drift. The two forms have DIFFERENT owners and different
+        // readers, and pairing them in one sentence is what broke it.
+        //
+        // ⭐ SO THIS BRANCH ADVERTISES EXACTLY ONE FORM, the one its own reader
+        // accepts, and is pinned that way by
+        // `__tests__/repair-chip-identification-complete.test.ts`. The percentage
+        // anchors belong to the IDENTIFIED branches, where the binder that reads
+        // them is the one that runs.
         `Tell me what it changes, like this: ${example}`,
-        `Use a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
       ].join(' ');
 
   return composeDirectAnswerResponse({
