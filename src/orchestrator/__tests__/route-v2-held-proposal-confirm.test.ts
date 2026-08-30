@@ -425,17 +425,48 @@ describe('POST /orchestrate/v2/turn — held proposal survives the confirm turn 
     expect(JSON.parse(res.body).assistant_text).not.toContain('Confirmed:');
   });
 
-  it('an unrelated quoted rename chip does not acquire consent from the live hold', async () => {
+  /**
+   * ⭐⭐ #1231 — A RENAME CHIP WHOSE HOLD IS NOT IN THE LIVE SET MUST NOT
+   * REDRAFT. This test previously asserted the opposite (edit dispatch), on
+   * the premise that such a click is an "unrelated rename chip" the user
+   * should get a fresh draft from. DERIVED REFUTATION (rg -a over src/,
+   * tests excluded, with a contrast control on the sibling verbs
+   * link/remove/adjust which returns many hits — so the probe can see this
+   * syntax class): the ONLY producer of `rename 'X' to 'Y'` copy in the
+   * service is describe-changeset.ts:257, and its only chip consumer is
+   * `buildGmHeldPublicCopy` — the held-proposal CONFIRM chip's label. There
+   * is no other rename-shaped affordance for a user to click. So a rename
+   * chip that matches no live proposal is not an unrelated command; it is a
+   * STALE CONFIRM CHIP (its hold consumed, swept, or superseded), and
+   * dispatching the edit lane for it drafts a SECOND hold and renders ANOTHER
+   * confirm chip — the loop this PR exists to close.
+   *
+   * The genuine conservatism claim this test was reaching for — a live hold
+   * must never hijack a genuinely NEW command — is pinned by its sibling
+   * above, which types the same string from the composer and still dispatches.
+   * That sibling is also this test's DISCRIMINATING TWIN: identical string,
+   * `source` the only difference, opposite outcomes.
+   */
+  it('a rename chip matching no live hold reaches the coach, never a second draft', async () => {
     pendingActionsForRead = [renameHold().pending];
     const res = await app.inject({
       method: 'POST', url: '/orchestrate/v2/turn',
       payload: payload({ message: "Rename 'Revenue' to 'Recurring income'", source: 'chip_click' }),
     });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
-    expect(chatWithToolsMock).not.toHaveBeenCalled();
-    expect(appendMock).not.toHaveBeenCalled();
-    expect(JSON.parse(res.body).assistant_text).not.toContain('Confirmed:');
+    // No second hold: the sole structural-proposal producer is never called.
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    // POSITIVE CONTROL — without it this negative would also pass if the turn
+    // had failed before routing. The coach IS the destination, and in THIS
+    // suite the coach adapter is a deliberate throw ("must NOT be called on a
+    // deterministic held-proposal resume"), so reaching it is observed as the
+    // call plus the harness's 500. Both are asserted so neither can drift into
+    // meaning something else.
+    expect(chatWithToolsMock).toHaveBeenCalled();
+    expect(res.statusCode).toBe(500);
+    // Nothing applied, and no consent acquired from the unrelated live hold.
+    for (const [write] of appendMock.mock.calls) {
+      expect((write as Record<string, unknown>).graph).toBeUndefined();
+    }
   });
 
   // ── Paul's exact sequence: the chip replays its LABEL text ─────────────

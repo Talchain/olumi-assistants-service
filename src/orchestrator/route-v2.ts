@@ -4914,8 +4914,58 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const structuralRestructureDetection = detectStructuralRestructureIntent(
       ingress.message,
     );
+    // ⭐⭐ #1231 — THE PRODUCT'S OWN CONFIRM AFFORDANCE IS NOT A FRESH COMMAND.
+    //
+    // `quoted_rename_command` is the one trigger whose shape the product ITSELF
+    // emits: a rename-only held batch's public copy is minted by
+    // describe-changeset.ts (`rename 'X' to 'Y'`, :257) and capitalised by
+    // `buildGmHeldPublicCopy` into the hold chip's LABEL — "Rename 'X' to 'Y'".
+    // The other two triggers are user phrasings no producer here renders.
+    //
+    // That collision falsifies the safety precondition #644 P2-2 relied on
+    // (the omission was safe *because* no edit-verb-free chip copy could match
+    // this detector). Left unguarded it re-opens the exact loop this feature
+    // exists to kill: rename/relabel are absent from EDIT_GRAPH_POSITIVE_REGEX
+    // (edit-graph-intent-regex.ts:20 — derived, not assumed), so before this
+    // arm a rename chip replay could never be an edit-lane intent; with it, a
+    // replay whose hold is no longer in the pending set (consumed, swept, or a
+    // chip still on screen from an earlier turn) falls past the exact-copy
+    // resolver as `replay_no_match` and DISPATCHES THE EDIT LANE, which drafts
+    // a SECOND hold and renders ANOTHER confirm chip.
+    //
+    // ⭐ THE GUARD IS IDENTITY-BOUND, NOT TEXTUAL. `source === 'chip_click'` is
+    // the boundary's own statement that this text is the product replaying its
+    // affordance — the SAME identity `isProposalReplayCandidate` below already
+    // trusts (DGAI #340). A string heuristic here would be the wrong instrument
+    // twice over: it would exclude a sentence a user can legitimately type, and
+    // it would drift the moment describe-changeset's copy changed. A user
+    // cannot type an ingress source, so nothing typed is excluded — the typed
+    // gain this PR exists for is untouched (route-v2-structural-restructure-
+    // routing.test.ts pins both halves on the SAME string in one run).
+    //
+    // ⚠ SCOPE: this suppresses the RENAME ARM only, and only on chip_click. A
+    // chip_click carrying per-option/each-option-own copy still counts (that is
+    // #644 P2-2's genuine future case, and the proposal-confirm gate below now
+    // resolves it).
+    //
+    // ⭐⭐ AND IT WITHDRAWS EDIT-LANE ELIGIBILITY ONLY — NOT RESOLVER
+    // ELIGIBILITY, which is a DIFFERENT QUESTION and gets its own term below.
+    // Measured, not reasoned: the first cut of this guard dropped the flag on
+    // the floor entirely, and an EXPIRED rename hold's chip then resumed and
+    // APPLIED ("Confirmed: rename 'Marketing' to …") instead of returning the
+    // honest no-live-proposal clarification — because route-level expiry is
+    // enforced by `resolveProposalConfirmAtRoute`, and skipping the gate skips
+    // the expiry check with it. Two questions under one flag (trap 21):
+    //   · "is this a fresh authoring command?"  → NO for a chip replay.
+    //   · "may this resume/clarify a held proposal?" → YES, always.
+    // `productChipRenameReplay` answers the second and is passed to the gate.
+    const productChipRenameReplay =
+      structuralRestructureDetection.matched &&
+      structuralRestructureDetection.trigger === 'quoted_rename_command' &&
+      ingress.source === 'chip_click';
     const structuralRestructureIntent =
       structuralRestructureDetection.matched &&
+      !productChipRenameReplay &&
       !negativeEditRegexHit &&
       !analyticalQuestionDetected &&
       !stateQuerySuppressed;
@@ -4974,14 +5024,31 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isProposalReplayCandidate =
       !isConfirmationShaped &&
       (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
-    // #1231 closes #644 P2-2's former asymmetry: the structural detector now
-    // recognises quoted rename commands, including the product's own
-    // "Rename 'X' to 'Y'" held-chip label. Resolve that replay before edit
-    // dispatch, or confirming an existing hold would draft a second one.
-    // Structural intent is only eligibility for the existing exact-copy
-    // resolver, never consent: unrelated copy still returns replay_no_match.
+    // #1231 closes #644 P2-2's former asymmetry: a structural-shaped REPLAY (a
+    // chip_click or affirmative-prefixed message that matches the structural
+    // detector) now pays the pendings read and resolves the live hold before
+    // edit dispatch, instead of re-dispatching the edit lane and drafting a
+    // second one. Structural intent is only ELIGIBILITY for the existing
+    // exact-copy resolver, never consent: unrelated copy still returns
+    // replay_no_match and edit routing proceeds untouched.
+    //
+    // ⚠ THIS IS NOT WHAT GUARDS THE RENAME CHIP, and the distinction matters
+    // because it was briefly conflated. The exact-copy resolver can only
+    // recognise a replay while the hold is STILL IN THE PENDING SET; a chip
+    // whose hold has been consumed or swept resolves `replay_no_match` and
+    // would dispatch. The product's own rename copy is therefore excluded by
+    // IDENTITY upstream (`productChipRenameReplay`), which does not depend on
+    // the pending set existing. This gate is the complement, not the guard.
     if (
-      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent)
+      (editVerbCandidate
+        || configureOptionIntent
+        || structuralRestructureIntent
+        // #1231 — the rename chip replay is eligible HERE (so a live hold
+        // resumes and a DEAD one clarifies honestly) while staying ineligible
+        // for `editIntentDetected` below (so a hold that is simply GONE cannot
+        // be redrafted). `replay_no_match` therefore falls to the coach, which
+        // is exactly where this copy went before the rename arm existed.
+        || productChipRenameReplay)
       && (isConfirmationShaped || isProposalReplayCandidate)
     ) {
       const resolution = await resolveProposalConfirmAtRoute(
