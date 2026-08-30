@@ -130,8 +130,52 @@ describe("served draft_graph prompt ↔ records consumer", () => {
   });
 
   it("the served prompt declares no output key the attached grammar cannot emit", () => {
+    // ⚠ VACUOUS ON A PROMPT THAT DECLARES NO KEYS — and that is the current
+    // prompt, by design (shape is block 2's job). What makes this guard real is
+    // the pinned v195 control above, which must keep finding violations. Read
+    // the two together; neither alone is evidence.
     const violations = unemittableDeclaredKeys(served);
     expect(violations).toEqual([]);
+  });
+
+  it("the grammar root admits NO additional properties", () => {
+    // Closes a mutant that survived the first battery: `emittableKeys()` reads
+    // `properties` only, so flipping `additionalProperties` to true left every
+    // assertion green while the grammar silently began admitting `nodes` and
+    // `edges` — which `isGraphShapedResponse` would still reject at the seam.
+    // The open-grammar/closed-seam combination is the exact contradiction this
+    // file exists to forbid, so pin the closure itself.
+    const root = buildDraftRecordsSchema() as { additionalProperties: unknown };
+    expect(root.additionalProperties).toBe(false);
+
+    const claimItem = buildDraftClaimItemSchema() as { additionalProperties: unknown };
+    expect(claimItem.additionalProperties).toBe(false);
+
+    // And the seam must actually refuse a graph object, so the two agree.
+    expect(isGraphShapedResponse({ nodes: [], edges: [] })).toBe(true);
+  });
+
+  it("the grammar carries every field the served prompt's reasoning depends on", () => {
+    // Closes the second survivor. The prompt's QUANTIFY step asks the model for
+    // how much each option moves what it changes; that answer has nowhere to go
+    // unless the claim grammar declares `sets_to`. A consumer-side witness
+    // cannot see this loss — the projector reads the field whether or not the
+    // grammar offers it — so the model-facing capability needs its own pin.
+    const claimProps = Object.keys(
+      (buildDraftClaimItemSchema() as { properties: Record<string, unknown> }).properties,
+    );
+    expect(claimProps).toContain("sets_to");
+
+    const statedProps = Object.keys(
+      (
+        buildDraftRecordsSchema() as {
+          properties: { stated_items: { items: { properties: Record<string, unknown> } } };
+        }
+      ).properties.stated_items.items.properties,
+    );
+    // The user's own number and unit — the channel the new prompt's
+    // NEVER-INVENT-A-NUMBER rule depends on existing.
+    expect(statedProps).toEqual(expect.arrayContaining(["value", "unit", "source_quote"]));
   });
 
   it("the ASSEMBLED system prompt teaches every key the grammar REQUIRES", () => {
