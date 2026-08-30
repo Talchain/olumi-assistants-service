@@ -11,10 +11,11 @@ returned copy, then validates and commits that same graph. It does not invent
 another source vocabulary or infer provenance from a number.
 
 The shared owner is Factor Quantification. The dependency is its unpublished
-0.53.0 artifact from schemas `e2e033544ae9d556361b58d65bfee88df19d5b6d`, SHA256
-`b8f77a778f91913a6961cace6748d959969d978c6b74ed4e8906e4813434d5b2`.
+0.53.0 artifact from schemas `51dca7aa03efaef9160c8a9f806b804b7f8a68fd`, SHA256
+`a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1`.
 CEE dependency commits `f898c87a71e12b90060c7a5750c1a679358bf7b4` and
-`f8dbee7de226495cacc64d9b6f9aaced5b10dadb` are reused without a competing pin.
+`f8dbee7de226495cacc64d9b6f9aaced5b10dadb`, followed by
+`831c50cef48e6e84d28f9ced88a34910a1894ef7`, are reused without a competing pin.
 
 An accepted point loses its stale value tier and model reasoning. Only an
 explicitly system-created unknown/fallback prior is removed. An unattributed
@@ -29,11 +30,22 @@ changed. The same number with identical attribution and no stale qualifiers
 remains a no-op. Verified panel participant and evidence IDs survive; an ordinary
 retype clears the superseded panel attribution.
 
+An unknown quantity can still have a known unit, cap and declared scale. When
+the shared selector identifies an unprotected unknown/fallback prior, the
+handler supplies that scale to the existing validator and normaliser before
+writing the new point. For example, a GBP prior with cap 100000 licenses a
+75000 GBP edit as value 0.75, preserving the cap and declaration. Its ignorance
+range never becomes a point estimate. Existing unit-mismatch and ambiguous
+bare-value rules still apply. The cleanup refuses to delete known scale
+metadata that was not coherently retained; it does not convert units or borrow
+a competing prior's scale.
+
 ## Replay
 
 ```sh
 pnpm exec vitest run \
-  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-qualifier-cleanup.test.ts
+  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-qualifier-cleanup.test.ts \
+  src/orchestrator-v5/tools/handlers/__tests__/set-factor-value-prior-scale.test.ts
 ```
 
 This executes the actual handler, mutation validation, persistence merge and

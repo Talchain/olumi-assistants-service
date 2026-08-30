@@ -28,7 +28,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
-import { clearSupersededFactorMarkers } from '@talchain/schemas';
+import { clearSupersededFactorMarkers, PriorSchema, selectFactorQuantity } from '@talchain/schemas';
 import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -330,7 +330,34 @@ export function createSetFactorValueHandler(): HandlerFn {
 
     const parsed = parseProposalValue(valueParam.value);
     const operator = valueParam.operator ?? 'set';
-    const before = snapshotObservedState(targetNode);
+    // An unknown quantity can still have a known scale. Read it only from the
+    // prior selected by the shared authority; never borrow a competing prior's
+    // scale or use its ignorance-support range as a point value.
+    const selection = selectFactorQuantity(targetNode);
+    const selectedPrior = selection.carrier === 'prior' && !selection.protected &&
+      (selection.kind === 'unknown' || selection.kind === 'fallback')
+      ? PriorSchema.safeParse(targetNode.prior) : undefined;
+    const priorScale = selectedPrior?.success ? selectedPrior.data : undefined;
+    const observed = targetNode.observed_state;
+    if (priorScale && (
+      (observed?.unit !== undefined && priorScale.unit !== undefined &&
+        unitComparisonKey(observed.unit) !== unitComparisonKey(priorScale.unit)) ||
+      (observed?.cap !== undefined && priorScale.cap !== undefined && observed.cap !== priorScale.cap) ||
+      (observed?.declared_scale !== undefined && priorScale.declared_scale !== undefined &&
+        observed.declared_scale !== priorScale.declared_scale)
+    )) {
+      throw new D1HandlerError('PARAMETER_INVALID', 'Confirm the factor’s unit and scale before changing this value.', {
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+    const factorUnit = observed?.unit ?? priorScale?.unit;
+    const factorCap = observed?.cap ?? priorScale?.cap;
+    const factorDeclaredScale = observed?.declared_scale ?? priorScale?.declared_scale;
+    const before = {
+      ...snapshotObservedState(targetNode),
+      ...(factorUnit !== undefined ? { unit: factorUnit } : {}),
+      ...(factorCap !== undefined ? { cap: factorCap } : {}),
+    };
 
     // The "current value" against which delta operators apply is the
     // USER-UNIT raw value. `resolveExistingRawValue` de-normalises it (the
@@ -413,8 +440,8 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(typeof (targetNode as { scale_frame?: unknown }).scale_frame === 'number'
         ? { factorScaleFrame: (targetNode as { scale_frame: number }).scale_frame }
         : {}),
-      ...(targetNode.observed_state?.declared_scale !== undefined
-        ? { factorDeclaredScale: targetNode.observed_state.declared_scale }
+      ...(factorDeclaredScale !== undefined
+        ? { factorDeclaredScale }
         : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
@@ -519,6 +546,7 @@ export function createSetFactorValueHandler(): HandlerFn {
         raw_value: normalised.raw_value,
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
+        ...(factorDeclaredScale !== undefined ? { declared_scale: factorDeclaredScale } : {}),
         // 2.396(b) — the pill-earning stamp. The provenance stamp below is
         // CLOBBERED by the V3 response transform (schema-v3.ts recomputes
         // node.provenance from extractionType), so `observed_state.source` is
@@ -623,6 +651,24 @@ export function createSetFactorValueHandler(): HandlerFn {
       // and commit. Replace the node: merging the helper's returned copy would
       // resurrect a prior that it deliberately removed.
       const clearedNode = clearSupersededFactorMarkers(node);
+      // Do not delete the only copy of a known scale. The selected prior's
+      // compatible metadata was supplied to the existing normaliser above;
+      // unselected/conflicting metadata must be clarified, not silently lost.
+      if (node.prior !== undefined && clearedNode.prior === undefined) {
+        const retired = PriorSchema.safeParse(node.prior);
+        const retained = clearedNode.observed_state;
+        if (!retired.success ||
+          (retired.data.unit !== undefined &&
+            unitComparisonKey(retired.data.unit) !== unitComparisonKey(retained?.unit)) ||
+          (retired.data.cap !== undefined && retired.data.cap !== retained?.cap &&
+            !(parsed.cap !== undefined && before.cap === retired.data.cap && retained?.cap === parsed.cap)) ||
+          (retired.data.declared_scale !== undefined && retired.data.declared_scale !== retained?.declared_scale)
+        ) {
+          throw new D1HandlerError('PARAMETER_INVALID', 'Confirm the factor’s unit and scale before changing this value.', {
+            userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+          });
+        }
+      }
       quantityQualifiersCleared = JSON.stringify(clearedNode) !== JSON.stringify(node);
       clone.nodes[nodeIndex] = clearedNode;
 
