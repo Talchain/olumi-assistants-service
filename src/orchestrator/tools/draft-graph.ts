@@ -372,11 +372,15 @@ export async function handleDraftGraph(
       'validation_error_codes',  // codes-only blocking-error mirror — fixed validator enums
       'last_phase',              // which validation emitter fired — fixed pipeline-phase string
       // ROADMAP 2.1086: the bounded auto-retry disclosure. Fixed shape
-      // ({ attempted: boolean, attempts: number }, built in
+      // ({ attempted: boolean, attempts: number }, plus a fixed-enum
+      // `skipped_reason` on the not-attempted arm — both built in
       // draft-auto-retry.ts) — no user content. Without it on the wire, a
       // post-retry 422 is indistinguishable from a single-attempt one and
       // diagnosing "did the server already retry?" costs a Render-logs
       // round-trip (the exact cost 2.718 removed for the validator codes).
+      // P0d: it is now emitted on BOTH arms. Emitting it only when a retry HAD
+      // been spent made "the server tried twice" and "the server never tried"
+      // indistinguishable — the two cases whose honest advice differs most.
       'auto_retry',              // bounded auto-retry disclosure — fixed shape, no user content
     ]);
     const rawDetails = (body as { details?: unknown }).details;

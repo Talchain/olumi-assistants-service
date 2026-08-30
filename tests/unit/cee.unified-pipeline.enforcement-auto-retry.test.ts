@@ -301,9 +301,41 @@ describe("2.1086 — bounded auto-retry on post-enforcement draft validation fai
     expect(runStageParse, "an unaffordable retry must not launch").toHaveBeenCalledTimes(1);
     expect(result.statusCode).toBe(422);
     const body = result.body as Record<string, any>;
-    // Single-attempt failure keeps the ORIGINAL honest copy untouched.
-    expect(body.details.auto_retry).toBeUndefined();
-    expect(JSON.stringify(body.recovery)).toContain("usually succeeds");
+
+    // ⚠ UPDATED BY P0d — AND THE OLD ASSERTIONS ARE THE DEFECT, NOT A BASELINE.
+    //
+    // This block used to assert `auto_retry` was UNDEFINED here and that the
+    // copy still CONTAINED "usually succeeds", under the comment "keeps the
+    // ORIGINAL honest copy untouched". Both were wrong, and the spec was
+    // pinning them:
+    //  - "Retrying the same brief usually succeeds" is a rate measured on
+    //    failures completing in 17.2–28.3s (BASELINE 3/5). This arm is reachable
+    //    ONLY when elapsed is past the ~55s funding floor, i.e. on a population
+    //    with no measured recovery rate at all. The sentence asserted a
+    //    frequency we had not earned, on a failure path.
+    //  - with the disclosure absent, "the server tried twice and both failed"
+    //    and "the server never tried" were indistinguishable on the wire —
+    //    the two cases whose honest next step differs most.
+    // Under the no-hiding ruling the fix is to SAY SO, not to drop the surface.
+    // Full reasoning + the opposite-direction twins:
+    // tests/unit/cee.unified-pipeline.informed-retry.test.ts.
+    expect(body.details.auto_retry).toEqual({
+      attempted: false,
+      attempts: 1,
+      skipped_reason: "budget_unaffordable",
+    });
+    expect(
+      JSON.stringify(body.recovery),
+      "an unmeasured frequency claim must not ride the unfunded arm",
+    ).not.toContain("usually succeeds");
+    expect(
+      JSON.stringify(body.recovery),
+      "the user must be told no automatic retry was made",
+    ).toContain("no time left to try again automatically");
+    // The fail-closed verdict and its diagnostics are untouched by the copy fix.
+    expect(body.code).toBe("CEE_GRAPH_INVALID");
+    expect(body.retryable).toBe(true);
+    expect(body.details.validation_error_codes).toEqual(["NO_PATH_TO_GOAL", "MISSING_BRIDGE"]);
 
     // The skip is telemetry-visible with the derived numbers.
     const skip = (log.warn as any).mock.calls.find(

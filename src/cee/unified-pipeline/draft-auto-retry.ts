@@ -187,6 +187,125 @@ const RETRY_EXHAUSTED_COPY: Record<
   },
 };
 
+// ---------------------------------------------------------------------------
+// P0d — THE UNFUNDED RETRY: an honest "I could not try again"
+// ---------------------------------------------------------------------------
+
+/**
+ * Post-retry copy for the case where the server DID NOT retry, because the
+ * remaining request budget could not fund a fresh draft.
+ *
+ * ⚠ WHAT WAS WRONG BEFORE, precisely. The retry is funded iff
+ * `getDraftLlmRetryBudgetMs(elapsed) >= MIN_DRAFT_RETRY_BUDGET_MS` — in
+ * practice, iff attempt 1 finished within ~55s. A SLOW enforcement failure
+ * therefore got NO retry at all, silently, while the single-attempt copy still
+ * said *"this is usually transient. Try again."* / *"Retrying the same brief
+ * usually succeeds"*.
+ *
+ * That frequency claim is inherited from a population this user is NOT in.
+ * BASELINE's 3/5 recovery was measured on failures completing in **17.2–28.3s**
+ * — uniformly faster than any success. For a failure slow enough to be
+ * unaffordable we have **no measured recovery rate at all**, so asserting one is
+ * a confident claim we have not earned. That is the class of defect that costs
+ * two people a day, not a rough edge that costs a tester a minute.
+ *
+ * ⭐ WHY THE ADVICE STILL SAYS "TRY AGAIN", and why that is not the same claim.
+ * A manual retry starts a FRESH request with a FULL budget, so it is genuinely
+ * a reasonable next step — it is the *rate* that is unsupported here, not the
+ * *action*. The copy therefore keeps the lever and drops the statistic. It also
+ * names the reason the server did not act itself, because without that the user
+ * cannot distinguish this case from "tried twice, both failed", which ships
+ * DIFFERENT advice (strengthen the brief) — and telling them the wrong one is
+ * exactly the hiding the standing ruling forbids.
+ *
+ * `retryable` stays true and the fail-closed verdict is untouched: an invalid
+ * model is still never shipped. The honesty lives in the copy.
+ */
+export const RETRY_UNAFFORDABLE_SUGGESTION =
+  "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you. This draft ran long enough that there was no time left to try again automatically, so nothing was retried on your behalf.";
+
+export const RETRY_UNAFFORDABLE_HINTS: readonly string[] = [
+  "Trying again is worth it — a fresh attempt starts with a full time budget",
+  "If it happens again, state the outcome you are optimising for explicitly",
+  "Naming how each consideration affects that outcome helps the model connect them",
+];
+
+export const OPTIONS_IDENTICAL_UNAFFORDABLE_SUGGESTION =
+  "Your options came out with the same values, so there was nothing to compare between them. This draft ran long enough that there was no time left to try again automatically, so nothing was retried on your behalf.";
+
+export const OPTIONS_IDENTICAL_UNAFFORDABLE_HINTS: readonly string[] = [
+  "Trying again is worth it — a fresh attempt starts with a full time budget",
+  "If it happens again, give each option at least one value that differs — cost, time, scope, capacity or risk",
+];
+
+/** Per-class unfunded copy. Same table shape, and the same reason for it: a new
+ *  class cannot be added to `RetryableDraftFailureClass` without the
+ *  typechecker demanding its copy on BOTH the exhausted and the unfunded path.
+ *
+ *  ⚠ The two tables are deliberately NOT merged. They answer different
+ *  questions — *"we tried twice and it failed twice"* versus *"we never tried"*
+ *  — and they prescribe different next steps. Collapsing them into one table
+ *  with a flag is how a single sentence ends up making both claims (trap 21). */
+const RETRY_UNAFFORDABLE_COPY: Record<
+  RetryableDraftFailureClass,
+  { suggestion: string; hints: readonly string[] }
+> = {
+  post_enforcement: {
+    suggestion: RETRY_UNAFFORDABLE_SUGGESTION,
+    hints: RETRY_UNAFFORDABLE_HINTS,
+  },
+  options_identical: {
+    suggestion: OPTIONS_IDENTICAL_UNAFFORDABLE_SUGGESTION,
+    hints: OPTIONS_IDENTICAL_UNAFFORDABLE_HINTS,
+  },
+};
+
+/**
+ * Return a copy of `result` whose recovery copy is honest that NO automatic
+ * retry was made, and whose details disclose the skip on the wire
+ * (`auto_retry: { attempted: false, attempts: 1, skipped_reason }` — fixed
+ * shape, fixed enum reason, no user content; it rides the `auto_retry` key
+ * already allowlisted in draft-graph.ts).
+ *
+ * Everything else — status code, `code`, `retryable`, the codes-only validator
+ * mirror, `last_phase` and the OPTIONS_IDENTICAL diagnostics — is preserved
+ * byte-for-byte. Pure: the input is not mutated.
+ */
+export function applyRetryUnaffordableCopy(
+  result: UnifiedPipelineResult,
+  retryClass: RetryableDraftFailureClass,
+): UnifiedPipelineResult {
+  const body = result.body as Record<string, unknown>;
+  const details =
+    body.details !== null && typeof body.details === "object" && !Array.isArray(body.details)
+      ? (body.details as Record<string, unknown>)
+      : {};
+  const copy = RETRY_UNAFFORDABLE_COPY[retryClass];
+  return {
+    ...result,
+    body: {
+      ...body,
+      recovery: {
+        suggestion: copy.suggestion,
+        hints: [...copy.hints],
+      },
+      // The pinned flat mirror, kept in agreement with `recovery.suggestion`
+      // for the same reason as the exhausted path: `buildCeeErrorResponse` sets
+      // it at emission, so rewriting `recovery` alone leaves the body carrying
+      // two DIFFERENT sentences.
+      recovery_suggestion: copy.suggestion,
+      details: {
+        ...details,
+        auto_retry: {
+          attempted: false,
+          attempts: 1,
+          skipped_reason: "budget_unaffordable",
+        },
+      },
+    },
+  };
+}
+
 /**
  * Return a copy of `result` (whose class the caller has already established
  * via `classifyRetryableDraftFailure`) whose recovery copy is honest about the
