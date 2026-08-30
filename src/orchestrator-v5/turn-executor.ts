@@ -5837,7 +5837,6 @@ export async function runTurnExecutor(
           // falls through untouched, because a re-ask on every non-answer
           // would hijack "run the analysis" and everything else the user might
           // say next. The elicitation stays additive.
-          const pending = baselineAnswer.pending;
           emit(TelemetryEvents.PendingActionSkipped, {
             request_id: requestId,
             scenario_id: context.session_id,
@@ -5878,8 +5877,18 @@ export async function runTurnExecutor(
               // and silently DROPPED those siblings: an explicit list REPLACES
               // the carried-forward set rather than adding to it. Caught by a
               // surviving mutant, which is the only reason it is not in this
-              // commit. The question survives because this branch does not set
-              // `consumedPendingAction` (the pair below pins exactly that).
+              // commit.
+              //
+              // WHY THE QUESTION SURVIVES, derived rather than assumed: this
+              // branch RETURNS here, thousands of lines before
+              // `consumedPendingAction` is read into `consumedPendingRefs`, so
+              // consumption cannot be expressed on this path at all and the
+              // commit's `priorPendingActions` default carries everything
+              // forward. An earlier draft of this comment credited "we do not
+              // set `consumedPendingAction`" — plausible, and false: a mutant
+              // that DOES set it survives, because nothing on this path reads
+              // it. Stated exactly, so the next reader does not inherit a
+              // mechanism that is not the one operating.
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
