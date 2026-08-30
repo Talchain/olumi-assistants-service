@@ -1,3 +1,9 @@
+> ⚠⚠ **SUPERSEDED AS A DESCRIPTION OF WHAT SHIPS — v11 IS WITHDRAWN.** Its rule was right and its
+> DESTINATION did not exist: 6 of its 9 clean draws were clean only via
+> `stated_items[].kind = "claim"`, a value the structured-outputs enum forbids. See
+> **`V12-WITHDRAWAL-AND-ROUTE.md`**. Everything below is the v11 record and is left UNEDITED —
+> it is evidence of what was measured on dated bytes, not a fixture to keep current.
+
 # records instruction v11 — a proposed CAUSE is not an option (2026-08-30)
 
 ## The defect, at the rung it was witnessed
