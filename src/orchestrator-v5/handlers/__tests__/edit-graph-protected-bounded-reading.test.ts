@@ -407,9 +407,27 @@ describe('MIXED CLAUSE — one entity bounded, another protected in the same mes
 // monotonicity claim this mechanism exists to record. A gap mechanism whose
 // comment overstates its reach is the defect it was built to prevent.
 
-/** Outright protections that carry an incidental number in the same
- *  comma-joined clause. Every one of these is CURRENTLY MISREPORTED as an
- *  undetermined reading. This is a known, measured, unfixed gap. */
+/**
+ * ⭐⭐ THE GAP IS CLOSED (2026-08-30). These strings are UNCHANGED — they are
+ * the historic corpus, append-only (CLAUDE.md trap 14b) — but their verdict
+ * has moved, and the pin below now asserts the CORRECT reading.
+ *
+ * They were dropped because `boundedReading` was computed over the WHOLE
+ * comma-joined clause, so an outright protection ("Do not touch Customer
+ * churn") inherited the bound from an incidental neighbour ("it is at 3%").
+ * `extractProtectedEntities` now records the comma-segments a cue actually
+ * GOVERNS, so `matched.every(clauseStatesBound)` is evaluated per segment: the
+ * outright segment states no bound, `every` is false, and the true sentence is
+ * assertable again.
+ *
+ * ⚠ NOTE WHAT DID **NOT** HAPPEN, because the module doc predicted it would.
+ * `protection-scope.ts` warns that an outright-protection LOOKAHEAD repairs
+ * these ten and then "flips 7 genuine bounds carrying an outright verb back to
+ * the ORIGINAL lie" — the trap-22f oscillation. No third predicate was added
+ * here. The fix is to clause SCOPE, which is why the opposite direction holds:
+ * `COMMA_CLAUSE_OPPOSITE_TWINS` below pins genuine bounds that must STILL read
+ * as undetermined, and a message with no comma is not touched at all.
+ */
 const COMMA_CLAUSE_KNOWN_DROPPED: readonly string[] = [
   'Do not touch Customer churn, it is at 3% and that is fine',
   'Do not touch Customer churn, it is below 3% already',
@@ -429,15 +447,48 @@ const COMMA_CLAUSE_STILL_CORRECT: readonly string[] = [
   "Don't touch Customer churn, our 3% target is already met",
 ];
 
-describe('KNOWN GAP — comma-joined outright protections carrying an incidental number', () => {
-  it('the dropped set is EXACTLY this, no more and no fewer', () => {
+/**
+ * ⭐ OPPOSITE-DIRECTION TWINS — the cases the closure above must NOT flip.
+ *
+ * Every one states a GENUINE numeric bound in the protective segment itself,
+ * so the product must still refuse to assert "you asked for this to stay as it
+ * is". Without these the pin above would be a guard watching one door
+ * (CLAUDE.md trap 22b): closing the gap and reopening the lie would read
+ * green.
+ */
+const COMMA_CLAUSE_OPPOSITE_TWINS: readonly string[] = [
+  'Keep Customer churn below 3%, and that is firm',
+  'Leave Customer churn under 3%, we agreed that last week',
+  'Do not let Customer churn go above 3%, it matters',
+  'Preserve Customer churn at no more than 3%, please',
+];
+
+describe('CLOSED GAP — comma-joined outright protections carrying an incidental number', () => {
+  it('⭐ the dropped set is now EMPTY — every historic case reads TRUE', () => {
     const dropped = [...COMMA_CLAUSE_KNOWN_DROPPED, ...COMMA_CLAUSE_STILL_CORRECT].filter(
       (m) =>
         extractProtectedEntities(m, GRAPH).find((e) => e.nodeId === 'fac_churn')
           ?.boundedReading === true,
     );
-    // Exact-set equality: REDs if the gap grows AND if it shrinks.
-    expect(dropped.sort()).toEqual([...COMMA_CLAUSE_KNOWN_DROPPED].sort());
+    // Exact-set equality: REDs if the gap RE-OPENS on any of these ten.
+    expect(dropped.sort()).toEqual([]);
+  });
+
+  it('⭐ and the product now says the TRUE sentence for each of them', () => {
+    for (const m of COMMA_CLAUSE_KNOWN_DROPPED) {
+      expect(textFor(m), m).toMatch(/to stay as it is/i);
+    }
+  });
+
+  it('⭐ OPPOSITE DIRECTION — genuine bounds are STILL undetermined, so the closure did not buy itself the original lie', () => {
+    for (const m of COMMA_CLAUSE_OPPOSITE_TWINS) {
+      expect(
+        extractProtectedEntities(m, GRAPH).find((e) => e.nodeId === 'fac_churn')
+          ?.boundedReading,
+        m,
+      ).toBe(true);
+      expect(textFor(m), m).not.toMatch(/to stay as it is/i);
+    }
   });
 
   it('CONTRAST CONTROL — the two escapees still produce the TRUE named sentence, so the pin above is not measuring a dead predicate', () => {
@@ -446,8 +497,8 @@ describe('KNOWN GAP — comma-joined outright protections carrying an incidental
     }
   });
 
-  it('the gap costs only truthfulness, never safety: every dropped case is still HELD', () => {
-    for (const m of COMMA_CLAUSE_KNOWN_DROPPED) {
+  it('SAFETY IS UNCHANGED BY THE CLOSURE: every historic case is still HELD', () => {
+    for (const m of [...COMMA_CLAUSE_KNOWN_DROPPED, ...COMMA_CLAUSE_OPPOSITE_TWINS]) {
       const d = evaluateEditGraphMutations(baseInput({ userMessage: m }));
       expect(d.governing, m).toBe('held');
       expect(d.blockApply, m).toBe(true);
