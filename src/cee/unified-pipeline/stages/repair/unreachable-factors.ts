@@ -17,6 +17,7 @@ import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import { canReachAnyGoal as hasPathToGoal } from "../../../../graph/reachability.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge } from "../../utils/edge-format.js";
+import { buildUnquantifiedPrior, IGNORANCE_PRIOR_RANGE, unquantifiedClauseSuffix } from "../../../provenance/unquantified-factor.js";
 import { log } from "../../../../utils/telemetry.js";
 import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 // The canonical unit classifier — the question "does this unit denote a
@@ -724,17 +725,39 @@ export function handleUnreachableFactors(
       // range cannot contain is NOT collapsed; it is narrowed normally, because
       // an incoherent distribution is worse than a fabricated one.
       const collapseContainsBaseline = originalValue >= 0 && originalValue <= 1;
-      const { range_min, range_max } = baselineIsFabricated && collapseContainsBaseline
-        ? { range_min: 0.0, range_max: 1.0 }
+      const leftUnquantified = baselineIsFabricated && collapseContainsBaseline;
+      // ⭐⭐ ONE SHAPE FOR ONE CONCEPT — and this line is the whole of that claim.
+      //
+      // This branch and `normalisation.ts` / `deterministic-sweep.ts` all answer
+      // the SAME question ("this factor's level is not something we know"), so
+      // they must produce the SAME node shape. Until this was wired through
+      // `buildUnquantifiedPrior()` they did not: this site wrote an UNFLAGGED
+      // `uniform(0,1)` while the others wrote a flagged one — two node-level
+      // shapes for one concept, of which a downstream discriminator keyed on
+      // `prior_is_unquantified` could only see one. Differently-named twins is
+      // this estate's chronic defect, and it would have been CREATED by the
+      // change written to remove a mirror.
+      //
+      // ⚠ THE OTHER ARM IS DELIBERATELY NOT SHARED, AND THAT DIFFERENCE IS REAL.
+      // `synthesisePriorFromBaseline` narrows around a baseline the system has
+      // grounds for. That is a defensible ESTIMATE WITH UNCERTAINTY — the second
+      // legitimate state — and flagging it would be a false claim of ignorance
+      // in the opposite direction. Only the collapse arm is ignorance.
+      const { range_min, range_max } = leftUnquantified
+        ? { range_min: IGNORANCE_PRIOR_RANGE.range_min, range_max: IGNORANCE_PRIOR_RANGE.range_max }
         : synthesisePriorFromBaseline(originalValue);
-      (node as any).prior = {
-        distribution: "uniform",
-        range_min,
-        range_max,
-      };
+      (node as any).prior = leftUnquantified
+        ? buildUnquantifiedPrior()
+        : {
+            distribution: "uniform",
+            range_min,
+            range_max,
+          };
       repair.prior_synthesised = true;
       repair.synthesised_range = { range_min, range_max };
-      const leftUnquantified = baselineIsFabricated && collapseContainsBaseline;
+      // ⚠ ONE PREDICATE, ONE NAME. This was a SECOND `const` recomputing exactly
+      // `baselineIsFabricated && collapseContainsBaseline` a few lines below the
+      // first — the same twin defect this edit exists to remove, one level down.
       repair.prior_is_unquantified = leftUnquantified;
       // ⚠ THIS SENTENCE REACHES THE USER VERBATIM (adversarial review C1).
       // `boundary.ts:168` copies `action` into `model_adjustments[].reason`, and
@@ -746,8 +769,7 @@ export function handleUnreachableFactors(
       // no notation, no leaked figure — the honest claim is that we have no
       // estimate, not a description of our own machinery.
       repair.action += leftUnquantified
-        ? `, and we have no estimate for it yet — its value was left fully open`
-          + ` rather than narrowed to a figure we cannot support`
+        ? unquantifiedClauseSuffix()
         : ` with synthesised prior [${range_min}, ${range_max}]`;
 
       log.info({

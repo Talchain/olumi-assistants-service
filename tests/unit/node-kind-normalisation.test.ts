@@ -685,7 +685,29 @@ describe("NodeKind Normalisation", () => {
 });
 
 describe("ensureControllableFactorBaselines", () => {
-  it("adds default baseline to controllable factors without data.value", () => {
+  // ⚠ UPDATED WHOLESALE, AND THE REASON MATTERS MORE THAN THE EDIT.
+  //
+  // Every STRUCTURAL claim this block made is unchanged and still asserted:
+  // which factors the function reaches (option→factor edges, both edge
+  // formats), that an exogenous factor is never touched, that a stated value is
+  // preserved, that an empty response is returned untouched.
+  //
+  // What changed is the REPRESENTATION of "this factor has no stated value".
+  // It was `data.value = 0.5` — a number chosen to satisfy a validator, which
+  // then reached ISL's elasticity as a multiplicative term and carried the same
+  // label downstream as a reasoned estimate. It is now an EXPLICIT unknown:
+  // no value, and `prior: uniform(0,1)` flagged `prior_is_unquantified`.
+  //
+  // The returned list is renamed `defaultedFactors` → `unquantifiedFactors`
+  // for the same reason: the function no longer defaults anything.
+  const isExplicitUnknown = (node: any) =>
+    node.data?.value === undefined &&
+    node.prior?.distribution === "uniform" &&
+    node.prior?.range_min === 0 &&
+    node.prior?.range_max === 1 &&
+    node.prior?.prior_is_unquantified === true;
+
+  it("states an EXPLICIT UNKNOWN for controllable factors without data.value", () => {
     const response = {
       nodes: [
         { id: "dec_1", kind: "decision", label: "Decision" },
@@ -700,12 +722,15 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { response: result, unquantifiedFactors } = ensureControllableFactorBaselines(response);
     const nodes = (result as any).nodes;
     const fac1 = nodes.find((n: any) => n.id === "fac_1");
 
-    expect(defaultedFactors).toEqual(["fac_1"]);
-    expect(fac1.data.value).toBe(0.5);
+    expect(unquantifiedFactors).toEqual(["fac_1"]);
+    expect(isExplicitUnknown(fac1)).toBe(true);
+    // The number is GONE, not relabelled. Pinned explicitly because "label the
+    // placeholder while still computing on it" was ruled a non-answer.
+    expect(fac1.data.value).toBeUndefined();
     expect(fac1.data.extractionType).toBe("inferred");
   });
 
@@ -724,16 +749,18 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { response: result, unquantifiedFactors } = ensureControllableFactorBaselines(response);
     const nodes = (result as any).nodes;
     const fac1 = nodes.find((n: any) => n.id === "fac_1");
 
-    expect(defaultedFactors).toEqual([]);
+    expect(unquantifiedFactors).toEqual([]);
     expect(fac1.data.value).toBe(49);
     expect(fac1.data.unit).toBe("£");
+    // OPPOSITE-DIRECTION TWIN: a real value must not acquire an ignorance prior.
+    expect(fac1.prior).toBeUndefined();
   });
 
-  it("does not add baseline to exogenous factors", () => {
+  it("does not touch exogenous factors", () => {
     const response = {
       nodes: [
         { id: "dec_1", kind: "decision", label: "Decision" },
@@ -750,12 +777,13 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { response: result, unquantifiedFactors } = ensureControllableFactorBaselines(response);
     const nodes = (result as any).nodes;
     const facExog = nodes.find((n: any) => n.id === "fac_exog");
 
-    expect(defaultedFactors).toEqual(["fac_1"]);
-    expect(facExog.data).toBeUndefined();  // Exogenous factor should NOT get default
+    expect(unquantifiedFactors).toEqual(["fac_1"]);
+    expect(facExog.data).toBeUndefined();   // Exogenous factor is out of this function's set …
+    expect(facExog.prior).toBeUndefined();  // … including for the prior.
   });
 
   it("handles multiple controllable factors", () => {
@@ -779,31 +807,32 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { response: result, unquantifiedFactors } = ensureControllableFactorBaselines(response);
     const nodes = (result as any).nodes;
 
-    // fac_a and fac_c should get defaults (no value), fac_b should keep its value
-    expect(defaultedFactors).toContain("fac_a");
-    expect(defaultedFactors).toContain("fac_c");
-    expect(defaultedFactors).not.toContain("fac_b");
-    expect(defaultedFactors.length).toBe(2);
+    // fac_a and fac_c have no value; fac_b keeps its own.
+    expect(unquantifiedFactors).toContain("fac_a");
+    expect(unquantifiedFactors).toContain("fac_c");
+    expect(unquantifiedFactors).not.toContain("fac_b");
+    expect(unquantifiedFactors.length).toBe(2);
 
     const facA = nodes.find((n: any) => n.id === "fac_a");
     const facB = nodes.find((n: any) => n.id === "fac_b");
     const facC = nodes.find((n: any) => n.id === "fac_c");
 
-    expect(facA.data.value).toBe(0.5);
+    expect(isExplicitUnknown(facA)).toBe(true);
     expect(facA.data.extractionType).toBe("inferred");
     expect(facB.data.value).toBe(100);
-    expect(facC.data.value).toBe(0.5);
+    expect(facB.prior).toBeUndefined();
+    expect(isExplicitUnknown(facC)).toBe(true);
   });
 
   it("returns unchanged response when no nodes or edges", () => {
     const emptyResponse = { nodes: [], edges: [] };
-    const { response, defaultedFactors } = ensureControllableFactorBaselines(emptyResponse);
+    const { response, unquantifiedFactors } = ensureControllableFactorBaselines(emptyResponse);
 
     expect(response).toEqual(emptyResponse);
-    expect(defaultedFactors).toEqual([]);
+    expect(unquantifiedFactors).toEqual([]);
   });
 
   it("handles source/target edge format", () => {
@@ -821,20 +850,28 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { unquantifiedFactors } = ensureControllableFactorBaselines(response);
 
-    expect(defaultedFactors).toEqual(["fac_1"]);
+    expect(unquantifiedFactors).toEqual(["fac_1"]);
   });
 
-  it("defaults to 0.5 — consistent with fixControllableMissingData safety net", () => {
-    // Both ensureControllableFactorBaselines (Stage 1) and
-    // fixControllableMissingData (deterministic-sweep) must agree on 0.5
-    // as the neutral midpoint for unknown controllable factor baselines.
+  it("drops an UNUSABLE non-numeric value rather than leaving it on the node", () => {
+    // Replaces "defaults to 0.5 — consistent with fixControllableMissingData".
+    // That agreement no longer exists to assert: Stage 1 states the unknown and
+    // `fixControllableMissingData` is left as a 0.5 safety net for a factor
+    // carrying NEITHER a value nor an explicit unknown, which Stage 1 no longer
+    // produces.
+    //
+    // What DOES need pinning is the case the old overwrite silently handled: a
+    // `value` that is present but not coercible to a number. Spreading `data`
+    // would preserve it, and the validator's `data?.value === undefined` gate
+    // reads a garbage string as "present" — so it would ship downstream under a
+    // clean validation.
     const response = {
       nodes: [
         { id: "dec_1", kind: "decision", label: "D" },
         { id: "opt_1", kind: "option", label: "O" },
-        { id: "fac_cont", kind: "factor", label: "Continuous factor" },
+        { id: "fac_cont", kind: "factor", label: "Continuous factor", data: { value: "not a number", unit: "%" } },
         { id: "out_1", kind: "outcome", label: "Out" },
       ],
       edges: [
@@ -844,12 +881,15 @@ describe("ensureControllableFactorBaselines", () => {
       ],
     };
 
-    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const { response: result, unquantifiedFactors } = ensureControllableFactorBaselines(response);
     const nodes = (result as any).nodes;
     const fac = nodes.find((n: any) => n.id === "fac_cont");
 
-    expect(defaultedFactors).toEqual(["fac_cont"]);
-    expect(fac.data.value).toBe(0.5);
+    expect(unquantifiedFactors).toEqual(["fac_cont"]);
+    expect(isExplicitUnknown(fac)).toBe(true);
+    // CONTRAST, so this is not merely "value is falsy": the sibling field on the
+    // same bag is untouched, i.e. the drop is scoped to `value` alone.
+    expect(fac.data.unit).toBe("%");
     expect(fac.data.extractionType).toBe("inferred");
   });
 });

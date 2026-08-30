@@ -33,7 +33,13 @@ import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
-import { stampFallbackDefault, FACTOR_VALUE_TIER_FIELD } from "../../../provenance/factor-value-provenance.js";
+// `stampFallbackDefault` is no longer imported here: the only site that used it
+// (`fixObservableMissingData`'s branch A) no longer invents a value, so there is
+// no value left to tier. `FACTOR_VALUE_TIER_FIELD` is still used by
+// `fixControllableMissingData`, which remains a `0.5` safety net for a factor
+// carrying neither a value nor an explicit unknown.
+import { FACTOR_VALUE_TIER_FIELD } from "../../../provenance/factor-value-provenance.js";
+import { buildUnquantifiedPrior, unquantifiedFactorSentence, shouldPreserveModelPrior } from "../../../provenance/unquantified-factor.js";
 import { log } from "../../../../utils/telemetry.js";
 import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
@@ -474,21 +480,64 @@ export function fixObservableMissingData(
     //
     // NOTHING ELSE MOVES. A stamp the MODEL emitted — `explicit`, or `observed`
     // it chose itself — is left alone; only the stamps this function writes change.
+    // ⛔⛔ SAME PRESERVATION GUARD AS W1 (`normalisation.ts`). A model-supplied
+    // prior is a STATED LEVEL, not a gap: overwriting it with `uniform(0,1)`
+    // flagged as ignorance is a false claim about a factor the model had
+    // information on. Only the `extractionType` half of this repair may apply.
+    if (!hasValue && shouldPreserveModelPrior(node)) {
+      if (data?.extractionType === undefined) {
+        (node as any).data = { ...(data ?? {}), extractionType: "inferred" };
+        repairs.push({
+          code: "OBSERVABLE_MISSING_DATA",
+          path: `nodes[${node.id}]`,
+          action: `Added extractionType="inferred"`,
+        });
+      }
+      continue;
+    }
+
     if (!hasValue) {
+      // ⛔ NO SUBSTITUTION. This branch used to WRITE `value: 0.5` and stamp it
+      // `fallback_default`, because `graph-validator.ts` treated a valueless
+      // factor as an INVALID GRAPH and there was no other way to satisfy it.
+      // The stamp was the honest half of a dishonest write: it told
+      // `unreachable-factors` not to narrow the 0.5 into a `[0.25, 0.75]` prior
+      // that reads as a measurement — but the number itself still reached the
+      // maths (ISL elasticity is linear in the factor's baseline; PLoT derives
+      // sigma as `|value| * 0.15`), and the tier stamp died at the CEE boundary
+      // so downstream it carried the SAME label as a reasoned estimate.
+      //
+      // The gate now accepts an EXPLICIT unknown, so the honest answer is
+      // expressible. `unquantified-factor.ts` owns the shape; this is the same
+      // mechanism `unreachable-factors.ts` writes through, not a second one.
+      //
+      // ⚠ ORDER IS LOAD-BEARING AND VERIFIED: this function runs at :2328,
+      // `handleUnreachableFactors` at :2439. That function's prior synthesis is
+      // wholly inside `if (originalValue !== undefined)`, so with no value it
+      // does not run and the prior written here SURVIVES rather than being
+      // narrowed. If the two are ever reordered, an observable factor could be
+      // reclassified to external BEFORE this runs, and this function's
+      // `category !== "observable"` guard would skip it entirely.
+      //
+      // NOTHING ELSE MOVES. Branch B below supplies only a LABEL for a value
+      // that already existed and is untouched.
+      const { value: _unusable, ...rest } = data ?? {};
       (node as any).data = {
-        // ⭐ STAMPED — the branch that INVENTS the value says so, so that
-        // `unreachable-factors` cannot later narrow this 0.5 into a
-        // `[0.25, 0.75]` prior that reads as a measurement. Branch B below
-        // supplies only a LABEL for a value that already existed, so it is not
-        // a fabricated quantity and is deliberately NOT stamped.
-        ...stampFallbackDefault(data ?? {}),
-        value: 0.5,
+        ...rest,
         extractionType: "inferred",
       };
+      (node as any).prior = buildUnquantifiedPrior();
       repairs.push({
         code: "OBSERVABLE_MISSING_DATA",
         path: `nodes[${node.id}]`,
-        action: `Added data.value=0.5 and extractionType="inferred"`,
+        // ⚠ THIS SENTENCE CAN REACH A USER. `boundary.ts:168` copies a repair's
+        // `action` into `model_adjustments[].reason` for allowlisted codes, and
+        // an earlier draft of the sibling string printed `[0, 1]`, the word
+        // UNQUANTIFIED, and the raw defaulted `0.5` to a user (adversarial
+        // review C1). All three are internal language — the bracket notation is
+        // our prior, and the `0.5` is the very number we are disowning. Plain
+        // English, no notation, no leaked figure.
+        action: unquantifiedFactorSentence(String((node as any).label ?? node.id)),
       });
     } else if (data.extractionType === undefined) {
       data.extractionType = "inferred";

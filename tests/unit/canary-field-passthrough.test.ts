@@ -132,9 +132,12 @@ describe("additive fields survive normalisation + validation pipeline", () => {
     expect(firstEdge._canary_edge).toBe(true);
   });
 
-  it("canary on a controllable factor without data.value survives baseline defaulting", () => {
-    // Factor without data.value gets baseline patched by ensureControllableFactorBaselines.
-    // The canary must survive the { ...node, data: { ... } } spread.
+  it("canary on a controllable factor without data.value survives the explicit-unknown patch", () => {
+    // Factor without data.value is patched by ensureControllableFactorBaselines
+    // — it no longer receives an invented 0.5 baseline; it receives an EXPLICIT
+    // UNKNOWN. The canary must still survive the { ...node, data: { ... } }
+    // spread, and the point of this test is unchanged: the patch path must be
+    // EXERCISED (asserted below) so the passthrough claim is not vacuous.
     const raw = {
       _canary_graph: "envelope_test",
       nodes: [
@@ -159,10 +162,10 @@ describe("additive fields survive normalisation + validation pipeline", () => {
     };
 
     const normalised = normaliseDraftResponse(raw);
-    const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
+    const { response: withBaselines, unquantifiedFactors } = ensureControllableFactorBaselines(normalised);
 
-    // Confirm baseline was actually defaulted (so the spread path was exercised)
-    expect(defaultedFactors).toContain("fac_no_value");
+    // Confirm the patch path was actually taken (so the spread was exercised)
+    expect(unquantifiedFactors).toContain("fac_no_value");
 
     const parseResult = LLMDraftResponse.safeParse(withBaselines);
     expect(parseResult.success).toBe(true);
@@ -174,8 +177,15 @@ describe("additive fields survive normalisation + validation pipeline", () => {
 
     // Canary survived the baseline-defaulting spread
     expect(factor._canary_node).toBe("must_survive_baseline_patch");
-    // Baseline was applied (0.5 = neutral midpoint per prompt instructions)
-    expect((factor.data as any).value).toBe(0.5);
+    // The explicit unknown was applied: no invented number, and a prior that
+    // asserts nothing, labelled as ignorance rather than as an estimate.
+    expect((factor.data as any).value).toBeUndefined();
+    expect(factor.prior).toEqual({
+      distribution: "uniform",
+      range_min: 0,
+      range_max: 1,
+      prior_is_unquantified: true,
+    });
 
     // Envelope canary survived
     expect(output._canary_graph).toBe("envelope_test");

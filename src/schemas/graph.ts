@@ -126,8 +126,34 @@ export const Position = z.object({ x: z.number(), y: z.number() });
  * Enables ISL sensitivity, VoI, and tipping point analysis.
  */
 export const FactorData = z.object({
-  /** Current or proposed value */
-  value: z.number(),
+  /**
+   * Current or proposed value.
+   *
+   * ⚠⚠ OPTIONAL SINCE THE EXPLICIT-UNKNOWN CHANGE, AND THIS FIELD BEING
+   * REQUIRED WAS A SECOND FORCING FUNCTION BEHIND THE `0.5` PLACEHOLDER —
+   * one layer above `graph-validator.ts`, and the one that actually bit first.
+   *
+   * `NodeData` is a UNION (`OptionData | ConstraintNodeData | FactorData`), so
+   * a factor `data` bag carrying `extractionType` but no `value` matched NO
+   * member and the whole draft failed `LLMDraftResponse.safeParse` with
+   * `anthropic_response_invalid_schema: nodes: Invalid input`. Every writer that
+   * wanted to ship an honest "we have no value for this" had to invent a number
+   * to get past this line.
+   *
+   * ⭐ IT ALSO MEANT TWO AUTHORITIES DISAGREED ABOUT THE SAME QUESTION.
+   * `graph-validator.ts`'s `validateFactorData` tests `data?.value === undefined`
+   * and raises CONTROLLABLE_MISSING_DATA — a branch that could not be reached
+   * through this schema, because parsing had already rejected the shape. The
+   * relaxation makes the two agree: the SCHEMA says a level may be absent, and
+   * the VALIDATOR decides whether an absent level is accounted for (it is, iff
+   * the node carries an explicit unknown).
+   *
+   * DIRECTION OF THE CHANGE, stated because it bounds the risk: this is a
+   * RELAXATION on ingress. Every payload that validated before still validates;
+   * nothing that was accepted is now rejected. What changes is that a shape
+   * which was previously impossible to express is now expressible.
+   */
+  value: z.number().optional(),
   /** Baseline/original value (e.g., "from X to Y" → baseline is X) */
   baseline: z.number().optional(),
   /** Unit of measurement (£, $, %, etc.) */

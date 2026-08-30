@@ -646,9 +646,9 @@ export class OpenAIAdapter implements LLMAdapter {
         );
       }
 
-      const { response: withBaselines, defaultedFactors } = ensureControllableFactorBaselines(normalised);
-      if (defaultedFactors.length > 0) {
-        log.info({ defaultedFactors }, `Defaulted baseline values for ${defaultedFactors.length} controllable factor(s)`);
+      const { response: withBaselines, unquantifiedFactors } = ensureControllableFactorBaselines(normalised);
+      if (unquantifiedFactors.length > 0) {
+        log.info({ unquantifiedFactors }, `Left ${unquantifiedFactors.length} controllable factor(s) explicitly unquantified rather than defaulting a baseline`);
       }
       const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
 

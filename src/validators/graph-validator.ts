@@ -13,6 +13,7 @@ import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/
 import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
+import { factorHasExpressiblePrior } from "../cee/provenance/unquantified-factor.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -781,10 +782,51 @@ function validateFactorData(
 
     const data = factor.data as FactorDataT | undefined;
 
+    // ⭐⭐ "UNKNOWN" IS A LEGAL STATE — AND THIS GATE IS WHY IT WAS NOT.
+    //
+    // `data?.value === undefined` at error severity made a factor with no
+    // numeric level an INVALID GRAPH. The repair machinery therefore had no
+    // honest option: every writer that could satisfy this gate could only do so
+    // by inventing a number. Measured 29 Aug 2026: 60 of 60 present factor
+    // values were exactly `0.5` across 18 drafts and all three brief classes —
+    // distinct value set literally `[0.5]`. This line is the forcing function
+    // behind that figure.
+    //
+    // A factor that STATES ITS LEVEL AS A DISTRIBUTION is now a complete answer
+    // to "what is this factor's level?". It is not a missing field; it is a
+    // stated one. That covers BOTH of the remaining legitimate states:
+    //   · a defensible estimate WITH its uncertainty — the model's own
+    //     `uniform(0.6, 1.0)`; and
+    //   · a genuine unknown — `uniform(0,1)` carrying `prior_is_unquantified`.
+    //
+    // ⚠ THE GATE ASKS THE WIDER QUESTION ON PURPOSE, AND THE TWO PREDICATES ARE
+    // NOT INTERCHANGEABLE (CLAUDE.md trap 21). `factorHasExpressiblePrior` asks
+    // "has the level been stated?"; `factorIsExplicitlyUnquantified` asks "is
+    // that statement an admission of ignorance?". Gating on the NARROW one
+    // would refuse a model's informative prior, and `fixControllableMissingData`
+    // would then repair the refusal by writing `0.5` — reinstating the exact
+    // placeholder this change removes, for precisely the population that
+    // carries the most information.
+    //
+    // ⚠ THE GATE IS NOT DELETED, AND THE DIFFERENCE IS THE WHOLE SAFETY
+    // ARGUMENT. A factor carrying NEITHER a value NOR an explicit unknown is
+    // still an error, because that is a structurally broken node rather than an
+    // honest one. `factorIsExplicitlyUnquantified` requires POSITIVE evidence
+    // (the flag present and literally `true`); it is deliberately not "has a
+    // prior", which would exempt every genuine external prior — two of which
+    // sit in the captured wire corpus with a real `uniform(0,1)` range and no
+    // flag (`fac_nrr`, `fac_legal_clearance`). Widening a predicate that guards
+    // two opposite harms is how this estate loses gates (CLAUDE.md trap 22b).
+    //
+    // The relaxation is scoped to `value` ALONE. `extractionType`,
+    // `factor_type` and `uncertainty_drivers` are separate requirements and an
+    // explicit unknown says nothing about any of them.
+    const statesLevelAsDistribution = factorHasExpressiblePrior(factor);
+
     if (info.category === "controllable") {
       // CONTROLLABLE_MISSING_DATA: Must have value, extractionType, factor_type, uncertainty_drivers
       const missing: string[] = [];
-      if (data?.value === undefined) missing.push("value");
+      if (data?.value === undefined && !statesLevelAsDistribution) missing.push("value");
       if (!data?.extractionType) missing.push("extractionType");
       if (!data?.factor_type) missing.push("factor_type");
       if (!data?.uncertainty_drivers) missing.push("uncertainty_drivers");
@@ -800,8 +842,12 @@ function validateFactorData(
       }
     } else if (info.category === "observable") {
       // OBSERVABLE_MISSING_DATA: Must have value and extractionType
+      // Same relaxation, same discriminator — see the block above. Observables
+      // are a DISJOINT population (`ensureControllableFactorBaselines` gates on
+      // the option→factor edge set and never reaches them), so the two arms are
+      // written out rather than shared.
       const missing: string[] = [];
-      if (data?.value === undefined) missing.push("value");
+      if (data?.value === undefined && !statesLevelAsDistribution) missing.push("value");
       if (!data?.extractionType) missing.push("extractionType");
 
       if (missing.length > 0) {
