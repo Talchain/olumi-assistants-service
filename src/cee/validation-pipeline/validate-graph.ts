@@ -296,7 +296,7 @@ export function classifyValidationFailure(
  * Parses the raw LLM text into a validated Pass2Response.
  * Throws a descriptive error on any schema violation.
  */
-function parsePass2Response(rawContent: string, requestId?: string): Pass2Response {
+export function parsePass2Response(rawContent: string, requestId?: string): Pass2Response {
   const { json: parsed } = extractJsonFromResponse(rawContent);
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

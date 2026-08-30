@@ -18,6 +18,7 @@
     "src/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
+    "tools/prompt-consumer/**/*.ts",
     "*.config.ts",
     "sdk/typescript/src/**/*.ts",
     "sdk/typescript/*.config.ts"
