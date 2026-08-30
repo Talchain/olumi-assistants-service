@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { DraftGraphOutput } from "../../src/schemas/assist.js";
+import { validateGraph } from "../../src/validators/graph-validator.js";
 import { CEEGraphResponseV3 } from "../../src/schemas/cee-v3.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/schema-v2.js";
@@ -385,9 +386,26 @@ describe("DraftGraphOutput conformance — post-repair graph shapes", () => {
     expect(result.success).toBe(true);
   });
 
-  it("graph with data={extractionType:'inferred'} (no value) FAILS DraftGraphOutput", () => {
-    // This is the exact shape that caused the 400 before the fix.
-    // After the fix, the sweep removes data entirely instead of leaving this partial.
+  it("graph with data={extractionType:'inferred'} (no value) now PARSES — the schema permits, the VALIDATOR decides", () => {
+    // ⚠⚠ THIS TEST'S VERDICT IS DELIBERATELY INVERTED, AND THE INVERSION IS THE
+    // POINT OF THE EXPLICIT-UNKNOWN CHANGE.
+    //
+    // It used to assert that a factor `data` bag with no `value` matched NO
+    // `NodeData` union branch and so failed to parse. That was true, and it was
+    // a SECOND forcing function behind the `0.5` placeholder — sitting one layer
+    // above `graph-validator.ts` and biting first. Every writer that wanted to
+    // ship an honest "we have no value for this" had to invent a number to get
+    // past this line.
+    //
+    // `FactorData.value` is now optional, so the shape is EXPRESSIBLE. That is a
+    // relaxation on ingress: nothing that parsed before fails now.
+    //
+    // The guarantee has not been dropped, it has MOVED to the authority that can
+    // state it truthfully. The schema answers "is this shape well-formed?"; the
+    // validator answers "is this factor's missing level accounted for?" — and it
+    // still errors unless the node carries an explicit unknown. The
+    // opposite-direction twin at the end of this test is what pins that, so the
+    // inversion cannot be read as "anything goes now".
     const input = {
       graph: {
         version: "1",
@@ -410,9 +428,44 @@ describe("DraftGraphOutput conformance — post-repair graph shapes", () => {
       },
     };
 
-    // This SHOULD fail — data={extractionType:"inferred"} matches no NodeData branch
     const result = DraftGraphOutput.safeParse(input);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+
+    // OPPOSITE-DIRECTION TWIN #1 — the relaxation is scoped to ABSENCE, not to
+    // type. A `value` of the wrong type still matches no NodeData branch.
+    const wrongType = structuredClone(input);
+    (wrongType.graph.nodes[2] as any).data = { value: "not a number", extractionType: "inferred" };
+    expect(DraftGraphOutput.safeParse(wrongType).success).toBe(false);
+
+    // OPPOSITE-DIRECTION TWIN #2 — the guarantee moved, it did not vanish. The
+    // same valueless factor, as a CONTROLLABLE one, is still refused by the
+    // validator unless it carries an explicit unknown.
+    const asControllable: any = {
+      nodes: [
+        { id: "decision_1", kind: "decision", label: "Test" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_broken", kind: "factor", label: "Broken", data: { extractionType: "inferred", factor_type: "cost", uncertainty_drivers: ["x"] } },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "decision_1", to: "opt_a", edge_type: "structural" },
+        { from: "decision_1", to: "opt_b", edge_type: "structural" },
+        { from: "opt_a", to: "fac_broken", edge_type: "causal" },
+        { from: "opt_b", to: "fac_broken", edge_type: "causal" },
+        { from: "fac_broken", to: "out_1", edge_type: "causal" },
+        { from: "out_1", to: "goal_1", edge_type: "causal" },
+      ],
+    };
+    const refused = validateGraph({ graph: asControllable });
+    expect(refused.errors.some((e: any) => e.code === "CONTROLLABLE_MISSING_DATA")).toBe(true);
+
+    // …and accounted for once the explicit unknown is present. Both halves in
+    // one test, so neither can drift away from the other.
+    asControllable.nodes[3].prior = { distribution: "uniform", range_min: 0, range_max: 1, prior_is_unquantified: true };
+    const accepted = validateGraph({ graph: asControllable });
+    expect(accepted.errors.some((e: any) => e.code === "CONTROLLABLE_MISSING_DATA")).toBe(false);
   });
 
   it("graph with constraint node passes DraftGraphOutput", () => {
@@ -855,8 +908,14 @@ describe("Structural parse — diagnostic logging", () => {
         default_seed: 42,
         nodes: [
           { id: "goal_1", kind: "goal", label: "Goal" },
-          // Node with partial data that fails NodeData union
-          { id: "fac_bad", kind: "factor", label: "Bad", data: { extractionType: "inferred" } },
+          // Node with partial data that fails the NodeData union.
+          // ⚠ The shape was `{ extractionType: "inferred" }` — a factor bag with
+          // no `value`. That is now LEGAL (`FactorData.value` is optional, so an
+          // honest "no estimate" is expressible), and this test needs a shape
+          // that genuinely still fails. A `value` of the wrong TYPE does: the
+          // relaxation is scoped to absence, not to type. The subject of this
+          // test — the diagnostic logging on a parse failure — is unchanged.
+          { id: "fac_bad", kind: "factor", label: "Bad", data: { value: "not a number", extractionType: "inferred" } },
         ],
         edges: [],
         meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },

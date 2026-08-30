@@ -1276,8 +1276,14 @@ describe("simpleRepair connectivity", () => {
     });
   });
 
-  describe("baseline default value consistency", () => {
-    it("controllable factor gets 0.5 default from ensureControllableFactorBaselines", async () => {
+  describe("baseline value consistency", () => {
+    it("controllable factor with no stated value gets an EXPLICIT UNKNOWN, not a 0.5 default", async () => {
+      // The block was named "baseline default value consistency" and asserted
+      // agreement on `0.5` between Stage 1 and the deterministic sweep's safety
+      // net. Stage 1 no longer defaults: a factor with no stated value now says
+      // so. The safety net still writes 0.5, but only for a factor carrying
+      // NEITHER a value nor an explicit unknown — a shape Stage 1 no longer
+      // produces — so there is no shared constant left to keep consistent.
       const { ensureControllableFactorBaselines } = await import("../../src/adapters/llm/normalisation.js");
       const response = {
         nodes: [
@@ -1290,7 +1296,14 @@ describe("simpleRepair connectivity", () => {
       };
       const result = ensureControllableFactorBaselines(response);
       const factor = result.response.nodes.find((n: any) => n.id === "fac_1");
-      expect(factor?.data?.value).toBe(0.5);
+      expect(result.unquantifiedFactors).toContain("fac_1");
+      expect(factor?.data?.value).toBeUndefined();
+      expect(factor?.prior).toEqual({
+        distribution: "uniform",
+        range_min: 0,
+        range_max: 1,
+        prior_is_unquantified: true,
+      });
       expect(factor?.data?.extractionType).toBe("inferred");
     });
   });

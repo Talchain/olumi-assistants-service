@@ -84,7 +84,14 @@ function observableViolations(ids: readonly string[]): ValidationIssue[] {
 const nodeById = (g: { nodes: TestNode[] }, id: string) => g.nodes.find((n) => n.id === id)!;
 
 describe("fixObservableMissingData — branch A, the DEFAULTED FILL", () => {
-  it("stamps `inferred`, so a value the repair invented is never attributed to the user", () => {
+  it("invents NO value at all, so there is nothing left to attribute to the user", () => {
+    // ⚠ STRENGTHENED, NOT RELAXED. This test used to assert that branch A's
+    // invented `0.5` was stamped `inferred`, so the fabrication could never be
+    // re-badged as the user's own words. Branch A no longer invents anything:
+    // it states an EXPLICIT UNKNOWN. The misattribution this suite exists to
+    // prevent is now impossible by construction rather than by labelling — the
+    // strongest form of the same claim — and every downstream honesty assertion
+    // below is kept and must still hold.
     const graph = graphOf([
       { id: "fac_burnout", kind: "factor", label: "Team burnout", category: "observable" },
     ]);
@@ -92,15 +99,19 @@ describe("fixObservableMissingData — branch A, the DEFAULTED FILL", () => {
     const repairs = fixObservableMissingData(graph as never, observableViolations(["fac_burnout"]));
 
     const node = nodeById(graph, "fac_burnout");
-    expect(node.data?.value).toBe(0.5);
+    expect(node.data?.value).toBeUndefined();
     expect(node.data?.extractionType).toBe("inferred");
-    // …and the two surfaces that read it agree, end of chain.
+    expect((node as Record<string, any>).prior?.prior_is_unquantified).toBe(true);
+    // …and the two surfaces that read it still agree, end of chain.
     expect(nodeProvenanceDisplay(node.data?.extractionType)).toBe("ai_inferred");
     expect(mayClaimFromBrief(node)).toBe(false);
-    // The repair still reports what it did — an honest stamp is not a silent one.
+    // The repair still reports what it did — an honest gap is not a silent one.
     expect(repairs).toHaveLength(1);
-    expect(repairs[0]!.action).toContain("inferred");
     expect(repairs[0]!.action).not.toContain("observed");
+    // The sentence can reach a user via `model_adjustments[].reason`, so it is
+    // plain English: it must not leak the disowned number or our own notation.
+    expect(repairs[0]!.action).not.toMatch(/0\.5/);
+    expect(repairs[0]!.action.toLowerCase()).toContain("no estimate");
   });
 });
 
