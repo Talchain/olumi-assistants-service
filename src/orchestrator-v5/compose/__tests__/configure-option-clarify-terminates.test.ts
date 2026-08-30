@@ -226,3 +226,49 @@ describe('the loop terminates', () => {
     }
   });
 });
+
+/**
+ * ⛔⛔ THE OUT-OF-SCALE OFFER MUST NOT RESTATE THE USER'S FIGURE ON A SECOND
+ * SCALE — the 100× error this PR authored inside the argument that no 100×
+ * error may exist.
+ *
+ * The offer's premise is *"you probably meant that as a percentage"*, which can
+ * only be true of a BARE figure. `modelUnitText` has already been divided by
+ * 100 for a percent reading, so interpolating it back into a `%` sentence
+ * divides twice. Measured at `a77979ec`:
+ *
+ *   "150%"  →  "If you meant 1.5% … write it with the % and I will set it."
+ *
+ * The reviewer's mutant R1 replaced this branch with arbitrary text and
+ * SURVIVED GREEN at 543/543 — there was no coverage at all. There is now.
+ */
+describe('the out-of-scale reply never re-scales the user\'s own figure', () => {
+  it.each(['150%', '250%', '2.7%', '60%'])(
+    'a figure the user ALREADY wrote as a percentage — "%s" — gets no percentage re-offer',
+    (message) => {
+      const text = compose(message);
+      // ⭐ THE HARM, AS AN ASSERTION: whatever else the reply says, it must not
+      // hand the user back a DIFFERENT number as if it were their meaning.
+      expect(text).not.toMatch(/If you meant [\d.]+% /);
+    },
+  );
+
+  it('a BARE figure still gets the offer, and at the value the user typed', () => {
+    // ⭐ THE OPPOSITE-DIRECTION TWIN. Gating the offer must not delete it: the
+    // bare-60-meaning-60% case is the one it exists for, and it is the stated
+    // residual of this PR's no-cliff design. If this goes green while the block
+    // above also goes green, the gate discriminates rather than suppressing.
+    const text = compose('60');
+    expect(text).toContain('If you meant 60% ');
+    // And the anchor is the factor's SCALE, never "the strongest effect" —
+    // the same false gloss (causal strength) Codex blocked in the ask itself.
+    expect(text).not.toContain('strongest effect');
+  });
+
+  it('the two directions are DISCRIMINATED, not merely both handled', () => {
+    // Pins the precondition (trap 13b): both cases must actually reach the
+    // out-of-scale branch, or the pair above is two tests of one empty path.
+    expect(compose('60')).toContain('outside the range');
+    expect(compose('150%')).toContain('outside the range');
+  });
+});

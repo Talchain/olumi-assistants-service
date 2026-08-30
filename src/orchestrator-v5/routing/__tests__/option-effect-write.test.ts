@@ -1525,3 +1525,54 @@ describe('W5 — an option-less graph declines by BOTH routes (equivalence demon
     ).toEqual({ matched: false, reason: 'option_not_named' });
   });
 });
+
+/**
+ * ⭐⭐ THE ASK SPEAKS HUMAN; THE ACKNOWLEDGEMENT MUST TOO.
+ *
+ * `"2.7%"` divides to `0.027000000000000003`, and this sentence used to
+ * interpolate that binary artefact straight at a user who had just answered a
+ * question phrased in plain English. **261 of 1,001 one-decimal percentages
+ * produce a float tail** — the arithmetic is exact, its decimal SPELLING is not.
+ */
+describe('the write acknowledgement never shows a floating-point tail', () => {
+  const ack = (committedValue: number) =>
+    formatOptionEffectWriteAck({
+      optionLabel: 'Keep current service',
+      factorLabel: 'Annual cost',
+      committedValue,
+    });
+
+  it('the defect corpus — every one-decimal percentage renders cleanly', () => {
+    // ⚠ SOURCED BY MEASUREMENT, NOT BY IMAGINATION: these are values produced by
+    // the real `/100` transform, sampled across the range the ask invites.
+    let tails = 0;
+    for (let pct = 0; pct <= 1000; pct += 1) {
+      const committed = (pct / 10) / 100; // "x.y%" as the binder computes it
+      if (committed > 1) continue;
+      if (/\d{6,}/.test(String(committed))) tails += 1;
+      expect(ack(committed), `committed=${committed}`).not.toMatch(/\d\.\d{7,}/);
+    }
+    // POSITIVE CONTROL — the corpus must actually CONTAIN the defect, or this
+    // whole block is a guard agreeing with itself (trap 13).
+    expect(tails, 'the corpus contains no float tails — the guard is vacuous')
+      .toBeGreaterThan(0);
+  });
+
+  it('the shortest exact spelling survives — this formats, it does not round', () => {
+    // ⚠ THE OPPOSITE-DIRECTION TWIN: suppressing the tail must not flatten
+    // honest precision or pad clean values.
+    expect(ack(0.6)).toContain('effect value of 0.6 ');
+    expect(ack(0)).toContain('effect value of 0 ');
+    expect(ack(1)).toContain('effect value of 1 ');
+    expect(ack(0.027)).toContain('effect value of 0.027 ');
+    expect(ack(0.125)).toContain('effect value of 0.125 ');
+  });
+
+  it('the stored value is untouched — only its rendering changed', () => {
+    // The formatter is display-only. A caller reading the number back gets what
+    // it wrote; nothing here may become a data transform.
+    const committed = 0.027000000000000003;
+    expect(ack(committed)).toContain('0.027');
+    expect(committed).toBe(0.027000000000000003);
+  });
+});

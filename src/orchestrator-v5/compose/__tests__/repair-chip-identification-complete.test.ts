@@ -194,4 +194,28 @@ describe('identification NOT complete — the teach-the-format branch is untouch
     expect(text).toContain(RETYPE_LEAD_IN);
     expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
   });
+
+  // ⛔⛔ P8, ON THE BRANCH THAT BROKE IT. This lane appended the percentage
+  // anchors here, so the branch advertised the bare-decimal sentence AND a
+  // percentage in one breath — and the obvious combination is refused by BOTH
+  // readers (`resolveOptionEffectWrite("…to 60%")` →
+  // `no_single_unit_scale_value`, measured).
+  //
+  // ⚠ THE REVIEWER'S MUTANT R2 SURVIVED GREEN AT 543/543 because nothing
+  // pinned this. It is pinned now: this branch advertises exactly ONE value
+  // form, and it is the one its own reader accepts.
+  it.each([
+    ['option named, factor absent', `Configure ${OPTION}`],
+    ['nothing named', 'help me with this'],
+  ])('%s — advertises ONE value form, never a second scale', (_name, message) => {
+    const text = compose(message);
+    // The routable sentence is present …
+    expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
+    // … and the percentage anchors, whose reader does NOT run on this branch,
+    // are absent. Asserted on the anchors themselves rather than on the hint
+    // constant, so re-wording the hint cannot silently un-pin this.
+    expect(text).not.toContain('0% means');
+    expect(text).not.toContain('100% means');
+    expect(text).not.toMatch(/\bpercentage\b/i);
+  });
 });

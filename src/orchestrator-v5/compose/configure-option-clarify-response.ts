@@ -288,8 +288,31 @@ export function composeConfigureOptionClarifyResponse(
     if (canonical === null) return null;
     const parsed = Number(canonical);
     if (!Number.isFinite(parsed) || (parsed >= 0 && parsed <= 1)) return null;
-    const asPercentage = parsed > 1 && parsed <= 100
-      ? ` If you meant ${canonical}% of the strongest effect, write it with the % and I will set it.`
+    // ⛔⛔ THE OFFER IS ONLY SOUND WHEN THE USER DID *NOT* ALREADY WRITE `%` —
+    // and getting this wrong authored a 100× error inside the PR whose whole
+    // argument is that no 100× error may exist.
+    //
+    // MEASURED at `a77979ec` by driving this composer:
+    //   "150%"  →  "If you meant 1.5% … write it with the % and I will set it."
+    // `canonical` is `modelUnitText`, which has ALREADY been divided by 100 for
+    // a percent reading (`toModelUnitText`). Interpolating it back into a `%`
+    // sentence divides a second time. The user wrote 150%; the product offered
+    // them 1.5% and called it their own meaning.
+    //
+    // ⭐ THE FIX IS NOT A FORMATTING ONE. The offer's PREMISE is "you probably
+    // meant this as a percentage" — which is only ever true of a BARE figure.
+    // Someone who typed the `%` has already told us the unit, so there is no
+    // second reading to offer and the honest answer is the range refusal alone.
+    // Gating on the user's own notation removes the arithmetic hazard by
+    // removing the branch that could not be right, rather than by rescaling
+    // inside it (a second scale transform is what caused this).
+    const userWrotePercent = answer.valueText.includes('%');
+    const asPercentage = !userWrotePercent && parsed > 1 && parsed <= 100
+      // ⚠ "of the strongest effect" was the SAME false gloss Codex blocked in
+      // the ask itself — effect STRENGTH, not the factor's level. The figure is
+      // an absolute assignment on the factor's own scale (`do(X=x)`, measured on
+      // deployed ISL `28fe0c95`), so the anchor is the scale, never the effect.
+      ? ` If you meant ${canonical}% of its full scale, write it with the % and I will set it.`
       : '';
     return [
       `I can't use ${answer.valueText} as that effect value — it is outside the range I can hold for this link.`,
@@ -480,8 +503,28 @@ export function composeConfigureOptionClarifyResponse(
         // lives in `option-effect-write.ts` — a shared writer this lane does not
         // own. The IDENTIFIED branches, which are the common path, now carry the
         // human anchors instead.
+        //
+        // ⛔⛔ AND THAT IS EXACTLY WHY THE HINT IS NOT APPENDED HERE. This lane
+        // shipped `MISSING_VALUE_ASK_FORMAT_HINT` on this branch and, in doing
+        // so, made a previously SELF-CONSISTENT branch contradictory: it
+        // advertised the bare-decimal sentence AND the percentage anchors in one
+        // breath, so the obvious combination —
+        //   `Set the X option's effect on Y to 60%`
+        // — is refused by BOTH readers. Measured at the head:
+        //   resolveOptionEffectWrite("…to 60%") → { matched: false,
+        //                                          reason: 'no_single_unit_scale_value' }
+        //
+        // That is a P8 violation authored by the very PR whose headline
+        // invariant is P8 — the ask and the acceptance share one owner so they
+        // cannot drift. The two forms have DIFFERENT owners and different
+        // readers, and pairing them in one sentence is what broke it.
+        //
+        // ⭐ SO THIS BRANCH ADVERTISES EXACTLY ONE FORM, the one its own reader
+        // accepts, and is pinned that way by
+        // `__tests__/repair-chip-identification-complete.test.ts`. The percentage
+        // anchors belong to the IDENTIFIED branches, where the binder that reads
+        // them is the one that runs.
         `Tell me what it changes, like this: ${example}`,
-        MISSING_VALUE_ASK_FORMAT_HINT,
       ].join(' ');
 
   return composeDirectAnswerResponse({
