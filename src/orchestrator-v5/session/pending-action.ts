@@ -700,9 +700,52 @@ export type ElicitTargetBaselinePending = PendingAction & {
 };
 
 /**
- * ROADMAP 2.918 — THE question-context gate for the elliptical answer
- * grammar. Returns the pending baseline question if and only if EXACTLY ONE
- * live `elicit_target_baseline` pending exists — two live questions make a
+ * R2918B — WHICH PENDING KINDS A BARE NUMBER COULD BE ANSWERING.
+ *
+ * Exhaustive `Record<PendingActionKind, boolean>`: adding a kind to the union
+ * is a COMPILE ERROR until it is classified here, so this is derived from the
+ * type rather than mirrored beside it (trap 12 — a hand-maintained list would
+ * drift silently, and the drift would read as a confident wrong bind).
+ *
+ * Membership is a claim about the QUESTION, not about the answer: "can a
+ * message that is nothing but a number be an answer to this ask?" If two such
+ * asks are live at once, a bare number is genuinely ambiguous between them and
+ * the elliptical carry must refuse.
+ */
+export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
+  // The asks whose natural answer IS a bare number, or a bare menu index.
+  elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
+  elicit_option_effect: true, // "give me a number from 0 to 1"
+  elicit_effect_target: true, // "which of these does your number belong to?"
+  elicit_edit_target: true, // "which factor, edge, option or value?"
+  set_factor_value: true, // a held quantity awaiting a target; "12" re-states it
+  clarify_v2_round: true, // a clarify round may offer numbered choices
+  proposed_concept: true, // the two-stage clarifier offers a choice
+  // The asks a bare number CANNOT be answering: each expects a confirmation or
+  // a chip click. This is the same reasoning
+  // `CONFIRMATION_EXPECTING_ACTION_TYPES` records one level up, and it is why
+  // the gate is not simply "sole among ALL live pendings": the receipt that
+  // ASKS the baseline question routinely ships a "Run the analysis" chip in the
+  // same commit, so an all-kinds rule would have made the feature unreachable.
+  run_analysis: false,
+  what_would_flip: false,
+  draft_graph: false,
+  apply_proposed_change: false,
+  edit_graph_add_risk: false,
+};
+
+/**
+ * ROADMAP 2.918, widened by R2918B — THE question-context gate for the
+ * elliptical answer grammar. Returns the pending baseline question if and only
+ * if it is the SOLE live ask that a bare number could be answering.
+ *
+ * As shipped this filtered to `elicit_target_baseline` first and only then
+ * required "exactly one", so a competing ask of a different kind was invisible
+ * to it and a bare "12%" bound to the baseline question no matter which
+ * question the user meant. Widening it is a precondition of hearing a bare
+ * "30": the other number-asking kinds take bare numbers too, so the looser
+ * grammar would otherwise have made a pre-existing mis-binding much easier to
+ * reach. Two live baseline questions still make a
  * bare "about 12%" ambiguous between targets, so it binds neither (the same
  * unanimity doctrine as the extractor's competitor rule, one level up).
  * Liveness via the shared predicate; `null` in every other case, so every
@@ -712,11 +755,16 @@ export function findSoleLiveElicitBaselinePending(
   pendings: readonly PendingAction[] | undefined,
   nowMs: number,
 ): ElicitTargetBaselinePending | null {
-  const live = filterLivePendingActions(pendings ?? [], nowMs).filter(
-    (pa): pa is ElicitTargetBaselinePending => pa.action.kind === 'elicit_target_baseline',
+  // LIVENESS, then CLAIMANTS, then IDENTITY. The order matters: filtering to
+  // the baseline kind FIRST (the shipped order) counts competitors out of
+  // existence before they can block anything.
+  const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
   );
-  if (live.length !== 1) return null;
-  return live[0]!;
+  if (claimants.length !== 1) return null;
+  const sole = claimants[0]!;
+  if (sole.action.kind !== 'elicit_target_baseline') return null;
+  return sole as ElicitTargetBaselinePending;
 }
 
 /**
