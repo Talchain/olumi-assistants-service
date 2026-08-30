@@ -1,0 +1,2681 @@
+{
+  "fixture_format": "factor_quantification_canonical_science_inputs_v1",
+  "scope": {
+    "evidence": "executed_deterministic_producer_canonical_json_reload",
+    "inputs": "authored_contract_controls_not_captured_live_model_output",
+    "consumer_format": "CEE_GraphV3_with_canonical_options_and_target_not_a_PLoT_or_ISL_projection",
+    "model_calls": 0,
+    "science_calls": 0,
+    "persistence": "in_memory_JSON_round_trip_not_a_service_or_database",
+    "fallback_production": "none_existing_system_resilience_authored_only_in_named_control"
+  },
+  "schema_binding": {
+    "package": "@talchain/schemas",
+    "version": "0.53.0",
+    "source_commit": "51dca7aa03efaef9160c8a9f806b804b7f8a68fd",
+    "vendor_tarball": "vendor/talchain-schemas-0.53.0.tgz",
+    "vendor_sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1",
+    "installed_factor_quantification_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+    "installed_graph_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+  },
+  "producer_source_sha256": {
+    "src/cee/factor-quantification/adopt.ts": "7835294aee1b302f7c872bb1a2e05e2e4d574fe33d3e5f1247a0a451877af94f",
+    "src/cee/factor-quantification/select.ts": "706da21a71133792bb1f0517b6c57a453420ab46481ee08fee57810de853afc6",
+    "src/cee/factor-quantification/estimate-response.ts": "b8b0c9bde08dd1133ccdef5ff3ca8b2961e6afdc3a6b8aeea17d9d0c24d43d10",
+    "src/schemas/cee-v3.ts": "5d93b59498221906623ceb0d3f19418fc0f6255eab2623da9ba74494d89070f9",
+    "scripts/semantic-contract/factor-quantification-fixtures.ts": "f536a20f5df0ce628877db868fa4b0afacfaff8cfca7b28219bc04b047080e4b"
+  },
+  "fixtures": [
+    {
+      "id": "reasoned_point_known_percent_scale",
+      "note": "A controlled structured estimator output is parsed and adopted. Value/std stay normalized; cap100, percent unit, unit_interval and derived raw75 survive reload.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "prior_is_unquantified": true,
+                "unit": "%",
+                "cap": 100,
+                "declared_scale": "unit_interval",
+                "source": "cee_repair"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [
+          {
+            "factor_id": "fac_availability",
+            "estimate_type": "estimated",
+            "value": 0.75,
+            "std": 0.05,
+            "reasoning": "15 available staff divided by 20 scheduled staff gives 0.75. The supplied attendance context states daily available-share standard deviation 0.05 on the same unit-interval scale. This derived quantity remains an Olumi estimate from supplied context.",
+            "basis": [
+              "attendance_counts",
+              "attendance_variation"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "id": "attendance_counts",
+            "text": "15 of 20 scheduled staff are available today.",
+            "factor_ids": [
+              "fac_availability"
+            ],
+            "kind": "brief_context"
+          },
+          {
+            "id": "attendance_variation",
+            "text": "The attendance context states a daily available-share standard deviation of 0.05.",
+            "factor_ids": [
+              "fac_availability"
+            ],
+            "kind": "brief_context"
+          }
+        ]
+      },
+      "executed": {
+        "operation": "adoptFactorEstimates",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": true,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "4febd698faf3c63a2e42e9f43b00964052e2744c1e9ad9d8d8dd68a9395094fa",
+        "estimated_ids": [
+          "fac_availability"
+        ],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "4febd698faf3c63a2e42e9f43b00964052e2744c1e9ad9d8d8dd68a9395094fa",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "std": 0.05,
+                "reasoning": {
+                  "rationale": "15 available staff divided by 20 scheduled staff gives 0.75. The supplied attendance context states daily available-share standard deviation 0.05 on the same unit-interval scale. This derived quantity remains an Olumi estimate from supplied context.",
+                  "context_basis": [
+                    "attendance_counts",
+                    "attendance_variation"
+                  ]
+                },
+                "value": 0.75,
+                "unit": "%",
+                "source": "cee_inference",
+                "raw_value": 75,
+                "cap": 100,
+                "extractionType": "inferred",
+                "declared_scale": "unit_interval"
+              },
+              "category": "external"
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "point",
+        "carrier": "observed_state",
+        "protected": true,
+        "source": "cee_inference"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "observed_state",
+        "selected_source": "cee_inference",
+        "observed_state_source": "cee_inference",
+        "prior_source": null,
+        "observed_state_reasoning": {
+          "rationale": "15 available staff divided by 20 scheduled staff gives 0.75. The supplied attendance context states daily available-share standard deviation 0.05 on the same unit-interval scale. This derived quantity remains an Olumi estimate from supplied context.",
+          "context_basis": [
+            "attendance_counts",
+            "attendance_variation"
+          ]
+        },
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "reasoned_uniform_known_percent_scale",
+      "note": "Uniform shape is positively justified by an authored model assumption. No midpoint or new point value is manufactured.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "prior_is_unquantified": true,
+                "unit": "%",
+                "cap": 100,
+                "declared_scale": "unit_interval",
+                "source": "cee_repair"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [
+          {
+            "factor_id": "fac_availability",
+            "estimate_type": "estimated",
+            "distribution": "uniform",
+            "range_min": 0.65,
+            "range_max": 0.85,
+            "reasoning": "This authored control explicitly assigns equal density to available shares from 0.65 to 0.85. These are uniform support bounds, not a confidence interval; the uniform shape comes from the supplied model assumption, not absence of information.",
+            "basis": [
+              "controlled_uniform_rule"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "id": "controlled_uniform_rule",
+            "text": "For this authored control, tomorrow's available share is uniformly distributed between 0.65 and 0.85.",
+            "factor_ids": [
+              "fac_availability"
+            ],
+            "kind": "model_context"
+          }
+        ]
+      },
+      "executed": {
+        "operation": "adoptFactorEstimates",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": true,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "15cbcdc6659f0a9ce39aa4ebc74742bbd46355d1b5d402033f2502838037c2f5",
+        "estimated_ids": [
+          "fac_availability"
+        ],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "15cbcdc6659f0a9ce39aa4ebc74742bbd46355d1b5d402033f2502838037c2f5",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0.65,
+                "range_max": 0.85,
+                "unit": "%",
+                "cap": 100,
+                "declared_scale": "unit_interval",
+                "source": "cee_inference",
+                "reasoning": {
+                  "rationale": "This authored control explicitly assigns equal density to available shares from 0.65 to 0.85. These are uniform support bounds, not a confidence interval; the uniform shape comes from the supplied model assumption, not absence of information.",
+                  "context_basis": [
+                    "controlled_uniform_rule"
+                  ]
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "distribution",
+        "carrier": "prior",
+        "protected": true,
+        "source": "cee_inference"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "prior",
+        "selected_source": "cee_inference",
+        "observed_state_source": null,
+        "prior_source": "cee_inference",
+        "observed_state_reasoning": null,
+        "prior_reasoning": {
+          "rationale": "This authored control explicitly assigns equal density to available shares from 0.65 to 0.85. These are uniform support bounds, not a confidence interval; the uniform shape comes from the supplied model assumption, not absence of information.",
+          "context_basis": [
+            "controlled_uniform_rule"
+          ]
+        },
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "model_unknown_preserves_declared_scale",
+      "note": "A parsed model refusal carries model reasoning and known scale metadata, with no numeric quantity or distribution claim.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "prior_is_unquantified": true,
+                "unit": "%",
+                "cap": 100,
+                "declared_scale": "unit_interval",
+                "source": "cee_repair"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [
+          {
+            "factor_id": "fac_availability",
+            "estimate_type": "unknown",
+            "reasoning": "The scale is defined, but no attendance observations or defensible uncertainty model are supplied. A percentage domain does not justify a central value, standard deviation or uniform range.",
+            "basis": [
+              "no_attendance_data"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "id": "no_attendance_data",
+            "text": "No attendance observations or uncertainty model have been supplied.",
+            "factor_ids": [
+              "fac_availability"
+            ],
+            "kind": "brief_context"
+          }
+        ]
+      },
+      "executed": {
+        "operation": "adoptFactorEstimates",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": true,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "26798419c6376cdac8af67ab0dad75f3b0a9a3a8a584ccb48f30c039bdf2b8c9",
+        "estimated_ids": [],
+        "model_unknown_ids": [
+          "fac_availability"
+        ],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "26798419c6376cdac8af67ab0dad75f3b0a9a3a8a584ccb48f30c039bdf2b8c9",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "prior_is_unquantified": true,
+                "unit": "%",
+                "cap": 100,
+                "declared_scale": "unit_interval",
+                "source": "cee_inference",
+                "reasoning": {
+                  "rationale": "The scale is defined, but no attendance observations or defensible uncertainty model are supplied. A percentage domain does not justify a central value, standard deviation or uniform range.",
+                  "context_basis": [
+                    "no_attendance_data"
+                  ]
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "unknown",
+        "carrier": "prior",
+        "protected": false,
+        "source": "cee_inference"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "prior",
+        "selected_source": "cee_inference",
+        "observed_state_source": null,
+        "prior_source": "cee_inference",
+        "observed_state_reasoning": null,
+        "prior_reasoning": {
+          "rationale": "The scale is defined, but no attendance observations or defensible uncertainty model are supplied. A percentage domain does not justify a central value, standard deviation or uniform range.",
+          "context_basis": [
+            "no_attendance_data"
+          ]
+        },
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "operational_unknown_without_model_reasoning",
+      "note": "markUnresolved writes a previously absent quantity as unknown. No model output or model-authored refusal is claimed.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external"
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "markUnresolved",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": true,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "3b7444c400bb4673c36a30756ee1328d95e9fc12f7028b2b80d7f484f248320f",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "3b7444c400bb4673c36a30756ee1328d95e9fc12f7028b2b80d7f484f248320f",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "prior_is_unquantified": true,
+                "source": "cee_repair"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "unknown",
+        "carrier": "prior",
+        "protected": false,
+        "source": "cee_repair"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "prior",
+        "selected_source": "cee_repair",
+        "observed_state_source": null,
+        "prior_source": "cee_repair",
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "authored_existing_resilience_uniform",
+      "note": "The sole explicitly authored existing system-resilience input. It is preserved for downstream discrimination; neither adoption nor markUnresolved generated this fallback.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 1,
+                "source": "cee_repair",
+                "value_tier": "fallback_default",
+                "prior_is_unquantified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "preserve_existing_input",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": false,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "bfbcd71e9949684195d90a4e80c383511963a22358452365a24404fcd750857c",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "bfbcd71e9949684195d90a4e80c383511963a22358452365a24404fcd750857c",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 1,
+                "source": "cee_repair",
+                "value_tier": "fallback_default",
+                "prior_is_unquantified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "fallback",
+        "carrier": "prior",
+        "protected": false,
+        "source": "cee_repair"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "prior",
+        "selected_source": "cee_repair",
+        "observed_state_source": null,
+        "prior_source": "cee_repair",
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "supplied_ignorance_user_assumption",
+      "note": "A user-supplied ignorance distribution remains user_assumption and protected. The shared selector labels its flagged numeric support fallback, without attributing it to CEE or converting it to a model estimate.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 1,
+                "source": "user_assumption",
+                "prior_is_unquantified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "preserve_existing_input",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": false,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "7ad7b0176003a02d0a87722461da9bbabe0f0b6f95cfaf24cd717e0c96e90473",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "7ad7b0176003a02d0a87722461da9bbabe0f0b6f95cfaf24cd717e0c96e90473",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 1,
+                "source": "user_assumption",
+                "prior_is_unquantified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "fallback",
+        "carrier": "prior",
+        "protected": true,
+        "source": "user_assumption"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "prior",
+        "selected_source": "user_assumption",
+        "observed_state_source": null,
+        "prior_source": "user_assumption",
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "legacy_unattributed_point",
+      "note": "An existing point with absent source is protected and remains unattributed. It is not relabelled user input, evidence, AI inference or fallback.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.37
+              },
+              "category": "external"
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "preserve_existing_input",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": false,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "f4a137a230fe47c243178df4034c984d558ed43e3edd648802f079a892b8befa",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "f4a137a230fe47c243178df4034c984d558ed43e3edd648802f079a892b8befa",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.37
+              },
+              "category": "external"
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "point",
+        "carrier": "observed_state",
+        "protected": true,
+        "source": null
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "observed_state",
+        "selected_source": null,
+        "observed_state_source": null,
+        "prior_source": null,
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "accepted_user_override_012_old_unflagged_prior",
+      "note": "Exact accepted user_override point wins selection over a genuinely source-absent old unflagged prior. The old prior is preserved without attribution, deletion or fallback classification.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.12,
+                "unit": "%",
+                "source": "user_override",
+                "raw_value": 12,
+                "cap": 100,
+                "declared_scale": "unit_interval"
+              },
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 0.132
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "preserve_existing_input",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": false,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "5da974206c03f13689f33cf61b2556b4638c4330129390977590b9435e5fe435",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "5da974206c03f13689f33cf61b2556b4638c4330129390977590b9435e5fe435",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.12,
+                "unit": "%",
+                "source": "user_override",
+                "raw_value": 12,
+                "cap": 100,
+                "declared_scale": "unit_interval"
+              },
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 0.132
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "point",
+        "carrier": "observed_state",
+        "protected": true,
+        "source": "user_override"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "observed_state",
+        "selected_source": "user_override",
+        "observed_state_source": "user_override",
+        "prior_source": null,
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    },
+    {
+      "id": "accepted_user_override_024_old_unflagged_prior",
+      "note": "Exact accepted user_override point wins selection over a genuinely source-absent old unflagged prior. The old prior is preserved without attribution, deletion or fallback classification.",
+      "target_factor_id": "fac_availability",
+      "producer_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.24,
+                "unit": "%",
+                "source": "user_override",
+                "raw_value": 24,
+                "cap": 100,
+                "declared_scale": "unit_interval"
+              },
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 0.132
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "structured_estimates": [],
+        "basis": []
+      },
+      "executed": {
+        "operation": "preserve_existing_input",
+        "schema_parser": "parseFactorEstimates",
+        "adopter": "adoptFactorEstimates",
+        "unresolved_writer_called": false,
+        "model_called": false,
+        "graph_redrawn": false
+      },
+      "canonical_write": {
+        "graph_sha256": "a6bca2d2401632693a6e8b233f9ec9b0f2c3ef6252e99bd2447d3d5e45d3f84c",
+        "estimated_ids": [],
+        "model_unknown_ids": [],
+        "rejected": []
+      },
+      "json_reload": {
+        "parser": "GraphV3",
+        "graph_sha256": "a6bca2d2401632693a6e8b233f9ec9b0f2c3ef6252e99bd2447d3d5e45d3f84c",
+        "unchanged": true
+      },
+      "science_input": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "goal_service",
+              "kind": "goal",
+              "label": "Dependable service"
+            },
+            {
+              "id": "opt_a",
+              "kind": "option",
+              "label": "Lower additional staffing",
+              "interventions": {
+                "fac_staffing": 0.2
+              }
+            },
+            {
+              "id": "opt_b",
+              "kind": "option",
+              "label": "Higher additional staffing",
+              "interventions": {
+                "fac_staffing": 0.8
+              }
+            },
+            {
+              "id": "fac_staffing",
+              "kind": "factor",
+              "label": "Additional staffing share",
+              "observed_state": {
+                "value": 0.1,
+                "source": "user_override",
+                "declared_scale": "unit_interval"
+              },
+              "category": "controllable"
+            },
+            {
+              "id": "fac_availability",
+              "kind": "factor",
+              "label": "Available share of scheduled staff",
+              "observed_state": {
+                "value": 0.24,
+                "unit": "%",
+                "source": "user_override",
+                "raw_value": 24,
+                "cap": 100,
+                "declared_scale": "unit_interval"
+              },
+              "category": "external",
+              "prior": {
+                "distribution": "uniform",
+                "range_min": 0,
+                "range_max": 0.132
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "opt_a",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "opt_b",
+              "to": "fac_staffing",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_staffing",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            },
+            {
+              "from": "fac_availability",
+              "to": "goal_service",
+              "strength": {
+                "mean": 0.4,
+                "std": 0.1
+              },
+              "exists_probability": 0.9,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "reasoning": "Fixed authored surrounding model for this contract control; not measured evidence."
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "id": "opt_a",
+            "label": "Lower additional staffing",
+            "interventions": {
+              "fac_staffing": 0.2
+            }
+          },
+          {
+            "id": "opt_b",
+            "label": "Higher additional staffing",
+            "interventions": {
+              "fac_staffing": 0.8
+            }
+          }
+        ],
+        "target_node": "goal_service"
+      },
+      "selected": {
+        "kind": "point",
+        "carrier": "observed_state",
+        "protected": true,
+        "source": "user_override"
+      },
+      "reasoning_attribution": {
+        "selected_carrier": "observed_state",
+        "selected_source": "user_override",
+        "observed_state_source": "user_override",
+        "prior_source": null,
+        "observed_state_reasoning": null,
+        "prior_reasoning": null,
+        "model_reasoning_is_evidence": false
+      },
+      "checks": {
+        "canonical_reload_unchanged": true,
+        "expected_quantity_selection": true,
+        "supplied_and_unrelated_values_unchanged": true
+      }
+    }
+  ]
+}

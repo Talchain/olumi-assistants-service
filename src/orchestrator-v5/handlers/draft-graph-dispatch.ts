@@ -63,6 +63,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { loadMostRecentPendingActions } from '../build-turn-context.js';
 import {
@@ -702,6 +703,7 @@ export async function dispatchDraftGraph(
     // nothing, timed out, or errored — NOT gated on whether a merge landed.
     // Drives llm_calls_used accounting.
     let m2LlmCallsUsed = 0;
+    let factorLlmCallsUsed = 0;
 
     // ── V6 dual-model draft enrichment (flag-gated, default OFF) ───────────
     // When CEE_V6_DUAL_DRAFT_ENABLED is on, an M2 review pass proposes
@@ -760,6 +762,36 @@ export async function dispatchDraftGraph(
           'V6 dual-draft enrichment threw — degrading to M1 draft',
         );
       }
+    }
+
+    // Factor quantities are adopted before the SAME atomic commit, returned graph,
+    // readiness and hash are built. No second graph/persistence pipeline.
+    if (config.features.factorQuantificationEnabled && draftResult.graphOutput !== null) {
+      const { quantifyDraftFactors } = await import('../../cee/factor-quantification/index.js');
+      const before = buildCanonicalAnalysisReadyFromGraph(draftResult.graphOutput);
+      const outcome = await quantifyDraftFactors({
+        graph: draftResult.graphOutput,
+        brief: effectiveBrief,
+        options: (before?.options ?? []).map(option => ({ ...option, id: option.option_id })),
+        targetId: before?.goal_node_id,
+        requestId,
+        requestStartMs: params.requestStartMs ?? startedAt,
+      });
+      factorLlmCallsUsed = outcome.model.metadata.call_made ? 1 : 0;
+      const canonicalReadiness = buildCanonicalAnalysisReadyFromGraph(outcome.graph);
+      draftResult = { ...draftResult, graphOutput: outcome.graph,
+        analysisReady: canonicalReadiness ?? draftResult.analysisReady };
+      const call = outcome.model.metadata;
+      if (call.call_made) promptAttribution.record({
+        taskId: 'factor_quantification', role: 'factor_quantification',
+        provider: call.provider ?? 'unknown', model: call.model ?? call.resolved_model ?? undefined,
+        inputTokens: call.input_tokens ?? undefined, outputTokens: call.output_tokens ?? undefined,
+        latencyMs: call.latency_ms, stopReason: null,
+        promptHash: call.prompt_hash, promptVersion: call.prompt_version,
+        promptId: 'factor_quantification', promptSource: 'code_constant',
+      });
+      emit('cee.factor_quantification', { request_id: requestId, scenario_id: payload.scenario_id, phase: 'precommit',
+        outcome: outcome.model.kind, ...outcome.metrics });
     }
 
     // llm_calls_used: the unified pipeline's draft stage makes at least one
@@ -898,7 +930,7 @@ export async function dispatchDraftGraph(
         // turn (call-based, not merge-based — a call that merged nothing /
         // timed out / errored still counts). m2LlmCallsUsed is 0 for the
         // no-call inert paths (sentinel, headroom, model-resolution gate).
-        llm_calls_used: 1 + m2LlmCallsUsed,
+        llm_calls_used: 1 + m2LlmCallsUsed + factorLlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         // A3 graph CAS observe-mode: the draft path is DELIBERATELY

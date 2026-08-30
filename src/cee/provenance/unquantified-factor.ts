@@ -95,6 +95,8 @@ export interface UnquantifiedPrior {
   readonly range_min: number;
   readonly range_max: number;
   readonly prior_is_unquantified: true;
+  readonly source: 'cee_repair';
+  readonly value_tier: 'fallback_default';
 }
 
 /**
@@ -110,6 +112,8 @@ export function buildUnquantifiedPrior(): UnquantifiedPrior {
     range_min: IGNORANCE_PRIOR_RANGE.range_min,
     range_max: IGNORANCE_PRIOR_RANGE.range_max,
     [PRIOR_IS_UNQUANTIFIED_FIELD]: true,
+    source: 'cee_repair',
+    value_tier: 'fallback_default',
   };
 }
 

@@ -1,4 +1,4 @@
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { describe, expect, it } from 'vitest';
 import { FACTOR_ESTIMATES_JSON_SCHEMA, parseFactorEstimates } from '../estimate-response.js';
 

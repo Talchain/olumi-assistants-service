@@ -132,7 +132,7 @@ export async function callFactorQuantification(input: FactorQuantificationCallIn
         system: FACTOR_QUANTIFICATION_SYSTEM_PROMPT,
         userMessage,
         temperature: 0,
-        maxTokens: MAX_OUTPUT_TOKENS,
+        maxTokens: config.cee.maxTokens.factor_quantification ?? MAX_OUTPUT_TOKENS,
         thinking: { type: 'disabled' },
         outputSchema: FACTOR_ESTIMATES_JSON_SCHEMA,
       }, { requestId: input.requestId, timeoutMs: remainingMs, signal: controller.signal }),

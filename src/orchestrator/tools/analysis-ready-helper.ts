@@ -8,6 +8,9 @@
  */
 
 import { GraphV3 } from "../../schemas/cee-v3.js";
+import { selectFactorQuantity } from "@talchain/schemas";
+import { config } from "../../config/index.js";
+import { comparisonFactorRequirements } from "../../cee/factor-quantification/select.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
@@ -73,6 +76,7 @@ export type CanonicalReadinessIssueCode =
   | 'MISSING_OPTION_CONNECTION'
   | 'CONSTRAINT_REVIEW_REQUIRED'
   | 'UNREACHABLE_CONTROLLABLE_FACTOR'
+  | 'FACTOR_QUANTITY_UNKNOWN'
   | 'INTERNAL_ERROR';
 
 export interface CanonicalReadinessIssue {
@@ -127,7 +131,7 @@ export interface CanonicalReadinessRepairChange {
 
 export interface CanonicalReadinessRequiredInput {
   readonly issue_id: string;
-  readonly kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'constraint_review';
+  readonly kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'factor_value' | 'value_scale' | 'constraint_review';
   readonly prompt: string;
   readonly option_id?: string;
   readonly factor_id?: string;
@@ -817,17 +821,19 @@ function requiredInputForIssue(
 ): CanonicalReadinessRequiredInput | null {
   if (issue.repairability !== 'human_input_required') return null;
   const kind: CanonicalReadinessRequiredInput['kind'] =
-    issue.category === 'graph_structure'
-      ? 'model_structure'
-      : issue.code === 'CONSTRAINT_REVIEW_REQUIRED'
-        ? 'constraint_review'
-        : issue.category === 'option_mapping'
-          ? 'option_mapping'
-          : issue.category === 'numeric_integrity'
-            || issue.code === 'NO_CAP_UNRECOVERABLE'
-            || issue.code === 'UNIT_MISMATCH'
-            ? 'value_scale'
-            : 'option_effect_value';
+    issue.code === 'FACTOR_QUANTITY_UNKNOWN'
+      ? 'factor_value'
+      : issue.category === 'graph_structure'
+        ? 'model_structure'
+        : issue.code === 'CONSTRAINT_REVIEW_REQUIRED'
+          ? 'constraint_review'
+          : issue.category === 'option_mapping'
+            ? 'option_mapping'
+            : issue.category === 'numeric_integrity'
+              || issue.code === 'NO_CAP_UNRECOVERABLE'
+              || issue.code === 'UNIT_MISMATCH'
+              ? 'value_scale'
+              : 'option_effect_value';
   return {
     issue_id: issue.issue_id,
     kind,
@@ -998,6 +1004,48 @@ function appendSemanticIssues(
 }
 
 /**
+ * Missing baseline quantities block only a computation which actually reads
+ * them. The selector owns the retained-option/do-override rule. Existing
+ * numeric priors (including labelled resilience support) stay with Science's
+ * policy; this gate never reclassifies them as an absent value.
+ */
+function appendRequiredFactorQuantityIssues(
+  graph: GraphV3T,
+  semantic: AnalysisReadyPayload | undefined,
+  issues: CanonicalReadinessIssue[],
+): void {
+  if (!semantic) return;
+  const requirements = comparisonFactorRequirements(
+    graph,
+    semantic.options.map((option) => ({ ...option, id: option.option_id })),
+    semantic.goal_node_id,
+  );
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  for (const requirement of requirements) {
+    // Recovering an excluded status-quo baseline schedules estimation/coaching;
+    // it does not block a comparison the existing gate can already submit.
+    if (requirement.operation !== 'isl.factor_baseline_sampling') continue;
+    const node = nodes.get(requirement.factor_id);
+    if (!node) continue;
+    const quantity = selectFactorQuantity(node);
+    // A persisted nonnumeric unknown remains a real missing computation input
+    // if its producer is later disabled. No numeric/ambiguous claim is blocked
+    // by this rule, and old absent baselines retain their rollout posture.
+    if (quantity.kind !== 'unknown'
+      && !(config.features.factorQuantificationEnabled && quantity.kind === 'missing')) continue;
+    issues.push({
+      issue_id: `factor_quantity_${node.id}`,
+      code: 'FACTOR_QUANTITY_UNKNOWN',
+      category: 'numeric_integrity',
+      message: `The baseline for "${node.label}" remains unknown and is needed for this comparison. Calibrate it with a grounded value or range before analysis.`,
+      repairability: 'human_input_required',
+      factor_id: node.id,
+      factor_label: node.label,
+    });
+  }
+}
+
+/**
  * The sole whole-model readiness assessment. It exhaustively records every
  * structural and semantic issue, while separately identifying the carrier
  * normalisations that are safe because they preserve user-supplied values.
@@ -1121,6 +1169,7 @@ export function assessCanonicalAnalysisReadiness(
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
     appendSemanticIssues(semantic, blockingIssues);
+    appendRequiredFactorQuantityIssues(proposalGraph as GraphV3T, semantic, blockingIssues);
 
     // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
     // where the complete issue set exists.

@@ -695,7 +695,7 @@ export interface GraphPatchBlockData {
       }>;
       unresolved_inputs: Array<{
         issue_id: string;
-        kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'constraint_review';
+        kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'factor_value' | 'constraint_review';
         prompt: string;
         option_id?: string;
         factor_id?: string;

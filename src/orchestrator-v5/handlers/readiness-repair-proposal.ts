@@ -114,6 +114,7 @@ const READINESS_REQUIRED_INPUT_KINDS: ReadonlySet<ReadinessRequiredInputKind> = 
   'option_mapping',
   'option_effect_value',
   'value_scale',
+  'factor_value',
   'constraint_review',
 ]);
 const READINESS_REPAIR_PROPOSAL_KEYS: ReadonlySet<string> = new Set([

@@ -60,15 +60,10 @@ export type FactorValueTier = "explicit" | "inferred_with_evidence" | "fallback_
  * change. It rides an additive field on `data` instead, which the graph
  * schemas preserve via `.passthrough()`.
  *
- * ⚠⚠ AND THE LIMIT OF THAT, STATED because the sentence above invites the wrong
- * inference: `.passthrough()` preserves the field across ZOD PARSING, which is
- * NOT the same as reaching the wire. `transformNodeToV3` rebuilds each node
- * field-by-field rather than spreading it, and `value_tier` appears ZERO times
- * in `transforms/schema-v3.ts` (positive control: `extractionType` IS forwarded
- * there, `:371`). **This stamp is pipeline-internal and does not cross the V3
- * boundary today.** That is sufficient for its purpose — stopping the launderer,
- * which runs inside the pipeline — and insufficient for labelling the render,
- * which is named as the remaining work rather than assumed done.
+ * Factor Quantification now forwards this declaration through V3 using the
+ * shared factor carrier. It is no longer safe to assume the stamp expires at
+ * the end of a turn. Accepted user mutations must call the shared selected-
+ * carrier cleanup helper; Graph Truth owns that mutation hook.
  *
  * The name deliberately contains no
  * `"user"`, `"specified"` or `"manual"` substring: `mapToV3ProvenanceSource`
@@ -198,12 +193,10 @@ export function factorValueIsFabricated(node: unknown): boolean {
  * short-circuit deleted, `{1.12, explicit, stamped}` still narrows to
  * [0.56, 1.68], and every containment test still passes.
  *
- * THE ONE RESIDUAL COST, and why it is unreachable: a STALE stamp landing on a
- * value that later becomes real. `value_tier` occurs ZERO times in the V3
- * transform (`src/cee/transforms/schema-v3.ts`; contrast control:
- * `extractionType` occurs 24 times and IS forwarded at `:371`), the persisted
- * graph is `GraphV3T`, and the V3 transform runs BEFORE the persist site. So no
- * stamp survives a turn, and a stale one cannot exist.
+ * A stale stamp can now survive persistence. The shared selectFactorQuantity
+ * and clearSupersededFactorMarkers contracts protect a fresh supplied value
+ * and retire only superseded system qualifiers. This historical pipeline
+ * predicate is not an authority selector for persisted models.
  */
 
 /**

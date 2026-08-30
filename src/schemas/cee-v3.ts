@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS, ObservedStateSchema, PriorSchema } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
@@ -50,6 +50,9 @@ export type FactorTypeV3T = z.infer<typeof FactorTypeV3>;
  * Observed state for factor nodes with quantitative values.
  */
 export const ObservedStateV3 = z.object({
+  std: ObservedStateSchema.shape.std,
+  reasoning: ObservedStateSchema.shape.reasoning,
+  value_tier: ObservedStateSchema.shape.value_tier,
   /** Current or proposed value */
   value: z.number(),
   /** Baseline/original value */
@@ -229,7 +232,7 @@ export const NodeV3 = z.object({
   encoding_map: z.record(z.string(), z.string()).optional(),
   /** Prior distribution data for external factors (set by LLM or synthesised by unreachable-factors repair).
    *  ISL needs prior ranges to run Monte Carlo sampling on external factors. */
-  prior: z.object({ distribution: z.string(), range_min: z.number(), range_max: z.number() }).passthrough().optional(),
+  prior: PriorSchema.optional(),
   /** Factor type classification (e.g. "continuous", "categorical") — promoted to node level by repair stages */
   factor_type: z.string().optional(),
   /** Extraction type: "extracted" or "inferred" — promoted to node level by repair stages */

@@ -45,7 +45,8 @@ import type { AnalysisReadyPayloadT } from "../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analysis-ready.js";
 import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant } from "../validation/integrity-sentinel.js";
 import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD } from "../constants.js";
-import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
+import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+import { readStampedFactorValueTier } from '../provenance/factor-value-provenance.js';
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { assertsBriefExtraction } from "../factor-extraction/brief-extraction-claim.js";
@@ -358,8 +359,17 @@ export function transformNodeToV3(
     };
   } else if (isFactorData(node.data) && node.data.value !== undefined) {
     // Map extractionType to V3 source format
-    const source: "brief_extraction" | "cee_inference" =
-      node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
+    const suppliedSource = (node.data as Record<string, unknown>).source;
+    const knownSource = OBSERVED_STATE_SOURCE_LITERALS.find(value => value === suppliedSource);
+    if (suppliedSource !== undefined && knownSource === undefined) {
+      // The existing CEE wire source enum cannot preserve an unknown source.
+      // Reject that contract conflict; never coerce it into brief attribution.
+      throw new Error(`Unsupported factor source on ${v3Node.id}`);
+    }
+    const source = knownSource
+      ?? (readStampedFactorValueTier(node) === 'fallback_default' ? 'cee_repair'
+        : node.data.extractionType === 'inferred' ? 'cee_inference'
+          : node.data.extractionType === 'explicit' || node.data.extractionType === 'observed' ? 'brief_extraction' : undefined);
 
     // ⭐ A WRITTEN `cap` MUST SHIP WITH THE `raw_value` THAT CORROBORATES IT.
     //
@@ -396,6 +406,10 @@ export function transformNodeToV3(
       baseline: node.data.baseline,
       unit: node.data.unit,
       source,
+      // Preserve the producer's explicit fallback declaration through the
+      // canonical boundary; missing provenance is not a fallback declaration.
+      ...(readStampedFactorValueTier(node) !== undefined
+        ? { value_tier: readStampedFactorValueTier(node) } : {}),
       // Pass through factor metadata fields
       ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
       ...(derivedRawValue !== undefined && { raw_value: derivedRawValue }),
@@ -508,7 +522,7 @@ export function transformNodeToV3(
   // Path B (controllable/observable factors): use observed_state fields via
   //   synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
   if (v3Node.display_value === undefined && v3Node.kind === "factor") {
-    if ((node as any).category === "external" && v3Node.prior) {
+    if ((node as any).category === "external" && v3Node.prior && 'range_min' in v3Node.prior && 'range_max' in v3Node.prior) {
       // Path A: external factor — synthesise from prior range
       const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
       // ⭐ THE SCALE IS DECLARED BY A PRODUCER, NOT SNIFFED BY THIS CONSUMER.

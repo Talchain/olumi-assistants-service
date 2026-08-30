@@ -189,6 +189,7 @@ const PINNED_TASK_RESOLUTIONS: Readonly<Record<string, string>> = Object.freeze(
   // The two tasks this lane moves, pinned to their post-fix identities.
   critique_graph: "anthropic / claude-sonnet-5",
   explain_diff: "anthropic / claude-sonnet-5",
+  factor_quantification: "anthropic / claude-sonnet-5",
 });
 
 describe("router task provider assignment is per-task", () => {

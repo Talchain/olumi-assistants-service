@@ -158,6 +158,8 @@ describe("A — a factor with no stated value emits an explicit unknown, not 0.5
       range_min: 0,
       range_max: 1,
       [PRIOR_IS_UNQUANTIFIED_FIELD]: true,
+      source: 'cee_repair',
+      value_tier: 'fallback_default',
     });
     //  3. … and the range is LABELLED as ignorance, which is the only thing
     //     that stops a downstream reader treating U(0,1) as an estimate.
