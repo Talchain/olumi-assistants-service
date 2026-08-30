@@ -200,6 +200,39 @@
                             "type": "number",
                             "exclusiveMinimum": 0
                           },
+                          "reasoning": {
+                            "type": "object",
+                            "properties": {
+                              "rationale": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Why Olumi estimated this quantity or could not estimate it. This is model reasoning, not evidence."
+                              },
+                              "context_basis": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "description": "IDs of supplied context items used in the reasoning. The producer must validate these IDs; naming one does not establish evidence authority."
+                              }
+                            },
+                            "required": [
+                              "rationale",
+                              "context_basis"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Model rationale and supplied context references, not evidence authority. Absence means no model reasoning was recorded."
+                          },
+                          "value_tier": {
+                            "type": "string",
+                            "enum": [
+                              "explicit",
+                              "inferred_with_evidence",
+                              "fallback_default"
+                            ],
+                            "description": "Existing producer classification. Absence means no tier was declared; source attribution remains independent. fallback_default explicitly marks a resilience value. inferred_with_evidence alone is not evidence authority."
+                          },
                           "baseline": {
                             "type": "number"
                           },
@@ -285,6 +318,14 @@
                         "enum": [
                           "level",
                           "delta"
+                        ]
+                      },
+                      "goal_direction": {
+                        "type": "string",
+                        "enum": [
+                          "maximise",
+                          "minimise",
+                          "target"
                         ]
                       }
                     },
