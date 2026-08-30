@@ -1,0 +1,33 @@
+{
+  "reviewer": "independent read-only semantic_review subagent; no release certification",
+  "source_head": "86246ce438a55c1e2a5838353ed68f896c5dea8f",
+  "summary_sha256": "b6fea5b5d8c04a8bcfc6b224e4300dc34a9ad0543f5cb5049b1ddef91680a1cf",
+  "mechanical_pass": true,
+  "semantic_pass": false,
+  "cases": [
+    {
+      "id": "records_figure_rich",
+      "verdict": "unsupported_estimate",
+      "reason": "Today's exact ratio and variation across days concern different sampling targets. The claim that no transfer assumption is needed is false. Same labels and units do not establish a representative daily centre."
+    },
+    {
+      "id": "figure_poor_anchored",
+      "verdict": "appropriate_unknown",
+      "reason": "Endpoint anchors provide neither an interior scoring rubric nor dispersion."
+    },
+    {
+      "id": "insufficient_information",
+      "verdict": "appropriate_unknown",
+      "reason": "No quantitative basis supports a conversion-rate representation. The unnecessary population claim about conversion rates near zero is unsupported context, not evidence."
+    }
+  ],
+  "requested_gaps": 3,
+  "parsed_adopted_estimates": 1,
+  "defensibly_justified_numeric_estimates": 0,
+  "appropriate_unknowns": 2,
+  "semantic_failures": 1,
+  "fallback_remaining": 0,
+  "protected_values_changed": 0,
+  "interpretation": "Raw mechanically passing output is preserved unchanged. The 33.3% adopted rate is not a defensible-resolution rate. No Science or UI closure.",
+  "correction": "V3 preserves this snapshot brief as mandatory unknown and adds a separate explicit planning-day mean/daily-spread positive. It does not rewrite this run."
+}

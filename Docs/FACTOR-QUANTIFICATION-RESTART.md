@@ -1,16 +1,26 @@
 # Factor Quantification — restart handoff, 30 August 2026
 
-Paused at the user's request for a machine restart. Implementation is authorised in Default mode. Resume the bounded implementation, not discovery or planning. No merge, publication, deployment, feature enablement or release clearance has been performed.
+Resumed after the user's machine restart. Implementation is authorised in Default mode. Resume the bounded implementation, not discovery or planning. No merge, publication, deployment, feature enablement or release clearance has been performed.
 
 ## Recover the work
 
-- CEE repository: `https://github.com/Talchain/olumi-assistants-service.git`; branch `codex/factor-quantification-20260830`; draft PR https://github.com/Talchain/olumi-assistants-service/pull/1235 . Existing checkout `/private/tmp/factor-quantification-20260830/cee`. Use the pushed branch HEAD; `/private/tmp` may not survive restart.
-- Shared repository: `https://github.com/Talchain/olumi-schemas.git`; same branch name; exact factor contract HEAD `51dca7aa03efaef9160c8a9f806b804b7f8a68fd`; draft PR https://github.com/Talchain/olumi-schemas/pull/54 stacked on Science objective PR #53. Existing checkout `/private/tmp/factor-quantification-20260830/schemas`.
+- CEE repository: `https://github.com/Talchain/olumi-assistants-service.git`; branch `codex/factor-quantification-20260830`; draft PR https://github.com/Talchain/olumi-assistants-service/pull/1235 . Existing checkout `/Users/paulslee/CodexWork/factor-quantification/cee`. Use the pushed branch HEAD; `/private/tmp` may not survive restart.
+- Shared repository: `https://github.com/Talchain/olumi-schemas.git`; same branch name; exact factor contract HEAD `51dca7aa03efaef9160c8a9f806b804b7f8a68fd`; draft PR https://github.com/Talchain/olumi-schemas/pull/54 stacked on Science objective PR #53. Existing checkout `/Users/paulslee/Documents/GitHub/factor-quantification-work/schemas`.
 - The actual unpublished `0.53.0` package is committed at `vendor/talchain-schemas-0.53.0.tgz` in CEE, SHA256 `a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1`. Shared source includes objective authority plus factor selection/unknown/rationale/scale/hash v3; do not revert to a main-only older package.
 - Node 22 and pnpm 10 were used. CEE has isolated local dependencies. Reinstall from the committed lock if recreating a checkout; do not modify another lane's package pin. `.npmrc` token warnings occurred locally without preventing existing cached dependency use.
 - All durable evidence is under `Docs/evidence/factor-quantification/`; no credentials or env files are committed. `Docs/factor-quantification-handoff.md` explains production contracts, replay commands and limitations.
 
-## Exact state at pause — do not lose the semantic failure
+## Resumed correction — supersedes the pause next-step wording below
+
+The unchanged v2 corpus executed at clean `86246ce438a55c1e2a5838353ed68f896c5dea8f`; raw results and independent review are banked under `Docs/evidence/factor-quantification/live-sonnet-v2/`. Mechanical checks passed, but the rich estimate incorrectly claimed no transfer assumption was needed to attach daily variation to today's exact count. **Zero of its one numeric estimates earned semantic support.** Two other gaps correctly remained unknown. Remaining fallback and changed protected values were zero; neither proves a defensible numeric estimate.
+
+V3 tightens only the estimator-specific time/population/quantity rule. The original rich brief is unchanged and now requires unknown for the stochastic representation; its arithmetic is still known. A separate records planning-day fixture explicitly supplies historical daily mean, matching daily spread and provisional reuse of the same process. The deterministic dispatch positive uses that fixture, not the ambiguous original. Both historical raw runs remain unchanged. V3 live verification is next; do not claim it from deterministic controls.
+
+The working CEE clone moved outside the GitHub ancestor directory to `/Users/paulslee/CodexWork/factor-quantification/cee`; the prior durable path is a compatibility symlink. Parent cloud-backed fallback declarations caused the original `pnpm typecheck` to stall. The same frozen local dependencies and actual `pnpm typecheck` gate completed successfully outside that ancestor tree, without package, lock or compiler-setting changes. The original stalled run is not a pass.
+
+Science's saved checkpoint still has no consumption-ready `.53` successor. Its PLoT/ISL/CEE hash ownership is unchanged. No rival downstream implementation or feature enablement was started.
+
+## Exact state at pause — historical, retained for continuity
 
 The bounded estimator, strict parser, canonical adoption, fallback typing, shared selection, readiness and actual draft-dispatch connection are implemented. Feature `CEE_FACTOR_QUANTIFICATION_ENABLED` defaults **off**. Core production was banked as `54dd156682f12da4792d688a3e05e02d0096d39c`; the live v1 witness used clean `8deefc63f79c6e1afa93da2387e752824a30cf6c`. The Science objective snapshot hook was carried as `d6a7b1875`, and its owner's exact test-only fixture dependency as `cb636b0e1`.
 

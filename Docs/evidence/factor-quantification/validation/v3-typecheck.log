@@ -1,0 +1,24 @@
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 pretypecheck /Users/paulslee/CodexWork/factor-quantification/cee
+> pnpm openapi:generate && pnpm check:schemas-resolution
+
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 openapi:generate /Users/paulslee/CodexWork/factor-quantification/cee
+> openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
+
+✨ openapi-typescript 7.10.1
+🚀 openapi.yaml → src/generated/openapi.d.ts [236.3ms]
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/CodexWork/factor-quantification/cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+> olumi-assistants-service@1.12.0 check:schemas-resolution /Users/paulslee/CodexWork/factor-quantification/cee
+> node scripts/check-schemas-resolution.mjs
+
+✔ @talchain/schemas@0.53.0 bound from this project (pin: file:vendor/talchain-schemas-0.53.0.tgz)
+
+> olumi-assistants-service@1.12.0 typecheck /Users/paulslee/CodexWork/factor-quantification/cee
+> tsc -p tsconfig.build.json --noEmit

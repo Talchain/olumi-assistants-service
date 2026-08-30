@@ -45,13 +45,13 @@ import type { DraftRecordSet } from '../../draft/records/grammar.js';
 import { projectGraphAndOptionsToV3 } from '../../transforms/schema-v3.js';
 import { FACTOR_ESTIMATES_JSON_SCHEMA } from '../estimate-response.js';
 import { FACTOR_QUANTIFICATION_PROMPT_VERSION, FACTOR_QUANTIFICATION_SYSTEM_PROMPT } from '../prompt.js';
-import { diagnostic, insufficientInformation, liveRecordsFigureRichControl } from './fixtures/corpus.js';
+import { diagnostic, insufficientInformation, liveRecordsFigureRichControl, liveRecordsPlanningDayControl } from './fixtures/corpus.js';
 
 const scenarioId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const turnId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const requestId = 'factor-quantification-records-dispatch';
 const model = 'claude-sonnet-5';
-const rationale = '15 available agents divided by 20 scheduled agents gives .75. The brief reports attendance-log daily share standard deviation .05 on the same scale. This is an Olumi inference from supplied context, not independently verified evidence.';
+const rationale = 'The historical daily available-agent mean 15 divided by the fixed scheduled count 20 gives .75. For a randomly selected planning day, reuse the logged daily spread .05 under the explicitly supplied same-process assumption; this is daily variation, not uncertainty in the mean. This is an Olumi inference from supplied context, not independently verified evidence.';
 type ReplayFixture = { brief: string; records: DraftRecordSet; missing_label?: string };
 let fixture: ReplayFixture;
 let replayed: GraphV3T;
@@ -97,7 +97,7 @@ beforeEach(() => {
   vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', 'false');
   vi.stubEnv('CEE_ANTHROPIC_STRUCTURED_OUTPUTS', 'true');
   _resetConfigCache();
-  fixture = liveRecordsFigureRichControl;
+  fixture = liveRecordsPlanningDayControl;
   writes = []; events = []; persisted = { graph: null, briefText: null };
   h.store = {
     ...createNoopSessionStore(),

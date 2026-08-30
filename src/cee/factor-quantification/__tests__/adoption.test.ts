@@ -17,6 +17,8 @@ const basis: BasisReference[] = figureRich.sources.map(source => ({
   id: source.id, text: source.quote, kind: 'brief_context',
   factor_ids: source.id.startsWith('availability_') ? [target] : source.id === 'parking' ? ['fac_parking'] : ['fac_churn'],
 }));
+// Deliberately injected syntax/transport control, NOT semantic support for the
+// snapshot-plus-daily-variation pairing; the live unknown oracle rejects it.
 const estimate = (overrides: Partial<FactorEstimate> = {}): FactorEstimate => ({
   factor_id: target, estimate_type: 'estimated', value: 0.75, std: 0.05,
   reasoning: '15 available agents divided by 20 scheduled agents gives .75 today; the brief reports daily available-share standard deviation .05 from the attendance log on the same scale. This remains an Olumi inference from supplied context, not independently verified evidence.',
@@ -121,7 +123,7 @@ describe('the requested science operation admits gaps; degree only orders admitt
 });
 
 describe('adoption rechecks authority, snapshot and scoped support', () => {
-  it('lands a parsed supported estimate while leaving all user values and unrelated model content unchanged', () => {
+  it('transports an injected parsed estimate without changing user values; semantic support is assessed separately', () => {
     const before = structuredClone(figureRich.graph);
     const output = adoptFactorEstimates(before, selection(before).gaps, decoded(estimate()), basis);
     expect(output.estimated).toEqual([target]);
@@ -273,7 +275,7 @@ describe('broken estimator output cannot masquerade as successful quantification
     { factor_id: target, estimate_type: 'estimated', value: 0.75, std: 0.05, reasoning: '', basis: ['availability_counts'] },
     { factor_id: target, estimate_type: 'estimated', value: 0.75, std: 0.05, reasoning: 'A plausible number', basis: [] },
     { factor_id: target, estimate_type: 'unknown', value: 0.75, reasoning: 'Cannot justify a number', basis: [] },
-  ])('rejects incomplete or contradictory output %# while its supported counterpart parses', invalid => {
+  ])('rejects incomplete or contradictory output %# while its structurally valid counterpart parses', invalid => {
     expect(parseFactorEstimates({ estimates: [invalid] }, [target]).ok).toBe(false);
     expect(parseFactorEstimates({ estimates: [estimate()] }, [target]).ok).toBe(true);
   });

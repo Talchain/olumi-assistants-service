@@ -5,7 +5,7 @@ import { matchesRequiredUnknown, passesStrictQuantificationEvaluation, quantityF
 import { GraphV3, type NodeV3T } from '../../../schemas/cee-v3.js';
 import { replayRecordSet } from '../../draft/records/replay.js';
 import { projectGraphAndOptionsToV3 } from '../../transforms/schema-v3.js';
-import { figurePoor, liveRecordsFigureRichControl } from './fixtures/corpus.js';
+import { figurePoor, figureRich, liveRecordsFigureRichControl, liveRecordsPlanningDayControl } from './fixtures/corpus.js';
 import { parseFactorEstimates } from '../estimate-response.js';
 
 const node = (observed: Record<string, unknown>): NodeV3T => ({
@@ -13,6 +13,38 @@ const node = (observed: Record<string, unknown>): NodeV3T => ({
 } as NodeV3T);
 const stated = () => node({ value: 0.12, unit: 'share', source: 'brief_extraction', baseline: undefined });
 const same = (left: NodeV3T, right: NodeV3T) => isDeepStrictEqual(quantityForWire(left), quantityForWire(right));
+
+describe('snapshot arithmetic is not a repeated-day uncertainty model', () => {
+  it('rejects the v2 numeric pairing without changing the original brief or the protected quantity', () => {
+    const response = parseFactorEstimates({ estimates: [{ factor_id: 'efa8b6f6',
+      estimate_type: 'estimated', value: 0.75, std: 0.05, basis: ['brief'],
+      reasoning: 'The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.' }] }, ['efa8b6f6']);
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error);
+    expect(matchesRequiredUnknown(response.estimates[0])).toBe(false);
+    expect(createHash('sha256').update(liveRecordsFigureRichControl.brief).digest('hex'))
+      .toBe('1df9f4271a728a495627a11d1f5c4f655400b79c4371cf23910b72bb9c598fb6');
+    expect(figureRich.expected.estimate_candidates).toEqual([]);
+    expect(figureRich.expected.must_remain_unknown).toEqual(['fac_availability']);
+  });
+
+  it('keeps the planning-day positive separate and projects its exact matched source quotes', async () => {
+    const fixture = liveRecordsPlanningDayControl;
+    expect(fixture.brief).not.toBe(liveRecordsFigureRichControl.brief);
+    for (const item of fixture.records.stated_items) expect(fixture.brief).toContain(item.source_quote);
+    const replay = await replayRecordSet(fixture.records, { brief: fixture.brief });
+    if (!replay.ok) throw new Error(replay.reason);
+    const graph = GraphV3.parse(projectGraphAndOptionsToV3(
+      replay.graph as Parameters<typeof projectGraphAndOptionsToV3>[0], { brief: fixture.brief },
+    ).graph);
+    expect(graph.nodes.find(item => item.label === fixture.protected_label)?.observed_state)
+      .toMatchObject({ value: 0.12, source: 'brief_extraction' });
+    expect(graph.nodes.find(item => item.label === fixture.missing_label)?.observed_state).toBeUndefined();
+    expect(fixture.brief).toContain('daily available-agent count averaged 15');
+    expect(fixture.brief).toContain('randomly selected operating day in the next four weeks');
+    expect(fixture.brief).toContain('same daily attendance process');
+  });
+});
 
 describe('an ordinal endpoint scale does not calibrate an interior number or spread', () => {
   it('rejects the exact banked model estimate despite valid output syntax, while accepting explicit unknown on the unchanged brief', () => {

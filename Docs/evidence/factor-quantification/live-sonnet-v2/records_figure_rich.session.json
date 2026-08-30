@@ -1,0 +1,523 @@
+{
+  "storage": "local_file_session_fixture",
+  "source_identity": {
+    "captured_at": "2026-08-30T14:32:16.738Z",
+    "git_head": "86246ce438a55c1e2a5838353ed68f896c5dea8f",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "c714f2b45890469c85a2e91f240a00e52f753bb6ebe6fb6f1a111f8940b72057",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "id": "cc6c3a02-378d-4dff-a887-67fb9107a58b",
+  "graph": {
+    "nodes": [
+      {
+        "id": "53002ebe",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "88b031c4",
+        "kind": "goal",
+        "label": "Improve Support Reliability",
+        "provenance": "from_brief",
+        "source_quote": "Improve support reliability.",
+        "label_authored": true
+      },
+      {
+        "id": "d9e055b5",
+        "kind": "option",
+        "label": "Keep Overtime Share at 0.12",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.12,
+            "raw_value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+          }
+        },
+        "is_baseline": true,
+        "provenance": "from_brief",
+        "source_quote": "Keep overtime share at 0.12",
+        "label_authored": true
+      },
+      {
+        "id": "113a52ab",
+        "kind": "option",
+        "label": "Raise Overtime Share to 0.24",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.24,
+            "raw_value": 0.24,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "raise overtime share to 0.24",
+        "label_authored": true
+      },
+      {
+        "id": "966bf2d0",
+        "kind": "factor",
+        "label": "Current overtime share is 0.12.",
+        "observed_state": {
+          "value": 0.12,
+          "unit": "share",
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "display_value": "0.12 share",
+        "provenance": "from_brief",
+        "source_quote": "Current overtime share is 0.12."
+      },
+      {
+        "id": "efa8b6f6",
+        "kind": "factor",
+        "label": "Agent availability share",
+        "observed_state": {
+          "std": 0.05,
+          "reasoning": {
+            "rationale": "The brief states 15 of 20 scheduled agents are available today, giving an observed availability share of 0.75, and reports a daily available-share standard deviation of 0.05 on the same scale from the attendance log. The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.",
+            "context_basis": [
+              "brief"
+            ]
+          },
+          "value": 0.75,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_966bf2d0_impact",
+        "kind": "outcome",
+        "label": "Current overtime share is 0.12. Impact",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_efa8b6f6_impact",
+        "kind": "outcome",
+        "label": "Agent availability share Impact",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "d9e055b5",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "113a52ab",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "966bf2d0",
+        "to": "out_966bf2d0_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_966bf2d0_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "efa8b6f6",
+        "to": "out_efa8b6f6_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_efa8b6f6_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "53002ebe",
+        "to": "d9e055b5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "53002ebe",
+        "to": "113a52ab",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      }
+    ]
+  },
+  "briefText": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+  "write": {
+    "scenario_id": "b4379d09-2d71-4952-b200-30bf89c7daf0",
+    "turn_id": "f011ce17-3367-4ea8-ba6e-89cc5275f94e",
+    "turn_class": "direct_answer",
+    "handler_id": null,
+    "request_hash": "sha256:1df9f4271a728a495627a11d1f5c4f655400b79c4371cf23910b72bb9c598fb6",
+    "response_emitted": true,
+    "llm_calls_used": 1,
+    "duration_ms": 3873,
+    "handler_facts": [],
+    "graph": {
+      "nodes": [
+        {
+          "id": "53002ebe",
+          "kind": "decision",
+          "label": "Decision",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "88b031c4",
+          "kind": "goal",
+          "label": "Improve Support Reliability",
+          "provenance": "from_brief",
+          "source_quote": "Improve support reliability.",
+          "label_authored": true
+        },
+        {
+          "id": "d9e055b5",
+          "kind": "option",
+          "label": "Keep Overtime Share at 0.12",
+          "interventions": {
+            "966bf2d0": {
+              "value": 0.12,
+              "raw_value": 0.12,
+              "unit": "share",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "966bf2d0",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+            }
+          },
+          "is_baseline": true,
+          "provenance": "from_brief",
+          "source_quote": "Keep overtime share at 0.12",
+          "label_authored": true
+        },
+        {
+          "id": "113a52ab",
+          "kind": "option",
+          "label": "Raise Overtime Share to 0.24",
+          "interventions": {
+            "966bf2d0": {
+              "value": 0.24,
+              "raw_value": 0.24,
+              "unit": "share",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "966bf2d0",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+            }
+          },
+          "provenance": "from_brief",
+          "source_quote": "raise overtime share to 0.24",
+          "label_authored": true
+        },
+        {
+          "id": "966bf2d0",
+          "kind": "factor",
+          "label": "Current overtime share is 0.12.",
+          "observed_state": {
+            "value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "extractionType": "explicit"
+          },
+          "display_value": "0.12 share",
+          "provenance": "from_brief",
+          "source_quote": "Current overtime share is 0.12."
+        },
+        {
+          "id": "efa8b6f6",
+          "kind": "factor",
+          "label": "Agent availability share",
+          "observed_state": {
+            "std": 0.05,
+            "reasoning": {
+              "rationale": "The brief states 15 of 20 scheduled agents are available today, giving an observed availability share of 0.75, and reports a daily available-share standard deviation of 0.05 on the same scale from the attendance log. The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.",
+              "context_basis": [
+                "brief"
+              ]
+            },
+            "value": 0.75,
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "category": "external",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_966bf2d0_impact",
+          "kind": "outcome",
+          "label": "Current overtime share is 0.12. Impact",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_efa8b6f6_impact",
+          "kind": "outcome",
+          "label": "Agent availability share Impact",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "edges": [
+        {
+          "from": "d9e055b5",
+          "to": "966bf2d0",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "113a52ab",
+          "to": "966bf2d0",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "966bf2d0",
+          "to": "out_966bf2d0_impact",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "out_966bf2d0_impact",
+          "to": "88b031c4",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "efa8b6f6",
+          "to": "out_efa8b6f6_impact",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "out_efa8b6f6_impact",
+          "to": "88b031c4",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "53002ebe",
+          "to": "d9e055b5",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "default"
+        },
+        {
+          "from": "53002ebe",
+          "to": "113a52ab",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "default"
+        }
+      ]
+    },
+    "briefText": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+    "pending_actions": [],
+    "userMessage": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+    "assistantMessage": "Local Factor Quantification witness."
+  }
+}

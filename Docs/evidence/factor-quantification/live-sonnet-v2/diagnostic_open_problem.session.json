@@ -1,0 +1,177 @@
+{
+  "storage": "local_file_session_fixture",
+  "source_identity": {
+    "captured_at": "2026-08-30T14:32:16.738Z",
+    "git_head": "86246ce438a55c1e2a5838353ed68f896c5dea8f",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "c714f2b45890469c85a2e91f240a00e52f753bb6ebe6fb6f1a111f8940b72057",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "id": "ac53f197-df7b-4c9c-a451-41923aeafffc",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_understand",
+        "kind": "goal",
+        "label": "Understand declining product adoption"
+      },
+      {
+        "id": "fac_onboarding",
+        "kind": "factor",
+        "label": "Onboarding friction",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0,
+          "range_max": 1,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      },
+      {
+        "id": "fac_fit",
+        "kind": "factor",
+        "label": "Weak product fit",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0,
+          "range_max": 1,
+          "source": "cee_repair",
+          "value_tier": "fallback_default",
+          "prior_is_unquantified": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "fac_onboarding",
+        "to": "goal_understand",
+        "strength": {
+          "mean": -0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      },
+      {
+        "from": "fac_fit",
+        "to": "goal_understand",
+        "strength": {
+          "mean": -0.4,
+          "std": 0.15
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+        }
+      }
+    ]
+  },
+  "briefText": "Help us understand declining product adoption. Onboarding friction and weak product fit are competing hypotheses, not options we can choose. We have not interviewed users or measured either cause. Preserve both explanations and identify what evidence would distinguish them; do not rank interventions.",
+  "write": {
+    "scenario_id": "0593553c-c145-4c6c-9102-979d71f8eb65",
+    "turn_id": "42fd29f0-4619-41db-b6b9-bbead3062bf1",
+    "turn_class": "direct_answer",
+    "handler_id": null,
+    "request_hash": "sha256:0325285b9d0fb22bd57372b94af1a313702cb75d5d254164193c92631a82c1d2",
+    "response_emitted": true,
+    "llm_calls_used": 0,
+    "duration_ms": 2,
+    "handler_facts": [],
+    "graph": {
+      "nodes": [
+        {
+          "id": "goal_understand",
+          "kind": "goal",
+          "label": "Understand declining product adoption"
+        },
+        {
+          "id": "fac_onboarding",
+          "kind": "factor",
+          "label": "Onboarding friction",
+          "category": "external",
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0,
+            "range_max": 1,
+            "source": "cee_repair",
+            "value_tier": "fallback_default",
+            "prior_is_unquantified": true
+          }
+        },
+        {
+          "id": "fac_fit",
+          "kind": "factor",
+          "label": "Weak product fit",
+          "category": "external",
+          "prior": {
+            "distribution": "uniform",
+            "range_min": 0,
+            "range_max": 1,
+            "source": "cee_repair",
+            "value_tier": "fallback_default",
+            "prior_is_unquantified": true
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "fac_onboarding",
+          "to": "goal_understand",
+          "strength": {
+            "mean": -0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        },
+        {
+          "from": "fac_fit",
+          "to": "goal_understand",
+          "strength": {
+            "mean": -0.4,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Fixed surrounding model assumption for this controlled fixture."
+          }
+        }
+      ]
+    },
+    "briefText": "Help us understand declining product adoption. Onboarding friction and weak product fit are competing hypotheses, not options we can choose. We have not interviewed users or measured either cause. Preserve both explanations and identify what evidence would distinguish them; do not rank interventions.",
+    "pending_actions": [],
+    "userMessage": "Help us understand declining product adoption. Onboarding friction and weak product fit are competing hypotheses, not options we can choose. We have not interviewed users or measured either cause. Preserve both explanations and identify what evidence would distinguish them; do not rank interventions.",
+    "assistantMessage": "Local Factor Quantification witness."
+  }
+}

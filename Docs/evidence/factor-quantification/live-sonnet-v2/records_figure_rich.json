@@ -1,0 +1,2096 @@
+{
+  "case_id": "records_figure_rich",
+  "scope": {
+    "witness": "live_estimator_with_local_file_commit_reload",
+    "first_pass": "fixed_records_replay_or_authored_control_not_a_live_draft_model_call",
+    "records_projection": "replayRecordSet_then_projectGraphAndOptionsToV3",
+    "persistence": "real_commitDirectAnswer_with_injected_local_file_SessionStore_not_Supabase",
+    "model_version_history": "disabled_for_this_local_witness",
+    "rolling_summary": "not_witnessed_no_Supabase_configuration",
+    "provider_grammar_enforcement": "unobserved_adapter_does_not_report_fallback",
+    "science_and_ui": "not_witnessed_by_this_runner"
+  },
+  "source_identity": {
+    "captured_at": "2026-08-30T14:32:16.738Z",
+    "git_head": "86246ce438a55c1e2a5838353ed68f896c5dea8f",
+    "source_state": "clean_committed_checkout",
+    "git_status_porcelain": [],
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_bytes": 0,
+    "tracked_diff_scope": "git diff HEAD, staged and unstaged tracked changes; raw diff is not persisted",
+    "untracked_source_hash_scope": ".ts/.js/.mjs/.cjs beneath src and scripts",
+    "untracked_source_files": [],
+    "runner_sha256": "c714f2b45890469c85a2e91f240a00e52f753bb6ebe6fb6f1a111f8940b72057",
+    "installed_schema": {
+      "name": "@talchain/schemas",
+      "version": "0.53.0",
+      "package_json_sha256": "218f922f9d75773136d4560e5c506b47771821f639eb50006d12036a0566dda2",
+      "factor_quantification_module_sha256": "87cdaa580509438496382f22d361ce5e24ef676b2a630956c4738383867c6b43",
+      "graph_module_sha256": "a2e94b646f85111b74b5ab4b038f05b2099665ecf3efec05f6879b44cdf68319"
+    },
+    "vendor_schema": {
+      "path": "vendor/talchain-schemas-0.53.0.tgz",
+      "sha256": "a532fb3ce386be8610bb56d4e4efee77fe39f75da7269a774c1d97009997eea1"
+    }
+  },
+  "input_kind": "records_replay",
+  "brief": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+  "request_id": "factor-live-988ebde0-c91b-4082-8c0a-1fa1b7bebf5c",
+  "scenario_id": "b4379d09-2d71-4952-b200-30bf89c7daf0",
+  "turn_id": "f011ce17-3367-4ea8-ba6e-89cc5275f94e",
+  "input_graph": {
+    "nodes": [
+      {
+        "id": "53002ebe",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "88b031c4",
+        "kind": "goal",
+        "label": "Improve Support Reliability",
+        "provenance": "from_brief",
+        "source_quote": "Improve support reliability.",
+        "label_authored": true
+      },
+      {
+        "id": "d9e055b5",
+        "kind": "option",
+        "label": "Keep Overtime Share at 0.12",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.12,
+            "raw_value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+          }
+        },
+        "is_baseline": true,
+        "provenance": "from_brief",
+        "source_quote": "Keep overtime share at 0.12",
+        "label_authored": true
+      },
+      {
+        "id": "113a52ab",
+        "kind": "option",
+        "label": "Raise Overtime Share to 0.24",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.24,
+            "raw_value": 0.24,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "raise overtime share to 0.24",
+        "label_authored": true
+      },
+      {
+        "id": "966bf2d0",
+        "kind": "factor",
+        "label": "Current overtime share is 0.12.",
+        "observed_state": {
+          "value": 0.12,
+          "unit": "share",
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "display_value": "0.12 share",
+        "provenance": "from_brief",
+        "source_quote": "Current overtime share is 0.12."
+      },
+      {
+        "id": "efa8b6f6",
+        "kind": "factor",
+        "label": "Agent availability share",
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_966bf2d0_impact",
+        "kind": "outcome",
+        "label": "Current overtime share is 0.12. Impact",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_efa8b6f6_impact",
+        "kind": "outcome",
+        "label": "Agent availability share Impact",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "d9e055b5",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "113a52ab",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "966bf2d0",
+        "to": "out_966bf2d0_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_966bf2d0_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "efa8b6f6",
+        "to": "out_efa8b6f6_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_efa8b6f6_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "53002ebe",
+        "to": "d9e055b5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "53002ebe",
+        "to": "113a52ab",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      }
+    ]
+  },
+  "records_replay": {
+    "ok": true,
+    "records": {
+      "stated_items": [
+        {
+          "kind": "goal",
+          "source_quote": "Improve support reliability."
+        },
+        {
+          "kind": "option",
+          "source_quote": "Keep overtime share at 0.12",
+          "is_baseline": true
+        },
+        {
+          "kind": "option",
+          "source_quote": "raise overtime share to 0.24"
+        },
+        {
+          "kind": "figure",
+          "source_quote": "Current overtime share is 0.12.",
+          "value": 0.12,
+          "unit": "share"
+        },
+        {
+          "kind": "figure",
+          "source_quote": "0.24",
+          "value": 0.24,
+          "unit": "share"
+        },
+        {
+          "kind": "figure",
+          "source_quote": "There are 20 scheduled agents",
+          "value": 20,
+          "unit": "agents"
+        },
+        {
+          "kind": "figure",
+          "source_quote": "15 are available today",
+          "value": 15,
+          "unit": "agents"
+        },
+        {
+          "kind": "figure",
+          "source_quote": "The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+          "value": 0.05,
+          "unit": "share"
+        }
+      ],
+      "claims": [
+        {
+          "claim_kind": "factor",
+          "label": "Agent availability share",
+          "basis": [
+            5,
+            6
+          ]
+        },
+        {
+          "claim_kind": "causal_link",
+          "label": "Keep the stated overtime",
+          "basis": [
+            3
+          ],
+          "from_stated": 1,
+          "to_stated": 3,
+          "effect": "positive",
+          "sets_to": 0.12
+        },
+        {
+          "claim_kind": "causal_link",
+          "label": "Raise overtime to the proposed share",
+          "basis": [
+            4
+          ],
+          "from_stated": 2,
+          "to_stated": 3,
+          "effect": "positive",
+          "sets_to": 0.24
+        },
+        {
+          "claim_kind": "causal_link",
+          "label": "Overtime supports reliability",
+          "from_stated": 3,
+          "to_stated": 0,
+          "effect": "positive"
+        },
+        {
+          "claim_kind": "causal_link",
+          "label": "Agent availability supports reliability",
+          "from_claim": 0,
+          "to_stated": 0,
+          "effect": "positive"
+        }
+      ]
+    },
+    "projection": {
+      "graph": {
+        "version": "1",
+        "default_seed": 17,
+        "nodes": [
+          {
+            "id": "53002ebe",
+            "kind": "decision",
+            "label": "Decision",
+            "provenance": {
+              "provenance_class": "projector_structural",
+              "source": "synthetic",
+              "quote": "Decision-to-option scaffold minted by the projector"
+            }
+          },
+          {
+            "id": "88b031c4",
+            "kind": "goal",
+            "label": "Improve Support Reliability",
+            "provenance": {
+              "provenance_class": "stated",
+              "source_quote": "Improve support reliability.",
+              "brief_binding": "verified",
+              "label_authored": true
+            }
+          },
+          {
+            "id": "d9e055b5",
+            "kind": "option",
+            "label": "Keep overtime share at 0.12",
+            "provenance": {
+              "provenance_class": "stated",
+              "source_quote": "Keep overtime share at 0.12",
+              "brief_binding": "verified"
+            },
+            "is_baseline": true,
+            "data": {
+              "interventions": {
+                "966bf2d0": 0.12
+              },
+              "raw_interventions": {
+                "966bf2d0": 0.12
+              },
+              "intervention_details": {
+                "966bf2d0": {
+                  "raw_value": 0.12,
+                  "unit": "share",
+                  "source": "brief_extraction",
+                  "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+                }
+              }
+            }
+          },
+          {
+            "id": "113a52ab",
+            "kind": "option",
+            "label": "raise overtime share to 0.24",
+            "provenance": {
+              "provenance_class": "stated",
+              "source_quote": "raise overtime share to 0.24",
+              "brief_binding": "verified"
+            },
+            "data": {
+              "interventions": {
+                "966bf2d0": 0.24
+              },
+              "raw_interventions": {
+                "966bf2d0": 0.24
+              },
+              "intervention_details": {
+                "966bf2d0": {
+                  "raw_value": 0.24,
+                  "unit": "share",
+                  "source": "brief_extraction",
+                  "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+                }
+              }
+            }
+          },
+          {
+            "id": "966bf2d0",
+            "kind": "factor",
+            "label": "Current overtime share is 0.12.",
+            "provenance": {
+              "provenance_class": "stated",
+              "source_quote": "Current overtime share is 0.12.",
+              "brief_binding": "verified"
+            },
+            "data": {
+              "value": 0.12,
+              "unit": "share",
+              "extractionType": "explicit"
+            },
+            "observed_state": {
+              "value": 0.12,
+              "raw_value": 0.12
+            }
+          },
+          {
+            "id": "efa8b6f6",
+            "kind": "factor",
+            "label": "Agent availability share",
+            "provenance": {
+              "provenance_class": "ai_inferred",
+              "basis": [
+                "4e2233c4",
+                "6160de5c"
+              ],
+              "unbased": false
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "6bb5fd45",
+            "from": "d9e055b5",
+            "to": "966bf2d0",
+            "effect_direction": "positive",
+            "origin": "ai",
+            "provenance_source": "inferred",
+            "provenance": {
+              "provenance_class": "ai_inferred",
+              "source": "hypothesis",
+              "quote": "Model-inferred causal link (records projector)",
+              "basis": [
+                "966bf2d0"
+              ],
+              "unbased": false
+            }
+          },
+          {
+            "id": "ab3882a6",
+            "from": "113a52ab",
+            "to": "966bf2d0",
+            "effect_direction": "positive",
+            "origin": "ai",
+            "provenance_source": "inferred",
+            "provenance": {
+              "provenance_class": "ai_inferred",
+              "source": "hypothesis",
+              "quote": "Model-inferred causal link (records projector)",
+              "basis": [
+                "a762e90a"
+              ],
+              "unbased": false
+            }
+          },
+          {
+            "id": "9760943f",
+            "from": "966bf2d0",
+            "to": "88b031c4",
+            "effect_direction": "positive",
+            "origin": "ai",
+            "provenance_source": "inferred",
+            "provenance": {
+              "provenance_class": "ai_inferred",
+              "source": "hypothesis",
+              "quote": "Model-inferred causal link (records projector)",
+              "basis": [],
+              "unbased": true
+            }
+          },
+          {
+            "id": "0c644d5d",
+            "from": "efa8b6f6",
+            "to": "88b031c4",
+            "effect_direction": "positive",
+            "origin": "ai",
+            "provenance_source": "inferred",
+            "provenance": {
+              "provenance_class": "ai_inferred",
+              "source": "hypothesis",
+              "quote": "Model-inferred causal link (records projector)",
+              "basis": [],
+              "unbased": true
+            }
+          },
+          {
+            "id": "e953e4ad",
+            "from": "53002ebe",
+            "to": "d9e055b5",
+            "origin": "default",
+            "provenance_source": "structural",
+            "provenance": {
+              "provenance_class": "projector_structural",
+              "source": "synthetic",
+              "quote": "Decision-to-option scaffold minted by the projector"
+            }
+          },
+          {
+            "id": "1ced969c",
+            "from": "53002ebe",
+            "to": "113a52ab",
+            "origin": "default",
+            "provenance_source": "structural",
+            "provenance": {
+              "provenance_class": "projector_structural",
+              "source": "synthetic",
+              "quote": "Decision-to-option scaffold minted by the projector"
+            }
+          }
+        ],
+        "meta": {
+          "roots": [
+            "53002ebe",
+            "efa8b6f6"
+          ],
+          "leaves": [
+            "88b031c4"
+          ],
+          "suggested_positions": {},
+          "source": "assistant"
+        }
+      },
+      "provenance": {
+        "88b031c4": {
+          "provenance_class": "stated",
+          "source_quote": "Improve support reliability.",
+          "brief_binding": "verified",
+          "label_authored": true
+        },
+        "d9e055b5": {
+          "provenance_class": "stated",
+          "source_quote": "Keep overtime share at 0.12",
+          "brief_binding": "verified"
+        },
+        "113a52ab": {
+          "provenance_class": "stated",
+          "source_quote": "raise overtime share to 0.24",
+          "brief_binding": "verified"
+        },
+        "966bf2d0": {
+          "provenance_class": "stated",
+          "source_quote": "Current overtime share is 0.12.",
+          "brief_binding": "verified"
+        },
+        "efa8b6f6": {
+          "provenance_class": "ai_inferred",
+          "basis": [
+            "4e2233c4",
+            "6160de5c"
+          ],
+          "unbased": false
+        },
+        "6bb5fd45": {
+          "provenance_class": "ai_inferred",
+          "source": "hypothesis",
+          "quote": "Model-inferred causal link (records projector)",
+          "basis": [
+            "966bf2d0"
+          ],
+          "unbased": false
+        },
+        "ab3882a6": {
+          "provenance_class": "ai_inferred",
+          "source": "hypothesis",
+          "quote": "Model-inferred causal link (records projector)",
+          "basis": [
+            "a762e90a"
+          ],
+          "unbased": false
+        },
+        "9760943f": {
+          "provenance_class": "ai_inferred",
+          "source": "hypothesis",
+          "quote": "Model-inferred causal link (records projector)",
+          "basis": [],
+          "unbased": true
+        },
+        "0c644d5d": {
+          "provenance_class": "ai_inferred",
+          "source": "hypothesis",
+          "quote": "Model-inferred causal link (records projector)",
+          "basis": [],
+          "unbased": true
+        },
+        "53002ebe": {
+          "provenance_class": "projector_structural",
+          "source": "synthetic",
+          "quote": "Decision-to-option scaffold minted by the projector"
+        },
+        "e953e4ad": {
+          "provenance_class": "projector_structural",
+          "source": "synthetic",
+          "quote": "Decision-to-option scaffold minted by the projector"
+        },
+        "1ced969c": {
+          "provenance_class": "projector_structural",
+          "source": "synthetic",
+          "quote": "Decision-to-option scaffold minted by the projector"
+        }
+      },
+      "dropped": [
+        {
+          "claim_index": -1,
+          "claim_kind": "stated_item",
+          "label": "0.24",
+          "node_id": "a762e90a",
+          "reason": "unconnected_to_goal",
+          "value": 0.24,
+          "unit": "share"
+        },
+        {
+          "claim_index": -1,
+          "claim_kind": "stated_item",
+          "label": "There are 20 scheduled agents",
+          "node_id": "4e2233c4",
+          "reason": "unconnected_to_goal",
+          "value": 20,
+          "unit": "agents"
+        },
+        {
+          "claim_index": -1,
+          "claim_kind": "stated_item",
+          "label": "15 are available today",
+          "node_id": "6160de5c",
+          "reason": "unconnected_to_goal",
+          "value": 15,
+          "unit": "agents"
+        },
+        {
+          "claim_index": -1,
+          "claim_kind": "stated_item",
+          "label": "The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+          "node_id": "c335044a",
+          "reason": "unconnected_to_goal",
+          "value": 0.05,
+          "unit": "share"
+        }
+      ]
+    },
+    "ask": {
+      "items": [],
+      "baseClaimIndex": 5
+    },
+    "graph": {
+      "version": "1",
+      "default_seed": 17,
+      "nodes": [
+        {
+          "id": "53002ebe",
+          "kind": "decision",
+          "label": "Decision",
+          "provenance": {
+            "provenance_class": "projector_structural",
+            "source": "synthetic",
+            "quote": "Decision-to-option scaffold minted by the projector"
+          }
+        },
+        {
+          "id": "88b031c4",
+          "kind": "goal",
+          "label": "Improve Support Reliability",
+          "provenance": {
+            "provenance_class": "stated",
+            "source_quote": "Improve support reliability.",
+            "brief_binding": "verified",
+            "label_authored": true
+          }
+        },
+        {
+          "id": "d9e055b5",
+          "kind": "option",
+          "label": "Keep overtime share at 0.12",
+          "provenance": {
+            "provenance_class": "stated",
+            "source_quote": "Keep overtime share at 0.12",
+            "brief_binding": "verified"
+          },
+          "is_baseline": true,
+          "data": {
+            "interventions": {
+              "966bf2d0": 0.12
+            },
+            "raw_interventions": {
+              "966bf2d0": 0.12
+            },
+            "intervention_details": {
+              "966bf2d0": {
+                "raw_value": 0.12,
+                "unit": "share",
+                "source": "brief_extraction",
+                "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+              }
+            }
+          }
+        },
+        {
+          "id": "113a52ab",
+          "kind": "option",
+          "label": "raise overtime share to 0.24",
+          "provenance": {
+            "provenance_class": "stated",
+            "source_quote": "raise overtime share to 0.24",
+            "brief_binding": "verified"
+          },
+          "data": {
+            "interventions": {
+              "966bf2d0": 0.24
+            },
+            "raw_interventions": {
+              "966bf2d0": 0.24
+            },
+            "intervention_details": {
+              "966bf2d0": {
+                "raw_value": 0.24,
+                "unit": "share",
+                "source": "brief_extraction",
+                "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+              }
+            }
+          }
+        },
+        {
+          "id": "966bf2d0",
+          "kind": "factor",
+          "label": "Current overtime share is 0.12.",
+          "provenance": {
+            "provenance_class": "stated",
+            "source_quote": "Current overtime share is 0.12.",
+            "brief_binding": "verified"
+          },
+          "data": {
+            "value": 0.12,
+            "unit": "share",
+            "extractionType": "explicit"
+          },
+          "observed_state": {
+            "value": 0.12,
+            "raw_value": 0.12
+          }
+        },
+        {
+          "id": "efa8b6f6",
+          "kind": "factor",
+          "label": "Agent availability share",
+          "provenance": {
+            "provenance_class": "ai_inferred",
+            "basis": [
+              "4e2233c4",
+              "6160de5c"
+            ],
+            "unbased": false
+          },
+          "category": "external"
+        },
+        {
+          "id": "out_966bf2d0_impact",
+          "kind": "outcome",
+          "label": "Current overtime share is 0.12. Impact",
+          "provenance": {
+            "provenance_class": "projector_structural",
+            "source": "synthetic",
+            "quote": "Mediating outcome minted to split a factor→goal edge"
+          }
+        },
+        {
+          "id": "out_efa8b6f6_impact",
+          "kind": "outcome",
+          "label": "Agent availability share Impact",
+          "provenance": {
+            "provenance_class": "projector_structural",
+            "source": "synthetic",
+            "quote": "Mediating outcome minted to split a factor→goal edge"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "6bb5fd45",
+          "from": "d9e055b5",
+          "to": "966bf2d0",
+          "effect_direction": "positive",
+          "origin": "ai",
+          "provenance_source": "inferred",
+          "provenance": {
+            "provenance_class": "ai_inferred",
+            "source": "hypothesis",
+            "quote": "Model-inferred causal link (records projector)",
+            "basis": [
+              "966bf2d0"
+            ],
+            "unbased": false
+          },
+          "strength_mean": 1,
+          "strength_std": 0.01,
+          "belief_exists": 1
+        },
+        {
+          "id": "ab3882a6",
+          "from": "113a52ab",
+          "to": "966bf2d0",
+          "effect_direction": "positive",
+          "origin": "ai",
+          "provenance_source": "inferred",
+          "provenance": {
+            "provenance_class": "ai_inferred",
+            "source": "hypothesis",
+            "quote": "Model-inferred causal link (records projector)",
+            "basis": [
+              "a762e90a"
+            ],
+            "unbased": false
+          },
+          "strength_mean": 1,
+          "strength_std": 0.01,
+          "belief_exists": 1
+        },
+        {
+          "from": "966bf2d0",
+          "to": "out_966bf2d0_impact",
+          "effect_direction": "positive",
+          "origin": "repair",
+          "provenance": {
+            "source": "synthetic",
+            "quote": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_source": "synthetic",
+          "strength_mean": 0.5,
+          "strength_std": 0.15,
+          "belief_exists": 0.9
+        },
+        {
+          "from": "out_966bf2d0_impact",
+          "to": "88b031c4",
+          "effect_direction": "positive",
+          "origin": "repair",
+          "provenance": {
+            "source": "synthetic",
+            "quote": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_source": "synthetic",
+          "strength_mean": 0.5,
+          "strength_std": 0.15,
+          "belief_exists": 0.9
+        },
+        {
+          "from": "efa8b6f6",
+          "to": "out_efa8b6f6_impact",
+          "effect_direction": "positive",
+          "origin": "repair",
+          "provenance": {
+            "source": "synthetic",
+            "quote": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_source": "synthetic",
+          "strength_mean": 0.5,
+          "strength_std": 0.15,
+          "belief_exists": 0.9
+        },
+        {
+          "from": "out_efa8b6f6_impact",
+          "to": "88b031c4",
+          "effect_direction": "positive",
+          "origin": "repair",
+          "provenance": {
+            "source": "synthetic",
+            "quote": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_source": "synthetic",
+          "strength_mean": 0.5,
+          "strength_std": 0.15,
+          "belief_exists": 0.9
+        },
+        {
+          "id": "e953e4ad",
+          "from": "53002ebe",
+          "to": "d9e055b5",
+          "origin": "default",
+          "provenance_source": "structural",
+          "provenance": {
+            "provenance_class": "projector_structural",
+            "source": "synthetic",
+            "quote": "Decision-to-option scaffold minted by the projector"
+          },
+          "strength_mean": 1,
+          "strength_std": 0.01,
+          "belief_exists": 1,
+          "effect_direction": "positive"
+        },
+        {
+          "id": "1ced969c",
+          "from": "53002ebe",
+          "to": "113a52ab",
+          "origin": "default",
+          "provenance_source": "structural",
+          "provenance": {
+            "provenance_class": "projector_structural",
+            "source": "synthetic",
+            "quote": "Decision-to-option scaffold minted by the projector"
+          },
+          "strength_mean": 1,
+          "strength_std": 0.01,
+          "belief_exists": 1,
+          "effect_direction": "positive"
+        }
+      ],
+      "meta": {
+        "roots": [
+          "53002ebe",
+          "efa8b6f6"
+        ],
+        "leaves": [
+          "88b031c4"
+        ],
+        "suggested_positions": {},
+        "source": "assistant"
+      }
+    },
+    "repairs": [
+      {
+        "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+        "path": "edges[d9e055b5→966bf2d0]",
+        "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+      },
+      {
+        "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+        "path": "edges[113a52ab→966bf2d0]",
+        "action": "Canonicalised structural option→factor edge to mean=1, std=0.01, existence=1.0"
+      },
+      {
+        "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+        "path": "edges[53002ebe→d9e055b5]",
+        "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+      },
+      {
+        "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+        "path": "edges[53002ebe→113a52ab]",
+        "action": "Canonicalised structural decision→option edge to mean=1, std=0.01, existence=1.0"
+      },
+      {
+        "code": "FACTOR_GOAL_EDGE_SPLIT",
+        "path": "edges[966bf2d0→88b031c4]",
+        "action": "Split factor→goal into factor→out_966bf2d0_impact→88b031c4 via synthetic outcome node"
+      },
+      {
+        "code": "FACTOR_GOAL_EDGE_SPLIT",
+        "path": "edges[efa8b6f6→88b031c4]",
+        "action": "Split factor→goal into factor→out_efa8b6f6_impact→88b031c4 via synthetic outcome node"
+      },
+      {
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "path": "nodes[efa8b6f6].category",
+        "action": "Reclassified unreachable factor \"Agent availability share\" to external"
+      }
+    ],
+    "readiness": {
+      "errorCodes": [
+        "CONTROLLABLE_MISSING_DATA"
+      ],
+      "warningCodes": [
+        "EXEMPT_UNREACHABLE_OUTCOME_RISK"
+      ],
+      "blocking": true
+    },
+    "semantics": {
+      "nodeCount": 8,
+      "edgeCount": 8,
+      "byKind": {
+        "decision": 1,
+        "goal": 1,
+        "option": 2,
+        "factor": 2,
+        "outcome": 2
+      },
+      "riskCount": 0,
+      "riskLabels": [],
+      "outcomeCount": 2,
+      "outcomeLabels": [
+        "Agent availability share Impact",
+        "Current overtime share is 0.12. Impact"
+      ],
+      "scaffoldedOutcomeIds": [
+        "out_966bf2d0_impact",
+        "out_efa8b6f6_impact"
+      ],
+      "scaffoldedOutcomeShare": 1,
+      "impactPatternOutcomeIds": [
+        "out_966bf2d0_impact",
+        "out_efa8b6f6_impact"
+      ],
+      "optionCount": 2,
+      "optionProvenance": [
+        {
+          "id": "113a52ab",
+          "label": "raise overtime share to 0.24",
+          "provenance_class": "stated"
+        },
+        {
+          "id": "d9e055b5",
+          "label": "Keep overtime share at 0.12",
+          "provenance_class": "stated"
+        }
+      ]
+    }
+  },
+  "requirements": [
+    {
+      "factor_id": "efa8b6f6",
+      "operation": "isl.factor_baseline_sampling",
+      "option_ids": [
+        "d9e055b5",
+        "113a52ab"
+      ],
+      "target_id": "88b031c4",
+      "impact": "unassessed"
+    }
+  ],
+  "selection": {
+    "gaps": [
+      {
+        "factor_id": "efa8b6f6",
+        "label": "Agent availability share",
+        "snapshot": "16b40434a303caf2df086efc38b10f3009a1d0156a00eb9b30c168375d763760",
+        "node_snapshot": "{\"id\":\"efa8b6f6\",\"kind\":\"factor\",\"label\":\"Agent availability share\",\"category\":\"external\",\"provenance\":\"ai_inferred\"}",
+        "requirement": {
+          "factor_id": "efa8b6f6",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "d9e055b5",
+            "113a52ab"
+          ],
+          "target_id": "88b031c4",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in d9e055b5, 113a52ab; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {},
+        "relationships": [
+          {
+            "from": "efa8b6f6",
+            "to": "out_efa8b6f6_impact",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.15
+            },
+            "exists_probability": 0.9,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Split factor→goal into factor→outcome→goal"
+            },
+            "provenance_display": "ai_inferred",
+            "origin": "repair"
+          }
+        ]
+      }
+    ],
+    "eligible": [
+      {
+        "factor_id": "efa8b6f6",
+        "label": "Agent availability share",
+        "snapshot": "16b40434a303caf2df086efc38b10f3009a1d0156a00eb9b30c168375d763760",
+        "node_snapshot": "{\"id\":\"efa8b6f6\",\"kind\":\"factor\",\"label\":\"Agent availability share\",\"category\":\"external\",\"provenance\":\"ai_inferred\"}",
+        "requirement": {
+          "factor_id": "efa8b6f6",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "d9e055b5",
+            "113a52ab"
+          ],
+          "target_id": "88b031c4",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in d9e055b5, 113a52ab; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {},
+        "relationships": [
+          {
+            "from": "efa8b6f6",
+            "to": "out_efa8b6f6_impact",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.15
+            },
+            "exists_probability": 0.9,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Split factor→goal into factor→outcome→goal"
+            },
+            "provenance_display": "ai_inferred",
+            "origin": "repair"
+          }
+        ]
+      }
+    ],
+    "unresolved_origin": [],
+    "protected_ids": []
+  },
+  "request_input": {
+    "brief": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+    "gaps": [
+      {
+        "factor_id": "efa8b6f6",
+        "label": "Agent availability share",
+        "snapshot": "16b40434a303caf2df086efc38b10f3009a1d0156a00eb9b30c168375d763760",
+        "node_snapshot": "{\"id\":\"efa8b6f6\",\"kind\":\"factor\",\"label\":\"Agent availability share\",\"category\":\"external\",\"provenance\":\"ai_inferred\"}",
+        "requirement": {
+          "factor_id": "efa8b6f6",
+          "operation": "isl.factor_baseline_sampling",
+          "option_ids": [
+            "d9e055b5",
+            "113a52ab"
+          ],
+          "target_id": "88b031c4",
+          "impact": "unassessed"
+        },
+        "reason": "Required baseline for isl.factor_baseline_sampling in d9e055b5, 113a52ab; impact unassessed.",
+        "requested_by": [
+          "isl.factor_baseline_sampling"
+        ],
+        "category": "external",
+        "scale": {},
+        "relationships": [
+          {
+            "from": "efa8b6f6",
+            "to": "out_efa8b6f6_impact",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.15
+            },
+            "exists_probability": 0.9,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis",
+              "reasoning": "Split factor→goal into factor→outcome→goal"
+            },
+            "provenance_display": "ai_inferred",
+            "origin": "repair"
+          }
+        ]
+      }
+    ],
+    "context": {
+      "basis": [
+        {
+          "id": "brief",
+          "text": "Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. There are 20 scheduled agents and 15 are available today. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale.",
+          "factor_ids": [
+            "efa8b6f6"
+          ],
+          "kind": "brief_context"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "53002ebe",
+          "kind": "decision",
+          "label": "Decision",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "88b031c4",
+          "kind": "goal",
+          "label": "Improve Support Reliability",
+          "provenance": "from_brief",
+          "source_quote": "Improve support reliability.",
+          "label_authored": true
+        },
+        {
+          "id": "d9e055b5",
+          "kind": "option",
+          "label": "Keep Overtime Share at 0.12",
+          "interventions": {
+            "966bf2d0": {
+              "value": 0.12,
+              "raw_value": 0.12,
+              "unit": "share",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "966bf2d0",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+            }
+          },
+          "is_baseline": true,
+          "provenance": "from_brief",
+          "source_quote": "Keep overtime share at 0.12",
+          "label_authored": true
+        },
+        {
+          "id": "113a52ab",
+          "kind": "option",
+          "label": "Raise Overtime Share to 0.24",
+          "interventions": {
+            "966bf2d0": {
+              "value": 0.24,
+              "raw_value": 0.24,
+              "unit": "share",
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "966bf2d0",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "value_confidence": "high",
+              "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+            }
+          },
+          "provenance": "from_brief",
+          "source_quote": "raise overtime share to 0.24",
+          "label_authored": true
+        },
+        {
+          "id": "966bf2d0",
+          "kind": "factor",
+          "label": "Current overtime share is 0.12.",
+          "observed_state": {
+            "value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "extractionType": "explicit"
+          },
+          "display_value": "0.12 share",
+          "provenance": "from_brief",
+          "source_quote": "Current overtime share is 0.12."
+        },
+        {
+          "id": "efa8b6f6",
+          "kind": "factor",
+          "label": "Agent availability share",
+          "category": "external",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_966bf2d0_impact",
+          "kind": "outcome",
+          "label": "Current overtime share is 0.12. Impact",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "out_efa8b6f6_impact",
+          "kind": "outcome",
+          "label": "Agent availability share Impact",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "relationships": [
+        {
+          "from": "d9e055b5",
+          "to": "966bf2d0",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "113a52ab",
+          "to": "966bf2d0",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Model-inferred causal link (records projector)"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "ai"
+        },
+        {
+          "from": "966bf2d0",
+          "to": "out_966bf2d0_impact",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "out_966bf2d0_impact",
+          "to": "88b031c4",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "efa8b6f6",
+          "to": "out_efa8b6f6_impact",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "out_efa8b6f6_impact",
+          "to": "88b031c4",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.15
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Split factor→goal into factor→outcome→goal"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "repair"
+        },
+        {
+          "from": "53002ebe",
+          "to": "d9e055b5",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "default"
+        },
+        {
+          "from": "53002ebe",
+          "to": "113a52ab",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Decision-to-option scaffold minted by the projector"
+          },
+          "provenance_display": "ai_inferred",
+          "origin": "default"
+        }
+      ]
+    }
+  },
+  "expected_request_hash": "abc2e5588a085732f166a3fe2c7ffd9226a6d64b06c51ad38261be8e8d721a91",
+  "parsed_model_result": {
+    "kind": "ok",
+    "estimates": [
+      {
+        "factor_id": "efa8b6f6",
+        "reasoning": "The brief states 15 of 20 scheduled agents are available today, giving an observed availability share of 0.75, and reports a daily available-share standard deviation of 0.05 on the same scale from the attendance log. The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.",
+        "estimate_type": "estimated",
+        "basis": [
+          "brief"
+        ],
+        "value": 0.75,
+        "std": 0.05
+      }
+    ],
+    "metadata": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v2",
+      "prompt_hash": "945c970e73eda083eeabc771743f78b016019d3e6ac9955685dd5b1d78b3100d",
+      "request_hash": "abc2e5588a085732f166a3fe2c7ffd9226a6d64b06c51ad38261be8e8d721a91",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 5364,
+      "output_tokens": 203,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 3831,
+      "provider_latency_ms": 3830,
+      "cost_usd": null
+    }
+  },
+  "metrics": {
+    "required_inputs": 1,
+    "materiality": "required_input_impact_unassessed",
+    "gaps_entering": 1,
+    "fallback_entering": 0,
+    "gaps_requested": 1,
+    "estimated": 1,
+    "model_unknown": 0,
+    "explicit_unknown": 0,
+    "operational_unresolved": 0,
+    "skipped_gaps": 0,
+    "rejected": [],
+    "fallback": 0,
+    "strict_evaluation_pass": true,
+    "unresolved_origin": [],
+    "protected_values_changed": 0,
+    "call": {
+      "call_made": true,
+      "provider": "anthropic",
+      "resolved_model": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
+      "prompt_version": "factor-quantification-v2",
+      "prompt_hash": "945c970e73eda083eeabc771743f78b016019d3e6ac9955685dd5b1d78b3100d",
+      "request_hash": "abc2e5588a085732f166a3fe2c7ffd9226a6d64b06c51ad38261be8e8d721a91",
+      "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+      "structured_output_requested": true,
+      "structured_output_enforced": null,
+      "input_tokens": 5364,
+      "output_tokens": 203,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "latency_ms": 3831,
+      "provider_latency_ms": 3830,
+      "cost_usd": null
+    }
+  },
+  "canonical_graph": {
+    "nodes": [
+      {
+        "id": "53002ebe",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "88b031c4",
+        "kind": "goal",
+        "label": "Improve Support Reliability",
+        "provenance": "from_brief",
+        "source_quote": "Improve support reliability.",
+        "label_authored": true
+      },
+      {
+        "id": "d9e055b5",
+        "kind": "option",
+        "label": "Keep Overtime Share at 0.12",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.12,
+            "raw_value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+          }
+        },
+        "is_baseline": true,
+        "provenance": "from_brief",
+        "source_quote": "Keep overtime share at 0.12",
+        "label_authored": true
+      },
+      {
+        "id": "113a52ab",
+        "kind": "option",
+        "label": "Raise Overtime Share to 0.24",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.24,
+            "raw_value": 0.24,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "raise overtime share to 0.24",
+        "label_authored": true
+      },
+      {
+        "id": "966bf2d0",
+        "kind": "factor",
+        "label": "Current overtime share is 0.12.",
+        "observed_state": {
+          "value": 0.12,
+          "unit": "share",
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "display_value": "0.12 share",
+        "provenance": "from_brief",
+        "source_quote": "Current overtime share is 0.12."
+      },
+      {
+        "id": "efa8b6f6",
+        "kind": "factor",
+        "label": "Agent availability share",
+        "observed_state": {
+          "std": 0.05,
+          "reasoning": {
+            "rationale": "The brief states 15 of 20 scheduled agents are available today, giving an observed availability share of 0.75, and reports a daily available-share standard deviation of 0.05 on the same scale from the attendance log. The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.",
+            "context_basis": [
+              "brief"
+            ]
+          },
+          "value": 0.75,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_966bf2d0_impact",
+        "kind": "outcome",
+        "label": "Current overtime share is 0.12. Impact",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_efa8b6f6_impact",
+        "kind": "outcome",
+        "label": "Agent availability share Impact",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "d9e055b5",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "113a52ab",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "966bf2d0",
+        "to": "out_966bf2d0_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_966bf2d0_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "efa8b6f6",
+        "to": "out_efa8b6f6_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_efa8b6f6_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "53002ebe",
+        "to": "d9e055b5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "53002ebe",
+        "to": "113a52ab",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      }
+    ]
+  },
+  "reloaded_graph": {
+    "nodes": [
+      {
+        "id": "53002ebe",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "88b031c4",
+        "kind": "goal",
+        "label": "Improve Support Reliability",
+        "provenance": "from_brief",
+        "source_quote": "Improve support reliability.",
+        "label_authored": true
+      },
+      {
+        "id": "d9e055b5",
+        "kind": "option",
+        "label": "Keep Overtime Share at 0.12",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.12,
+            "raw_value": 0.12,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge 6bb5fd45 to stated_items[3]: Current overtime share is 0.12."
+          }
+        },
+        "is_baseline": true,
+        "provenance": "from_brief",
+        "source_quote": "Keep overtime share at 0.12",
+        "label_authored": true
+      },
+      {
+        "id": "113a52ab",
+        "kind": "option",
+        "label": "Raise Overtime Share to 0.24",
+        "interventions": {
+          "966bf2d0": {
+            "value": 0.24,
+            "raw_value": 0.24,
+            "unit": "share",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "966bf2d0",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct causal value bound by edge ab3882a6 to stated_items[4]: 0.24"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "raise overtime share to 0.24",
+        "label_authored": true
+      },
+      {
+        "id": "966bf2d0",
+        "kind": "factor",
+        "label": "Current overtime share is 0.12.",
+        "observed_state": {
+          "value": 0.12,
+          "unit": "share",
+          "source": "brief_extraction",
+          "extractionType": "explicit"
+        },
+        "display_value": "0.12 share",
+        "provenance": "from_brief",
+        "source_quote": "Current overtime share is 0.12."
+      },
+      {
+        "id": "efa8b6f6",
+        "kind": "factor",
+        "label": "Agent availability share",
+        "observed_state": {
+          "std": 0.05,
+          "reasoning": {
+            "rationale": "The brief states 15 of 20 scheduled agents are available today, giving an observed availability share of 0.75, and reports a daily available-share standard deviation of 0.05 on the same scale from the attendance log. The value 0.75 is a direct computation from stated counts (15/20), and the std is directly reported in the brief as the daily variability of this same quantity (available share of scheduled agents), so no transfer assumption is needed.",
+            "context_basis": [
+              "brief"
+            ]
+          },
+          "value": 0.75,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_966bf2d0_impact",
+        "kind": "outcome",
+        "label": "Current overtime share is 0.12. Impact",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_efa8b6f6_impact",
+        "kind": "outcome",
+        "label": "Agent availability share Impact",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "d9e055b5",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "113a52ab",
+        "to": "966bf2d0",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "966bf2d0",
+        "to": "out_966bf2d0_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_966bf2d0_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "efa8b6f6",
+        "to": "out_efa8b6f6_impact",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "out_efa8b6f6_impact",
+        "to": "88b031c4",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "53002ebe",
+        "to": "d9e055b5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "53002ebe",
+        "to": "113a52ab",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      }
+    ]
+  },
+  "session_file": "/Users/paulslee/Documents/GitHub/factor-quantification-work/artifacts/live-sonnet-v2-20260830/records_figure_rich.session.json",
+  "commit": {
+    "performed": true,
+    "graph_persisted": true,
+    "persisted_row_id": "cc6c3a02-378d-4dff-a887-67fb9107a58b",
+    "persistence_latency_ms": 32
+  },
+  "final_readiness": {
+    "options": [
+      {
+        "option_id": "d9e055b5",
+        "label": "Keep Overtime Share at 0.12",
+        "status": "ready",
+        "interventions": {
+          "966bf2d0": 0.12
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "966bf2d0": {
+            "display_value": "0.12 share",
+            "normalised_value": 0.12,
+            "unit": "share"
+          }
+        },
+        "raw_interventions": {
+          "966bf2d0": 0.12
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "113a52ab",
+        "label": "Raise Overtime Share to 0.24",
+        "status": "ready",
+        "interventions": {
+          "966bf2d0": 0.24
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "966bf2d0": {
+            "display_value": "0.24 share",
+            "normalised_value": 0.24,
+            "unit": "share"
+          }
+        },
+        "raw_interventions": {
+          "966bf2d0": 0.24
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "88b031c4",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true
+  },
+  "result": {
+    "id": "records_figure_rich",
+    "passed": true,
+    "failures": [],
+    "metrics": {
+      "required_inputs": 1,
+      "materiality": "required_input_impact_unassessed",
+      "gaps_entering": 1,
+      "fallback_entering": 0,
+      "gaps_requested": 1,
+      "estimated": 1,
+      "model_unknown": 0,
+      "explicit_unknown": 0,
+      "operational_unresolved": 0,
+      "skipped_gaps": 0,
+      "rejected": [],
+      "fallback": 0,
+      "strict_evaluation_pass": true,
+      "unresolved_origin": [],
+      "protected_values_changed": 0,
+      "call": {
+        "call_made": true,
+        "provider": "anthropic",
+        "resolved_model": "claude-sonnet-5",
+        "model": "claude-sonnet-5",
+        "prompt_version": "factor-quantification-v2",
+        "prompt_hash": "945c970e73eda083eeabc771743f78b016019d3e6ac9955685dd5b1d78b3100d",
+        "request_hash": "abc2e5588a085732f166a3fe2c7ffd9226a6d64b06c51ad38261be8e8d721a91",
+        "schema_hash": "117d5ab8939a0f06c14f6bcee75a7f71c24ff7b4d7e9cc38a4cd9eb911fbaaa9",
+        "structured_output_requested": true,
+        "structured_output_enforced": null,
+        "input_tokens": 5364,
+        "output_tokens": 203,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "latency_ms": 3831,
+        "provider_latency_ms": 3830,
+        "cost_usd": null
+      }
+    },
+    "protected_values_changed": 0,
+    "estimates": 1,
+    "provenance_survived": 1,
+    "uncertainty_survived": 1,
+    "case_latency_ms": 3908,
+    "persistence_latency_ms": 32
+  }
+}

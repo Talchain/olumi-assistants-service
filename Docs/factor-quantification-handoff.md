@@ -49,4 +49,6 @@ Prompt/Consumer owns the separate claim-mediated percentage loss: a direct state
 
 The bounded alternative-model comparison comes after a working canonical-to-Science path, not before it. It has not been used as a dependency or as a numerical fill-rate contest.
 
-The estimator-specific v2 prompt now requires separate numerical support for a central value and dispersion, forbids inventing a spread from qualitative anchors or graph-edge uncertainty, and distinguishes observed variation from measurement error. The unchanged figure-poor brief is being tightened to mandatory unknown. The restart handoff records whether that corrected prompt has a fresh live witness; historical v1 outputs are retained rather than relabelled.
+V2 was executed at clean `86246ce4`: two appropriate unknowns and one mechanically accepted but semantically unsupported estimate. Its rich rationale incorrectly equated today's exact count with the centre of a repeated-day distribution. The 33.3% adopted rate is not a defensible-resolution rate. Raw outputs and independent assessment are retained in `live-sonnet-v2/`.
+
+V3 adds an explicit target/population/time-basis rule. The unchanged rich snapshot is now an unknown control. A separate records planning-day fixture supplies a comparable historical mean and daily spread plus explicit provisional same-process assumption. V3's live semantic witness is pending; the deterministic positive has moved to that unambiguous fixture. Source/typecheck, strict parser and persistence controls alone do not validate model reasoning.

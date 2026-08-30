@@ -1,5 +1,5 @@
 /**
- * Opt-in, five-case Factor Quantification witness. Example (credentials/model
+ * Opt-in, six-case Factor Quantification witness. Example (credentials/model
  * must already be supplied by the caller; this script never reads env files):
  *   node --import tsx scripts/semantic-contract/factor-quantification-live.ts \
  *     --live --out /absolute/path/to/a-new-evidence-directory
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   const { projectGraphAndOptionsToV3 } = await import('../../src/cee/transforms/schema-v3.js');
   const { createNoopSessionStore } = await import('../../src/orchestrator-v5/session/__tests__/fixtures.js');
   const { commitDirectAnswer } = await import('../../src/orchestrator-v5/commit.js');
-  const { liveRecordsFigureRichControl, figurePoor, diagnostic, insufficientInformation, suppliedValueControl } =
+  const { liveRecordsFigureRichControl, liveRecordsPlanningDayControl, figurePoor, diagnostic, insufficientInformation, suppliedValueControl } =
     await import('../../src/cee/factor-quantification/__tests__/fixtures/corpus.js');
 
   // Resolve with the SAME configured router as the wrapper, without making a
@@ -176,7 +176,8 @@ async function main(): Promise<void> {
   type Case = {
     id: string; input_kind: 'records_replay' | 'authored_control'; brief: string;
     build(): Promise<{ graph: GraphV3T; replay?: unknown }>;
-    expected: 'rich_point' | 'unknown' | 'no_call_diagnostic' | 'no_call_protected';
+    expected: 'planning_point' | 'unknown' | 'no_call_diagnostic' | 'no_call_protected';
+    protected_label?: string;
     target_label?: string; target_id?: string;
   };
   const suppliedGraph = GraphV3.parse(structuredClone(suppliedValueControl.graph));
@@ -195,13 +196,25 @@ async function main(): Promise<void> {
   const authored = (graph: GraphV3T) => async () => ({ graph: GraphV3.parse(structuredClone(graph)) });
   const cases: Case[] = [
     { id: 'records_figure_rich', input_kind: 'records_replay', brief: liveRecordsFigureRichControl.brief,
-      expected: 'rich_point', target_label: liveRecordsFigureRichControl.missing_label,
+      expected: 'unknown', target_label: liveRecordsFigureRichControl.missing_label,
+      protected_label: liveRecordsFigureRichControl.protected_label,
       async build() {
         const replay = await replayRecordSet(liveRecordsFigureRichControl.records, { brief: liveRecordsFigureRichControl.brief });
         if (!replay.ok) throw new Error('Records replay failed');
         const projection = projectGraphAndOptionsToV3(replay.graph as Parameters<typeof projectGraphAndOptionsToV3>[0],
           { brief: liveRecordsFigureRichControl.brief });
         return { graph: GraphV3.parse(projection.graph), replay };
+      } },
+    { id: 'records_planning_day', input_kind: 'records_replay', brief: liveRecordsPlanningDayControl.brief,
+      expected: 'planning_point', target_label: liveRecordsPlanningDayControl.missing_label,
+      protected_label: liveRecordsPlanningDayControl.protected_label,
+      async build() {
+        const fixture = liveRecordsPlanningDayControl;
+        const replay = await replayRecordSet(fixture.records, { brief: fixture.brief });
+        if (!replay.ok) throw new Error('Records replay failed');
+        return { graph: GraphV3.parse(projectGraphAndOptionsToV3(
+          replay.graph as Parameters<typeof projectGraphAndOptionsToV3>[0], { brief: fixture.brief },
+        ).graph), replay };
       } },
     { id: figurePoor.id, input_kind: 'authored_control', brief: figurePoor.brief,
       expected: 'unknown', target_id: 'fac_preparedness', build: authored(figurePoor.graph) },
@@ -278,12 +291,14 @@ async function main(): Promise<void> {
       if (!noCall) check(outcome.model.kind === 'ok', 'Requested target must receive a parsed model answer');
       const parsed = outcome.model.kind === 'ok' ? outcome.model.estimates : [];
       const targetEstimate = parsed.find(estimate => estimate.factor_id === target?.id);
-      if (item.expected === 'rich_point') {
-        check(targetEstimate?.estimate_type === 'estimated' && targetEstimate.value === 0.75 && targetEstimate.std === 0.05,
-          'Rich target must derive .75 and retain the supplied .05 standard deviation');
-        const stated = graph.nodes.find(n => n.label === liveRecordsFigureRichControl.protected_label);
+      if (item.protected_label) {
+        const stated = graph.nodes.find(n => n.label === item.protected_label);
         check(stated?.observed_state?.value === 0.12 && stated.observed_state.source === 'brief_extraction',
           'The records path must preserve the user-stated .12 before estimation');
+      }
+      if (item.expected === 'planning_point') {
+        check(targetEstimate?.estimate_type === 'estimated' && targetEstimate.value === 0.75 && targetEstimate.std === 0.05,
+          'Planning-day target must derive .75 from the historical mean and retain the matching .05 daily spread');
       } else if (item.expected === 'unknown') {
         check(matchesRequiredUnknown(targetEstimate), 'Insufficient quantitative calibration must produce a model-authored unknown');
       } else if (item.expected === 'no_call_diagnostic') {
@@ -367,7 +382,12 @@ async function main(): Promise<void> {
   const summary = { generated_at: new Date().toISOString(), scope, source_identity: sourceIdentity,
     model: resolution.resolved_model, provider: resolution.provider, cases: results,
     passed: results.every(item => item.passed), materiality: 'required_input_impact_unassessed',
-    totals: { gaps_entering: gaps, estimated: estimates, explicit_unknown: unknown, fallback,
+    totals: { required_inputs: sum(item => item.metrics?.required_inputs ?? 0),
+      gaps_entering: gaps, fallback_entering: sum(item => item.metrics?.fallback_entering ?? 0),
+      estimated: estimates, model_unknown: sum(item => item.metrics?.model_unknown ?? 0), explicit_unknown: unknown, fallback,
+      operational_unresolved: sum(item => item.metrics?.operational_unresolved ?? 0),
+      skipped_gaps: sum(item => item.metrics?.skipped_gaps ?? 0),
+      unresolved_origin: sum(item => item.metrics?.unresolved_origin.length ?? 0),
       estimated_percent: percent(estimates, gaps), explicit_unknown_percent: percent(unknown, gaps), fallback_percent: percent(fallback, gaps),
       protected_values_changed: sum(item => item.protected_values_changed),
       estimate_provenance_survival_percent: percent(sum(item => item.provenance_survived), sum(item => item.estimates)),
@@ -378,7 +398,7 @@ async function main(): Promise<void> {
       persistence_latency_ms: sum(item => item.persistence_latency_ms ?? 0), cost_usd: null },
     interpretation: 'Parsed/adopted estimates are candidates for independent semantic review; schema and basis-ID compliance do not prove factual correctness.',
     superseded_evaluation: 'The banked run at 8deefc63f79c6e1afa93da2387e752824a30cf6c passed the old pipeline checks, but its figure-poor 0.35/std 0.15 was semantically flagged as unsupported. The old 66.7% adoption rate is not a defensible-quality rate. This unchanged brief now requires unknown; archived artifacts are not rewritten.',
-    instrument_warnings: estimates === 0 && gaps > 0 ? ['All requested cases returned no adopted estimate; the rich positive target has failed.'] : [],
+    instrument_warnings: estimates === 0 && gaps > 0 ? ['All requested cases returned no adopted estimate; the explicit planning-day positive target has failed.'] : [],
   };
   await atomicJson(join(out, 'summary.json'), summary);
   console.log(`Evidence written to ${out}; ${summary.passed ? 'all target checks passed' : 'target checks failed'}. Local file persistence only.`);

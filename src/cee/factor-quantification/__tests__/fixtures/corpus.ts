@@ -116,13 +116,13 @@ export const figureRich: QuantificationCase = {
     consumer_reason: { fac_availability: 'External parent of the selected goal; its current level/range is an input to the real structural calculation.', fac_parking: 'No directed path to the selected goal despite more outgoing edges than the requested factor.' },
   },
   expected: {
-    ...fixedPolicy, protected_values: { fac_churn: 0.12, fac_overtime: 0 }, estimate_candidates: ['fac_availability'], must_remain_unknown: [], excluded_factors: ['fac_parking'],
+    ...fixedPolicy, protected_values: { fac_churn: 0.12, fac_overtime: 0 }, estimate_candidates: [], must_remain_unknown: ['fac_availability'], excluded_factors: ['fac_parking'],
     evidence_controls: [
       { target_id: 'fac_availability', source_id: 'availability_counts', disposition: 'supports_estimate_basis' },
       { target_id: 'fac_availability', source_id: 'invented_staffing_report', disposition: 'reject_missing_source' },
       { target_id: 'fac_availability', source_id: 'parking', disposition: 'reject_irrelevant_source' },
     ],
-    notes: ['15 / 20 supports a current 0.75 estimate; do not invent precision about future availability.', 'A derived estimate remains Olumi-estimated; a rationale does not convert it into new observed evidence.', 'Do not select the disconnected high-degree factor. Connectivity is a scheduling rule, not scientific materiality.'],
+    notes: ['15 / 20 establishes today\'s exact 0.75 arithmetic, but daily variation does not supply uncertainty for that snapshot. The stochastic representation remains unknown.', 'A derived estimate remains Olumi-estimated; a rationale does not convert it into new observed evidence.', 'Do not select the disconnected high-degree factor. Connectivity is a scheduling rule, not scientific materiality.'],
   },
 };
 
@@ -233,4 +233,22 @@ export const liveRecordsFigureRichControl = {
     ],
   } satisfies DraftRecordSet,
   protected_label: 'Current overtime share is 0.12.',
+};
+
+/** Separate positive: do not rewrite the original snapshot/variation ambiguity
+ * or the claim-mediated source-loss fixture to make an estimate appear valid.
+ * The random-day planning quantity and transfer assumption are explicit. */
+export const liveRecordsPlanningDayControl = {
+  ...liveRecordsFigureRichControl,
+  brief: 'Improve support reliability. Keep overtime share at 0.12 or raise overtime share to 0.24. Current overtime share is 0.12. Model agent availability share for a randomly selected operating day in the next four weeks, not today or the four-week average. In the attendance log for the last four weeks, each operating day had 20 scheduled agents; the daily available-agent count averaged 15. Availability is the available share of scheduled agents on a 0 to 1 scale. The attendance log reports a daily available-share standard deviation of 0.05 on that same scale. For this provisional planning comparison, assume the next four weeks use the same daily attendance process and staffing conditions as the logged period. This assumption is not evidence of future outcomes; the standard deviation describes variation between operating days, not uncertainty in the historical mean.',
+  missing_label: 'Agent availability share on a planning day',
+  records: {
+    stated_items: liveRecordsFigureRichControl.records.stated_items.map((item, index) => {
+      if (index === 5) return { kind: 'figure' as const, source_quote: 'each operating day had 20 scheduled agents', value: 20, unit: 'agents' };
+      if (index === 6) return { kind: 'figure' as const, source_quote: 'the daily available-agent count averaged 15', value: 15, unit: 'agents' };
+      return { ...item };
+    }),
+    claims: liveRecordsFigureRichControl.records.claims.map(item => item.claim_kind === 'factor'
+      ? { ...item, label: 'Agent availability share on a planning day' } : { ...item }),
+  } satisfies DraftRecordSet,
 };
