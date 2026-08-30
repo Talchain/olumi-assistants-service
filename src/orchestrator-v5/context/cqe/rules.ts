@@ -87,7 +87,10 @@ export const NUMERIC_SUFFIX_SOURCE = String.raw`(?:k|m|bn|million|billion|thousa
 const SUFFIX = NUMERIC_SUFFIX_SOURCE;
 
 // UNIT token for patterns that accept a trailing unit.
-const UNIT = `(?:%|pp|percentage\\s+points?|${TIME_UNIT}|${METRIC_UNIT}|${CURRENCY_SYMBOL}|${CURRENCY_CODE}|${CURRENCY_COLLOQUIAL})`;
+// Word spellings have exactly the same quantity semantics as `%`. The word
+// boundary prevents `percent` from consuming the start of `percentage points`.
+const PERCENT_UNIT = String.raw`(?:%|percent\b|per\s+cent\b)`;
+const UNIT = `(?:${PERCENT_UNIT}|pp|percentage\\s+points?|${TIME_UNIT}|${METRIC_UNIT}|${CURRENCY_SYMBOL}|${CURRENCY_CODE}|${CURRENCY_COLLOQUIAL})`;
 
 // Word fractions (handled by P5; values from §4.3 cross-cutting modifiers).
 // Order matters: longer phrases must precede shorter ones so the alternation
@@ -156,7 +159,7 @@ function normaliseUnit(token: string | undefined): string | null {
   if (!token) return null;
   const t = token.trim().toLowerCase();
   if (!t) return null;
-  if (t === '%') return 'percentage';
+  if (t === '%' || /^(?:percent|per\s+cent)$/.test(t)) return 'percentage';
   if (t === 'pp' || /^percentage\s+points?$/.test(t)) return 'percentage_points';
   if (/^(£|\$|€|gbp|usd|eur|grand|quid)$/.test(t)) return normaliseCurrencyUnit(t);
   // Collapse plurals for duration/metric units (months -> month, etc).
@@ -499,7 +502,7 @@ const rule_P5: PatternRule = {
 // ---- P6 directional_percent -------------------------------------------------
 
 const P6_REGEX = new RegExp(
-  `\\b(${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB})(?:\\s+[a-z][a-z\\s-]{0,30}?)?\\s+by\\s+(?:(?:${APPROX})\\s+)?(${NUM})\\s*%`,
+  `\\b(${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB})(?:\\s+[a-z][a-z\\s-]{0,30}?)?\\s+by\\s+(?:(?:${APPROX})\\s+)?(${NUM})\\s*${PERCENT_UNIT}`,
   'gi',
 );
 
@@ -808,7 +811,7 @@ const rule_P8: PatternRule = {
 
 // ---- P9 bare_percentage ----------------------------------------------------
 
-const P9_REGEX = new RegExp(`(${NUM})\\s*%`, 'gi');
+const P9_REGEX = new RegExp(`(${NUM})\\s*${PERCENT_UNIT}`, 'gi');
 
 const rule_P9: PatternRule = {
   id: 'P9',

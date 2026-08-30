@@ -13,7 +13,8 @@
  *   - raw_value is the user-unit number ("5", "50000", "0.8").
  *   - value is the model-unit number written into observed_state.value.
  *     When `cap` is defined, value = raw_value / cap (clamped to [0, cap]).
- *     When `cap` is absent, value = raw_value.
+ *     Otherwise an existing scale frame wins. An explicitly stated percent
+ *     supplies a divisor of 100 when no frame exists; other units stay raw.
  *
  * The cap / range / unit guards are NOT defined inline here any more —
  * they live in `evaluateFactorValueProposal` (the single source of
@@ -23,9 +24,11 @@
  * already throws. See workstream plan: AC.1 parity invariant.
  */
 
+import { DeclaredScale, DECLARED_SCALE_BOUNDS } from '@talchain/schemas';
 import { D1HandlerError } from './errors.js';
 import {
   evaluatePostOperatorFactorValue,
+  unitComparisonKey,
   type ProposalRejectionReason,
 } from './evaluate-factor-value-proposal.js';
 import { resolveScaleFrame } from './scale-frame.js';
@@ -62,6 +65,8 @@ export interface NormaliseInput {
    * pair, then to today's raw write. See `resolveScaleFrame`.
    */
   readonly factorScaleFrame?: number;
+  /** Existing semantic scale class; never inferred from a label or number. */
+  readonly factorDeclaredScale?: unknown;
   /**
    * When true, the parameter arrived as a bare number with no unit. We
    * use this to detect ambiguous proposals against capped factors —
@@ -73,6 +78,8 @@ export interface NormaliseInput {
 export interface NormaliseResult {
   readonly raw_value: number;
   readonly value: number;
+  /** A newly supplied divisor, not an upper bound or probability declaration. */
+  readonly scale_frame?: number;
 }
 
 /**
@@ -99,6 +106,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     factorObservedValue,
     factorObservedRawValue,
     factorScaleFrame,
+    factorDeclaredScale,
     inputHasUnit,
   } = input;
 
@@ -169,6 +177,16 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   //   · UNFRAMED (raw == value, or no recorded pair) → store raw_value as-is
   //     in both fields, exactly as before. Counts, ratios, unbounded scales.
   if (cap === undefined) {
+    const explicitPercentage = inputHasUnit && unitComparisonKey(unit) === '%';
+    if (
+      explicitPercentage && factorScaleFrame !== undefined &&
+      (!Number.isFinite(factorScaleFrame) || factorScaleFrame <= 1)
+    ) {
+      throw new D1HandlerError('PARAMETER_INVALID', 'The factor’s recorded scale frame is invalid.', {
+        details: { factorScaleFrame },
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
     const frame = resolveScaleFrame({
       storedFrame: factorScaleFrame,
       value: factorObservedValue,
@@ -179,6 +197,40 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
       if (Number.isFinite(framedValue)) {
         return { raw_value: rawInput, value: framedValue };
       }
+    }
+    // CQE's `percentage` quantity is a fraction; its proposal adapter restores
+    // the user amount and `%`. Reapply that explicit unit conversion when the
+    // factor has no frame. This does NOT classify it as a probability: 110%
+    // can be a ratio, and an absent declared_scale must remain absent.
+    // A rejected stored frame is not an absent one. Never replace conflicting
+    // canonical evidence with the percentage convention.
+    if (explicitPercentage) {
+      const declared = DeclaredScale.safeParse(factorDeclaredScale);
+      if (
+        factorScaleFrame !== undefined ||
+        factorObservedValue !== undefined || factorObservedRawValue !== undefined ||
+        (factorDeclaredScale !== undefined && (!declared.success || declared.data === 'raw_count'))
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'The stated percentage needs a compatible recorded scale before this value can be changed.',
+          {
+            details: { factorScaleFrame, factorDeclaredScale },
+            userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+          },
+        );
+      }
+      const value = rawInput / 100;
+      if (declared.success) {
+        const bounds = DECLARED_SCALE_BOUNDS[declared.data];
+        if ((bounds.min !== null && value < bounds.min) || (bounds.max !== null && value > bounds.max)) {
+          throw new D1HandlerError('PARAMETER_INVALID', 'The percentage is outside the factor’s declared scale.', {
+            details: { factorDeclaredScale, value },
+            userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+          });
+        }
+      }
+      return { raw_value: rawInput, value, scale_frame: 100 };
     }
     return { raw_value: rawInput, value: rawInput };
   }

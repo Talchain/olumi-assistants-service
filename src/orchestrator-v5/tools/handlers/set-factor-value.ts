@@ -52,6 +52,7 @@ import {
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
@@ -410,6 +411,9 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(typeof (targetNode as { scale_frame?: unknown }).scale_frame === 'number'
         ? { factorScaleFrame: (targetNode as { scale_frame: number }).scale_frame }
         : {}),
+      ...(targetNode.observed_state?.declared_scale !== undefined
+        ? { factorDeclaredScale: targetNode.observed_state.declared_scale }
+        : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
       // a bare-number proposal "200" against a cap=100 factor is ambiguous
@@ -417,6 +421,19 @@ export function createSetFactorValueHandler(): HandlerFn {
       // "%". Refuse rather than guess; the user must clarify.
       inputHasUnit: parsed.inputHasUnit,
     });
+
+    // A first stated percentage may establish its own divisor, but cannot
+    // silently reframe existing option values on that factor. Use the same
+    // intervention reader as analysis; do not guess from their magnitudes.
+    if (normalised.scale_frame !== undefined && graph.nodes.some((node) =>
+      node.kind === 'option' && targetId in mergeInterventionSourceObjects(node)
+    )) {
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'Confirm the factor’s scale before changing a percentage used by existing options.',
+        { details: { target_id: targetId }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
+      );
+    }
 
     const after: ObservedSnapshot = {
       value: normalised.value,
@@ -545,6 +562,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       }
 
       node.observed_state = merged;
+      // Persist the unit's divisor on the canonical node. Inferring it later
+      // from raw/value loses it at zero; a cap would wrongly impose bounds.
+      if (normalised.scale_frame !== undefined) {
+        node.scale_frame = normalised.scale_frame;
+      }
 
       // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
       // from the post-mutation observed_state via the canonical pure
