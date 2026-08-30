@@ -39,7 +39,7 @@ import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 // `fixControllableMissingData`, which remains a `0.5` safety net for a factor
 // carrying neither a value nor an explicit unknown.
 import { FACTOR_VALUE_TIER_FIELD } from "../../../provenance/factor-value-provenance.js";
-import { buildUnquantifiedPrior, unquantifiedFactorSentence } from "../../../provenance/unquantified-factor.js";
+import { buildUnquantifiedPrior, unquantifiedFactorSentence, factorHasExpressiblePrior } from "../../../provenance/unquantified-factor.js";
 import { log } from "../../../../utils/telemetry.js";
 import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
@@ -480,6 +480,22 @@ export function fixObservableMissingData(
     //
     // NOTHING ELSE MOVES. A stamp the MODEL emitted — `explicit`, or `observed`
     // it chose itself — is left alone; only the stamps this function writes change.
+    // ⛔⛔ SAME PRESERVATION GUARD AS W1 (`normalisation.ts`). A model-supplied
+    // prior is a STATED LEVEL, not a gap: overwriting it with `uniform(0,1)`
+    // flagged as ignorance is a false claim about a factor the model had
+    // information on. Only the `extractionType` half of this repair may apply.
+    if (!hasValue && factorHasExpressiblePrior(node)) {
+      if (data?.extractionType === undefined) {
+        (node as any).data = { ...(data ?? {}), extractionType: "inferred" };
+        repairs.push({
+          code: "OBSERVABLE_MISSING_DATA",
+          path: `nodes[${node.id}]`,
+          action: `Added extractionType="inferred"`,
+        });
+      }
+      continue;
+    }
+
     if (!hasValue) {
       // ⛔ NO SUBSTITUTION. This branch used to WRITE `value: 0.5` and stamp it
       // `fallback_default`, because `graph-validator.ts` treated a valueless

@@ -114,6 +114,49 @@ export function buildUnquantifiedPrior(): UnquantifiedPrior {
 }
 
 /**
+ * Is this a prior a downstream consumer can actually express?
+ *
+ * ⚠⚠ TWO PREDICATES, TWO QUESTIONS, AND CONFLATING THEM IS HOW THIS PR SHIPPED
+ * A NEW INFORMATION-LOSS PATH IN ITS FIRST ROUND (CLAUDE.md trap 21):
+ *
+ *   `factorHasExpressiblePrior`     — "has this factor's level been STATED as a
+ *                                      distribution?"        → the VALIDATOR's gate
+ *   `factorIsExplicitlyUnquantified`— "is that distribution an admission of
+ *                                      IGNORANCE rather than an estimate?"
+ *                                                            → the DOWNSTREAM discriminator
+ *
+ * They are not the same axis and neither is derived from the other. A
+ * model-supplied `U(0.6, 1.0)` answers the first YES and the second NO. The
+ * first round of this change asked only the second question at the write site
+ * and therefore overwrote such a prior with `U(0,1)` flagged as ignorance — a
+ * FALSE CLAIM OF IGNORANCE about a factor the model had information on, moving
+ * the centre 0.8 → 0.5 on a quantity the maths is linear in.
+ *
+ * ⭐ THE CONDITIONS ARE THE ONES WE HOLD OURSELVES TO. This is deliberately the
+ * same expressibility test the suite asserts against our OWN emitted prior —
+ * uniform family, finite bounds, STRICTLY ordered — mirroring PLoT's three
+ * declines. One definition, used both to validate what we emit and to decide
+ * whether a model's prior is good enough to keep. A second, looser definition
+ * here would be the mirror this module exists to remove.
+ *
+ * `range_min < range_max` is strict on purpose: `min === max` is a point mass,
+ * not a stated range, and `min > max` would rely on a downstream swap repair we
+ * must not depend on.
+ */
+export function factorHasExpressiblePrior(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const prior = (node as { prior?: unknown }).prior;
+  if (typeof prior !== "object" || prior === null) return false;
+  const p = prior as Record<string, unknown>;
+  if (p.distribution !== IGNORANCE_PRIOR_DISTRIBUTION) return false;
+  const min = p.range_min;
+  const max = p.range_max;
+  if (typeof min !== "number" || !Number.isFinite(min)) return false;
+  if (typeof max !== "number" || !Number.isFinite(max)) return false;
+  return min < max;
+}
+
+/**
  * Does this node carry an EXPLICIT unknown?
  *
  * ⚠⚠ THIS IS THE VALIDATOR'S DISCRIMINATOR, AND ITS BREADTH IS THE WHOLE
@@ -151,9 +194,24 @@ export function factorIsExplicitlyUnquantified(node: unknown): boolean {
  * The honest claim is that we have no estimate — not a description of our own
  * machinery.
  */
+export const UNQUANTIFIED_CLAUSE =
+  "we have no estimate for it yet — its value was left fully open" +
+  " rather than narrowed to a figure we cannot support";
+
 export function unquantifiedFactorSentence(label: string): string {
-  return (
-    `We have no estimate for "${label}" yet — its value was left fully open` +
-    ` rather than narrowed to a figure we cannot support`
-  );
+  return `We have no estimate for "${label}" yet — its value was left fully open`
+    + ` rather than narrowed to a figure we cannot support`;
+}
+
+/**
+ * The same claim as a CLAUSE, for appending to a repair action that already
+ * describes something else (`unreachable-factors.ts` appends it to its
+ * reclassification sentence).
+ *
+ * Two grammatical forms, ONE wording, declared together — so the product cannot
+ * end up saying two different things about one state, which is the failure this
+ * whole module exists to stop.
+ */
+export function unquantifiedClauseSuffix(): string {
+  return `, and ${UNQUANTIFIED_CLAUSE}`;
 }

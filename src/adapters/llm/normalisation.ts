@@ -8,7 +8,7 @@
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
 import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
-import { buildUnquantifiedPrior } from "../../cee/provenance/unquantified-factor.js";
+import { buildUnquantifiedPrior, factorHasExpressiblePrior } from "../../cee/provenance/unquantified-factor.js";
 
 // ============================================================================
 // Types
@@ -996,6 +996,35 @@ export function ensureControllableFactorBaselines(response: unknown): {
     }
     if (data && typeof data.value === 'number') {
       return node; // Already has value
+    }
+
+    // ⛔⛔ A MODEL-SUPPLIED PRIOR IS INFORMATION. DO NOT OVERWRITE IT.
+    //
+    // The first round of this change wrote the ignorance prior unconditionally,
+    // and that was a NEW information-loss path introduced by a fix for
+    // information loss. A model emitting `uniform(0.6, 1.0)` — centre 0.8 — had
+    // its prior replaced by `uniform(0, 1)` STAMPED `prior_is_unquantified`:
+    // a false claim of ignorance about a factor the model had information on,
+    // moving the centre to 0.5 on a quantity ISL's elasticity is linear in.
+    // Before this PR the prior survived, so it was a REGRESSION, not a gap.
+    //
+    // It is not hypothetical. The served prompt (v187 — NOT `defaults-v19.ts`,
+    // which is not the served prompt) teaches narrowed ranges, and a sweep of
+    // all five shipped starters found 14 priors, EVERY ONE `uniform` and EVERY
+    // ONE NARROWED (0.4–0.9, 0.25–0.75, 0.3–0.8, 0.265–0.795 …) — and ZERO at
+    // exactly (0,1). That is the corpus a tester meets.
+    //
+    // ⭐ THE THREE LEGITIMATE STATES, AND THIS BRANCH IS THE SECOND ONE.
+    // explicit user fact → PRESERVE (the return above) · defensible estimate,
+    // WITH its uncertainty → the estimate (here) · genuinely unknown → UNKNOWN
+    // (below). A stated distribution IS a stated level; it needs no value and
+    // it must not be relabelled as ignorance.
+    //
+    // The test is `factorHasExpressiblePrior`, NOT "has a prior": a malformed or
+    // degenerate prior is not information either, and such a node falls through
+    // to the honest unknown rather than being shipped unusable.
+    if (factorHasExpressiblePrior(node)) {
+      return node;
     }
 
     // ⛔ NO SUBSTITUTION. State the unknown instead of inventing a midpoint.

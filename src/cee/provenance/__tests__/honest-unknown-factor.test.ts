@@ -412,20 +412,61 @@ describe("C — an explicit unknown satisfies the factor-data gate; nothing else
     expect(missingFieldsFor(result, "CONTROLLABLE_MISSING_DATA")).toContain("value");
   });
 
-  it("a prior WITHOUT the flag does not satisfy the gate either", () => {
-    // The narrow twin of the case above: `fac_nrr` in the captured corpus is a
-    // real `uniform(0,1)` prior. Carrying a prior must not be enough — only the
-    // explicit ignorance label is.
+  it("a MODEL-SUPPLIED prior satisfies the gate too — a stated distribution is a stated level", () => {
+    // ⚠⚠ THIS TEST'S VERDICT IS INVERTED FROM ITS FIRST VERSION, AND THE
+    // INVERSION IS A DEFECT FIX, NOT A RELAXATION.
+    //
+    // It used to assert that only an EXPLICITLY-FLAGGED prior satisfied the
+    // gate, so a model's own `uniform(0.6, 1.0)` was refused — and
+    // `fixControllableMissingData` would then "repair" that refusal by writing
+    // `0.5`, reinstating the exact placeholder this PR removes, for precisely
+    // the population carrying the MOST information.
+    //
+    // The gate asks "has this factor's level been stated?", and there are TWO
+    // legitimate ways to state it as a distribution: a defensible estimate with
+    // its uncertainty, and an admission of ignorance. Both are answers.
+    // `prior_is_unquantified` is what tells a downstream reader WHICH — that is
+    // a different question, asked by a different predicate (trap 21).
     const graph = optionConnectedGraph({
-      extractionType: "explicit",
+      extractionType: "inferred",
       factor_type: "retention",
       uncertainty_drivers: ["cohort model"],
     });
-    nodeById(graph, "fac_target").prior = { distribution: "uniform", range_min: 0, range_max: 1 };
+    nodeById(graph, "fac_target").prior = { distribution: "uniform", range_min: 0.6, range_max: 1 };
 
     const result = validateGraph({ graph: graph as GraphT });
-    expect(hasErrorCode(result, "CONTROLLABLE_MISSING_DATA")).toBe(true);
-    expect(missingFieldsFor(result, "CONTROLLABLE_MISSING_DATA")).toContain("value");
+    expect(hasErrorCode(result, "CONTROLLABLE_MISSING_DATA")).toBe(false);
+
+    // …and it is NOT thereby relabelled as ignorance. The two predicates must
+    // disagree on this node, which is what makes them two predicates.
+    expect(factorIsExplicitlyUnquantified(nodeById(graph, "fac_target"))).toBe(false);
+  });
+
+  it("an UNEXPRESSIBLE prior does not satisfy the gate — the relaxation is not 'has a prior'", () => {
+    // OPPOSITE-DIRECTION TWIN of the case above. A prior PLoT cannot express is
+    // not a stated level; accepting it would ship a node ISL centres on a silent
+    // 0.0 with no disclosure, which is worse than the placeholder.
+    const unexpressible: Array<[string, Record<string, unknown>]> = [
+      ["degenerate point mass", { distribution: "uniform", range_min: 0.5, range_max: 0.5 }],
+      ["inverted bounds", { distribution: "uniform", range_min: 0.9, range_max: 0.1 }],
+      ["non-finite bound", { distribution: "uniform", range_min: 0, range_max: Number.POSITIVE_INFINITY }],
+      ["unknown family", { distribution: "beta", range_min: 0, range_max: 1 }],
+      ["missing bounds", { distribution: "uniform" }],
+    ];
+
+    for (const [name, prior] of unexpressible) {
+      const graph = optionConnectedGraph({
+        extractionType: "inferred",
+        factor_type: "retention",
+        uncertainty_drivers: ["cohort model"],
+      });
+      nodeById(graph, "fac_target").prior = prior;
+      const result = validateGraph({ graph: graph as GraphT });
+      expect(
+        missingFieldsFor(result, "CONTROLLABLE_MISSING_DATA"),
+        `an unexpressible prior (${name}) must not satisfy the gate`,
+      ).toContain("value");
+    }
   });
 
   it("the OTHER required fields are still required — the relaxation is scoped to `value` alone", () => {
@@ -478,6 +519,169 @@ describe("C — an explicit unknown satisfies the factor-data gate; nothing else
 // therefore not style assertions about a literal — they are the preconditions
 // of the whole change being safe, and each one names the harm it prevents.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// G — A MODEL-SUPPLIED PRIOR IS INFORMATION AND SURVIVES
+//
+// ⚠⚠ THIS BLOCK EXISTS BECAUSE THE FIRST ROUND OF THIS PR SHIPPED THE EXACT
+// HARM IT WAS WRITTEN TO PREVENT, IN THE OPPOSITE DIRECTION.
+//
+// W1 wrote the ignorance prior UNCONDITIONALLY, so a model's `uniform(0.6, 1.0)`
+// — centre 0.8 — became `uniform(0, 1)` STAMPED `prior_is_unquantified: true`.
+// That is a FALSE CLAIM OF IGNORANCE about a factor the model had information
+// on, and it moves the maths: elasticity is linear in the baseline, so the
+// centre shifting 0.8 → 0.5 is a real change to the headline sensitivity.
+// Before this PR the prior survived, so it was a REGRESSION, not a gap.
+//
+// It is not hypothetical. The SERVED prompt is v187 (not `defaults-v19.ts`,
+// which is not served) and teaches narrowed ranges; a sweep of all five shipped
+// starters found 14 priors, EVERY ONE `uniform` and EVERY ONE NARROWED
+// (0.4–0.9, 0.25–0.75, 0.3–0.8, 0.265–0.795 …), and ZERO at exactly (0,1).
+// Under the first round every one of those would have been flattened and
+// falsely flagged — on the starter corpus a tester meets.
+//
+// THE TELL WAS UNIFORMITY (CLAUDE.md trap 20): the informative arm and the
+// no-prior arm returned byte-identical output. Both cases below are kept in one
+// block so that can never be true again unnoticed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("G — a model-supplied prior is preserved, never overwritten or relabelled", () => {
+  // Ranges taken from the starter sweep, not invented here.
+  const STARTER_PRIORS: ReadonlyArray<readonly [number, number]> = [
+    [0.4, 0.9],
+    [0.25, 0.75],
+    [0.3, 0.8],
+    [0.265, 0.795],
+    [0.6, 1.0],
+  ];
+
+  it.each(STARTER_PRIORS.map((r) => [r[0], r[1]] as const))(
+    "W1 leaves a model-supplied uniform(%s, %s) exactly as the model wrote it",
+    (min, max) => {
+      const graph = optionConnectedGraph({ extractionType: "inferred" });
+      nodeById(graph, "fac_target").prior = { distribution: "uniform", range_min: min, range_max: max };
+
+      const { response, unquantifiedFactors } = ensureControllableFactorBaselines(graph) as any;
+      const factor = nodeById(response, "fac_target");
+
+      // The prior is untouched, bound by VALUE of the model's own bounds.
+      expect(factor.prior).toEqual({ distribution: "uniform", range_min: min, range_max: max });
+      // …and never relabelled as ignorance, which is the false-claim half.
+      expect(factor.prior.prior_is_unquantified).toBeUndefined();
+      expect(factorIsExplicitlyUnquantified(factor)).toBe(false);
+      expect(unquantifiedFactors).not.toContain("fac_target");
+      // The centre the maths uses is the model's, not 0.5.
+      expect((factor.prior.range_min + factor.prior.range_max) / 2).toBeCloseTo((min + max) / 2, 10);
+    },
+  );
+
+  it("CONTRAST — the same node with NO prior is still marked, so the guard discriminates", () => {
+    // ⭐ THE DISCRIMINATION, not merely the preservation. Without this the block
+    // above would also pass on a W1 that had simply stopped writing anything —
+    // which would be the value-less + prior-less state ISL cannot disclose.
+    const graph = optionConnectedGraph({ extractionType: "inferred" });
+    const { response, unquantifiedFactors } = ensureControllableFactorBaselines(graph) as any;
+    const factor = nodeById(response, "fac_target");
+
+    expect(unquantifiedFactors).toContain("fac_target");
+    expect(factorIsExplicitlyUnquantified(factor)).toBe(true);
+    expect(factor.prior.range_min).toBe(0);
+    expect(factor.prior.range_max).toBe(1);
+  });
+
+  it("an UNEXPRESSIBLE model prior is replaced by the honest unknown, not shipped unusable", () => {
+    // The third direction, and the reason the guard is `factorHasExpressiblePrior`
+    // rather than "has a prior": a malformed prior is not information either, and
+    // forwarding it would hand PLoT something it must decline — which lands the
+    // node in the silent-0.0 state. Preserving information and shipping garbage
+    // are different things.
+    for (const prior of [
+      { distribution: "uniform", range_min: 0.5, range_max: 0.5 },
+      { distribution: "uniform", range_min: 0.9, range_max: 0.1 },
+      { distribution: "beta", range_min: 0, range_max: 1 },
+    ]) {
+      const graph = optionConnectedGraph({ extractionType: "inferred" });
+      nodeById(graph, "fac_target").prior = { ...prior };
+      const { response } = ensureControllableFactorBaselines(graph) as any;
+      const factor = nodeById(response, "fac_target");
+      expect(factorIsExplicitlyUnquantified(factor)).toBe(true);
+      expect(factor.prior.range_min).toBeLessThan(factor.prior.range_max);
+    }
+  });
+
+  it("ONE SHAPE FOR ONE CONCEPT — unreachable-factors' collapse emits the SAME flagged prior", async () => {
+    // ⭐⭐ BLOCKER 2. The PR body claimed "one mechanism, not two" while
+    // `unreachable-factors.ts` still wrote an UNFLAGGED `uniform(0,1)` — two
+    // node-level shapes for one concept, of which a downstream discriminator
+    // keyed on `prior_is_unquantified` could see only one. This test is what
+    // makes the claim true rather than asserted.
+    const { handleUnreachableFactors } = await import("../../unified-pipeline/stages/repair/unreachable-factors.js");
+    const { FACTOR_VALUE_TIER_FIELD } = await import("../factor-value-provenance.js");
+
+    // A factor unreachable from any option, carrying a STAMPED fabricated
+    // baseline — the precondition for the collapse arm. Pinned in-test.
+    const graph: any = {
+      nodes: [
+        { id: "dec_x", kind: "decision", label: "D" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: "fac_far", kind: "factor", label: "Unreachable", data: { value: 0.5, extractionType: "inferred", [FACTOR_VALUE_TIER_FIELD]: "fallback_default" } },
+        { id: "out_x", kind: "outcome", label: "O" },
+        { id: "goal_x", kind: "goal", label: "G" },
+      ],
+      edges: [
+        { from: "dec_x", to: "opt_a", edge_type: "structural" },
+        { from: "dec_x", to: "opt_b", edge_type: "structural" },
+        { from: "opt_a", to: "out_x", edge_type: "causal" },
+        { from: "opt_b", to: "out_x", edge_type: "causal" },
+        { from: "fac_far", to: "out_x", edge_type: "causal" },
+        { from: "out_x", to: "goal_x", edge_type: "causal" },
+      ],
+    };
+
+    const result = handleUnreachableFactors(graph as GraphT, "from_to" as any);
+    expect(result.reclassified).toContain("fac_far"); // precondition fired
+
+    const factor = nodeById(graph, "fac_far");
+    // THE SAME SHAPE a downstream reader gets from W1/W3 — byte-for-byte.
+    expect(factor.prior).toEqual(buildUnquantifiedPrior());
+    expect(factorIsExplicitlyUnquantified(factor)).toBe(true);
+  });
+
+  it("…and the OTHER arm stays UNFLAGGED, because a narrowed prior is an estimate, not ignorance", async () => {
+    // OPPOSITE-DIRECTION TWIN, and the reason the two arms are legitimately
+    // different: `synthesisePriorFromBaseline` narrows around a baseline the
+    // system has grounds for. Flagging that would be a false claim of ignorance
+    // in the other direction — the same harm as blocker 1, mirrored.
+    const { handleUnreachableFactors } = await import("../../unified-pipeline/stages/repair/unreachable-factors.js");
+    const graph: any = {
+      nodes: [
+        { id: "dec_x", kind: "decision", label: "D" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        // A REAL baseline, no fabrication stamp.
+        { id: "fac_far", kind: "factor", label: "Unreachable", data: { value: 0.62, extractionType: "explicit" } },
+        { id: "out_x", kind: "outcome", label: "O" },
+        { id: "goal_x", kind: "goal", label: "G" },
+      ],
+      edges: [
+        { from: "dec_x", to: "opt_a", edge_type: "structural" },
+        { from: "dec_x", to: "opt_b", edge_type: "structural" },
+        { from: "opt_a", to: "out_x", edge_type: "causal" },
+        { from: "opt_b", to: "out_x", edge_type: "causal" },
+        { from: "fac_far", to: "out_x", edge_type: "causal" },
+        { from: "out_x", to: "goal_x", edge_type: "causal" },
+      ],
+    };
+
+    handleUnreachableFactors(graph as GraphT, "from_to" as any);
+    const factor = nodeById(graph, "fac_far");
+    expect(factor.prior).toBeDefined();
+    expect(factorIsExplicitlyUnquantified(factor)).toBe(false);
+    // It is narrowed, i.e. genuinely a different shape from the ignorance one.
+    expect(factor.prior.range_min > 0 || factor.prior.range_max < 1).toBe(true);
+  });
+});
 
 describe("F — the emitted prior is expressible, and no factor escapes value-less AND prior-less", () => {
   it("the prior meets every condition PLoT needs to express a uniform parameter-uncertainty", () => {

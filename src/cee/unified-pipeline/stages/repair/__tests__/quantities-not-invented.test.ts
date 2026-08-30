@@ -46,6 +46,7 @@
 
 import { describe, it, expect } from "vitest";
 import { handleUnreachableFactors } from "../unreachable-factors.js";
+import { buildUnquantifiedPrior } from "../../../../provenance/unquantified-factor.js";
 import { fixObservableMissingData } from "../deterministic-sweep.js";
 import { ensureControllableFactorBaselines } from "../../../../../adapters/llm/normalisation.js";
 import {
@@ -129,10 +130,15 @@ describe("A — a system-defaulted baseline must not be narrowed into a prior th
 
     // The laundered shape, named explicitly so this test states what it forbids.
     expect(prior).not.toEqual({ distribution: "uniform", range_min: 0.25, range_max: 0.75 });
-    // Ignorance is expressed as the range that asserts nothing.
-    expect(prior).toEqual({ distribution: "uniform", range_min: 0.0, range_max: 1.0 });
+    // Ignorance is expressed as the range that asserts nothing — and it is now
+    // built by the SHARED owner, so this site and the two defaulting sites
+    // cannot drift into two node-level shapes for one concept.
+    expect(prior).toEqual(buildUnquantifiedPrior());
 
-    // …and it is MARKED, so no downstream surface has to guess.
+    // …and it is MARKED on BOTH carriers, so no downstream surface has to guess.
+    // The repair record is internal telemetry; the NODE flag is what crosses the
+    // wire, and only the node flag can reach a downstream discriminator.
+    expect(prior.prior_is_unquantified).toBe(true);
     const repair = result.repairs.find((r) => r.path.includes("fac_x"));
     expect(repair?.prior_is_unquantified).toBe(true);
   });
@@ -463,9 +469,7 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
 
     handleUnreachableFactors(graph, EDGE_FORMAT);
 
-    expect(factorNode(graph).prior).toEqual({
-      distribution: "uniform", range_min: 0, range_max: 1,
-    });
+    expect(factorNode(graph).prior).toEqual(buildUnquantifiedPrior());
   });
 
   it("A STAMPED value labelled `explicit` with no real value IS caught", () => {
@@ -491,9 +495,7 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
 
     handleUnreachableFactors(graph, EDGE_FORMAT);
 
-    expect(factorNode(graph).prior).toEqual({
-      distribution: "uniform", range_min: 0, range_max: 1,
-    });
+    expect(factorNode(graph).prior).toEqual(buildUnquantifiedPrior());
     expect(factorNode(graph).prior).not.toEqual({
       distribution: "uniform", range_min: 0.25, range_max: 0.75,
     });
@@ -508,9 +510,7 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
 
     handleUnreachableFactors(graph, EDGE_FORMAT);
 
-    expect(factorNode(graph).prior).toEqual({
-      distribution: "uniform", range_min: 0, range_max: 1,
-    });
+    expect(factorNode(graph).prior).toEqual(buildUnquantifiedPrior());
   });
 
   it("TWIN — containment ALONE protects a real brief-backed value, with no label rule", () => {
