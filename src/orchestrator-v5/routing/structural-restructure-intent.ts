@@ -54,6 +54,24 @@
  *      that shape are excluded by this detector's own INTERROGATIVE GATE (see
  *      the detector body and `INTERROGATIVE_LEAD` / `TRAILING_QUESTION_MARK`),
  *      not by the "own" clause and not by the caller's analytical guard.
+ *   3. `quoted_rename_command` — an explicit WHOLE-MESSAGE rename with both
+ *      labels quoted ("Rename 'Cost' to 'Budget'"). rename/relabel are absent
+ *      from `EDIT_GRAPH_POSITIVE_REGEX`, so without this arm an unambiguous
+ *      rename command falls to the coach with no apply action — the same
+ *      four-turn-nothing shape as triggers 1 and 2.
+ *
+ *      ⚠⚠ #1231 — THIS TRIGGER, ALONE AMONG THE THREE, MATCHES COPY THE
+ *      PRODUCT ITSELF EMITS. `describe-changeset.ts:257` renders a rename op
+ *      as `rename 'X' to 'Y'`; `buildGmHeldPublicCopy` capitalises it into a
+ *      HELD-PROPOSAL CONFIRM CHIP's label. So this arm's shape is also the
+ *      product's own confirmation affordance, and treating a replay of it as a
+ *      fresh command re-dispatches the edit lane and drafts a SECOND hold —
+ *      confirm-click-returns-another-confirm. This detector is deliberately
+ *      TEXT-ONLY and cannot tell the two apart; the discrimination is the
+ *      CALLER's and is bound to INGRESS IDENTITY, not to text: route-v2
+ *      declines this trigger (and only this trigger) when
+ *      `source === 'chip_click'`. Anyone adding a trigger whose shape a
+ *      producer in this repo can render owes the same caller-side exclusion.
  *
  * Safe-biased like its sibling detectors (`configure-option-intent.ts`,
  * `option-intervention-guard.ts`): a false positive costs one edit-lane turn
@@ -70,7 +88,10 @@
  * S2 Phase 4 deletes the other routing mirrors.
  */
 
-export type StructuralRestructureTrigger = 'per_option_term' | 'each_option_own';
+export type StructuralRestructureTrigger =
+  | 'per_option_term'
+  | 'each_option_own'
+  | 'quoted_rename_command';
 
 export type StructuralRestructureDetection =
   | { readonly matched: true; readonly trigger: StructuralRestructureTrigger }
@@ -128,6 +149,19 @@ const INTERROGATIVE_LEAD =
 const TRAILING_QUESTION_MARK = /\?\s*$/;
 
 /**
+ * An explicit whole-message rename belongs to the existing edit dispatcher,
+ * not the coach whose tool deliberately cannot author structural changes.
+ * Do not broaden the unanchored edit-verb regex: "Should we rename …" is
+ * deliberation. Quoted old/new labels delimit this narrow command arm; extra
+ * clauses, negation, conditions and incomplete requests remain unclaimed by
+ * this arm.
+ * These strings are NOT resolved identities or mutation permission. The
+ * existing edit lane retains entity/state resolution, consent, validation and
+ * commit. No operation or graph is constructed here.
+ */
+const QUOTED_RENAME_COMMAND = /^\s*(?:please\s+)?(?:rename|relabel)\s+(?:(?:the\s+)?(?:node|factor|option|goal|outcome|risk)\s+)?(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^”\r\n]+)”)\s+to\s+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^”\r\n]+)”)[.!]?\s*$/i;
+
+/**
  * Detect a free-text structural-restructure intent. Pure and total — never
  * throws; returns a classified skip on any non-match. Text-only: the caller
  * owns graph presence (the edit lane reloads / recovers when no graph is
@@ -151,6 +185,14 @@ export function detectStructuralRestructureIntent(
   if (typeof message !== 'string' || message.length === 0) return NO_MATCH;
   if (INTERROGATIVE_LEAD.test(message) || TRAILING_QUESTION_MARK.test(message)) {
     return NO_MATCH;
+  }
+  const rename = QUOTED_RENAME_COMMAND.exec(message);
+  if (rename) {
+    const oldLabel = rename[1] ?? rename[2] ?? rename[3];
+    const newLabel = rename[4] ?? rename[5] ?? rename[6];
+    if (oldLabel?.trim() && newLabel?.trim()) {
+      return { matched: true, trigger: 'quoted_rename_command' };
+    }
   }
   if (EACH_OPTION_OWN.test(message)) {
     return { matched: true, trigger: 'each_option_own' };
