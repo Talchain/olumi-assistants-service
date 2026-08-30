@@ -2335,38 +2335,44 @@ function projectOnce(
     // ⭐⭐ THE BADGE SAYS THE USER DESIGNATED THIS GOAL, SO IT MAY ONLY BE WORN
     // BY A GOAL THE USER DESIGNATED.
     //
-    // ── THE DEFECT, MEASURED ───────────────────────────────────────────────
-    // Brief: "Churn has gone up over the last two quarters and we're not sure
-    // why." The model files that whole sentence — a SYMPTOM, not an objective —
+    // ── THE DEFECT, MEASURED ON A REAL GOVERNED CAPTURE ────────────────────
+    // Brief `01-simple-binary` (`run-b9389df`, real staging): the model files
+    // the user's own QUESTION — "Should we raise the price or keep it as is?" —
     // as a `stated_item` of `kind: "goal"`. Every line below then agreed with
     // it: `provenance_class: "stated"` + `brief_binding: "verified"` earns
     // `from_brief` at `schema-v3.ts:1176`, and the opener quoted it back:
     //
-    //   I've built a first model for "Churn has gone up over the last two
-    //   quarters and we're not sure why.".
+    //   I've built a first decision model for "Should we raise the price or
+    //   keep it as is?".
     //
     // Quotation marks promise THESE ARE YOUR WORDS. They were — but the claim
     // the badge makes is not about the WORDS, it is about the DESIGNATION, and
-    // the user designated nothing. The founder's ruling names this exact shape:
-    // *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    // a question designates no objective. The founder's ruling names this exact
+    // shape: *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    // FOUR of the thirteen governed goal quotes are this shape.
     //
     // ── THE EVIDENCE WAS ALREADY IN HAND AND WAS BEING DISCARDED ───────────
     // `deriveGoalObjectiveLabel` had already answered the question one line up,
-    // returning `{ authored: false, reason: "head_disclaims" }` — the union's
-    // own words: *"A disclaimer is not a goal."* That `reason` was dropped on
-    // the floor and `"stated"` written unconditionally. Nothing new is derived
-    // here; a verdict that was being computed and thrown away is now read.
+    // returning `{ authored: false, reason: "deliberation_frame" }` — the
+    // union's own words: *"The quote states a DECISION, not an objective."*
+    // That `reason` was dropped on the floor and `"stated"` written
+    // unconditionally. Nothing new is derived here; a verdict that was being
+    // computed and thrown away is now read.
     //
-    // ── ⛔ WHY THIS IS A SUBSET OF "REFUSED", AND NOT "REFUSED" ────────────
+    // ── ⛔ WHY THIS IS A NARROW SUBSET OF "REFUSED", AND NOT "REFUSED" ─────
     // The opposite harm is WORSE: telling a user their own designated goal was
-    // invented. `deriveGoalObjectiveLabel` refuses for CONCISION reasons too,
-    // and three of them ride genuine user objectives —
-    // `identical_to_quote` is literally *"the quote already IS the objective,
-    // verbatim"*, `no_concise_form` is a length verdict, `clause_discarded` a
-    // reduction one. A bare `!authoredLabel.authored` here would strip the
-    // user's badge off all three. `refusalDeniesObjecthood` admits only the
-    // refusals that are a positive judgement of NON-objecthood, and both
-    // directions are pinned in `goal-designation-provenance.test.ts`.
+    // invented. Most of this deriver's refusals answer a DISPLAY question ("may
+    // I shorten this safely?"), not an authorship one — and an earlier head of
+    // this branch shipped that conflation and an independent reviewer measured
+    // it: admitting `head_disclaims` (a lexical `not|never|no|nor` test) told a
+    // user who wrote *"Our objective for this quarter is: We must never let
+    // latency exceed 200ms"* that the brief designates no objective. Three of
+    // three `head_disclaims` quotes in the external adversarial corpus are
+    // genuine objectives. `refusalDeniesObjecthood` therefore admits ONLY the
+    // two closed CONSTRUCTION tests that positively judge the span to state a
+    // CHOICE; the full table and its measurement live at
+    // `objective-label.ts:REFUSAL_ANSWERS`, and both directions are pinned in
+    // `goal-designation-provenance.test.ts`.
     //
     // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
     // `source_quote` STAYS: the user's verbatim is theirs and still reaches the

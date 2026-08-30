@@ -120,54 +120,128 @@ export type AuthoredLabelRefusal =
   | "asks_a_question";
 
 /**
- * ⭐⭐ THE REFUSALS THAT DENY OBJECTHOOD — AND WHY THIS IS A SUBSET, NOT
- * "THE DERIVER REFUSED".
+ * ⭐⭐⭐ EVERY REFUSAL ANSWERS EXACTLY ONE OF TWO QUESTIONS, AND ONLY ONE OF
+ * THEM IS ABOUT AUTHORSHIP.
  *
- * {@link deriveGoalObjectiveLabel} refuses for two different reasons wearing one
- * return shape, and a consumer that treats them alike ships the OPPOSITE HARM:
+ *   Q1 · DISPLAY SAFETY — *may I transform this span into a shorter label
+ *        without changing what it means?* Every veto in this module was written
+ *        to answer Q1, and its whole doctrine ("stated over what is THROWN
+ *        AWAY", "refusal falls back to the verbatim") is Q1 doctrine.
  *
- *   · SEMANTIC refusals say *this span is not an objective at all*. The union
- *     above declares each one in those words — "states a DECISION, not an
- *     objective", "a choice, not an objective", "A disclaimer is not a goal".
- *     Nothing was designated; whoever filed this span as the goal chose it.
+ *   Q2 · DESIGNATION — *did the USER put this span forward as their objective?*
+ *        An authorship question. The `from_brief` badge at
+ *        `schema-v3.ts:1176` is a Q2 claim, and so is the narrative quoting the
+ *        label back as the user's own goal.
  *
- *   · CONCISION refusals say only *I could not produce a shorter display label*.
- *     `no_concise_form` is a LENGTH verdict; `clause_discarded` is a REDUCTION
- *     verdict; `too_few_tokens` is a token count; and `identical_to_quote` is
- *     the union's own words for "the quote already IS the objective, verbatim" —
- *     i.e. the STRONGEST possible evidence the user designated it. Re-badging
- *     any of these would tell a user their own stated objective was invented.
+ * ⚠⚠ THE MISTAKE THIS TABLE EXISTS TO PREVENT WAS SHIPPED IN THIS FILE'S OWN
+ * PREVIOUS VERSION, AND AN INDEPENDENT REVIEWER MEASURED IT: `head_disclaims`
+ * was admitted as a Q2 answer because it reads like one ("A disclaimer is not a
+ * goal"). It is not. It is a **lexical negation detector** — `HEAD_DISCLAIMS`
+ * is `/(^|\s)(not|never|no|nor)(\s|$)/` — and a negation is how ordinary
+ * business English states an UPPER BOUND. Measured over this module's own
+ * adversarial corpus (`authored-node-labels.test.ts` `MEASURED_HARMS`, written
+ * outside the author's head), **3 of 3 `head_disclaims` goal quotes are genuine
+ * user objectives and 0 of 3 are not**:
  *
- * ⚠ MEASURED, NOT REASONED. Over the 13 goal quotes of the governed baseline
- * (`run-b9389df`, real staging captures): 9 author cleanly, 4 refuse
- * `deliberation_frame` — and ZERO refuse for a concision reason. The set below
- * therefore costs nothing on real data while closing 4 of 13. The concision
- * reasons are excluded on principle, and the four hand-built minimal pairs in
- * `goal-designation-provenance.test.ts` are what keeps them excluded.
+ *   · "We must never let latency exceed 200ms"        ← a latency target
+ *   · "We must not exceed £250,000"                   ← a budget cap
+ *   · "Grow revenue, but not at the expense of margin" ← a compound objective
  *
- * ⚠ `empty` is DELIBERATELY OUT. It is a degenerate input, not a judgement that
- * the span is not an objective, and an empty label is filtered before any
- * surface can quote it. Fail-safe direction: under-claiming the machine costs a
- * badge, over-claiming it strips a real attribution.
+ * Its precision as a designation signal is therefore ZERO on the only external
+ * evidence available, and admitting it told a user who wrote *"Our objective for
+ * this quarter is: We must never let latency exceed 200ms"* that **"the brief
+ * designates no objective"** — the exact inverse of the harm the consumer was
+ * built to stop. Trap 21: two questions were being answered by one membership
+ * test, and the fail-safe direction of Q1 (refuse ⇒ keep the verbatim, which
+ * cannot regress a label) is the fail-DANGEROUS direction of Q2 (refuse ⇒ strip
+ * a real attribution).
  *
- * ⭐ THE SET IS PINNED BY NAME (trap 22f's KNOWN-DROPPED discipline) so it REDs
- * if it GROWS or SHRINKS, and `refusalDeniesObjecthood` is the only reader.
+ * ⭐ WHY THE TWO SURVIVORS ARE DIFFERENT IN KIND, not merely safer. Each is a
+ * closed, explicit *construction* test whose match is a positive judgement that
+ * the span states a CHOICE — and a choice is not an objective however it is
+ * worded, whoever wrote it. The union above declares both in exactly those
+ * terms, and the same measurement gives them **9 of 9** (4 real governed
+ * captures + 5 adversarial quotes), with **0** genuine objectives struck.
+ *
+ * ⚠ A CONSTRUCTION TEST IS STILL NOT PROOF OF NON-DESIGNATION, and the residual
+ * is named rather than implied: a user who designates a genuinely disjunctive
+ * objective ("Reduce churn or grow expansion revenue") is struck by
+ * `states_alternatives`. It is retained because it is the structural twin of
+ * `deliberation_frame` — the form no frame list can outrun — and because the
+ * corpus shows it striking a real choice 1/1 and a real objective 0/1. If that
+ * ever measures otherwise, this table is where it is corrected.
+ *
+ * ⭐ DERIVED, NOT MIRRORED (trap 12). `Record<AuthoredLabelRefusal, …>` is
+ * EXHAUSTIVE, so a new refusal reason FAILS `tsc` until someone states which
+ * question it answers. There is no default and no silent bucket.
  */
-export const REFUSALS_DENYING_OBJECTHOOD: ReadonlySet<AuthoredLabelRefusal> = new Set<
-  AuthoredLabelRefusal
->(["deliberation_frame", "states_alternatives", "head_disclaims"]);
+type RefusalAnswers = "designation" | "display_only";
+
+const REFUSAL_ANSWERS: Readonly<Record<AuthoredLabelRefusal, RefusalAnswers>> = {
+  /** "states a DECISION, not an objective" — a closed frame list, Q2. */
+  deliberation_frame: "designation",
+  /** "a choice, not an objective" — the structural twin of the above, Q2. */
+  states_alternatives: "designation",
+
+  // ── Q1 ONLY. Each is a verdict about TRANSFORMING the span, and says
+  //    nothing whatever about who put it forward.
+  /** A degenerate input, not a judgement. Filtered before any surface. */
+  empty: "display_only",
+  would_drop_a_qualification: "display_only",
+  /** A REDUCTION verdict — a clause would have been discarded. */
+  clause_discarded: "display_only",
+  /** ⛔ A LEXICAL NEGATION test. 3/3 genuine objectives — see above. */
+  head_disclaims: "display_only",
+  /** A LENGTH verdict. */
+  no_concise_form: "display_only",
+  /** A TOKEN COUNT. */
+  too_few_tokens: "display_only",
+  names_no_subject: "display_only",
+  /** Fail-closed on an unexpected derivation, never a claim about the user. */
+  not_derivable: "display_only",
+  /** "the quote already IS the objective, verbatim" — the STRONGEST evidence
+   *  the user designated it, so admitting it would invert the badge outright. */
+  identical_to_quote: "display_only",
+  no_derivable_decision_statement: "display_only",
+  /** Option path only. */
+  asks_a_question: "display_only",
+};
 
 /**
- * TRUE when a refusal is a positive judgement that the span is NOT an objective.
+ * The Q2 answers, DERIVED from {@link REFUSAL_ANSWERS} rather than restated.
+ * Exported so guards bind to it by identity; pinned by name in
+ * `goal-designation-provenance.test.ts` so it REDs if it grows OR shrinks.
+ */
+export const REFUSALS_DENYING_OBJECTHOOD: ReadonlySet<AuthoredLabelRefusal> = new Set(
+  (Object.keys(REFUSAL_ANSWERS) as AuthoredLabelRefusal[]).filter(
+    (reason) => REFUSAL_ANSWERS[reason] === "designation",
+  ),
+);
+
+/**
+ * TRUE when a refusal is a positive judgement that the span states a CHOICE and
+ * therefore designates no objective.
  *
- * ⚠ SUFFICIENT, NEVER NECESSARY, and the gap is named rather than implied: a
- * WELL-FORMED invented goal — one {@link deriveGoalObjectiveLabel} would happily
- * author — returns `authored: true` and no reason at all, so it is invisible
- * here. This closes the loud half. The durable fix is a grammar change in
+ * ⚠⚠ SUFFICIENT, NEVER NECESSARY, and the gap is NAMED rather than implied —
+ * this is the honest KNOWN-OPEN set, not a description of completeness:
+ *
+ *   (a) a WELL-FORMED invented goal returns `authored: true` and no reason at
+ *       all, so it is invisible here;
+ *   (b) a span that is not an objective but is refused for a DISPLAY reason
+ *       keeps the badge. The lane's own motivating case — *"Churn has gone up
+ *       over the last two quarters and we're not sure why."* — is in this class.
+ *       It was previously caught by `head_disclaims`, but only BY ACCIDENT: the
+ *       detector fired on the incidental "not" in "we're not sure why", and the
+ *       same accident struck the three genuine objectives above. A coincidence
+ *       is not a signal, and it may not be relied on.
+ *
+ * Both are closed only by asking the PRODUCER — a grammar change in
  * `DRAFT_RECORDS_INSTRUCTION`, which today offers the model only `stated_items`
  * ("what the user actually said") and `claims` ("what YOU are adding") and then
- * forbids the goal from being a claim — instructing it to infer a goal and
- * requiring it to file the result as something the user said.
+ * forbids the goal from being a claim, i.e. instructs it to infer a goal and
+ * requires it to file the result as something the user said. Deliberately not
+ * this slice, and pinned as KNOWN-OPEN in the spec so the gap is visible in a
+ * suite rather than in a comment nobody runs (trap 22f).
  */
 export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined): boolean {
   return reason !== undefined && REFUSALS_DENYING_OBJECTHOOD.has(reason);
