@@ -2259,10 +2259,28 @@ describe('provisional-decision framing (open brief)', () => {
    *  from this lane's head (trap 22). */
   const KNOWN_DROPPED: ReadonlyArray<{ readonly name: string; readonly label: string }> = [
     { name: 'negated-disclaimer', label: 'Choose Between Fixed Options Yet' },
-    {
-      name: 'exploratory-figuring-out',
-      label: 'What Customers Actually Value Most About the Service',
-    },
+    // ⭐⭐ `exploratory-figuring-out` WAS HERE AND IS NOW CAUGHT — the shrink
+    // this set was built to make visible, and it RED here rather than passing
+    // in silence. It authored `What Customers Actually Value Most About the
+    // Service`: an investigative frame (`figuring out `) whose complement is
+    // interrogative (`what …`), i.e. the user's QUESTION title-cased into the
+    // decision node. Closed at the producer by `INVESTIGATIVE_FRAMES` +
+    // `INTERROGATIVE_COMPLEMENT` in `cee/draft/records/objective-label.ts`,
+    // after the same shape was witnessed on the deployed build `a18e194`
+    // ("…work out what is actually driving it…" -> "What Is Actually Driving It
+    // Before We Commit Budget to a Fix").
+    //
+    // The scope note above anticipated exactly this: the sibling frames
+    // `working out `/`work out ` produce the same shape and were left to the
+    // extraction row. They are now all four closed — but ONLY where the
+    // complement is interrogative, so `considering `, and a `figure out ` that
+    // takes a noun phrase ("figure out our hiring strategy"), still author.
+    // That judgement was deliberately NOT minted here, and is not minted now:
+    // `considering ` is untouched.
+    //
+    // `negated-disclaimer` stays: its defect is an unhandled NEGATION ("we are
+    // NOT choosing between…"), a different mechanism from this one, and
+    // collapsing the two under one fix is the harm trap 21 names.
   ];
 
   it('KNOWN-DROPPED: exactly these open briefs still author a decision label', async () => {

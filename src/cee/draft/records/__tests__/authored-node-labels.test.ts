@@ -790,3 +790,198 @@ describe("the user's exact words survive and are reachable", () => {
     expect(wireGoal?.label_authored).toBe(true);
   });
 });
+
+// ── INVESTIGATIVE BRIEFS ────────────────────────────────────────────────────
+/**
+ * ⭐⭐ A QUESTION THE USER ASKED IS NOT THE DECISION THEY ARE MAKING.
+ *
+ * ── THE WITNESSED DEFECT (deployed build `a18e194`, driven 30 Aug 2026) ────
+ * A brief ending "…I need to work out what is actually driving it before we
+ * commit budget to a fix." produced a DECISION node reading
+ *
+ *   "What Is Actually Driving It Before We Commit Budget to a Fix"
+ *
+ * — a title-cased fragment of the user's own sentence, naming no choice. The
+ * label is reproduced byte-exactly by {@link deriveDecisionLabel} at rest, so
+ * this is the producer and not a downstream surface.
+ *
+ * ── THE MECHANISM, ISOLATED RATHER THAN INFERRED ───────────────────────────
+ * `deriveDecisionLabel` searches goal quotes with `requireChoiceFrame = true`
+ * and then the BRIEF with the default `false`. Isolated by running each loop
+ * alone: the goal-quote loop correctly returns `Decision`; the brief loop
+ * returns the fragment. So the two call sites of one predicate carry two
+ * different breadths, and only one of them was ever tightened.
+ *
+ * ── WHY *INVESTIGATIVE* AND NOT SIMPLY *NON-CHOICE* ────────────────────────
+ * Requiring a CHOICE frame on the brief path would have been the wrong fix.
+ * Measured across the frame families at pristine, it destroys six good labels
+ * that name a real decision subject — `deciding how to allocate the £2m
+ * marketing budget` → "Allocate the £2m Marketing Budget", `choosing a payroll
+ * vendor` → "Payroll Vendor for Next Year", and four more. The harm is narrower
+ * than "not a choice": the four INVESTIGATIVE frames take an EPISTEMIC
+ * complement — one works out, figures out, *finds out* a fact — so the span
+ * that follows them is a QUESTION, never a course of action. That is a
+ * structural property of the construction, not a calibration over a corpus,
+ * which is the same footing `DELIBERATION_FRAMES` itself stands on.
+ *
+ * ⚠ THE DELIBERATE, PINNED COST. A brief phrased "figure out whether to renew"
+ * does state a choice, and the earliest-longest frame match is the
+ * investigative one, so it now refuses and falls back to the honest generic.
+ * That is one label traded, in the safe direction — refusal restores today's
+ * pre-authoring behaviour and cannot put words in the user's mouth — and it is
+ * pinned BY NAME below so it can neither grow nor shrink in silence (trap 22f).
+ * A further rule to recover it would be the next round on a natural-language
+ * predicate, which this estate has ratified as the point to stop guessing.
+ *
+ * ⚠ THE GOAL PATH IS DELIBERATELY UNTOUCHED. The investigative frames STAY in
+ * `DELIBERATION_FRAMES`, because "I need to work out what is driving it" is
+ * genuinely not an objective and must still be refused as one. This change
+ * removes them from the decision node's EXTRACTION ANCHOR only — the two jobs
+ * that list does, separated (trap 21).
+ */
+describe("an investigative brief does not name the decision from a question it asks", () => {
+  /** The witnessed brief, verbatim from the deployed run. */
+  const WITNESSED_BRIEF =
+    "Our onboarding is too slow and customers never reach value. " +
+    "I need to work out what is actually driving it before we commit budget to a fix.";
+
+  it("refuses the witnessed churn-diagnosis brief instead of title-casing its question", () => {
+    const derived = deriveDecisionLabel({ brief: WITNESSED_BRIEF });
+    expect(derived.label).not.toBe(
+      "What Is Actually Driving It Before We Commit Budget to a Fix",
+    );
+    expect(derived.authored).toBe(false);
+    expect(derived.label).toBe("Decision");
+    expect(derived.reason).toBe("no_derivable_decision_statement");
+  });
+
+  /**
+   * All four investigative frames, each with the question fragment it produced
+   * at pristine. The defect was systematic, not one bad sentence.
+   */
+  const INVESTIGATIVE_CASES: ReadonlyArray<readonly [string, string]> = [
+    ["work out", "I need to work out what is actually driving it before we commit budget to a fix."],
+    ["working out", "We are working out which of the three regions is losing us money."],
+    ["figure out", "I need to figure out why our conversion rate halved last quarter."],
+    ["figuring out", "The team is figuring out where the bottleneck actually sits."],
+  ];
+
+  it.each(INVESTIGATIVE_CASES)(
+    "refuses to mint a decision label from a brief framed with %s",
+    (_frame, brief) => {
+      const derived = deriveDecisionLabel({ brief });
+      expect(derived.authored).toBe(false);
+      expect(derived.label).toBe("Decision");
+    },
+  );
+
+  // ── OPPOSITE-DIRECTION TWINS. Every one of these authored at pristine and
+  // must still author: the fix must close the question path without touching
+  // the decision-naming path. Bound by IDENTITY (the exact label), never by a
+  // predicate another string could satisfy (trap 19).
+  const STILL_AUTHORED: ReadonlyArray<readonly [string, string, string]> = [
+    ["should we", "Should we build or buy a billing system?", "Build or Buy a Billing System"],
+    ["deciding how to", "We are deciding how to allocate the £2m marketing budget.", "Allocate the £2m Marketing Budget"],
+    ["deciding on", "We are deciding on a pricing model for the new tier.", "A Pricing Model for the New Tier"],
+    ["choosing a", "We are choosing a payroll vendor for next year.", "Payroll Vendor for Next Year"],
+    ["choosing between", "We are choosing between Leeds and Bristol for the new office.", "Choose Between Leeds and Bristol for the New Office"],
+    ["considering", "We are considering a move to a subscription model.", "A Move to a Subscription Model"],
+    ["deciding", "We are deciding the launch date for the new product.", "The Launch Date for the New Product"],
+    ["trying to decide", "We are trying to decide the right size for the sales team.", "The Right Size for the Sales Team"],
+    /**
+     * ⭐⭐ THE CASE THE GOVERNED CORPUS TAUGHT, and the reason this predicate
+     * has two conjuncts. This is `03-vague-underspecified` verbatim. The
+     * first version of the fix matched on the FRAME alone and destroyed this
+     * label; an investigative verb with a NOUN-PHRASE complement names a real
+     * subject and must survive. Bound to the exact string, so a future
+     * frame-only formulation REDs here rather than shipping.
+     */
+    [
+      "an investigative frame with a noun-phrase complement",
+      "We need to figure out our hiring strategy for next quarter. Things have been pretty hectic and we're not sure if we should hire more engineers or focus on sales. Budget is tight.",
+      "Hiring Strategy for Next Quarter",
+    ],
+  ];
+
+  it.each(STILL_AUTHORED)(
+    "still authors the decision on a brief framed with %s",
+    (_frame, brief, expected) => {
+      const derived = deriveDecisionLabel({ brief });
+      expect(derived.authored).toBe(true);
+      expect(derived.label).toBe(expected);
+    },
+  );
+
+  /**
+   * ⭐⭐ THE *FIRST* CONJUNCT IS LOAD-BEARING TOO, AND ONLY THESE BIND IT.
+   * Found by a surviving mutant (`INVESTIGATIVE_FRAMES.has(...)` → `true`),
+   * demonstrated non-equivalent rather than assumed so (trap 13c): a
+   * DECIDING frame may take an interrogative complement and still state a real
+   * decision. An interrogative complement is only evidence of a question when
+   * the verb was one of *finding out*. Without these, dropping the frame
+   * requirement is invisible.
+   */
+  const DECIDING_FRAME_WITH_INTERROGATIVE_COMPLEMENT: ReadonlyArray<
+    readonly [string, string]
+  > = [
+    ["We are deciding what to do about the Leeds office.", "What to Do About the Leeds Office"],
+    ["We are deciding which supplier to keep for next year.", "Which Supplier to Keep for Next Year"],
+  ];
+
+  it.each(DECIDING_FRAME_WITH_INTERROGATIVE_COMPLEMENT)(
+    "still authors when a DECIDING frame takes an interrogative complement: %s",
+    (brief, expected) => {
+      const derived = deriveDecisionLabel({ brief });
+      expect(derived.authored).toBe(true);
+      expect(derived.label).toBe(expected);
+    },
+  );
+
+  /**
+   * ⚠ THE KNOWN-DROPPED SET, pinned EXACTLY. It must RED if it grows (a new
+   * regression) OR shrinks (someone "recovered" it with the extra rule this
+   * comment forbids). Asserting the exact set is what makes both observable.
+   */
+  const KNOWN_DROPPED: ReadonlyArray<readonly [string, string]> = [
+    [
+      "an investigative frame that happens to precede a real choice",
+      "We need to figure out whether to renew the Salesforce contract.",
+    ],
+  ];
+
+  it.each(KNOWN_DROPPED)("known-dropped, deliberately: %s", (_why, brief) => {
+    const derived = deriveDecisionLabel({ brief });
+    expect(derived.authored).toBe(false);
+    expect(derived.label).toBe("Decision");
+  });
+
+  /**
+   * ⭐ THE PRECONDITION THIS GUARD PINS ON ITSELF (trap 13b). The suite above
+   * would pass just as happily if `deriveDecisionLabel` refused EVERYTHING —
+   * a guard agreeing with itself. This asserts the two arms genuinely
+   * discriminate on the SAME run, so the refusals are the code's doing and not
+   * a derivation that has quietly stopped working.
+   */
+  it("discriminates: the investigative arm refuses while the choice arm authors, in one run", () => {
+    const investigative = deriveDecisionLabel({ brief: WITNESSED_BRIEF });
+    const choice = deriveDecisionLabel({
+      brief: "Should we build or buy a billing system?",
+    });
+    expect(investigative.authored).toBe(false);
+    expect(choice.authored).toBe(true);
+    expect(choice.label).not.toBe(investigative.label);
+  });
+
+  /**
+   * ⭐⭐ THE GOAL PATH IS UNCHANGED, ASSERTED RATHER THAN ASSUMED. The
+   * investigative frames must REMAIN deliberation frames for the goal, whose
+   * refusal on this quote is correct and is not what this change touches.
+   */
+  it("leaves the goal path's refusal on the same investigative quote untouched", () => {
+    const quote = "work out what is actually driving it before we commit budget to a fix";
+    const derived = deriveGoalObjectiveLabel(quote);
+    expect(derived.authored).toBe(false);
+    expect(derived.reason).toBe("deliberation_frame");
+    expect(derived.label).toBe(quote);
+  });
+});
