@@ -25,6 +25,7 @@
  *     no spaces before %).
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { clearSupersededFactorMarkers } from '@talchain/schemas';
@@ -649,9 +650,12 @@ export function createSetFactorValueHandler(): HandlerFn {
       before.raw_value === after.raw_value &&
       unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
       before.cap === after.cap;
-    // Confirming the same number can still replace a fallback with supplied
-    // knowledge. That change must be committed and acknowledged as applied.
-    const noop = valueUnchanged && !quantityQualifiersCleared;
+    const attributionChanged =
+      targetNode.observed_state?.source !== (appliedProvenance?.source ?? USER_EDIT_SOURCE) ||
+      !isDeepStrictEqual(targetNode.observed_state?.elicited_from, appliedProvenance?.elicited_from);
+    // Confirming the same number can replace fallback/estimated knowledge or
+    // identify a different author. Acknowledge that semantic change as applied.
+    const noop = valueUnchanged && !quantityQualifiersCleared && !attributionChanged;
 
     const fact: SetFactorValueHandlerFact = {
       fact_type: 'set_factor_value',

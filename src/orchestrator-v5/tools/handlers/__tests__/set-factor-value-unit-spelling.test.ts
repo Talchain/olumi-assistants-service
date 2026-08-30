@@ -68,9 +68,11 @@ describe('a spelling-only unit proposal', () => {
   });
 
   it('is reported as a NOOP, not as an applied change', async () => {
-    // 'people' -> 'People', same number. Nothing changed.
+    // 'people' -> 'People', same supplied number and attribution.
+    const graph = buildD1Fixture();
+    graph.nodes.find((node) => node.id === 'f-uncapped')!.observed_state!.source = 'user_override';
     const outcome = await handler(
-      buildHandlerInvocation({ proposal: proposal('f-uncapped', 12, 'People'), graph: buildD1Fixture() }),
+      buildHandlerInvocation({ proposal: proposal('f-uncapped', 12, 'People'), graph }),
     );
     const fact = (outcome.handler_facts as unknown[])[0] as { noop: boolean; result: { status: string } };
     expect(fact.noop).toBe(true);

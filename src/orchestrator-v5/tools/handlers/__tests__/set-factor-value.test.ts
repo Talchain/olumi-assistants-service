@@ -439,9 +439,10 @@ describe('set_factor_value handler', () => {
     });
   });
 
-  it('emits noop status when the value does not change', async () => {
+  it('emits noop status when the supplied value and attribution do not change', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();
+    graph.nodes.find((node) => node.id === 'f-churn')!.observed_state!.source = 'user_override';
     const outcome = await handler(
       buildInvocation(
         graph,
