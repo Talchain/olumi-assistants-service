@@ -1193,6 +1193,7 @@ describe('A2 — ACCEPTANCE: an ordinary answer binds the pair the product asked
     expect(readMissingValueAnswer(J18.wire.t4_user_message)).toEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',
@@ -1402,6 +1403,7 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
     expect(readMissingValueAnswer('It matters a lot - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',

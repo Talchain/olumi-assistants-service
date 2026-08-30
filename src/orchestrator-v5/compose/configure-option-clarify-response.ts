@@ -306,8 +306,19 @@ export function composeConfigureOptionClarifyResponse(
     // Gating on the user's own notation removes the arithmetic hazard by
     // removing the branch that could not be right, rather than by rescaling
     // inside it (a second scale transform is what caused this).
-    const userWrotePercent = answer.valueText.includes('%');
-    const asPercentage = !userWrotePercent && parsed > 1 && parsed <= 100
+    // ⭐⭐ ASK THE READER, NEVER RE-DERIVE. This gate was
+    // `answer.valueText.includes('%')` — a hand-maintained mirror of
+    // `missing-value-answer.ts`'s percent detection, which had ALREADY drifted
+    // from it by two spellings (`percent`, `per cent` — see PERCENT_SUFFIX).
+    // Measured: `"Set it to 150 percent."` divides to 1.5, carries no `%`
+    // character, and the offer said *"If you meant 1.5%"* — the same 100× harm
+    // this branch exists to prevent, one notation over.
+    //
+    // Adding the missing spellings here would maintain the mirror. The field is
+    // the reader's own answer to the only question that matters — did I divide
+    // by 100? — so a new notation is handled by the owner and this branch
+    // cannot drift from it again.
+    const asPercentage = !answer.percentApplied && parsed > 1 && parsed <= 100
       // ⚠ "of the strongest effect" was the SAME false gloss Codex blocked in
       // the ask itself — effect STRENGTH, not the factor's level. The figure is
       // an absolute assignment on the factor's own scale (`do(X=x)`, measured on

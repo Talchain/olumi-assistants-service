@@ -353,6 +353,7 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
     expect(readMissingValueAnswer(R1)).toEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',

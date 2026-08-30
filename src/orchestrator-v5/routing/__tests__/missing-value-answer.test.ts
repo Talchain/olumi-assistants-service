@@ -292,6 +292,7 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
     expect(reading).toEqual({
       kind: 'numeric',
       elliptical: true,
+      percentApplied: false,
       valueText: '0.12',
       modelUnitText: '0.12',
       referent: null,
@@ -401,6 +402,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer(WITNESSED)).toStrictEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',
@@ -442,6 +444,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer('The costs are fixed - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',
@@ -516,6 +519,7 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
     expect(readMissingValueAnswer(witnessed)).toEqual({
       kind: 'numeric',
       elliptical: false,
+      percentApplied: false,
       valueText: '0.8',
       modelUnitText: '0.8',
       referent: 'it',

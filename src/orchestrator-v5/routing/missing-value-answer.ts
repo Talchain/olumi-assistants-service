@@ -701,9 +701,37 @@ export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
  * ⚠ PAIRED WITH ACCEPTANCE, ALWAYS. Every `example` in the list above must BIND
  * through the real binder — asserted in
  * `__tests__/ask-copy-acceptance-pairing.test.ts` — so the ask cannot advertise a
- * form the product refuses (P8). That pairing now covers BOTH directions: the
- * numeric exemplars must read numeric, and {@link MISSING_VALUE_NO_CHANGE_PHRASE}
- * must read as {@link MissingValueAnswer} of kind `no_change` — never as `0`.
+ * form the product refuses (P8).
+ *
+ * ⛔⛔⛔ THE ASK DOES NOT OFFER "no change", AND REMOVING THAT CLAUSE IS THE
+ * POINT — the reader still RECOGNISES it, the ask simply stops INVITING it.
+ *
+ * This lane shipped `Say "no change" if the option leaves it alone.` and it was
+ * an invitation the product cannot honour. Measured end to end: `kind:
+ * 'no_change'` has ONE consumer, whose two call sites are gated on
+ * `detectConfigureOptionIntent`, and **0 of 225 accepted no-change phrasings
+ * match that detector** (positive control fired, fabricated control declined).
+ * The honest reply appeared in **0 of 8** live compositions. The invitation and
+ * the qualitative refusal even contradicted each other inside one message:
+ *   "I can't put 'no change' on that link — the effect value has to be a
+ *    number… Say 'no change' if the option leaves it alone."
+ *
+ * **A product that invites an answer it cannot process is worse than one that
+ * never offers it** — it spends the user's turn and their goodwill, and it is
+ * precisely the ask-invariant failure this PR exists to fix, turned inward.
+ *
+ * ⚠⚠ AND WHY THIS PR'S OWN P8 GUARD COULD NOT SEE IT — worth stating, because
+ * the guard is otherwise the strongest thing here: **P8 checks the READER, not
+ * the ROUTE.** `ask-copy-acceptance-pairing.test.ts` drives
+ * {@link readMissingValueAnswer} and proves every advertised form is
+ * *recognised*. Recognition is necessary and NOWHERE NEAR sufficient: an
+ * invitation can be perfectly readable and still reach no consumer that acts on
+ * it. A form may only be ADVERTISED once its route is witnessed end to end, not
+ * once its reader returns non-null.
+ *
+ * The recognition stays (someone will say it anyway, and they get an honest
+ * answer instead of the demand repeating). Re-advertising it needs a write path
+ * for an EMPTY intervention, which CEE does not have — rowed, not hidden.
  *
  * ⭐⭐ "NO CHANGE" AND "ZERO" ARE DIFFERENT ANSWERS AND THE ASK NOW OFFERS BOTH.
  * They were previously inexpressible and indistinguishable in the WORST possible
@@ -735,8 +763,7 @@ export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
 export const MISSING_VALUE_ASK_FORMAT_HINT: string =
   'That number is the level the factor reaches, not how much it moves: '
   + `${MISSING_VALUE_ASK_EXEMPLARS[0]!.example} means zero, `
-  + `${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} means its top. `
-  + `Say "${MISSING_VALUE_NO_CHANGE_PHRASE}" if the option leaves it alone.`;
+  + `${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} means its top.`;
 
 export type MissingValueAnswer =
   | {
@@ -775,6 +802,32 @@ export type MissingValueAnswer =
        * silently.
        */
       readonly elliptical: boolean;
+      /**
+       * ⭐⭐⭐ DID THIS READING DIVIDE BY 100? — the reader's OWN answer, so no
+       * consumer has to guess from the text.
+       *
+       * ⚠⚠ IT EXISTS BECAUSE A CONSUMER GUESSED AND WAS WRONG, TWICE OVER.
+       * `configure-option-clarify-response.ts` gated its "did you mean a
+       * percentage?" offer on `valueText.includes('%')` — a HAND-MAINTAINED
+       * MIRROR of this module's percent detection (trap 12). It had already
+       * drifted from the thing it mirrors by TWO spellings, because
+       * {@link PERCENT_SUFFIX} admits `percent` and `per cent` as well as the
+       * glyph. Measured at the head that introduced the mirror:
+       *
+       *   "Set it to 150 percent."  → modelUnitText 1.5, no `%` CHARACTER
+       *   composed: "If you meant 1.5% of its full scale …"
+       *
+       * The user wrote 150 percent and the product offered them 1.5% — the
+       * SAME 100× harm, in the same sentence, as the defect that gate was
+       * added to close.
+       *
+       * ⭐ THE FIX IS NOT ANOTHER SPELLING IN THE GATE — adding `percent` to
+       * the consumer maintains the mirror and it drifts again on the next
+       * notation. There is ONE owner of "was this a percentage?", and it is the
+       * reader that performed the division. Consumers ASK; they never re-derive.
+       * Anything downstream that needs the question answered reads this field.
+       */
+      readonly percentApplied: boolean;
       /**
        * ⭐ THE PROSE THAT PRECEDED THE ANSWERING CLAUSE, normalised — `''` when
        * the message is, in its entirety, the answer.
@@ -839,6 +892,7 @@ interface NumericClause {
   readonly valueText: string;
   readonly modelUnitText: string | null;
   readonly referent: string | null;
+  readonly percentApplied: boolean;
 }
 
 /**
@@ -863,6 +917,7 @@ function readNumericClause(text: string): NumericClause | null {
       valueText: isPercent ? `${digits}${percent.trim()}` : digits,
       modelUnitText: toModelUnitText(digits, isPercent),
       referent: m.groups?.['referent'] ?? null,
+      percentApplied: isPercent,
     };
   }
   return null;
@@ -912,6 +967,7 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
         referent: null,
         leadingContext: '',
         elliptical: true,
+        percentApplied: isPercent,
       };
     }
   }

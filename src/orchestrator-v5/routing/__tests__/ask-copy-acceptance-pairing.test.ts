@@ -79,9 +79,42 @@ describe('every phrasing the ask offers is one the binder accepts', () => {
     const [low, high] = MISSING_VALUE_ASK_EXEMPLARS;
     expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(low!.example);
     expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(high!.example);
-    // The no-change phrase is the THIRD answer the ask offers, and it is quoted
-    // from the vocabulary the reader matches — not spelled beside it.
-    expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(MISSING_VALUE_NO_CHANGE_PHRASE);
+  });
+
+  it('⛔ THE ASK DOES NOT OFFER "no change" — P8 CHECKS THE ROUTE, NOT ONLY THE READER', () => {
+    // ⚠⚠ THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, and the flip is
+    // the finding. This lane advertised `Say "no change" if the option leaves it
+    // alone.` and pinned it here as a THIRD offered answer — on the strength of
+    // the reader recognising it.
+    //
+    // ⛔ RECOGNITION IS NOT A ROUTE. Measured end to end: `kind: 'no_change'`
+    // has ONE consumer, whose two call sites are gated on
+    // `detectConfigureOptionIntent`, and **0 of 225 accepted no-change phrasings
+    // match that detector** (positive control fired; fabricated control
+    // declined). The honest reply appeared in **0 of 8** live compositions, and
+    // the invitation contradicted the refusal inside a single message:
+    //   "I can't put 'no change' on that link — the effect value has to be a
+    //    number… Say 'no change' if the option leaves it alone."
+    //
+    // ⚠ AND THIS FILE IS WHY IT SHIPPED. Every other guard here drives
+    // `readMissingValueAnswer` and proves an advertised form is RECOGNISED —
+    // which is necessary and nowhere near sufficient. A form may only be
+    // ADVERTISED once its route is witnessed end to end.
+    expect(MISSING_VALUE_ASK_FORMAT_HINT).not.toContain(MISSING_VALUE_NO_CHANGE_PHRASE);
+    expect(MISSING_VALUE_ASK_FORMAT_HINT.toLowerCase()).not.toContain('leaves it alone');
+  });
+
+  it('…but the READER still recognises it — removing the offer removed nothing else', () => {
+    // ⭐ THE OPPOSITE-DIRECTION TWIN OF THE SUBTRACTION. Withdrawing an
+    // invitation must not withdraw the honest answer: someone will say it
+    // anyway, and they must still get a reply rather than the demand repeating.
+    // If this ever goes red alongside the block above, the fix over-subtracted.
+    for (const phrase of MISSING_VALUE_NO_CHANGE_PHRASES) {
+      expect(readMissingValueAnswer(phrase)?.kind, phrase).toBe('no_change');
+    }
+    // Precondition pin: the vocabulary is non-empty, so the loop is a
+    // measurement rather than a guard agreeing with itself (trap 13).
+    expect(MISSING_VALUE_NO_CHANGE_PHRASES.length).toBeGreaterThan(0);
   });
 
   it('⛔ THE ASK DESCRIBES AN ABSOLUTE ASSIGNMENT, NEVER CAUSAL STRENGTH', () => {
