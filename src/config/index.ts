@@ -626,6 +626,7 @@ const ConfigSchema = z.object({
     draftSubstageDetail: booleanString.default(false), // CEE_DRAFT_SUBSTAGE_DETAIL — emit the COMPLETE draft substage timing set on _diagnostic_trace (ROADMAP 1.77 F1); OFF = the historical 4-key subset, byte-identical
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
     v6DualDraftEnabled: booleanString.default(false), // CEE_V6_DUAL_DRAFT_ENABLED — V6 dual-model draft: M2 review + deterministic merge after M1 draft, before commit (default OFF; producer-agnostic enrichment stage in draft-graph-dispatch)
+    factorQuantificationEnabled: booleanString.default(false), // Activate with shared factor semantics and Science consumers.
     // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
     //
     // Scope narrowed by the v5-handler-surface brief (Task 0b) for clarity:
@@ -1104,6 +1105,7 @@ const ConfigSchema = z.object({
       orchestrator: z.string().optional(), // Model for orchestrator Phase 3 + tool-calling
       edit_graph: z.string().optional(), // Model for edit_graph tool handler
       m2_review: z.string().optional(), // Model for V6 dual-draft M2 graph review (CEE_MODEL_M2_REVIEW; recommended claude-opus-4-8 at activation)
+      factor_quantification: z.string().optional(),
       summary: z.string().optional(), // Context v2 S4 rolling summariser (CEE_MODEL_SUMMARY; haiku-class default, 1.74 estate re-points it)
     }).default({}),
     // Per-operation max tokens limits
@@ -1123,6 +1125,7 @@ const ConfigSchema = z.object({
       orchestrator: z.coerce.number().int().positive().optional(), // Max tokens for orchestrator Phase 3
       edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
       m2_review: z.coerce.number().int().positive().optional(), // Max tokens for V6 dual-draft M2 review (default 4096 in m2-review.ts)
+      factor_quantification: z.coerce.number().int().positive().optional(),
       summary: z.coerce.number().int().positive().optional(), // Context v2 S4 rolling summariser (the module sets its own default)
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
@@ -1578,6 +1581,7 @@ function parseConfig(): Config {
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
+      factorQuantificationEnabled: env.CEE_FACTOR_QUANTIFICATION_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
       graphCasRpc: env.CEE_V5_GRAPH_CAS_RPC,
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
@@ -1718,6 +1722,7 @@ function parseConfig(): Config {
         orchestrator: env.CEE_MODEL_ORCHESTRATOR,
         edit_graph: env.CEE_MODEL_EDIT_GRAPH,
         m2_review: env.CEE_MODEL_M2_REVIEW,
+        factor_quantification: env.CEE_MODEL_FACTOR_QUANTIFICATION,
         summary: env.CEE_MODEL_SUMMARY,
       },
       // Per-operation max tokens limits
@@ -1733,6 +1738,7 @@ function parseConfig(): Config {
         orchestrator: env.CEE_MAX_TOKENS_ORCHESTRATOR,
         edit_graph: env.CEE_MAX_TOKENS_EDIT_GRAPH,
         m2_review: env.CEE_MAX_TOKENS_M2_REVIEW,
+        factor_quantification: env.CEE_MAX_TOKENS_FACTOR_QUANTIFICATION,
       },
       // Tiered model selection
       modelSelection: {

@@ -166,6 +166,7 @@ export type CeeTask =
   // stays inert otherwise); this union entry exists so startup/admin model
   // listings and isValidCeeTask cover the task.
   | "m2_graph_review"
+  | "factor_quantification"
   // Display-only entry for the v5 routing prompt. The v5 routing call site
   // (src/orchestrator-v5/routing/route-with-tool-use.ts) controls its own
   // model/temperature/tools selection independently. `getSystemPrompt('routing')`
@@ -280,6 +281,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // NEVER governs a live call: the dual-draft gate requires the explicit
   // CEE_MODEL_M2_REVIEW env override to match the resolved model.
   m2_graph_review: "claude-opus-4-8",
+  factor_quantification: "claude-sonnet-5",
   // Display-only — see comment on the `routing` member of CeeTask above.
   // The v5 routing call site does NOT consume this value.
   routing: "claude-sonnet-4-20250514",
@@ -462,6 +464,12 @@ export const AI_TASK_LIFECYCLE: Readonly<
     gate: 'CEE_V6_DUAL_DRAFT_ENABLED + provisioned prompt + explicit CEE_MODEL_M2_REVIEW',
     note: 'Code path exists but remains inert unless every activation gate passes.',
   },
+  factor_quantification: {
+    executable: false,
+    state: 'feature_gated',
+    gate: 'CEE_FACTOR_QUANTIFICATION_ENABLED',
+    note: 'Bounded factor-only estimation before canonical draft commit; activation requires factor consumer adoption.',
+  },
   extraction: {
     executable: true,
     state: 'dedicated_adapter',
@@ -495,7 +503,8 @@ export type RuntimeAiTaskId =
   | 'extraction'
   | 'rolling_summary'
   | 'decision_review_decompose'
-  | 'm2_graph_review';
+  | 'm2_graph_review'
+  | 'factor_quantification';
 
 export interface RuntimeAiTaskAuthority {
   /** Static production code path; current availability lives in lifecycle. */
@@ -682,6 +691,17 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     promptIdentity: 'runtime_source_version_hash',
     structuredContract: 'M2 outputSchema + deterministic review parser',
     fallback: 'inert unless feature, prompt, explicit model and budget gates all pass',
+    promotionGate: 'none_no_real_pack',
+  },
+  factor_quantification: {
+    hasExecutablePath: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.factor_quantification,
+    promptAuthority: 'code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract: 'factor-only outputSchema + strict estimate/unknown parser + protected canonical adoption',
+    fallback: 'no numeric fallback; skipped, invalid or failed calls leave explicit unresolved quantities',
     promotionGate: 'none_no_real_pack',
   },
 } as const satisfies Readonly<
