@@ -29,6 +29,7 @@ import {
   type ProposalRejectionReason,
 } from './evaluate-factor-value-proposal.js';
 import { resolveScaleFrame } from './scale-frame.js';
+import { unitPinnedScaleFrame } from '../../../../cee/draft/records/unit-scale-class.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
 
 export interface NormaliseInput {
@@ -180,6 +181,63 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
         return { raw_value: rawInput, value: framedValue };
       }
     }
+
+    // ⭐⭐ THE UNIT THE USER STATED IS EVIDENCE ABOUT THE SCALE — READ IT BEFORE
+    // FALLING BACK. Reaching here means no frame was recoverable: the factor
+    // has no pair and no persisted `scale_frame` (the projector writes one only
+    // when the factor had a magnitude in view — `magnitudes.length === 0`
+    // continues). Until this limb, EVERY such edit was written
+    // `value === raw_value`, and that pair is not a neutral fallback: it
+    // positively encodes "this number is already on the analysis scale". For
+    // "12 percent" that assertion is FALSE BY A FACTOR OF 100, and the analysis
+    // seam's baseline gate then refused the whole run
+    // (`baseline_scale_unresolved`) on an edit the product had just accepted —
+    // wire-witnessed. The user stated the scale in their own words and we threw
+    // the words away.
+    //
+    // ⚠ ONLY THE UNIT-PINNED FRAMES ARE ADMISSIBLE HERE, AND THE DISTINCTION IS
+    // THE WHOLE SAFETY ARGUMENT. `unitPinnedScaleFrame` returns percent → 100
+    // and basis points → 10,000 and NOTHING ELSE. Those are functions of the
+    // UNIT ALONE, so the number derived here is the number the projector would
+    // have written, whatever the sibling interventions are. The general
+    // `deriveFactorScaleFrame` is NOT admissible and must never be called from
+    // this seam: its {1,2,5}·10^k ladder is a function of the magnitude SET,
+    // the edit sees only its own magnitude, and re-deriving it here lands
+    // £600,000 at level 0.6 beside a £400,000 option at 0.8 — the status quo
+    // scoring cheaper than a cheaper option, with no refusal anywhere (9 of 25
+    // framings distorted, worst 100x; `records/projector.ts`'s persist site).
+    //
+    // ⚠ AND NOTE WHAT DELIBERATELY DOES NOT CHANGE. A currency or a count
+    // classes `unknown`, pins no frame, and still falls through to the raw
+    // write below — so the baseline gate still refuses it, loudly and
+    // specifically. Closing the percent gap must not open the currency lie:
+    // this limb is narrow because the honest refusal is the correct behaviour
+    // for every unit whose divisor nobody has stated.
+    //
+    // ⚠ ONLY THE UNIT THE USER STATED ON THIS PROPOSAL COUNTS — the factor's
+    // STORED unit is deliberately NOT consulted, and that is this estate's own
+    // doctrine rather than my caution. `set-factor-value.ts` states it at the
+    // call site: "The factor's stored unit is irrelevant to the user's intent —
+    // a bare-number proposal '200' ... is ambiguous regardless of whether the
+    // factor's existing observed_state.unit is '%'. Refuse rather than guess."
+    // Falling back to `factorUnit` here would have silently overturned that
+    // ruling for every capless factor, which is precisely the "closed the gap,
+    // opened the lie" trade this limb exists to avoid. A bare-number edit stays
+    // raw and the gate keeps refusing it, exactly as before.
+    //
+    // `inputHasUnit` is asserted rather than inferred from `unit` being set:
+    // the two are equivalent for today's only caller, and pinning the intent
+    // means a future caller that sets one without the other fails loudly here
+    // instead of quietly inventing a divisor.
+    const statedUnit = inputHasUnit ? unit : undefined;
+    const pinnedFrame = unitPinnedScaleFrame(statedUnit, rawInput);
+    if (pinnedFrame !== undefined) {
+      const pinnedValue = rawInput / pinnedFrame;
+      if (Number.isFinite(pinnedValue)) {
+        return { raw_value: rawInput, value: pinnedValue };
+      }
+    }
+
     return { raw_value: rawInput, value: rawInput };
   }
 
