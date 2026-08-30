@@ -186,6 +186,7 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
+import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -5822,6 +5823,82 @@ export async function runTurnExecutor(
           // into a second resume (the commit excludes its ref from
           // carry-forward; a successful mint also moves the graph hash).
           consumedPendingAction = pending;
+        } else if (baselineAnswer.skip_reason === 'unreadable_answer') {
+          // R2918B — THE USER ANSWERED AND WE CANNOT READ IT. Before this,
+          // every such reply fell through in silence: the answer landed
+          // nowhere and the product never said why. Say what shape is needed
+          // and re-persist the question, so the next attempt still has a
+          // referent to bind through.
+          //
+          // SCOPE — the whole safety argument for this branch. It fires ONLY
+          // on `unreadable_answer`, which the classifier reserves for messages
+          // SHAPED like an answer ("10-15%", "maybe 12%", "120%"). A message
+          // that ignores the question still returns `not_an_answer` and still
+          // falls through untouched, because a re-ask on every non-answer
+          // would hijack "run the analysis" and everything else the user might
+          // say next. The elicitation stays additive.
+          const pending = baselineAnswer.pending;
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: `baseline_elicitation_reask_${baselineAnswer.reason}`,
+          });
+          const reaskResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: formatBaselineReask({
+              targetLabel: baselineAnswer.targetLabel,
+              reason: baselineAnswer.reason,
+            }),
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = reaskResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(reaskResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              // Re-persist the SAME question (not a new one): the graph has
+              // not moved, so the pending's `graph_hash` precondition still
+              // holds and the next answer can bind through it. Without this
+              // the re-ask would name a target the next turn could no longer
+              // resolve, which is the silent-drop defect one turn later.
+              pending_actions: [pending],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_reask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation re-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
         }
       }
 

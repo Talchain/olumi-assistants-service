@@ -389,3 +389,104 @@ describe('2.918 RESUME — the source gate is PINNED (it was not)', () => {
     ).toBe(0.12);
   });
 });
+
+describe('R2918B ROUTE — the bare number the ask invites reaches the mint', () => {
+  it('"30" against the live question mints the baseline, zero LLM calls', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    const { response, telemetry } = await runTurnExecutor(
+      payload('30'),
+      'req-r2918b-bare',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    expect(telemetry.failure_type).toBeNull();
+    expect(chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry.llm_calls_used).toBe(0);
+
+    expect(appendCalls).toHaveLength(1);
+    const committed = appendCalls[0]!.graph as GraphV3T;
+    expect(
+      committed.nodes.find((n) => n.id === 'o-churn-rate')?.observed_state?.baseline,
+    ).toBe(0.3);
+    expect(response.assistant_text).toContain('Noted Churn rate is currently at 30%.');
+  });
+});
+
+describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not', () => {
+  it('"10-15%" re-asks, names the target and the shape, and RE-PERSISTS the question', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    const { response, telemetry } = await runTurnExecutor(
+      payload('10-15%'),
+      'req-r2918b-reask',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    expect(telemetry.failure_type).toBeNull();
+    // The pre-route claimed the turn: no LLM, and no invented value.
+    expect(chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry.llm_calls_used).toBe(0);
+
+    // NOTHING was minted. A binder that accepts everything writes wrong values
+    // confidently; this is the case where it must refuse and say so.
+    expect(appendCalls).toHaveLength(1);
+    const committed = appendCalls[0]!.graph as GraphV3T | undefined;
+    if (committed) {
+      for (const n of committed.nodes) {
+        expect(n.observed_state?.baseline).toBeUndefined();
+      }
+    }
+
+    // The user is TOLD, by name and with the shape needed.
+    expect(response.assistant_text).toContain('Churn rate');
+    expect(response.assistant_text).toContain('One number is enough');
+    expect(response.assistant_text).toContain('What percentage is Churn rate at right now?');
+
+    // The question is RE-PERSISTED, so the next attempt still has a referent.
+    const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
+    const reAsked = persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
+    expect(reAsked).toHaveLength(1);
+    expect(
+      (reAsked[0]!.action as { target_id: string }).target_id,
+    ).toBe('o-churn-rate');
+  });
+
+  it('"120%" re-asks about the RANGE (the reason reaches the copy, not just the branch)', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter } = directAnswerAdapter();
+
+    const { response } = await runTurnExecutor(payload('120%'), 'req-r2918b-range', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(response.assistant_text).toContain('between 0 and 100 percent');
+  });
+
+  it('THE PAIR — a message that is NOT answering falls through silently, exactly as before', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload('run the analysis please'),
+      'req-r2918b-silent',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    // The ordinary flow owns the turn. No re-ask copy anywhere.
+    expect(chatWithTools).toHaveBeenCalled();
+    expect(response.assistant_text).not.toContain('One number is enough');
+    expect(response.assistant_text).not.toContain('What percentage is Churn rate at right now?');
+  });
+});

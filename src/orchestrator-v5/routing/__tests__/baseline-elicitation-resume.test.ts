@@ -178,3 +178,81 @@ describe('2.918 resume — every gate fails closed, in order', () => {
     ).toEqual({ matched: false, skip_reason: 'not_an_answer' });
   });
 });
+
+describe('R2918B resume — the bare-number answers the ask itself invites', () => {
+  // The ask reads "Roughly what percentage is Churn rate at right now?".
+  // Every one of these is that question's own vocabulary coming back.
+  const answers = ['30', 'roughly 30', 'about 30', '30 percent', '30 today'];
+
+  it.each(answers)('"%s" is claimed as an answer', (message) => {
+    const r = run({ message });
+    expect(r.matched).toBe(true);
+    if (r.matched) expect(r.pending.action.target_id).toBe('o-churn-rate');
+  });
+});
+
+describe('R2918B resume — an ANSWER the product cannot read is TOLD, not swallowed', () => {
+  // CORPUS PROVENANCE: these are the rows the 2.918 suite already pinned as
+  // must-not-bind, plus the range shapes a "Roughly what percentage" question
+  // invites. They were authored to prove the binder refuses them, and it still
+  // does. What changes is that the refusal now reaches the user.
+  const unreadable: ReadonlyArray<readonly [string, string]> = [
+    ['maybe 12%', 'unreadable'],
+    ['10-15%', 'unreadable'],
+    ['12% or 15%', 'unreadable'],
+    ['about 12%, I think', 'unreadable'],
+    ['it was 12%', 'unreadable'],
+    ['12% higher', 'unreadable'],
+    ['somewhere between 10 and 15', 'unreadable'],
+    ['120%', 'out_of_range'],
+    ['0.3', 'ambiguous_scale'],
+  ];
+
+  it.each(unreadable)('"%s" → re-ask (%s), carrying the pending and the live label', (message, reason) => {
+    const r = run({ message });
+    expect(r.matched).toBe(false);
+    if (!r.matched && r.skip_reason === 'unreadable_answer') {
+      expect(r.reason).toBe(reason);
+      expect(r.targetLabel).toBe('Churn rate');
+      expect(r.pending.action.target_id).toBe('o-churn-rate');
+    } else {
+      throw new Error(`expected unreadable_answer, got ${String(r.skip_reason)}`);
+    }
+  });
+
+  // THE OTHER DIRECTION, and it is the one that keeps the feature honest: a
+  // message that is not answering this question must still fall through in
+  // SILENCE. A re-ask here would hijack the user's next move.
+  const notAnswering: readonly string[] = [
+    'what do you mean by that?',
+    'run the analysis',
+    'ok thanks',
+    'add a factor for support load',
+    'Win rate is 12% today.',
+    'about 12% if things improve',
+    'About 12%. But it varies a lot.',
+  ];
+
+  it.each(notAnswering)('"%s" stays SILENT (not_an_answer), no re-ask', (message) => {
+    const r = run({
+      message,
+      nodes: [
+        { id: 'o-churn-rate', label: 'Churn rate' },
+        { id: 'o-win', label: 'Win rate' },
+      ],
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'not_an_answer' });
+  });
+
+  it('POSITIVE CONTROL with a DISCRIMINATION (trap 20): the same battery run with no live question re-asks nothing', () => {
+    // Not merely "the probe can see something" — this asserts the re-ask is
+    // the PENDING's doing. Without a live question, an unreadable answer is
+    // just a message, and the gate must return the ordinary skip reason.
+    expect(run({ message: 'maybe 12%', pendings: [] })).toEqual({
+      matched: false,
+      skip_reason: 'no_pending_question',
+    });
+    // ...while the SAME message with the question live does re-ask.
+    expect(run({ message: 'maybe 12%' }).skip_reason).toBe('unreadable_answer');
+  });
+});

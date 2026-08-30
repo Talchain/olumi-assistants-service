@@ -51,7 +51,7 @@ import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
 } from '../session/pending-action.js';
-import { deriveElicitedBaselineAnswerPercent } from '../../cee/factor-extraction/stated-level.js';
+import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -679,6 +679,20 @@ export type BaselineElicitationResumeDispatch =
         | 'not_an_answer';
     }
   | {
+      /**
+       * R2918B — the user ANSWERED and the product cannot read the answer.
+       * Distinct from `matched: false` on purpose: there is nothing to mint, so
+       * this is not a bind, but staying silent here is the defect this closes.
+       * The caller re-asks, naming the shape it needs, and re-persists the
+       * question so the next attempt still has a referent to bind through.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'unreadable_answer';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
+      readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
+    }
+  | {
       readonly matched: true;
       readonly pending: ElicitTargetBaselinePending;
       /** The LIVE label of the target node (used for the receipt and replay). */
@@ -711,8 +725,21 @@ export function tryBaselineElicitationResume(input: {
   const competingLabels = (input.graphNodes ?? [])
     .filter((n) => n.id !== targetId)
     .map((n) => (typeof n.label === 'string' ? n.label : undefined));
-  const answer = deriveElicitedBaselineAnswerPercent(input.message, liveLabel, competingLabels);
-  if (answer === undefined) {
+  const verdict = classifyElicitedBaselineAnswer(input.message, liveLabel, competingLabels);
+  if (verdict.outcome === 'unresolved') {
+    // The user answered; the product cannot read it. Told, not swallowed.
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      targetLabel: liveLabel,
+      reason: verdict.reason,
+    };
+  }
+  if (verdict.outcome !== 'bound') {
+    // Not an answer to THIS question at all. Silence is contractual here: the
+    // elicitation is additive, so an ignored question must leave the flow
+    // exactly as it was before 2.918.
     return { matched: false, skip_reason: 'not_an_answer' };
   }
   return { matched: true, pending, targetLabel: liveLabel };

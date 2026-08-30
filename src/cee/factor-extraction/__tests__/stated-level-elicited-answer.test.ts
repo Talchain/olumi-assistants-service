@@ -70,8 +70,6 @@ describe('2.918 — full-sentence answers ride the UNCHANGED #868 grammar', () =
 
 describe('2.918 — non-answers that must NOT bind (the no-invention rule, answer-shaped)', () => {
   const nonAnswers: ReadonlyArray<readonly [string, string]> = [
-    ['no percent sign (v1 is percent-only)', '12'],
-    ['no percent sign with hedge', 'about 12'],
     ['delta-post word', '12% higher'],
     ['delta-post word after hedge', 'about 12% up'],
     ['bound word before', 'under 12%'],
@@ -99,6 +97,41 @@ describe('2.918 — non-answers that must NOT bind (the no-invention rule, answe
 
   it('POSITIVE CONTROL for the battery above (trap 13b): a genuine bare answer DOES bind', () => {
     expect(deriveElicitedBaselineAnswerPercent('about 12%', LABEL)).toBe(12);
+  });
+});
+
+describe('R2918B — the ask supplies the UNIT, so a BARE NUMBER is an answer', () => {
+  // CORPUS PROVENANCE (this suite's own rule, restated because the previous
+  // corpus violated it): NOT invented to suit the rule under test.
+  //   (a) the ASK's own copy, `formatBaselineElicitation`: "Roughly what
+  //       percentage is <target> at right now?" — so "roughly", "about",
+  //       "percentage", "right now" and "today" are the question's OWN words
+  //       coming back, and a grammar that refuses them refuses its own echo;
+  //   (b) the two rows this suite previously pinned as MUST-NOT-BIND ('12',
+  //       'about 12'), authored by the 2.918 lane — kept verbatim, reclassified
+  //       by evidence rather than replaced;
+  //   (c) the reported real answer that lands nowhere today: a bare '30'.
+  const answers: ReadonlyArray<readonly [string, number]> = [
+    ['30', 30],
+    ['12', 12],
+    ['about 12', 12],
+    ['roughly 30', 30],
+    ['about 30', 30],
+    ['30 percent', 30],
+    ['30 per cent', 30],
+    ['30 percentage', 30],
+    ['30 pct', 30],
+    ['30 today', 30],
+    ['roughly 30 right now', 30],
+    ["it's 30", 30],
+    ['we are at 30', 30],
+    ['0', 0],
+    ['100', 100],
+    ['12.5', 12.5],
+  ];
+
+  it.each(answers)('"%s" → %d', (message, expected) => {
+    expect(deriveElicitedBaselineAnswerPercent(message, LABEL)).toBe(expected);
   });
 });
 

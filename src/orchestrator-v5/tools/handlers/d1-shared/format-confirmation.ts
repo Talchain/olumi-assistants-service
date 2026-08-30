@@ -205,6 +205,53 @@ export function formatBaselineNoted(input: {
  * answer without '%' cannot mint. Leak-safe: no handler ids, no parameter
  * names, no internal tokens, no em dash.
  */
+/**
+ * R2918B — THE RE-ASK, for an answer the product could not read.
+ *
+ * The 2.918 ask above notes in writing that the extractor's grammar is
+ * percent-only and that "an answer without '%' cannot mint". The mitigation was
+ * to hope the user typed the symbol, and when they did not, the reply landed
+ * NOWHERE and nothing ever said why. R2918B removes the first half of that (a
+ * bare number is now an answer) and this removes the second: where an answer is
+ * genuinely unreadable, the product says so and says what shape it needs,
+ * instead of guessing or going silent.
+ *
+ * SCOPE, and it is the whole safety argument: this is emitted ONLY for a
+ * message the classifier judged an ATTEMPTED answer. A message that ignores the
+ * question keeps the pre-2.918 behaviour exactly, because a re-ask that fired
+ * on every non-answer would hijack "run the analysis" and every other thing a
+ * user says next.
+ *
+ * Leak-safe on the same terms as the ask: no handler ids, no parameter names,
+ * no internal tokens, no em dash, and no leading-decimal numeral in the
+ * example copy (the raw-decimal egress rule).
+ */
+export function formatBaselineReask(input: {
+  readonly targetLabel: string;
+  readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
+}): string {
+  const ask = `What percentage is ${input.targetLabel} at right now?`;
+  switch (input.reason) {
+    case 'out_of_range':
+      return (
+        `That is outside the range I can use for a current level. ` +
+        `It needs to sit between 0 and 100 percent. ${ask}`
+      );
+    case 'ambiguous_scale':
+      return (
+        `I could not tell what scale that is on, and guessing would be a ` +
+        `hundredfold difference. Give it to me as a percentage, for example ` +
+        `30 or 30%. ${ask}`
+      );
+    case 'unreadable':
+    default:
+      return (
+        `I could not read a single current level for ${input.targetLabel} in ` +
+        `that. One number is enough, for example 30 or 30%. ${ask}`
+      );
+  }
+}
+
 export function formatBaselineElicitation(input: { readonly targetLabel: string }): string {
   return (
     `To test that bound, the analysis also needs to know where ${input.targetLabel} stands today. ` +
