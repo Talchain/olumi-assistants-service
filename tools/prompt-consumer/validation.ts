@@ -50,7 +50,7 @@ export function verifyValidationCarriage(
   assert.equal(result.metadata[2]!.status, 'agreed');
 }
 
-export function runValidationProbe(raw = JSON.stringify(validationSample()), ignoreUncertainty = false) {
+export function runValidationProbe(raw = JSON.stringify(validationSample()), ignoreUncertainty = false, dropReasoning = false) {
   return runContractProbe({
     id: 'validate_graph.edge_uncertainty', task: 'validate_graph',
     components: {
@@ -66,12 +66,16 @@ export function runValidationProbe(raw = JSON.stringify(validationSample()), ign
     execute(c) {
       assert.deepEqual(c.schema(), { mode: 'json_object', attachedSchema: null });
       const parsed = c.parser(raw);
+      // The oracle is the emitted transport object, not the parser's result:
+      // otherwise a parser that drops reasoning could redefine the expectation.
+      const expected = JSON.parse(raw) as Pass2Response;
+      if (dropReasoning) parsed.edges[0]!.reasoning = '';
       const pass1 = parsed.edges.map(e => ({ from: e.from, to: e.to, strength: { mean: 0.5, std: 0.05 }, exists_probability: 0.8 })) as EdgeV3T[];
       const linted = c.lints(parsed.edges);
       const bias = c.bias(pass1, linted.edges);
       const adjusted = c.adjust(linted.edges, bias.offsets);
       if (ignoreUncertainty) adjusted[0]!.strength.std = 0.05;
-      return { expected: parsed, offsets: bias.offsets, metadata: pass1.map((e, i) => c.consumer(e, linted.edges[i]!, adjusted[i]!, linted.lintLog, 1)) };
+      return { expected, offsets: bias.offsets, metadata: pass1.map((e, i) => c.consumer(e, linted.edges[i]!, adjusted[i]!, linted.lintLog, 1)) };
     },
     verify(result) { verifyValidationCarriage(result, result.expected); },
   });
@@ -82,10 +86,11 @@ export function runValidationMutations() {
   delete missing.edges[0]!.strength.std;
   const unrelated = validationSample();
   unrelated.edges[0]!.reasoning = 'An independently worded rationale about museum capacity.';
-  return runSemanticMutationFamily({ id: 'edge-uncertainty', expectedCaseIds: ['baseline', 'missing-std', 'ignored-std', 'unrelated'], cases: [
+  return runSemanticMutationFamily({ id: 'edge-uncertainty', expectedCaseIds: ['baseline', 'missing-std', 'ignored-std', 'dropped-reasoning', 'unrelated'], cases: [
     { id: 'baseline', kind: 'baseline', run: () => runValidationProbe() },
     { id: 'missing-std', kind: 'semantic_break', run: () => runValidationProbe(JSON.stringify(missing)) },
     { id: 'ignored-std', kind: 'semantic_break', run: () => runValidationProbe(undefined, true) },
+    { id: 'dropped-reasoning', kind: 'semantic_break', run: () => runValidationProbe(undefined, false, true) },
     { id: 'unrelated', kind: 'unrelated', run: () => runValidationProbe(JSON.stringify(unrelated)) },
   ] });
 }
