@@ -199,6 +199,10 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   Quote it, even if it is unquantified, modest or awkwardly worded, and even if
   you can see a sharper objective behind it. Theirs is the one that counts.
 - \`option\` — a course of action the user named: something they could DO.
+  An option is something you can CARRY OUT. If the span is instead something
+  that can be TRUE or FALSE, it is not an option however much it is shaped like
+  one: "cut our list price by 15%" is an act, "the product has fallen behind
+  competitors" is a claim about the world.
   Quote the span that NAMES the action, not the sentence it sits in. A shorter
   span is still verbatim, and that span is what the reader sees on the node.
   "the events budget, which everyone loves but I've never seen a deal come out
@@ -212,6 +216,17 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   the graph to be scored and ranked against the others, so a span that is not a
   course of action is compared with the user's real alternatives as though it
   were one of them.
+  A proposed CAUSE is the case this catches most often. When a brief reports
+  what people believe is behind a problem — "some think the product has fallen
+  behind", "the CFO believes we raised prices too aggressively" — each of those
+  spans answers WHY, and an answer is true or false rather than something the
+  user carries out. File each as a \`claim\`: what it says varies is a
+  \`factor\`, and what it says threatens the goal is a \`risk\`. A brief can
+  disagree about causes and name no course of action at all; when it does, the
+  options are what the user could DO about the problem, and the disagreement
+  itself is a \`claim\`, never the alternatives.
+  Who said it makes no difference. "Sales says cut the price, product says hold
+  and ship the integrations" names two real acts, and both are options.
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.

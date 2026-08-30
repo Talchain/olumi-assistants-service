@@ -310,15 +310,90 @@ const HISTORIC_V9_INSTRUCTION_BYTES = 9183;
  * rule on `stated_items` is untouched, because that governs the USER's half of
  * the record set and is not what was blocking anybody.
  */
-const PREREGISTERED_V10_INSTRUCTION_SHA256 =
+const HISTORIC_V10_INSTRUCTION_SHA256 =
   "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1";
-const PREREGISTERED_V10_INSTRUCTION_BYTES = 10079;
+const HISTORIC_V10_INSTRUCTION_BYTES = 10079;
+
+/**
+ * ⭐⭐ v11 — A PROPOSED CAUSE IS NOT AN OPTION. SHAPE half only; the connect half
+ * is byte-identical to v10 (`b631a953…` / 4,544, asserted below).
+ *
+ * THE WITNESSED DEFECT, measured at the DEPLOYED staging draft endpoint on
+ * 2026-08-30 (CEE build `a18e194`, served `draft_graph` v195 `152998b447819c2e`
+ * plus exactly the v10 bytes above), on a brief whose leadership team disagrees
+ * about why growth stalled:
+ *
+ *   POST /assist/v1/draft-graph returned option nodes
+ *     `0811361d` "The Product Has Fallen Behind Competitors"
+ *     `b8e1cbe6` "Onboarding Is the Problem"
+ *     `5f615ae5` "We're Selling to the Wrong Customers"
+ *   each `provenance: "from_brief"`, each `source_quote` the attributed span,
+ *   each `status: "needs_user_mapping"` — i.e. three competing EXPLANATIONS put
+ *   on the graph to be scored and ranked against one another. The same draw ALSO
+ *   emitted the genuine actions ("Commission structured win/loss review", "Run
+ *   rapid customer interviews and churn analysis"), so the model was never
+ *   short of the right answer: the instruction simply let the causes stand as
+ *   their siblings.
+ *
+ * WHY HERE AND NOT IN THE SERVED PROMPT: `anthropic.ts:516-517` pushes this
+ * constant as a SECOND system block beside PMS `draft_graph`. A control arm
+ * carrying v195 ALONE (admin `test-prompt-llm`, 6 briefs) emitted no records at
+ * all and never reproduced the defect; the composed arm reproduced it on the
+ * first draw. The filing decision is made here, so this is where it is fixed.
+ *
+ * WHAT v11 ADDS, and it is RECLASSIFICATION ONLY — it tells the model where to
+ * put something it was already going to say, applying no pressure to invent,
+ * which is the property every version of this instruction has had to keep:
+ *   · a carry-out/true-or-false test on what an option IS;
+ *   · the proposed-cause exclusion, routing each span to a `factor` or a `risk`;
+ *   · the opposite-direction preservation clause — "who said it makes no
+ *     difference" — because a rule keyed on ATTRIBUTION rather than on
+ *     ACTION would demote "sales says cut the price, product says hold and
+ *     ship the integrations", which are two real options. That clause is the
+ *     half that stops this fix being worse than the defect (trap 22b).
+ *
+ * ⚠⚠ STATUS AT PINNING: **MEASURED ON A PROXY, NOT ON THE DEPLOYED PATH, AND THE
+ * PROXY IS NOISIER THAN DEPLOYED.** Said in full because this comment is what a
+ * future session finds first. Both arms were composed from the same two system
+ * blocks and drawn through admin `test-prompt-llm`, which carries NO structured-
+ * outputs grammar — so it measures the FILING decision this change governs, and
+ * nothing downstream of it. Within that instrument, over a 6-brief corpus:
+ *   · diagnostic briefs, causes filed as options: BEFORE 5 of 5 draws, AFTER
+ *     3 of 9 draws. A large reduction, NOT elimination — the residual is
+ *     stochastic, and deployed behaviour on the witnessed brief was
+ *     DETERMINISTIC (identical node ids across independent draws), so the
+ *     absolute AFTER rate is not a deployed rate and none is claimed.
+ *   · genuine-choice briefs, options preserved: 7 of 7 draws, ZERO losses,
+ *     including the attributed-but-real contrast case.
+ * The corpus was written by the lane that wrote these bytes, which is the exact
+ * limitation trap 22 names: it cannot see the class its author did not imagine.
+ * The deployed witness on `/assist/v1/draft-graph` is owed AFTER this merge
+ * deploys, and no claim about it is made here.
+ *
+ * ⚠ v10 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Every draft served from
+ * the option-effect-value change until this merge received exactly those bytes,
+ * and the deployed BEFORE witness above is attributable to them.
+ */
+const PREREGISTERED_V11_INSTRUCTION_SHA256 =
+  "e778852c76a27469e26d8d61f3685bb2f91a20524d89bfd577b70dbe393e3f75";
+const PREREGISTERED_V11_INSTRUCTION_BYTES = 11171;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v10 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V10_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v11 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V11_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V10_INSTRUCTION_BYTES,
+      PREREGISTERED_V11_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v10 bytes, so v10's runs stay attributable", () => {
+    // v10 is the artefact the deployed BEFORE witness was served: the three
+    // explanation-shaped option nodes came back from a build running exactly
+    // these bytes. Re-pointing this literal would make that measurement read as
+    // a measurement of the CURRENT instruction, which is the one thing it is not.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V10_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V10_INSTRUCTION_BYTES,
     );
   });
 
@@ -440,10 +515,24 @@ describe("the draft records instruction is the measured artefact", () => {
     // `option` IS, and which span of the brief names it, are both statements
     // about what goes in a field, so v9 is shape-half in its entirety and the
     // connect half is byte-identical to v6/v7/v8 (asserted in the next test).
+    //
+    // ⚠⚠ AND AGAIN IN v11 — the FIFTH version to touch it, after v10 left it
+    // alone entirely. What an `option` IS, and which spans are excluded from
+    // being one, are statements about what goes in a field, so v11 is shape-half
+    // in its entirety and the connect half is byte-identical to v10 (asserted in
+    // the next test). That asymmetry is the point of pinning the halves apart:
+    // this edit is legible as "the option bullet changed" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "5f058e0be800bda882350a1c33b88e89b4308b16e57cfff9c83a63c0bce0b3c3",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(6627);
+    // HISTORIC — the v9/v10 SHARED shape half (v10 moved the connect half only).
+    // Asserted DISTINCT: these are the bytes the deployed BEFORE witness was
+    // served, so they must stay separable from the ones that replace them.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "9dfb9f583edaf66df70d355a260a9a56ef9b80fe3367a5043a97d3cca048a207",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(5535);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(5535);
     // HISTORIC — v8's shape half. Asserted DISTINCT so v8's runs stay
     // attributable to the bytes that produced them.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -522,6 +611,45 @@ describe("the draft records instruction is the measured artefact", () => {
    * its own content — and bound to BOTH halves of the claim, because the negative
    * half ("`to_claim` cannot reach it") is the one that names the actual defect.
    */
+  /**
+   * ⭐⭐ THE v11 RULE, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
+   *
+   * A hash pin cannot tell "someone deleted the preservation clause" from
+   * "someone fixed a typo two bullets away", and here that distinction is the
+   * whole safety argument. Two OPPOSITE harms, asserted separately, because a
+   * fix for either alone reopens the other (CLAUDE.md trap 22b):
+   *
+   *   (a) A PROPOSED CAUSE IS SCORED AS AN OPTION. The witnessed defect: three
+   *       competing explanations of why growth stalled shipped as ranked
+   *       alternatives, so the analysis reported a win probability for
+   *       "The Product Has Fallen Behind Competitors".
+   *   (b) A REAL OPTION IS DEMOTED BECAUSE SOMEONE IS NAMED AS PROPOSING IT.
+   *       STRICTLY WORSE than (a): it silently deletes the user's actual
+   *       alternatives from their own decision, and it would not show up in any
+   *       corpus of diagnostic briefs. A rule keyed on attribution rather than
+   *       on action produces exactly this, which is why the clause naming it is
+   *       asserted in its own right and not folded into (a).
+   */
+  it("excludes a proposed cause from being an option, without demoting attributed actions", () => {
+    // (a) the exclusion, bound to the discriminator rather than to a phrase list
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "An option is something you can CARRY OUT.",
+    );
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "A proposed CAUSE is the case this catches most often.",
+    );
+    // and where the demoted span is to go, or the rule only says "not here"
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "what it says varies is a\n  `factor`, and what it says threatens the goal is a `risk`",
+    );
+    // (b) the opposite-direction half — the one that keeps this fix from being
+    // worse than the defect it closes.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain("Who said it makes no difference.");
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "names two real acts, and both are options",
+    );
+  });
+
   it("keeps the goal-is-a-stated-item rule that round 9 added", () => {
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
       "The goal is a `stated_item`, so a link that reaches it sets `to_stated`.",
