@@ -238,6 +238,20 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // load-bearing half: an unclassified-but-wired kind would slip through the
   // non-mutating branch and skip the divergence guard entirely.
   elicit_option_effect: 'mutating',
+  // ROADMAP 2.1353 — the two value-ask exits' offered cells. Not resumed by
+  // this module today, and classified MUTATING for exactly 2.1352's reasoning:
+  // answering "which of these does your 0.12 belong to?" WRITES an
+  // option→factor effect value, and every candidate the pending names can be
+  // invalidated by a graph change between the ask and the answer. Fail-closed
+  // is the load-bearing half — an unclassified-but-wired kind would slip
+  // through the non-mutating branch and skip the divergence guard.
+  elicit_effect_target: 'mutating',
+  // ROADMAP 2.1353 — the edit-clarify intercepts' offered targets. MUTATING on
+  // the same fail-closed reasoning, and it is the right default even though the
+  // question itself is weaker: the copy asks for "the specific factor, edge,
+  // option, or value to change", so any answer this referent helps bind is an
+  // EDIT, and its offered node ids are exactly what a graph change can move.
+  elicit_edit_target: 'mutating',
   // ROADMAP 2.63 C3/C4 — the draft/redraft offer. Never resumed by this
   // module (route-v2's draft-offer pre-route owns it; here it falls
   // through like any unclassified-for-resume kind), but classified
