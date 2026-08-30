@@ -712,6 +712,37 @@ export type BaselineElicitationResumeDispatch =
       readonly competing: readonly PendingAction[];
     }
   | {
+      /**
+       * ⭐⭐ THE REPLY BROUGHT ITS OWN SUBJECT, so the collision does not govern
+       * it and this path must NOT claim it.
+       *
+       * A competing ask makes an ELLIPTICAL answer ambiguous — "30%" has no
+       * subject and has to borrow the question's, so with two questions open we
+       * cannot tell which one lent it. A reply that NAMES what it is talking
+       * about ("Churn rate is 30%", "Churn is about 12%.") borrows nothing: it
+       * binds by identity against the target's label with competitor unanimity,
+       * exactly as it would on a turn with no pending question at all.
+       *
+       * Named apart from `no_pending_question` deliberately, even though both
+       * fall through. They are different facts — "we were not asked" versus "we
+       * were asked, two questions are open, and this reply resolves its own
+       * subject anyway" — and collapsing two facts into one value is the defect
+       * class this whole transition exists to close. A test can bind to this by
+       * identity; telemetry can count it; a future reader cannot mistake it for
+       * silence.
+       *
+       * WHAT HAPPENS NEXT is the pre-existing behaviour, unchanged: the turn
+       * continues to the handler, whose own gate (`ellipticalAllowed === false`
+       * when the sole-pending rule refuses) runs the subject-bearing limb and
+       * records the baseline against the node the user named. This verdict
+       * RESTORES that route; it does not add one.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'subject_bound_answer';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
+    }
+  | {
       readonly matched: true;
       readonly pending: ElicitTargetBaselinePending;
       /** The LIVE label of the target node (used for the receipt and replay). */
@@ -786,6 +817,29 @@ export function tryBaselineElicitationResume(input: {
     );
     if (collisionVerdict.outcome === 'not_an_answer') {
       return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    // ⭐⭐ INDEPENDENT SUBJECT AUTHORITY BEATS THE COLLISION.
+    //
+    // The soleness rule is the licence for ELLIPTICAL CARRY — for a reply with
+    // no subject that must borrow the question's. A reply that names its own
+    // subject never borrowed anything, so a second open question cannot make it
+    // ambiguous, and refusing it is a false positive that DROPS a legitimate
+    // answer. The two harms cannot share one window: dropping a real answer is a
+    // gap, minting an unasked-for edit is a lie.
+    //
+    // ⚠ NOT "accept every bound result" — that is the over-correction this
+    // guard is written to avoid. A bare "30%" is ALSO `bound`; it is bound
+    // `elliptical`, and it stays intercepted below. The discriminator is WHICH
+    // LIMB bound it, which is recorded by the classifier itself rather than
+    // re-derived here, so there is no second predicate over user text to drift
+    // against the first.
+    if (collisionVerdict.outcome === 'bound' && collisionVerdict.authority === 'subject') {
+      return {
+        matched: false,
+        skip_reason: 'subject_bound_answer',
+        pending: collision.baseline,
+        targetLabel: collisionLabel,
+      };
     }
     return {
       matched: false,
