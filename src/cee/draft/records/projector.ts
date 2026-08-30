@@ -1677,7 +1677,41 @@ function bindDirectStatedMagnitude(args: {
     // case can finally see it. The product cannot know whether the user meant an
     // increment or a total, and asking beats guessing in either direction
     // (CLAUDE.md trap 22f).
-    if (citedFigures.length === 0) return undefined;
+    // ⭐⭐ AN UNCITED MAGNITUDE IS OURS — AND SAYING SO IS THE WHOLE POINT.
+    //
+    // This branch returned `undefined`, which wrote NO binding, which left the
+    // value in `interventions` with no entry in `intervention_details`. Measured
+    // by executing the projector at `f18d941b`: an option carrying
+    // `sets_to: 240000` with no cited figure projected
+    // `interventions: {f0f5ccb2: 0.48}`, `raw_interventions: {f0f5ccb2: 240000}`
+    // and NO `intervention_details` at all — a number on the graph that the
+    // product cannot attribute to anybody. That is CLAUDE.md's class-1 defect
+    // (absence represented as value) in the field the analysis ranks options on.
+    //
+    // The three legitimate states are user fact / OUR estimate with provenance /
+    // unknown. An unstamped number is the second wearing the first's clothes, so
+    // the stamp is not a nicety — it is what makes asking the model for the
+    // estimate at all (see `instruction.ts`, "HOW MUCH EACH OPTION MOVES WHAT IT
+    // CHANGES") an honest trade rather than a fabrication. The two ship together.
+    //
+    // ⚠ THE RECEIPT IS DELIBERATELY NOT IN THE `Direct causal value …` FAMILY.
+    // `transforms/analysis-ready.ts:831-835` raises a NON-WAIVABLE
+    // `ambiguous_value` blocker on that prefix when the binding is unresolved.
+    // Reusing it would swap a hard `MISSING_OPTION_VALUE` refusal for a hard
+    // `AMBIGUOUS_OPTION_VALUE` one — the symptom metric moves, the user stays
+    // blocked (trap 23). An honest estimate is disclosed, not refused; a value
+    // the model claimed came from the brief is what that blocker is for.
+    //
+    // ⚠ ORDERING IS UNAFFECTED: `compareCanonicalInterventionCandidates` reads
+    // only `authority`, `setsTo` and `edgeId` — never the binding — so stamping
+    // cannot change which candidate wins a parallel-link conflict.
+    if (citedFigures.length === 0) {
+      return {
+        raw_value: claim.sets_to,
+        source: "cee_hypothesis",
+        reasoning: `Olumi estimate via edge ${edgeId}; no stated figure is cited for this option→factor effect`,
+      };
+    }
     // A value that IS a stated figure somewhere keeps its existing route: the
     // extractor may still earn it brief authority via `classifyAmountAgainstBrief`,
     // and demoting it here would trade this defect for its mirror image.
