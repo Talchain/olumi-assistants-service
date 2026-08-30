@@ -511,18 +511,46 @@ describe("GET /admin/v1/draft-failures", () => {
     expect(body.error).toBe("unauthorized");
   });
 
-  it("lists draft failures with valid admin key", async () => {
+  /**
+   * ⚠ CORRECTED 30 Aug 2026 (P0c). THIS TEST WAS PINNING THE DEFECT, and its
+   * own comment was the false label that kept it there.
+   *
+   * It asserted `200` with an empty `failures` array and explained that as
+   * *"backed by in-memory store"*. There is no in-memory store. This suite sets
+   * no `SUPABASE_URL` and no `SUPABASE_SERVICE_ROLE_KEY` (0 occurrences of
+   * either in this file), so `getClient()` returned null and
+   * `listDraftFailureBundles` answered `{ failures: [], total: 0 }` WITHOUT EVER
+   * REACHING THE TABLE. The test therefore proved only that an unreachable
+   * store reports itself empty — the exact false-negative that made
+   * `/admin/v1/draft-failures` useless for diagnosing the draft-500 P0, and the
+   * exact shape the estate keeps paying for: an absence reported by a probe
+   * that could not look. (Platform trap 14 — an honest confession replaced by a
+   * comfortable explanation; nobody re-checked it.)
+   *
+   * The endpoint now distinguishes the three answers it was collapsing into
+   * one. With no store configured the truthful answer is 503, so that is what
+   * is asserted. The authorisation and validation cases either side are
+   * unchanged and still cover what this describe block was written for.
+   *
+   * The full contract, including the opposite-direction twins (a REACHABLE
+   * store with no rows still answers 200; a REACHABLE store with no such id
+   * still answers 404), is pinned in
+   * `tests/unit/cee.draft-failure-store-honesty.test.ts`.
+   */
+  it("reports the store as UNAVAILABLE — never an empty list — when it cannot be reached", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/v1/draft-failures",
       headers: { "X-Admin-Key": ADMIN_KEY },
     });
-    // 200 = success with failures array (backed by in-memory store)
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(503);
     const body = res.json();
-    expect(body).toHaveProperty("failures");
-    expect(body).toHaveProperty("total");
-    expect(Array.isArray(body.failures)).toBe(true);
+    expect(body.error).toBe("draft_failure_store_unavailable");
+    expect(body.reason).toBe("store_not_configured");
+    // The load-bearing half: a caller must NOT be able to read this as "there
+    // are no draft failures".
+    expect(body.failures).toBeUndefined();
+    expect(body.total).toBeUndefined();
   });
 
   it("returns 400 for invalid query params", async () => {
