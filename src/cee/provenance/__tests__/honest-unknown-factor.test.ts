@@ -33,12 +33,27 @@
  * rather than from a fixture of this author's design, which is what acceptance
  * criterion 2 ("a real end-to-end brief, not a synthetic fixture") requires.
  *
- * That corpus also supplies the discrimination this suite would otherwise have
- * missed: TWO of its factors carry a GENUINE `uniform(0, 1)` prior
- * (`fac_nrr`, `fac_legal_clearance`). A predicate keyed on the RANGE would
- * classify both as ignorance and suppress two real priors — a false positive
- * that INVENTS a claim of ignorance we do not have. The corpus is what makes
- * that case reachable; the author's head did not supply it (trap 22).
+ * That corpus also supplies a case the author's head did not: TWO of its factors
+ * carry a `uniform(0, 1)` prior (`fac_nrr`, `fac_legal_clearance`) — trap 22.
+ *
+ * ⚠⚠ AND AN EARLIER VERSION OF THIS PARAGRAPH WAS WRONG ABOUT THEM, WHICH IS
+ * WORTH KEEPING BECAUSE THE ERROR WAS PLAUSIBLE. It called both "GENUINE" priors
+ * and concluded that "a predicate keyed on the RANGE would suppress two real
+ * priors". That reasoning is sound for the READ predicate and false for the
+ * WRITE sites, and the difference is the served prompt: `defaults-v187.ts:517-521`
+ * teaches `0.0 | 1.0` as the encoding for "unknown / no qualifier", so a
+ * model-supplied `uniform(0,1)` is most likely the model saying it does NOT
+ * know. Reading it as genuine information was the assumption that let a
+ * disclosure regression through.
+ *
+ * THE TWO PREDICATES ARE THEREFORE KEYED ON DIFFERENT THINGS, ON PURPOSE:
+ *   `factorIsExplicitlyUnquantified` — reads the FLAG only, never the range.
+ *       A node that was never marked is not retro-classified by its numbers.
+ *   `shouldPreserveModelPrior`       — reads the RANGE at the WRITE sites, and
+ *       deliberately declines to preserve a full-width prior unflagged, because
+ *       that is ignorance wearing an estimate's clothes.
+ * Neither corpus factor is affected either way: both are `external`, and the
+ * write sites do not reach that category.
  *
  * MINE: the structural expectations, each derived from the producer's own
  * declared semantics — `graph-validator.ts`'s gate, and
@@ -266,10 +281,17 @@ describe("B — real values survive, on the captured wire corpus", () => {
     expect(nodeById(response, "fac_target").prior).toBeUndefined();
   });
 
-  it("a GENUINE uniform(0,1) prior is NOT read as ignorance — the flag is the discriminator", () => {
-    // ⭐⭐ THE CASE THE AUTHOR'S HEAD DID NOT SUPPLY, and the one that decides
-    // whether this change is safe. Two nodes in the captured corpus carry a
-    // real `uniform(0, 1)` prior the model chose:
+  it("the FLAG, not the range, is what `factorIsExplicitlyUnquantified` reads", () => {
+    // ⭐⭐ THE CASE THE AUTHOR'S HEAD DID NOT SUPPLY. Two nodes in the captured
+    // corpus carry a `uniform(0, 1)` prior the model chose:
+    //
+    // ⚠ SCOPE, CORRECTED: this asserts only what the PREDICATE reads — the flag,
+    // never the range. It does NOT claim these two priors are informative. The
+    // served prompt (`defaults-v187.ts:517-521`) teaches `0.0 | 1.0` for
+    // "unknown / no qualifier", so a `uniform(0,1)` is very likely the model
+    // saying it does not know; `shouldPreserveModelPrior` treats it that way at
+    // the WRITE sites. These two are `external` factors, which those sites do
+    // not reach, so nothing here contradicts that.
     //   fac_nrr             (B1) — provenance from_brief, extractionType explicit
     //   fac_legal_clearance (B3) — provenance ai_inferred
     // A predicate keyed on the RANGE — "is this prior [0,1]?" — matches both and
@@ -574,6 +596,50 @@ describe("G — a model-supplied prior is preserved, never overwritten or relabe
       expect((factor.prior.range_min + factor.prior.range_max) / 2).toBeCloseTo((min + max) / 2, 10);
     },
   );
+
+  it("RESTORED PIN — a model-supplied uniform(0,1) IS ignorance and is flagged; a narrowed one is not", () => {
+    // ⚠⚠ THIS CASE WAS DELETED RATHER THAN UPDATED, AND THAT IS THE REAL LESSON.
+    //
+    // A test named "a prior WITHOUT the flag does not satisfy the gate either"
+    // used `uniform(0, 1)` as its input. When the gate legitimately widened, the
+    // input was SWAPPED to `uniform(0.6, 1.0)` — so the `(0,1)` behaviour ended
+    // up asserted in NEITHER direction, and a disclosure regression walked
+    // straight through a suite that had once covered it. Changing a test's INPUT
+    // to keep it green is not the same as updating its verdict: the first
+    // silently drops coverage, the second moves it.
+    //
+    // What makes `(0,1)` different is not arithmetic, it is the SERVED PROMPT.
+    // `defaults-v187.ts:514,517-521` teaches the model to encode ignorance as a
+    // prior, and `unknown / no qualifier` is exactly `0.0 | 1.0`. So a
+    // model-supplied `uniform(0,1)` is the model saying it does not know, in the
+    // vocabulary we taught it — not an estimate to preserve. Left unflagged it
+    // gave LESS disclosure than staging, which at least stamped
+    // `value_tier: "fallback_default"`.
+    //
+    // ⭐ The range is IDENTICAL before and after; only the disclosure changes.
+    const ignorance = optionConnectedGraph({ extractionType: "inferred" });
+    nodeById(ignorance, "fac_target").prior = { distribution: "uniform", range_min: 0, range_max: 1 };
+    const { response: r1, unquantifiedFactors: u1 } = ensureControllableFactorBaselines(ignorance) as any;
+    const flagged = nodeById(r1, "fac_target");
+
+    expect(factorIsExplicitlyUnquantified(flagged)).toBe(true);
+    expect(u1).toContain("fac_target");
+    // Nothing narrowed, nothing widened — the interval is the one the model gave.
+    expect(flagged.prior.range_min).toBe(0);
+    expect(flagged.prior.range_max).toBe(1);
+
+    // OPPOSITE DIRECTION, in the same test so the two cannot drift apart: the
+    // narrowest possible informative prior is still preserved and still NOT
+    // relabelled as ignorance. Without this, flagging everything would pass.
+    const informative = optionConnectedGraph({ extractionType: "inferred" });
+    nodeById(informative, "fac_target").prior = { distribution: "uniform", range_min: 0, range_max: 0.999 };
+    const { response: r2, unquantifiedFactors: u2 } = ensureControllableFactorBaselines(informative) as any;
+    const preserved = nodeById(r2, "fac_target");
+
+    expect(factorIsExplicitlyUnquantified(preserved)).toBe(false);
+    expect(u2).not.toContain("fac_target");
+    expect(preserved.prior).toEqual({ distribution: "uniform", range_min: 0, range_max: 0.999 });
+  });
 
   it("CONTRAST — the same node with NO prior is still marked, so the guard discriminates", () => {
     // ⭐ THE DISCRIMINATION, not merely the preservation. Without this the block

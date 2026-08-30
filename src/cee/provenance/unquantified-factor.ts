@@ -157,6 +157,55 @@ export function factorHasExpressiblePrior(node: unknown): boolean {
 }
 
 /**
+ * Should a MODEL-SUPPLIED prior be preserved as the factor's stated level?
+ *
+ * ⚠⚠ EXPRESSIBLE IS NOT THE SAME AS INFORMATIVE, AND CONFLATING THEM COST
+ * DISCLOSURE THAT STAGING ALREADY HAD.
+ *
+ * The served prompt teaches the model to encode ignorance AS a prior
+ * (`defaults-v187.ts:514,517-521`):
+ *
+ *     | Brief language          | range_min | range_max |
+ *     | "low", "limited"        | 0.0       | 0.4       |
+ *     | "moderate", "normal"    | 0.3       | 0.7       |
+ *     | "high", "intense"       | 0.6       | 1.0       |
+ *     | unknown / no qualifier  | 0.0       | 1.0       |     <-- THIS ONE
+ *
+ * So a model-supplied `uniform(0, 1)` is not an estimate we should preserve —
+ * it is the model SAYING IT DOES NOT KNOW, in the vocabulary we taught it. A
+ * guard that only asked "is this prior expressible?" preserved it unflagged,
+ * and the factor then validated clean with no `prior_is_unquantified` and no
+ * `value_tier` — **less disclosure than staging**, which at least stamped
+ * `value_tier: "fallback_default"`. A fix for silent placeholders that
+ * introduces a silent placeholder.
+ *
+ * The tell was that the two shapes below became indistinguishable while a third,
+ * semantically identical to the first, was treated differently:
+ *
+ *     model `U(0,1)`   -> unflagged   <-- "I don't know", silently
+ *     model `U(0.6,1)` -> unflagged   <-- an estimate; correct
+ *     no prior at all  -> FLAGGED     <-- "I don't know", disclosed
+ *
+ * The first and third are the SAME CLAIM and must get the same representation.
+ *
+ * ⭐ NOTHING IS NARROWED AND NOTHING IS WIDENED. A `U(0,1)` that falls through
+ * here is replaced by `buildUnquantifiedPrior()`, whose range is `[0,1]` — the
+ * IDENTICAL interval. The only thing that changes is that the node now SAYS so.
+ * No information is lost in either direction; disclosure is gained.
+ *
+ * The bound is `range_max - range_min < 1` rather than an equality test against
+ * `0` and `1`, so a prior that spans the whole scale by any spelling (or wider)
+ * is treated as the non-statement it is.
+ */
+export function shouldPreserveModelPrior(node: unknown): boolean {
+  if (!factorHasExpressiblePrior(node)) return false;
+  const p = (node as { prior: Record<string, unknown> }).prior;
+  const min = p.range_min as number;
+  const max = p.range_max as number;
+  return max - min < IGNORANCE_PRIOR_RANGE.range_max - IGNORANCE_PRIOR_RANGE.range_min;
+}
+
+/**
  * Does this node carry an EXPLICIT unknown?
  *
  * ⚠⚠ THIS IS THE VALIDATOR'S DISCRIMINATOR, AND ITS BREADTH IS THE WHOLE

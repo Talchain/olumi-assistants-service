@@ -8,7 +8,7 @@
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
 import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
-import { buildUnquantifiedPrior, factorHasExpressiblePrior } from "../../cee/provenance/unquantified-factor.js";
+import { buildUnquantifiedPrior, shouldPreserveModelPrior } from "../../cee/provenance/unquantified-factor.js";
 
 // ============================================================================
 // Types
@@ -1020,10 +1020,13 @@ export function ensureControllableFactorBaselines(response: unknown): {
     // (below). A stated distribution IS a stated level; it needs no value and
     // it must not be relabelled as ignorance.
     //
-    // The test is `factorHasExpressiblePrior`, NOT "has a prior": a malformed or
-    // degenerate prior is not information either, and such a node falls through
-    // to the honest unknown rather than being shipped unusable.
-    if (factorHasExpressiblePrior(node)) {
+    // The test is `shouldPreserveModelPrior`, NOT "has a prior". Two things are
+    // not information and must fall through to the honest unknown rather than be
+    // preserved: a malformed or degenerate prior (unusable), and a prior
+    // spanning the WHOLE unit interval — which the served prompt v187 teaches as
+    // the encoding for "unknown / no qualifier", i.e. the model saying it does
+    // not know. Preserving that unflagged is LESS disclosure than staging gave.
+    if (shouldPreserveModelPrior(node)) {
       return node;
     }
 
