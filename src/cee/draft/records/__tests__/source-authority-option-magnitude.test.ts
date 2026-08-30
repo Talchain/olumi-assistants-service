@@ -431,10 +431,20 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     });
 
     // A target factor that cites only the figure does not establish which
-    // option owns it; that weaker shape must remain unbound.
+    // option owns it; that weaker shape must not earn brief authority.
+    //
+    // ⚠ ASSERTION SHARPENED (option-effect-value change): this read
+    // `toBeUndefined()`, which was a proxy for "has not earned brief
+    // authority". The two came apart when an uncited magnitude started carrying
+    // an honest `cee_hypothesis` stamp instead of no provenance at all. The
+    // property being defended here — that this weaker shape cannot be certified
+    // as the user's own figure — is asserted directly, and would still fail if
+    // the stamp ever moved to `brief_extraction`.
     const noOptionJoin = structuredClone(liveShape);
     noOptionJoin.claims[0] = { ...noOptionJoin.claims[0]!, basis: [4] };
-    expect(bindingOf(projectRecordsToGraph(noOptionJoin, twinBrief), FULL_SWITCH)).toBeUndefined();
+    expect(bindingOf(projectRecordsToGraph(noOptionJoin, twinBrief), FULL_SWITCH)).toMatchObject({
+      source: "cee_hypothesis",
+    });
 
     // A target factor that cites two options cannot lend one option's figure to
     // the other. This is the authority-collision mutant: both basis-less links
@@ -449,8 +459,13 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     delete statusQuoLink.basis;
     statusQuoLink.sets_to = 25_000;
     const collided = projectRecordsToGraph(twoOptionJoin, twinBrief);
-    expect(bindingOf(collided, FULL_SWITCH)).toBeUndefined();
-    expect(bindingOf(collided, STATUS_QUO)).toBeUndefined();
+    // ⚠ Same sharpening as above, and this is the case where it matters most:
+    // the defect being pinned is that the old rule "falsely certified BOTH links
+    // as brief extraction". Neither may claim the user's figure. Asserting the
+    // stamp by identity says exactly that, where `toBeUndefined()` said it only
+    // by side effect.
+    expect(bindingOf(collided, FULL_SWITCH)).toMatchObject({ source: "cee_hypothesis" });
+    expect(bindingOf(collided, STATUS_QUO)).toMatchObject({ source: "cee_hypothesis" });
 
     // An explicit (but incomplete) link basis remains authoritative; target
     // inheritance must not silently repair or reinterpret it.
@@ -459,9 +474,12 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
       (claim) => claim.claim_kind === "causal_link" && claim.from_stated === 0 && claim.to_claim === 0,
     )!;
     explicitLink.basis = [0];
+    // ⚠ Same sharpening: the property is that an explicit basis citing no
+    // FIGURE does not inherit the target's citation and so cannot earn brief
+    // authority. It is now stamped honestly as ours rather than left unstamped.
     expect(
       bindingOf(projectRecordsToGraph(explicitIncompleteBasis, twinBrief), FULL_SWITCH),
-    ).toBeUndefined();
+    ).toMatchObject({ source: "cee_hypothesis" });
 
     // Two same-valued candidate figures are ambiguous even when only one quote
     // happens to verify against this brief. Preserve the existing fail-closed

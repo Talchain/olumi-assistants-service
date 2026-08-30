@@ -197,13 +197,30 @@ describe("composed magnitude citing the user's own stated figures", () => {
     expect(reasoning).toContain("48000");
   });
 
-  it("NEGATIVE TWIN — a link that cited no figure at all stays unbound, because it really is model-chosen", () => {
+  it("NEGATIVE TWIN — a link that cited no figure at all is stamped as model-chosen, never as a citation", () => {
     const projection = projectRecordsToGraph(records({ berlinBasis: [] }), BRIEF);
+    const berlin = bindingOf(projection, BERLIN);
 
+    // ⚠ ASSERTION CHANGED, AND THE INTENT IS THE REASON IT COULD BE.
+    // This read `toBeUndefined()` until the option-effect-value change. That was
+    // ONE assertion answering TWO questions (CLAUDE.md trap 21): "has this
+    // earned brief authority?" (no — still no) and "does it carry a provenance
+    // record at all?" (previously no, and that was the class-1 defect). An
+    // uncited magnitude now carries a stamp saying it is OURS, which is the
+    // opposite of dressing it as a citation — this test's stated intent — so
+    // the intent is asserted directly instead of through the old proxy.
     expect(
-      bindingOf(projection, BERLIN),
-      "an empty basis is a genuine 'I chose this' and must not be dressed as a citation",
-    ).toBeUndefined();
+      berlin,
+      "an uncited magnitude must still be attributable — an unstamped number is the defect, not the safeguard",
+    ).toBeDefined();
+    expect(
+      berlin!.source,
+      "an empty basis is a genuine 'I chose this' and must never earn brief authority",
+    ).toBe("cee_hypothesis");
+    // The specific harm this case was written against: it must not be dressed
+    // as a citation it does not have.
+    expect(berlin).not.toHaveProperty("composed_citation");
+    expect(String(berlin!.reasoning)).not.toContain("stated_items[");
   });
 
   it("MIRROR GUARD — a value that IS a stated figure elsewhere keeps its existing route", () => {
