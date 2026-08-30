@@ -379,7 +379,7 @@ export const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Output valid JSON only (no comments, no text outside the JSON object)
 - Every outcome and risk needs an inbound path from a controllable factor
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
-- 2–6 options maximum`;
+- At most 6 options; generate alternatives only for prospective action requests, not diagnostic explanations`;
 
 // v12 (2026-07-23, lean-draft contract, ROADMAP 1.197): the draft grammar is
 // STRUCTURE ONLY — coaching / causal_claims / topology_plan are dropped from the

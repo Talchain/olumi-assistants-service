@@ -7,6 +7,8 @@ import { describe, it, expect } from "vitest";
 import { DeclaredScale } from "@talchain/schemas";
 import { synthesiseRangeDisplayValue } from "../display-value.js";
 import { classifyUnitScaleClass, isPercentScaledUnit } from "../../draft/records/projector.js";
+import type { DraftRecordSet } from "../../draft/records/grammar.js";
+import { projectDraftRecords } from "../../draft/records/seam.js";
 import { transformNodeToV3 } from "../../transforms/schema-v3.js";
 import { handleUnreachableFactors } from "../../unified-pipeline/stages/repair/unreachable-factors.js";
 
@@ -572,15 +574,12 @@ describe("GATE 2 — the declared-scale vocabulary is pinned to the contract", (
  * => `unit_interval`). The ratio arm now reads the same carrier symmetrically.
  *
  * ── WHY THIS COSTS THE COMPLIANT CASE NOTHING ────────────────────────────
- * The draft prompt MANDATES the ratio encoding in two places
- * (`Prompts/canonical/draft_graph.txt:320` and `src/prompts/defaults-v187.ts:300`,
- * verbatim: *"Ratio that can exceed 100% | raw ratio | percentage points |
- * NRR 110% -> 1.10, raw 110"*). On that encoding `value` (1.10) and
- * `raw_value` (110) DIFFER BY CONSTRUCTION, so the guard cannot fire on a
- * compliant factor. It only fires on a violation — which is precisely the case
- * that was rendering a lie.
+ * Legacy ratio-encoded inputs carry distinct model and raw magnitudes;
+ * raw-scale inputs may legitimately carry equal ones. These tests protect both
+ * repair inputs, not a model mandate. The current records producer is tested
+ * separately below through the real parser, projector and display consumer.
  */
-describe("COMPOSED TREE — a factor stating 115% renders on ONE scale, in both encodings", () => {
+describe("LEGACY/REPAIR COMPATIBILITY — 115% renders on ONE scale, in both encodings", () => {
   function statedFactorGraph(data: Record<string, unknown>): any {
     // Shape taken from the existing repair suite's own helper
     // (`stated-quantity-survival.test.ts:69`), which derives it from the
@@ -606,7 +605,7 @@ describe("COMPOSED TREE — a factor stating 115% renders on ONE scale, in both 
     return (transformNodeToV3(node as never) as any).display_value;
   }
 
-  it("the MANDATED ratio encoding (value 1.15, raw 115) renders 57.5% to 172.5%", () => {
+  it("ratio-encoded input (value 1.15, raw 115) renders 57.5% to 172.5%", () => {
     const display = displayFor({
       value: 1.15,
       raw_value: 115,
@@ -650,7 +649,7 @@ describe("COMPOSED TREE — a factor stating 115% renders on ONE scale, in both 
     ).toBe("57.5% to 172.5%");
   });
 
-  it("the compliant factor still earns its ratio declaration", () => {
+  it("the ratio-encoded factor still earns its ratio declaration", () => {
     expect(
       displayFor({ value: 1.15, raw_value: 115, unit: "%", operator: ">=", extractionType: "explicit" }),
     ).toBe("57.5% to 172.5%");
@@ -658,145 +657,157 @@ describe("COMPOSED TREE — a factor stating 115% renders on ONE scale, in both 
 });
 
 // ---------------------------------------------------------------------------
-// THE GUARD'S PREMISE, READ FROM THE PRODUCER'S OWN BYTES
+// RECORDS → PARSER → PROJECTOR → DISPLAY (the current draft producer)
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const SERVED_PROMPT_PATH = resolve(REPO_ROOT, "Prompts/canonical/draft_graph.txt");
 const MANIFEST_PATH = resolve(REPO_ROOT, "Prompts/canonical/manifest.json");
-const SECOND_COPY_PATH = resolve(REPO_ROOT, "src/prompts/defaults-v187.ts");
 
 /**
- * The ratio-encoding row, matched BY SHAPE rather than by line number (a line
- * number is its own little mirror — `CLAUDE.md` trap 12). The prompt states the
- * encoding as a markdown table row:
- *
- *   | Type | model value | raw_value | Example |
- *   | Ratio that can exceed 100% | raw ratio | percentage points | NRR 110% → 1.10, raw 110 |
+ * Canonical is a verified served export, not the unpromoted candidate. This
+ * checks artefact identity only: matching a hash cannot prove model behaviour.
+ * The adapter assembly tests separately bind the selected snapshot to a request.
  */
-const RATIO_ROW_RE = /^\|\s*Ratio that can exceed 100%\s*\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$/gm;
-/** The worked example's two magnitudes: `… → <model value>, raw <raw_value>`. */
-const WORKED_EXAMPLE_RE = /→\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*raw\s+([0-9]+(?:\.[0-9]+)?)/;
-
-/**
- * ⛔ THIS BLOCK REPLACES A GUARD THAT COULD NOT FAIL.
- *
- * It previously read, in full:
- *
- *     const compliant = { value: 1.15, raw_value: 115 };
- *     expect(compliant.value).not.toBe(compliant.raw_value);
- *
- * — two fields of a literal declared on the line above, under a docstring
- * claiming it "REDs if a future producer ever emits value === raw_value".
- * `1.15 !== 115` by construction, so nothing about any producer could move it.
- * MEASURED, not argued: rewriting the mandate row in BOTH cited prompt files to
- * say the two are the SAME left the file 48/48 GREEN. The premise was
- * destroyed at the producer and the guard noticed nothing.
- *
- * The premise IS real and IS readable, so it is now READ. Everything below
- * derives from `Prompts/canonical/draft_graph.txt`, bound to the SERVED
- * artefact by the canonical manifest's own digest — not merely to a file that
- * happens to sit on disk at that path.
- */
-describe("PRECONDITION — the ratio encoding is MANDATED by the served draft prompt", () => {
-  it("the cited prompt is readable, non-empty, and IS the served artefact (sha256 == manifest)", () => {
-    // If this REDs the guard is not "broken" — it is telling you the artefact it
-    // derives from has moved or is no longer the one CEE serves, which is
-    // precisely when a silent mirror starts rotting.
+describe("draft prompt capture identity (not behavioural evidence)", () => {
+  it("keeps the verified served export bound to its recorded full digest", () => {
     const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
-    expect(served.length, `prompt unreadable or empty at ${SERVED_PROMPT_PATH}`).toBeGreaterThan(0);
-
     const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) as {
-      pms_prompts: ReadonlyArray<{ key: string; file: string; sha256: string }>;
+      pms_prompts: ReadonlyArray<{
+        key: string;
+        file: string;
+        sha256: string;
+        served_hash_verified: boolean;
+      }>;
     };
-    const entry = manifest.pms_prompts.find((p) => p.key === "draft_graph");
-    expect(entry, "the canonical manifest has no `draft_graph` entry").toBeDefined();
-    expect(entry!.file).toBe("Prompts/canonical/draft_graph.txt");
-    expect(
-      createHash("sha256").update(served, "utf8").digest("hex"),
-      "the file at Prompts/canonical/draft_graph.txt is NOT the digest the manifest attests as " +
-        "served. Either the file drifted or the manifest did — re-derive which before trusting " +
-        "any expectation in this file, because they all rest on these bytes.",
-    ).toBe(entry!.sha256);
+    const entries = manifest.pms_prompts.filter((entry) => entry.key === "draft_graph");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.file).toBe("Prompts/canonical/draft_graph.txt");
+    expect(entries[0]!.served_hash_verified).toBe(true);
+    expect(createHash("sha256").update(served, "utf8").digest("hex")).toBe(entries[0]!.sha256);
+  });
+});
+
+interface DraftScaleCase {
+  id: string;
+  quote: string;
+  value: number;
+  unit: string;
+  effect: number;
+  frame: number;
+  display: string;
+}
+
+// These are quantities, not prose-table examples. In particular a >100%
+// percentage is framed deterministically by the projector, not normalised by
+// the model into the old graph prompt's prescribed 1.15 / raw 115 shape.
+const DRAFT_SCALE_CASES: readonly DraftScaleCase[] = [
+  { id: "percentage", quote: "Rejections are 12%", value: 12, unit: "%", effect: 8, frame: 100, display: "12%" },
+  { id: "ratio_above_100_percent", quote: "Net revenue retention is 115%", value: 115, unit: "%", effect: 120, frame: 200, display: "115%" },
+  { id: "currency_magnitude", quote: "Operating cost is £50000", value: 50000, unit: "GBP", effect: 20000, frame: 100000, display: "£50k" },
+];
+
+function scaleRecords(row: DraftScaleCase): DraftRecordSet {
+  return {
+    stated_items: [
+      { kind: "goal", source_quote: "improve resilience" },
+      { kind: "option", source_quote: "fund the programme" },
+      { kind: "figure", source_quote: row.quote, value: row.value, unit: row.unit, role: "baseline" },
+    ],
+    claims: [
+      { claim_kind: "causal_link", label: "programme changes the quantity", from_stated: 1, to_stated: 2, sets_to: row.effect, effect: "positive" },
+      { claim_kind: "causal_link", label: "the quantity affects resilience", from_stated: 2, to_stated: 0, effect: "positive" },
+    ],
+  };
+}
+
+function projectScaleCase(row: DraftScaleCase, records = scaleRecords(row)) {
+  const brief = `We want to improve resilience. We could fund the programme. ${row.quote}.`;
+  const seam = projectDraftRecords(records, brief);
+  expect(seam.ok, "the real records parser must accept this fixture").toBe(true);
+  if (!seam.ok) throw new Error(seam.detail);
+  expect(seam.records.stated_items[2]).toEqual(records.stated_items[2]);
+  expect(seam.records.claims[0]!.sets_to).toBe(records.claims[0]!.sets_to);
+  expect(seam.projection.dropped).toEqual([]);
+  const factors = seam.projection.graph.nodes.filter((node) => node.kind === "factor");
+  const options = seam.projection.graph.nodes.filter((node) => node.kind === "option");
+  expect(factors, "a missing factor must not make a display check vacuous").toHaveLength(1);
+  expect(options).toHaveLength(1);
+  return { seam, factor: factors[0]!, option: options[0]! };
+}
+
+function expectConsumedQuantity(
+  row: DraftScaleCase,
+  factor: ReturnType<typeof projectScaleCase>["factor"],
+) {
+  // This is the actual V3 transform and its display synthesiser, not a
+  // hand-written normalisation or an assertion on the input fixture.
+  const consumed = transformNodeToV3(factor as Parameters<typeof transformNodeToV3>[0]);
+  expect(consumed.id).toBe(factor.id);
+  expect(consumed.kind).toBe("factor");
+  expect(consumed.observed_state?.value).toBeCloseTo(row.value / row.frame, 12);
+  expect(consumed.observed_state?.raw_value).toBe(row.value);
+  expect(consumed.observed_state?.unit).toBe(row.unit);
+  expect(consumed.observed_state?.source).toBe("brief_extraction");
+  expect(consumed.provenance).toBe("from_brief");
+  expect(consumed.display_value).toBe(row.display);
+  return consumed;
+}
+
+describe("current records scalar and unit contract reaches the actual display consumer", () => {
+  it.each(DRAFT_SCALE_CASES)("$id: raw value, model scale and source stay distinct", (row) => {
+    const { factor, option } = projectScaleCase(row);
+    expect(factor.scale_frame).toBe(row.frame);
+    expectConsumedQuantity(row, factor);
+
+    // The same factor frame must govern the option's supported sets_to value.
+    const optionData = option.data as {
+      interventions: Record<string, number>;
+      raw_interventions: Record<string, number>;
+      intervention_details: Record<string, { source: string; raw_value: number }>;
+    };
+    expect(Object.keys(optionData.interventions)).toEqual([factor.id]);
+    expect(optionData.interventions[factor.id]).toBeCloseTo(row.effect / row.frame, 12);
+    expect(optionData.raw_interventions[factor.id]).toBe(row.effect);
+    expect(optionData.intervention_details[factor.id]).toMatchObject({
+      source: "cee_hypothesis",
+      raw_value: row.effect,
+    });
   });
 
-  it("finds EXACTLY ONE ratio-encoding row — zero would mean this guard silently stopped checking", () => {
-    const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
-    const rows = [...served.matchAll(RATIO_ROW_RE)];
-    expect(
-      rows.length,
-      `expected exactly one "| Ratio that can exceed 100% | … |" row in ${SERVED_PROMPT_PATH}; ` +
-        `found ${rows.length}. ZERO means the row's WORDING changed and every assertion below ` +
-        "would pass by matching nothing (trap 13 — an absence probe with no positive control). " +
-        "MORE THAN ONE means there are competing authorities on the encoding.",
-    ).toBe(1);
+  it.each(DRAFT_SCALE_CASES)("$id: losing raw magnitude fails; changing an unrelated label passes", (row) => {
+    const { factor } = projectScaleCase(row);
+    const lostRaw = structuredClone(factor);
+    if (lostRaw.data) delete (lostRaw.data as Record<string, unknown>).raw_value;
+    if (lostRaw.observed_state) delete lostRaw.observed_state.raw_value;
+    expect(() => expectConsumedQuantity(row, lostRaw)).toThrow();
+
+    const renamed = { ...factor, label: "A different display caption" };
+    expectConsumedQuantity(row, renamed);
   });
 
-  it("⭐ DERIVED: the served prompt's worked example keeps model value and raw_value DISTINCT", () => {
-    // THIS IS THE GUARD'S WHOLE PREMISE. `declaredScaleOf`'s ratio arm treats
-    // `rawValue === value` as proof of NON-normalisation and declines to stamp
-    // `ratio`. That is only safe because a COMPLIANT factor never presents the
-    // two as equal — and the reason it never does is that the producer's own
-    // instruction mandates the two columns be different quantities.
-    const served = readFileSync(SERVED_PROMPT_PATH, "utf8");
-    const rows = [...served.matchAll(RATIO_ROW_RE)];
-
-    // ── PIN THE PRECONDITION IN-TEST, so this cannot pass vacuously ──────────
-    // Without these three the assertions below hold trivially on a row that
-    // stopped matching, or on an example that stopped parsing.
-    expect(rows.length, "no ratio row matched — see the previous test").toBe(1);
-    const example = rows[0]![3]!;
-    const parsed = WORKED_EXAMPLE_RE.exec(example);
-    expect(
-      parsed,
-      `the ratio row's example column (${JSON.stringify(example)}) no longer parses as ` +
-        '"→ <model value>, raw <raw_value>". The mandate may still be stated in some other ' +
-        "shape, but THIS guard can no longer read it — re-anchor it rather than deleting it.",
-    ).not.toBeNull();
-
-    const modelValue = Number(parsed![1]);
-    const rawValue = Number(parsed![2]);
-    expect(Number.isFinite(modelValue) && Number.isFinite(rawValue)).toBe(true);
-    expect(modelValue, "a zero model value would make DISTINCTNESS accidental").toBeGreaterThan(0);
-
-    // ── THE MANDATE ITSELF, written against the SPEC and not against the
-    // failure mode (trap 13d): the columns are "raw ratio" and "percentage
-    // points", so the raw magnitude IS the model value expressed in percentage
-    // points. Distinctness is a CONSEQUENCE of that, which is why it is
-    // asserted second rather than assumed first.
-    expect(
-      Math.round(modelValue * 100),
-      `the served prompt now mandates model value ${modelValue} with raw_value ${rawValue}. ` +
-        "The ratio row's two columns are declared `raw ratio` and `percentage points`, so " +
-        "raw_value should be the model value in percentage points.",
-    ).toBe(rawValue);
-
-    // ⭐ AND THE CLAUSE `declaredScaleOf` ACTUALLY RESTS ON. If a future producer
-    // ever mandates value === raw_value for a genuine ratio, THIS REDs — which
-    // is what the deleted literal-comparison only claimed to do.
-    expect(
-      modelValue,
-      "THE GUARD'S PREMISE HAS BEEN WITHDRAWN AT THE PRODUCER. `declaredScaleOf` " +
-        "(unreachable-factors.ts) reads `rawValue === value` as proof a factor was NOT " +
-        "normalised and refuses to stamp `ratio`. If the served prompt now mandates them " +
-        "equal, that read fires on COMPLIANT factors and strips the declaration from every " +
-        "legitimate ratio — re-derive the guard, do not re-point this test.",
-    ).not.toBe(rawValue);
+  it("a cited source earns user authority; the same uncited number does not", () => {
+    const original = DRAFT_SCALE_CASES[2]!;
+    const row = { ...original, effect: original.value };
+    const uncited = projectScaleCase(row);
+    const citedRecords = scaleRecords(row);
+    const citedClaim = { ...citedRecords.claims[0]!, basis: [2] };
+    const cited = projectScaleCase(row, {
+      ...citedRecords,
+      claims: [citedClaim, ...citedRecords.claims.slice(1)],
+    });
+    const detail = (result: ReturnType<typeof projectScaleCase>) =>
+      (result.option.data as {
+        intervention_details: Record<string, { source: string; raw_value: number }>;
+      }).intervention_details[result.factor.id]!;
+    expect(detail(uncited)).toMatchObject({ source: "cee_hypothesis", raw_value: row.value });
+    expect(detail(cited)).toMatchObject({ source: "brief_extraction", raw_value: row.value });
   });
 
-  it("the SECOND copy the guard cites has not drifted from the served bytes", () => {
-    // Two authorities on one question do not get to drift (trap 21). Both files
-    // are cited by `declaredScaleOf`'s own comment; if they disagree, the
-    // comment is naming a rule that is only half true.
-    const servedRows = [...readFileSync(SERVED_PROMPT_PATH, "utf8").matchAll(RATIO_ROW_RE)];
-    const copyRows = [...readFileSync(SECOND_COPY_PATH, "utf8").matchAll(RATIO_ROW_RE)];
-    expect(servedRows.length, "served prompt: ratio row missing").toBe(1);
-    expect(
-      copyRows.length,
-      `${SECOND_COPY_PATH} no longer carries the ratio-encoding row that ` +
-        "`declaredScaleOf`'s comment cites alongside the canonical prompt.",
-    ).toBe(1);
-    expect(copyRows[0]![0]!.trim()).toBe(servedRows[0]![0]!.trim());
+  it("deleting a required claim label is rejected by the real parser", () => {
+    const records = structuredClone(scaleRecords(DRAFT_SCALE_CASES[0]!));
+    delete (records.claims[0] as unknown as Record<string, unknown>).label;
+    expect(projectDraftRecords(records)).toMatchObject({ ok: false, reason: "not_a_record_set" });
   });
 });

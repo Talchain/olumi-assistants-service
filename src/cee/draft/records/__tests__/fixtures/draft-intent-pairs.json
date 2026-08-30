@@ -1,0 +1,20 @@
+[
+  {
+    "id": "logistics-disagreement",
+    "diagnostic": "We want to cut missed delivery windows. Operations believes drivers have too many stops; dispatch believes parcels leave the depot too late. These are competing explanations, not established findings. What evidence would distinguish them before we decide what to change?",
+    "decision": "We want to cut missed delivery windows. Compare reducing stops per route with moving depot dispatch earlier. We have not chosen either approach; show how each could affect missed delivery windows.",
+    "actionSpans": ["reducing stops per route", "moving depot dispatch earlier"]
+  },
+  {
+    "id": "museum-chronology",
+    "diagnostic": "We want to restore museum attendance. Last winter we raised adult admission and closed on Mondays. Attendance subsequently fell, but the curator thinks the exhibition programme explains the fall while the treasurer suspects the price change. Help us investigate what happened; no new policy has been proposed.",
+    "decision": "We want to restore museum attendance. We could lower adult admission or reopen on Mondays. Compare these two prospective policies while keeping their costs and uncertain effects separate.",
+    "actionSpans": ["lower adult admission", "reopen on Mondays"]
+  },
+  {
+    "id": "manufacturer-open",
+    "diagnostic": "We want to reduce rejected batches. Rejections have doubled this quarter, and we do not yet know whether incoming material or process variation explains the change. Help us structure the investigation without committing to a remedy.",
+    "decision": "We want to reduce rejected batches. Rejections have doubled this quarter. We have not named any remedies: generate distinct practical actions we could take and explain how each might reduce rejections.",
+    "actionSpans": []
+  }
+]

@@ -51,11 +51,11 @@ export interface DisplayValueInput {
  * sniff below, so it is corrected here rather than left as a comment nobody
  * reconciled. Derived at the bytes, CEE staging, 2026-08-26:
  *
- *   1. THE MODEL, via the draft prompt. External factors are instructed to
- *      emit `prior: {distribution, range_min, range_max}` on a NORMALISED
- *      0–1 anchoring scale — `Prompts/canonical/draft_graph.txt:473-476`
- *      ("low, limited" -> 0.0–0.4; "moderate, normal" -> 0.3–0.7), with the
- *      canonical example `{range_min: 0.0, range_max: 1.0}`.
+ *   1. Existing graph inputs can carry a `prior` on a normalised scale. The
+ *      legacy graph-output prompt described that encoding, but it is NOT the
+ *      current draft records contract: `buildDraftRecordsSchema()` has a
+ *      scalar claim `value`, not factor `range_min` / `range_max` fields.
+ *      Do not use the old prompt table as proof of the live records producer.
  *
  *   2. `synthesisePriorFromBaseline` (repair stage,
  *      `unified-pipeline/stages/repair/unreachable-factors.ts:690`), which

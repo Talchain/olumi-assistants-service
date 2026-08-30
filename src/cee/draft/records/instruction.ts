@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildDraftRecordsSchema } from "./grammar.js";
 
 /**
  * THE DRAFT RECORDS INSTRUCTION — the model-facing half of the contract.
@@ -167,11 +168,22 @@ import { createHash } from "node:crypto";
  * 0 → 20, with no pressure on the model to invent anything.
  */
 
+/** The same machine-readable contract is present even after grammar degradation. */
+export const DRAFT_RECORDS_MACHINE_SCHEMA_INSTRUCTION = `<DRAFT_RECORDS_MACHINE_SCHEMA>
+${JSON.stringify(buildDraftRecordsSchema())}
+</DRAFT_RECORDS_MACHINE_SCHEMA>`;
+
 /** The shape half: two lists, verbatim quotes, and the honesty split. */
 export const DRAFT_RECORDS_SHAPE_INSTRUCTION = `
 ## OUTPUT SHAPE FOR THIS REQUEST
 
 Do not emit a graph. Emit two lists instead.
+The JSON Schema below is the sole authority for machine-readable shape. It
+replaces any earlier graph-output instructions or worked examples, including
+those in a fallback prompt. Semantic guidance still applies where compatible.
+Every claim requires a short, meaningful \`label\`, including causal links.
+
+${DRAFT_RECORDS_MACHINE_SCHEMA_INSTRUCTION}
 
 **stated_items** — one entry for each thing the user actually said that bears on
 the decision. \`source_quote\` is REQUIRED and must be copied VERBATIM from the
@@ -208,7 +220,14 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   The question the user is deciding is not an option. It is the decision, and
   the options are its branches. Neither is something they say they do not know,
   something that already happened, nor a description of how things work today:
-  those belong in a \`figure\` or a \`claim\`, or nowhere. Every option is put on
+  do not turn them into options. Competing explanations of a current problem
+  are hypotheses, not prospective actions, even when each names something the
+  team could change. Only generate new alternatives when the user is asking
+  for possible actions or a choice between them, not just exploring causes.
+  The records contract has no attributed hypothesis/disagreement item: do not
+  disguise a reported belief as a factual \`figure\` or as your own \`claim\`.
+  This limitation is not permission to assert that the belief was preserved.
+  Every option is put on
   the graph to be scored and ranked against the others, so a span that is not a
   course of action is compared with the user's real alternatives as though it
   were one of them.
@@ -238,7 +257,10 @@ Use \`claim_kind\`:
   Higher is worse.
 - \`causal_link\` — one thing affecting another
 - \`option_refinement\` — a sharper version of an option
-- \`prior\` — what you believe about a quantity, and how sure you are
+- \`prior\` — an AI-inferred quantity; \`value\` can carry a scalar point estimate.
+  Omit \`value\` when unknown. This contract cannot carry a range, calibrated
+  confidence, rationale or typed refusal. Do not encode those in a number or
+  label, and do not present a scalar as a reasoned uncertainty estimate.
 
 Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
 \`factor\`: a factor is something that VARIES on the way to a result, and calling
@@ -309,8 +331,10 @@ and \`basis\` still records whatever the user said that you built them on.
   from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
   the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
 
-Do not emit a factor you cannot connect. But never drop something the user
-stated: keep it in \`stated_items\`, and connect it if it bears on the goal.
+Do not emit a factor you cannot connect. Keep supported user-stated items in
+\`stated_items\`, and connect them if they bear on the goal. Do not coerce an
+unsupported semantic distinction into an unrelated record kind to satisfy
+connectivity or option-count expectations.
 
 ## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES
 

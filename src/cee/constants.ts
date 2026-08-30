@@ -91,7 +91,8 @@ export const COMPUTE_SIGMA_FLOOR = LLM_STRENGTH_STD_FLOOR;
  */
 export const STRENGTH_DEFAULT_RETRY_NUDGE =
   "IMPORTANT: Your previous output used identical edge strengths (0.5) for most relationships. " +
-  "This produces uninformative analysis. Differentiate edge strength.mean values based on the " +
+  "This produces uninformative analysis. Differentiate causal-link strengths, using the " +
+  "field and value shape required by the active output contract, based on the " +
   "relative causal influence of each relationship. Use the full range: strong effects (0.6-0.9), " +
   "moderate (0.3-0.5), weak (0.1-0.2). Each edge should reflect your assessment of that specific " +
   "mechanism's strength. Revisit each causal relationship in this decision and assign strengths " +
@@ -123,13 +124,13 @@ export const STRENGTH_DEFAULT_RETRY_NUDGE =
  */
 export const DRAFT_LEAN_RETRY_DIRECTIVE =
   "IMPORTANT: Your previous draft was too large to complete and was cut off. " +
-  "Draft the PRIMARY trade-off only: at most 12 nodes. Keep only the 1-2 most " +
-  "decisive numeric guardrails as explicit numbers; express every other number " +
-  "qualitatively (e.g. 'high', 'moderate', 'low') rather than as a precise value. " +
-  "Model the single most important decision and the options directly compared in " +
-  "it; leave secondary options, background factors, per-option attribute breakdowns, " +
-  "and less-critical risks out of the graph. A small graph that finishes is far " +
-  "better than a large one that does not.";
+  "Keep the primary reasoning structure small: aim for at most 12 projected nodes. " +
+  "Use the active output contract, not a different graph-shaped response. Preserve " +
+  "the user's explicit numbers, units and source quotes exactly; do not replace " +
+  "them with qualitative approximations. Shorten your labels and reduce your " +
+  "own secondary inferences and option expansion instead. Keep the genuine " +
+  "alternatives being compared, if any; a diagnostic brief does not require " +
+  "invented actions. A compact complete response is better than a truncated one.";
 
 // Re-export additional thresholds from shared package for direct use
 export {

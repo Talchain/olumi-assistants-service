@@ -1,6 +1,6 @@
 /**
- * BEHAVIOURAL WITNESS — the new served draft_graph prompt, exercised against
- * the REAL consumer.
+ * CONSUMER WORKED EXAMPLE — hand-authored records exercised against the real
+ * consumer. This is NOT evidence of model behaviour or served candidate bytes.
  *
  * A prompt change with no consumer-side evidence is a hope, not a fix. This
  * file supplies the evidence, on the same brief the retired v195 prompt used
@@ -200,7 +200,7 @@ function v195WorkedExample(): unknown {
   return null;
 }
 
-describe("behavioural witness: new instructed shape vs the consumer", () => {
+describe("consumer worked example: records and historical graph shape", () => {
   it("instrument: the fixture uses only enum values the grammar declares", () => {
     // Trap 13c: a kit validates sensitivity, never correctness. Derive the
     // expectations from the PRODUCER's enums so this fixture cannot assert a

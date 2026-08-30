@@ -1,748 +1,94 @@
 /**
- * THE INSTRUCTION IS PINNED BY A HISTORIC HASH, AND THE LITERAL MAY NOT BE
- * "UPDATED" TO MATCH A CHANGE.
+ * Instruction identity, not semantic or live-promotion evidence.
  *
- * Every measurement that justified drafting by records was taken against exactly
- * these bytes. `e630587523d29ace…` / 2,351 bytes is a RECORD of what was served,
- * not a convenience constant: if the instruction changes and someone edits the
- * literal below to match, the whole evidence base silently detaches from the
- * product and nothing anywhere goes red.
- *
- * Changing the instruction is legitimate. Changing it while re-pointing the pin
- * in the same motion is not — move the pin deliberately, in a commit that also
- * carries the new measurement.
- *
- * The pin is derived by HASHING THE SERVED CONSTANT, so it also fails if the
- * concatenation, the trimming or either section moves — not just if someone
- * edits the prose.
+ * Historical pins are immutable attribution records. v11 is the unpromoted
+ * PR #1228 instruction candidate; its hash must not be described as served
+ * until deployment is independently witnessed. A hash deliberately changes on
+ * an unrelated spelling edit, so these tests do not claim semantic compatibility.
+ * The assembled-adapter and behavioural suites provide those different proofs.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { buildDraftRecordsSchema } from "../grammar.js";
 import {
   DRAFT_RECORDS_INSTRUCTION,
   DRAFT_RECORDS_SHAPE_INSTRUCTION,
   DRAFT_RECORDS_CONNECT_INSTRUCTION,
+  DRAFT_RECORDS_MACHINE_SCHEMA_INSTRUCTION,
   draftRecordsInstructionHash,
 } from "../instruction.js";
 
-/**
- * HISTORIC — v2. The bytes served on every run measured up to and including
- * 2026-08-11 (the 0/27-accepted enumeration and the two arm-R1 measured blocks).
- * This literal is a RECORD and is never re-pointed: it is what makes those runs
- * attributable. The current instruction is v3 and deliberately does NOT hash to
- * it; the assertion below is that the two are DISTINCT, which is the honest
- * statement and the one that stays true forever.
- */
-const HISTORIC_V2_INSTRUCTION_SHA256 =
-  "e630587523d29ace5739d5c26754d787fb00479d542a3cb1fc7ca13ceb1eca26";
-const HISTORIC_V2_INSTRUCTION_BYTES = 2351;
+const HISTORIC_INSTRUCTIONS = [
+  // v2: measured enumeration / R1 blocks through 2026-08-11.
+  { version: 2, sha256: "e630587523d29ace5739d5c26754d787fb00479d542a3cb1fc7ca13ceb1eca26", bytes: 2351 },
+  // v3-v7: pre-registered artefacts, unmeasured at original pinning.
+  { version: 3, sha256: "494e52b9fca948660927849c870ca8a689cac7399ac100b185243f99a54f416b", bytes: 3673 },
+  { version: 4, sha256: "edc329f9d2496be3c1fbfba4f5f5968439d4178913f0b5b1967773ee6430e9f3", bytes: 4426 },
+  { version: 5, sha256: "2e5bc9695f1907a802ab9f2dfa7f697bf36692f10c3675e9227c06994de98182", bytes: 4688 },
+  { version: 6, sha256: "b4916b58954b30838a5ca37a770fd796371b17400a1002131defba6bd7a69162", bytes: 6021 },
+  { version: 7, sha256: "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8", bytes: 6748 },
+  // v8: unmeasured; the independent-model proxy failed its deployed control.
+  { version: 8, sha256: "acd9148eb107ea85d839fd1198a4eff9659b3ab81b36ef2255d5c029837a0b4d", bytes: 8265 },
+  // v9-v10: unmeasured at original pinning. The hashes are not success claims.
+  { version: 9, sha256: "7629e9ec738786eb4624b078a62c81a5f4e5c90adc2bb4e1b5edbd820f97def8", bytes: 9183 },
+  { version: 10, sha256: "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1", bytes: 10079 },
+] as const;
 
-/**
- * ⭐ PRE-REGISTERED — v3, frozen 2026-08-12 BEFORE any run was spent on it.
- *
- * Pre-registration is the point: these bytes were hashed and written to the
- * evidence dir (`v3/PRE-REGISTRATION-V3.md`) before measurement, so the result of
- * the five-gate block cannot be attributed to an instruction that was quietly
- * tuned after seeing it.
- *
- * ⚠ STATUS AT THE TIME OF PINNING: UNMEASURED. v3 was written against the gate's
- * grammar derived at the validator's bytes and against the emission anatomy of the
- * banked corpus — NOT against a live result. A reader must not infer from the
- * existence of this pin that a measurement stands behind it; the evidence file
- * says so in terms, and this comment says so here because the pin is what a future
- * session will find first.
- *
- * These bytes SUPERSEDE the spike's pinned instruction BY DESIGN: the spike's
- * §1.4 pin governed the falsification experiment, and this is productionisation
- * under R1's own acceptance design, which is a different question.
- */
-const HISTORIC_V3_INSTRUCTION_SHA256 =
-  "494e52b9fca948660927849c870ca8a689cac7399ac100b185243f99a54f416b";
-const HISTORIC_V3_INSTRUCTION_BYTES = 3673;
+// v11 changes semantic guidance and embeds the actual machine schema. It is
+// separately identified instead of rewriting any historical evidence pin.
+const CANDIDATE_V11 = {
+  instruction: { sha256: "51d260e6bc07b8d80ea170533e2ec2f565ed8ee83fbe63be1aed351ac35770fa", bytes: 12554 },
+  shape: { sha256: "c5741d81cb6fa76a0c6d995a7054a89c8cfd910dc7e8a2241119af80677c6103", bytes: 7890 },
+  connect: { sha256: "9ec1533ffe0859418fbdfb1a6a678ddac8fcbd2d35ef4aaedd37b09c645d2903", bytes: 4664 },
+} as const;
 
-/**
- * ⭐ PRE-REGISTERED — v4, frozen 2026-08-12 BEFORE any acceptance run was spent
- * on it (`round7/PRE-REGISTRATION-V4.md`).
- *
- * v4 changes the REFERENCE SYNTAX and the option-chaining rule:
- *   · references are typed by FIELD (`from_stated`/`from_claim`/`to_stated`/
- *     `to_claim`, integers) instead of by a prefix character inside a string.
- *     A grammar cannot constrain a string's shape here — `pattern` is a
- *     forbidden structured-outputs keyword — so a TYPE on a FIELD is the only
- *     enforcement available.
- *   · the model is told to chain the option THE USER NAMED rather than its own
- *     refinement, which is the instruction-side half of a fix whose load-bearing
- *     half is deterministic (the projector merges a single refinement onto its
- *     stated parent).
- *
- * ⚠ v3 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Both long-brief
- * measured blocks were taken against exactly those bytes; re-pointing the
- * literal would detach that evidence from the artefact that produced it.
- */
-const HISTORIC_V4_INSTRUCTION_SHA256 =
-  "edc329f9d2496be3c1fbfba4f5f5968439d4178913f0b5b1967773ee6430e9f3";
-const HISTORIC_V4_INSTRUCTION_BYTES = 4426;
+const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
-/**
- * ⭐ PRE-REGISTERED — v5, frozen 2026-08-12 BEFORE any acceptance run was spent
- * on it (`round9/PRE-REGISTRATION-V5.md`).
- *
- * v5 changes ONE thing in the connect half, and the shape half does not move at
- * all (`175af059…` / 1,771 bytes, unchanged from v4 — asserted below):
- *
- *   **the goal is a `stated_item`, so a link that reaches it sets `to_stated`.**
- *
- * DERIVED, not guessed: `projector.ts` `CLAIM_KIND_TO_NODE_KIND` maps the four
- * claim kinds to `factor | option | null` and NEVER to `goal`, so no claims index
- * IS the goal. MEASURED cause: on round 7's run 8 the single link intended for
- * the goal was written with a claim reference. It resolved SUCCESSFULLY — to a
- * factor — so nothing terminated at the goal, every derived factor was withheld
- * as unconnected, and a completion pass that emitted TEN well-formed causal links
- * contributed ZERO nodes and ZERO edges.
- *
- * ⚠ THE GRAMMAR CANNOT ENFORCE THIS AND NO SCHEMA CAN. `{"to_claim": 0}` is
- * well-formed, in range, and denotes a real node of a legal kind; its wrongness
- * is a fact about what the model MEANT. A schema constrains documents, not
- * intentions. The instruction and the completion ask are the only places this can
- * be said, which is why it is said in both.
- *
- * ⚠ v4 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED — round 7's five-gate
- * block was measured against exactly those bytes.
- */
-const HISTORIC_V5_INSTRUCTION_SHA256 =
-  "2e5bc9695f1907a802ab9f2dfa7f697bf36692f10c3675e9227c06994de98182";
-const HISTORIC_V5_INSTRUCTION_BYTES = 4688;
-
-/**
- * ⭐ v6 — 2026-08-14, the instruction half of the risk/outcome grammar widening.
- *
- * ⚠ STATUS: UNMEASURED AGAINST A LIVE DRAW at the time of pinning, and this
- * comment is what a future session will find first, so it says so plainly. The
- * bytes were written against `grammar.ts`'s widened `DRAFT_RECORD_CLAIM_KINDS`,
- * against `ALLOWED_EDGES`, and against the SERVED graph prompt's own BRIDGE
- * TERMINALITY / NODE ORIENTATION sections — i.e. against three authorities at
- * their bytes, and against ZERO live results. What the model actually emits
- * under the widened schema is the post-merge deploy witness's job
- * (`scripts/records-pinned-brief-acceptance.ts`), and no claim about it is made
- * here.
- *
- * ⚠ v5 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. The round-11 block and
- * every measurement taken through 2026-08-13 were served exactly those bytes;
- * re-pointing the literal would detach that evidence from the artefact that
- * produced it. Both halves moved in v6, which has not happened before — the
- * shape half changed in v4 only, and the connect half in v3/v4/v5 — because a
- * new claim KIND has to be both declared (shape) and connected (connect).
- */
-const HISTORIC_V6_INSTRUCTION_SHA256 =
-  "b4916b58954b30838a5ca37a770fd796371b17400a1002131defba6bd7a69162";
-const HISTORIC_V6_INSTRUCTION_BYTES = 6021;
-
-/**
- * ⭐ v7 — 2026-08-14, the instruction half of the `is_baseline` widening.
- *
- * Two sentences were added to the SHAPE half, and both close a measured silence
- * rather than restating the served prompt for tidiness:
- *
- *  · `is_baseline` on a status-quo option. The served `draft_graph` v195 has
- *    mandated this at `:282-283` ("mandatory on ANY option representing the
- *    status quo … whatever its label or id") while THIS block — the one sitting
- *    nearest the output shape — named options 21 times and status quo ZERO. The
- *    grammar had no field for it either, so the mandate addressed a shape the
- *    model could not emit. The field now exists (grammar design note 5) and this
- *    is where it is taught.
- *  · `role` on a numeric `goal`. The projector registers a stated goal target as
- *    `goal_threshold_*` only when the number is a TARGET, and refuses when the
- *    model marks it `baseline`, because registering a current level as the
- *    success threshold inverts the objective. That refusal is only reachable if
- *    the model knows the distinction is load-bearing, so it is stated here.
- *
- * ⚠ STATUS: UNMEASURED AGAINST A LIVE DRAW at the time of pinning, said plainly
- * because this comment is what a future session finds first. The bytes were
- * written against three authorities AT THEIR BYTES — the served v195's Status Quo
- * section, `grammar.ts`'s widened schemas, and the `Node` schema's
- * `goal_threshold_*` contract — and against ZERO live results. What the model
- * actually emits under the widened schema is the post-merge deploy witness's job
- * (`scripts/records-pinned-brief-acceptance.ts`); no claim about it is made here.
- *
- * ⚠ v6 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED, exactly as v4's and v5's
- * are not. Every draft served between 2026-08-14's grammar widening and this one
- * received those bytes.
- */
-const HISTORIC_V7_INSTRUCTION_SHA256 =
-  "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8";
-const HISTORIC_V7_INSTRUCTION_BYTES = 6748;
-
-/**
- * ⭐ v8 — 2026-08-29. What a `goal` IS, replacing the four words that were all
- * the served bytes ever said about it.
- *
- * v7 and every version before it defined the goal as "an objective the user
- * stated" — four words, no discriminator, and no instruction for the case where
- * the user states no objective at all. MEASURED at the deployed staging draft
- * endpoint on 2026-08-29 across a 13-brief corpus, served prompt `draft_graph`
- * v195 (`152998b447819c2e`) plus exactly these v7 bytes:
- *
- *   · 6 of 6 briefs that STATE an outcome produced the right goal. That half
- *     works and is what the preservation clause exists to protect.
- *   · 0 of 7 briefs that DO NOT state an outcome produced a goal that is one.
- *     The model quoted, variously, an action the board wants to take, a REASON
- *     ("two of our largest customers have operations there and have asked"), a
- *     symptom, a process wish, and a 147-character sub-question.
- *
- * Why it is worth an instruction change rather than a validator: everything in
- * the graph points AT the goal, so when the goal is one of the options the
- * causal structure is built to justify that option, and the analysis then scores
- * the alternatives against a target that already assumes one of them. On
- * `D1_plant_closure` the model filed ONE span — "The board wants to close our
- * Carlisle plant." — as both the `goal` and an `option`, byte-identical
- * `source_quote` on both records.
- *
- * The three rules added are stated as a DEFINITION plus a structural test, never
- * as a phrase list: a goal is the result wanted rather than the move weighed;
- * every option including the status quo must be a candidate route TO it; and —
- * the opposite-direction half — a stated objective is quoted as the user wrote
- * it even when unquantified, modest or awkward. That last clause is what stops
- * the fix substituting our judgement for theirs, which is the worse harm.
- *
- * ⚠⚠ STATUS AT PINNING: **UNMEASURED AGAINST A LIVE DRAW, AND THE PROXY THAT WAS
- * TRIED FAILED ITS OWN POSITIVE CONTROL.** Said in full because this comment is
- * what a future session finds first, and a hedged version would read as evidence.
- *
- * What was tried: both arms composed from the same two system blocks
- * `anthropic.ts:516-517` composes, the control arm asserted BYTE-IDENTICAL to v7
- * (`37f271b2…` / 6,748) — but drawn by an independent model instance rather than
- * by `claude-sonnet-5` under the structured-outputs grammar. THE CONTROL ARM DID
- * NOT REPRODUCE DEPLOYED BEHAVIOUR: on the 7 briefs that state no outcome it
- * emitted NO goal record at all (6 of 13 overall), where deployed staging emits a
- * goal on 12 of 13. Absolute rates from that instrument are therefore worth
- * nothing, and none is claimed here.
- *
- * What the instrument CAN support, because both arms carry the same bias, is the
- * WITHIN-INSTRUMENT delta: no-goal 6 → 0; all 6 stated-outcome briefs preserved
- * (4 byte-identical quotes, 2 longer spans of the same statement, 0 substituted);
- * and on the 7 unstated-outcome briefs the goal moved from nothing to a
- * decision-relevant quantity in 6 cases. That is directional support, NOT a
- * measurement of the fix.
- *
- * The sanctioned live path is `tools/draft-quality-eval --live --candidate`,
- * which needs `ANTHROPIC_API_KEY`. The lane that wrote these bytes did not hold
- * one. The BEFORE arm above IS deployed truth and stands on its own; the AFTER
- * arm does not exist yet.
- *
- * ⚠ v7 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Every draft served
- * between the 2026-08-14 `is_baseline` widening and this one received those
- * bytes, and the 13-brief BEFORE measurement is attributable to exactly them.
- */
-const HISTORIC_V8_INSTRUCTION_SHA256 =
-  "acd9148eb107ea85d839fd1198a4eff9659b3ab81b36ef2255d5c029837a0b4d";
-const HISTORIC_V8_INSTRUCTION_BYTES = 8265;
-
-/**
- * ⭐ PRE-REGISTERED — v9, frozen 2026-08-29.
- *
- * ⚠ STATUS AT THE TIME OF PINNING: **UNMEASURED**, and this line is here because
- * the pin is what a future session finds first. No live draw was spent on these
- * bytes. They were written against a WITNESSED defect — option nodes that
- * shipped, scored and ranked with win probabilities on the deployed build across
- * 16 signed-in runs and 7 briefs, among them the user's own question ("Should we
- * hire a sales lead?", which then shipped as the BASELINE option), a stated
- * unknown, and a 60-adviser description of how things work today at win
- * probability 0.0542. Do not read this pin as evidence that the change worked;
- * read it as a record of exactly what was served from this merge onward.
- *
- * WHAT v9 CHANGED, and it is ONE bullet:
- *   · `option` gains a definition, a SPAN rule and three exclusions. The
- *     definition and the exclusions are RECLASSIFICATION — they tell the model
- *     where to put something it was already going to say — so neither applies
- *     any pressure to invent, which is the property every version of this
- *     instruction has had to keep.
- *   · The span rule is the half that reaches the LABEL. On this path an option
- *     node's label IS `source_quote` (`projector.ts`), and `source_quote` must
- *     be verbatim — so the only way a label can stop being a pasted sentence is
- *     for the quoted SPAN to be the one naming the action. "A shorter span is
- *     still verbatim" is the sentence that makes those two rules compatible, and
- *     the `goal` bullet has said the same thing ("Quote the span naming what is
- *     at stake") since v8. This closes an asymmetry inside one file.
- *
- * ⚠ THE CONNECT HALF IS BYTE-IDENTICAL to v6/v7/v8 (`44c96633…` / 3,648,
- * asserted below), so this edit is legible as shape-only without reading the
- * diff — which is the entire reason the halves are pinned apart.
- */
-const HISTORIC_V9_INSTRUCTION_SHA256 =
-  "7629e9ec738786eb4624b078a62c81a5f4e5c90adc2bb4e1b5edbd820f97def8";
-const HISTORIC_V9_INSTRUCTION_BYTES = 9183;
-
-/**
- * ⭐⭐ v10 — THE OPTION-EFFECT-VALUE CHANGE. PRE-REGISTERED, UNMEASURED at pinning.
- *
- * WHAT CHANGED, and it is the CONNECT half only: the
- * `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES` section stopped instructing
- * the model to WITHHOLD the value.
- *
- * v9 said: *"Set it only where the brief gives you the basis for it … Where the
- * brief does not support a number, leave `sets_to` out. An absent number is a
- * truthful answer; a guessed one is read as the user's own and cannot be told
- * apart from a figure they gave you."*
- *
- * ⚠ THAT SECOND CLAUSE WAS FALSE AT `f18d941b`, AND ITS FALSENESS IS THE WHOLE
- * REASON FOR v10. `projector.ts` `bindDirectStatedMagnitude` already stamps every
- * option→factor magnitude `brief_extraction` (value EQUALS a stated figure that
- * verifies against the brief bytes) or `cee_hypothesis` (ours), and only the
- * first is ever presented as the user's. A guessed number therefore CAN be told
- * apart from a figure the user gave — the instruction was a stale mirror of a
- * distinction the projector gained later (CLAUDE.md trap 12).
- *
- * WHY IT MATTERS ENOUGH TO CHANGE: a messy strategic brief rarely states a
- * per-option-per-factor figure, so the model complied and omitted `sets_to`
- * everywhere. Options then reach `cee/transforms/analysis-ready.ts:741` with no
- * interventions, every option×factor pair raises `MISSING_OPTION_VALUE`, and the
- * existing compute-discard waiver cannot fire because it requires the option to
- * carry at least one real value (`analysis-ready-core.ts:506`). Fresh-journey
- * completion was 1 of 23, with this blocker in 20 of them. The model was not
- * failing to comply — it was complying.
- *
- * ⚠ AND THE HALF THAT MAKES IT HONEST SHIPS WITH IT, not after: `projector.ts`
- * now stamps an UNCITED magnitude `cee_hypothesis` instead of writing no
- * provenance at all. Asking for more estimates while leaving them unattributable
- * would trade a refusal the user can SEE for a fabrication they cannot
- * (`option-effect-value-provenance.test.ts` pins that invariant). The shape half
- * is byte-identical to v9 — the "do not invent a number the user did not state"
- * rule on `stated_items` is untouched, because that governs the USER's half of
- * the record set and is not what was blocking anybody.
- */
-const PREREGISTERED_V10_INSTRUCTION_SHA256 =
-  "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1";
-const PREREGISTERED_V10_INSTRUCTION_BYTES = 10079;
-
-describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v10 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V10_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V10_INSTRUCTION_BYTES,
-    );
+describe("draft records instruction artefact identity", () => {
+  it("pins the unpromoted v11 candidate without repointing served v10 evidence", () => {
+    expect(draftRecordsInstructionHash()).toBe(CANDIDATE_V11.instruction.sha256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(CANDIDATE_V11.instruction.bytes);
   });
 
-  it("is DISTINCT from the historic v9 bytes, so v9's runs stay attributable", () => {
-    // v9 is the artefact every draw behind the 1-of-23 completion measurement was
-    // served. Whatever is logged against v10 must stay separable from it, or the
-    // before/after on this change becomes unattributable.
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V9_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V9_INSTRUCTION_BYTES,
-    );
+  it("preserves the full v10 instruction fixture at the historic hash and byte length", () => {
+    // Text fixtures end with LF; the exported constant historically used
+    // trimEnd(). No other whitespace or content is normalised here.
+    const historic = readFileSync(
+      new URL("./fixtures/records-instruction-v10.txt", import.meta.url),
+      "utf8",
+    ).trimEnd();
+    const pin = HISTORIC_INSTRUCTIONS.find((entry) => entry.version === 10)!;
+    expect(sha256(historic)).toBe(pin.sha256);
+    expect(Buffer.byteLength(historic, "utf8")).toBe(pin.bytes);
   });
 
-  it("is DISTINCT from the historic v8 bytes, so v8's runs stay attributable", () => {
-    // v8 was served from the goal-bullet change until this merge. Its own
-    // pre-registration note says it was unmeasured at pinning; whatever was
-    // logged against it must stay separable from what is logged against v9.
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V8_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V8_INSTRUCTION_BYTES,
-    );
+  it.each(HISTORIC_INSTRUCTIONS)("keeps v$version measurements attributable to distinct bytes", (pin) => {
+    expect(draftRecordsInstructionHash()).not.toBe(pin.sha256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(pin.bytes);
   });
 
-  it("is DISTINCT from the historic v7 bytes, so the 13-brief BEFORE arm stays attributable", () => {
-    // The BEFORE half of this change's own evidence was served exactly v7. If a
-    // later edit ever lands back on those bytes, that measurement would silently
-    // become a measurement of the CURRENT artefact, which is the one thing it is
-    // not. Asserting distinctness is also what makes an accidental revert loud.
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V7_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V7_INSTRUCTION_BYTES,
-    );
+  it("keeps every historical version once, so table-driven pins cannot silently disappear", () => {
+    expect(HISTORIC_INSTRUCTIONS.map((entry) => entry.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(new Set(HISTORIC_INSTRUCTIONS.map((entry) => entry.sha256)).size).toBe(9);
   });
 
-  it("is DISTINCT from the historic v5 bytes, so round 11's block stays attributable", () => {
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V5_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V5_INSTRUCTION_BYTES,
-    );
-  });
-
-  it("is DISTINCT from the historic v4 bytes, so round 7's block stays attributable", () => {
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V4_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V4_INSTRUCTION_BYTES,
-    );
-  });
-
-  it("is DISTINCT from the historic v3 bytes, so v3's measured blocks stay attributable", () => {
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V3_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V3_INSTRUCTION_BYTES,
-    );
-  });
-
-  it("is DISTINCT from the historic v2 bytes, so v2's measurements stay attributable", () => {
-    // The failure this guards is not a typo — it is someone "restoring" the old
-    // pin, or hand-editing v3 back toward v2, and thereby making two different
-    // instructions share one evidence base.
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V2_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V2_INSTRUCTION_BYTES,
-    );
-  });
-
-  it("is exactly the two declared sections, in order, and nothing else", () => {
-    // Derived rather than restated: if a third section is ever appended without
-    // being exported, this fails even though the hash test might have been
-    // "fixed" by someone re-pinning it.
+  it("is exactly the two independently pinned sections, in production order", () => {
     expect(DRAFT_RECORDS_INSTRUCTION).toBe(
       `${DRAFT_RECORDS_SHAPE_INSTRUCTION}\n${DRAFT_RECORDS_CONNECT_INSTRUCTION}`.trimEnd(),
     );
-    expect(DRAFT_RECORDS_INSTRUCTION.startsWith(DRAFT_RECORDS_SHAPE_INSTRUCTION)).toBe(true);
+    expect(sha256(DRAFT_RECORDS_SHAPE_INSTRUCTION)).toBe(CANDIDATE_V11.shape.sha256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(CANDIDATE_V11.shape.bytes);
+    expect(sha256(DRAFT_RECORDS_CONNECT_INSTRUCTION)).toBe(CANDIDATE_V11.connect.sha256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(CANDIDATE_V11.connect.bytes);
   });
 
-  it("is DISTINCT from the historic v6 instruction, so v6's runs stay attributable", () => {
-    // Not decoration. Every draft served between the 2026-08-14 grammar widening
-    // and the `is_baseline` widening received exactly those bytes, and a reader of
-    // those logs must be able to tell which instruction produced them. Asserting
-    // distinctness is also what makes an accidental REVERT loud: a re-pointed pin
-    // and a reverted artefact are indistinguishable from a single equality check.
-    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V6_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
-      HISTORIC_V6_INSTRUCTION_BYTES,
+  it("the prompt-only machine shape is the actual attached grammar, not a prose mirror", () => {
+    const match = /^<DRAFT_RECORDS_MACHINE_SCHEMA>\n([\s\S]+)\n<\/DRAFT_RECORDS_MACHINE_SCHEMA>$/.exec(
+      DRAFT_RECORDS_MACHINE_SCHEMA_INSTRUCTION,
     );
-  });
-
-  it("keeps the shape half independently pinned, so a reference-syntax edit is legible as one", () => {
-    // The two halves were measured separately: the shape half alone produced
-    // ZERO option-origin causal links over 44 links / 9 runs; adding the connect
-    // half moved that to 28 of 75 on the first attempt. Pinning them apart is
-    // what makes a future edit attributable to one half or the other.
-    //
-    // ⚠⚠ THE SHAPE HALF MOVED IN v4, AND IT HAD NEVER MOVED BEFORE. v2 and v3
-    // shared it byte-for-byte (`a6de4225…`, 1,443 bytes) because both described
-    // the same reference syntax. v4 changes that syntax — the namespace is now
-    // the FIELD, not a prefix character inside a string — and the sentence that
-    // teaches it lives in the shape half. Recorded explicitly because "the shape
-    // half is unchanged" was true for two versions running and is exactly the
-    // kind of inherited sentence that survives past the change that falsified it.
-    //
-    // ⚠⚠ AND IT MOVED AGAIN IN v7 — the second consecutive version to touch it,
-    // which the v4 note above could not have anticipated. Both v7 sentences
-    // (`is_baseline` on a status-quo option, `role` on a numeric goal) are
-    // SHAPE-half statements: each tells the model what to PUT IN A FIELD, not how
-    // to connect two records. The connect half is byte-identical to v6, and that
-    // asymmetry is the point of pinning the halves apart — this edit is legible
-    // as a shape-only change without reading the diff.
-    //
-    // ⚠⚠ AND AGAIN IN v8 — the THIRD consecutive version to touch it, and the
-    // largest single move it has ever made (3,100 → 4,617 bytes). The whole of
-    // v8 is shape-half: what a `goal` IS is a statement about which span goes in
-    // a field, not about how two records connect. The connect half is
-    // byte-identical to v6/v7 (`44c96633…` / 3,648, asserted below), so this
-    // edit is legible as shape-only without reading the diff — which is the
-    // entire reason the halves are pinned apart.
-    //
-    // ⚠⚠ AND AGAIN IN v9 — the FOURTH consecutive version to touch it. What an
-    // `option` IS, and which span of the brief names it, are both statements
-    // about what goes in a field, so v9 is shape-half in its entirety and the
-    // connect half is byte-identical to v6/v7/v8 (asserted in the next test).
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      "9dfb9f583edaf66df70d355a260a9a56ef9b80fe3367a5043a97d3cca048a207",
-    );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(5535);
-    // HISTORIC — v8's shape half. Asserted DISTINCT so v8's runs stay
-    // attributable to the bytes that produced them.
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
-      "03974285d14572f39df7a7758ce553de956798c48a5a88376346ec12a203fe04",
-    );
-    // HISTORIC — v7's shape half. Asserted DISTINCT: it is the artefact the
-    // 13-brief BEFORE arm was served, and it must stay separable from this one.
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
-      "8964de6b75f45814bdbf0af7f8439e27a7a6ed75022368cca927d9105c225a4d",
-    );
-    // HISTORIC — v6's shape half. Asserted DISTINCT so v6's runs stay attributable.
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
-      "575509cbc8570c1bd4fb8d31f9ce8b83f3d5508f28f37a5f11417a1f6dd30a3e",
-    );
-    // HISTORIC — v4/v5's shared shape half. Asserted DISTINCT: it stood
-    // unchanged for two versions, which is exactly the kind of "unchanged" a
-    // reader inherits past the change that ended it.
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
-      "175af059317040381c4529c0e9ec0342070b7d14425b62fd6c5b374df48a99d6",
-    );
-    // HISTORIC — v2/v3's shared shape half. Asserted DISTINCT so the two cannot
-    // be conflated in the record.
-    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
-      "a6de4225a94bf321185775a7b34d01b1eb4f7f9def5c0c6ee7b2f1fc95692a80",
-    );
-  });
-
-  it("pins the v5 CONNECT half independently, so the half that changed is legible", () => {
-    // v4 changes the connect half too: "chain the option the USER named" replaces
-    // v3's "an option_refinement IS an option needing its own chain". That v3
-    // sentence closed one direction of a defect and opened its mirror — the model
-    // complied and left the user's own options bare — so the load-bearing half of
-    // the v4 fix is DETERMINISTIC (the projector merges a lone refinement onto its
-    // stated parent) and this sentence is only its instruction-side complement.
-    //
-    // ⭐ v5 adds ONE bullet to this half and changes nothing else: the goal is a
-    // `stated_item`, so `to_stated` is how a link reaches it. That sentence is
-    // the instruction-side half of round 9's goal-targeting fix; its
-    // completion-side half names the goal's exact index in the ask.
-    //
-    // ⭐⭐ v10 MOVES THIS HALF, and it is the ONLY half it moves — the shape half
-    // is byte-identical to v9. That is exactly what pinning the halves apart is
-    // for: this edit is legible as "the option-effect-value section changed"
-    // without reading the diff. See the v10 block above for why the sentence it
-    // replaced was false at `f18d941b`.
-    expect(
-      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("b631a9538e5c1e9a5bcb1e0c884c2cb81f7920ab5c1b61f3a15ba12d106691f9");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4544);
-    // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
-    // the 1-of-23 measurement was served these bytes.
-    expect(
-      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).not.toBe("44c966336427c2672c2a0ee96bb6a507877ee7819660d77d496d9f982d1b879f");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(3648);
-    // HISTORIC — v5's connect half, asserted DISTINCT.
-    expect(
-      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).not.toBe("6f395141d575f2b1b6e04454da84dc0b755cadfc60bd77fde7894207913a5b87");
-    // HISTORIC — v4's connect half, asserted DISTINCT.
-    expect(
-      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).not.toBe("cb7fa43faf8237c974f044c098a6c97d8d9003733705f58ff2df3cf41786af74");
-    // HISTORIC — v3's connect half, asserted DISTINCT.
-    expect(
-      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).not.toBe("53a6955a40d9a8c877d8f1dc09f24343b3cfac540d74dfcc82aa507ea131d856");
-  });
-
-  /**
-   * ⭐ THE v5 SENTENCE, PINNED BY CONTENT rather than only by a hash.
-   *
-   * A hash pin fails on ANY edit, which means it cannot tell "someone removed
-   * the goal-targeting rule" from "someone fixed a typo two bullets away". This
-   * is the one sentence round 9's whole goal-link fix rests on, so it is bound to
-   * its own content — and bound to BOTH halves of the claim, because the negative
-   * half ("`to_claim` cannot reach it") is the one that names the actual defect.
-   */
-  it("keeps the goal-is-a-stated-item rule that round 9 added", () => {
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
-      "The goal is a `stated_item`, so a link that reaches it sets `to_stated`.",
-    );
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
-      "goal is never one of your `claims`, so `to_claim` cannot reach it",
-    );
-  });
-
-  /**
-   * ⭐⭐ THE v10 RULES, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
-   *
-   * A hash pin cannot tell "someone reinstated the withholding rule" from
-   * "someone fixed a typo", and here that distinction is the difference between
-   * a product that runs and one that refuses 20 journeys in 23.
-   *
-   * TWO OPPOSITE HARMS, asserted separately, because a fix for either alone
-   * reopens the other (CLAUDE.md trap 22b — the opposite-direction twin):
-   *
-   *   (a) THE VALUE IS WITHHELD. The model omits `sets_to`, options carry no
-   *       interventions, every pair raises `MISSING_OPTION_VALUE` and nothing
-   *       can be analysed. This is what v9 instructed, and it is the defect.
-   *   (b) THE VALUE IS INVENTED AND PASSED OFF AS THE USER'S. Strictly worse —
-   *       it is the class-1 defect on the field the analysis ranks options on.
-   *       The instruction guards this by still routing stated figures through
-   *       `basis`; the PROJECTOR guards it by stamping provenance, which is why
-   *       `option-effect-value-provenance.test.ts` is the other half of the pair.
-   *
-   * ⚠ The negative assertion is the load-bearing one: it names the exact
-   * withdrawn sentence, so an accidental revert to v9's policy is LOUD rather
-   * than silently re-blocking the product under a green suite.
-   */
-  it("asks for the option effect value on every link, instead of instructing its omission", () => {
-    // (a) the ask itself
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
-      "Set it on every option→factor link you emit.",
-    );
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
-      "give your best estimate, reasoned from what",
-    );
-    // (b) the stated figure still routes through `basis` — the estimate is not
-    // bought by loosening the user's own half.
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
-      "set `basis` to the stated_items it came from",
-    );
-    // The shape half's invention prohibition on the USER's values is untouched.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "Do not invent a number the\nuser did not state",
-    );
-  });
-
-  it("no longer carries v9's withholding rule, in either of its two sentences", () => {
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).not.toContain(
-      "Where the brief does not support a number,\nleave `sets_to` out.",
-    );
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).not.toContain(
-      "a guessed one is\nread as the user's own and cannot be told apart from a figure they gave you",
-    );
-    // POSITIVE CONTROL for both negatives: the probe can still find a string
-    // that IS present in this half, so a `not.toContain` above is a
-    // discrimination rather than a dead assertion (CLAUDE.md trap 13).
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("## HOW MUCH EACH OPTION MOVES");
-  });
-
-  /**
-   * ⭐⭐ THE v8 RULES, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
-   *
-   * A hash pin cannot tell "someone deleted the preservation clause" from
-   * "someone fixed a typo", and here that distinction is the whole safety
-   * argument. This guards TWO OPPOSITE HARMS, and they are asserted separately
-   * on purpose, because a fix for either one alone reopens the other:
-   *
-   *   (a) THE GOAL IS AN OPTION. The frame is pre-committed and every causal
-   *       chain is built to justify a move the user has not finished making.
-   *   (b) A STATED OBJECTIVE IS DISCARDED and a better-formed one substituted.
-   *       That is the WORSE harm — it silently replaces the user's judgement
-   *       with ours — and 6 of 6 briefs that state an outcome already get it
-   *       right today, so it is a live regression risk, not a hypothetical.
-   *
-   * Deleting either group must go red BY NAME, not as an unexplained hash drift.
-   */
-  it("keeps the v8 rule that a goal is the result wanted, not the move weighed", () => {
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "the result the user wants, not the move they are weighing to get",
-    );
-    // The structural test, which is what makes this a rule about the GRAPH
-    // rather than a rule about wording. Without it the definition is a slogan.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "has to be a candidate route TO the goal",
-    );
-    // Derived from a live observation, not invented: on the 2026-08-29 corpus
-    // the model filed ONE span as both records, byte-identical `source_quote`.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "Never file one span as both a `goal` and an `option`",
-    );
-    // The constructive half. Without it the model is told what a goal is NOT and
-    // given nothing to do on the 7-of-13 briefs that never state one — and the
-    // measured failure mode is precisely falling back to the sentence that
-    // frames the choice.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "that sentence is the decision, not its purpose",
-    );
-  });
-
-  it("keeps the v8 clause that protects a stated objective from being improved", () => {
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "When the user HAS said what they are trying to achieve, that is the goal.",
-    );
-    // The three adjectives are the load-bearing part: they are the cases where
-    // substituting a sharper objective is most tempting and most wrong.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "even if it is unquantified, modest or awkwardly worded",
-    );
-  });
-
-  /**
-   * ⭐⭐ THE v9 RULES, PINNED BY CONTENT — AND THE TWO HALVES PINNED APART,
-   * because they answer different questions and only one of them reaches a label.
-   *
-   * A hash pin cannot tell "someone deleted the span rule" from "someone fixed a
-   * typo two bullets away", and here the span rule is the ONLY sentence in the
-   * whole instruction that can shorten an option label: on this path the label
-   * IS `source_quote`, and `source_quote` must be verbatim, so "a shorter span
-   * is still verbatim" is what makes a short label reachable at all. Delete it
-   * and the classification half still reads correctly while every option node
-   * silently goes back to carrying a pasted sentence.
-   */
-  it("keeps the v9 span rule, which is the only sentence that can shorten an option label", () => {
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "Quote the span that NAMES the action, not the sentence it sits in.",
-    );
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain("A shorter\n  span is still verbatim");
-  });
-
-  it("keeps the v9 exclusions, which are what stop a non-option being scored", () => {
-    // The decision question shipped as an option — and then as the BASELINE
-    // option — in the witnessed corpus. This is the sentence that addresses it.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "The question the user is deciding is not an option.",
-    );
-    // The other three witnessed classes: a stated unknown, a piece of history,
-    // and a description of how things work today.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "something they say they do not know,\n  something that already happened, nor a description of how things work today",
-    );
-    // ⚠ AND THE REASON, which is what makes it a contract rather than a rule the
-    // model discards under load — the same discipline v6 states for its own
-    // reclassification lines.
-    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "to be scored and ranked against the others",
-    );
-  });
-});
-
-describe("the instruction says nothing it must not say", () => {
-  /**
-   * The model has NO provenance channel — `grammar.ts` carries no provenance
-   * property, and that absence is the mechanism that makes false authorship
-   * structurally impossible rather than merely discouraged. An instruction that
-   * discussed provenance would invite the model to try to express one, and the
-   * first thing a model does when it cannot express something is approximate it.
-   *
-   * Bound to the CONCEPT's vocabulary, not to one phrasing.
-   */
-  it("never mentions provenance, attribution or authorship", () => {
-    const lowered = DRAFT_RECORDS_INSTRUCTION.toLowerCase();
-    for (const forbidden of ["provenance", "attribut", "authorship", "badge", "from_brief", "ai_inferred"]) {
-      expect(lowered).not.toContain(forbidden);
-    }
-  });
-
-  /**
-   * `category` is INFERRED FROM STRUCTURE by the validator
-   * (`graph-validator.ts:83-134`): a factor is `controllable` because an option
-   * edge points at it. Asking the model to DECLARE it invites `CATEGORY_MISMATCH`
-   * — the instruction would be manufacturing the very rejection it exists to
-   * avoid.
-   */
-  it("never asks the model to declare a category", () => {
-    expect(DRAFT_RECORDS_INSTRUCTION.toLowerCase()).not.toContain("category");
-    expect(DRAFT_RECORDS_INSTRUCTION).not.toContain("controllable");
-  });
-
-  /**
-   * A number the model was not asked for is invented precision, and the repair
-   * machinery defaults edge strength anyway — so asking for it buys nothing and
-   * costs honesty.
-   */
-  it("never asks the model for an edge strength", () => {
-    expect(DRAFT_RECORDS_INSTRUCTION).not.toContain("strength");
-  });
-
-  /**
-   * The one prohibition that must survive every future edit: the model must not
-   * invent a number the user did not state. This is the sentence the fabrication
-   * gate rests on, so it is pinned by content rather than left to a hash that a
-   * legitimate edit elsewhere would move.
-   */
-  it("keeps the do-not-invent-a-number prohibition", () => {
-    expect(DRAFT_RECORDS_INSTRUCTION).toContain(
-      "Do not invent a number the\nuser did not state, and do not round or rescale one they did.",
-    );
-  });
-
-  /**
-   * ⭐ AND THE ANTI-PRESSURE CLAUSE, which is the reason zero claims is a
-   * legitimate answer. Without it, "emit claims" reads as "emit claims", and a
-   * model that cannot find a basis will manufacture one.
-   */
-  it("keeps empty basis as an explicitly legitimate answer", () => {
-    expect(DRAFT_RECORDS_INSTRUCTION).toContain("leave `basis` empty — that\nis a legitimate and expected answer");
-    expect(DRAFT_RECORDS_INSTRUCTION).toContain("An empty `claims` list is a valid response.");
-  });
-
-  /**
-   * The connect half is the half that could most easily be turned into pressure
-   * to invent. It must keep BOTH of its balancing sentences: the one that removes
-   * a claim, and the one that forbids dropping anything the user stated.
-   */
-  it("keeps both balancing sentences in the connect half", () => {
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("Do not emit a factor you cannot connect.");
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("But never drop something the user\nstated");
+    expect(match, "the complete machine-schema block must be readable").not.toBeNull();
+    expect(JSON.parse(match![1]!)).toEqual(buildDraftRecordsSchema());
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION.split(DRAFT_RECORDS_MACHINE_SCHEMA_INSTRUCTION)).toHaveLength(2);
   });
 });

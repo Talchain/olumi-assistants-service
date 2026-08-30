@@ -322,8 +322,9 @@ function declaredScaleOf(
   rawValue: number | undefined,
 ): "unit_interval" | "ratio" | undefined {
   if (!Number.isFinite(value)) return undefined;
-  // A percentage-style metric carrying a value above 1 is the ratio case the
-  // draft prompt mandates ("can this metric meaningfully exceed 100%?").
+  // A percentage-style metric may arrive on a ratio scale above 1. This is
+  // an input compatibility rule, not the current records prompt's encoding:
+  // records carry raw magnitudes and the projector chooses their shared frame.
   //
   // ⚠⚠ BUT `value > 1` ALONE CANNOT TELL `1.15` ON RATIO SCALE FROM `115` ON
   // RAW SCALE — both are `> 1`, and stamping `ratio` on the raw one licenses a
@@ -348,12 +349,12 @@ function declaredScaleOf(
   // symmetrically, not a new signal.
   //
   // ── AND IT COSTS THE COMPLIANT CASE NOTHING ──────────────────────────────
-  // The draft prompt MANDATES the ratio encoding verbatim — "Ratio that can
-  // exceed 100% | raw ratio | percentage points | NRR 110% -> 1.10, raw 110"
-  // (`Prompts/canonical/draft_graph.txt:320`, `src/prompts/defaults-v187.ts:300`).
-  // On that encoding `value` (1.10) and `raw_value` (110) DIFFER BY
-  // CONSTRUCTION, so this can never fire on a compliant factor. It fires only
-  // on a violation — exactly the input that was rendering a lie.
+  // For ratio-encoded input `value` (1.10) and `raw_value` (110) differ, so
+  // the guard does not fire. For raw input (110 / 110), it must not stamp a
+  // ratio declaration. Both are supported input encodings, not a claim that
+  // the current model emits one particular graph shape. The records projector
+  // derives its frame deterministically; see the records-to-display cases in
+  // `range-display-declared-scale.test.ts` for that separate live path.
   //
   // Falling through (rather than returning a different member) is deliberate:
   // `value > 1` fails `inUnitInterval` below and yields `undefined` =
