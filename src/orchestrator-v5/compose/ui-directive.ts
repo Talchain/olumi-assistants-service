@@ -254,7 +254,46 @@ type UiDirectiveSuppressReason =
    * suppression keeps the answer's PROSE (which already names the blocker) and
    * declines only the gesture.
    */
-  | 'remedy_surface_unmapped';
+  | 'remedy_surface_unmapped'
+  /**
+   * The ambiguity highlight: the candidates carry no graph-entity id at all
+   * (neither carrier populated), so there is nothing to point at.
+   */
+  | 'ambiguity_no_candidate_entities'
+  /**
+   * The ambiguity highlight, and THE ONE WORTH WATCHING: the candidates DO name
+   * entities, but none of them resolves in the turn's persisted graph. That is
+   * the difference between "this turn had nothing to point at" and "this turn
+   * tried to point at entities the user's graph does not contain", and the
+   * second is a drift signal — a proposal outliving the nodes it targets, or a
+   * persisted read that came back degraded. Both suppress identically and would
+   * be indistinguishable without separate tags.
+   */
+  | 'ambiguity_targets_unresolved'
+  /**
+   * The ambiguity highlight: more resolvable candidates than the cap, so the
+   * gesture would flood the canvas rather than point at anything.
+   */
+  | 'ambiguity_too_many_targets'
+  /**
+   * The ambiguity highlight: the assembled block failed the strict boundary
+   * parse. Should be unreachable (every field is builder-controlled and the
+   * targets come from a kind-gated lookup), which is exactly why it is tagged
+   * rather than dropped silently — an unreachable arm that starts firing is a
+   * contract change nobody announced.
+   */
+  | 'ambiguity_schema_parse_failed';
+
+/**
+ * The `fact_type` tag for the ambiguity rows.
+ *
+ * ⚠ IT IS NOT A FACT TYPE, AND THAT IS THE POINT. Every other row in this file
+ * rides a `HandlerFact` and stamps its `fact_type`; this row exists precisely
+ * BECAUSE the ambiguity turn has no fact. The field is a plain `string` on the
+ * telemetry helper, so the honest tag is one that says which turn class emitted
+ * the gesture rather than borrowing a fact name this turn never produced.
+ */
+const AMBIGUITY_FACT_TYPE = 'ambiguity_clarification';
 
 function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
   emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
@@ -1154,8 +1193,26 @@ export const AMBIGUITY_HIGHLIGHT_MAX_TARGETS = 6;
  * the id in both places contributes it once.
  */
 interface AmbiguityCandidateSource {
-  readonly preconditions?: { readonly target_entity_ids?: unknown } | undefined;
-  readonly action?: { readonly inline_patch?: unknown } | undefined;
+  /**
+   * ⚠ BOTH FIELDS ARE `unknown` ON PURPOSE — this is not laziness, and the
+   * typecheck gate proved it. `PendingAction.action` is a DISCRIMINATED UNION
+   * and only some variants carry `inline_patch` at all (a `set_factor_value`
+   * pending has no property in common with an `{ inline_patch }` shape, so
+   * TypeScript's weak-type check rejects the narrower structural type
+   * outright). Declaring the shape we WISH the carriers had would either not
+   * compile or force a cast that silently asserts a property the variant does
+   * not have. `unknown` + the total readers below state the honest contract:
+   * this builder accepts any pending and extracts ids where they exist.
+   */
+  readonly preconditions?: unknown;
+  readonly action?: unknown;
+}
+
+/** Narrow an unknown to a readable record, or null. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 /** Read a `target_entity_ids`-shaped field defensively (unknown → []). */
@@ -1177,12 +1234,13 @@ export function collectAmbiguityCandidateEntityIds(
 ): readonly string[] {
   const ids: string[] = [];
   for (const cand of candidates) {
-    const fromPreconditions = readEntityIds(cand.preconditions?.target_entity_ids);
-    const inlinePatch = cand.action?.inline_patch;
+    const preconditions = asRecord(cand.preconditions);
+    const fromPreconditions =
+      preconditions === null ? [] : readEntityIds(preconditions.target_entity_ids);
+    const action = asRecord(cand.action);
+    const inlinePatch = action === null ? null : asRecord(action.inline_patch);
     const fromInlinePatch =
-      inlinePatch !== null && typeof inlinePatch === 'object'
-        ? readEntityIds((inlinePatch as { target_entity_ids?: unknown }).target_entity_ids)
-        : [];
+      inlinePatch === null ? [] : readEntityIds(inlinePatch.target_entity_ids);
     for (const id of [...fromPreconditions, ...fromInlinePatch]) {
       if (!ids.includes(id)) ids.push(id);
     }
@@ -1218,7 +1276,9 @@ export function buildAmbiguityCandidateUiDirective(
   candidateEntityIds: readonly string[],
   lookup: GraphNodeLookup,
 ): UiDirectiveBlock | null {
-  if (candidateEntityIds.length === 0) return null;
+  if (candidateEntityIds.length === 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_no_candidate_entities');
+  }
 
   const targets: { id: string; label: string; kind: GraphNodeRef['kind'] }[] = [];
   const seen = new Set<string>();
@@ -1231,8 +1291,12 @@ export function buildAmbiguityCandidateUiDirective(
     targets.push({ id: ref.id, label: ref.label, kind: ref.kind });
   }
 
-  if (targets.length === 0) return null;
-  if (targets.length > AMBIGUITY_HIGHLIGHT_MAX_TARGETS) return null;
+  if (targets.length === 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_targets_unresolved');
+  }
+  if (targets.length > AMBIGUITY_HIGHLIGHT_MAX_TARGETS) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_too_many_targets');
+  }
 
   const candidate: UiDirectiveBlock = {
     type: 'ui_directive',
@@ -1241,5 +1305,8 @@ export function buildAmbiguityCandidateUiDirective(
   };
 
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_schema_parse_failed');
+  }
+  return emitDirective(AMBIGUITY_FACT_TYPE, parsed.data);
 }

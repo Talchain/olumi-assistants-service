@@ -15,7 +15,7 @@
  * merely asserting it.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 import {
   buildAmbiguityCandidateUiDirective,
@@ -273,6 +273,59 @@ describe('the mount path — the block actually reaches the response', () => {
     const emitted = response.blocks[0] as typeof directive;
     expect(emitted.type).toBe('ui_directive');
     expect(emitted.targets.map((t) => t.id)).toEqual(['factor_price']);
+  });
+});
+
+/**
+ * SUPPRESSION IS OBSERVABLE — the module's own discipline is that every drop is
+ * reason-tagged so it is never a silent no-op (the broken-alarm class).
+ *
+ * The two failure modes MUST stay distinguishable: "this turn had nothing to
+ * point at" is normal, whereas "the candidates named entities the user's graph
+ * does not contain" is a DRIFT signal (a proposal outliving its nodes, or a
+ * degraded persisted read). They suppress identically, so without separate tags
+ * the second is invisible — which is precisely how a silently-degrading gesture
+ * would go unnoticed.
+ */
+describe('suppression is reason-tagged, and the two reasons are distinguishable', () => {
+  const reasonsFor = async (
+    ids: readonly string[],
+    lk: ReturnType<typeof buildGraphNodeLookupFromGraph>,
+  ): Promise<string[]> => {
+    const telemetry = await import('../../../utils/telemetry.js');
+    const seen: string[] = [];
+    const spy = vi
+      .spyOn(telemetry, 'emit')
+      .mockImplementation((event: unknown, payload: unknown) => {
+        if (event === telemetry.TelemetryEvents.V5UiDirectiveSuppressed) {
+          seen.push(String((payload as { reason?: unknown }).reason));
+        }
+      });
+    buildAmbiguityCandidateUiDirective(ids, lk);
+    spy.mockRestore();
+    return seen;
+  };
+
+  it('tags an EMPTY candidate set distinctly from unresolved targets', async () => {
+    expect(await reasonsFor([], lookup())).toEqual(['ambiguity_no_candidate_entities']);
+  });
+
+  it('tags ids that do not resolve in the graph as a DRIFT signal, not as "nothing to point at"', async () => {
+    expect(await reasonsFor(['ghost_a'], lookup())).toEqual(['ambiguity_targets_unresolved']);
+  });
+
+  it('tags the over-cap suppression distinctly', async () => {
+    const nodes = Array.from({ length: AMBIGUITY_HIGHLIGHT_MAX_TARGETS + 1 }, (_, i) => ({
+      id: `factor_${i}`,
+      kind: 'factor',
+      label: `Factor ${i}`,
+    }));
+    expect(
+      await reasonsFor(
+        nodes.map((n) => n.id),
+        buildGraphNodeLookupFromGraph({ nodes, edges: [] }),
+      ),
+    ).toEqual(['ambiguity_too_many_targets']);
   });
 });
 
