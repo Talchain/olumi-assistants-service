@@ -1740,9 +1740,23 @@ export interface RemapResult {
    * ("no_goal_node"), and ROADMAP 2.349 established that a deadline is not a
    * hard constraint and must NOT generate a limit question — surfacing those
    * here would re-open exactly the defect 2.349 closed. So step 0 increments
-   * the count and contributes nothing to this array. `unbindable.length <=
-   * rejected_no_match` is the invariant, and it is asserted by spec rather
-   * than intended.
+   * the count and contributes nothing to this array.
+   *
+   * `unbindable.length <= rejected_no_match` is the invariant. It is asserted
+   * by `unified-pipeline/stages/repair/__tests__/constraint-target-unmatched-ask.test.ts`
+   * ("unbindable is a strict subset of rejected_no_match") — a positive control
+   * proving a step-6 drop really lands in the array, the strict case proving a
+   * temporal drop is counted but never carried, and the end-to-end consequence
+   * that a deadline brief produces no ask.
+   *
+   * ⚠ THAT SENTENCE WAS A FABRICATION WHEN FIRST WRITTEN, and is corrected here
+   * rather than quietly deleted. It claimed the invariant was "asserted by spec"
+   * while NO spec anywhere read `.unbindable` — measured at review with a
+   * positive control (`rejected_no_match` → 28 hits) and a fabricated contrast
+   * (0). The behaviour was already correct; the claim about our own
+   * verification was not, and a sentence asserting a guard that does not exist
+   * is how a later session inherits false confidence (CLAUDE.md trap 14). The
+   * spec was written to make the claim true.
    */
   unbindable: ExtractedGoalConstraint[];
 }

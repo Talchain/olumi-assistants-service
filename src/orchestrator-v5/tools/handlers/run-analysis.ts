@@ -1498,19 +1498,36 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leadingOptionId ?? null,
       unmeasuredTargetIds,
     );
-    const unmeasuredTargets = constraintVerdict.unmeasuredTargetConstraints ?? [];
-    if (unmeasuredTargets.length > 0) {
-      // FAIL LOUD. A limit we could never have checked is a real modelling gap
-      // and it costs the user an enforced constraint every time it happens —
-      // it is simply no longer allowed to cost them the recommendation too.
-      // Redacted: ids and counts only — no labels, no thresholds, no units.
-      emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
-        request_id: invocation.requestId,
-        scenario_id: args.scenario_id,
-        constraint_ids: unmeasuredTargets.map((c) => c.constraint_id),
-        codes: ['CEE_CONSTRAINT_TARGET_CARRIES_NO_VALUE'],
-      });
-    }
+    // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
+    // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
+    // reason, as the intake axis makes ~50 lines below.
+    //
+    // The first version of this change DID emit, reusing
+    // `V5RunAnalysisConstraintUnevaluated` with a CEE-minted discriminating
+    // code. Review measured three divergences and it was withdrawn:
+    //   - that event's declared semantics include "the leading-option claim is
+    //     withheld" (`utils/telemetry.ts`), and this partition fires precisely
+    //     when it is NOT;
+    //   - its `codes` field is documented as PRODUCER codes, and a CEE-minted
+    //     one filed there is a drafter defect recorded inside a producer
+    //     statistic — the first dashboard to read it would be wrong about both;
+    //   - a single turn could emit the event twice, from two different
+    //     questions.
+    // That is trap 21 in the shape this module already names: two questions
+    // under one name. A registered `V5RunAnalysisConstraintTargetUnmeasured`
+    // is its own change — the telemetry-validation workflow owns that registry
+    // and its own instructions require the dashboard queries, the alert
+    // configurations and `observability/README.md` to move with it.
+    //
+    // STATED EXACTLY, BECAUSE A WRONG OBSERVABILITY CLAIM IS WORSE THAN NONE.
+    // What is now unmeasured: the RATE at which a ratified constraint binds to
+    // a node carrying no quantity. Nothing else regresses — the two existing
+    // constraint emits are untouched and still fire on their own states, and
+    // this partition never enters those states, so no dashboard loses a
+    // datapoint it has today. The signals that remain are the user-facing
+    // disclosure (the `unmeasured_target` voice) and the draft-time
+    // `cee.compound_goal.target_unmatched_asked` log, which covers the
+    // never-bound half of the same defect but not this one.
     if (constraintVerdict.state === 'unevaluated') {
       emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
         request_id: invocation.requestId,

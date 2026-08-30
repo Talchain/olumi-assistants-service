@@ -50,6 +50,10 @@ import { dirname, resolve } from 'node:path';
 
 import { runCompoundGoals } from '../compound-goals.js';
 import { renderDirectionClarifications } from '../../../../compound-goal/direction-gate.js';
+import {
+  extractCompoundGoals,
+  remapConstraintTargets,
+} from '../../../../compound-goal/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -220,5 +224,111 @@ describe('a stated limit that binds to nothing is asked about, not dropped', () 
   it.each(BIND_RUNS)('run %s still ships the constraint it managed to bind', (id) => {
     const { wire } = run(NODE_SETS[id]!);
     expect(wire.filter((c) => c.value === 240000 && c.operator === '<=')).toHaveLength(1);
+  });
+});
+
+/**
+ * `RemapResult.unbindable` IS A STRICT SUBSET OF `rejected_no_match`.
+ *
+ * ⚠⚠ THIS BLOCK EXISTS BECAUSE THE CLAIM WAS MADE BEFORE IT WAS TRUE. The
+ * field's own docstring said the relation "is asserted by spec rather than
+ * intended" while NO SPEC ANYWHERE READ `.unbindable` — measured at review with
+ * a positive control (`rejected_no_match` → 28 hits) and a fabricated contrast
+ * (0 hits). The behaviour was correct; the sentence describing it was a
+ * fabrication, and a sentence in the tree asserting a guard that does not exist
+ * is exactly how a later session inherits false confidence (CLAUDE.md trap 14).
+ * Written now so the docstring is a fact.
+ *
+ * ⭐ WHY THE GAP IS LOAD-BEARING AND NOT AN ACCOUNTING QUIRK. `noMatchCount` is
+ * incremented at TWO sites: step 0 (a temporal constraint with no goal node to
+ * bind to) and step 6 (a genuine no-match). Only step 6 fills `unbindable`.
+ * ROADMAP 2.349 established that a deadline is NOT a hard constraint and must
+ * not generate a limit question — so if the two ever became equal, every brief
+ * containing a time phrase would start asking the user which part of their
+ * model "18 months" applies to, which is precisely the defect 2.349 closed.
+ * The strict-subset case below is therefore the one that matters, and it is
+ * asserted with a positive control beside it so an always-empty array could not
+ * satisfy it vacuously.
+ *
+ * Inputs derived by executing the real extractor at this tip, not invented.
+ */
+describe('unbindable is a strict subset of rejected_no_match', () => {
+  const GOAL_AND_FACTOR = [
+    { id: 'goal_1', kind: 'goal', label: 'Ship it' },
+    { id: 'fac_x', kind: 'factor', label: 'Something Else' },
+  ];
+  const FACTOR_ONLY = [{ id: 'fac_x', kind: 'factor', label: 'Something Else' }];
+
+  function remap(brief: string, nodes: ReadonlyArray<{ id: string; kind?: string; label?: string }>) {
+    const ex = extractCompoundGoals(brief, { includeProxies: false });
+    const ids = nodes.map((n) => n.id);
+    const labels = new Map(nodes.filter((n) => n.label).map((n) => [n.id, n.label!]));
+    const goalNodeId = nodes.find((n) => n.kind === 'goal')?.id;
+    return { ex, r: remapConstraintTargets(ex.constraints, ids, labels, 'test-subset', goalNodeId) };
+  }
+
+  /** A time phrase with no goal node: step 0 drops it and counts it. */
+  const DEADLINE_BRIEF = 'Deliver the platform rebuild within 18 months.';
+  /** A stated ceiling that matches no label: step 6 drops it and KEEPS it. */
+  const CEILING_BRIEF = 'Our support budget for the year is £240,000.';
+
+  it('POSITIVE CONTROL — a step-6 drop really does land in the array', () => {
+    // Without this, every assertion below is satisfiable by an array that is
+    // always empty (trap 13: an absence probe needs to prove it can see a
+    // presence).
+    const { r } = remap(CEILING_BRIEF, GOAL_AND_FACTOR);
+    expect(r.rejected_no_match).toBe(1);
+    expect(r.unbindable.map((c) => c.targetName)).toEqual(['budget']);
+  });
+
+  it('⭐ THE STRICT CASE — a temporal drop is COUNTED but never carried', () => {
+    const { ex, r } = remap(DEADLINE_BRIEF, FACTOR_ONLY);
+    // Precondition pinned IN-TEST: this brief really does produce a
+    // deadline-bearing row, and there really is no goal node to bind it to.
+    expect(ex.constraints.filter((c) => c.deadlineMetadata !== undefined)).toHaveLength(1);
+    expect(FACTOR_ONLY.some((n) => n.kind === 'goal')).toBe(false);
+
+    expect(r.rejected_no_match, 'step 0 must count the temporal drop').toBe(1);
+    expect(r.unbindable, 'and must contribute NOTHING to the ask channel').toEqual([]);
+    expect(r.unbindable.length).toBeLessThan(r.rejected_no_match);
+  });
+
+  it('a mixed brief keeps the relation, with the gap exactly the temporal row', () => {
+    const brief = 'We must ship the migration within 18 months and keep churn under 5%.';
+    const { r } = remap(brief, FACTOR_ONLY);
+    expect(r.rejected_no_match).toBe(4);
+    expect(r.unbindable).toHaveLength(3);
+    expect(
+      r.unbindable.every((c) => c.deadlineMetadata === undefined),
+      'no deadline-bearing row may reach the ask channel',
+    ).toBe(true);
+  });
+
+  it.each([
+    ['deadline, goal present', DEADLINE_BRIEF, GOAL_AND_FACTOR],
+    ['deadline, no goal', DEADLINE_BRIEF, FACTOR_ONLY],
+    ['ceiling, goal present', CEILING_BRIEF, GOAL_AND_FACTOR],
+    ['ceiling, no goal', CEILING_BRIEF, FACTOR_ONLY],
+    ['mixed, no goal', 'We must ship the migration within 18 months and keep churn under 5%.', FACTOR_ONLY],
+    ['nothing extractable', 'We are deciding between two suppliers.', GOAL_AND_FACTOR],
+  ])('THE INVARIANT holds: %s', (_name, brief, nodes) => {
+    const { r } = remap(brief, nodes);
+    expect(r.unbindable.length).toBeLessThanOrEqual(r.rejected_no_match);
+  });
+
+  it('END TO END — a deadline brief produces NO ask, so ROADMAP 2.349 is intact', () => {
+    // The consequence the invariant exists to protect, asserted at the stage
+    // rather than at the helper: a time phrase must never reach the user as
+    // "which part of your model does 18 months apply to?".
+    const ctx: any = {
+      requestId: 'test-2349-intact',
+      effectiveBrief: DEADLINE_BRIEF,
+      graph: { nodes: FACTOR_ONLY.map((n) => ({ ...n })), edges: [] },
+      goalConstraints: undefined,
+      directionUnresolved: undefined,
+    };
+    runCompoundGoals(ctx);
+    const asks = (ctx.directionUnresolved ?? []) as Array<{ reason: string }>;
+    expect(asks.filter((a) => a.reason === 'target_unmatched')).toEqual([]);
   });
 });
