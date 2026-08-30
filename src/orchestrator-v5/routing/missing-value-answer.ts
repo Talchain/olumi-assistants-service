@@ -245,10 +245,13 @@ const BARE_NUMBER_PATTERN = new RegExp(`^${NUMBER}\\s*[.!]*$`);
  *
  * WHY IT IS ON THE READING AND NOT AT THE CALL SITES. Every consumer that WRITES
  * feeds the figure back through `buildConfigureOptionAdvisedFormat`, whose
- * sentence is re-read by `readOptionEffectValue` — which declines a percent sign
- * AND a thousands separator. So a percent reading that reached a writer as "8%"
- * would silently fail to land, and each call site fixing that itself is the
- * second spelling that rots (trap 12). One reading, one canonical text.
+ * sentence is re-read by `readOptionEffectValue` — which declines a thousands
+ * separator, and CONVERTS a percent to the 0–1 scale rather than declining it.
+ * ⚠ The decline-on-`%` this note originally rested on is gone; the canonical
+ * spelling is still the right answer, for the stronger reason that the
+ * ACKNOWLEDGEMENT must name the figure that landed (0.08), not the token the
+ * user typed. Each call site converting for itself is the second spelling that
+ * rots (trap 12). One reading, one canonical text.
  *
  * ⚠ THE EXPONENT GUARD IS NOT DECORATION. The consumer takes TEXT, so a value
  * whose shortest round-trip spelling is exponential ("0.00001%" → `1e-7`) must

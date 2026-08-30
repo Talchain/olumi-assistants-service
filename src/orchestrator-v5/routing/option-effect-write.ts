@@ -57,12 +57,18 @@
  *      the honest move is not to claim it. `chip_prefix` is likewise excluded
  *      — the bare configure chip carries no value and `L16`'s intercept owns
  *      it.
- *   2. The message carries EXACTLY ONE plain-number value assignment on the
- *      0–1 scale (`readOptionEffectValue`). A currency symbol, a `%`, an
- *      attached unit, a thousands separator or a second assignment all
- *      DECLINE — this writer performs no unit conversion and no cap
- *      normalisation, so it may only write a value that is already in the
- *      model's own units. The prompt block that generates the advised format
+ *   2. The message carries EXACTLY ONE value assignment the writer can place
+ *      on the 0–1 scale, AND that assignment is ATTRIBUTABLE TO THE CHANGE
+ *      (`readOptionEffectValueReading`).
+ *      ⚠ A `%` is CONVERTED (`30%` → 0.3), not declined — the one unit with a
+ *      defined conversion to this scale. A currency symbol, an attached unit
+ *      and a thousands separator still DECLINE: there is no conversion from
+ *      pounds to a 0–1 effect and inventing one would be a fabricated number.
+ *      ⛔ AND A VALUE THE USER STATED ABOUT SOMETHING THEY ASKED US TO KEEP IS
+ *      NOT THIS WRITE'S VALUE. "keep <B> to 0.9. revise <A>'s effect on <F>"
+ *      carries a number and names no value for A, so attribution is
+ *      UNDETERMINED and the resolver ASKS. It does not pick one.
+ *      The prompt block that generates the advised format
  *      states the scale (`src/prompts/edit-graph-v6.ts`: "effect values are
  *      on the 0-1 scale") — P7: derived from the PRODUCER's instruction, not
  *      from a corpus.
@@ -211,6 +217,10 @@ import {
 } from './option-intervention-guard.js';
 import { readMissingValueAnswer } from './missing-value-answer.js';
 import {
+  extractProtectedEntities,
+  PRESERVATION_CUE,
+} from '../graph-management/protection-scope.js';
+import {
   deriveAskedEffectPair,
   deriveMissingEffectPairs,
   type MissingEffectPair,
@@ -264,18 +274,23 @@ export const OPTION_EFFECT_WRITE_EXCLUDED_TRIGGERS: ReadonlyArray<{
 export const OPTION_EFFECT_WRITE_KNOWN_DROPPED: readonly string[] = Object.freeze([
   // `baseline` suppressor — the sentence names two different entities.
   'For the {option} option, change the {factor} baseline to 0.3',
-  // No unit conversion: this writer only ever writes a model-unit value.
+  // No CURRENCY conversion: there is no defined mapping from pounds to a 0-1
+  // effect, and inventing one would be a fabricated number.
   "Set the {option} option's effect on {factor} to £25,000",
-  "Set the {option} option's effect on {factor} to 12%",
   // ⚠ ADDED AFTER A SURVIVING MUTANT (trap 22 — a corpus that omits a value
-  // class cannot certify the code over it). Deleting the currency/percent
-  // guard left the battery GREEN, because every currency and percent member
-  // above was ALSO caught by the thousands-separator or the 0-1 scale check.
-  // These two are the class where the guard is the ONLY thing standing: `£1`
-  // is one pound and `1%` is 0.01, and both would otherwise bind as a
-  // model-unit 1 — the maximum effect value, silently.
+  // class cannot certify the code over it). Deleting the currency guard left
+  // the battery GREEN, because every currency member above was ALSO caught by
+  // the thousands-separator or the 0-1 scale check. This is the class where
+  // the guard is the ONLY thing standing: `£1` is one pound, and would
+  // otherwise bind as a model-unit 1 — the maximum effect value, silently.
   "Set the {option} option's effect on {factor} to £1",
-  "Set the {option} option's effect on {factor} to 1%",
+  // ⭐ PERCENT LEFT THIS SET on 2026-08-30. `to 12%` and `to 1%` were pinned
+  // here as unclaimed; they are now CONVERTED to 0.12 and 0.01 and claimed,
+  // because refusing them was the founder-path defect: on deployed `a18e194`,
+  // "revise <option>'s effect on <factor> to 30%" died as
+  // `no_single_unit_scale_value` while the identical sentence ending `to 0.3`
+  // wrote cleanly. Their replacements assert the CONVERTED VALUE exactly, so a
+  // wrong divisor cannot pass where a mere "is it claimed?" check would.
   // Out of the 0-1 model scale — the LLM path can normalise against a cap.
   "Set the {option} option's effect on {factor} to 40000",
   // Compound: two assignments in one sentence, two writes, one turn.
@@ -317,10 +332,12 @@ export const ANSWERED_ASK_KNOWN_DROPPED: readonly { readonly message: string; re
       message: 'The team disagrees about this - set the {factor} baseline to 0.8.',
       why: 'the `baseline` suppressor — the sentence names two different entities (W1 class)',
     }),
-    Object.freeze({
-      message: 'That seems about right - set it to 80%.',
-      why: 'not a model-unit value; this writer performs no conversion',
-    }),
+    // ⭐ 'That seems about right - set it to 80%.' LEFT THIS SET on 2026-08-30.
+    // Its stated reason — "this writer performs no conversion" — stopped being
+    // true when the percent conversion landed, and a pinned reason that has
+    // gone false is the honest-label defect this protocol exists to prevent
+    // (CLAUDE.md trap 14). `80%` is now read as 0.8 and CLAIMED; its
+    // opposite-direction twin in the spec asserts that exact value.
     Object.freeze({
       message: 'It would push it up a lot - set it to 0.8 for the {option} option.',
       why:
@@ -348,31 +365,164 @@ export const BASELINE_FRAMING = /\bbaselines?\b/;
  * phrasing in this estate uses — `VALUE_SET_PAYLOAD` in
  * `configure-option-intent.ts` is anchored on the same word, and
  * `buildConfigureOptionAdvisedFormat` emits it. The captures below are checked
- * rather than the match trusted: a currency symbol, a percent sign, an
- * attached unit or a thousands separator each mean the number is NOT in the
- * model's units, and this writer performs no conversion.
+ * rather than the match trusted, and each capture decides a DIFFERENT thing:
+ *   - a currency symbol means the number is not on the model's scale and no
+ *     conversion is defined for it, so the message is declined;
+ *   - a PERCENT SIGN is a unit this writer DOES convert (`30%` → 0.3) — it was
+ *     declined until 2026-08-30, which was the founder-path defect;
+ *   - the magnitude admits a leading decimal (`.3`), which the original
+ *     `\d+(?:\.\d+)?` alone could not match at all;
+ *   - an attached unit or a thousands separator still mean the number is not
+ *     the model-unit value, and are checked on the text AFTER the match.
  */
-const VALUE_ASSIGNMENT = /\bto\s+(£|\$|€)?\s*(\d+(?:\.\d+)?)(\s*%)?/g;
+const VALUE_ASSIGNMENT = /\bto\s+(£|\$|€)?\s*(\d+(?:\.\d+)?|\.\d+)(\s*%)?/g;
 
-/** The user's effect value, or null when the message does not carry exactly one. */
-export function readOptionEffectValue(normalisedMessage: string): number | null {
+/**
+ * One candidate assignment, kept with WHERE it occurred so a compound
+ * sentence can be attributed rather than guessed at.
+ */
+interface ValueAssignment {
+  readonly value: number;
+  readonly index: number;
+}
+
+/**
+ * ⭐⭐ THE FORMS REAL USERS TYPE — measured, not imagined.
+ *
+ * On deployed `a18e194` this reader returned null, and the turn died as
+ * `no_single_unit_scale_value`, for BOTH of the founder's edit sentences:
+ *
+ *   "revise <Option>'s effect on <Factor> to 30%"   → `%` rejected outright
+ *   "set <Option>'s effect on <Factor> to .3"       → no leading digit
+ *
+ * The discriminating control that proves it was the VALUE FORM and nothing
+ * else: the same sentences with `to 0.3` resolved to a clean write on the
+ * same bytes and the same graph.
+ *
+ * A percent is now CONVERTED to the model's 0-1 scale rather than declined —
+ * `30%` is 0.3, and the existing range check still rejects `150%`. A currency
+ * amount is still declined: there is no conversion from pounds to a 0-1
+ * effect, and inventing one would be a fabricated number.
+ */
+function readValueAssignments(normalisedMessage: string): ValueAssignment[] | null {
   const re = new RegExp(VALUE_ASSIGNMENT.source, 'g');
-  let found: number | null = null;
+  const out: ValueAssignment[] = [];
   let match: RegExpExecArray | null;
   while ((match = re.exec(normalisedMessage)) !== null) {
-    if (found !== null) return null; // a second assignment — compound, decline
     const [whole, currency, digits, percent] = match;
-    if (currency !== undefined || percent !== undefined) return null;
+    // A currency amount is not on the model's scale and this writer performs
+    // no conversion for it.
+    if (currency !== undefined) return null;
     const after = normalisedMessage.slice(match.index + whole.length);
     // An attached unit (`0.6m`, `5k`), a further digit, or a thousands
     // separator all mean this number is not the model-unit value.
     if (/^[0-9a-z]/.test(after)) return null;
     if (/^[.,]\d/.test(after)) return null;
-    const value = Number.parseFloat(digits!);
-    if (!Number.isFinite(value) || value < 0 || value > 1) return null;
-    found = value;
+    const magnitude = Number.parseFloat(digits!);
+    if (!Number.isFinite(magnitude)) return null;
+    const value = percent !== undefined ? magnitude / 100 : magnitude;
+    if (value < 0 || value > 1) return null;
+    out.push({ value, index: match.index });
   }
-  return found;
+  return out;
+}
+
+/**
+ * ⭐ COMPOUND ATTRIBUTION — the assignments that are NOT restatements of
+ * something the user asked to KEEP.
+ *
+ * "revise A to 0.3, keep B to 0.4" carries two assignments. Taking the first,
+ * or the last, would be a coin toss that writes a wrong number under a
+ * confident receipt. The assignment sitting in a PRESERVATION segment is read
+ * as what it is — a restatement of what B already has — and dropped.
+ *
+ * ⭐⭐ ONE FILTER, CONSULTED ON EVERY PATH. It used to run only where there
+ * was more than one candidate, and that asymmetry — not either half on its
+ * own — composed the wrong write pinned as R1 below:
+ *
+ *   "keep <Option B> to 0.9. revise <Option A>'s effect on <Factor>"
+ *
+ * carries exactly ONE assignment, and it belongs to the option the user asked
+ * to KEEP. Skipping the filter on the strength of the COUNT handed that 0.9
+ * to the protected-option disambiguation, which removed B from candidacy and
+ * wrote 0.9 to A — a value the user never stated about A, read back out of
+ * the persisted graph. So the filter is now a property of the assignment, not
+ * of how many there happen to be.
+ *
+ * The cue list is imported from `protection-scope`, not re-spelled — one
+ * alphabet, one reader (CLAUDE.md trap 12).
+ */
+function assignmentsAttributableToTheChange(
+  normalisedMessage: string,
+  candidates: readonly ValueAssignment[],
+): ValueAssignment[] {
+  const segments: Array<{ start: number; end: number; preserves: boolean }> = [];
+  let cursor = 0;
+  for (const piece of normalisedMessage.split(',')) {
+    segments.push({
+      start: cursor,
+      end: cursor + piece.length,
+      preserves: PRESERVATION_CUE.test(piece),
+    });
+    cursor += piece.length + 1; // the comma itself
+  }
+  return candidates.filter((c) => {
+    const segment = segments.find((seg) => c.index >= seg.start && c.index < seg.end);
+    return segment === undefined || !segment.preserves;
+  });
+}
+
+/**
+ * ⭐⭐ THE USER'S VALUE, AND WHETHER IT IS THEIRS TO WRITE HERE.
+ *
+ * `absent` and `attributed` are the two readings this module has always had.
+ * `unattributed` is the third state it was collapsing into `attributed`: a
+ * value the message genuinely carries, which the user stated about something
+ * they asked us to LEAVE ALONE.
+ *
+ * ⛔ IT IS DELIBERATELY NOT COLLAPSED INTO `absent` EITHER, and that is the
+ * whole design. `absent` declines, and a decline hands the turn to the edit
+ * LLM — the wrong-entity-write path this module exists to close. Undetermined
+ * attribution is a question, not a refusal: Olumi improves the user's
+ * reasoning rather than supplying answers, so where we cannot tell which
+ * entity a number belongs to we ASK, and an unnecessary question is
+ * categorically cheaper than a wrong write.
+ */
+export type OptionEffectValueReading =
+  /** No assignment on the model's scale at all. */
+  | { readonly kind: 'absent' }
+  /** Exactly one assignment survives the preservation filter. */
+  | { readonly kind: 'attributed'; readonly value: number }
+  /** The message's only assignment belongs to a preservation clause. */
+  | { readonly kind: 'unattributed'; readonly value: number };
+
+/** The user's effect value, read WITH its attribution. */
+export function readOptionEffectValueReading(
+  normalisedMessage: string,
+): OptionEffectValueReading {
+  const candidates = readValueAssignments(normalisedMessage);
+  if (candidates === null || candidates.length === 0) return { kind: 'absent' };
+  const surviving = assignmentsAttributableToTheChange(normalisedMessage, candidates);
+  if (surviving.length === 1) return { kind: 'attributed', value: surviving[0]!.value };
+  // A lone assignment the filter removed is still a value the user typed —
+  // reported as unattributed so the caller can ask rather than guess. Several
+  // candidates with no single survivor stay `absent`, i.e. decline exactly as
+  // they do today.
+  if (candidates.length === 1) return { kind: 'unattributed', value: candidates[0]!.value };
+  return { kind: 'absent' };
+}
+
+/**
+ * The user's effect value, or null when the message does not carry exactly one.
+ *
+ * ⚠ BYTE-IDENTICAL IN BEHAVIOUR to before the reading above existed, and the
+ * suite pins that: an unattributed value is still A VALUE, so every caller
+ * that only asks "is there a number here" sees exactly what it saw. What
+ * changed is that `resolveOptionEffectWrite` no longer has to.
+ */
+export function readOptionEffectValue(normalisedMessage: string): number | null {
+  const reading = readOptionEffectValueReading(normalisedMessage);
+  return reading.kind === 'absent' ? null : reading.value;
 }
 
 /** A label match, kept with its identity so nothing is resolved by value. */
@@ -617,6 +767,47 @@ export const OPTION_EFFECT_WRITE_ASK_RESOLVED_LIMIT = Object.freeze({
     + 'natural-language predicate tuning oscillated on a neighbouring seam (CLAUDE.md trap 22f), '
     + 'and the honest exit there is to ask rather than guess — which is what two or more '
     + 'outstanding options on the same factor already does',
+});
+
+/**
+ * ⛔ THE RESIDUAL THIS FIX DOES *NOT* CLOSE — stated because a gap recorded in
+ * the suite is honest and a gap invisible to it is how the next round happens.
+ *
+ * The unattributed-value guard sits on the PROTECTED-OPTION disambiguation,
+ * which is reached only when the message names MORE THAN ONE option. Where a
+ * preservation clause names nothing the graph knows, exactly one option is
+ * matched, and the write goes through carrying a value the user stated about
+ * something else:
+ *
+ *   "keep last year's number to 0.9. revise <Option A>'s effect on <Factor>"
+ *     → writes 0.9 to A, referee `proceed`, 0.9 read back from the graph.
+ *
+ * ⚠ MEASURED AT THREE TIPS AND IDENTICAL AT ALL THREE — pristine `179874a2`,
+ * the first cut of this branch, and here. It is PRE-EXISTING and untouched by
+ * this change, not a regression it introduces, which is the only reason it is
+ * being recorded rather than fixed in the same breath ("while we're here" work
+ * is what turns one defect into two).
+ *
+ * Closing it means refusing to write an unattributed value on the
+ * single-option path too — and that path has no ambiguity to ask ABOUT, so the
+ * only exits available today are a write or a decline, and a decline hands the
+ * turn to the edit LLM, i.e. the wrong-entity-write path this module exists to
+ * close. It therefore needs a "which entity is this number about?" ask that
+ * this resolution type cannot yet express. Sequenced separately, deliberately.
+ *
+ * `option-effect-founder-edit-forms.test.ts` pins this EXACT behaviour, so the
+ * set can neither grow nor shrink unnoticed.
+ */
+export const OPTION_EFFECT_UNATTRIBUTED_VALUE_RESIDUAL = Object.freeze({
+  shape:
+    'a preservation clause naming NO graph entity, alongside exactly one named option — '
+    + 'e.g. "keep last year\'s number to 0.9. revise <Option>\'s effect on <Factor>"',
+  behaviour: 'writes the unattributed value to the single named option',
+  status: 'PRE-EXISTING at pristine 179874a2; unchanged by this fix',
+  why_not_closed:
+    'the single-option path has no option ambiguity to ask about, and the only other exit '
+    + 'available today is a decline, which hands the turn to the edit LLM — the wrong-entity '
+    + 'write this module exists to close. Needs an ask this resolution type cannot express yet.',
 });
 
 /** One candidate pair the ask offers. */
@@ -1041,8 +1232,9 @@ export function resolveOptionEffectWrite(params: {
     return decline('not_effect_framed_intent');
   }
 
-  const value = readOptionEffectValue(normalised);
-  if (value === null) return decline('no_single_unit_scale_value');
+  const reading = readOptionEffectValueReading(normalised);
+  if (reading.kind === 'absent') return decline('no_single_unit_scale_value');
+  const value = reading.value;
 
   const padded = ` ${normalised} `;
   if (answeredAsk) {
@@ -1056,6 +1248,53 @@ export function resolveOptionEffectWrite(params: {
     // ⭐ RULE 3b — the product's own outstanding ask resolves the option. See
     // the header for the witness, the conjuncts and the stated residual.
     return resolveFromOutstandingAsk(padded, graph, params.graph, value);
+  }
+
+  // ⭐⭐ AN OPTION THE USER ASKED TO KEEP IS NOT A CANDIDATE FOR THE CHANGE.
+  //
+  // "revise A's effect on F to 0.3, keep B at 0.4" names TWO options, so the
+  // block below offered the user a choice between them — measured on deployed
+  // `a18e194`: `kind: 'ask'`, candidates A and B. But the sentence is not
+  // ambiguous. The user said which one to change and which one to keep, and
+  // asking them to repeat it is the Confirm-button-that-does-nothing one rung
+  // up.
+  //
+  // ⚠ NARROW ON PURPOSE — THIS ONLY EVER DISAMBIGUATES. It runs solely inside
+  // the >1 branch, so it can never turn a decline into a write, and never
+  // suppresses a protection: an option that is the ONLY match still goes to
+  // the referee and is still held on `USER_PROTECTED_ENTITY` if the user
+  // protected it. The confirm-tap path is untouched; what changes is that a
+  // protected option no longer competes to BE the change target.
+  //
+  // ⛔⛔ AND IT CONSUMES ONLY AN *ATTRIBUTED* VALUE — the conjunct that stops
+  // two individually-safe rules composing into a wrong write. The safety note
+  // above was stated about the wrong OUTCOME CLASS: "it can never turn a
+  // decline into a write" is true and beside the point, because what it turned
+  // was a CLARIFYING QUESTION into a wrong write, which is strictly worse. On
+  //
+  //   "keep <Option B> to 0.9. revise <Option A>'s effect on <Factor>"
+  //
+  // the user stated 0.9 about B inside a `keep` clause and stated NO value for
+  // A at all. Removing B from candidacy left A alone, and A was written 0.9 —
+  // measured at the persisted graph, not at the receipt. Neither this filter
+  // nor the value reader was wrong on its own; the composition was.
+  //
+  // Where the value is UNATTRIBUTED the resolver falls through to the ask
+  // below, which is what it did before this filter existed. Undetermined
+  // attribution is a question, never a guess — and never a threshold tuned to
+  // guess more often.
+  //
+  // The protected set comes from `extractProtectedEntities` — the one owner of
+  // "what did the user ask us to leave alone" — not a second reading of the
+  // message (trap 21).
+  if (optionMatches.length > 1 && reading.kind === 'attributed') {
+    const protectedIds = new Set(
+      extractProtectedEntities(params.message, params.graph).map((p) => p.nodeId),
+    );
+    const changeable = optionMatches.filter((m) => !protectedIds.has(m.id));
+    if (changeable.length === 1) {
+      return resolveSingleOption(changeable[0]!, padded, graph, value);
+    }
   }
 
   if (optionMatches.length > 1) {
@@ -1085,7 +1324,23 @@ export function resolveOptionEffectWrite(params: {
     });
   }
 
-  const option = optionMatches[0]!;
+  return resolveSingleOption(optionMatches[0]!, padded, graph, value);
+}
+
+/**
+ * The single-named-option path: resolve the factor, then write.
+ *
+ * Extracted so the protected-option disambiguation above reaches EXACTLY this
+ * code rather than a second copy of it. One option resolved by two routines
+ * is the twin-function defect this estate has paid for twice (CLAUDE.md
+ * trap 16 / the two `generateGraphHash`s).
+ */
+function resolveSingleOption(
+  option: LabelMatch,
+  padded: string,
+  graph: GraphV3T,
+  value: number,
+): OptionEffectWriteResolution {
   const factorMatches = matchLabels(padded, linkedFactorsOf(graph, option.id));
   if (factorMatches.length === 0) {
     // The message names no factor this option is wired to. Deliberately a

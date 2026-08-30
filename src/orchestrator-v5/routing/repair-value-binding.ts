@@ -464,9 +464,11 @@ export type RepairValueBindingResolution =
        * ⭐ THE CANONICAL 0–1 SPELLING, not the user's token — because every
        * consumer of this field WRITES it (the instruction below, and the ask
        * arm's chip replay message), and the writer's own grammar
-       * (`readOptionEffectValue`) declines a percent sign and a thousands
-       * separator. "8%" is carried here as "0.08" and the acknowledgement names
-       * what was written, so the user sees the figure that landed.
+       * (`readOptionEffectValue`) declines a thousands separator. ⚠ It now
+       * CONVERTS a percent rather than declining it, so the old "8% would not
+       * land" reason no longer holds — the canonical spelling stays because the
+       * acknowledgement must name the figure that WAS WRITTEN. "8%" is carried
+       * here as "0.08", so the user sees the figure that landed.
        */
       readonly valueText: string;
       /** The edit-lane instruction carrying the binding. */

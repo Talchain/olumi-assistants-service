@@ -145,6 +145,42 @@ function messageExceedsScanCap(userMessage: string | null | undefined): boolean 
  * one confirm tap, and only for ops targeting an entity NAMED in the same
  * clause.
  */
+/**
+ * The PRESERVATION half of the cue alphabet — "leave this as it is".
+ *
+ * ⭐ SPLIT OUT AND EXPORTED so the option-effect value reader consults the
+ * SAME list rather than re-spelling it. Two spellings of "this segment asks
+ * for something to be kept" is the hand-maintained mirror this estate keeps
+ * paying for (CLAUDE.md trap 12), and here the two readers would disagree
+ * about exactly the compound sentence under dispute.
+ */
+const PRESERVATION_CUE_SOURCES: readonly string[] = [
+  'leave',
+  'keep',
+  'preserve',
+  'retain',
+  'unchanged',
+  'untouched',
+  'intact',
+  'as[-\\s]is',
+  'alone',
+  'stays?\\s+the\\s+same',
+];
+
+/** Word-bounded alternation over a cue source list. */
+function cueRegExp(sources: readonly string[], flags = 'i'): RegExp {
+  return new RegExp(sources.map((t) => `\\b${t}\\b`).join('|'), flags);
+}
+
+/**
+ * True when THIS segment asks for something to be kept as it is. Narrower
+ * than `PROTECTION_CUE` on purpose: it is consulted to decide which of two
+ * competing value assignments is the RESTATEMENT, and a false positive there
+ * drops a value (safe, declines) while a false negative takes the wrong one
+ * (a wrong write). Only the preservation verbs carry that reading.
+ */
+export const PRESERVATION_CUE = cueRegExp(PRESERVATION_CUE_SOURCES);
+
 const PROTECTION_CUE = new RegExp(
   [
     // negated auxiliaries / imperatives
@@ -166,17 +202,8 @@ const PROTECTION_CUE = new RegExp(
     'no\\s+changes?',
     'nothing',
     'none\\s+of',
-    // preservation verbs / adjectives
-    'leave',
-    'keep',
-    'preserve',
-    'retain',
-    'unchanged',
-    'untouched',
-    'intact',
-    'as[-\\s]is',
-    'alone',
-    'stays?\\s+the\\s+same',
+    // preservation verbs / adjectives — SINGLE-SOURCED above
+    ...PRESERVATION_CUE_SOURCES,
     // exclusion prepositions
     'except',
     'other\\s+than',
@@ -437,6 +464,117 @@ function readGraphNodes(graph: unknown): GraphNodeLike[] {
 }
 
 /**
+ * ⭐⭐ WHICH ENTITY DOES THE CUE GOVERN? — the clause-scope split.
+ *
+ * `CLAUSE_BOUNDARY` deliberately does not split on bare commas, because a
+ * LIST protection must stay in one clause ("do not touch A, B, and C"). The
+ * cost, measured on the deployed bytes (`a18e194`, referee probe): the
+ * founder's own edit sentence
+ *
+ *   "revise <Option A>'s effect on <Factor> to 30%, keep <Option B> at 40%"
+ *
+ * is ONE protective clause, so `keep` — an instruction about **B** — captured
+ * **A**, the entity the user had just asked to CHANGE, and the referee
+ * returned `governing=held`, `blocker=USER_PROTECTED_ENTITY` on a write the
+ * user had explicitly requested. The Confirm button appeared and nothing
+ * moved.
+ *
+ * ⚠ THIS IS SCOPE, NOT GRANULARITY, AND THE DISTINCTION IS THE WHOLE FIX.
+ * Refining the protected unit from entity to entity+field does NOT move this
+ * case: A stays inside the `keep` clause either way, and stays held. The
+ * question is which entities a cue GOVERNS.
+ *
+ * ⛔ THE FAIL-SAFE DIRECTION IS ASYMMETRIC AND DECIDES THE SHAPE OF THE RULE.
+ * Over-protecting costs one confirm tap. Under-protecting writes to something
+ * the user asked us to leave alone — the harm this whole module exists to
+ * stop. So the exemption is stated POSITIVELY and narrowly: a segment is
+ * exempt only when it is an EXPLICIT CHANGE DIRECTIVE — it leads with an
+ * imperative change verb AND carries a value assignment. Everything else
+ * inherits protection exactly as it does today.
+ *
+ * That conjunction is what keeps the documented incidental-number corpus
+ * intact. "Do not touch Customer churn, we measured it at 3% last week" leads
+ * its second segment with "we", not a change verb, so nothing is exempted and
+ * the entity stays protected — and the entity is in the cue segment regardless.
+ * A rule keyed on "does this segment mention a number" would have dropped it.
+ */
+const CHANGE_DIRECTIVE_FILLER =
+  /^(?:(?:please|kindly|now|then|next|also|and|so|ok|okay|right|let'?s|go\s+ahead\s+and|could\s+you|can\s+you|would\s+you|i(?:'d|\s+would)\s+like\s+(?:you\s+)?to|i\s+want\s+(?:you\s+)?to)\s+)+/i;
+
+/** Imperative verbs that OPEN an explicit change instruction. */
+const CHANGE_DIRECTIVE_VERB =
+  /^(?:set|revise|change|update|adjust|raise|lower|increase|decrease|reduce|bump|shift|move|make|put|configure)\b/i;
+
+/** A value assignment inside the segment ("to 30%", "at 0.4", "to .3"). */
+const SEGMENT_VALUE_ASSIGNMENT = /\b(?:to|at)\s+[-+]?[£$€]?\s*(?:\d+(?:\.\d+)?|\.\d+)\s*%?/i;
+
+/**
+ * True when this comma-segment is an explicit, self-contained change
+ * instruction. BOTH conjuncts are required — see the note above for why the
+ * imperative lead cannot be dropped.
+ */
+function isExplicitChangeDirective(segment: string): boolean {
+  const lead = segment.replace(CHANGE_DIRECTIVE_FILLER, '');
+  return CHANGE_DIRECTIVE_VERB.test(lead) && SEGMENT_VALUE_ASSIGNMENT.test(segment);
+}
+
+/**
+ * The comma-segments of a protective clause that its cue actually GOVERNS.
+ *
+ * Left to right: a cue-bearing segment opens governance; an explicit change
+ * directive closes it; anything else inherits (which is what keeps "do not
+ * touch A, B, and C" whole). A segment that is BOTH reads as protective —
+ * fail-safe.
+ *
+ * TOTALITY: a clause with no comma, or one where governance resolves to
+ * nothing, degrades to TODAY's behaviour (the whole clause), so this function
+ * can never lose a protection it does not positively exempt.
+ */
+function governedSegments(
+  clause: string,
+  maskedClause: string,
+  graphNames: readonly string[],
+): string[] {
+  const splitOnCommas = (text: string): string[] =>
+    text
+      .split(',')
+      .map((c) => c.trim())
+      .filter((c) => c.length > 0);
+
+  const segments = splitOnCommas(clause);
+  if (segments.length <= 1) return [clause];
+
+  // ⚠ COST, MEASURED — masking is O(graph names × regex) and must NOT run
+  // per segment. Doing so cost 2,349 ms on a comma-dense 10,000-character
+  // message against a 60-node graph, against 70 ms for the same message with
+  // no commas: a 33× regression on exactly the hostile shape MESSAGE_SCAN_CAP
+  // exists to bound, and one no test in this suite would have caught. The
+  // caller has ALREADY masked the whole clause once, so reuse that and split
+  // it the same way.
+  //
+  // Masking substitutes a single space for a name, so it cannot add or remove
+  // commas — the two splits align whenever no LABEL itself contains a comma.
+  // Where one does, the counts diverge and we fall back to masking per
+  // segment: correct, rarer, and bounded by the node count rather than by the
+  // message.
+  const maskedSegments = splitOnCommas(maskedClause);
+  const aligned = maskedSegments.length === segments.length;
+
+  const out: string[] = [];
+  let governed = false;
+  for (let i = 0; i < segments.length; i += 1) {
+    const segment = segments[i]!;
+    // The cue must survive name-masking for the same reason the clause-level
+    // test does: an entity NAMED "keep what we have" is not an instruction.
+    const cueText = aligned ? maskedSegments[i]! : maskReferringMentions(segment, graphNames);
+    if (PROTECTION_CUE.test(cueText)) governed = true;
+    else if (isExplicitChangeDirective(segment)) governed = false;
+    if (governed) out.push(segment);
+  }
+  return out.length > 0 ? out : [clause];
+}
+
+/**
  * Extract the entities the user's message PROTECTS: every graph node whose
  * label (or id) is mentioned inside a protection-cue-bearing clause or an
  * exception tail. Deterministic, total, conservative (see module doc).
@@ -460,8 +598,13 @@ export function extractProtectedEntities(
       // maskReferringMentions). MENTIONS are still matched against the
       // ORIGINAL clause, so a masked name is still protectable by a cue the
       // user actually wrote.
-      if (clauseIsProtective(maskReferringMentions(clause, graphNames))) {
-        protectiveTexts.push(clause);
+      const maskedClause = maskReferringMentions(clause, graphNames);
+      if (clauseIsProtective(maskedClause)) {
+        // ⭐ Only the segments the cue GOVERNS, not the whole clause — see
+        // governedSegments for the held-write this splits apart. The masked
+        // clause is passed in rather than recomputed per segment (cost note
+        // there).
+        protectiveTexts.push(...governedSegments(clause, maskedClause, graphNames));
       }
     }
     // The exception-tail scan reads the SAME masked text, so a label carrying

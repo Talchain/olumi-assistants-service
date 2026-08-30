@@ -439,12 +439,42 @@ describe('the value grammar admits ONE model-unit number and nothing else', () =
   it('the KNOWN-DROPPED set is not vacuous — every member is effect-framed or baseline-framed', () => {
     // A member that failed the INTENT gate for an unrelated reason would be
     // pinning nothing about the value grammar.
-    expect(OPTION_EFFECT_WRITE_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(8);
+    // FLOOR LOWERED 8 → 6 on 2026-08-30, and the reason is recorded rather
+    // than the number quietly edited: `to 12%` and `to 1%` left this set
+    // because percent is now converted, not refused. The floor is a
+    // non-vacuity guard, so it tracks the real size; the members that left did
+    // so with opposite-direction twins asserting their converted VALUES.
+    expect(OPTION_EFFECT_WRITE_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(6);
     for (const template of OPTION_EFFECT_WRITE_KNOWN_DROPPED) {
       const message = instantiate(template);
       expect(message).toContain(OPTION_LABEL);
       expect(message).toContain(FACTOR_LABEL);
     }
+  });
+
+  /**
+   * ⭐⭐ THE FORMS REAL USERS TYPE — the founder-path fix, pinned by VALUE.
+   *
+   * Asserting only "is it claimed?" would let a wrong divisor through: `/10`
+   * turns `1%` into 0.1, which is in range and reads as a clean write. Each
+   * percent case therefore pins the EXACT converted value, and `1%` → 0.01 is
+   * the discriminating one.
+   */
+  it.each([
+    ['30%', 0.3],
+    ['12%', 0.12],
+    ['1%', 0.01],
+    ['0.5%', 0.005],
+    ['100%', 1],
+    ['.3', 0.3],
+    ['.05', 0.05],
+  ])('⭐ "%s" is a form users type and IS claimed, at the right value', (text, expected) => {
+    const message = `Set the ${OPTION_LABEL} option's effect on ${FACTOR_LABEL} to ${text}.`;
+    expect(resolveOptionEffectWrite({ message, graph: graph() })).toMatchObject({
+      matched: true,
+      kind: 'write',
+      value: expected,
+    });
   });
 
   it.each([
@@ -471,12 +501,11 @@ describe('the value grammar admits ONE model-unit number and nothing else', () =
 
   it.each([
     ['currency', 'to £25000'],
-    ['percent', 'to 12%'],
-    // The class where the currency/percent guard is the ONLY thing standing:
-    // both parse to an in-range, separator-free `1`. Added after the guard's
-    // mutant SURVIVED against the original corpus.
+    // The class where the currency guard is the ONLY thing standing: it parses
+    // to an in-range, separator-free `1`. Added after the guard's mutant
+    // SURVIVED against the original corpus.
     ['currency at a model-scale magnitude', 'to £1'],
-    ['percent at a model-scale magnitude', 'to 1%'],
+    ['percent above the model scale once converted', 'to 150%'],
     ['a thousands separator', 'to 25,000'],
     ['an attached unit', 'to 0.6m'],
     ['above the model scale', 'to 40000'],
@@ -1375,9 +1404,24 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
     });
   });
 
+  it('⭐ TWIN — an answered ask given in PERCENT is claimed, at the converted value', () => {
+    // The member this replaces was pinned as "this writer performs no
+    // conversion". It now converts, so the pin moved rather than being
+    // quietly deleted — and the twin binds the VALUE, not just the claim.
+    expect(
+      resolveOptionEffectWrite({
+        message: 'That seems about right - set it to 80%.',
+        graph: j18Graph(),
+      }),
+    ).toMatchObject({ matched: true, kind: 'write', value: 0.8 });
+  });
+
   it('⭐ the pinned known-dropped set declines, each for its stated reason', () => {
     // Trap 22f's honest-gap protocol: REDs if the claim widens to swallow one.
-    expect(ANSWERED_ASK_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(5);
+    // FLOOR LOWERED 5 → 4 on 2026-08-30: the `set it to 80%` member left this
+    // set because its stated reason ("no conversion") became false. Its twin
+    // above pins the converted value.
+    expect(ANSWERED_ASK_KNOWN_DROPPED.length).toBeGreaterThanOrEqual(4);
     for (const dropped of ANSWERED_ASK_KNOWN_DROPPED) {
       const message = dropped.message
         .replace('{option}', J18.ids.option_label)
