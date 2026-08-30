@@ -55,6 +55,20 @@ import {
   formatWithheldWriteNotice,
   resolveNodeLabels,
 } from '../routing/option-intervention-write-guard.js';
+// ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION — the SECOND wrong-carrier
+// shape, witnessed on deployed `91d39119` on 30 Aug 2026 and NOT covered by the
+// guard above (that one requires a `not_honoured` outcome verdict, which the
+// witnessed turn does not reach: it is allowed as `outcome_not_unhonoured`).
+// Different question, different evidence, separate module — see its header for
+// why folding it into the guard above would be trap 21.
+import {
+  detectOptionOwnValueSubstitution,
+  formatOptionOwnValueWithheldNotice,
+} from '../routing/option-observed-state-substitution.js';
+// The product's OWN shipped configure affordance — the single source of that
+// chip's copy and the prefix route-v2's configure gate matches. Derived, never
+// a second spelling (trap 12).
+import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
 // ⭐⭐ ROADMAP 2.1266 — the WRITE PATH the guard above exists because we lacked.
 // `option-intervention-write-guard.ts` withholds a wrong-entity write; this
 // composes the RIGHT one deterministically, so the product's own advised
@@ -3220,6 +3234,24 @@ export async function dispatchEditGraph(
     appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
   });
   const optionInterventionWriteWithheld = optionInterventionWriteVerdict.verdict === 'withhold';
+  // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION, witnessed on deployed
+  // `91d39119` (30 Aug 2026, scenario `0fe8c040`, request `1a0ba66d`): a plain
+  // English revision wrote each OPTION node's OWN `observed_state` (Pilot 30 /
+  // unit % / baseline 70) while the canonical interventions stayed at 0.7 and
+  // 0.4 — and the reply CONFIRMED the change. The next rerun then read the
+  // unmoved input as evidence of robustness.
+  //
+  // Computed alongside the verdict above rather than inside it: they answer
+  // different questions (message-bound factor-baseline substitute vs
+  // message-free option-own-value substitute) and the witnessed turn is
+  // ALLOWED by the one above as `outcome_not_unhonoured`. Neither is weakened;
+  // a withhold from EITHER withholds the write.
+  const optionOwnValueVerdict = detectOptionOwnValueSubstitution({
+    before: parsedGraph,
+    after: editResult.appliedGraph ?? null,
+    appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
+  });
+  const optionOwnValueWithheld = optionOwnValueVerdict.verdict === 'withhold';
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
   // live-blocked verdict — or a part-accounting substitution block, or a
@@ -3228,7 +3260,8 @@ export async function dispatchEditGraph(
     successfulAppliedMutation &&
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
-    !optionInterventionWriteWithheld;
+    !optionInterventionWriteWithheld &&
+    !optionOwnValueWithheld;
   if (optionInterventionWriteWithheld) {
     log.warn(
       {
@@ -3241,6 +3274,20 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph — the applied mutation moved a node baseline while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
     );
+  }
+  if (optionOwnValueWithheld) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_own_value_write_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        option_ids: optionOwnValueVerdict.substitutions.map((s) => s.optionId),
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
+    );
+  }
+  if (optionInterventionWriteWithheld || optionOwnValueWithheld) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
     // branches below do, so staleness is never claimed off an unpersisted
@@ -3265,7 +3312,9 @@ export async function dispatchEditGraph(
           : { priorFactsReadOk: priorFactsReadOkForRecovery },
       );
     }
-    ev.branch = 'option_intervention_write_withheld';
+    ev.branch = optionInterventionWriteWithheld
+      ? 'option_intervention_write_withheld'
+      : 'option_own_value_write_withheld';
     ev.outcome = 'clarify';
   }
   if (paSubstitutionBlocked && partAccounting !== null) {
@@ -3972,6 +4021,69 @@ export async function dispatchEditGraph(
           resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds),
         ),
       ),
+    };
+  }
+
+  // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION — replace the false
+  // confirmation with the ask.
+  //
+  // The witnessed harm was NOT silence: it was a reply that said *"Confirmed:
+  // change 'Coverage Pilot' to 30%"* over a graph whose staffing intervention
+  // never moved. Withholding alone would swap one false belief for another, so
+  // the notice says plainly that nothing was saved and asks for the MISSING
+  // BINDING — which of the option's links the number belonged to. That is the
+  // documented trap-22f exit: where the target cannot be determined, make the
+  // ambiguity the product rather than commit a substitute.
+  //
+  // The chip is the product's OWN shipped `Help me configure <option>` — the
+  // one `detectConfigureOptionIntent` matches by prefix — so the question has
+  // an acceptance path and is not one the product cannot take an answer to
+  // (P8). Built from `configure-option-chip-text.ts`, the single source of that
+  // copy, never re-spelled here (trap 12). Deduped by chip id so a turn that
+  // already offers it does not offer it twice.
+  if (optionOwnValueVerdict.verdict === 'withhold') {
+    const existingActions = response.suggested_actions ?? [];
+    const configureChips: BoundaryAction[] = [];
+    for (const sub of optionOwnValueVerdict.substitutions) {
+      const chip = buildConfigureOptionChip(sub.optionLabel);
+      const alreadyOffered =
+        existingActions.some((a) => a.message === chip.message)
+        || configureChips.some((a) => a.message === chip.message);
+      if (alreadyOffered) continue;
+      // No `action_type`: the boundary enum is closed to the v0.7.0 V5 values
+      // (`BOUNDARY_ACTION_TYPES`) and none of them names "configure an
+      // option". The chip works as a prompt-replay button via `message`, which
+      // is exactly the route `detectConfigureOptionIntent` matches.
+      configureChips.push({
+        id: chip.id,
+        label: chip.label,
+        message: chip.message,
+      });
+    }
+    // ⭐⭐ THE NOTICE REPLACES THE NARRATION — IT DOES NOT SIT UNDER IT.
+    //
+    // Measured, not reasoned about: appending left the reply reading
+    // *"Confirmed: change 'Coverage Pilot' to 30% and change 'Current Coverage'
+    // to 40%."* immediately above *"Nothing from that message was saved."* —
+    // a reply that both confirms and denies the same write, with the
+    // confirmation FIRST. That is worse than the defect, not better.
+    //
+    // The sibling factor-baseline withhold does not need this because 2.427's
+    // recovery copy has already replaced the narration wholesale on its branch.
+    // This branch has no text guard in front of it, so the edit LLM's own
+    // success sentence survives unless it is replaced here. Nothing is lost:
+    // the turn was withheld WHOLESALE, so every success claim in that text is
+    // false by construction. Where the sibling withhold ALSO fired, its copy is
+    // already honest and this appends rather than clobbering it.
+    const ownValueNotice = formatOptionOwnValueWithheldNotice(
+      optionOwnValueVerdict.substitutions,
+    );
+    response = {
+      ...response,
+      assistant_text: optionInterventionWriteWithheld
+        ? appendLapseNotice(response.assistant_text, ownValueNotice)
+        : ownValueNotice,
+      suggested_actions: [...existingActions, ...configureChips],
     };
   }
 
