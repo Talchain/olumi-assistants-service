@@ -62,6 +62,23 @@ expiry with refreshed loaded timestamps. One anonymous instance is not fleet
 convergence. No cache invalidation, promotion or rollback is performed here;
 missing post-action evidence remains `UNVERIFIED`.
 
+Replay the original experiment into its manifest and promotion packet without
+another model call. Use the same declared settings as the capture (a mismatch
+refuses the replay), the original snapshot, and the same pristine runtime:
+
+```sh
+CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true pnpm exec tsx scripts/prompt-model-quality.ts \
+  --packet --experiment /absolute/new-experiment-directory \
+  --runtime-root /absolute/pristine-runtime --runtime-head FULL_40_CHARACTER_SHA \
+  --snapshot /absolute/new-snapshot.json --out /absolute/new-packet.json
+```
+
+The packet re-runs real functions and source-owned oracles; editing a stored
+`PASS` field has no effect. An observed grammar-accepted response is not proof
+that every instruction can be honoured. Where the foundation's structural
+probes do not match the target source, they stay explicitly historical and the
+target structural-compatibility result is `UNVERIFIED`.
+
 ## Existing structural registry
 
 This follow-on does not gate or activate #1228. No production prompt execution

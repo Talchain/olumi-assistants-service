@@ -12,7 +12,7 @@ const paths = ['/admin/prompts/draft_graph_default', '/admin/prompts/verify', '/
 
 describe('read-only serving observation transport', () => {
   test('GET only and no redirects', async () => {
-    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const requests: Array<{ url: string; init?: Parameters<typeof fetch>[1] }> = [];
     const fetcher: typeof fetch = async (url, init) => {
       requests.push({ url: String(url), init });
       return new Response('{"unrelated":"teapot"}', { status: 200 });
