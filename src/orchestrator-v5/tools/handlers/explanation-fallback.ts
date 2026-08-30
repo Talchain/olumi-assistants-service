@@ -940,6 +940,16 @@ export function composeSelectedDependenciesEvidenceAnswer(
   evidence: SelectedDependenciesEvidence,
 ): string {
   if (evidence.status === 'ambiguous') {
+    if (evidence.subject_selection === 'single_resolved') {
+      // The user already has exactly one resolved element selected, so the
+      // name-or-select instruction below would state a condition that is
+      // already true. What is unresolved here is the question or the saved
+      // model, and the copy says only that.
+      return (
+        'I cannot tie this dependency question to exactly one element of the saved Living Model, so I will not guess its relationships. ' +
+        'Check that the element you mean appears once in the model, and ask again.'
+      );
+    }
     return (
       'I cannot establish one unique Living Model element and matching dependency question, so I will not guess its relationships. ' +
       'Name or select one element and ask again.'

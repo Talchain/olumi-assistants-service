@@ -508,6 +508,12 @@ describe('buildStructuralPairEvidence', () => {
 });
 
 describe('buildSelectedDependenciesEvidence', () => {
+  // An ambiguous verdict reached while exactly one selected element resolved.
+  // The producer marks it so the consumer copy can stop telling that user to
+  // "name or select one element" — see the guards below.
+  const AMBIGUOUS_SELECTED = {
+    status: 'ambiguous', subject_selection: 'single_resolved',
+  } as const;
   const selectedNodes: readonly Record<string, unknown>[] = [
       { id: 'improve', kind: 'option', label: 'Improve current CRM' },
       { id: 'hubspot', kind: 'option', label: 'Move to HubSpot' },
@@ -640,7 +646,7 @@ describe('buildSelectedDependenciesEvidence', () => {
       structureQuery: { kind: 'dependencies', element_id: 'adoption' },
       proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
     }))
-      .toEqual({ status: 'ambiguous' });
+      .toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({ messageText: 'What does Sales rep time on selling activities depend on?' }))
       .toEqual(buildNamed());
   });
@@ -657,7 +663,7 @@ describe('buildSelectedDependenciesEvidence', () => {
       structureQuery: { kind: 'dependencies', element_id: 'cost' },
       proposalEntity: { id: 'cost', resolution_status: 'resolved' },
     }, withCost))
-      .toEqual({ status: 'ambiguous' });
+      .toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({ messageText: 'What does this depend on?' }, withCost)?.status)
       .toBe('resolved');
   });
@@ -754,23 +760,155 @@ describe('buildSelectedDependenciesEvidence', () => {
     }
   });
 
+  // ── Guards for the named-dependency change (PR #1229 review) ──────────────
+  //
+  // (A) THE DEPLOYED SELECTED PATH IS MESSAGE-TEXT INDEPENDENT.
+  // The named corroborator widens `genericAllowedIds` to the whole node lookup
+  // and turns on `preferLongestMention`. Both are legitimate for the *named*
+  // authority and catastrophic for the *selected* one: they answer opposite
+  // questions ("the user named a different subject" vs "the user mentioned
+  // another object in passing"). Measured on the first head of this PR, three
+  // currently-deployed selected turns went RESOLVED → AMBIGUOUS. This asserts
+  // the property directly rather than enumerating the three: on the selected
+  // path the current message must have ZERO influence on the outcome.
+  it('makes the selected-path outcome byte-identical across every message text', () => {
+    const withCost = graph(
+      [...selectedNodes, { id: 'cost', kind: 'factor', label: 'Cost' }], selectedEdges,
+    );
+    const withDuplicateIds = graph([
+      ...selectedNodes,
+      { id: 'collision', kind: 'factor', label: 'Spare capacity' },
+      { id: 'collision', kind: 'factor', label: 'Budget headroom' },
+    ], selectedEdges);
+    const corpus = [
+      undefined,
+      '',
+      'What does this depend on?',
+      'What does this depend on? I mostly care about cost.',
+      'What does this depend on? CRM adoption and usability seems relevant.',
+      'What does this depend on? Cost and Ramp and disruption time both worry me.',
+      'What does CRM adoption and usability depend on?',
+      'What does Missing Object depend on?',
+      'What does Sales rep time depend on?',
+      'What do Sales rep time on selling activities and Cost depend on?',
+    ];
+    for (const currentGraph of [selectedGraph, withCost, withDuplicateIds]) {
+      const baseline = buildSelected({}, currentGraph);
+      // Positive control: the baseline this property is measured against must
+      // itself be a real answer, or "identical" would be vacuous agreement.
+      expect(baseline?.status).toBe('resolved');
+      for (const messageText of corpus) {
+        expect(JSON.stringify(buildSelected({ messageText }, currentGraph)))
+          .toBe(JSON.stringify(baseline));
+      }
+    }
+    // In-suite CONTRAST: the same corpus over the named authority must NOT be
+    // message-independent, or the assertion above proves only that the probe
+    // cannot see message text at all.
+    const named = corpus.map((messageText) => buildSelected({
+      messageText, requestedSelection: undefined, focus: undefined, groundedSelection: null,
+    }, selectedGraph)?.status);
+    expect(new Set(named).size).toBeGreaterThan(1);
+  });
+
+  // (B) THE AMBIGUOUS NOTICE'S TRUTH CONDITION.
+  // The consumer replaces the assistant text with "Name or select one element
+  // and ask again". Told to a user who HAS exactly one resolved element
+  // selected, that instruction states a condition which is already true. The
+  // producer therefore marks that turn, and the composer must not emit the
+  // name-or-select sentence for it. Enumerated over every ambiguity source
+  // reachable while the focus stays single-and-resolved.
+  it('marks every ambiguous verdict reached with one resolved selected element', () => {
+    const duplicateSelectedId = graph([
+      ...selectedNodes, { id: 'selling_time', kind: 'outcome', label: 'Second copy' },
+    ], selectedEdges);
+    const duplicateSelectedLabel = graph([
+      ...selectedNodes,
+      { id: 'twin', kind: 'outcome', label: 'Sales rep time on selling activities' },
+    ], selectedEdges);
+    const contradictoryEdges = graph(selectedNodes, [
+      ...selectedEdges, { from: 'automation', to: 'selling_time', strength: -0.9 },
+    ]);
+    const cases: readonly (readonly [string, Partial<Parameters<typeof buildSelectedDependenciesEvidence>[1]>, ReturnType<typeof graph>])[] = [
+      ['router typed a different element', {
+        structureQuery: { kind: 'dependencies', element_id: 'adoption' },
+        proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
+      }, selectedGraph],
+      ['validated entity disagrees with the query', {
+        proposalEntity: { id: 'adoption', resolution_status: 'resolved' },
+      }, selectedGraph],
+      ['validated entity unresolved', {
+        proposalEntity: { id: 'selling_time', resolution_status: 'unresolved' },
+      }, selectedGraph],
+      ['ingress gesture also carried an edge', {
+        requestedSelection: { node_ids: ['selling_time'], edge_ids: ['automation-selling_time'] },
+      }, selectedGraph],
+      ['duplicate canonical id for the selected item', {}, duplicateSelectedId],
+      ['duplicate visible label for the selected item', {}, duplicateSelectedLabel],
+      ['contradictory parallel connectors', {}, contradictoryEdges],
+    ];
+    for (const [name, overrides, currentGraph] of cases) {
+      const evidence = buildSelected(overrides, currentGraph);
+      expect({ name, ...evidence }).toEqual({
+        name, status: 'ambiguous', subject_selection: 'single_resolved',
+      });
+    }
+    // In-suite CONTRAST, both directions. Without the mark the assertion above
+    // could be satisfied by stamping every ambiguous verdict.
+    expect(buildSelected({
+      messageText: 'What does that depend on?',
+      requestedSelection: undefined, focus: undefined, groundedSelection: null,
+    })).toEqual({ status: 'ambiguous' });
+    expect(buildSelected({
+      focus: {
+        elements: [
+          { id: 'selling_time', kind: 'outcome', label: 'Sales rep time on selling activities', analysis_link: 'no_analysis' },
+          { id: 'adoption', kind: 'factor', label: 'CRM adoption and usability', analysis_link: 'no_analysis' },
+        ],
+        unresolved: 'none', requested_count: 2, unresolved_count: 0,
+      },
+    })).toEqual({ status: 'ambiguous' });
+  });
+
+  // (C) DERIVED, FAIL-LOUD: a future ambiguous return added inside the builder
+  // must go through the marking helper. A hand-checked list of return sites
+  // would drift the first time one is added — this reads the source.
+  it('routes every ambiguous return in the builder through the selection-marking helper', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(
+      new URL('../structural-pair-evidence.ts', import.meta.url), 'utf8',
+    );
+    const start = source.indexOf('export function buildSelectedDependenciesEvidence(');
+    expect(start).toBeGreaterThan(-1);
+    const rest = source.slice(start);
+    const end = rest.indexOf('\n}\n');
+    expect(end).toBeGreaterThan(-1);
+    const body = rest.slice(0, end);
+    const bare = /\{\s*status:\s*'ambiguous'\s*\}/g;
+    // Positive control: the probe must be able to SEE a bare literal somewhere,
+    // or "zero in the builder" is an absence proved by a blind instrument.
+    expect(source.match(bare)?.length ?? 0).toBeGreaterThan(0);
+    expect(body.match(bare)).toBeNull();
+    expect((body.match(/ambiguousForTurn\(options\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+
   it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {
     expect(buildSelected({
       requestedSelection: { node_ids: ['selling_time'], edge_ids: ['automation→selling_time'] },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       requestedSelection: { node_ids: ['selling_time', 'adoption'], edge_ids: [] },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       requestedSelection: { node_ids: ['goal'], edge_ids: [] },
-    })).toEqual({ status: 'ambiguous' });
-    expect(buildSelected({ groundedSelection: null })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
+    expect(buildSelected({ groundedSelection: null })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       groundedSelection: { element_ids: ['selling_time', 'adoption'], unresolved: 'none' },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       structureQuery: { kind: 'dependencies', element_id: 'goal' },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       focus: {
         elements: [{
@@ -788,24 +926,24 @@ describe('buildSelectedDependenciesEvidence', () => {
         }],
         unresolved: 'none', requested_count: 1, unresolved_count: 0,
       },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       groundedSelection: { element_ids: ['selling_time'], unresolved: 'not_in_model' },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       proposalEntity: {
         id: 'goal',
         label: 'Improve sales productivity',
         resolution_status: 'resolved',
       },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
     expect(buildSelected({
       proposalEntity: {
         id: 'selling_time',
         label: 'Sales rep time on selling activities',
         resolution_status: 'ambiguous',
       },
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
   });
 
   it('fails weak when canonical relationship coverage is unavailable', () => {
@@ -878,7 +1016,7 @@ describe('buildSelectedDependenciesEvidence', () => {
       graphContextStatus: 'canonical',
       graphAuthority: 'canonical_strict',
       graphWasTrimmed: false,
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
 
     const conflicting = graph(
       selectedNodes,
@@ -899,7 +1037,7 @@ describe('buildSelectedDependenciesEvidence', () => {
       graphContextStatus: 'canonical',
       graphAuthority: 'canonical_strict',
       graphWasTrimmed: false,
-    })).toEqual({ status: 'ambiguous' });
+    })).toEqual(AMBIGUOUS_SELECTED);
   });
 
   it('deduplicates exact twins, preserves bidirected non-causal semantics, and ignores outgoing density', () => {
@@ -955,17 +1093,17 @@ describe('buildSelectedDependenciesEvidence', () => {
     expect(buildSelectedDependenciesEvidence(graph(
       selectedNodes,
       [...selectedEdges, { from: 'selling_time', to: 'selling_time', strength: 1 }],
-    ), common)).toEqual({ status: 'ambiguous' });
+    ), common)).toEqual(AMBIGUOUS_SELECTED);
 
     expect(buildSelectedDependenciesEvidence(graph(
       [...selectedNodes, { id: 'automation', kind: 'factor', label: 'Automation duplicate' }],
       selectedEdges,
-    ), common)).toEqual({ status: 'ambiguous' });
+    ), common)).toEqual(AMBIGUOUS_SELECTED);
 
     expect(buildSelectedDependenciesEvidence(graph(
       [...selectedNodes, { id: 'selling_time', kind: 'outcome', label: 'Selected duplicate' }],
       selectedEdges,
-    ), common)).toEqual({ status: 'ambiguous' });
+    ), common)).toEqual(AMBIGUOUS_SELECTED);
 
     const manyNodes = Array.from({ length: 25 }, (_, index) => ({
       id: `driver-${index}`, kind: 'factor', label: `Driver ${index}`,
