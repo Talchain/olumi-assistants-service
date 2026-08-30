@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS, ObservedStateSchema, PriorSchema } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalDirection, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS, ObservedStateSchema, PriorSchema } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
@@ -181,6 +181,9 @@ export const NodeV3 = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
+  /** Preserve the stated objective through the stripping snapshot parser.
+   * Absence remains unknown; this consumer never supplies a direction. */
+  goal_direction: GoalDirection.optional(),
   /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`.
