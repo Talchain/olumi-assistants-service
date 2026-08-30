@@ -70,7 +70,7 @@ import {
   readOptionResultSources,
   isUsableWinProbability,
 } from '../../orchestrator/context/option-result-source.js';
-import { readObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
+import { readObjectiveRecommendation, readFactObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   buildScaffoldPromptDisclosure,
@@ -223,7 +223,7 @@ export async function enrichRunAnalysisWithDecisionReview(
   const invokeInput = buildInvokeInput(
     input.brief,
     enrichment,
-    fact.result.leading_option_id,
+    readFactObjectiveRecommendation(fact.result)?.option_id ?? null,
     scaffoldDisclosure,
     // T1 claim safety, read from the FACT (typed `result.constraint_verdict`
     // first, interim `enrichment.__cee_claim_safety` second, fail-closed on
@@ -871,11 +871,8 @@ function buildInvokeInput(
  * precedence + shape documentation. The name is kept so this module's existing
  * consumers (headline + contract tests) import it unchanged.
  *
- * The caller (`buildInvokeInput`) walks the returned sources in order until one
- * can match `leading_option_id`, honouring PLoT's declared winner whenever ANY
- * source carries it. `projectOptionAsWinner` is shape-tolerant (`option_id ||
- * id`, `option_label || label`, nested or flat `outcome.mean`), so every source
- * shape feeds into the same projector unchanged.
+ * This compatibility reader is for ancillary result data. Recommendation
+ * selection uses objective-recommendation.ts and never falls back across sources.
  */
 export const readResultsArraySources = readOptionResultSources;
 
@@ -887,29 +884,7 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
   );
 }
 
-/**
- * Select the winner option, preferring an exact `leading_option_id` match
- * when PLoT has declared one.
- *
- * Tightening (Phase 3A fix, 2026-05-17): when `leadingOptionId` is
- * provided but none of the results carry a matching `option_id` / `id`,
- * return `null` rather than falling back to "highest probability in the
- * envelope". The previous fallback would invent a winner whenever the
- * declared leader was missing from the envelope, masking real
- * data-integrity issues; the enricher's `no_winner` skip is the honest
- * outcome for that case.
- *
- * Round-4 review MAJOR-A: the leader-present branch also returns `null`
- * when the leader-matched entry lacks a {@link isUsableWinProbability}
- * win_probability, so the `buildInvokeInput` walk falls through to a richer
- * source — exactly like headline `resolveWinner`. Previously it returned the
- * thin leader with win_probability coerced to 0 (a phantom 0% winner) on a
- * thin-current envelope, disagreeing with the walking headline/compact/state.
- *
- * When `leadingOptionId` is null or empty, fall back to the highest-USABLE
- * -probability entry (returns null if none of the entries carry a usable
- * win_probability).
- */
+/** Exact structural-ID lookup only; missing identity never authorises argmax. */
 export function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
   leadingOptionId: string | null,

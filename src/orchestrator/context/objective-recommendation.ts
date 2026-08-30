@@ -16,6 +16,16 @@ export function readObjectiveRanking(value: unknown): EnrichmentObjectiveRanking
   return parsed.success ? parsed.data : null;
 }
 
+/** The HTTP response must describe exactly the candidates actually admitted. */
+export function matchesRequestedOptionIds(enrichment: Record<string, unknown>, requestedIds: readonly unknown[]): boolean {
+  if (requestedIds.length === 0 || requestedIds.some((id) => typeof id !== 'string' || !id)) return false;
+  const expected = new Set(requestedIds);
+  if (expected.size !== requestedIds.length || !Array.isArray(enrichment.option_comparison)) return false;
+  const received = enrichment.option_comparison.map((value) => record(value)?.option_id);
+  return received.length === expected.size && new Set(received).size === expected.size &&
+    received.every((id) => expected.has(id));
+}
+
 /** Read PLoT's permitted recommendation; never derive one from raw shares. */
 export function readObjectiveRecommendation(enrichment: Record<string, unknown>) {
   const ranking = readObjectiveRanking(enrichment.objective_ranking);
@@ -36,21 +46,40 @@ export function readObjectiveRecommendation(enrichment: Record<string, unknown>)
   }
   for (const entry of ranking.ranked_options) {
     const row = rows.get(entry.option_id);
-    if (!row || !isRecommendableOption(row) || row.win_probability !== entry.win_probability) return null;
+    if (!row || row.win_probability !== entry.win_probability) return null;
   }
+  if (rows.size !== ranking.ranked_options.length) return null;
   const ranked = ranking.ranked_options.find((entry) => entry.option_id === id);
   const option = rows.get(id);
-  if (!ranked || !option) return null;
+  if (!ranked || !option || !isRecommendableOption(option)) return null;
   return { option_id: id, win_probability: ranked.win_probability, option, ranking };
+}
+
+/** Revalidate the handler's existing structural-ID map after a durable reload. */
+export function readFactObjectiveRecommendation(result: unknown) {
+  const factResult = record(result);
+  const enrichment = record(factResult?.enrichment);
+  const boundShares = record(factResult?.win_probabilities);
+  if (!enrichment || !boundShares) return null;
+  const recommendation = readObjectiveRecommendation(enrichment);
+  if (!recommendation || factResult?.leading_option_id !== recommendation.option_id) return null;
+  const ranked = recommendation.ranking.ranked_options;
+  if (Object.keys(boundShares).length !== ranked.length || ranked.some((entry) =>
+    !Object.hasOwn(boundShares, entry.option_id) || boundShares[entry.option_id] !== entry.win_probability)) return null;
+  return { ...recommendation, win_probabilities: boundShares as Record<string, number> };
 }
 
 /** Revalidate the unchanged producer fields after compacting or loading a fact. */
 export function readSummaryObjectiveRecommendation(summary: AnalysisResponseSummary | null | undefined) {
   if (!summary) return null;
-  const recommendation = readObjectiveRecommendation({
-    objective_ranking: summary.objective_ranking,
-    robustness: { recommended_option_id: summary.recommended_option_id },
-    option_comparison: summary.options,
+  const recommendation = readFactObjectiveRecommendation({
+    leading_option_id: summary.winner.option_id,
+    win_probabilities: summary.win_probabilities,
+    enrichment: {
+      objective_ranking: summary.objective_ranking,
+      robustness: { recommended_option_id: summary.recommended_option_id },
+      option_comparison: summary.options,
+    },
   });
   return recommendation && summary.winner.option_id === recommendation.option_id &&
     summary.winner.win_probability === recommendation.win_probability

@@ -124,7 +124,7 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
-import { readObjectiveRecommendation } from '../../../orchestrator/context/objective-recommendation.js';
+import { readObjectiveRecommendation, matchesRequestedOptionIds } from '../../../orchestrator/context/objective-recommendation.js';
 import {
   buildAnalysisSubmissionDisclosure,
   partitionScaffoldedByAnalysisPresence,
@@ -1413,8 +1413,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // --- 6. Build RunAnalysisHandlerFact (Resolution 2) ------------------
-    const winProbabilities = extractWinProbabilities(resultRecords);
-    const leadingOptionId = readObjectiveRecommendation(response as Record<string, unknown>)?.option_id ?? null;
+    const recommendation = matchesRequestedOptionIds(
+      response as Record<string, unknown>, finalWireOptions.map((option) => (option as Record<string, unknown>).option_id),
+    ) ? readObjectiveRecommendation(response as Record<string, unknown>) : null;
+    // Persist the existing structural-ID map only after binding producer truth
+    // to the actual admitted request. Cold readers revalidate this same map.
+    const winProbabilities = recommendation
+      ? Object.fromEntries(recommendation.ranking.ranked_options.map((option) => [option.option_id, option.win_probability]))
+      : null;
+    const leadingOptionId = recommendation?.option_id ?? null;
     // Template selection uses the status outcome. Correction 4 of the V5
     // alpha hardening plan: caveats for partial / unknown-status surface
     // through the existing `summary` / `assistant_text` fields only — do
@@ -2173,7 +2180,7 @@ const OK_STATUSES: ReadonlySet<string> = new Set(['completed', 'computed']);
  * contract from Part C: at least one entry carries a string `option_id` or
  * `option_label` AND a finite numeric `win_probability`. Matches the
  * downstream consumer shape in `selectLeadingOptionId` /
- * `extractWinProbabilities`.
+ * the request-bound probability map.
  */
 function hasUsableResultFields(records: ReadonlyArray<Record<string, unknown>>): boolean {
   if (records.length === 0) return false;
@@ -2412,30 +2419,6 @@ export function buildDedupKeptLabelResolver(
   if (keptLabelByRemovedId.size === 0) return () => null;
   return (omittedOptionId: string): string | null =>
     keptLabelByRemovedId.get(omittedOptionId) ?? null;
-}
-
-/**
- * Build the `win_probabilities` map per Resolution 2 §3. Keyed by
- * `option_label` when present, falling back to `option_id`. Skips records
- * that have no usable key or no numeric `win_probability`.
- *
- * Returns `null` when the resulting map would be empty — the handler omits
- * `win_probabilities` entirely in that case rather than emitting an empty
- * object (matches the optional-schema shape cleanly).
- */
-function extractWinProbabilities(
-  records: ReadonlyArray<Record<string, unknown>>,
-): Record<string, number> | null {
-  const map: Record<string, number> = {};
-  for (const record of records) {
-    const key = typeof record.option_id === 'string' && record.option_id.length > 0
-      ? record.option_id : null;
-    if (key === null) continue;
-    const prob = record.win_probability;
-    if (typeof prob !== 'number' || !Number.isFinite(prob)) continue;
-    map[key] = prob;
-  }
-  return Object.keys(map).length > 0 ? map : null;
 }
 
 /**

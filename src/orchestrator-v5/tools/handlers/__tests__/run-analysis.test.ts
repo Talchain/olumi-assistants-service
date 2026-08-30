@@ -37,10 +37,25 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from '../run-analysis.js';
-import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
+import legacyHappyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
 import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larger.json' with { type: 'json' };
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+
+// Current producer fixture: the positive constraint guards must exercise an
+// attested recommendation, while bespoke legacy fixtures below remain absent.
+const happyFixture = {
+  ...legacyHappyFixture,
+  option_comparison: legacyHappyFixture.results,
+  objective_ranking: {
+    direction: 'maximise', attested: true, status: 'computed',
+    ranked_options: [
+      { option_id: 'opt_a', rank: 1, win_probability: 0.62 },
+      { option_id: 'opt_b', rank: 2, win_probability: 0.38 },
+    ],
+  },
+  robustness: { ...legacyHappyFixture.robustness, recommended_option_id: 'opt_a' },
+};
 
 // ---------------------------------------------------------------------------
 // Test harness

@@ -540,7 +540,7 @@ export function buildAnalysisFromPriorFacts(
   }
   const fromEnrichment =
     enrichmentRecord !== null
-      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)
+      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope, undefined, { factResult: result })
       : null;
   if (enrichmentRecord !== null && fromEnrichment !== null) {
     if (fromEnrichment.options.length > 0) {

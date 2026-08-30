@@ -193,49 +193,7 @@ export interface RunProjection {
   readonly leader_option_id: string | null;
 }
 
-/**
- * The leading option's genuine `option_id`, or null.
- *
- * ⚠ `summary.winner.option_id` ALONE IS NOT AN IDENTITY. `compactAnalysis`
- * falls back `option_id ← option_label` when a raw option record carries no
- * `option_id`, so on legacy enrichment the field holds a display string and an
- * "id comparison" would silently degrade back into the label comparison this
- * whole change exists to remove. So the id is confirmed against the RAW
- * records — read through `winnerOptionResultSource`, the same single-sourced
- * reader `compactAnalysis` crowned the winner from, so "the id we compare is
- * the id of the option the projection called the leader" needs no second
- * derivation and no re-implementation of source precedence (trap #12).
- *
- * Deliberately NOT `result.leading_option_id` (PLoT's DECLARED leader): compact
- * crowns the highest-probability recommendable option, and the two are
- * different notions by design (see option-result-source.ts "STRATEGY SPLIT").
- * Taking identity from one and the displayed label from the other would let a
- * run report "unchanged" while showing two different labels.
- *
- * ⚠ THE CONFIRMATION IS ANCHORED TO THE CROWNED ENTRY, NOT EXISTENTIAL. An
- * "any entry in this source carries that id" test is defeated by a SIBLING
- * option whose own `option_id` collides with the id-less leader's
- * label-fallback:
- *
- *     [{ option_label: 'Offshore', win: 0.62 },                    ← crowned, NO id
- *      { option_id: 'Offshore', option_label: 'Onshore', win: 0.38 }]
- *
- * The sibling would vouch for an identity the leader never had, and the
- * comparison would then report a leader change under basis `option_id` — the
- * false claim this whole change exists to remove, wearing the badge that says
- * it was verified.
- *
- * So the entry must match the projection on all THREE fields `compactAnalysis`
- * carries through, which is what makes "this is the record we crowned"
- * decidable from the outside. The three conditions restate compact's own
- * passthrough rules, and each is load-bearing (there is a control test per
- * field):
- *   - `option_id` — passed through verbatim when present;
- *   - `option_label` — passed through when present, else compact substitutes
- *     the id (so an absent raw label means projected label === projected id);
- *   - `win_probability` — passed through when numeric, else coerced to 0.
- *     Separates a sibling that collides on BOTH id and label.
- */
+/** Use the same validated producer identity as the compact projection. */
 function readLeaderOptionId(
   summary: AnalysisResponseSummary,
 ): string | null {
@@ -252,7 +210,7 @@ export function projectRunFact(fact: HandlerFact): RunProjection | null {
   const result = (fact as { result?: { enrichment?: unknown } }).result;
   const enrichment = result?.enrichment;
   if (!enrichment) return null;
-  const summary = compactAnalysis(enrichment as V2RunResponseEnvelope);
+  const summary = compactAnalysis(enrichment as V2RunResponseEnvelope, undefined, { factResult: result as Record<string, unknown> });
   if (summary === null) return null;
   return {
     summary,

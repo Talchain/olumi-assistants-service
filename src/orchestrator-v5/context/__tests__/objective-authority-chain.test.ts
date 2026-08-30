@@ -8,7 +8,8 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
 import { assembleContextPack } from '../context-pack-assembler.js';
-import type { CoachingStatePack } from '../canonical-analysis-state.js';
+import { selectCanonicalAnalysisState, summariseCoachingStatePack, type CoachingStatePack } from '../canonical-analysis-state.js';
+import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
 import { buildUserMessage } from '../../routing/route-with-tool-use.js';
 import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-headline.js';
 import { enrichRunAnalysisWithDecisionReview, selectWinner } from '../../coaching/decision-review-enricher.js';
@@ -59,7 +60,7 @@ function coldPack(fact: HandlerFact, coachingContext = fresh) {
     { id: 'expensive', label: 'Expensive' }, { id: 'affordable', label: 'Affordable' },
   ]);
   const pack = assembleContextPack({ payload, priorTurns: [], priorFacts: [fact], analysis: summary,
-    coachingContext, modelFacingClaimSafety: { status: 'permitted' } });
+    coachingContext, mayNameLeadingOption: true, modelFacingClaimSafety: { status: 'permitted' } });
   return { summary, pack, prompt: buildUserMessage(pack, payload.message) };
 }
 
@@ -81,6 +82,7 @@ describe('objective authority through the actual CEE HTTP adapter and cold promp
     expect(pack.analysis?.runner_up).toBeNull();
     expect(pack.analysis?.margin_pp).toBeNull();
     expect(pack.display_analysis?.leading_option?.label).toBe('Affordable');
+    expect(pack.display_analysis?.options?.find((option) => option.label === 'Affordable')?.rank).toBe('2');
     expect(prompt).toContain('Affordable');
     expect(prompt).not.toMatch(/60 percentage points|"runner_up"|"margin"/);
   });
@@ -122,6 +124,51 @@ describe('objective authority through the actual CEE HTTP adapter and cold promp
     expect(buildUserMessage(pack, payload.message)).not.toContain('"leading_option"');
   });
 
+  it.each(['direction', 'threshold_frame', 'threshold'] as const)('an objective %s edit makes the saved run stale at the actual context caller', async (edit) => {
+    const { stored } = await adapterToStoredFact(objectiveRankingFixture());
+    const oldHash = stored.result.graph_hash_at_run;
+    const changed = structuredClone(graph);
+    if (edit === 'direction') changed.nodes[0].goal_direction = 'minimise';
+    if (edit === 'threshold_frame') Object.assign(changed.nodes[0], { goal_threshold_frame: 'absolute' });
+    if (edit === 'threshold') Object.assign(changed.nodes[0], { goal_threshold: 0.6 });
+    const currentHash = computeAnalysisAffectingGraphHash(changed);
+    expect(currentHash).not.toBe(oldHash);
+    const state = selectCanonicalAnalysisState({ priorFacts: [stored], currentGraphHash: currentHash });
+    const coaching = summariseCoachingStatePack(state);
+    expect(coaching.freshness).toBe('stale');
+    const { prompt } = coldPack(stored, coaching);
+    expect(prompt).not.toContain('"leading_option"');
+    expect(stored.result.graph_hash_at_run).toBe(oldHash);
+  });
+
+  it('label and descriptive provenance changes preserve freshness and the permitted recommendation', async () => {
+    const { stored } = await adapterToStoredFact(objectiveRankingFixture());
+    const renamed = structuredClone(graph);
+    Object.assign(renamed.nodes[0], { label: 'Value after discussion', description: 'Clarified wording', provenance: 'user note' });
+    const currentHash = computeAnalysisAffectingGraphHash(renamed);
+    expect(currentHash).toBe(stored.result.graph_hash_at_run);
+    const coaching = summariseCoachingStatePack(selectCanonicalAnalysisState({ priorFacts: [stored], currentGraphHash: currentHash }));
+    expect(coaching.freshness).toBe('fresh');
+    expect(coldPack(stored, coaching).pack.display_analysis?.leading_option?.label).toBe('Affordable');
+  });
+
+  it('stale run-over-run context cannot restore a current recommendation through its leader IDs', async () => {
+    const wire = { ...objectiveRankingFixture(), _meta: { builds: { plot: 'plot-fixture', isl: 'isl-fixture' } } };
+    const { stored } = await adapterToStoredFact(wire);
+    const previous = structuredClone(stored);
+    previous.result.computed_at = '2026-08-29T10:00:00.000Z';
+    const summary = buildAnalysisFromPriorFacts([stored]);
+    const assemble = (coachingContext: CoachingStatePack) => assembleContextPack({ payload, priorTurns: [],
+      priorFacts: [stored, previous], analysis: summary, coachingContext,
+      mayNameLeadingOption: true, modelFacingClaimSafety: { status: 'permitted' } });
+    const permitted = assemble(fresh);
+    expect(permitted.run_delta?.leader.current_leading_option_id).toBe('affordable');
+    const stale = assemble({ ...fresh, freshness: 'stale' });
+    expect(stale.run_delta).toBeDefined();
+    expect(stale.run_delta?.leader.current_leading_option_id).toBeUndefined();
+    expect(buildUserMessage(stale, payload.message)).not.toContain('"current_leading_option_id"');
+  });
+
   it('uses the producer ID for Decision Review and supplies no invented runner-up or margin', async () => {
     const { stored } = await adapterToStoredFact(objectiveRankingFixture());
     const invoke = vi.spyOn(review, 'invokeDecisionReview').mockRejectedValue(new Error('capture only'));
@@ -132,6 +179,66 @@ describe('objective authority through the actual CEE HTTP adapter and cold promp
     expect(input.winner).toMatchObject({ id: 'affordable', win_probability: 0.2 });
     expect(input.runner_up).toBeNull();
     expect(input._meta?.margin).toBeNull();
+  });
+
+  it('rejects a self-consistent alien response against the actual admitted request', async () => {
+    const wire = objectiveRankingFixture();
+    wire.option_comparison[1].option_id = 'alien';
+    wire.objective_ranking.ranked_options[1].option_id = 'alien';
+    wire.robustness.recommended_option_id = 'alien';
+    const { stored } = await adapterToStoredFact(wire);
+    expect(stored.result.leading_option_id).toBeNull();
+    expect(stored.result.win_probabilities).toBeUndefined();
+    expect(stored.result.constraint_verdict?.may_name_leading_option).toBe(false);
+    expect(coldPack(stored).prompt).not.toContain('"leading_option"');
+    const invoke = vi.spyOn(review, 'invokeDecisionReview');
+    await enrichRunAnalysisWithDecisionReview({ handlerFacts: [stored], requestId: 'alien', scenarioId,
+      signal: new AbortController().signal, brief: 'Compare within the budget.' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects an extra unranked high-share candidate without manufacturing a prompt rank', async () => {
+    const wire = objectiveRankingFixture();
+    wire.option_comparison.push({ ...wire.option_comparison[0], option_id: 'third', option_label: 'Third', win_probability: 0.9 });
+    const { stored } = await adapterToStoredFact(wire);
+    expect(readObjectiveRecommendation(wire)).toBeNull();
+    expect(stored.result.leading_option_id).toBeNull();
+    expect(stored.result.win_probabilities).toBeUndefined();
+    const { pack, prompt } = coldPack(stored);
+    expect(pack.display_analysis?.options).toBeUndefined();
+    expect(prompt).not.toContain('Third');
+  });
+
+  it('rejects a cold response whose IDs have been renamed after the admitted binding was stored', async () => {
+    const { stored } = await adapterToStoredFact(objectiveRankingFixture());
+    const wire = stored.result.enrichment as ReturnType<typeof objectiveRankingFixture>;
+    wire.option_comparison[1].option_id = 'alien';
+    wire.objective_ranking.ranked_options[1].option_id = 'alien';
+    wire.robustness.recommended_option_id = 'alien';
+    stored.result.leading_option_id = 'alien';
+    expect(coldPack(stored).summary?.winner.option_id).toBe('');
+    expect(projectRunFact(stored)?.leader_option_id).toBeNull();
+  });
+
+  it('keeps a permitted computed option even when a different ranked candidate failed', async () => {
+    const wire = objectiveRankingFixture();
+    wire.option_comparison[0].status = 'error';
+    const { stored } = await adapterToStoredFact(wire);
+    expect(stored.result.leading_option_id).toBe('affordable');
+    expect(coldPack(stored).summary?.winner.option_id).toBe('affordable');
+  });
+
+  it('copies equal producer dense ranks without inventing a second-place position', async () => {
+    const wire = objectiveRankingFixture();
+    wire.option_comparison.forEach((option) => { option.win_probability = 0.5; });
+    wire.objective_ranking.ranked_options = [
+      { option_id: 'affordable', rank: 1, win_probability: 0.5 },
+      { option_id: 'expensive', rank: 1, win_probability: 0.5 },
+    ];
+    const { stored } = await adapterToStoredFact(wire);
+    const { pack } = coldPack(stored);
+    expect(pack.display_analysis?.options?.map((option) => option.rank)).toEqual(['1', '1']);
+    expect(pack.display_analysis?.leading_option?.label).toBe('Affordable');
   });
 });
 

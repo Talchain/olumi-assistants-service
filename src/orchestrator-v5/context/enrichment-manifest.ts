@@ -472,7 +472,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
  * inverts the direction of truth. Re-run the command against PLoT, then decide
  * what the manifest should say.
  */
-export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP = '75e7f974+objective-working-tree' as const;
+export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP = 'e64e440' as const;
 export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS: ReadonlySet<string> = new Set<string>([
   '_meta', 'analysis_status', 'approximate', 'auto_noise_applied',
   'auto_noise_provenance', 'ceeTrace', 'cee_status', 'conditional_probabilities',

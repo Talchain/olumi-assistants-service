@@ -207,13 +207,6 @@ const NOT_ROBUST_SENTENCES: readonly string[] = [
 const NOT_ROBUST_SENTENCE_MAX_CHARS = Math.max(...NOT_ROBUST_SENTENCES.map((s) => s.length));
 
 /**
- * Elimination floor: an option with a finite win_probability strictly below
- * this value is "effectively eliminated". Mirrors the mission wording
- * "<1% win probability".
- */
-const ELIMINATED_WIN_PROBABILITY_CEILING = 0.01;
-
-/**
  * Minimum number of effectively-eliminated options before the narration
  * mentions it. One dead option in a two-way race is just the loser; two or
  * more is real information about the field narrowing.
@@ -614,14 +607,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     unsetOptionEffectFactorIds,
   } = input;
 
-  // Same-source resolution: the winner label, winner probability, and
-  // runner-up probability ALL come from the SAME source array — one of
-  // option_comparison[], results[], decision_brief.options[] (and the nested
-  // results-object shapes) in the shared CURRENT-first precedence order (see
-  // readOptionResultSources). This guards against the round-2 cross-source
-  // mixing risk — a clean label from one source paired with stale or
-  // inconsistent probability maths from another — and keeps the headline's
-  // winner identical to the review/coach surfaces on the same envelope.
+  // Recommendation identity comes from PLoT's permitted selection; its share
+  // and label come from the matching current comparison row.
   const winner = resolveWinner(enrichment, leading_option_id);
   if (winner === null) {
     // No source produced a winner with a clean label AND a finite
@@ -1363,31 +1350,11 @@ interface ResolvedWinner {
    * OTHER raw odds.
    */
   readonly runnerUpLabel: string | null;
-  /**
-   * Mission B (provisional_doctrine_v0): number of NON-winner entries in
-   * the SAME accepted source with a finite win_probability strictly below
-   * {@link ELIMINATED_WIN_PROBABILITY_CEILING} (i.e. effectively
-   * eliminated, <1% chance of winning). Same-source so the count can
-   * never mix probabilities across envelope shapes.
-   */
+  /** No permitted elimination count is supplied by the objective contract. */
   readonly eliminatedCount: number;
 }
 
-/**
- * Resolve the leading option's label, its win_probability, AND the
- * runner-up probability — all from the SAME source array in a single
- * pass. Iterates sources in priority order
- * ({@link readResultsArraySources}); a source is accepted only when
- * BOTH the candidate winner has a non-ID-shaped label AND a finite,
- * in-range win_probability. Sources that fail either check are
- * skipped (continue) so a thin/ID-shaped first source can be rescued
- * by a richer subsequent source — but each accepted source provides
- * the full triple, never a label from one and a probability from
- * another.
- *
- * Returns null when no source provides all three signals — the
- * caller treats null as "fall back to the locked template".
- */
+/** Read a clean label and share for PLoT's attested, permitted recommendation. */
 function resolveWinner(
   enrichment: Record<string, unknown>,
   leadingOptionId: string,

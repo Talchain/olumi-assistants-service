@@ -88,12 +88,11 @@ export interface DisplaySafeAnalysisOption {
 }
 
 /**
- * Lane 21 (P0-A) — one entry of the full ranked option list. `rank` is a
- * string ("1", "2", …) to preserve the structural no-numbers-anywhere
- * invariant of the display-safe projection; array order matches rank.
+ * One option's display-safe evidence. When supplied, rank is the producer's
+ * dense rank rendered as a string; an absent rank is never inferred from order.
  */
 export interface DisplaySafeRankedOption {
-  readonly rank: string;
+  readonly rank?: string;
   readonly label: string;
   /**
    * Display percent string, e.g. `"72%"` — same end-of-range honesty as
@@ -967,15 +966,12 @@ export function formatAnalysisForContext(
   // Lane 21 (P0-A) breadth fields — every field below follows the file's
   // omission semantics (absent, never null / empty).
 
-  // Full ranked option list. The raw projection arrives sorted by win
-  // probability descending and bounded (MAX_PROJECTED_OPTIONS); rank is a
-  // string so no raw number ever enters the display projection. Lane 30:
-  // each entry carries its `target_fit` percent when the raw option carries
-  // a valid goal-fit value.
+  // Copy only the producer's dense rank. Array position and raw share sorting
+  // never create a rank; without authority this remains neutral option data.
   const rawOptions = raw.options ?? [];
   if (rawOptions.length > 0) {
-    out.options = rawOptions.map((o, i) => ({
-      rank: String(i + 1),
+    out.options = rawOptions.map((o) => ({
+      ...(o.rank !== undefined ? { rank: String(o.rank) } : {}),
       ...formatOption(o),
     }));
   }
