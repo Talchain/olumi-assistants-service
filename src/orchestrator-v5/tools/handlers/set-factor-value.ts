@@ -27,6 +27,7 @@
 
 import { z } from 'zod';
 
+import { clearSupersededFactorMarkers } from '@talchain/schemas';
 import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -498,10 +499,12 @@ export function createSetFactorValueHandler(): HandlerFn {
     const capChanged =
       before.cap !== undefined && after.cap !== undefined && after.cap !== before.cap;
     let rescaledInterventionCount = 0;
+    let quantityQualifiersCleared = false;
 
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
-      const node = clone.nodes.find((n) => n.id === targetId);
+      const nodeIndex = clone.nodes.findIndex((n) => n.id === targetId);
+      const node = clone.nodes[nodeIndex];
       if (!node) {
         // Should be impossible — we found it on `graph` and clone is a deep
         // copy. Defensive throw for completeness.
@@ -614,6 +617,14 @@ export function createSetFactorValueHandler(): HandlerFn {
         );
       }
 
+      // The value and verified source have now been written. Retire stale
+      // selected-quantity qualifiers in this same mutation, before validation
+      // and commit. Replace the node: merging the helper's returned copy would
+      // resurrect a prior that it deliberately removed.
+      const clearedNode = clearSupersededFactorMarkers(node);
+      quantityQualifiersCleared = JSON.stringify(clearedNode) !== JSON.stringify(node);
+      clone.nodes[nodeIndex] = clearedNode;
+
       return { before, after };
     });
 
@@ -633,11 +644,14 @@ export function createSetFactorValueHandler(): HandlerFn {
     // non-matching key is refused earlier at guard 2b. It is kept so the invariant is
     // EXPLICIT rather than incidental: if the write rule ever changes, `noop` must not
     // silently start narrating phantom changes again. Do not cite it as mutation-verified.
-    const noop =
+    const valueUnchanged =
       before.value === after.value &&
       before.raw_value === after.raw_value &&
       unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
       before.cap === after.cap;
+    // Confirming the same number can still replace a fallback with supplied
+    // knowledge. That change must be committed and acknowledged as applied.
+    const noop = valueUnchanged && !quantityQualifiersCleared;
 
     const fact: SetFactorValueHandlerFact = {
       fact_type: 'set_factor_value',
@@ -690,7 +704,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     // a value the way a non-resolved `before` could.
     const changeText = noop
       ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
-      : beforeResolution.kind === 'resolved'
+      : beforeResolution.kind === 'resolved' && !valueUnchanged
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
 
