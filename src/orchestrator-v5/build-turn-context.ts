@@ -29,6 +29,8 @@ import type {
   TurnContext,
 } from '@talchain/schemas/orchestrator';
 import type { HandlerFactWithTurn } from './types/handler-fact.js';
+import { getModelManagementService, type ModelManagementService } from './model-management/index.js';
+import { deriveCanonicalNodeLabelTransition } from './context/canonical-label-transition.js';
 import type { SessionTurnWithContent } from './session/conversation-content.js';
 import type { GraphWriteFailureDisclosure } from './session/store.js';
 
@@ -69,6 +71,7 @@ import {
   reconcileRecentMutationFacts,
   type DurableRecentMutationFactRead,
   type HandlerFactsWithRecentMutationHistory,
+  type ReconciledRecentMutationFacts,
 } from './context/reconcile-recent-mutation-facts.js';
 import {
   SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
@@ -538,6 +541,8 @@ export interface BuildTurnContextOptions {
    * real Supabase.
    */
   readonly sessionStore?: SessionStore;
+  /** Read-only test dependency; production uses the existing flag-gated service. */
+  readonly mutationVersionReader?: Pick<ModelManagementService, 'getVersionForCommittedTurn' | 'getVersion'>;
   /**
    * The turn's canvas selection, as normalised at ingress
    * (`parseRequestExtensions`). Threaded from `RunTurnExecutorOptions` so the
@@ -753,13 +758,16 @@ export async function buildTurnContext(
     priorTurnsTotal,
     durableRead: durableMutationFactRead,
   });
+  const recentMutationHistory = await enrichRecentMutationLabelTransitions(
+    reconciledRecentMutationFacts, payload.scenario_id, requestId, options.mutationVersionReader,
+  );
   // Keep the ordinary fact array byte/iteration-compatible for analysis,
   // coaching and mutation-warrant consumers. The non-enumerable binding lets
   // the already-existing ContextPack call sites carry the separately scoped
   // durable receipt history without an executor edit or a second store read.
   const priorFactsWithRecentMutationHistory = bindRecentMutationHistoryToPriorFacts(
     priorFacts,
-    reconciledRecentMutationFacts,
+    recentMutationHistory,
   );
   const scenarioAnalysisFactSet = reconcileScenarioAnalysisFacts({
     scenarioId: payload.scenario_id,
@@ -1995,6 +2003,46 @@ async function fetchRecentAppliedMutationFacts(
       severity: 'warning',
     });
     return { status: 'degraded' };
+  }
+}
+
+/**
+ * Receipt completeness and qualitative transition knowledge are different
+ * questions. A failed optional version read never removes a receipt or turns
+ * incomplete history into absence. Only the reconciler's retained occurrences
+ * are enriched; at most its existing cap, never a second history query.
+ */
+async function enrichRecentMutationLabelTransitions(
+  history: ReconciledRecentMutationFacts,
+  scenarioId: string,
+  requestId: string,
+  injectedReader?: BuildTurnContextOptions['mutationVersionReader'],
+): Promise<ReconciledRecentMutationFacts> {
+  const entries = history.recent_mutation_entries;
+  if (config.cee.modelVersionsEnabled !== true || !entries?.some(
+    (entry) => entry.fact.fact_type === 'edit_graph' && entry.committed_turn_ref?.scenario_id === scenarioId,
+  )) return history;
+  try {
+    const reader = injectedReader ?? getModelManagementService();
+    const enriched = await Promise.all(entries.map(async (entry) => {
+      const ref = entry.committed_turn_ref;
+      if (entry.fact.fact_type !== 'edit_graph' || ref?.scenario_id !== scenarioId) return entry;
+      try {
+        const child = await reader.getVersionForCommittedTurn(scenarioId, ref.source_turn_id, ref.mutation_id);
+        if (child.status !== 'ok' || child.value.parent_version_id === null) return entry;
+        const parent = await reader.getVersion(scenarioId, child.value.parent_version_id);
+        if (parent.status !== 'ok') return entry;
+        const transition = deriveCanonicalNodeLabelTransition(ref, child.value, parent.value);
+        return transition ? Object.freeze({ ...entry, label_transition: transition }) : entry;
+      } catch {
+        return entry;
+      }
+    }));
+    return Object.freeze({ ...history, recent_mutation_entries: Object.freeze(enriched) });
+  } catch {
+    log.warn({ request_id: requestId, reason: 'version_read_unavailable' },
+      'V5 qualitative edit context unavailable; preserving existing receipt history');
+    return history;
   }
 }
 

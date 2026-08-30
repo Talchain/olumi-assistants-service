@@ -65,7 +65,10 @@ function makeClient(cfg: MockConfig = {}): {
           filters.limit = n;
           return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
         },
-        maybeSingle: () => Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
+        maybeSingle: () => {
+          filters.maybeSingle = true;
+          return Promise.resolve(cfg.selectResult ?? { data: null, error: null });
+        },
       };
       return chain as never;
     }),
@@ -482,6 +485,74 @@ describe('SupabaseModelVersionStore.getVersion', () => {
     const { client } = makeClient({ selectResult: { data: null, error: null } });
     const store = new SupabaseModelVersionStore(client);
     expect(await store.getVersion(SCENARIO, VERSION_ID)).toBeNull();
+  });
+});
+
+describe('SupabaseModelVersionStore.getVersionForCommittedTurn', () => {
+  const SOURCE_TURN = '55555555-5555-4555-8555-555555555555';
+  const MUTATION = '66666666-6666-4666-8666-666666666666';
+
+  it('reads the exact scenario/source-turn/mutation child, never the current head or newest row', async () => {
+    const row = summaryRow({
+      source_turn_id: SOURCE_TURN,
+      mutation_id: MUTATION,
+      creation_kind: 'committed_mutation',
+      parent_version_id: 'parent-version',
+    });
+    const { client, rpcCalls, selectCalls } = makeClient({ selectResult: { data: row, error: null } });
+    const store = new SupabaseModelVersionStore(client);
+    const version = await store.getVersionForCommittedTurn(SCENARIO, SOURCE_TURN, MUTATION);
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.table).toBe('model_versions');
+    expect(selectCalls[0]!.cols.split(',').map((column) => column.trim())).toEqual(expect.arrayContaining([
+      'graph', 'source_turn_id', 'mutation_id', 'creation_kind', 'parent_version_id', 'scenario_id', 'owner_user_id',
+    ]));
+    expect(selectCalls[0]!.filters).toEqual({
+      'eq:scenario_id': SCENARIO,
+      'eq:source_turn_id': SOURCE_TURN,
+      'eq:mutation_id': MUTATION,
+      'eq:creation_kind': 'committed_mutation',
+      maybeSingle: true,
+    });
+    expect(version).toMatchObject({
+      id: VERSION_ID,
+      scenario_id: SCENARIO,
+      source_turn_id: SOURCE_TURN,
+      mutation_id: MUTATION,
+      creation_kind: 'committed_mutation',
+      parent_version_id: 'parent-version',
+      graph: row.graph,
+    });
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it('an absent exact child remains null without falling back to a current or adjacent version', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: null, error: null } });
+    const store = new SupabaseModelVersionStore(client);
+    expect(await store.getVersionForCommittedTurn('other-scenario', SOURCE_TURN, MUTATION)).toBeNull();
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.filters['eq:scenario_id']).toBe('other-scenario');
+    expect(selectCalls[0]!.filters['eq:source_turn_id']).toBe(SOURCE_TURN);
+    expect(selectCalls[0]!.filters['eq:mutation_id']).toBe(MUTATION);
+  });
+
+  it.each(['PGRST116', '08006'])(
+    'ambiguous or failed child reads (%s) throw instead of picking one candidate',
+    async (code) => {
+      const { client } = makeClient({
+        selectResult: { data: null, error: { code, message: 'No unique readable child' } },
+      });
+      const store = new SupabaseModelVersionStore(client);
+      await expect(store.getVersionForCommittedTurn(SCENARIO, SOURCE_TURN, MUTATION))
+        .rejects.toBeInstanceOf(ModelVersionStoreError);
+    },
+  );
+
+  it('malformed returned metadata throws instead of fabricating a version record', async () => {
+    const { client } = makeClient({ selectResult: { data: summaryRow({ id: null }), error: null } });
+    const store = new SupabaseModelVersionStore(client);
+    await expect(store.getVersionForCommittedTurn(SCENARIO, SOURCE_TURN, MUTATION))
+      .rejects.toBeInstanceOf(ModelVersionStoreError);
   });
 });
 

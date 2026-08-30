@@ -334,6 +334,7 @@ export const RecentMutationSchema = z
     ]),
     summary: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
     target_label: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
+    transition: z.literal('node_label_changed').optional(),
   })
   .strict();
 

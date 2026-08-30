@@ -140,6 +140,10 @@ export interface ModelVersionStorePort {
     beforeSequence?: number,
   ): Promise<readonly ModelVersionSummary[]>;
   getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null>;
+  /** Exact committed-turn lookup; never substitutes the current/newest version. */
+  getVersionForCommittedTurn?(
+    scenarioId: string, sourceTurnId: string, mutationId: string,
+  ): Promise<ModelVersionRecord | null>;
   restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
   restoreVersionAtomic?(
     write: AtomicRestoreVersionWrite,
@@ -315,6 +319,27 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
     const pointer = (data as { current_model_version_id?: unknown } | null)
       ?.current_model_version_id;
     return typeof pointer === 'string' && pointer.length > 0 ? pointer : null;
+  }
+
+  async getVersionForCommittedTurn(
+    scenarioId: string,
+    sourceTurnId: string,
+    mutationId: string,
+  ): Promise<ModelVersionRecord | null> {
+    const { data, error } = await this.client
+      .from('model_versions')
+      .select(MODEL_VERSION_RECORD_COLUMNS)
+      .eq('scenario_id', scenarioId)
+      .eq('source_turn_id', sourceTurnId)
+      .eq('mutation_id', mutationId)
+      .eq('creation_kind', 'committed_mutation')
+      .maybeSingle();
+    if (error) {
+      throw new ModelVersionStoreError('Committed-turn version read failed', { cause: error });
+    }
+    if (data == null) return null;
+    const row = data as Record<string, unknown>;
+    return { ...parseSummaryRow(scenarioId, row), graph: row.graph ?? null };
   }
 }
 

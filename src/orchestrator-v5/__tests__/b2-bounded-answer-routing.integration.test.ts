@@ -570,6 +570,173 @@ describe('B2 real executor convergence', () => {
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
 
+  it('gives a named dependency question the same canonical answer as its selected deictic twin despite a contradictory caller graph', async () => {
+    const wrongAnswer =
+      'Replace CRM directly drives Reach 1,500 paid teams, and it is the only dependency.';
+    const contradictoryRequestGraph = structuredClone(GRAPH);
+    contradictoryRequestGraph.edges = [
+      { from: 'opt_new', to: 'goal', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ];
+    // Pin the disagreement, rather than trusting the fixture's name: the caller
+    // asserts an edge absent from the persisted graph, and drops both real ones.
+    expect(GRAPH.edges.filter((edge) => edge.to === 'goal').map((edge) => edge.from))
+      .toEqual(['adoption', 'capacity']);
+    expect(contradictoryRequestGraph.edges.map((edge) => [edge.from, edge.to]))
+      .toEqual([['opt_new', 'goal']]);
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const selectedAdapter = answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' });
+    const namedAdapter = answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' });
+
+    const selected = await runTurnExecutor(payload('What does this depend on?'), `req-${randomUUID()}`, {
+      routingAdapter: selectedAdapter,
+      handlerRegistry: handlers,
+      graphState: contradictoryRequestGraph,
+      selectedElements: { node_ids: ['goal'], edge_ids: [] },
+    });
+    const named = await runTurnExecutor(payload('What does "Reach 1,500 paid teams" depend on?'), `req-${randomUUID()}`, {
+      routingAdapter: namedAdapter,
+      handlerRegistry: handlers,
+      graphState: contradictoryRequestGraph,
+    });
+
+    expect(selected.groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
+    expect(selected.response.assistant_text).toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');
+    expect(selected.response.assistant_text).toContain('from Team Capacity Consumed to Reach 1,500 paid teams');
+    expect(named.response.assistant_text).toBe(selected.response.assistant_text);
+    expect(named.response.assistant_text).not.toContain('from Replace CRM to Reach 1,500 paid teams');
+    expect(named.response.assistant_text).not.toContain('only dependency');
+    expect(selectedAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(namedAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(persistedGraph).toEqual(GRAPH);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it.each([
+    ['another existing canonical object', 'adoption', 'adoption', 'Sales Rep Adoption Rate'],
+    ['a query/entity identity disagreement', 'goal', 'adoption', 'Sales Rep Adoption Rate'],
+  ])('does not let %s replace the object explicitly named in the dependency question', async (_case, queryId, entityId, entityLabel) => {
+    const wrongAnswer = 'Replace CRM is the only dependency of the object you named.';
+    // Both possible IDs really exist. This is not merely the easy unknown-ID
+    // validator case: an otherwise valid router proposal must not confer scope.
+    expect(GRAPH.nodes.some((node) => node.id === queryId)).toBe(true);
+    expect(GRAPH.nodes.some((node) => node.id === entityId)).toBe(true);
+    const adapter = answeringAdapter(
+      wrongAnswer,
+      { kind: 'dependencies', element_id: queryId },
+      { id: entityId, label: entityLabel, kind: 'node' },
+    );
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload('What does "Reach 1,500 paid teams" depend on?'),
+      `req-${randomUUID()}`,
+      { routingAdapter: adapter, handlerRegistry: handlers, graphState: structuredClone(GRAPH) },
+    );
+
+    expect(response.assistant_text).toContain('will not guess');
+    expect(response.assistant_text).not.toContain('only dependency');
+    expect(response.assistant_text).not.toContain('from Replace CRM to Sales Rep Adoption Rate');
+    expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    expect(persistedGraph).toEqual(GRAPH);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('does not treat a valid dependency proposal as a referent for an unselected deictic question', async () => {
+    const wrongAnswer = 'Sales Rep Adoption Rate is what this depends on.';
+    const adapter = answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' });
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response } = await runTurnExecutor(payload('What does this depend on?'), `req-${randomUUID()}`, {
+      routingAdapter: adapter,
+      handlerRegistry: handlers,
+      graphState: structuredClone(GRAPH),
+    });
+
+    expect(response.assistant_text).toContain('will not guess');
+    expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    expect(persistedGraph).toEqual(GRAPH);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it.each([
+    ['incidental generic mention', 'What does this depend on? I mostly care about cost.', true],
+    ['same prose with no generic node', 'What does this depend on? I mostly care about cost.', false],
+    ['incidental multiword mention', 'What does this depend on? Team Capacity Consumed seems relevant.', false],
+  ])('keeps the resolved selected answer with %s instead of asking for the existing selection again', async (_case, message, includeCost) => {
+    const wrongAnswer =
+      'Replace CRM has a direct connector into Reach 1,500 paid teams, so the selected goal depends directly on choosing that option.';
+    const currentGraph = {
+      ...structuredClone(GRAPH),
+      nodes: [
+        ...structuredClone(GRAPH.nodes),
+        ...(includeCost ? [{ id: 'cost', kind: 'factor', label: 'Cost', observed_state: { value: 0.5 } }] : []),
+      ],
+    };
+    persistedGraph = structuredClone(currentGraph);
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+    const options = {
+      handlerRegistry: handlers,
+      graphState: currentGraph,
+      selectedElements: { node_ids: ['goal'], edge_ids: [] },
+    };
+    const baseline = await runTurnExecutor(payload('What does this depend on?'), `req-${randomUUID()}`, {
+      ...options,
+      routingAdapter: answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' }),
+    });
+    const result = await runTurnExecutor(payload(message), `req-${randomUUID()}`, {
+      ...options,
+      routingAdapter: answeringAdapter(wrongAnswer, { kind: 'dependencies', element_id: 'goal' }),
+    });
+
+    expect(result.groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
+    expect(baseline.response.assistant_text).toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');
+    expect(result.response.assistant_text).toBe(baseline.response.assistant_text);
+    expect(result.response.assistant_text).not.toContain('Name or select');
+    expect(persistedGraph).toEqual(currentGraph);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
+  it('fails weak when the selected identity conflicts with the model-typed dependency subject', async () => {
+    const wrongAnswer = 'The selected goal has exactly the dependencies you asked about.';
+    const adapter = answeringAdapter(
+      wrongAnswer,
+      { kind: 'dependencies', element_id: 'capacity' },
+      { id: 'capacity', label: 'Team Capacity Consumed', kind: 'node' },
+    );
+    const handlers: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+      ['explain_from_structure' as V5ActionType, createExplainFromStructureHandler()],
+    ]);
+
+    const { response, groundedSelection } = await runTurnExecutor(
+      payload('What does "Team Capacity Consumed" depend on?'),
+      `req-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        handlerRegistry: handlers,
+        graphState: structuredClone(GRAPH),
+        selectedElements: { node_ids: ['goal'], edge_ids: [] },
+      },
+    );
+
+    // Preserve the deployed identity guard: the resolved selection cannot be
+    // replaced by a different otherwise-valid model-typed canonical subject.
+    expect(groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
+    expect(response.assistant_text).toContain('will not guess');
+    expect(response.assistant_text).not.toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');
+    expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    expect(persistedGraph).toEqual(GRAPH);
+    expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
+  });
+
   it.each([
     ['multiple nodes', { node_ids: ['goal', 'adoption'], edge_ids: [] }],
     ['mixed node and edge', { node_ids: ['goal'], edge_ids: ['adoption→goal'] }],
