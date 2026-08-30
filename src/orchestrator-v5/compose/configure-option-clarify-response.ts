@@ -298,6 +298,45 @@ export function composeConfigureOptionClarifyResponse(
     ].join(' ');
   })();
 
+  // ⭐⭐⭐ "NO CHANGE" — UNDERSTOOD, NAMED, AND HONESTLY UNRESOLVED.
+  //
+  // ⚠⚠ THE BRANCH IT REPLACES WAS THE `answered` ONE, which said *"…still has no
+  // effect value…"* and re-asked for a number. True, but it treated a fully
+  // understood answer as if the user had said nothing — and the ask that
+  // produced it used to tell them `0%` WAS the way to say this.
+  //
+  // ⛔ IT MUST NOT OFFER `0`, AND THAT IS THE WHOLE POINT. Measured on deployed
+  // ISL `28fe0c95`: an intervention is `do(X=x)`, so `0` drives the factor TO
+  // ZERO — a real cost, duration or headcount set to nothing. "This option
+  // leaves it alone" and "this option drives it to zero" are different claims
+  // and the product may never silently trade one for the other.
+  //
+  // ⛔ NOR MAY IT QUIETLY WRITE THE FACTOR'S CURRENT LEVEL. `do(X = baseline)`
+  // keeps the mean and destroys the variance (std 0.149197 → 0.000401, real
+  // Monte Carlo loop, n=4000), so the option would read as maximally robust for
+  // a reason unrelated to the decision. A confident wrong number is the one
+  // thing this product may never produce. ISL's honest primitive is an EMPTY
+  // `interventions={}`; CEE has no write path that can express it (measured:
+  // zero occurrences of any intervention-removal helper against a 447-hit
+  // `update_node` control), so the gap is NAMED rather than papered over —
+  // the no-hiding ruling, applied to a capability rather than to a surface.
+  //
+  // ⚠ IT PROMISES NO MECHANISM IT HAS NOT DRIVEN. `remove_edge` exists as a
+  // changeset (`handlers/describe-changeset.ts:297`), but whether a natural
+  // "disconnect them" routes to it is UNVERIFIED at this tip, and this composer
+  // has twice shipped a locus that turned out to be a dead end (the EdgePanel
+  // intervention row; the disabled canvas fieldset). So the copy names the two
+  // real resolutions as MODEL facts and stops there — P8: never advertise what
+  // you have not established the product accepts.
+  const noChangeText = answer !== null && answer.kind === 'no_change'
+    ? [
+        `Understood — "${answer.term}" means "${optionLabel}" leaves ${primaryFactor} where it is.`,
+        `I can't record that as an effect value: the number on that link sets the level ${primaryFactor} would REACH, so writing 0 would drive it to zero, which is a different claim about your decision.`,
+        `Two things would resolve it honestly — either tell me the level ${primaryFactor} would reach under "${optionLabel}", or take that link out of the model so the option is not claiming an effect it does not have.`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+      ].join(' ')
+    : null;
+
   const qualitativeText = answer !== null && answer.kind === 'qualitative'
     ? [
         `I can't put "${answer.term}" on that link — the effect value has to be a number.`,
@@ -359,7 +398,8 @@ export function composeConfigureOptionClarifyResponse(
   // underneath it — a cross-service hand-maintained mirror going stale exactly
   // as its own header warned (trap 12). It has now done that twice.
   const identificationComplete =
-    !answered && qualitativeText === null && messageNamesOptionEffectSlot(input.message);
+    !answered && qualitativeText === null && noChangeText === null
+    && messageNamesOptionEffectSlot(input.message);
 
   const assistant_text = identificationComplete
     ? [
@@ -399,6 +439,8 @@ export function composeConfigureOptionClarifyResponse(
         MISSING_VALUE_ASK_FORMAT_HINT,
         ...(analysisSentence === null ? [] : [analysisSentence]),
       ].join(' ')
+    : noChangeText !== null
+    ? noChangeText
     : qualitativeText !== null
     ? qualitativeText
     : outOfScale !== null

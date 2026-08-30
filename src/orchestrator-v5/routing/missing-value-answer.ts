@@ -491,6 +491,94 @@ export const MISSING_VALUE_ANSWER_KNOWN_DROPPED: readonly string[] = [
 ];
 
 /**
+ * ⭐⭐ THE PHRASE THE ASK TEACHES for "this option leaves that factor alone".
+ *
+ * It is the FIRST member of {@link MISSING_VALUE_NO_CHANGE_PHRASES} rather than
+ * a second spelling beside it, so the sentence the product prints and the set
+ * the reader accepts cannot drift (trap 12 — the ask is DERIVED from the
+ * vocabulary, never written next to it).
+ */
+export const MISSING_VALUE_NO_CHANGE_PHRASE = 'no change';
+
+/**
+ * ⭐⭐⭐ THE NO-CHANGE VOCABULARY — an EXACT, ANCHORED SET, deliberately not a
+ * pattern.
+ *
+ * ⚠⚠ THIS IS ONE HALF OF A TWO-HARM SEAM AND THE HALVES CANNOT SHARE A WINDOW
+ * (trap 22b). The two opposite harms:
+ *   · a user meaning **"this option doesn't touch that factor"** must NEVER
+ *     produce an intervention of `0` — that would set a real cost, duration or
+ *     headcount to zero (see the ISL measurements in the ask hint's header);
+ *   · a user meaning **"this drives it to zero"** must NEVER produce "no
+ *     intervention" — that would silently discard a genuine, decision-relevant
+ *     effect.
+ * Both directions are pinned in `__tests__/missing-value-answer.test.ts`, each
+ * with its opposite-direction twin, because a corpus that tests one direction is
+ * a guard watching one door.
+ *
+ * ⭐ WHY AN EXACT SET AND NOT A REGEX. English puts "nothing" on BOTH sides of
+ * this line — *"it does nothing **to** it"* is no change, *"it drives it **to**
+ * nothing"* is zero — and they differ by one preposition. A loose pattern over
+ * that is the natural-language predicate this estate lost four consecutive
+ * rounds to (trap 22f), each round fixing one direction and reopening the other.
+ * An exact set has no cliff and can only ever DECLINE: a phrasing outside it
+ * falls through to today's behaviour, which is the demand repeating — a gap, not
+ * a lie. Members are added on measured evidence, never on imagination.
+ *
+ * ⚠ THE LIST IS THE DATA. Nothing derives a phrase from a rule here; the ask
+ * sentence quotes member [0] and the reader matches the whole set.
+ */
+export const MISSING_VALUE_NO_CHANGE_PHRASES: readonly string[] = [
+  MISSING_VALUE_NO_CHANGE_PHRASE,
+  'no effect',
+  'unchanged',
+  'it stays the same',
+  'stays the same',
+  'it does not change',
+  'it doesn\'t change',
+  'it does nothing to it',
+  'does nothing to it',
+  'it leaves it unchanged',
+  'leaves it unchanged',
+  'it does not affect it',
+  'it doesn\'t affect it',
+  'does not affect it',
+  'doesn\'t affect it',
+];
+
+/**
+ * Optional openers a person puts in front of one of the phrases above. Stripped
+ * before the exact-set match so the SET stays the readable data and does not
+ * have to enumerate every subject a user might choose.
+ */
+const NO_CHANGE_OPENERS: readonly string[] = [
+  'this option ',
+  'the option ',
+  'that option ',
+  'it ',
+];
+
+/**
+ * Read the whole message as "this option leaves that factor alone", or `null`.
+ *
+ * ⚠ WHOLE-MESSAGE ONLY, by the same reasoning as {@link BARE_NUMBER_PATTERN}:
+ * anchored, so a verb, a figure, a referent or a second clause all fail the
+ * claim. It cannot creep, and it runs AFTER every numeric reading, so a message
+ * carrying a digit can never reach it.
+ */
+function readNoChange(text: string): boolean {
+  const stripped = text.replace(/[.!]+$/u, '').trim();
+  if (MISSING_VALUE_NO_CHANGE_PHRASES.includes(stripped)) return true;
+  for (const opener of NO_CHANGE_OPENERS) {
+    if (stripped.startsWith(opener)) {
+      const rest = stripped.slice(opener.length).trim();
+      if (MISSING_VALUE_NO_CHANGE_PHRASES.includes(rest)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * ⭐⭐ THE FORMS THE ASK MAY OFFER — and they live HERE, in the module that
  * decides acceptance, because P8 is "never ask what you cannot accept".
  *
@@ -550,15 +638,58 @@ export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
  * That is a GAP, not a lie — and the refusal copy names the fix, so it costs one
  * turn rather than dead-ending.
  *
- * ⚠ THE ANCHORS ARE THE ESTATE'S OWN, NOT MINTED HERE. `0%` / `100%` are glossed
- * with the wording `compose/configure-option-clarify-response.ts` already ships
- * ("this option does nothing to it" / "this option drives it fully"). The
- * contract declares `InterventionV3.value` as a bare `z.number()`
- * (`schemas/cee-v3.ts:407`) with the 0–1 bound stated by the PRODUCER
- * (`prompts/edit-graph-v6.ts:116`) — a normalised magnitude with no further
- * scientific interpretation declared, which is what makes a `/100` transform
- * innocent. A stronger anchor wording ("strongest plausible effect") would be a
- * semantic claim no producer backs, so it is not used.
+ * ⚠⚠⚠ THE ANCHOR GLOSS WAS FALSE, AND IT WAS THE MOST DANGEROUS SENTENCE IN
+ * THIS MODULE. CORRECTED 30 Aug 2026 (Codex, `CHANGES_REQUIRED` on #1217) —
+ * corrected IN PLACE rather than deleted, because the estate's own record of
+ * how this gloss got here is what stops it coming back (trap 14).
+ *
+ * The withdrawn text said the anchors were "the estate's own, not minted here",
+ * glossed `0%` as *"this option does nothing to it"* and `100%` as *"it drives
+ * it fully"*, and reasoned that a `/100` transform is innocent because the
+ * contract declares `InterventionV3.value` as a bare `z.number()`. The
+ * ARITHMETIC half of that is still true. **The MEANING half was wrong, and the
+ * inherited gloss it borrowed was wrong too — a false label faithfully copied
+ * from a sibling composer is still a false label.**
+ *
+ * ⭐⭐⭐ WHAT THE NUMBER ACTUALLY IS — SETTLED BY EXECUTION, NOT BY READING.
+ * Measured against the EXACT deployed ISL `28fe0c950f6ca5737f4555c863353d37b734dddf`,
+ * `SCMEvaluatorV2` imported directly from
+ * `src/services/robustness_analyzer_v2.py` (SHA-256
+ * `823263f081eb26ee820653c91d6252cdb655742fb37a96538e75ecf84e08cf77`) — the real
+ * class, not a reimplementation:
+ *
+ *   · `evaluate`'s own docstring (`:1409`) defines the parameter as **`do(X=x)`**.
+ *   · `:1428-1431` OVERWRITE the node's structural equation:
+ *       `node_values[node_id] = interventions[node_id]`  // "Interventional
+ *                                                        //  value overrides
+ *                                                        //  structural equations"
+ *   · Baseline 0.6, unit-strength factor→goal edge:
+ *       no intervention → 0.6 · `do(x=0)` → **0** · `do(x=0.6)` → 0.6 · `do(x=1)` → 1
+ *   · CONTROL, zero edge strength, `do(x=1)` → 0 (the probe is not blind).
+ *   · CONTROL, baseline 0.8 with `do(x=0.3)` → **0.3, not 0.24** — the baseline is
+ *     OVERWRITTEN, never scaled.
+ *   · FOUR-WAY DISCRIMINATOR (baseline 0.8, `do(x=0.5)`, strength 0.5), chosen so
+ *     every rival reading predicts a DIFFERENT number: absolute assignment → 0.25 ·
+ *     change-from-baseline → 0.65 · baseline multiplier → 0.20 · causal strength →
+ *     0.40. **MEASURED 0.25.** The other three are refuted by that single run.
+ *
+ * **So the value is an ABSOLUTE ASSIGNMENT OF THE FACTOR'S OWN LEVEL.** It is not
+ * causal strength, and it is not change-from-baseline. Those are three different
+ * quantities and the withdrawn copy conflated all three.
+ *
+ * ⛔ THE EXECUTION CONSEQUENCE, which is why this was a blocker and not a nit:
+ * a colleague who followed the advertised anchor — *"0% if this option does
+ * nothing to it"* — **SET A REAL COST, DURATION OR HEADCOUNT TO ZERO** and
+ * materially changed their own analysis. The parser reading `0%` correctly never
+ * made the sentence true. ISL range-checks the value NOWHERE on this path
+ * (`InterventionOption.interventions` is a bare `Dict[str, float]`,
+ * `models/robustness_v2.py:607`), so nothing downstream would have caught it.
+ *
+ * ⭐ THE CORRECTED ANCHORS SAY WHAT THE NUMBER DOES: `0%` is the factor FALLING
+ * TO ZERO, `100%` is it reaching the TOP OF ITS SCALE. The percentage is of the
+ * FACTOR'S OWN SCALE (pass 3d's `scale_frame` divisor — `records/projector.ts`),
+ * never of "the effect". The `/100` arithmetic is untouched; only the claim about
+ * what the resulting number MEANS has changed.
  *
  * ⚠ AND IT CARRIES NO SPECIMEN MID-SCALE VALUE. An earlier cut of this sentence
  * quoted exemplars verbatim and was caught by an EXISTING guard —
@@ -570,12 +701,42 @@ export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
  * ⚠ PAIRED WITH ACCEPTANCE, ALWAYS. Every `example` in the list above must BIND
  * through the real binder — asserted in
  * `__tests__/ask-copy-acceptance-pairing.test.ts` — so the ask cannot advertise a
- * form the product refuses (P8).
+ * form the product refuses (P8). That pairing now covers BOTH directions: the
+ * numeric exemplars must read numeric, and {@link MISSING_VALUE_NO_CHANGE_PHRASE}
+ * must read as {@link MissingValueAnswer} of kind `no_change` — never as `0`.
+ *
+ * ⭐⭐ "NO CHANGE" AND "ZERO" ARE DIFFERENT ANSWERS AND THE ASK NOW OFFERS BOTH.
+ * They were previously inexpressible and indistinguishable in the WORST possible
+ * arrangement: the ask taught `0%` as the way to say "no effect" (binding the
+ * factor to zero — the harm above), while every genuine no-change phrasing read
+ * `null` and the demand simply repeated. Measured at pristine `a77979ec`:
+ * `"no change"`, `"no effect"`, `"it does nothing to it"`, `"this option does
+ * nothing to it"`, `"it leaves it unchanged"` → **all five `null`.**
+ *
+ * ⚠⚠ AND WHY `no_change` IS A DISTINCT KIND RATHER THAN THE BASELINE VALUE.
+ * The obvious implementation — write `do(X = the factor's current level)` — is
+ * WRONG, and this was settled by execution against the same deployed ISL, not
+ * reasoned. An intervention REPLACES the node's per-draw sample (`:1429`
+ * short-circuits before the `factor_values` lookup at `:1438`), so pinning at
+ * the baseline preserves the MEAN and destroys the VARIANCE. Measured on the
+ * real Monte Carlo loop, n=4000, seed 424242, `x ~ normal(0.6, 0.15)`:
+ *
+ *   `interventions={}`   → mean 0.602552, std **0.149197**
+ *   `do(x=0.6)`          → mean 0.599466, std **0.000401**   ← 372× collapse
+ *
+ * So writing the baseline would make the option look maximally robust **for a
+ * reason that has nothing to do with the decision** — a confident wrong number,
+ * which is the one thing this product may never produce. ISL already ships the
+ * honest primitive: an EMPTY `interventions={}` evaluates on the sampled draws.
+ * Recording `no_change` as its own reading keeps that door open and, until the
+ * write path can act on it, keeps the product from silently choosing either
+ * wrong answer on the user's behalf.
  */
 export const MISSING_VALUE_ASK_FORMAT_HINT: string =
-  `How strong is that effect? Answer as a percentage — ${MISSING_VALUE_ASK_EXEMPLARS[0]!.example} `
-  + `if this option does nothing to it, ${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} `
-  + 'if it drives it on its own.';
+  'That number is the level the factor reaches, not how much it moves: '
+  + `${MISSING_VALUE_ASK_EXEMPLARS[0]!.example} means zero, `
+  + `${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} means its top. `
+  + `Say "${MISSING_VALUE_NO_CHANGE_PHRASE}" if the option leaves it alone.`;
 
 export type MissingValueAnswer =
   | {
@@ -636,6 +797,29 @@ export type MissingValueAnswer =
   | {
       readonly kind: 'qualitative';
       /** The user's own words, quoted back. NEVER mapped to a number. */
+      readonly term: string;
+    }
+  | {
+      /**
+       * ⭐⭐⭐ "THIS OPTION LEAVES THAT FACTOR ALONE" — a THIRD kind, and the
+       * whole point is that it is neither of the other two.
+       *
+       * It is NOT `numeric` with a value of `0`: zero is an absolute assignment
+       * that drives the factor TO zero (`do(X=0)`, measured on deployed ISL
+       * `28fe0c95` — see the ask hint's header). It is NOT `qualitative`
+       * either: a qualitative term is a word we decline to interpret, whereas
+       * this one is fully understood — we simply cannot ACT on it yet.
+       *
+       * ⚠ A CONSUMER MUST NOT SUBSTITUTE A NUMBER FOR IT, AND THAT INCLUDES THE
+       * FACTOR'S OWN BASELINE. Writing `do(X = baseline)` preserves the mean and
+       * destroys the variance (std 0.149197 → 0.000401 on the real Monte Carlo
+       * loop, n=4000) — the option would read as maximally robust for a reason
+       * unrelated to the decision. The honest primitive is ISL's empty
+       * `interventions={}`; until a write path can express that, a consumer says
+       * so plainly rather than choosing a wrong number on the user's behalf.
+       */
+      readonly kind: 'no_change';
+      /** The user's own words, quoted back — never rewritten. */
       readonly term: string;
     };
 
@@ -749,6 +933,25 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
     if (trailing !== null && trailing.referent !== null) {
       return { kind: 'numeric', ...trailing, leadingContext, elliptical: false };
     }
+  }
+
+  // (3) ⭐⭐ "NO CHANGE" — LAST AMONG THE NUMERIC ARMS BY CONSTRUCTION, AND THAT
+  // ORDER IS THE SAFETY.
+  //
+  // Every numeric reading above has already declined by the time this runs, so a
+  // message carrying a figure can NEVER be read as no-change: `"0%"`, `"set it
+  // to 0"` and `"down to zero"` are claimed upstream (or, for the last, decline
+  // everywhere) and never reach here. That is the opposite-direction twin
+  // enforced STRUCTURALLY rather than by a rule this function has to get right —
+  // the zero direction cannot be stolen by the no-change direction because it is
+  // resolved first.
+  //
+  // It sits ABOVE the qualitative arm because "no change" is a phrase we
+  // UNDERSTAND, not a word we decline to interpret. Demoting it to qualitative
+  // would quote it back and re-ask for a number, which is exactly the loop this
+  // reading exists to end.
+  if (readNoChange(text)) {
+    return { kind: 'no_change', term: normalise(message).replace(/[.!]+$/u, '').trim() };
   }
 
   const q = QUALITATIVE_ANSWER_PATTERN.exec(text);

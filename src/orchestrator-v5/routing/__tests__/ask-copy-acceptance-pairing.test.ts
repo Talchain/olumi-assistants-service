@@ -20,6 +20,8 @@ import { describe, expect, it } from 'vitest';
 import {
   MISSING_VALUE_ASK_EXEMPLARS,
   MISSING_VALUE_ASK_FORMAT_HINT,
+  MISSING_VALUE_NO_CHANGE_PHRASE,
+  MISSING_VALUE_NO_CHANGE_PHRASES,
   readMissingValueAnswer,
 } from '../missing-value-answer.js';
 import { resolveRepairValueBinding } from '../repair-value-binding.js';
@@ -77,7 +79,129 @@ describe('every phrasing the ask offers is one the binder accepts', () => {
     const [low, high] = MISSING_VALUE_ASK_EXEMPLARS;
     expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(low!.example);
     expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(high!.example);
-    expect(MISSING_VALUE_ASK_FORMAT_HINT.toLowerCase()).toContain('percentage');
+    // The no-change phrase is the THIRD answer the ask offers, and it is quoted
+    // from the vocabulary the reader matches — not spelled beside it.
+    expect(MISSING_VALUE_ASK_FORMAT_HINT).toContain(MISSING_VALUE_NO_CHANGE_PHRASE);
+  });
+
+  it('⛔ THE ASK DESCRIBES AN ABSOLUTE ASSIGNMENT, NEVER CAUSAL STRENGTH', () => {
+    // ⚠⚠ THIS GUARD REPLACES A `toContain('percentage')` ASSERTION, and the
+    // swap is a STRENGTHENING, not a relaxation — recorded here because a
+    // weakened guard that looks like a tidy-up is how this estate loses seams.
+    //
+    // The old assertion checked the ask named the NOTATION. It was satisfied by
+    // the sentence Codex blocked this PR over — *"How strong is that effect?
+    // … 0% if this option does nothing to it"* — which named the notation
+    // correctly and the QUANTITY falsely. A user who followed it set a real
+    // cost to zero.
+    //
+    // Measured on deployed ISL `28fe0c95`: the value is `do(X=x)`, an absolute
+    // assignment of the factor's own level. So the properties worth guarding are
+    // semantic, and the notation is carried by the `%` in the anchors above.
+    const hint = MISSING_VALUE_ASK_FORMAT_HINT.toLowerCase();
+
+    // (a) It must not ask about the STRENGTH of an effect.
+    expect(hint).not.toContain('how strong');
+    expect(hint).not.toContain('strength');
+    // (b) It must never gloss the low anchor as "no effect" — that is the exact
+    //     false equivalence that made zeroing a cost look like the safe answer.
+    expect(hint).not.toContain('does nothing to it');
+    expect(hint).not.toContain('no effect');
+    // (c) It must not describe the number as the SIZE OF A CHANGE either — that
+    //     is change-from-baseline, refuted by the same four-way discriminator.
+    expect(hint).not.toMatch(/how (?:big|much) (?:the|a) (?:change|difference) is/);
+    // (d) Positive control — the guard must be capable of failing. It asserts
+    //     the sentence says what the number IS, so a sentence that dropped the
+    //     claim entirely would RED here rather than passing silently.
+    expect(hint).toContain('level');
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐⭐ THE TWO HARMS, EACH WITH ITS OPPOSITE-DIRECTION TWIN.
+  //
+  // One seam, two opposite failures, and they CANNOT SHARE A WINDOW (trap 22b).
+  // The estate lost four consecutive rounds on one such predicate, each round
+  // fixing one direction and silently reopening the other, every round under a
+  // fully green suite. So both directions are pinned here, together, and each
+  // names the harm it prevents.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  it.each(MISSING_VALUE_NO_CHANGE_PHRASES.map((p) => [p] as const))(
+    'HARM 1 — "%s" means NO CHANGE and must never bind an intervention of 0',
+    (phrase) => {
+      const answer = readMissingValueAnswer(phrase);
+      expect(answer, `"${phrase}" reads as nothing at all`).not.toBeNull();
+      // Bound by KIND, not by a value predicate another reading could satisfy.
+      expect(answer?.kind, `"${phrase}" must read no_change`).toBe('no_change');
+      // ⛔ THE HARM, STATED AS AN ASSERTION: a user saying "this option leaves
+      // that factor alone" must NEVER produce the number 0. On deployed ISL
+      // `28fe0c95` an intervention is `do(X=x)`, so 0 SETS the factor to zero —
+      // a real cost, duration or headcount driven to nothing.
+      expect(answer?.kind).not.toBe('numeric');
+      // And it must not be demoted to an uninterpretable word either: this is a
+      // phrase the product UNDERSTANDS and must answer, not quote back.
+      expect(answer?.kind).not.toBe('qualitative');
+    },
+  );
+
+  it.each([
+    ['0%', 0],
+    ['0', 0],
+    ['set it to 0', 0],
+    ['set it to 0%', 0],
+    ['0.0', 0],
+  ] as const)(
+    'HARM 2 (TWIN) — "%s" means DRIVE IT TO ZERO and must never read as no_change',
+    (phrase, expected) => {
+      const answer = readMissingValueAnswer(phrase);
+      expect(answer, `"${phrase}" reads as nothing at all`).not.toBeNull();
+      // ⛔ THE MIRROR HARM: a user saying "this option drives it to zero" must
+      // NEVER be recorded as "no intervention". That would silently discard a
+      // genuine, decision-relevant effect — and, because ISL evaluates an empty
+      // `interventions={}` on the SAMPLED draws, it would also restore a
+      // variance the user had just told us is gone.
+      expect(answer?.kind, `"${phrase}" must stay numeric`).toBe('numeric');
+      if (answer?.kind !== 'numeric') return;
+      expect(Number(answer.modelUnitText)).toBe(expected);
+    },
+  );
+
+  // ⭐⭐ A HAND-WRITTEN CORPUS, DELIBERATELY *NOT* DERIVED FROM THE EXPORTED SET
+  // — and this is the only thing in the file that can notice the set is SHORT.
+  //
+  // `HARM 1` above iterates `MISSING_VALUE_NO_CHANGE_PHRASES`, so it proves the
+  // reader AGREES with the list and is structurally blind to a member being
+  // removed: delete a phrase and you delete its own test case, and the suite
+  // stays green (trap 12d — deriving a guard MOVES the risk, it does not remove
+  // it). These are written out, so a shrinking vocabulary REDs here.
+  //
+  // ⚠ THEY ARE ALSO THE ONLY CASES IN THIS FILE NOT SOURCED FROM THE AUTHOR'S
+  // MODEL OF THE READER. Every one is a phrasing measured reading `null` at
+  // pristine `a77979ec` — i.e. a real dead end, not an imagined one.
+  it.each([
+    'no change',
+    'No change.',
+    'no effect',
+    'unchanged',
+    'it does nothing to it',
+    'this option does nothing to it',
+    'it leaves it unchanged',
+    'it stays the same',
+    "it doesn't affect it",
+  ])('CORPUS (underived) — "%s" must read as no_change', (phrase) => {
+    expect(readMissingValueAnswer(phrase)?.kind).toBe('no_change');
+  });
+
+  it('the two directions are DISCRIMINATED, not merely both handled', () => {
+    // ⚠ A GUARD THAT PINS ITS OWN PRECONDITION (trap 13b). Each block above
+    // could pass while the reader answered the SAME way to both classes — if,
+    // say, everything read numeric. This asserts the reader actually
+    // distinguishes them, so the pair cannot decay into two tests of one branch.
+    const noChange = readMissingValueAnswer(MISSING_VALUE_NO_CHANGE_PHRASE);
+    const zero = readMissingValueAnswer('0%');
+    expect(noChange?.kind).not.toBe(zero?.kind);
+    expect(noChange?.kind).toBe('no_change');
+    expect(zero?.kind).toBe('numeric');
   });
 
   it('⚠⚠ THE HINT NEVER NAMES THE INTERNAL REPRESENTATION — the founder ruling', () => {
