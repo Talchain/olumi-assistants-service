@@ -13,9 +13,11 @@ import {
   FALLBACK_STALENESS_REASON,
 } from '../analysis-fallback.js';
 import { compactAnalysis } from '../../../orchestrator/context/analysis-compact.js';
+import { attestedConsumerFixture } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 
 function runAnalysisFact(overrides: {
   leadingOptionId?: string | null;
+  attested?: boolean;
   winProbabilities?: Record<string, number>;
   noop?: boolean;
   summary?: string;
@@ -31,6 +33,10 @@ function runAnalysisFact(overrides: {
       leading_option_id: leadingOptionId,
       win_probabilities: overrides.winProbabilities,
       summary: overrides.summary ?? 'Prior run',
+      ...(overrides.attested && leadingOptionId && overrides.winProbabilities ? {
+        enrichment: attestedConsumerFixture({ analysis_status: 'complete' }, leadingOptionId,
+          Object.entries(overrides.winProbabilities).map(([option_id, win_probability]) => ({ option_id, win_probability }))),
+      } : {}),
     },
   };
 }
@@ -60,6 +66,7 @@ describe('buildAnalysisFromPriorFacts', () => {
 
   it('projects winner from leading_option_id + its win probability', () => {
     const fact = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-a',
       winProbabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
     });
@@ -78,13 +85,13 @@ describe('buildAnalysisFromPriorFacts', () => {
     expect(summary.options.map((o) => o.option_id)).toEqual(['opt-a', 'opt-b', 'opt-c']);
   });
 
-  it('computes margin as winner minus runner-up', () => {
+  it('does not manufacture a permitted margin from historical raw shares', () => {
     const fact = runAnalysisFact({
       leadingOptionId: 'opt-a',
       winProbabilities: { 'opt-a': 0.7, 'opt-b': 0.3 },
     });
     const summary = buildAnalysisFromPriorFacts([fact])!;
-    expect(summary.margin).toBeCloseTo(0.4);
+    expect(summary.margin).toBeNull();
   });
 
   it('returns null margin when fewer than 2 options', () => {
@@ -119,10 +126,12 @@ describe('buildAnalysisFromPriorFacts', () => {
 
   it('picks the FIRST run_analysis fact when multiple present (newest-first order)', () => {
     const newest = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-new',
       winProbabilities: { 'opt-new': 0.9, 'opt-old': 0.1 },
     });
     const older = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-old',
       winProbabilities: { 'opt-old': 0.9, 'opt-new': 0.1 },
     });
@@ -137,7 +146,8 @@ describe('buildAnalysisFromPriorFacts', () => {
     });
     const summary = buildAnalysisFromPriorFacts([fact])!;
     expect(summary).not.toBeNull();
-    expect(summary.winner.option_id).toBe('opt-b');
+    expect(summary.winner.option_id).toBe('');
+    expect(summary.options[0].option_id).toBe('opt-b');
   });
 
   it('returns null when neither leading_option_id nor win_probabilities extractable', () => {
@@ -154,6 +164,7 @@ describe('buildAnalysisFromPriorFacts', () => {
 
   it('resolves option labels from the current graph when provided', () => {
     const fact = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-a',
       winProbabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
     });
@@ -170,6 +181,7 @@ describe('buildAnalysisFromPriorFacts', () => {
 
   it('falls back to option_id when the graph has no matching label', () => {
     const fact = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-a',
       winProbabilities: { 'opt-a': 0.6, 'opt-unknown': 0.4 },
     });
@@ -184,6 +196,7 @@ describe('buildAnalysisFromPriorFacts', () => {
 
   it('trims whitespace labels and falls back to id when label is empty', () => {
     const fact = runAnalysisFact({
+      attested: true,
       leadingOptionId: 'opt-a',
       winProbabilities: { 'opt-a': 1.0 },
     });
@@ -286,6 +299,7 @@ describe('buildAnalysisFromPriorFacts', () => {
       expect(summary.top_drivers).toEqual([]);
       expect(summary.robustness_level).toBe('unknown');
       expect(summary.options).toHaveLength(2);
+      expect(summary.winner.option_id).toBe('');
     });
 
     it('falls back to minimal extraction when enrichment is malformed (string)', () => {
@@ -493,7 +507,8 @@ describe('buildAnalysisFromPriorFacts', () => {
     });
 
     it('relabels options from optionLabelSource even when enrichment provided its own labels', () => {
-      const fact = runAnalysisFactWithEnrichment(RICH_ENRICHMENT);
+      const current = attestedConsumerFixture(RICH_ENRICHMENT, 'opt-launch', RICH_ENRICHMENT.results as Record<string, unknown>[]);
+      const fact = runAnalysisFactWithEnrichment(current);
       const summary = buildAnalysisFromPriorFacts([fact], [
         { id: 'opt-launch', label: 'Plan A: Ship This Quarter' },
       ])!;
@@ -1119,8 +1134,9 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
       'positive',
       'negative',
     ]);
-    // Winner/options from option_comparison are untouched by the override.
-    expect(summary!.winner.option_id).toBe('opt-a');
+    // The override restores driver evidence, not absent objective authority.
+    expect(summary!.winner.option_id).toBe('');
+    expect(summary!.options[0].option_id).toBe('opt-a');
   });
 
   it('ingress vs fallback parity: identical top-driver projection for the same enrichment', () => {

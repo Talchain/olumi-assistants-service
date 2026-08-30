@@ -38,6 +38,14 @@ function makeSummary(
   overrides: Partial<AnalysisResponseSummaryWithSignals> = {},
 ): AnalysisResponseSummaryWithSignals {
   return {
+    objective_ranking: { direction: 'maximise', attested: true, status: 'computed', ranked_options: [
+      { option_id: 'opt-a', rank: 1, win_probability: 0.72 },
+      { option_id: 'opt-c', rank: 2, win_probability: 0.22 },
+      { option_id: 'opt-b', rank: 3, win_probability: 0.05 },
+      { option_id: 'opt-d', rank: 4, win_probability: 0.01 },
+    ] },
+    recommended_option_id: 'opt-a',
+    win_probabilities: { 'opt-a': 0.72, 'opt-c': 0.22, 'opt-b': 0.05, 'opt-d': 0.01 },
     winner: { option_id: 'opt-a', option_label: 'Hire locally', win_probability: 0.72 },
     options: FOUR_OPTIONS,
     top_drivers: [driver('f1', 'Engineering Capacity', 0.43)],
@@ -66,10 +74,10 @@ describe('ContextPack analysis projection breadth (Lane 21)', () => {
   it('carries ALL options — label + probability, sorted by probability descending', () => {
     const pack = assemble(makeSummary());
     expect(pack.analysis?.options).toEqual([
-      { label: 'Hire locally', probability: 0.72 },
-      { label: 'Status quo', probability: 0.22 },
-      { label: 'Offshore partner', probability: 0.05 },
-      { label: 'Tiered pricing', probability: 0.01 },
+      { rank: 1, label: 'Hire locally', probability: 0.72 },
+      { rank: 2, label: 'Status quo', probability: 0.22 },
+      { rank: 3, label: 'Offshore partner', probability: 0.05 },
+      { rank: 4, label: 'Tiered pricing', probability: 0.01 },
     ]);
   });
 
@@ -389,21 +397,18 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
   it('attaches goal_fit_probability to matching options by structural option_id', () => {
     const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
     expect(pack.analysis?.options).toEqual([
-      { label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.293 },
-      { label: 'Status quo', probability: 0.22, goal_fit_probability: 0.61 },
-      { label: 'Offshore partner', probability: 0.05 },
-      { label: 'Tiered pricing', probability: 0.01 },
+      { rank: 1, label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.293 },
+      { rank: 2, label: 'Status quo', probability: 0.22, goal_fit_probability: 0.61 },
+      { rank: 3, label: 'Offshore partner', probability: 0.05 },
+      { rank: 4, label: 'Tiered pricing', probability: 0.01 },
     ]);
     expect(pack.analysis?.leading_option).toEqual({
+      rank: 1,
       label: 'Hire locally',
       probability: 0.72,
       goal_fit_probability: 0.293,
     });
-    expect(pack.analysis?.runner_up).toEqual({
-      label: 'Status quo',
-      probability: 0.22,
-      goal_fit_probability: 0.61,
-    });
+    expect(pack.analysis?.runner_up).toBeNull(); // no permitted runner-up in this contract
   });
 
   it('matches by option_id even when the option was relabelled from the current graph', () => {
@@ -418,6 +423,7 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
       }),
     );
     expect(pack.analysis?.options?.[0]).toEqual({
+      rank: 1,
       label: 'Hire locally',
       probability: 0.72,
       goal_fit_probability: 0.293,
@@ -433,7 +439,7 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
       }),
     );
     const statusQuo = pack.analysis?.options?.find((o) => o.label === 'Status quo');
-    expect(statusQuo).toEqual({ label: 'Status quo', probability: 0.22, goal_fit_probability: 0.4 });
+    expect(statusQuo).toEqual({ rank: 2, label: 'Status quo', probability: 0.22, goal_fit_probability: 0.4 });
   });
 
   it('drops an out-of-range goal-fit value rather than projecting a false probability', () => {
@@ -444,7 +450,7 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
         ],
       }),
     );
-    expect(pack.analysis?.options?.[0]).toEqual({ label: 'Hire locally', probability: 0.72 });
+    expect(pack.analysis?.options?.[0]).toEqual({ rank: 1, label: 'Hire locally', probability: 0.72 });
   });
 
   it('validates against the strict ContextPack schema with goal-fit values attached', () => {
@@ -474,12 +480,13 @@ describe('ContextPack confidence tier + option outcomes (Lane 30)', () => {
       }),
     );
     expect(pack.analysis?.options).toEqual([
-      { label: 'Hire locally', probability: 0.72, outcome_mean: 0.237 },
-      { label: 'Status quo', probability: 0.22, outcome_mean: -0.0996 },
-      { label: 'Offshore partner', probability: 0.05 },
-      { label: 'Tiered pricing', probability: 0.01 },
+      { rank: 1, label: 'Hire locally', probability: 0.72, outcome_mean: 0.237 },
+      { rank: 2, label: 'Status quo', probability: 0.22, outcome_mean: -0.0996 },
+      { rank: 3, label: 'Offshore partner', probability: 0.05 },
+      { rank: 4, label: 'Tiered pricing', probability: 0.01 },
     ]);
     expect(pack.analysis?.leading_option).toEqual({
+      rank: 1,
       label: 'Hire locally',
       probability: 0.72,
       outcome_mean: 0.237,
