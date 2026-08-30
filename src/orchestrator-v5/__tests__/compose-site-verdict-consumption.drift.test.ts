@@ -399,6 +399,16 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     stance: 'structural',
     why: 'Baseline re-ask template; pure function of a label + a reason enum, so no analysis value and no comparative claim can reach it.',
   },
+  // The baseline/effect DISAMBIGUATION ask. STRUCTURAL on the same footing as
+  // the re-ask above, and by construction: `formatBaselineAskCollision` is a
+  // pure function of the target label plus the labels the competing pending
+  // already persisted, so no analysis value, projection or option ranking is in
+  // scope for it to name. The branch returns BEFORE any handler runs and
+  // commits without a pending override, so there is no verdict to consume.
+  'formatBaselineAskCollision({': {
+    stance: 'structural',
+    why: 'Baseline/effect disambiguation ask; pure function of persisted labels, emitted before any handler runs, so no analysis value and no comparative claim can reach it.',
+  },
   // ── THE CALIBRATION / WITHHELD-CONSENT SITES (2026-08-05) ───────────────
   // Both are STRUCTURAL, and the reason is stronger than "it is a template":
   // these two branches exist precisely so that NO model text reaches the
@@ -1119,7 +1129,11 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // ⚠ BASELINE ELICITATION RE-ASK (R2918B): 41 -> 42. ONE compose site added
     // in turn-executor.ts — the unreadable-answer re-ask. Explicit
     // `assistant_text:` form, so keyable by the same regex and in scope here.
-    expect(compared, 'the re-key comparison compared nothing').toBe(42);
+    // ⚠ BASELINE/EFFECT DISAMBIGUATION ASK: 42 -> 43. ONE compose site added in
+    // turn-executor.ts — the competing-ask branch, the re-ask's sibling on the
+    // same pre-route. Explicit `assistant_text:` form, so keyable by the same
+    // regex and in scope here.
+    expect(compared, 'the re-key comparison compared nothing').toBe(43);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1333,8 +1347,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // for the same reason: this ledger failed `pnpm test:required` on the
     // commit that created the site, and the guard found the omission rather
     // than a human remembering it. Eighth instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(47);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(43);
+    // ⚠ BASELINE/EFFECT DISAMBIGUATION ASK: 47 -> 48 sites, 43 -> 44 keys, NO
+    // added file — the site is in turn-executor.ts, already scanned, and is
+    // registered `structural`. Recorded the same way as every entry above, and
+    // for the same reason: this ledger failed `pnpm test:required` on the
+    // commit that created the site, and the guard found the omission rather
+    // than a human remembering it. Ninth instance of the mechanism working.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(48);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(44);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
