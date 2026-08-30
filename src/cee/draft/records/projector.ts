@@ -1452,8 +1452,37 @@ interface ProjectedInterventionBinding {
    * routes open across this flag — it reads the BRIEF TEXT, a different set from
    * `stated_items`, and suppressing it withdrew attribution from numbers the user
    * typed verbatim. See `V4InterventionBinding.composed_citation`.
+   *
+   * ⚠ NO LONGER THE GATE. The extractor now keys on
+   * {@link ProjectedInterventionBinding.withholds_brief_authority}, an opt-IN,
+   * so this flag has stopped carrying that job. It stays as the receipt marker
+   * for the composed branch, which is a real and separate fact about the
+   * magnitude.
    */
   readonly composed_citation?: true;
+  /**
+   * ⭐⭐ THE RECEIPT CONTESTS THE BRIEF'S AUTHORITY — the only condition under
+   * which `intervention-extractor.ts` may close its own brief-authority routes.
+   *
+   * Set ONLY where the records genuinely leave ownership undetermined: a
+   * magnitude whose candidate stated items cannot be resolved to one, and a
+   * figure that would equally license a rival option. In both, keeping the value
+   * while withdrawing the LABEL is the fail-closed answer in both directions.
+   *
+   * ⛔ IT IS NOT SET ON A RECEIPT THAT MERELY REPORTS "no stated item was
+   * cited". The extractor gated on `binding !== undefined` — *"did the projector
+   * write anything?"* — while the question it means is *"does this receipt
+   * contest the brief?"*. Those coincided only while every binding was verified
+   * or contested; the uncited branch broke the coincidence, and the old gate
+   * then re-attributed a figure the user typed verbatim in the brief to Olumi at
+   * low confidence, in a sentence saying no figure was cited. The two
+   * authorities read DIFFERENT SETS — this binder matches `stated_items`,
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT — so absence from one is
+   * no finding about the other. (CLAUDE.md trap 21: two questions under one
+   * condition; trap 13d: gate against the SPEC, not the shape the first case
+   * happened to take.)
+   */
+  readonly withholds_brief_authority?: true;
 }
 
 export interface CanonicalInterventionCandidate {
@@ -1756,6 +1785,10 @@ function bindDirectStatedMagnitude(args: {
       raw_value: claim.sets_to,
       ...(units.length === 1 ? { unit: units[0] } : {}),
       source: "cee_hypothesis",
+      // GENUINELY CONTESTED: which stated item this magnitude is bound to is
+      // undetermined, so the extractor's brief-text route must not hand the
+      // user's authorship back on the strength of the number being findable.
+      withholds_brief_authority: true,
       reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; candidates ${matches
         .map(({ index }) => `stated_items[${index}]`)
         .join(", ")}`,
@@ -1778,6 +1811,10 @@ function bindDirectStatedMagnitude(args: {
       raw_value: claim.sets_to,
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       source: "cee_hypothesis",
+      // GENUINELY CONTESTED: the brief said this figure once and nothing here
+      // can say which option owns it, so the extractor must not re-earn the
+      // label from the brief text either.
+      withholds_brief_authority: true,
       reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; stated_items[${index}] is claimed by more than one option`,
     };
   }
