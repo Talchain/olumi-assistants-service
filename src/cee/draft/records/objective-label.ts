@@ -201,6 +201,84 @@ const CHOICE_FRAMES: ReadonlySet<string> = new Set([
   "the options are ",
 ]);
 
+/**
+ * ⭐⭐ THE INVESTIGATIVE SUBSET — frames that introduce a QUESTION TO BE
+ * ANSWERED, and may therefore never anchor the decision node's extraction.
+ *
+ * ── THE WITNESSED DEFECT (deployed `a18e194`, driven 30 Aug 2026) ──────────
+ * A brief ending "…I need to work out what is actually driving it before we
+ * commit budget to a fix." produced a DECISION node reading
+ * `What Is Actually Driving It Before We Commit Budget to a Fix` — the user's
+ * own question, title-cased, naming no choice at all. All four frames below
+ * did the same thing at pristine, so the defect was systematic:
+ *
+ *   working out  → "Which of the Three Regions Is Losing Us Money"
+ *   figure out   → "Why Conversion Rate Halved Last Quarter"
+ *   figuring out → "Where the Bottleneck Actually Sits"
+ *
+ * ── WHY THESE FOUR, STRUCTURALLY AND NOT BY CALIBRATION ────────────────────
+ * One works out, figures out — *finds out* — a FACT. The complement of these
+ * verbs is epistemic, so the span that follows is a question about the world
+ * and never a course of action. That is a property of the construction, the
+ * same footing {@link DELIBERATION_FRAMES} itself stands on, and it is why a
+ * match here is evidence rather than a guess.
+ *
+ * ⚠ NOT `!CHOICE_FRAMES`, WHICH WAS THE OBVIOUS FIX AND IS THE WRONG ONE.
+ * Measured across the frame families at pristine, requiring a choice frame on
+ * the brief path destroys SIX labels that name a real decision subject —
+ * `deciding how to allocate the £2m marketing budget`, `choosing a payroll
+ * vendor`, `deciding on a pricing model`, `considering a move to a subscription
+ * model`, `deciding the launch date`, `trying to decide the right size`. The
+ * harm is narrower than "not a choice", and so is this.
+ *
+ * ⚠ THEY REMAIN DELIBERATION FRAMES. On the GOAL path "I need to work out what
+ * is driving it" must still be REFUSED as an objective, and it is. This subset
+ * withdraws them from ONE of that list's two opposite jobs — the decision's
+ * extraction anchor — rather than from the list (trap 21: two questions were
+ * being answered by one membership test).
+ *
+ * ⚠⚠ AND THE FRAME ALONE IS NOT THE PREDICATE — THE FIRST VERSION OF THIS RULE
+ * WAS FRAME-ONLY AND THE GOVERNED CORPUS REFUTED IT WITHIN ONE RUN. Brief
+ * `03-vague-underspecified` reads "We need to figure out our hiring strategy for
+ * next quarter" and authored `Hiring Strategy for Next Quarter` — a good label
+ * naming a real subject, which frame-only matching destroyed. The claim written
+ * here ("the complement of these verbs is epistemic") is FALSE when the
+ * complement is a plain noun phrase; it was written against the failure mode in
+ * hand rather than against the construction space (trap 13d), and a corpus
+ * drawn from outside the author's head is what caught it (trap 22).
+ *
+ * So the predicate is a CONJUNCTION of two independent conditions — an
+ * investigative frame AND an {@link INTERROGATIVE_COMPLEMENT} — which is the
+ * prescribed shape when one predicate guards two opposite harms (trap 22b:
+ * dropping a real decision, and inventing one from a question). It is not a
+ * widened window with a moving cliff, so closing the question harm cannot
+ * reopen the noun-phrase one.
+ */
+const INVESTIGATIVE_FRAMES: ReadonlySet<string> = new Set([
+  "figuring out ",
+  "figure out ",
+  "working out ",
+  "work out ",
+]);
+
+/**
+ * ⭐ THE SECOND CONJUNCT: the complement is a QUESTION, not a subject.
+ *
+ * `figure out WHY conversion halved` asks something; `figure out OUR HIRING
+ * STRATEGY` names something. The distinction is grammatical and visible at the
+ * first word, which is why it is a closed list of interrogatives rather than a
+ * judgement about wording.
+ *
+ * ⚠ `how` IS INCLUDED AND IT IS THE ARGUABLE MEMBER. "figure out how to fix the
+ * pipeline" reads as a decision; "figure out how our churn got this bad" reads
+ * as a question, and the two are not separable at the first word. It refuses,
+ * which is the direction that falls back to today's honest generic rather than
+ * the one that names a decision the user did not state. Pinned by name in
+ * `authored-node-labels.test.ts`.
+ */
+const INTERROGATIVE_COMPLEMENT =
+  /^(what|why|which|where|when|who|whom|whose|whether|how|if)\b/i;
+
 /** Frames whose own verb carries the choice and must NOT be stripped. */
 const BETWEEN_FRAMES: ReadonlySet<string> = new Set([
   "deciding between ",
@@ -882,6 +960,25 @@ function decisionLabelFromCandidate(
   const source = canonical(candidate);
   const frame = findDeliberationFrame(source);
   if (!frame) return undefined;
+  // ⭐ A QUESTION THE USER ASKED IS NOT THE DECISION THEY ARE MAKING. Both
+  // conjuncts are required: an investigative frame whose complement NAMES a
+  // subject ("figure out our hiring strategy") still authors. This runs on BOTH
+  // call sites, because a question is no more the decision when it arrives in a
+  // goal quote than when it arrives in the brief.
+  //
+  // ⚠ THE DELIBERATE COST, PINNED BY NAME in `authored-node-labels.test.ts`:
+  // "figure out whether to renew the contract" does state a choice, and
+  // `whether` is an interrogative, so it refuses. One label traded, in the safe
+  // direction — refusal restores the pre-authoring behaviour and cannot put
+  // words in the user's mouth, whereas the extra rule needed to recover it
+  // would be the next round on a natural-language predicate (trap 22f: the
+  // ratified point to stop guessing).
+  if (
+    INVESTIGATIVE_FRAMES.has(frame.frame) &&
+    INTERROGATIVE_COMPLEMENT.test(source.slice(frame.index + frame.frame.length).trim())
+  ) {
+    return undefined;
+  }
   if (requireChoiceFrame && !CHOICE_FRAMES.has(frame.frame)) return undefined;
 
   // ⭐ A `between` FRAME IS NOT A PREAMBLE — THE FRAME WORD *IS* THE SEMANTICS.
