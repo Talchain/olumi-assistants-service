@@ -1244,22 +1244,80 @@ export function isBasisPointsUnit(unit: string | undefined): boolean {
 }
 
 /**
- * The smallest {1,2,5}·10^k STRICTLY greater than `x` (x > 0, finite).
+ * The exponent span of an IEEE-754 double, decades: 10^-324 (the smallest
+ * denormal) to 10^308 (the largest normal) is 633 decades. Every ladder walk
+ * over representable numbers therefore fits inside this many steps with room to
+ * spare — a walk that exceeds it is not a large input, it is a non-terminating
+ * one. DERIVED from the format, not chosen: it is a backstop, never a policy.
+ */
+const NICE_NUMBER_LADDER_MAX_STEPS = 700;
+
+/**
+ * The smallest FINITE {1,2,5}·10^k STRICTLY greater than `x`, or `undefined`
+ * when no such number truthfully exists.
+ *
  * Pure arithmetic, no floating log tricks at the boundaries: the exponent scan
  * starts safely below x and walks up, so exact powers (100 → 200) behave.
+ *
+ * ⭐⭐ THE PRECONDITION USED TO BE PROSE ONLY. This docstring has always read
+ * "(x > 0, finite)" and the body has always TRUSTED the caller for it. Outside
+ * that domain the walk does not throw and does not return — it SPINS FOREVER,
+ * because every comparison against the candidate is false and there is no exit
+ * but `return`. Measured at `9f401d25` in a SIGKILL-bounded child process, six
+ * inputs hang: `NaN`, `+Infinity`, `-Infinity`, `0`, any negative, and the two
+ * smallest positive denormals (`5e-324`, `1e-323`, where `10 ** -324`
+ * underflows the start magnitude to `0` and `0 * 10` is `0` forever).
+ *
+ * ⚠ NOTE THE SHAPE, because it is why the caller's guards did not save it:
+ * `deriveFactorScaleFrame` refuses `m < 0` and `max <= 1`, and BOTH ARE FALSE
+ * FOR `NaN` — every comparison against `NaN` is false, so a NaN slips through a
+ * sign guard and a bound guard alike and arrives here. `-Infinity` IS caught
+ * (by `m < 0`); `NaN` and `+Infinity` are not. A guard written as an ordering
+ * test is not a domain test (trap 13d).
+ *
+ * ⭐ REFUSAL, NOT SUBSTITUTION. `undefined` is this file's established refusal
+ * convention for "no truthful answer exists" — `deriveFactorScaleFrame`, this
+ * function's only caller, already refuses that way and its caller already reads
+ * it as `continue`. Returning an invented number (0, 1, the input) would put a
+ * fabricated frame into the analysis, which is the harm the surrounding module
+ * exists to prevent.
+ *
+ * Non-finite is also the honest answer ABOVE the domain: from ~1.6e308 the
+ * ladder's next rung is not representable, and `Infinity` as a frame would ship
+ * a fabricated level 0 under a green guard (review breadth finding, pinned by
+ * `projector-scale-projection.test.ts`). That case now refuses here rather than
+ * being filtered at the caller, so the postcondition is uniform: **the return
+ * is a finite positive number, or nothing.**
  */
-export function nextNiceNumberAbove(x: number): number {
+export function nextNiceNumberAbove(x: number): number | undefined {
+  // The domain, ENFORCED. `!(x > 0)` rather than `x <= 0` so `NaN` is refused
+  // by the same test — an ordering comparison against NaN is false either way,
+  // and this is exactly the asymmetry that let NaN reach the loop.
+  if (!Number.isFinite(x) || !(x > 0)) return undefined;
   let magnitude = 10 ** Math.floor(Math.log10(x));
+  // Underflow: for the two smallest denormals `10 ** -324` is `0`, and a zero
+  // magnitude can never be scaled back up. Refuse rather than spin.
+  if (!Number.isFinite(magnitude) || !(magnitude > 0)) return undefined;
   // Math.log10 can land one bucket high or low at representation boundaries;
   // step down until magnitude ≤ x so the candidate walk below is complete.
-  while (magnitude > x) magnitude /= 10;
-  for (;;) {
+  // Bounded for the same reason the ascending walk is: a descending walk from a
+  // finite positive magnitude provably reaches 0, but the bound costs nothing
+  // and removes the need to re-prove that at every future edit.
+  for (let step = 0; magnitude > x; step++) {
+    if (step >= NICE_NUMBER_LADDER_MAX_STEPS) return undefined;
+    magnitude /= 10;
+  }
+  for (let step = 0; step < NICE_NUMBER_LADDER_MAX_STEPS; step++) {
     for (const m of [1, 2, 5]) {
       const candidate = m * magnitude;
-      if (candidate > x) return candidate;
+      // `Number.isFinite` is the postcondition, not an optimisation: above
+      // ~1.6e308 the rung overflows and an infinite frame is a fabricated 0.
+      if (candidate > x) return Number.isFinite(candidate) ? candidate : undefined;
     }
     magnitude *= 10;
+    if (!Number.isFinite(magnitude)) return undefined;
   }
+  return undefined;
 }
 
 /**
@@ -1399,12 +1457,13 @@ export function deriveFactorScaleFrame(
   const scaleClass = classifyUnitScaleClass(unit);
   if (scaleClass === "percent" && max <= 100) return 100;
   if (scaleClass === "basis_points" && max <= 10000) return 10000;
-  const frame = nextNiceNumberAbove(max);
-  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
-  // infinite frame would ship a fabricated level 0 under a green guard
-  // (review breadth finding). Non-finite frame → unframed, the honest path.
-  if (!Number.isFinite(frame)) return undefined;
-  return frame;
+  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows, and an infinite frame
+  // would ship a fabricated level 0 under a green guard (review breadth
+  // finding). That refusal now lives INSIDE `nextNiceNumberAbove`, whose
+  // postcondition is "a finite positive number, or nothing" — so the single
+  // `undefined` test below covers it, and there is no second guard here that
+  // no test could ever kill. Unframed is the honest path either way.
+  return nextNiceNumberAbove(max);
 }
 
 // ── The projector ───────────────────────────────────────────────────────────
