@@ -270,10 +270,13 @@ describe("P0d · buildPriorAttemptDirective — the retry's corrective context",
     //      carrier. The producer already draws this exact line — it keeps
     //      `validation_errors[].message` off the wire for the same reason
     //      (graph-enforcement.ts:707-714).
-    //  (b) USEFULNESS. Node ids are `sha8(claim_kind, label)` content hashes
-    //      minted by the PROJECTOR (records/projector.ts:2589) — the model has
-    //      never seen them and does not emit them. Attempt 2 mints its own.
-    //      Naming attempt 1's ids would be noise at best.
+    //  (b) USEFULNESS, and only for the IDS. Node ids are
+    //      `sha8(claim_kind, label)` content hashes minted by the PROJECTOR
+    //      (records/projector.ts:2589; grammar.ts:371 — "`id` absent by
+    //      design"). The model has never seen them and does not emit them.
+    //      ⚠ LABELS ARE DIFFERENT: the model DOES author those, so (b) does not
+    //      exclude them — (a) does, on its own. Excluding labels is a safety
+    //      judgement, not an oversight.
     const body = enforcementBlockedBody() as Record<string, any>;
     body.details.validation_errors = [
       { code: "NO_EFFECT_PATH", message: 'Option "opt_x" has no controllable factors with path to goal', path: "nodesById.7cb3711f" },

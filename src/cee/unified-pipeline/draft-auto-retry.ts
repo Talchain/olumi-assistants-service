@@ -209,6 +209,15 @@ const RETRY_EXHAUSTED_COPY: Record<
  * a confident claim we have not earned. That is the class of defect that costs
  * two people a day, not a rough edge that costs a tester a minute.
  *
+ * ⭐ AND THIS ARM IS FAR MORE REACHABLE THAN THE DRAFT LATENCIES SUGGEST.
+ * `elapsedMs` is measured from `routeStartedAt` — **HTTP request entry**, not
+ * draft start (`route-v2.ts:4393`, whose own comment says "pre-LLM turn time
+ * (routing tool-use call, context assembly) now counts against the budget").
+ * So the ~55s floor is consumed by turn overhead as well as by the draft
+ * itself, and a draft that finished in 40s can still land here. Reading the
+ * funding condition off the observed 17–31s draft times alone UNDERSTATES how
+ * often a real user meets this copy.
+ *
  * ⭐ WHY THE ADVICE STILL SAYS "TRY AGAIN", and why that is not the same claim.
  * A manual retry starts a FRESH request with a FULL budget, so it is genuinely
  * a reasonable next step — it is the *rate* that is unsupported here, not the

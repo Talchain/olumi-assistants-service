@@ -112,6 +112,7 @@ import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identi
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
 import { DRAFT_LEAN_RETRY_DIRECTIVE } from "../../src/cee/constants.js";
+import { buildPriorAttemptDirective } from "../../src/cee/unified-pipeline/retry-directive.js";
 // Real values (the timeouts mock above spreads the real module): the sentinel
 // and the affordability functions come from source, so the reachability math
 // here derives from the same code parse.ts runs.
@@ -853,5 +854,150 @@ describe("runStageParse", () => {
       // Pre-fix: attempt 1 ignored elapsed → the provider WAS called (RED).
       expect(mockAdapter.draftGraph).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0d — THE LAST HOP: `ctx.opts.priorAttemptDirective` → `systemDirective` →
+// the adapter call.
+// ---------------------------------------------------------------------------
+//
+// ⚠ WHY THIS BLOCK EXISTS, AND IT IS A REVIEW FINDING WORTH KEEPING.
+//
+// The P0d wrapper spec (tests/unit/cee.unified-pipeline.informed-retry.test.ts)
+// mocks `runStageParse` wholesale and asserts `ctx.opts.priorAttemptDirective`.
+// That proves the wrapper HANDS OVER the directive and nothing more. Review
+// proved by execution that the final hop was unguarded: mutating parse.ts's
+//     [ctx.opts.priorAttemptDirective, perAttemptDirective]  →  [perAttemptDirective]
+// makes the ENTIRE capability inert — the model never sees the correction —
+// and all 17 tests in that spec stay GREEN.
+//
+// A capability whose headline claim no test can observe is the guarantee-theatre
+// defect class. These cases drive the REAL `runStageParse` against the REAL
+// adapter mock, so the assertion is about what the provider is actually sent.
+describe("Stage 1 — P0d: the prior-attempt directive reaches the adapter", () => {
+  /** The post-enforcement fail-closed result, in the shape the producer emits
+   *  and `isEnforcementBlockedResult` reads (status + code + retryable +
+   *  details.last_phase). Built as a literal because this file mocks
+   *  `buildCeeErrorResponse` to a different shape — but the DIRECTIVE itself is
+   *  produced by the real `buildPriorAttemptDirective`, so the codes below are
+   *  genuinely derived from a failure rather than hand-written into a string. */
+  function enforcementBlockedResult(codes: string[]) {
+    return {
+      statusCode: 422,
+      body: {
+        code: "CEE_GRAPH_INVALID",
+        retryable: true,
+        details: {
+          validation_error_codes: codes,
+          enforcement_repairs: 0,
+          last_phase: "deterministic_enforcement",
+        },
+      },
+    };
+  }
+
+  it("⭐ attempt 1 sends NO directive; attempt 2 sends one DERIVED from attempt 1's own codes", async () => {
+    const directive = buildPriorAttemptDirective(
+      enforcementBlockedResult(["NO_EFFECT_PATH", "NO_EFFECT_PATH", "NO_PATH_TO_GOAL"]),
+    );
+    expect(directive, "the fixture must actually produce a directive").toBeTruthy();
+
+    // ATTEMPT 1 — the outer wrapper leaves the opt ABSENT.
+    setupMocks();
+    await runStageParse(makeCtx());
+    const attempt1 = mockAdapter.draftGraph.mock.calls[0][0];
+
+    // ATTEMPT 2 — the wrapper sets it from attempt 1's typed failure.
+    setupMocks();
+    await runStageParse(
+      makeCtx({
+        opts: {
+          schemaVersion: "v3" as const,
+          requestStartMs: Date.now(),
+          priorAttemptDirective: directive,
+        },
+      }),
+    );
+    const attempt2 = mockAdapter.draftGraph.mock.calls[0][0];
+
+    // THE HOP ITSELF.
+    expect(attempt1.systemDirective, "attempt 1 has no prior attempt to learn from").toBeUndefined();
+    expect(attempt2.systemDirective, "attempt 2 must carry the correction to the provider").toBe(
+      directive,
+    );
+
+    // DERIVED, not constant — the multiplicities are attempt 1's own (trap 19:
+    // bind to the object, never to "a string arrived").
+    expect(attempt2.systemDirective).toContain("NO_EFFECT_PATH (×2)");
+    expect(attempt2.systemDirective).toContain("NO_PATH_TO_GOAL (×1)");
+
+    // #595 review P2 — SYSTEM-SIDE, never inside the brief. The adapter
+    // concatenates `systemDirective` OUTSIDE the [BEGIN/END]_UNTRUSTED_USER_CONTENT
+    // markers precisely so a correction is not read as untrusted user text.
+    expect(attempt1.brief, "the brief must be byte-identical across attempts").toBe(attempt2.brief);
+    expect(attempt2.brief).not.toContain("NO_EFFECT_PATH");
+  });
+
+  it("COMPOSES with the per-attempt lean-retry directive instead of clobbering it", async () => {
+    // Two different questions (trap 21): "what went wrong last time the whole
+    // pipeline drafted this brief?" and "what should this LLM call do
+    // differently from the previous call WITHIN this attempt?". Both can be
+    // true at once — attempt 2 can itself truncate — and letting either silently
+    // win would drop a correction the model needs.
+    const directive = buildPriorAttemptDirective(enforcementBlockedResult(["NO_EFFECT_PATH"]));
+
+    setupMocks();
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    await runStageParse(
+      makeCtx({
+        opts: {
+          schemaVersion: "v3" as const,
+          requestStartMs: Date.now(),
+          priorAttemptDirective: directive,
+        },
+      }),
+    );
+
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+    const inner1 = mockAdapter.draftGraph.mock.calls[0][0];
+    const inner2 = mockAdapter.draftGraph.mock.calls[1][0];
+
+    // The outer correction rides BOTH inner attempts…
+    expect(inner1.systemDirective).toContain("NO_EFFECT_PATH");
+    expect(inner2.systemDirective).toContain("NO_EFFECT_PATH");
+    // …and the lean-retry nudge is ADDED on the inner retry, not substituted.
+    expect(inner1.systemDirective).not.toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+    expect(inner2.systemDirective).toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+  });
+
+  it("OPPOSITE-DIRECTION TWIN — with no prior attempt, the lean retry is UNCHANGED", async () => {
+    // The composition must not smuggle an empty string, a stray separator, or a
+    // truthy wrapper onto the path every ordinary draft takes. Absent ⇒ byte-for
+    // -byte the pre-P0d behaviour, which is what makes the OFF path free.
+    setupMocks();
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    await runStageParse(makeCtx());
+
+    const inner1 = mockAdapter.draftGraph.mock.calls[0][0];
+    const inner2 = mockAdapter.draftGraph.mock.calls[1][0];
+    expect(inner1.systemDirective).toBeUndefined();
+    expect(inner2.systemDirective).toBe(DRAFT_LEAN_RETRY_DIRECTIVE);
   });
 });

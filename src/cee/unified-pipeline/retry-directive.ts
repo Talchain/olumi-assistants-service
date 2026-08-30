@@ -41,11 +41,23 @@
  *    that already-adjudicated field. It is not a new safety judgement; it is the
  *    producer's.
  *
- * 2. **USEFULNESS — the ids would be noise.** Node ids are
+ * 2. **USEFULNESS — the IDS specifically would be noise.** Node ids are
  *    `sha8(claim_kind, label)` content hashes minted by the PROJECTOR
- *    (`cee/draft/records/projector.ts:2589`). The model never emitted them and
- *    has never seen them, and attempt 2 mints its own from its own labels. An id
- *    from attempt 1 is not a referent attempt 2 can act on.
+ *    (`cee/draft/records/projector.ts:2589`); `cee/draft/records/grammar.ts:371`
+ *    says it outright — *"What the model adds — the honesty half. `id` absent by
+ *    design."* The model never emitted them and has never seen them, and
+ *    attempt 2 mints its own. An id from attempt 1 is not a referent attempt 2
+ *    can act on.
+ *
+ * ⚠ **AND THE DISTINCTION A LATER LANE WILL OTHERWISE REOPEN: LABELS ARE NOT
+ * IDS.** The model DOES author labels, so naming the stranded options by label
+ * would be theoretically actionable — reason 2 does NOT rule them out, and it
+ * would be wrong to cite it as if it did. **Labels are excluded by reason 1
+ * alone**: a label is drafted from the user's brief, and the directive lands in
+ * the system-authority region, so echoing one there is a prompt-injection
+ * carrier. That is a SAFETY judgement, deliberately taken, not an oversight —
+ * so reopening it means answering the injection question, not rediscovering
+ * that labels exist.
  *
  * ## The gloss table and trap 12
  *
