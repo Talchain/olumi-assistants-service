@@ -84,7 +84,12 @@ import {
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
-import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
+import {
+  deriveGoalObjectiveLabel,
+  deriveDecisionLabel,
+  refusalDeniesObjecthood,
+  type AuthoredLabel,
+} from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
@@ -141,6 +146,17 @@ export const PROJECTOR_STRUCTURAL_CLASS: RecordProvenanceClass = "projector_stru
 export function scaffoldingProvenance(quote: string): RecordProvenance {
   return { provenance_class: PROJECTOR_STRUCTURAL_CLASS, source: "synthetic", quote };
 }
+
+/**
+ * The disclosure for a goal whose SPAN the user wrote but never designated as
+ * the objective. Exported so guards bind to it by identity rather than by
+ * copying the string (trap 19).
+ *
+ * ⚠ 58 characters — `StructuredProvenance.quote` is `z.string().max(100)`, and
+ * it describes what the machine did. It is NEVER user text.
+ */
+export const GOAL_SPAN_CHOSEN_BY_CEE =
+  "Goal span chosen by CEE: the brief designates no objective";
 
 /**
  * ⭐ THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
@@ -2313,15 +2329,78 @@ function projectOnce(
     // over the QUOTE. It is still true of the LEGACY graph path, which has no
     // typed record — which is why the authoring at the wire runs inside the
     // typed branch only.
-    const authoredLabel =
+    const authoredLabel: AuthoredLabel =
       kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
 
-    const prov: RecordProvenance = {
-      provenance_class: "stated",
-      source_quote: quote,
-      brief_binding: briefBinding,
-      ...(authoredLabel.authored ? { label_authored: true } : {}),
-    };
+    // ⭐⭐ THE BADGE SAYS THE USER DESIGNATED THIS GOAL, SO IT MAY ONLY BE WORN
+    // BY A GOAL THE USER DESIGNATED.
+    //
+    // ── THE DEFECT, MEASURED ───────────────────────────────────────────────
+    // Brief: "Churn has gone up over the last two quarters and we're not sure
+    // why." The model files that whole sentence — a SYMPTOM, not an objective —
+    // as a `stated_item` of `kind: "goal"`. Every line below then agreed with
+    // it: `provenance_class: "stated"` + `brief_binding: "verified"` earns
+    // `from_brief` at `schema-v3.ts:1176`, and the opener quoted it back:
+    //
+    //   I've built a first model for "Churn has gone up over the last two
+    //   quarters and we're not sure why.".
+    //
+    // Quotation marks promise THESE ARE YOUR WORDS. They were — but the claim
+    // the badge makes is not about the WORDS, it is about the DESIGNATION, and
+    // the user designated nothing. The founder's ruling names this exact shape:
+    // *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    //
+    // ── THE EVIDENCE WAS ALREADY IN HAND AND WAS BEING DISCARDED ───────────
+    // `deriveGoalObjectiveLabel` had already answered the question one line up,
+    // returning `{ authored: false, reason: "head_disclaims" }` — the union's
+    // own words: *"A disclaimer is not a goal."* That `reason` was dropped on
+    // the floor and `"stated"` written unconditionally. Nothing new is derived
+    // here; a verdict that was being computed and thrown away is now read.
+    //
+    // ── ⛔ WHY THIS IS A SUBSET OF "REFUSED", AND NOT "REFUSED" ────────────
+    // The opposite harm is WORSE: telling a user their own designated goal was
+    // invented. `deriveGoalObjectiveLabel` refuses for CONCISION reasons too,
+    // and three of them ride genuine user objectives —
+    // `identical_to_quote` is literally *"the quote already IS the objective,
+    // verbatim"*, `no_concise_form` is a length verdict, `clause_discarded` a
+    // reduction one. A bare `!authoredLabel.authored` here would strip the
+    // user's badge off all three. `refusalDeniesObjecthood` admits only the
+    // refusals that are a positive judgement of NON-objecthood, and both
+    // directions are pinned in `goal-designation-provenance.test.ts`.
+    //
+    // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
+    // `source_quote` STAYS: the user's verbatim is theirs and still reaches the
+    // inspector (`schema-v3.ts:1187` carries it for every recognised class), so
+    // nothing the user wrote is lost — only the DESIGNATION is withdrawn.
+    // `label_authored` is deliberately NOT set: it answers *"did we write these
+    // characters?"* and we did not — the deriver refused, so the label IS the
+    // user's own text. Two signals, two questions (trap 21); `MINTED_GOAL_-`
+    // `PROVENANCE` sets it because its label is CEE-authored prose, and this
+    // one's is not.
+    //
+    // ⚠ ONE CONSEQUENCE, DISCLOSED RATHER THAN DISCOVERED: `completion.ts:444`
+    // skips `projector_structural` nodes in its destroyed-content guard, so a
+    // goal re-badged here leaves that guard's domain. Pinned by name in the
+    // spec so it is visible in the suite rather than silent.
+    const goalWasNeverDesignated =
+      kind === "goal" && !authoredLabel.authored && refusalDeniesObjecthood(authoredLabel.reason);
+
+    const prov: RecordProvenance = goalWasNeverDesignated
+      ? {
+          // The SAME constructor and the SAME class the fallback limb already
+          // uses (`goal-inference.ts:47`). One vocabulary for "the machine put
+          // this here" — a second spelling would be two authorities for one
+          // fact, which is the estate's dominant defect.
+          ...scaffoldingProvenance(GOAL_SPAN_CHOSEN_BY_CEE),
+          source_quote: quote,
+          brief_binding: briefBinding,
+        }
+      : {
+          provenance_class: "stated",
+          source_quote: quote,
+          brief_binding: briefBinding,
+          ...(authoredLabel.authored ? { label_authored: true } : {}),
+        };
     provenance[id] = prov;
 
     const node: ProjectedNode = {

@@ -120,6 +120,60 @@ export type AuthoredLabelRefusal =
   | "asks_a_question";
 
 /**
+ * ⭐⭐ THE REFUSALS THAT DENY OBJECTHOOD — AND WHY THIS IS A SUBSET, NOT
+ * "THE DERIVER REFUSED".
+ *
+ * {@link deriveGoalObjectiveLabel} refuses for two different reasons wearing one
+ * return shape, and a consumer that treats them alike ships the OPPOSITE HARM:
+ *
+ *   · SEMANTIC refusals say *this span is not an objective at all*. The union
+ *     above declares each one in those words — "states a DECISION, not an
+ *     objective", "a choice, not an objective", "A disclaimer is not a goal".
+ *     Nothing was designated; whoever filed this span as the goal chose it.
+ *
+ *   · CONCISION refusals say only *I could not produce a shorter display label*.
+ *     `no_concise_form` is a LENGTH verdict; `clause_discarded` is a REDUCTION
+ *     verdict; `too_few_tokens` is a token count; and `identical_to_quote` is
+ *     the union's own words for "the quote already IS the objective, verbatim" —
+ *     i.e. the STRONGEST possible evidence the user designated it. Re-badging
+ *     any of these would tell a user their own stated objective was invented.
+ *
+ * ⚠ MEASURED, NOT REASONED. Over the 13 goal quotes of the governed baseline
+ * (`run-b9389df`, real staging captures): 9 author cleanly, 4 refuse
+ * `deliberation_frame` — and ZERO refuse for a concision reason. The set below
+ * therefore costs nothing on real data while closing 4 of 13. The concision
+ * reasons are excluded on principle, and the four hand-built minimal pairs in
+ * `goal-designation-provenance.test.ts` are what keeps them excluded.
+ *
+ * ⚠ `empty` is DELIBERATELY OUT. It is a degenerate input, not a judgement that
+ * the span is not an objective, and an empty label is filtered before any
+ * surface can quote it. Fail-safe direction: under-claiming the machine costs a
+ * badge, over-claiming it strips a real attribution.
+ *
+ * ⭐ THE SET IS PINNED BY NAME (trap 22f's KNOWN-DROPPED discipline) so it REDs
+ * if it GROWS or SHRINKS, and `refusalDeniesObjecthood` is the only reader.
+ */
+export const REFUSALS_DENYING_OBJECTHOOD: ReadonlySet<AuthoredLabelRefusal> = new Set<
+  AuthoredLabelRefusal
+>(["deliberation_frame", "states_alternatives", "head_disclaims"]);
+
+/**
+ * TRUE when a refusal is a positive judgement that the span is NOT an objective.
+ *
+ * ⚠ SUFFICIENT, NEVER NECESSARY, and the gap is named rather than implied: a
+ * WELL-FORMED invented goal — one {@link deriveGoalObjectiveLabel} would happily
+ * author — returns `authored: true` and no reason at all, so it is invisible
+ * here. This closes the loud half. The durable fix is a grammar change in
+ * `DRAFT_RECORDS_INSTRUCTION`, which today offers the model only `stated_items`
+ * ("what the user actually said") and `claims` ("what YOU are adding") and then
+ * forbids the goal from being a claim — instructing it to infer a goal and
+ * requiring it to file the result as something the user said.
+ */
+export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined): boolean {
+  return reason !== undefined && REFUSALS_DENYING_OBJECTHOOD.has(reason);
+}
+
+/**
  * ⭐ DELIBERATION FRAMES — the closed list of constructions in which a sentence
  * describes a CHOICE BEING MADE rather than an objective being pursued.
  *
