@@ -18,7 +18,7 @@ import {
   compactAnalysis,
   type AnalysisResponseSummary,
 } from '../../orchestrator/context/analysis-compact.js';
-import { winnerOptionResultSource } from '../../orchestrator/context/option-result-source.js';
+import { readSummaryObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   orderSuccessfulRunAnalysisFactsNewestFirst,
@@ -237,28 +237,9 @@ export interface RunProjection {
  *     Separates a sibling that collides on BOTH id and label.
  */
 function readLeaderOptionId(
-  enrichment: Record<string, unknown>,
   summary: AnalysisResponseSummary,
 ): string | null {
-  const winner = summary.winner;
-  if (winner.option_id.length === 0) return null;
-  for (const entry of winnerOptionResultSource(enrichment)) {
-    if (typeof entry.option_id !== 'string' || entry.option_id !== winner.option_id) {
-      continue;
-    }
-    const labelMatches =
-      typeof entry.option_label === 'string'
-        ? entry.option_label === winner.option_label
-        : winner.option_label === winner.option_id;
-    if (!labelMatches) continue;
-    const winMatches =
-      typeof entry.win_probability === 'number'
-        ? entry.win_probability === winner.win_probability
-        : winner.win_probability === 0;
-    if (!winMatches) continue;
-    return winner.option_id;
-  }
-  return null;
+  return readSummaryObjectiveRecommendation(summary)?.option_id ?? null;
 }
 
 /**
@@ -276,7 +257,6 @@ export function projectRunFact(fact: HandlerFact): RunProjection | null {
   return {
     summary,
     leader_option_id: readLeaderOptionId(
-      enrichment as Record<string, unknown>,
       summary,
     ),
   };

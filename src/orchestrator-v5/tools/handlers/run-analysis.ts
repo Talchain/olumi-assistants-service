@@ -124,7 +124,7 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
-import { isRecommendableOption } from './recommendable-option.js';
+import { readObjectiveRecommendation } from '../../../orchestrator/context/objective-recommendation.js';
 import {
   buildAnalysisSubmissionDisclosure,
   partitionScaffoldedByAnalysisPresence,
@@ -1414,7 +1414,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 6. Build RunAnalysisHandlerFact (Resolution 2) ------------------
     const winProbabilities = extractWinProbabilities(resultRecords);
-    const leadingOptionId = selectLeadingOptionId(resultRecords);
+    const leadingOptionId = readObjectiveRecommendation(response as Record<string, unknown>)?.option_id ?? null;
     // Template selection uses the status outcome. Correction 4 of the V5
     // alpha hardening plan: caveats for partial / unknown-status surface
     // through the existing `summary` / `assistant_text` fields only — do
@@ -1907,7 +1907,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // `applyIntakeToLeaderPermission` for the full statement of that
         // residual.
         constraint_verdict: applyIntakeToLeaderPermission(
-          projectClaimSafety(constraintVerdict),
+          {
+            ...projectClaimSafety(constraintVerdict),
+            may_name_leading_option: constraintVerdict.mayNameLeadingOption && leadingOptionId !== null,
+          },
           intakeReconciliation,
         ),
       },
@@ -2425,84 +2428,14 @@ function extractWinProbabilities(
 ): Record<string, number> | null {
   const map: Record<string, number> = {};
   for (const record of records) {
-    const key = typeof record.option_label === 'string' && record.option_label.length > 0
-      ? record.option_label
-      : typeof record.option_id === 'string' && record.option_id.length > 0
-        ? record.option_id
-        : null;
+    const key = typeof record.option_id === 'string' && record.option_id.length > 0
+      ? record.option_id : null;
     if (key === null) continue;
     const prob = record.win_probability;
     if (typeof prob !== 'number' || !Number.isFinite(prob)) continue;
     map[key] = prob;
   }
   return Object.keys(map).length > 0 ? map : null;
-}
-
-/**
- * Pick the leading option per Refinement R2 (Paul 2026-04-18). Returns
- * `null` whenever there is no unambiguous leader — NEVER interprets a tie
- * as "roughly leader". See Docs/v5/slice-c2-schemas-audit.md §3.1 for the
- * full rule matrix.
- *
- * Status gate (2026-07-20): options whose per-option ISL `status` is not
- * recommendable (`'error'` / `'skipped'`) are removed BEFORE any R2 rule is
- * applied. Previously this function was status-blind, so a failed option
- * carrying a top win-probability was crowned as the leader — the same
- * silent-wrong-value defect Codex reproduced in PLoT (fixed there in PR #238).
- * See `recommendable-option.ts` for the predicate and why it is a status-only
- * mirror of PLoT's `isCrownableCandidate`.
- *
- * The R2 rules below are unchanged and now operate on the recommendable
- * records only. When NO record is recommendable the result is `null` — the
- * pre-existing, already-modelled "no leader" state (same value produced by an
- * empty result set or an unbroken tie), NOT a new wire shape.
- */
-function selectLeadingOptionId(
-  allRecords: ReadonlyArray<Record<string, unknown>>,
-): string | null {
-  if (allRecords.length === 0) return null;
-
-  // Status gate. An errored/skipped option is never crowned, exactly as PLoT
-  // never counts it in a near-tie. Absent status stays recommendable (legacy
-  // and most current payloads carry no per-option status) — narrowing this
-  // would silently withhold leaders that legitimately exist.
-  const records = allRecords.filter(isRecommendableOption);
-  if (records.length === 0) return null;
-
-  // Single result: that's the leader regardless of win_probability value
-  // (presence wins over magnitude — zero-probability single options still
-  // classify as "the leading option" because there's no alternative).
-  if (records.length === 1) {
-    return extractOptionId(records[0]);
-  }
-
-  // Multiple results: find the strictly maximum win_probability. If any
-  // record is missing a numeric probability, we cannot compute — return
-  // null (matches Resolution 2 §3.1 "missing probability → null").
-  const probabilities: Array<{ id: string | null; prob: number }> = [];
-  for (const record of records) {
-    const prob = record.win_probability;
-    if (typeof prob !== 'number' || !Number.isFinite(prob)) return null;
-    probabilities.push({ id: extractOptionId(record), prob });
-  }
-
-  let maxProb = -Infinity;
-  for (const entry of probabilities) {
-    if (entry.prob > maxProb) maxProb = entry.prob;
-  }
-  const leaders = probabilities.filter((p) => p.prob === maxProb);
-  if (leaders.length !== 1) return null; // tie → no interpretation
-  return leaders[0].id;
-}
-
-function extractOptionId(record: Record<string, unknown>): string | null {
-  if (typeof record.option_id === 'string' && record.option_id.length > 0) {
-    return record.option_id;
-  }
-  if (typeof record.option_label === 'string' && record.option_label.length > 0) {
-    return record.option_label;
-  }
-  return null;
 }
 
 /**

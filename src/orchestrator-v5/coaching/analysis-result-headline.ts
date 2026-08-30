@@ -47,8 +47,6 @@
  */
 
 import {
-  readResultsArraySources,
-  selectWinner,
   readGraph,
   readRecord,
   readNumber,
@@ -58,8 +56,7 @@ import {
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
-import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
-import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
+import { readObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
 import { readRawRobustnessSignals } from './pick-raw-robustness.js';
 // NOTE: `NEAR_TIE_PP_THRESHOLD` is deliberately NOT imported any more. Holding
 // the constant was what let this file re-derive the near-tie with its own `<=`
@@ -1395,86 +1392,19 @@ function resolveWinner(
   enrichment: Record<string, unknown>,
   leadingOptionId: string,
 ): ResolvedWinner | null {
-  // Status gate (shared across ALL winner surfaces via the ONE
-  // isRecommendableOption predicate): a FAILED / skipped option (per-option
-  // ISL `status`) is never crowned as the leader AND never counted as the
-  // runner-up it is measured against — mirroring the direct receipt
-  // (run-analysis.ts selectLeadingOptionId), compactAnalysis, projectAnalysis
-  // and the decision-review enricher. Applied per-source BEFORE selection so
-  // both the `selectWinner` input below and the runner-up loop only see
-  // recommendable records. Absent status stays recommendable, so status-less
-  // enrichments (legacy / most current payloads) are byte-for-byte unaffected.
-  // A source that filters to empty (all options failed) yields no winner and is
-  // skipped, so an all-error set produces the honest null headline instead of
-  // crowning the top failed option; a declared `leadingOptionId` pointing at a
-  // failed option finds no match in any filtered source and falls through.
-  const sources = readResultsArraySources(enrichment).map((source) =>
-    source.filter(isRecommendableOption),
+  const recommendation = readObjectiveRecommendation(enrichment);
+  if (!recommendation || leadingOptionId !== recommendation.option_id) return null;
+  const raw = recommendation.option;
+  const label = sanitiseLabel(
+    typeof raw.option_label === 'string' ? raw.option_label : '',
+    recommendation.option_id,
   );
-  if (sources.length === 0) return null;
-
-  const id = leadingOptionId.trim();
-  for (const source of sources) {
-    const winner = selectWinner(source, id.length > 0 ? id : null);
-    if (winner === null) continue;
-    const cleanedLabel = sanitiseLabel(winner.label, winner.id);
-    if (cleanedLabel === null) continue;
-
-    // Re-read the winner's probability directly from the source.
-    // `selectWinner` calls `projectOptionAsWinner` which coerces a
-    // missing/non-finite `win_probability` to 0 — that conceals the
-    // difference between "explicitly 0" (a legitimate, finite signal
-    // for a dominated option) and "missing entirely" (a thin source
-    // that should be skipped so a richer downstream source can carry
-    // both label and probability). Reading raw lets the skip path
-    // fire when the source can't supply a finite probability at all.
-    const winnerRaw = source.find((r) => {
-      const rId =
-        (typeof r.option_id === 'string' && r.option_id) ||
-        (typeof r.id === 'string' && r.id) ||
-        '';
-      return rId === winner.id;
-    });
-    // Round-4 review MAJOR-A: per-source acceptance keys on the SINGLE shared
-    // predicate (finite AND in [0,1]) — identical to winnerOptionResultSource
-    // and the enricher selectWinner, so degenerate envelopes can't diverge.
-    // (Preserves the out-of-range fallback: a stray 1.5 is not "usable".)
-    if (!isUsableWinProbability(winnerRaw?.win_probability)) continue;
-    const winnerProb = winnerRaw!.win_probability as number;
-
-    let runnerUpProb: number | null = null;
-    let runnerUpRaw: Record<string, unknown> | null = null;
-    let runnerUpId = '';
-    let eliminatedCount = 0;
-    for (const raw of source) {
-      const rId =
-        (typeof raw.option_id === 'string' && raw.option_id) ||
-        (typeof raw.id === 'string' && raw.id) ||
-        '';
-      if (rId === winner.id) continue;
-      if (!isUsableWinProbability(raw.win_probability)) continue;
-      const p = raw.win_probability as number;
-      if (runnerUpProb === null || p > runnerUpProb) {
-        runnerUpProb = p;
-        runnerUpRaw = raw;
-        runnerUpId = rId;
-      }
-      if (p < ELIMINATED_WIN_PROBABILITY_CEILING) eliminatedCount += 1;
-    }
-    // D-W: sanitise the runner-up's label for the leader-trails copy. A
-    // missing / ID-shaped runner-up label yields null (the copy branch then
-    // stays silent rather than leak an ID). Display-only; no producer read.
-    let runnerUpLabel: string | null = null;
-    if (runnerUpRaw !== null) {
-      const rawRunnerUpLabel =
-        (typeof runnerUpRaw.option_label === 'string' && runnerUpRaw.option_label) ||
-        (typeof runnerUpRaw.label === 'string' && runnerUpRaw.label) ||
-        '';
-      runnerUpLabel = sanitiseLabel(rawRunnerUpLabel, runnerUpId);
-    }
-    return { label: cleanedLabel, winnerProb, runnerUpProb, runnerUpLabel, eliminatedCount };
-  }
-  return null;
+  if (label === null) return null;
+  // The raw ranking does not name a permitted runner-up or license a gap.
+  return {
+    label, winnerProb: recommendation.win_probability,
+    runnerUpProb: null, runnerUpLabel: null, eliminatedCount: 0,
+  };
 }
 
 /**

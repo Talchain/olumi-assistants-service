@@ -7,6 +7,21 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
+### `talchain-schemas-0.52.0.tgz`
+
+Development artifact supplied by the Science schema owner for the coordinated
+objective-authority train. SHA256
+`f2cf05fc68d75ae6453050c70d0af95cfd8adb643dfba56c12e73aa7f99014ed`.
+This is not yet a tagged or registry-verified release; final review may repin it.
+It adds the attested objective ranking and makes goal direction and threshold
+frame part of analysis identity. Historical hashes are not rewritten: an old
+identity needs a fresh analysis. This consumer deliberately withholds current
+recommendations for old results without objective authority, so deploy it only
+with the coordinated producer train. Revert the consumer changes and vendor pin
+together to roll back.
+
+## Previous contents
+
 ### `talchain-schemas-0.50.0.tgz`
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE.**

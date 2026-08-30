@@ -15,7 +15,9 @@ import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-
 import { readDriverInfluenceScore } from "./driver-influence.js";
 import { winnerOptionResultSource } from "./option-result-source.js";
 import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
-import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers/recommendable-option.js";
+import type { EnrichmentObjectiveRanking } from "@talchain/schemas/boundary";
+import { readObjectiveRanking, readObjectiveRecommendation } from "./objective-recommendation.js";
+import { isUsableWinProbability } from "./option-result-source.js";
 
 // ============================================================================
 // Output Types
@@ -106,6 +108,9 @@ export interface FragileEdge {
 }
 
 export interface AnalysisResponseSummary {
+  /** Unchanged producer comparison and permitted recommendation identity. */
+  objective_ranking?: EnrichmentObjectiveRanking;
+  recommended_option_id?: string;
   winner: {
     option_id: string;
     option_label: string;
@@ -206,26 +211,6 @@ function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
     if (Array.isArray(nested.option_comparison) && nested.option_comparison.length > 0) return nested.option_comparison;
   }
   return [];
-}
-
-/**
- * Derive a winner from sorted option summaries.
- * Tiebreak: first by option_id lexicographic (deterministic).
- */
-function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner'] | null {
-  if (options.length === 0) return null;
-  // options is already sorted by win_probability descending; tiebreak by option_id
-  const sorted = [...options].sort((a, b) => {
-    const probDiff = b.win_probability - a.win_probability;
-    if (probDiff !== 0) return probDiff;
-    return a.option_id.localeCompare(b.option_id);
-  });
-  const first = sorted[0];
-  return {
-    option_id: first.option_id,
-    option_label: first.option_label,
-    win_probability: first.win_probability,
-  };
 }
 
 /**
@@ -725,34 +710,17 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options + WINNER from the single-sourced WALKING current-first
-    // reader (M1 / round-3/4): `option_comparison` (current PLoT V2) beats the
-    // legacy `results` copy, BUT a source lacking a usable (finite, [0,1])
-    // win_probability is skipped so the winner falls through to the source that
-    // carries one (shared isUsableWinProbability predicate) — never a phantom 0%
-    // winner. compact derives the winner as the highest-probability option in
-    // the walked-to source; the enricher/headline additionally honour PLoT's
-    // declared leading_option_id (a pre-existing, intentional strategy split —
-    // compact's `response` is the enrichment, which carries no leading_option_id,
-    // and the primary production path uses this analytical winner unreconciled).
-    // They coincide when the leader is the highest-probability option or absent.
-    // (Per-option driver / flip / fragility aggregation below is a SEPARATE
-    // concern — see getResultsArray, which stays results-first because the
-    // per-option factor_sensitivity/robustness shape lives in `results`, not in
-    // the identity-only live option_comparison.)
-    const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
+    // Current comparison rows carry data; only the attested producer ID below
+    // licenses a recommendation. Legacy data never supplies missing authority.
+    const results = Array.isArray(response.option_comparison)
+      ? response.option_comparison
+      : [...winnerOptionResultSource(response as Record<string, unknown>)];
     const options: OptionSummary[] = results
       .filter(isOptionResult)
-      .filter((r) => {
-        const hasId = typeof r.option_id === 'string';
-        const hasLabel = typeof r.option_label === 'string';
-        const hasProb = typeof r.win_probability === 'number';
-        return hasId || (hasLabel && hasProb);
-      })
+      .filter((r) => typeof r.option_id === 'string' && r.option_id.length > 0 &&
+        isUsableWinProbability(r.win_probability))
       .map((r) => {
-        const optionId = typeof r.option_id === 'string'
-          ? r.option_id
-          : (typeof r.option_label === 'string' ? r.option_label : 'unknown');
+        const optionId = r.option_id as string;
         const optionLabel = typeof r.option_label === 'string'
           ? r.option_label
           : optionId;
@@ -791,20 +759,16 @@ export function compactAnalysis(
         return a.option_id.localeCompare(b.option_id);
       });
 
-    // Status gate (shared with the direct receipt in run-analysis.ts and the
-    // downstream projectAnalysis / decision-review enricher): a FAILED /
-    // skipped option is never crowned and never defines the margin, even when
-    // it carries the top win_probability. Absent status stays recommendable.
-    // The full `options` list is left intact (errored options are retained,
-    // WITH their status) so the coach egress can still disclose that they ran;
-    // only the WINNER + MARGIN are computed from the recommendable subset.
-    const recommendableOptions = options.filter(isRecommendableTypedOption);
-
-    const winner = deriveWinner(recommendableOptions);
-    if (!winner) {
-      // No recommendable options — can still return summary with empty winner
-      log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
-    }
+    const recommendation = readObjectiveRecommendation(response as Record<string, unknown>);
+    const matchedWinner = recommendation
+      ? options.find((option) => option.option_id === recommendation.option_id)
+      : undefined;
+    const winner = matchedWinner ? {
+      option_id: matchedWinner.option_id,
+      option_label: matchedWinner.option_label,
+      win_probability: matchedWinner.win_probability,
+    } : null;
+    const objectiveRanking = readObjectiveRanking(response.objective_ranking);
 
     const rawRobustnessLevel = deriveRobustnessLevel(response);
     const robustnessLevel = mapRobustnessToCanonical(rawRobustnessLevel);
@@ -829,20 +793,14 @@ export function compactAnalysis(
         }))
       : [];
 
-    // Margin: winner.win_probability - runner_up.win_probability, measured
-    // over the RECOMMENDABLE options only (a failed option is never the winner
-    // nor the runner-up it is measured against). recommendableOptions preserves
-    // the win_probability-descending order of `options`.
-    const margin = recommendableOptions.length >= 2
-      ? recommendableOptions[0].win_probability - recommendableOptions[1].win_probability
-      : null;
-    // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
-    // upstream so the V5 assembler stays passthrough-only (F.6).
-    const marginPp = margin === null
-      ? null
-      : Math.round(margin * 1000) / 10;
+    // Raw first-place-share order is not the permitted recommendation order.
+    // PLoT supplies no permitted runner-up/gap in this contract.
+    const margin = null;
+    const marginPp = null;
 
     const summary: AnalysisResponseSummary = {
+      ...(objectiveRanking ? { objective_ranking: objectiveRanking } : {}),
+      ...(recommendation ? { recommended_option_id: recommendation.option_id } : {}),
       winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
       options,
       top_drivers: topDrivers,
