@@ -268,15 +268,67 @@ const HISTORIC_V8_INSTRUCTION_BYTES = 8265;
  * asserted below), so this edit is legible as shape-only without reading the
  * diff — which is the entire reason the halves are pinned apart.
  */
-const PREREGISTERED_V9_INSTRUCTION_SHA256 =
+const HISTORIC_V9_INSTRUCTION_SHA256 =
   "7629e9ec738786eb4624b078a62c81a5f4e5c90adc2bb4e1b5edbd820f97def8";
-const PREREGISTERED_V9_INSTRUCTION_BYTES = 9183;
+const HISTORIC_V9_INSTRUCTION_BYTES = 9183;
+
+/**
+ * ⭐⭐ v10 — THE OPTION-EFFECT-VALUE CHANGE. PRE-REGISTERED, UNMEASURED at pinning.
+ *
+ * WHAT CHANGED, and it is the CONNECT half only: the
+ * `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES` section stopped instructing
+ * the model to WITHHOLD the value.
+ *
+ * v9 said: *"Set it only where the brief gives you the basis for it … Where the
+ * brief does not support a number, leave `sets_to` out. An absent number is a
+ * truthful answer; a guessed one is read as the user's own and cannot be told
+ * apart from a figure they gave you."*
+ *
+ * ⚠ THAT SECOND CLAUSE WAS FALSE AT `f18d941b`, AND ITS FALSENESS IS THE WHOLE
+ * REASON FOR v10. `projector.ts` `bindDirectStatedMagnitude` already stamps every
+ * option→factor magnitude `brief_extraction` (value EQUALS a stated figure that
+ * verifies against the brief bytes) or `cee_hypothesis` (ours), and only the
+ * first is ever presented as the user's. A guessed number therefore CAN be told
+ * apart from a figure the user gave — the instruction was a stale mirror of a
+ * distinction the projector gained later (CLAUDE.md trap 12).
+ *
+ * WHY IT MATTERS ENOUGH TO CHANGE: a messy strategic brief rarely states a
+ * per-option-per-factor figure, so the model complied and omitted `sets_to`
+ * everywhere. Options then reach `cee/transforms/analysis-ready.ts:741` with no
+ * interventions, every option×factor pair raises `MISSING_OPTION_VALUE`, and the
+ * existing compute-discard waiver cannot fire because it requires the option to
+ * carry at least one real value (`analysis-ready-core.ts:506`). Fresh-journey
+ * completion was 1 of 23, with this blocker in 20 of them. The model was not
+ * failing to comply — it was complying.
+ *
+ * ⚠ AND THE HALF THAT MAKES IT HONEST SHIPS WITH IT, not after: `projector.ts`
+ * now stamps an UNCITED magnitude `cee_hypothesis` instead of writing no
+ * provenance at all. Asking for more estimates while leaving them unattributable
+ * would trade a refusal the user can SEE for a fabrication they cannot
+ * (`option-effect-value-provenance.test.ts` pins that invariant). The shape half
+ * is byte-identical to v9 — the "do not invent a number the user did not state"
+ * rule on `stated_items` is untouched, because that governs the USER's half of
+ * the record set and is not what was blocking anybody.
+ */
+const PREREGISTERED_V10_INSTRUCTION_SHA256 =
+  "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1";
+const PREREGISTERED_V10_INSTRUCTION_BYTES = 10079;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v9 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V9_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v10 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V10_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V9_INSTRUCTION_BYTES,
+      PREREGISTERED_V10_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v9 bytes, so v9's runs stay attributable", () => {
+    // v9 is the artefact every draw behind the 1-of-23 completion measurement was
+    // served. Whatever is logged against v10 must stay separable from it, or the
+    // before/after on this change becomes unattributable.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V9_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V9_INSTRUCTION_BYTES,
     );
   });
 
@@ -431,10 +483,22 @@ describe("the draft records instruction is the measured artefact", () => {
     // `stated_item`, so `to_stated` is how a link reaches it. That sentence is
     // the instruction-side half of round 9's goal-targeting fix; its
     // completion-side half names the goal's exact index in the ask.
+    //
+    // ⭐⭐ v10 MOVES THIS HALF, and it is the ONLY half it moves — the shape half
+    // is byte-identical to v9. That is exactly what pinning the halves apart is
+    // for: this edit is legible as "the option-effect-value section changed"
+    // without reading the diff. See the v10 block above for why the sentence it
+    // replaced was false at `f18d941b`.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("44c966336427c2672c2a0ee96bb6a507877ee7819660d77d496d9f982d1b879f");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(3648);
+    ).toBe("b631a9538e5c1e9a5bcb1e0c884c2cb81f7920ab5c1b61f3a15ba12d106691f9");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4544);
+    // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
+    // the 1-of-23 measurement was served these bytes.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("44c966336427c2672c2a0ee96bb6a507877ee7819660d77d496d9f982d1b879f");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(3648);
     // HISTORIC — v5's connect half, asserted DISTINCT.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
@@ -465,6 +529,61 @@ describe("the draft records instruction is the measured artefact", () => {
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
       "goal is never one of your `claims`, so `to_claim` cannot reach it",
     );
+  });
+
+  /**
+   * ⭐⭐ THE v10 RULES, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
+   *
+   * A hash pin cannot tell "someone reinstated the withholding rule" from
+   * "someone fixed a typo", and here that distinction is the difference between
+   * a product that runs and one that refuses 20 journeys in 23.
+   *
+   * TWO OPPOSITE HARMS, asserted separately, because a fix for either alone
+   * reopens the other (CLAUDE.md trap 22b — the opposite-direction twin):
+   *
+   *   (a) THE VALUE IS WITHHELD. The model omits `sets_to`, options carry no
+   *       interventions, every pair raises `MISSING_OPTION_VALUE` and nothing
+   *       can be analysed. This is what v9 instructed, and it is the defect.
+   *   (b) THE VALUE IS INVENTED AND PASSED OFF AS THE USER'S. Strictly worse —
+   *       it is the class-1 defect on the field the analysis ranks options on.
+   *       The instruction guards this by still routing stated figures through
+   *       `basis`; the PROJECTOR guards it by stamping provenance, which is why
+   *       `option-effect-value-provenance.test.ts` is the other half of the pair.
+   *
+   * ⚠ The negative assertion is the load-bearing one: it names the exact
+   * withdrawn sentence, so an accidental revert to v9's policy is LOUD rather
+   * than silently re-blocking the product under a green suite.
+   */
+  it("asks for the option effect value on every link, instead of instructing its omission", () => {
+    // (a) the ask itself
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
+      "Set it on every option→factor link you emit.",
+    );
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
+      "give your best estimate, reasoned from what",
+    );
+    // (b) the stated figure still routes through `basis` — the estimate is not
+    // bought by loosening the user's own half.
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
+      "set `basis` to the stated_items it came from",
+    );
+    // The shape half's invention prohibition on the USER's values is untouched.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "Do not invent a number the\nuser did not state",
+    );
+  });
+
+  it("no longer carries v9's withholding rule, in either of its two sentences", () => {
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).not.toContain(
+      "Where the brief does not support a number,\nleave `sets_to` out.",
+    );
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).not.toContain(
+      "a guessed one is\nread as the user's own and cannot be told apart from a figure they gave you",
+    );
+    // POSITIVE CONTROL for both negatives: the probe can still find a string
+    // that IS present in this half, so a `not.toContain` above is a
+    // discrimination rather than a dead assertion (CLAUDE.md trap 13).
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("## HOW MUCH EACH OPTION MOVES");
   });
 
   /**

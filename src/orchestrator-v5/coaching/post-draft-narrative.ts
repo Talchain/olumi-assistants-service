@@ -69,6 +69,9 @@ import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/type
 
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
+import { deriveNotModelledManifest } from '../../cee/context-integrity/not-modelled-manifest.js';
+import { composeDroppedFigureNotice } from '../../cee/context-integrity/brief-audit-answer.js';
+
 import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
 
 import {
@@ -523,6 +526,33 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const provisionalDecision = hasProvisionalDecision(nodes);
   const nextStep = buildReadinessNextStep(analysisReady, nodes, { provisionalDecision });
 
+  /**
+   * ⭐⭐ A FIGURE THE USER STATED AND THE MODEL DID NOT CARRY IS NAMED HERE, OR
+   * IT IS NEVER NAMED AT ALL.
+   *
+   * `TEAM-TEST-MVP.md` criterion 2: a material fact stated in the brief is
+   * either preserved in the model or explicitly disclosed as not modelled —
+   * *"silent omission fails this"*. This takes the DISCLOSURE branch. Nothing
+   * here writes a stated figure into the model: a number placed in a slot it
+   * does not belong in is the fabrication class this estate bans, and it is
+   * strictly worse than an absence the user can see.
+   *
+   * ⭐ NOTHING IS COMPUTED HERE THAT WAS NOT ALREADY COMPUTED. The verdict axis
+   * (`in_model` / `prose_only` / `absent`) and the copy both already shipped —
+   * they were simply unreachable unless the user ASKED a brief-audit question,
+   * which on a first draft nobody thinks to do. This is the "built but never
+   * plugged in" failure, and the fix is a call site, not a capability.
+   *
+   * ⚠ DERIVED FROM THE SAME `briefText` THE ADVISORY GUARD READS, which the
+   * dispatcher already resolves to `effectiveBrief` — the string the pipeline
+   * actually drafted from, not `payload.message`. Two readers of "the brief"
+   * disagreeing is exactly the defect that comment was written to fix, and
+   * there is one reader here.
+   */
+  const droppedFigureNotice = composeDroppedFigureNotice(
+    deriveNotModelledManifest(briefText ?? null, graph),
+  );
+
   // Run the full-response gate once so we can capture both the
   // pass/fail and (on fail) the categorical reject reason for ops
   // telemetry — without re-running the gate.
@@ -559,9 +589,17 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         // note here. Tightening the acceptance test would change WHICH PATH
         // serves a 110-140 word summary, and a copy change may not silently
         // re-route composition.
-        text: nodes.length > 0
-          ? `${acceptedSummary}\n\n${MODEL_VARIANCE_NOTE}`
-          : acceptedSummary,
+        // ⭐ THE DROPPED-FIGURE NOTICE RIDES THIS PATH TOO, AND FOR THE REASON
+        // THE VARIANCE NOTE'S OWN COMMENT GIVES: this shortcut is the MAJORITY
+        // path (146 of 688 replies took the deterministic opener in the 18 Aug
+        // capture). A disclosure added only to the sectioned builder below
+        // would be DARK for most users while every register recorded the
+        // clause as closed — this estate's single most repeated failure.
+        text: [
+          acceptedSummary,
+          ...(nodes.length > 0 ? [MODEL_VARIANCE_NOTE] : []),
+          ...(droppedFigureNotice !== null ? [droppedFigureNotice] : []),
+        ].join('\n\n'),
         telemetry: {
           assumption_source: 'coaching_summary',
           coaching_summary_present: true,
@@ -708,6 +746,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     weighingBlockDirectionOnly,
     completenessBlock,
     nextStep,
+    droppedFigureNotice,
   });
 
   return {
@@ -1796,6 +1835,13 @@ interface SectionedNarrativeInput {
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
   readonly nextStep: string;
+  /**
+   * The stated figures the model did not carry, or `null` when there are none
+   * (or when the derivation could not look). A FIXED FOOTER like the variance
+   * note — see {@link assembleSectionedNarrative}'s `withNote` for why it is
+   * deliberately outside the word budget.
+   */
+  readonly droppedFigureNotice: string | null;
 }
 
 interface SectionedNarrativeResult {
@@ -1876,10 +1922,22 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
    * ⭐ SPLICED SECOND-TO-LAST, not appended. `nextStep` stays terminal so the
    * reply still ends on the action; placing the note first would open every
    * draft with two hedges in a row (see the opener in `buildConfirmSentence`).
+   *
+   * ⭐ THE DROPPED-FIGURE NOTICE IS SPLICED ON THE SAME TERMS, AND THE
+   * REASONING ABOVE IS EXACTLY WHY. It is a statement about what the artefact
+   * DOES NOT CONTAIN — the user's own figures — so pricing it against the
+   * artefact's content would let any future coaching addition silently trade
+   * away a disclosure the acceptance clause requires. It rides ABOVE the
+   * variance note so the two hedges read narrow-then-general, and both stay
+   * BEFORE `nextStep` so the reply still ends on the action.
    */
   const withNote = (text: string): string => {
     const blocks = text.split('\n\n');
-    blocks.splice(blocks.length - 1, 0, MODEL_VARIANCE_NOTE);
+    const footers =
+      input.droppedFigureNotice !== null
+        ? [input.droppedFigureNotice, MODEL_VARIANCE_NOTE]
+        : [MODEL_VARIANCE_NOTE];
+    blocks.splice(blocks.length - 1, 0, ...footers);
     return blocks.join('\n\n');
   };
 

@@ -1452,8 +1452,37 @@ interface ProjectedInterventionBinding {
    * routes open across this flag — it reads the BRIEF TEXT, a different set from
    * `stated_items`, and suppressing it withdrew attribution from numbers the user
    * typed verbatim. See `V4InterventionBinding.composed_citation`.
+   *
+   * ⚠ NO LONGER THE GATE. The extractor now keys on
+   * {@link ProjectedInterventionBinding.withholds_brief_authority}, an opt-IN,
+   * so this flag has stopped carrying that job. It stays as the receipt marker
+   * for the composed branch, which is a real and separate fact about the
+   * magnitude.
    */
   readonly composed_citation?: true;
+  /**
+   * ⭐⭐ THE RECEIPT CONTESTS THE BRIEF'S AUTHORITY — the only condition under
+   * which `intervention-extractor.ts` may close its own brief-authority routes.
+   *
+   * Set ONLY where the records genuinely leave ownership undetermined: a
+   * magnitude whose candidate stated items cannot be resolved to one, and a
+   * figure that would equally license a rival option. In both, keeping the value
+   * while withdrawing the LABEL is the fail-closed answer in both directions.
+   *
+   * ⛔ IT IS NOT SET ON A RECEIPT THAT MERELY REPORTS "no stated item was
+   * cited". The extractor gated on `binding !== undefined` — *"did the projector
+   * write anything?"* — while the question it means is *"does this receipt
+   * contest the brief?"*. Those coincided only while every binding was verified
+   * or contested; the uncited branch broke the coincidence, and the old gate
+   * then re-attributed a figure the user typed verbatim in the brief to Olumi at
+   * low confidence, in a sentence saying no figure was cited. The two
+   * authorities read DIFFERENT SETS — this binder matches `stated_items`,
+   * `classifyAmountAgainstBrief` scans the BRIEF TEXT — so absence from one is
+   * no finding about the other. (CLAUDE.md trap 21: two questions under one
+   * condition; trap 13d: gate against the SPEC, not the shape the first case
+   * happened to take.)
+   */
+  readonly withholds_brief_authority?: true;
 }
 
 export interface CanonicalInterventionCandidate {
@@ -1677,7 +1706,41 @@ function bindDirectStatedMagnitude(args: {
     // case can finally see it. The product cannot know whether the user meant an
     // increment or a total, and asking beats guessing in either direction
     // (CLAUDE.md trap 22f).
-    if (citedFigures.length === 0) return undefined;
+    // ⭐⭐ AN UNCITED MAGNITUDE IS OURS — AND SAYING SO IS THE WHOLE POINT.
+    //
+    // This branch returned `undefined`, which wrote NO binding, which left the
+    // value in `interventions` with no entry in `intervention_details`. Measured
+    // by executing the projector at `f18d941b`: an option carrying
+    // `sets_to: 240000` with no cited figure projected
+    // `interventions: {f0f5ccb2: 0.48}`, `raw_interventions: {f0f5ccb2: 240000}`
+    // and NO `intervention_details` at all — a number on the graph that the
+    // product cannot attribute to anybody. That is CLAUDE.md's class-1 defect
+    // (absence represented as value) in the field the analysis ranks options on.
+    //
+    // The three legitimate states are user fact / OUR estimate with provenance /
+    // unknown. An unstamped number is the second wearing the first's clothes, so
+    // the stamp is not a nicety — it is what makes asking the model for the
+    // estimate at all (see `instruction.ts`, "HOW MUCH EACH OPTION MOVES WHAT IT
+    // CHANGES") an honest trade rather than a fabrication. The two ship together.
+    //
+    // ⚠ THE RECEIPT IS DELIBERATELY NOT IN THE `Direct causal value …` FAMILY.
+    // `transforms/analysis-ready.ts:831-835` raises a NON-WAIVABLE
+    // `ambiguous_value` blocker on that prefix when the binding is unresolved.
+    // Reusing it would swap a hard `MISSING_OPTION_VALUE` refusal for a hard
+    // `AMBIGUOUS_OPTION_VALUE` one — the symptom metric moves, the user stays
+    // blocked (trap 23). An honest estimate is disclosed, not refused; a value
+    // the model claimed came from the brief is what that blocker is for.
+    //
+    // ⚠ ORDERING IS UNAFFECTED: `compareCanonicalInterventionCandidates` reads
+    // only `authority`, `setsTo` and `edgeId` — never the binding — so stamping
+    // cannot change which candidate wins a parallel-link conflict.
+    if (citedFigures.length === 0) {
+      return {
+        raw_value: claim.sets_to,
+        source: "cee_hypothesis",
+        reasoning: `Olumi estimate via edge ${edgeId}; no stated figure is cited for this option→factor effect`,
+      };
+    }
     // A value that IS a stated figure somewhere keeps its existing route: the
     // extractor may still earn it brief authority via `classifyAmountAgainstBrief`,
     // and demoting it here would trade this defect for its mirror image.
@@ -1722,6 +1785,10 @@ function bindDirectStatedMagnitude(args: {
       raw_value: claim.sets_to,
       ...(units.length === 1 ? { unit: units[0] } : {}),
       source: "cee_hypothesis",
+      // GENUINELY CONTESTED: which stated item this magnitude is bound to is
+      // undetermined, so the extractor's brief-text route must not hand the
+      // user's authorship back on the strength of the number being findable.
+      withholds_brief_authority: true,
       reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; candidates ${matches
         .map(({ index }) => `stated_items[${index}]`)
         .join(", ")}`,
@@ -1744,6 +1811,10 @@ function bindDirectStatedMagnitude(args: {
       raw_value: claim.sets_to,
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       source: "cee_hypothesis",
+      // GENUINELY CONTESTED: the brief said this figure once and nothing here
+      // can say which option owns it, so the extractor must not re-earn the
+      // label from the brief text either.
+      withholds_brief_authority: true,
       reasoning: `Direct causal value has unresolved stated-item binding via edge ${edgeId}; stated_items[${index}] is claimed by more than one option`,
     };
   }
