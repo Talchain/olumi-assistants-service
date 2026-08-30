@@ -1,0 +1,22 @@
+{
+  "_readme": "Single source of truth for the v201 delta. Consumed by build.py AND by tests/unit/prompts.draft-graph-v201-delta.test.ts, so neither is a hand-maintained mirror of the other.",
+  "prompt_id": "draft_graph_default",
+  "base_version": 195,
+  "base_sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+  "candidate_version": 201,
+  "edits": [
+    {
+      "find": "- the decision and named options,\n",
+      "replace": "- the decision and its named options — courses of action only; apply the OPTION_RULES ACTION TEST before treating any named thing as an option,\n"
+    },
+    {
+      "find": "List options from the brief plus Status Quo (see OPTION_RULES).",
+      "replace": "List the brief's named candidates that pass the OPTION_RULES ACTION TEST, plus Status Quo (see OPTION_RULES)."
+    },
+    {
+      "find": "<OPTION_RULES>\nProduce 2-6 options total.\n",
+      "replace": "<OPTION_RULES>\nProduce 2-6 options total.\n\nACTION TEST — OPTIONS ARE MOVES, NOT DIAGNOSES: An option is a course of action the decision-maker could choose to take. Before emitting any option node, ask: could the team decide to DO this? A candidate that is instead simply true or false — a cause, diagnosis, hypothesis, or explanation of why things are as they are — fails the test and must never become an option, however prominently the brief states it.\n- Cue to apply the test (the cue is not the test): the brief reports people disagreeing about WHY something is happening (\"some think the product has fallen behind, others think onboarding is the problem\"), or its candidates are claims about the present rather than moves the team could make.\n- Attributed disagreement about WHAT TO DO still names real options: \"some want to relocate five engineers, others want to hire locally, others want an agency\" are courses of action and MUST remain options. Only claims about why things are as they are fail the test. Never key this test on who said something, on hedging, or on the presence of disagreement.\n- When a candidate fails the ACTION TEST, model the lever it points at as a factor under the normal FACTOR CATEGORIES rules (\"onboarding is the problem\" -> a factor for onboarding quality), and carry the DISAGREEMENT as uncertainty on that factor's influence: a wider prior, a lower exists_probability on its causal edge, or a risk. The disputed claim never becomes an option, a goal, or the decision node.\n- The options are then the responses the team could choose between: the action each explanation implies if it were true (e.g. \"Rebuild Product Competitiveness\", \"Overhaul Onboarding\"), a diagnose-first path such as \"Run a structured diagnosis before committing to a fix\", and Status Quo. Emit only responses plausible for this decision class; option count, diversity and distinctness rules all still apply.\n- Never present a diagnostic hypothesis to the user as though it were a choice. If the brief names no course of action at all, prefer a diagnose-first option plus Status Quo over inventing a fix.\n"
+    }
+  ],
+  "load_bearing_clause": "Attributed disagreement about WHAT TO DO still names real options"
+}
