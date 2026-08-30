@@ -14,7 +14,9 @@ import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   derivePendingActivity,
   filterLivePendingActions,
+  findSoleLiveElicitBaselinePending,
   isPendingActionExpired,
+  PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER,
   RESUMABLE_ACTION_TYPES,
   type PendingAction,
   type PendingActionKind,
@@ -284,5 +286,112 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     expect(tally.expiredCount).toBe(1);
     expect(tally.confirmationExpectingLiveCount).toBe(1);
     expect(tally.kinds).toEqual({ proposed_concept: 1, set_factor_value: 1 });
+  });
+});
+
+/**
+ * ROADMAP 2.1361 — WHICH PENDING KINDS COMPETE FOR A BARE NUMBER.
+ *
+ * ⚠ THE DEFECT. `findSoleLiveElicitBaselinePending` filtered to kind
+ * `elicit_target_baseline` FIRST and only then checked that exactly one
+ * survived, so a live `elicit_option_effect` ("give me a number from 0 to 1")
+ * alongside the baseline question blocked nothing: a bare "12%" bound to the
+ * baseline ask regardless of which question the user was answering. Widening
+ * the gate to "sole among ALL live pendings" would have been the wrong fix —
+ * the ask turn's own commit merges the baseline pending with chip-derived
+ * pendings, so co-residence with a chip is normal and that gate would never
+ * open. The population is therefore narrowed to kinds a BARE NUMBER could
+ * plausibly answer.
+ */
+describe('2.1361 — PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER', () => {
+  it('classifies EVERY kind, derived from the record itself (no hand-list to go short)', () => {
+    const classified = Object.keys(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER).sort();
+    // The Record<PendingActionKind, boolean> type makes an unclassified NEW
+    // kind a compile error; this asserts the runtime shape agrees and that the
+    // probe is not reading an empty object (trap 13e — magnitude, not sign).
+    expect(classified.length).toBeGreaterThanOrEqual(12);
+    for (const kind of classified) {
+      expect(typeof PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER[kind as PendingActionKind]).toBe(
+        'boolean',
+      );
+      // Every classified kind must be constructible, i.e. really is a kind.
+      expect(pendingOfKind(kind as PendingActionKind).action.kind).toBe(kind);
+    }
+  });
+
+  it('pins the classification per kind, so a RECLASSIFICATION goes red even though the type still compiles', () => {
+    expect(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER).toEqual({
+      elicit_target_baseline: true,
+      elicit_option_effect: true,
+      elicit_effect_target: true,
+      elicit_edit_target: true,
+      set_factor_value: true,
+      run_analysis: false,
+      what_would_flip: false,
+      apply_proposed_change: false,
+      edit_graph_add_risk: false,
+      proposed_concept: false,
+      clarify_v2_round: false,
+      draft_graph: false,
+    });
+  });
+
+  it('is a PROPER subset in both directions — neither everything nor nothing competes', () => {
+    // Trap 20 — a collapsed classifier (all true / all false) satisfies a
+    // one-sided battery. Assert both classes are non-empty.
+    const values = Object.values(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER);
+    expect(values.filter(Boolean).length).toBeGreaterThan(0);
+    expect(values.filter((v) => !v).length).toBeGreaterThan(0);
+  });
+});
+
+describe('2.1361 — findSoleLiveElicitBaselinePending, across kinds', () => {
+  const baseline = () => pendingOfKind('elicit_target_baseline');
+
+  it('the sole live baseline question is returned', () => {
+    const found = findSoleLiveElicitBaselinePending([baseline()], NOW_MS);
+    expect(found?.action.kind).toBe('elicit_target_baseline');
+  });
+
+  it.each(
+    (
+      Object.entries(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER) as Array<
+        [PendingActionKind, boolean]
+      >
+    ).filter(([kind, expects]) => expects && kind !== 'elicit_target_baseline'),
+  )('a co-resident live %s also wants a number, so NOTHING is claimed', (kind) => {
+    expect(findSoleLiveElicitBaselinePending([baseline(), pendingOfKind(kind)], NOW_MS)).toBeNull();
+  });
+
+  it.each(
+    (
+      Object.entries(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER) as Array<
+        [PendingActionKind, boolean]
+      >
+    ).filter(([, expects]) => !expects),
+  )('CONTRAST CONTROL: a co-resident live %s does NOT block (or the feature is dark)', (kind) => {
+    const found = findSoleLiveElicitBaselinePending([baseline(), pendingOfKind(kind)], NOW_MS);
+    expect(found?.action.kind).toBe('elicit_target_baseline');
+  });
+
+  it('an EXPIRED competitor does not block — liveness runs before the competition check', () => {
+    const expired = { ...pendingOfKind('elicit_option_effect'), expires_at_turn_count: 0 };
+    expect(
+      findSoleLiveElicitBaselinePending([baseline(), expired], NOW_MS)?.action.kind,
+    ).toBe('elicit_target_baseline');
+  });
+
+  it('a sole live competitor that is NOT the baseline question returns null, never that competitor', () => {
+    expect(findSoleLiveElicitBaselinePending([pendingOfKind('elicit_option_effect')], NOW_MS)).toBeNull();
+    expect(findSoleLiveElicitBaselinePending([pendingOfKind('set_factor_value')], NOW_MS)).toBeNull();
+  });
+
+  it('two live baseline questions stay ambiguous (the original 2.918 rule, unchanged)', () => {
+    expect(
+      findSoleLiveElicitBaselinePending(
+        [baseline(), { ...baseline(), id: 'pa-second' }],
+        NOW_MS,
+      ),
+    ).toBeNull();
   });
 });

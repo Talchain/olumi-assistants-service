@@ -186,6 +186,7 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
+import { formatBaselineReAsk } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -5822,6 +5823,96 @@ export async function runTurnExecutor(
           // into a second resume (the commit excludes its ref from
           // carry-forward; a successful mint also moves the graph hash).
           consumedPendingAction = pending;
+        } else if (baselineAnswer.skip_reason === 'unusable_answer') {
+          // ROADMAP 2.1361 — THE RE-ASK. The user plainly tried to answer and
+          // the extractor may not honour it (a guess, a range, a choice, an
+          // out-of-range figure, an aside the grammar cannot judge). Before
+          // 2.1361 this fell through in silence: the answer landed nowhere and
+          // the product never said why, while the LLM fallback could not
+          // rescue it either (routing back into add_constraint re-runs the
+          // same binder on the same string).
+          //
+          // Scope, and why it does NOT hijack turns: `unusable_answer` is
+          // reachable only when the whole message is digits plus CLOSED answer
+          // vocabulary (see `ANSWER_ATTEMPT_VOCABULARY`). A user who has
+          // changed the subject produces `not_an_answer` and keeps the
+          // pre-2.1361 silent fall-through, as do every lapsed, diverged and
+          // target-missing case. The fail direction is silence, never capture.
+          //
+          // Shape mirrors the clarification-recovery branch above: a curated
+          // zero-LLM `direct_answer`, committed with the question RE-PERSISTED
+          // (fresh TTL, unchanged graph-hash precondition) so the next reply
+          // can still bind. Re-asking without re-persisting would be a dead
+          // end — the second answer would find no pending and refuse again.
+          const reAskPending = baselineAnswer.pending;
+          const reAskEmittedAtIso = new Date().toISOString();
+          const reAskPendingActions: readonly PendingAction[] = [
+            {
+              ...reAskPending,
+              id: randomUUID(),
+              expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+              expires_at_iso: new Date(
+                Date.parse(reAskEmittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+              ).toISOString(),
+              emitted_at_iso: reAskEmittedAtIso,
+            },
+          ];
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: 'baseline_elicitation_unusable_answer',
+          });
+          const reAskAssistantText = formatBaselineReAsk({
+            targetLabel: baselineAnswer.targetLabel,
+          });
+          const reAskResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: reAskAssistantText,
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = reAskResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(reAskResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              pending_actions: reAskPendingActions,
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_re_ask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation re-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
         }
       }
 

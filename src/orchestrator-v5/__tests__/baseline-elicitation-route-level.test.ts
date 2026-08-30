@@ -28,7 +28,10 @@ import { setTestSink } from '../../utils/telemetry.js';
 import { makeMessagePayload } from './fixtures.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { PendingAction } from '../session/pending-action.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  type PendingAction,
+} from '../session/pending-action.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
@@ -387,5 +390,225 @@ describe('2.918 RESUME — the source gate is PINNED (it was not)', () => {
       (appendCalls[0]!.graph as GraphV3T).nodes.find((n) => n.id === 'o-churn-rate')
         ?.observed_state?.baseline,
     ).toBe(0.12);
+  });
+});
+
+/**
+ * ROADMAP 2.1361 — THE PRODUCT MUST HEAR THE ANSWERS TO ITS OWN QUESTION.
+ *
+ * The ask is "Roughly what percentage is <target> at right now?" and, at the
+ * deployed tip, a bare "30" — and "roughly 30" and "30 percent", which echo
+ * the ask's own words — all REFUSED, silently. These are the end-to-end pins:
+ * the answer a user actually types reaches `observed_state.baseline` on the
+ * named target, with zero LLM calls, through the one existing writer.
+ */
+describe('2.1361 RESUME — a bare number answers the question', () => {
+  it.each([
+    ['30', 0.3],
+    ['roughly 30', 0.3],
+    ['about 30', 0.3],
+    ['30 percent', 0.3],
+  ])('"%s" mints the baseline on the named target', async (message, expectedFraction) => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    const { response, telemetry } = await runTurnExecutor(
+      payload(message),
+      `req-21361-bind-${message.replace(/\W+/g, '-')}`,
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    expect(telemetry.failure_type).toBeNull();
+    expect(chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry.llm_calls_used).toBe(0);
+
+    expect(appendCalls).toHaveLength(1);
+    const committed = appendCalls[0]!.graph as GraphV3T;
+    // Bound BY IDENTITY to the target the question named, never by a value
+    // predicate another node could satisfy (CLAUDE.md trap 19).
+    const target = committed.nodes.find((n) => n.id === 'o-churn-rate');
+    expect(target?.observed_state?.baseline).toBe(expectedFraction);
+    for (const n of committed.nodes) {
+      if (n.id === 'o-churn-rate') continue;
+      expect(n.observed_state?.baseline).toBeUndefined();
+    }
+
+    // The user's own number, confirmed back — no invented substitute.
+    expect(response.assistant_text).toContain('Noted Churn rate is currently at 30%.');
+    // The question is answered, so it must not be asked again.
+    expect(response.assistant_text).not.toContain('Roughly what percentage');
+    const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
+    expect(persisted.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(0);
+  });
+});
+
+/**
+ * ROADMAP 2.1361 — THE OTHER HALF OF THE ACCEPTANCE CONDITION. A binder that
+ * accepts everything writes wrong values confidently, so an answer that is
+ * genuinely ambiguous or out of range must still ASK. Before 2.1361 it fell
+ * through in silence and the answer landed nowhere.
+ */
+describe('2.1361 RE-ASK — an unusable answer is answered, not ignored', () => {
+  it.each([['maybe 30%'], ['10-15%'], ['30% or 40%'], ['120%'], ['about 30%, I think']])(
+    '"%s" re-asks, mints nothing, and keeps the question alive',
+    async (message) => {
+      const graph = graphWithFramedRow();
+      const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+      mockedPendingActions = [elicitPending(liveHash)];
+      const { adapter, chatWithTools } = directAnswerAdapter();
+
+      const { response, telemetry } = await runTurnExecutor(
+        payload(message),
+        `req-21361-reask-${message.replace(/\W+/g, '-')}`,
+        { routingAdapter: adapter, graphState: graph },
+      );
+
+      expect(telemetry.failure_type).toBeNull();
+      // Deterministic: the re-ask costs no LLM call.
+      expect(chatWithTools).not.toHaveBeenCalled();
+      expect(telemetry.llm_calls_used).toBe(0);
+
+      // NOTHING was minted — the no-invention rule is intact.
+      for (const call of appendCalls) {
+        const g = call.graph as GraphV3T | undefined;
+        if (g == null) continue;
+        for (const n of g.nodes) expect(n.observed_state?.baseline).toBeUndefined();
+      }
+
+      // The product says what it needs, and names the target.
+      expect(response.assistant_text).toContain('Churn rate');
+      expect(response.assistant_text).toContain('one number between 0 and 100');
+
+      // ⭐ THE RE-ASK IS NOT A DEAD END: the question is re-persisted, so the
+      // next reply can still bind. A re-ask without this would ask forever.
+      const persisted = (appendCalls.at(-1)!.pending_actions ?? []) as PendingAction[];
+      const requestioned = persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
+      expect(requestioned).toHaveLength(1);
+      expect(requestioned[0]!.action).toMatchObject({ target_id: 'o-churn-rate' });
+      expect(requestioned[0]!.expires_at_turn_count).toBeGreaterThan(0);
+    },
+  );
+
+  it('⭐ ANTI-HIJACK CONTROL — a user who changed the subject is NOT re-asked', async () => {
+    // The load-bearing negative. `unusable_answer` is reachable only when the
+    // whole message is digits plus CLOSED answer vocabulary; anything else
+    // keeps the pre-2.1361 silent fall-through, so a stale question can never
+    // capture a turn the user meant for something else.
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload('Actually, can we add 3 more factors about pricing instead?'),
+      'req-21361-anti-hijack',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    // The ordinary LLM path owns the turn, exactly as before 2.1361.
+    expect(chatWithTools).toHaveBeenCalled();
+    expect(response.assistant_text).not.toContain('one number between 0 and 100');
+  });
+
+  it('⭐ DISCRIMINATION CONTROL — bind and re-ask are different outcomes on the same fixture', async () => {
+    // Trap 20: a route that returned the same thing for every message would
+    // satisfy each battery above on its own. One fixture, two messages, two
+    // observably different commits.
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+
+    mockedPendingActions = [elicitPending(liveHash)];
+    const bound = await runTurnExecutor(payload('30'), 'req-21361-disc-bind', {
+      routingAdapter: directAnswerAdapter().adapter,
+      graphState: graph,
+    });
+    const boundGraph = appendCalls.at(-1)!.graph as GraphV3T;
+    const boundBaseline = boundGraph.nodes.find((n) => n.id === 'o-churn-rate')?.observed_state
+      ?.baseline;
+
+    appendCalls.length = 0;
+    mockedPendingActions = [elicitPending(liveHash)];
+    const asked = await runTurnExecutor(payload('30% or 40%'), 'req-21361-disc-reask', {
+      routingAdapter: directAnswerAdapter().adapter,
+      graphState: graph,
+    });
+    const askedGraph = appendCalls.at(-1)!.graph as GraphV3T | undefined;
+    const askedBaseline = askedGraph?.nodes.find((n) => n.id === 'o-churn-rate')?.observed_state
+      ?.baseline;
+
+    expect(boundBaseline).toBe(0.3);
+    expect(askedBaseline).toBeUndefined();
+    expect(bound.response.assistant_text).not.toBe(asked.response.assistant_text);
+  });
+});
+
+/**
+ * ⭐⭐ ROADMAP 2.1361 — THE RE-ASK MUST SURVIVE BEING ANSWERED BADLY TWICE.
+ *
+ * This test exists because a mutant SURVIVED without it. Replacing the
+ * executor's explicit `pending_actions: reAskPendingActions` with `[]` left
+ * every other assertion in this file green — the commit's CARRY-FORWARD keeps
+ * a non-consumed pending alive, so "the question is still there" held either
+ * way and the re-persist looked equivalent.
+ *
+ * It is not equivalent. `computeSurvivingPriorPendingsDetailed` DECREMENTS
+ * `expires_at_turn_count` on every carried turn (commit.ts: `nextTurnCount =
+ * pa.expires_at_turn_count - 1`), and the default budget is 2. So under
+ * carry-forward alone the product would ask, be fumbled twice, and then
+ * SILENTLY STOP LISTENING — the exact defect 2.1361 exists to remove, moved
+ * from the first answer to the third. Re-asking refreshes the budget, because
+ * a question the product has just repeated is not a question that is running
+ * out of patience.
+ *
+ * A single-turn assertion cannot see this. The journey can.
+ */
+describe('2.1361 — the question survives repeated fumbles', () => {
+  it('unusable, unusable, then a good bare answer — and it still binds', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+
+    // Turn 1 — a range. Re-ask.
+    await runTurnExecutor(payload('10-15%'), 'req-21361-journey-1', {
+      routingAdapter: directAnswerAdapter().adapter,
+      graphState: graph,
+    });
+    const afterTurn1 = (appendCalls.at(-1)!.pending_actions ?? []) as PendingAction[];
+    expect(afterTurn1.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(1);
+    // The budget is REFRESHED, not spent: this is the assertion the surviving
+    // mutant had no answer to.
+    expect(
+      afterTurn1.find((p) => p.action.kind === 'elicit_target_baseline')!.expires_at_turn_count,
+    ).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+
+    // Turn 2 — a guess. Re-ask again, from the question the last turn persisted.
+    appendCalls.length = 0;
+    mockedPendingActions = afterTurn1;
+    await runTurnExecutor(payload('maybe 30%'), 'req-21361-journey-2', {
+      routingAdapter: directAnswerAdapter().adapter,
+      graphState: graph,
+    });
+    const afterTurn2 = (appendCalls.at(-1)!.pending_actions ?? []) as PendingAction[];
+    expect(
+      afterTurn2.find((p) => p.action.kind === 'elicit_target_baseline')!.expires_at_turn_count,
+    ).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+
+    // Turn 3 — the user gets it right. Under carry-forward alone the budget
+    // would be exhausted by now and this would bind NOTHING.
+    appendCalls.length = 0;
+    mockedPendingActions = afterTurn2;
+    const { response, telemetry } = await runTurnExecutor(payload('30'), 'req-21361-journey-3', {
+      routingAdapter: directAnswerAdapter().adapter,
+      graphState: graph,
+    });
+
+    expect(telemetry.llm_calls_used).toBe(0);
+    const committed = appendCalls.at(-1)!.graph as GraphV3T;
+    expect(committed.nodes.find((n) => n.id === 'o-churn-rate')?.observed_state?.baseline).toBe(
+      0.3,
+    );
+    expect(response.assistant_text).toContain('Noted Churn rate is currently at 30%.');
   });
 });

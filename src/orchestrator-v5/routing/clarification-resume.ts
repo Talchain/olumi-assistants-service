@@ -51,7 +51,7 @@ import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
 } from '../session/pending-action.js';
-import { deriveElicitedBaselineAnswerPercent } from '../../cee/factor-extraction/stated-level.js';
+import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -652,10 +652,17 @@ export function tryClarificationResume(
  * value-identical `add_constraint` replay from the pending's own fields, so
  * the mint runs through the ONE existing writer with zero LLM calls.
  *
- * EVERY non-match falls through SILENTLY to the normal flow (no recovery
- * copy): the elicitation is additive by contract — a lapsed, diverged or
- * ignored question must leave behaviour exactly as it was before 2.918. The
- * skip reasons exist for telemetry only.
+ * ROADMAP 2.1361 — ONE non-match no longer falls through silently.
+ * `unusable_answer` means the user plainly TRIED to answer (the message is
+ * digits plus closed answer vocabulary) and the extractor may not honour it:
+ * a guess, a range, a choice, an out-of-range figure, an aside the grammar
+ * cannot judge. Before 2.1361 that answer landed nowhere and the product never
+ * said why. The caller now RE-ASKS on this reason alone; every OTHER non-match
+ * still falls through SILENTLY, because the elicitation is additive by
+ * contract — a lapsed, diverged or ignored question must leave behaviour
+ * exactly as it was before 2.918, and a user who has changed the subject must
+ * never be hijacked by a stale question. `not_an_answer` therefore keeps its
+ * pre-2.1361 meaning and its silence.
  *
  * Gates, in order, all fail-closed:
  *   - exactly ONE live pending question (two are ambiguous for a bare
@@ -677,6 +684,17 @@ export type BaselineElicitationResumeDispatch =
         | 'graph_diverged'
         | 'target_missing'
         | 'not_an_answer';
+    }
+  | {
+      /**
+       * ROADMAP 2.1361 — the ONE non-match that speaks. Carries the pending
+       * and the live label so the caller can re-ask NAMING the target and
+       * re-persist the question; without both, a re-ask would be a dead end.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'unusable_answer';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
     }
   | {
       readonly matched: true;
@@ -711,8 +729,14 @@ export function tryBaselineElicitationResume(input: {
   const competingLabels = (input.graphNodes ?? [])
     .filter((n) => n.id !== targetId)
     .map((n) => (typeof n.label === 'string' ? n.label : undefined));
-  const answer = deriveElicitedBaselineAnswerPercent(input.message, liveLabel, competingLabels);
-  if (answer === undefined) {
+  // ONE classification, three outcomes (2.1361). The mint path re-runs the
+  // same classifier through `deriveElicitedBaselineAnswerPercent` on identical
+  // inputs, so match and mint cannot disagree.
+  const answer = classifyElicitedBaselineAnswer(input.message, liveLabel, competingLabels);
+  if (answer.outcome === 'unusable') {
+    return { matched: false, skip_reason: 'unusable_answer', pending, targetLabel: liveLabel };
+  }
+  if (answer.outcome !== 'bound') {
     return { matched: false, skip_reason: 'not_an_answer' };
   }
   return { matched: true, pending, targetLabel: liveLabel };

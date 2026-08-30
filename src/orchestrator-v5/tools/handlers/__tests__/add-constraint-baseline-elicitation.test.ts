@@ -32,6 +32,7 @@ import type { GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { createAddConstraintHandler } from '../add-constraint.js';
 import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
+import { deriveElicitedBaselineAnswerPercent } from '../../../../cee/factor-extraction/stated-level.js';
 
 const QUESTION_FOR_CHURN = 'Roughly what percentage is Churn rate at right now?';
 
@@ -548,5 +549,145 @@ describe('2.918 — the elliptical answer binds ONLY through the pending questio
     // The restatement is otherwise a noop; the mint keeps the channels honest.
     expect(second.handler_facts[0]?.noop).toBe(false);
     expect(second.assistant_text).toContain('Noted Churn rate is currently at 12%.');
+  });
+});
+
+/**
+ * ROADMAP 2.1361 — the handler-side gate, with the discrimination its own
+ * suite could not previously make.
+ *
+ * The pre-2.1361 pair above proves the pending is NECESSARY (remove it and
+ * nothing mints). It cannot prove the pending is the thing that names the
+ * REFERENT, because the extractor binds an elliptical answer under any
+ * non-empty label — so a fixture whose pending pointed at an unrelated node
+ * would have passed identically. These add the missing half: move the
+ * pending's `target_id` and the mint must move with it, or vanish.
+ */
+describe('2.1361 — the pending, not the message, names the target that gets the mint', () => {
+  function graphWithPersistedRowFor(nodeId: string, label: string): GraphV3T {
+    const g = graphWithConstraintTargets();
+    (g as { goal_constraints?: unknown[] }).goal_constraints = [
+      {
+        constraint_id: 'gc-persisted-rot',
+        node_id: nodeId,
+        operator: '<=',
+        value: 10,
+        label,
+        provenance: 'explicit',
+        unit: '%',
+        value_frame: 'level',
+      },
+    ];
+    return g;
+  }
+
+  it('ROT MUTANT: a pending for a DIFFERENT target does not license the elliptical bind on this one', async () => {
+    const outcome = await runTurn({
+      message: 'about 12%',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedRowFor('o-churn-rate', 'Churn rate'),
+      // The question in flight is about a DIFFERENT node. The message is
+      // byte-identical to the matched case above.
+      pendings: [elicitPending({ target_id: 'g-revenue', target_label: 'Revenue' })],
+    });
+    const graph = outcome.mutated_graph as GraphV3T;
+    for (const n of graph.nodes) {
+      expect(n.observed_state?.baseline).toBeUndefined();
+    }
+    expect(outcome.assistant_text).toContain(QUESTION_FOR_CHURN);
+  });
+
+  it('PRECONDITION PIN: the message alone is referent-blind, so the rot above is the GATE’s doing', () => {
+    // Trap 13b — without this, the rot mutant could be measuring the grammar
+    // rather than the gate. It is not: the extractor binds under any label.
+    expect(deriveElicitedBaselineAnswerPercent('about 12%', 'Churn rate')).toBe(12);
+    expect(deriveElicitedBaselineAnswerPercent('about 12%', 'Revenue')).toBe(12);
+    expect(deriveElicitedBaselineAnswerPercent('about 12%', 'Zzz Unrelated Metric')).toBe(12);
+  });
+
+  it('a live ask that ALSO wants a number blocks the elliptical bind (cross-kind, 2.1361 change 4)', async () => {
+    const competitor = {
+      ...elicitPending({ id: 'pa-other' }),
+      action: {
+        kind: 'elicit_option_effect',
+        option_id: 'opt-1',
+        option_label: 'Option A',
+        factor_id: 'f-quality',
+        factor_label: 'Product quality',
+      },
+    } as PendingAction;
+    const outcome = await runTurn({
+      message: 'about 12%',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedRowFor('o-churn-rate', 'Churn rate'),
+      pendings: [elicitPending(), competitor],
+    });
+    const graph = outcome.mutated_graph as GraphV3T;
+    for (const n of graph.nodes) {
+      expect(n.observed_state?.baseline).toBeUndefined();
+    }
+  });
+});
+
+describe('2.1361 — the handler mints from a BARE number, through the same gate', () => {
+  function graphWithPersistedRow(): GraphV3T {
+    const g = graphWithConstraintTargets();
+    (g as { goal_constraints?: unknown[] }).goal_constraints = [
+      {
+        constraint_id: 'gc-persisted-bare',
+        node_id: 'o-churn-rate',
+        operator: '<=',
+        value: 10,
+        label: 'Churn rate',
+        provenance: 'explicit',
+        unit: '%',
+        value_frame: 'level',
+      },
+    ];
+    return g;
+  }
+
+  it.each([['30'], ['roughly 30'], ['about 30'], ['30 percent']])(
+    '"%s" with the live question mints 0.3 on the named target and nothing else',
+    async (message) => {
+      const outcome = await runTurn({
+        message,
+        targetId: 'o-churn-rate',
+        value: 10,
+        unit: '%',
+        graph: graphWithPersistedRow(),
+        pendings: [elicitPending()],
+      });
+      const graph = outcome.mutated_graph as GraphV3T;
+      expect(node(graph, 'o-churn-rate').observed_state?.baseline).toBe(0.3);
+      for (const n of graph.nodes) {
+        if (n.id === 'o-churn-rate') continue;
+        expect(n.observed_state?.baseline).toBeUndefined();
+      }
+      expect(outcome.assistant_text).toContain('Noted Churn rate is currently at 30%.');
+      expect(outcome.__elicit_baseline).toBeUndefined();
+    },
+  );
+
+  it('THE PAIR: without the question, a bare "30" mints NOTHING and the ask stands', async () => {
+    // The load-bearing negative for change 1. Making the '%' optional is safe
+    // only because the elliptical limb is unreachable without a live question;
+    // if that gate ever weakened, a stray "30" would mint a baseline.
+    const outcome = await runTurn({
+      message: '30',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedRow(),
+    });
+    const graph = outcome.mutated_graph as GraphV3T;
+    for (const n of graph.nodes) {
+      expect(n.observed_state?.baseline).toBeUndefined();
+    }
+    expect(outcome.assistant_text).toContain(QUESTION_FOR_CHURN);
   });
 });

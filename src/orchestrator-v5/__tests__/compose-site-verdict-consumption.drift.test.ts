@@ -372,6 +372,14 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   noPendingAssistantText: { stance: 'structural', why: 'Pending-action recovery template.' },
   '"The analysis is no longer fresh': { stance: 'structural', why: 'Literal staleness copy.' },
   expiredAssistantText: { stance: 'structural', why: 'Pending-expiry template.' },
+  // ROADMAP 2.1361 — the baseline-elicitation RE-ASK. Deterministic copy from
+  // `formatBaselineReAsk`, a constant builder interpolating ONE node label. It
+  // asks for a number and names no option, ranking or analysis claim, so there
+  // is no persisted verdict for it to consume or leak.
+  reAskAssistantText: {
+    stance: 'structural',
+    why: 'Baseline re-ask template; interpolates the target label only, makes no comparative claim.',
+  },
   ambiguousAssistantText: {
     stance: 'structural',
     count: 2,
@@ -1106,7 +1114,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // site added in turn-executor.ts — the reference-class pre-route. Explicit
     // `assistant_text:` form, so keyable by the same regex and in scope here.
     // Canonical readiness repair adds one explicit assistant_text compose site.
-    expect(compared, 'the re-key comparison compared nothing').toBe(41);
+    expect(compared, 'the re-key comparison compared nothing').toBe(42);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1314,8 +1322,16 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // failed `pnpm test:required` on the commit that created the site, and the
     // guard found the omission rather than a human remembering it. Seventh
     // instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(46);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(42);
+    // ⚠ BASELINE-ELICITATION RE-ASK (ROADMAP 2.1361): 46 -> 47 sites, 42 -> 43
+    // keys, NO new file — the site is `reAskAssistantText` in turn-executor.ts,
+    // registered `structural` (deterministic `formatBaselineReAsk` copy that
+    // interpolates one node label and makes no comparative claim). Recorded the
+    // same way as every entry above, and for the same reason: this ledger
+    // failed on the commit that created the site — it caught the inline
+    // expression BEFORE it was named, so the omission could not inherit
+    // another site's stance. Eighth instance of the mechanism working.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(47);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(43);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',

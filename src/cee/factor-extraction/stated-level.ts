@@ -75,7 +75,7 @@ const STATIVE_VERB =
  * admitted for the "right now" / "right around" hedge family (2.918 — the
  * elicitation question's own copy says "right now", so answers echo it).
  */
-const PRESENT_STATE_QUALIFIERS: readonly string[] = [
+export const PRESENT_STATE_QUALIFIERS: readonly string[] = [
   "currently",
   "now",
   "presently",
@@ -418,6 +418,29 @@ export function deriveStatedTargetBaselinePercent(
 }
 
 /**
+ * The percent MARKER an elicited answer may carry, and — since ROADMAP 2.1361
+ * — may equally OMIT.
+ *
+ * ⚠ WHY THIS IS OPTIONAL, and why that is not a loosening of the no-invention
+ * rule. The parent statement grammar is percent-only because a bare "churn is
+ * 12" on an arbitrary turn states no unit and CEE may not invent one. The
+ * elicited limb is a different cell: it is reachable ONLY behind a live
+ * server-minted `elicit_target_baseline` pending for THIS target, and that
+ * pending's own question is "Roughly what percentage is <target> at right
+ * now?". The question supplies the UNIT exactly as it already supplies the
+ * REFERENT — both come from the ask, neither from the extractor. Requiring the
+ * user to re-state a unit the product just named is not caution, it is a
+ * product that cannot hear the answers to its own question: `30`,
+ * `roughly 30` and `30 percent` (two of which echo the ask's own words) all
+ * refused before this change, while the ask never stated the requirement.
+ *
+ * The marker itself stays a CLOSED alternation so a stray trailing word is
+ * still a refusal; `percent`/`per cent` are the British and American spellings
+ * of the ask's own noun.
+ */
+const PERCENT_MARKER = "(?:\\s*%|\\s+per\\s*cent|\\s+percent|\\s+percentage)";
+
+/**
  * ROADMAP 2.918 — the ELLIPTICAL ANSWER grammar. In reply to a pending
  * baseline question that NAMES the target ("Roughly what percentage is Churn
  * rate at right now?"), the natural answer carries no subject: "about 12%",
@@ -429,23 +452,168 @@ export function deriveStatedTargetBaselinePercent(
  * set — it/that + copula, we + are (+ at); pronouns carry no metric identity,
  * which is exactly why the question context must supply it), qualifiers drawn
  * from the SAME `PRESENT_STATE_QUALIFIERS` vocabulary as the statement
- * grammar, ONE unsigned number with a literal '%', optional trailing
- * qualifiers, and at most a closing '.' or '!'. Anything else refuses:
- * a '?' (question echo), a quote, a delta or bound word, a second number, a
- * conditional tail, "maybe" — every one of these may change the claim, and
- * only the full grammar (which demands a subject) is entitled to judge a
- * longer utterance. Percent-only and [0,100] for the same reasons as the
- * parent (the mint cell it feeds is unchanged).
+ * grammar, ONE unsigned number with an OPTIONAL percent marker (2.1361 — see
+ * `PERCENT_MARKER`; the ask supplies the unit), optional trailing qualifiers,
+ * and at most a closing '.' or '!'. Anything else refuses: a '?' (question
+ * echo), a quote, a delta or bound word, a second number, a conditional tail,
+ * "maybe" — every one of these may change the claim, and only the full grammar
+ * (which demands a subject) is entitled to judge a longer utterance. [0,100]
+ * for the same reason as the parent (the mint cell it feeds is unchanged).
+ *
+ * NOTE the whole-message anchoring is what makes the optional marker safe: a
+ * bare number is admitted only when the ENTIRE message is that number plus
+ * closed-vocabulary hedging. "12 higher", "under 12", "10-15", "12 or 15" and
+ * "-12" all still refuse, because no limb of this pattern can consume the
+ * extra token — they are refusals of the GRAMMAR, not of the '%'.
  */
 const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
   "^\\s*" +
     "(?:(?:it|that)(?:['’]s|\\s+is)\\s+|we(?:['’]re|\\s+are)\\s+(?:at\\s+)?)?" +
     `(?:${QUALIFIER_ALT}\\s+)*` +
-    "(?<value>\\d+(?:\\.\\d+)?)\\s*%" +
+    "(?<value>\\d+(?:\\.\\d+)?)" +
+    `${PERCENT_MARKER}?` +
     `(?:\\s+${QUALIFIER_ALT})*` +
     "\\s*[.!]?\\s*$",
   "i",
 );
+
+/**
+ * ROADMAP 2.1361 — the CLOSED vocabulary that makes a non-binding message
+ * recognisable as an ANSWER ATTEMPT rather than a change of subject.
+ *
+ * WHY THIS EXISTS. Before 2.1361 every non-match fell through in SILENCE: an
+ * unreadable answer landed nowhere and the product never said why. Re-asking
+ * needs a discriminator, and the one thing this codebase must not build is
+ * another natural-language predicate settled by length constants with hard
+ * cliffs on either side (CLAUDE.md trap 22f — four rounds of oscillation on
+ * exactly that shape). So the discriminator is STRUCTURAL and closed: a
+ * message is an answer ATTEMPT when it carries at least one digit AND every
+ * alphabetic token in it is a member of this union. Nothing else can reach
+ * the re-ask, so a user who has changed the subject is never hijacked, and the
+ * fail direction is the pre-2.1361 silence.
+ *
+ * The union is deliberately small and each group has a stated job:
+ *   - pronoun leads and qualifiers: the grammar's own vocabulary, so a
+ *     near-miss on a shape the grammar ALMOST accepts is recognised;
+ *   - unit words: the ask's own noun;
+ *   - hedges and connectors: the vocabulary of the answers that are genuinely
+ *     UNUSABLE rather than absent — a guess ("maybe 12%"), a range
+ *     ("10 to 15%"), a choice ("12% or 15%"), an aside ("about 12%, I think").
+ *     These are the shapes that must ASK rather than bind, and asking is only
+ *     possible if they are distinguishable from silence.
+ */
+export const ANSWER_ATTEMPT_VOCABULARY: ReadonlySet<string> = new Set([
+  // The elliptical grammar's own pronoun leads.
+  "it",
+  "that",
+  "we",
+  "is",
+  "are",
+  // The shared present-state qualifier vocabulary (derived, not mirrored).
+  ...PRESENT_STATE_QUALIFIERS,
+  // The ask's own unit noun, both spellings.
+  "percent",
+  "percentage",
+  "per",
+  "cent",
+  // Guess hedges: an answer the user is not asserting.
+  "maybe",
+  "perhaps",
+  "possibly",
+  "probably",
+  "i",
+  "think",
+  "guess",
+  "reckon",
+  "say",
+  "sure",
+  "not",
+  // Range / choice connectors: an answer that names more than one value.
+  "or",
+  "to",
+  "and",
+  "between",
+]);
+
+/** Contraction tails stripped before tokenising, so "it's"/"we're" tokenise cleanly. */
+const CONTRACTION_TAIL_RE = /['’](?:s|re|d|ll|m|ve|t)\b/gi;
+
+/**
+ * True when the message is structurally an ATTEMPT to answer the pending
+ * baseline question: it carries a digit, and every alphabetic token belongs to
+ * {@link ANSWER_ATTEMPT_VOCABULARY}. Pure membership over a closed set — no
+ * length threshold, no clause-boundary judgement, nothing that can oscillate.
+ */
+function isAnswerAttempt(message: string): boolean {
+  if (!/\d/.test(message)) return false;
+  const words = message.replace(CONTRACTION_TAIL_RE, "").toLowerCase().match(/[a-z]+/g);
+  if (words === null) return true; // digits and punctuation only, e.g. "10-15%"
+  return words.every((w) => ANSWER_ATTEMPT_VOCABULARY.has(w));
+}
+
+/**
+ * ROADMAP 2.1361 — what the answer turn should DO, in three outcomes.
+ *
+ * `bound` and `not_an_answer` are the pre-2.1361 behaviour unchanged (mint, or
+ * silent fall-through). `unusable` is the new middle: the user plainly TRIED
+ * to answer and the extractor may not honour it — a guess, a range, a choice,
+ * an out-of-range figure, an aside the grammar cannot judge. The caller
+ * RE-ASKS on `unusable` rather than binding, which is the half of the
+ * acceptance condition that stops a widened binder writing wrong values
+ * confidently: a binder that accepts everything is worse than one that
+ * refuses in silence.
+ */
+export type ElicitedBaselineAnswer =
+  | { readonly outcome: "bound"; readonly value: number }
+  | { readonly outcome: "unusable" }
+  | { readonly outcome: "not_an_answer" };
+
+/**
+ * The classifier {@link deriveElicitedBaselineAnswerPercent} is the value-only
+ * projection of. ONE parser, two readers — the mint path asks for the number,
+ * the routing path asks what to say — so the two can never disagree about
+ * whether a message bound (CLAUDE.md trap 21: two authorities under similar
+ * names answering different questions).
+ *
+ * Callers MUST gate this on a live `elicit_target_baseline` pending whose
+ * target is `targetLabel`'s node; see
+ * {@link deriveElicitedBaselineAnswerPercent} for why, and note that this
+ * function itself is REFERENT-BLIND by construction (it cannot check a gate it
+ * is not given). The gate is pinned at its two call sites, not here.
+ */
+export function classifyElicitedBaselineAnswer(
+  message: string | null | undefined,
+  targetLabel: string | null | undefined,
+  competingLabels: readonly (string | null | undefined)[] = [],
+): ElicitedBaselineAnswer {
+  if (typeof message !== "string" || message.trim() === "") {
+    return { outcome: "not_an_answer" };
+  }
+  // No target label ⇒ no identity to bind ⇒ nothing, same rule as the parent.
+  // Deliberately NOT `unusable`: with no referent there is no question to
+  // re-ask, so silence is the only honest outcome.
+  if (typeof targetLabel !== "string" || targetLabel.trim() === "") {
+    return { outcome: "not_an_answer" };
+  }
+
+  const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
+  if (full !== undefined) return { outcome: "bound", value: full };
+
+  const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
+  if (m !== null) {
+    const value = Number(m.groups?.["value"]);
+    // Same [0,100] rule as the parent — the mint cell this feeds is unchanged.
+    // A well-formed answer OUTSIDE the range is the clearest `unusable` there
+    // is: the product understood it perfectly and still may not use it, so
+    // saying so is strictly better than silence.
+    if (Number.isFinite(value) && value >= 0 && value <= 100) {
+      return { outcome: "bound", value };
+    }
+    return { outcome: "unusable" };
+  }
+
+  return isAnswerAttempt(message) ? { outcome: "unusable" } : { outcome: "not_an_answer" };
+}
 
 /**
  * The single raw percent an ANSWER TURN states for the pending question's
@@ -463,6 +631,18 @@ const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
  *      that gate (exactly one live pending, matching target id, server-minted
  *      so no LLM proposal can fabricate it).
  *
+ * ⚠ THIS FUNCTION IS REFERENT-BLIND ON THE ELLIPTICAL LIMB, BY CONSTRUCTION.
+ * `targetLabel` is consulted by the full-sentence limb and is otherwise only a
+ * presence check: an elliptical "about 12%" binds under ANY non-empty label,
+ * because the label is not what licenses it — the live pending is, and this
+ * function is not given one. That is the contract, not a defect, but it means
+ * NO TEST HERE CAN OBSERVE A REFERENT MIS-BINDING, and a "positive control"
+ * in this file that passes the genuine label proves only that the function
+ * runs. The referent discrimination lives at the two GATES
+ * (`add-constraint.ts` and `tryBaselineElicitationResume`) and is pinned there
+ * by rot-mutant pairs that move the pending's target and assert the bound
+ * referent moves with it.
+ *
  * EXTRACTION ONLY — never infers, defaults, or rounds; every refusal path
  * returns `undefined` and the caller mints nothing.
  */
@@ -471,18 +651,6 @@ export function deriveElicitedBaselineAnswerPercent(
   targetLabel: string | null | undefined,
   competingLabels: readonly (string | null | undefined)[] = [],
 ): number | undefined {
-  if (typeof message !== "string" || message.trim() === "") return undefined;
-  // No target label ⇒ no identity to bind ⇒ nothing, same rule as the parent.
-  if (typeof targetLabel !== "string" || targetLabel.trim() === "") return undefined;
-
-  const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
-  if (full !== undefined) return full;
-
-  const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
-  if (m === null) return undefined;
-  const value = Number(m.groups?.["value"]);
-  if (!Number.isFinite(value)) return undefined;
-  // Same [0,100] rule as the parent — the mint cell this feeds is unchanged.
-  if (!(value >= 0 && value <= 100)) return undefined;
-  return value;
+  const classified = classifyElicitedBaselineAnswer(message, targetLabel, competingLabels);
+  return classified.outcome === "bound" ? classified.value : undefined;
 }

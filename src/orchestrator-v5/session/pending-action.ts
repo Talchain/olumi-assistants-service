@@ -700,23 +700,94 @@ export type ElicitTargetBaselinePending = PendingAction & {
 };
 
 /**
+ * ROADMAP 2.1361 — WHICH PENDING KINDS COMPETE FOR A BARE NUMBER.
+ *
+ * ⚠ THE DEFECT THIS CLOSES. `findSoleLiveElicitBaselinePending` used to filter
+ * to kind `elicit_target_baseline` FIRST and only then check that exactly one
+ * survived. So a live `elicit_option_effect` ("give me a number from 0 to 1")
+ * sitting alongside the baseline question did not block anything: a bare
+ * "12%" bound to the baseline ask regardless of which question the user was
+ * answering. That was already wrong; it gets sharper now that a BARE NUMBER
+ * binds (2.1361 change 1), because "12" is a plausible reply to either.
+ *
+ * ⚠ AND WHY THE OBVIOUS WIDENING IS WRONG. "Sole among ALL live pendings"
+ * would take the feature DARK: the ask turn's own commit merges the baseline
+ * pending with `proposalPendingForCommit` (chip-derived pendings) up to the
+ * budget of 3 — see turn-executor's `pendingForCommit` — so a co-resident
+ * `run_analysis` chip pending is the NORMAL case, not the exception. A gate
+ * that never opens is not a stricter gate, it is a deleted capability that
+ * reads as green.
+ *
+ * So the population is narrowed to the kinds whose question a BARE NUMBER
+ * could plausibly answer. A chip a user clicks, a yes/no offer, or a concept
+ * noun does not compete; another ask for a figure does.
+ *
+ * Type design follows `PENDING_ACTION_KIND_SAFETY_CLASSIFICATION`: an
+ * exhaustive `Record<PendingActionKind, boolean>` is a COMPILE-TIME error when
+ * a kind is added and left unclassified, so this cannot become a hand-list
+ * that silently goes short (CLAUDE.md trap 12). The runtime pin in
+ * `pending-action-liveness.test.ts` iterates it so a RECLASSIFICATION also
+ * goes red.
+ */
+export const PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER: Record<PendingActionKind, boolean> = {
+  // Asks for a figure — these are the competitors.
+  elicit_target_baseline: true,
+  // "give me a number from 0 to 1" (2.1352).
+  elicit_option_effect: true,
+  // "which of these does your 0.12 belong to?" (2.1353) — the pending exists
+  // BECAUSE a number was given, and an index reply ("2") is a bare number.
+  elicit_effect_target: true,
+  // "which specific factor, edge, option, or value to change" (2.1353) — the
+  // word "value" in the ask's own copy invites a figure. Fail-closed.
+  elicit_edit_target: true,
+  // Holds a numeric value and its clarify asks which factor to apply it to; a
+  // bare number reply is plausible enough to compete. Fail-closed, and safe:
+  // this kind is server-only (never chip-derived), so it cannot co-occur with
+  // the baseline ask incidentally.
+  set_factor_value: true,
+
+  // Do NOT compete: none of these questions has a number for an answer, and
+  // classifying them true is what would take the feature dark.
+  run_analysis: false,
+  what_would_flip: false,
+  apply_proposed_change: false,
+  edit_graph_add_risk: false,
+  proposed_concept: false,
+  clarify_v2_round: false,
+  draft_graph: false,
+};
+
+const NUMERIC_ANSWER_EXPECTING_KINDS: ReadonlySet<PendingActionKind> = new Set(
+  (Object.entries(PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER) as Array<[PendingActionKind, boolean]>)
+    .filter(([, expects]) => expects)
+    .map(([kind]) => kind),
+);
+
+/**
  * ROADMAP 2.918 — THE question-context gate for the elliptical answer
- * grammar. Returns the pending baseline question if and only if EXACTLY ONE
- * live `elicit_target_baseline` pending exists — two live questions make a
- * bare "about 12%" ambiguous between targets, so it binds neither (the same
- * unanimity doctrine as the extractor's competitor rule, one level up).
- * Liveness via the shared predicate; `null` in every other case, so every
- * caller fails closed by construction.
+ * grammar, WIDENED by 2.1361. Returns the pending baseline question if and
+ * only if exactly one live pending EXPECTS A NUMERIC ANSWER
+ * ({@link PENDING_ACTION_KIND_EXPECTS_NUMERIC_ANSWER}) and that one is the
+ * `elicit_target_baseline` question.
+ *
+ * Two live baseline questions are ambiguous between targets; a baseline
+ * question live alongside ANY other figure-asking pending is ambiguous between
+ * QUESTIONS. Both now refuse, on the same unanimity doctrine as the
+ * extractor's competitor rule one level up. Non-competing pendings (chips,
+ * offers, concepts) are ignored, which is what keeps the gate open at all.
+ * `null` in every other case, so every caller fails closed by construction.
  */
 export function findSoleLiveElicitBaselinePending(
   pendings: readonly PendingAction[] | undefined,
   nowMs: number,
 ): ElicitTargetBaselinePending | null {
-  const live = filterLivePendingActions(pendings ?? [], nowMs).filter(
-    (pa): pa is ElicitTargetBaselinePending => pa.action.kind === 'elicit_target_baseline',
+  const competing = filterLivePendingActions(pendings ?? [], nowMs).filter((pa) =>
+    NUMERIC_ANSWER_EXPECTING_KINDS.has(pa.action.kind),
   );
-  if (live.length !== 1) return null;
-  return live[0]!;
+  if (competing.length !== 1) return null;
+  const sole = competing[0]!;
+  if (sole.action.kind !== 'elicit_target_baseline') return null;
+  return sole as ElicitTargetBaselinePending;
 }
 
 /**

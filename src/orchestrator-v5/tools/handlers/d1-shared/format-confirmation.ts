@@ -201,14 +201,54 @@ export function formatBaselineNoted(input: {
  * why (ISL's level conversion genuinely cannot run without a baseline —
  * `CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`), names the target
  * so an elliptical answer has an identity to bind through, and says
- * "percentage" because the extractor's v1 grammar is percent-only — an
- * answer without '%' cannot mint. Leak-safe: no handler ids, no parameter
- * names, no internal tokens, no em dash.
+ * "percentage" to name the unit the analysis needs. Leak-safe: no handler ids,
+ * no parameter names, no internal tokens, no em dash.
+ *
+ * ⚠ THE PARAGRAPH THIS REPLACED WAS THE DEFECT, IN WRITING (ROADMAP 2.1361).
+ * It read: says "percentage" because the extractor's v1 grammar is
+ * percent-only — an answer without '%' cannot mint. That is an author stating,
+ * in a comment, that the product asks a question whose most natural answers it
+ * cannot hear, and mitigating it by hoping the user types a '%' the question
+ * never asked for. Measured at the deployed tip: `30`, `roughly 30` and
+ * `30 percent` (the last two echoing this very sentence's own words) all
+ * refused, and the refusal was SILENT. 2.1361 made the '%' optional on the
+ * elicited limb — the ask supplies the unit exactly as it supplies the
+ * referent — so this copy is now true of the binder behind it. If either half
+ * changes, `cee/factor-extraction/__tests__/stated-level-elicited-answer.test.ts`
+ * (block "(B) the product's own question") derives the ask's hedge vocabulary
+ * and unit noun from THIS STRING at test time and asserts the binder hears
+ * each one, so an ask reworded into vocabulary the binder refuses goes RED
+ * rather than shipping. The defect is closed structurally, not just once.
  */
 export function formatBaselineElicitation(input: { readonly targetLabel: string }): string {
   return (
     `To test that bound, the analysis also needs to know where ${input.targetLabel} stands today. ` +
     `Roughly what percentage is ${input.targetLabel} at right now?`
+  );
+}
+
+/**
+ * ROADMAP 2.1361 — the RE-ASK, for an answer that was plainly attempted and
+ * cannot be honoured: a guess ("maybe 12%"), a range ("10-15%"), a choice
+ * ("12% or 15%"), an out-of-range figure ("120%"), or an aside the grammar
+ * may not judge ("about 12%, I think").
+ *
+ * Before this existed such a turn fell through in silence: the answer landed
+ * nowhere and the product never said why. Silence is the wrong half of the
+ * trade — a binder loose enough to accept all of these would write wrong
+ * values confidently, so the honest exit is to make the ambiguity the product
+ * and ASK, naming the shape that works.
+ *
+ * States only what is true and actionable: the target, that one number is
+ * needed, its range, and that the '%' sign is optional (which it now is).
+ * Leak-safe on the same rules as the ask above: no handler ids, no parameter
+ * names, no internal tokens, no em dash, no example figure that could be
+ * misread as a claim about the user's own metric.
+ */
+export function formatBaselineReAsk(input: { readonly targetLabel: string }): string {
+  return (
+    `I couldn’t read that as a single current level for ${input.targetLabel}. ` +
+    `Give me one number between 0 and 100, with or without the % sign, and I’ll record it.`
   );
 }
 
