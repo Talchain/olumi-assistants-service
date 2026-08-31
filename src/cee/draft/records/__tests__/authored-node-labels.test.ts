@@ -1,6 +1,12 @@
 /**
  * ⭐⭐ THE NODE LABEL IS AN AUTHORED OBJECTIVE, NOT THE USER'S RAW BRIEF FRAGMENT
- * — and the decision node is not the word "Decision".
+ * — and the decision node is not labelled with the generic word for its kind.
+ *
+ * ⚠ THE CAPTURES AND SCREENSHOTS BELOW SAY `Decision`, AND ARE LEFT THAT WAY:
+ * they are dated records of what the product ACTUALLY emitted, not fixtures to
+ * keep current (trap 14b). Today's placeholder is `Question`
+ * ({@link UNAUTHORED_DECISION_LABEL}), renamed to agree with the UI's node
+ * vocabulary; assertions track the constant, the history does not.
  *
  * ── THE WITNESSED DEFECT ───────────────────────────────────────────────────
  * The founder photographed a goal node reading
@@ -42,6 +48,7 @@ import {
   deriveGoalObjectiveLabel,
   deriveDecisionLabel,
   labelIsDerivedFrom,
+  UNAUTHORED_DECISION_LABEL,
 } from "../objective-label.js";
 import { enforceSingleGoal } from "../../../structure/index.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
@@ -201,7 +208,7 @@ describe("the goal label is an authored objective, not the user's verbatim fragm
 });
 
 describe("the decision node carries a real label derived from the decision being made", () => {
-  it("the projector no longer mints the literal 'Decision' when the brief states the decision", () => {
+  it("the projector no longer mints the generic placeholder when the brief states the decision", () => {
     const brief = "Should we raise the price or keep it as is? Our churn is 3.5% monthly.";
     const records: DraftRecordSet = {
       stated_items: [
@@ -247,7 +254,7 @@ describe("the decision node carries a real label derived from the decision being
     const decisions = projected.nodes.filter((n) => n.kind === "decision");
     expect(decisions).toHaveLength(1);
     const decision = decisions[0];
-    expect(decision.label).not.toBe("Decision");
+    expect(decision.label).not.toBe(UNAUTHORED_DECISION_LABEL);
     expect(decision.label).toBe("Raise the Price or Keep It as Is");
     expect(decision.provenance?.label_authored).toBe(true);
   });
@@ -368,7 +375,7 @@ describe("the decision node carries a real label derived from the decision being
     (_name, vetoed, twin, twinLabel) => {
       const refused = deriveDecisionLabel({ brief: vetoed, goalQuotes: [] });
       expect(refused.authored, `must refuse: ${vetoed}`).toBe(false);
-      expect(refused.label).toBe("Decision");
+      expect(refused.label).toBe(UNAUTHORED_DECISION_LABEL);
       const authored = deriveDecisionLabel({ brief: twin, goalQuotes: [] });
       expect(authored.authored, `twin must author: ${twin}`).toBe(true);
       expect(authored.label).toBe(twinLabel);
@@ -378,7 +385,7 @@ describe("the decision node carries a real label derived from the decision being
   it("a refused decision keeps the honest generic and says so", () => {
     const derived = deriveDecisionLabel({ brief: "The board set two main options.", goalQuotes: [] });
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 });
 
@@ -851,7 +858,7 @@ describe("an investigative brief does not name the decision from a question it a
       "What Is Actually Driving It Before We Commit Budget to a Fix",
     );
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
     expect(derived.reason).toBe("no_derivable_decision_statement");
   });
 
@@ -871,7 +878,7 @@ describe("an investigative brief does not name the decision from a question it a
     (_frame, brief) => {
       const derived = deriveDecisionLabel({ brief });
       expect(derived.authored).toBe(false);
-      expect(derived.label).toBe("Decision");
+      expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
     },
   );
 
@@ -952,7 +959,7 @@ describe("an investigative brief does not name the decision from a question it a
   it.each(KNOWN_DROPPED)("known-dropped, deliberately: %s", (_why, brief) => {
     const derived = deriveDecisionLabel({ brief });
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 
   /**
@@ -983,5 +990,103 @@ describe("an investigative brief does not name the decision from a question it a
     expect(derived.authored).toBe(false);
     expect(derived.reason).toBe("deliberation_frame");
     expect(derived.label).toBe(quote);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE CROSS-SERVICE VOCABULARY PIN — the decision node's unauthored
+ * placeholder is the word the UI shows for that node's KIND, and the two
+ * services must agree on it or a freshly-drafted graph contradicts its own
+ * legend on screen.
+ *
+ * ── THE DEFECT THIS EXISTS TO CATCH ─────────────────────────────────────────
+ * The UI renamed the decision node's user-facing vocabulary from `Decision` to
+ * `Question`, from a single constant (`DECISION_NODE_LABEL`,
+ * `DecisionGuideAI:src/canvas/domain/vocabulary.ts`, PR #1026). That constant
+ * governs the LEGEND, the context menu, the inspector and the node registry's
+ * kind label — it does NOT rewrite a node's own `label` field. So a graph
+ * drafted by CEE carried the server-minted string `Decision` as the node's
+ * text while every affordance around it read `Question`: the two services
+ * disagreeing on one screen, which is what this pin forbids.
+ *
+ * ── WHY THE ASSERTION IS A LITERAL AND NOT THE CONSTANT ─────────────────────
+ * Asserting `=== UNAUTHORED_DECISION_LABEL` would be a tautology: it passes for
+ * whatever the constant happens to say, which is exactly the drift in question.
+ * The literal below is the CONTRACT with the UI. If someone changes the CEE
+ * constant, this REDs and the RED is the reminder that the UI half must move
+ * in the same wave.
+ *
+ * ⚠ SCOPE, STATED PRECISELY (trap 20): this pins CEE's half only. It cannot
+ * observe the UI's constant from this repo, so it proves the server emits the
+ * agreed string — never that the UI still agrees. The UI's own half is pinned
+ * in that repo.
+ */
+describe("the unauthored decision label agrees with the UI's node vocabulary", () => {
+  /** The string the UI's `DECISION_NODE_LABEL` holds. Changing one requires changing both. */
+  const UI_DECISION_NODE_LABEL = "Question";
+
+  it("⭐ the pure producer mints the agreed placeholder when it declines to author", () => {
+    const declined = deriveDecisionLabel({
+      brief: "Our burn rate is too high and the team is stretched thin.",
+      goalQuotes: [],
+    });
+    expect(declined.authored).toBe(false);
+    expect(declined.reason).toBe("no_derivable_decision_statement");
+    expect(declined.label).toBe(UI_DECISION_NODE_LABEL);
+
+    // CONTRAST CONTROL (trap 13): a brief that DOES pose a choice must author a
+    // real label. Without this the pin would pass against a producer that had
+    // stopped authoring anything at all and returned the placeholder always.
+    const authored = deriveDecisionLabel({
+      brief: "We are deciding whether to build our own fleet or partner with third-party couriers.",
+      goalQuotes: [],
+    });
+    expect(authored.authored).toBe(true);
+    expect(authored.label).not.toBe(UI_DECISION_NODE_LABEL);
+  });
+
+  /**
+   * ⭐ THE WHOLE MINT PATH, NOT THE LEAF FUNCTION. The pure-function pin above
+   * would still pass if the projector stopped calling `deriveDecisionLabel` and
+   * hardcoded its own string — which is how the literal got minted in the first
+   * place. This drives `projectRecordsToGraph` and reads the node a user would
+   * actually see, bound BY IDENTITY (the sole `kind === "decision"` node), never
+   * by a value predicate another node could satisfy.
+   */
+  it("⭐ the PROJECTED decision node a user sees carries the agreed placeholder", () => {
+    const brief = "Our burn rate is too high and the team is stretched thin.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Our burn rate is too high" },
+        { kind: "option", source_quote: "cut contractor spend" },
+        { kind: "option", source_quote: "slow down hiring" },
+      ],
+      claims: [
+        { claim_kind: "outcome", label: "Monthly Burn", basis: [0] },
+        {
+          claim_kind: "causal_link",
+          label: "cutting contractors lowers burn",
+          from_stated: 1,
+          to_claim: 0,
+          effect: "negative",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "slower hiring lowers burn",
+          from_stated: 2,
+          to_claim: 0,
+          effect: "negative",
+        },
+      ],
+    };
+
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decisions = projected.nodes.filter((n) => n.kind === "decision");
+    expect(decisions).toHaveLength(1);
+    const decision = decisions[0];
+
+    expect(decision.label).toBe(UI_DECISION_NODE_LABEL);
+    // The placeholder is NOT an authored label, and must not claim to be.
+    expect(decision.provenance?.label_authored).toBeUndefined();
   });
 });
