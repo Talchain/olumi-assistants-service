@@ -44,7 +44,7 @@ import {
 import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
 import {
   applyRecordedAskLifetimes,
-  enforceSymmetricClaimWindow,
+  clampRecordedAskWindow,
   isPendingActionExpired,
   isShortWindowBareNumberClaimant,
   PENDING_ACTION_ASK_TURN_TTL,
@@ -532,26 +532,38 @@ describe('the claimant set moves as one — a NON-widened competitor', () => {
       expires_at_iso: new Date(ASKED_AT_MS - 1000).toISOString(),
     };
     expect(isPendingActionExpired(deadMenu, ASKED_AT_MS)).toBe(true);
+    // The production DECISION primitive, over the production union.
     expect(recordedAskWindowMustClamp([ask, deadMenu], ASKED_AT_MS)).toBe(false);
-    const input = [ask, deadMenu];
-    expect(enforceSymmetricClaimWindow(input, ASKED_AT_MS)).toBe(input);
+    // End to end through the real carry-forward: the widened window survives.
+    const carried = ageSetThroughRealTurns([ask, deadMenu]);
+    const carriedAsk = findById(carried, ask.id);
+    expect(carriedAsk).not.toBeNull();
+    expect(resolveAnswer('0.3', carriedAsk === null ? [] : [carriedAsk]).kind).toBe('bind');
   });
 
   it('TWIN: the clamp only ever SHORTENS, lands exactly on the defaults, and never touches an offer', () => {
-    // The safety argument, pinned. A one-directional transform cannot make any
-    // binding reachable that was not reachable before the widening shipped.
+    // ⚠ RE-POINTED AT THE PRODUCTION COMPOSITION (review, 2026-08-31). This
+    // twin — the one pinning the central one-directional safety claim — used to
+    // drive an `enforceSymmetricClaimWindow(pendings, nowMs)` convenience that
+    // had ZERO production call sites. A safety property proven against a
+    // function production never calls is unguarded at rest, and that wrapper
+    // has since been deleted. What runs here is what `commit.ts` runs:
+    // `recordedAskWindowMustClamp` over the UNION, then `clampRecordedAskWindow`
+    // per pending.
     const menu = numberedMenu();
+    const ask = askAsPersisted();
     const offer: PendingAction = {
       ...askAsShipped,
       id: '00000000-0000-4000-8000-0000000000f6',
       action: { kind: 'what_would_flip' } as PendingActionAction,
     };
-    const [clampedOffer] = enforceSymmetricClaimWindow([offer, menu], ASKED_AT_MS);
-    expect(clampedOffer).toBe(offer); // a non-ask, returned by identity
+    // POSITIVE CONTROL: the decision must actually be TRUE here, or every
+    // identity assertion below would hold for the trivial reason.
+    expect(recordedAskWindowMustClamp([offer, ask, menu], ASKED_AT_MS)).toBe(true);
 
-    const ask = askAsPersisted();
-    const [clampedAsk] = enforceSymmetricClaimWindow([ask, menu], ASKED_AT_MS);
-    if (clampedAsk === undefined) throw new Error('enforceSymmetricClaimWindow must preserve arity');
+    expect(clampRecordedAskWindow(offer)).toBe(offer); // a non-ask, by identity
+
+    const clampedAsk = clampRecordedAskWindow(ask);
     expect(clampedAsk.expires_at_turn_count).toBeLessThanOrEqual(ask.expires_at_turn_count);
     expect(Date.parse(clampedAsk.expires_at_iso)).toBeLessThanOrEqual(
       Date.parse(ask.expires_at_iso),
@@ -561,6 +573,8 @@ describe('the claimant set moves as one — a NON-widened competitor', () => {
     expect(Date.parse(clampedAsk.expires_at_iso)).toBe(
       ASKED_AT_MS + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
     );
+    // Idempotent: clamping a clamped ask changes nothing further.
+    expect(clampRecordedAskWindow(clampedAsk)).toBe(clampedAsk);
   });
 
   it('TWIN: a malformed expiry is passed through untouched and stays fail-closed', () => {
@@ -568,9 +582,71 @@ describe('the claimant set moves as one — a NON-widened competitor', () => {
     // unparseable stamp into a valid clamp would convert an expired verdict
     // into a live 10-minute window.
     const malformed: PendingAction = { ...askAsPersisted(), expires_at_iso: 'not-a-date' };
-    const [out] = enforceSymmetricClaimWindow([malformed, numberedMenu()], ASKED_AT_MS);
-    if (out === undefined) throw new Error('enforceSymmetricClaimWindow must preserve arity');
+    expect(recordedAskWindowMustClamp([malformed, numberedMenu()], ASKED_AT_MS)).toBe(true);
+    const out = clampRecordedAskWindow(malformed);
     expect(out.expires_at_iso).toBe('not-a-date');
     expect(isPendingActionExpired(out, ASKED_AT_MS)).toBe(true);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // ⚠⚠ THE MIDDLE OF THE RANGE — the case the corpus had no member of.
+  //
+  // Every case above keeps BOTH claimants present on every turn, or NEITHER.
+  // Those are the two ends. The reviewer's finding lives in the middle: a
+  // competitor that is live for ONE turn and then gone. That is where the
+  // clamp's STICKINESS shows, and where the comment I first wrote was false.
+  // ───────────────────────────────────────────────────────────────────────────
+  it('THE TRANSIENT COMPETITOR: one turn of overlap returns the ask to the default window PERMANENTLY', () => {
+    const ask = askAsPersisted();
+    const menu = numberedMenu();
+    // PREMISE: the ask really is widened before the overlap, or the assertions
+    // below would be about a window that was never opened.
+    expect(ask.expires_at_turn_count).toBe(PENDING_ACTION_ASK_TURN_TTL);
+    expect(Date.parse(ask.expires_at_iso)).toBe(ASKED_AT_MS + PENDING_ACTION_ASK_WALL_TTL_MS);
+
+    // ── Turn 1: the competitor is live. The clamp fires, and what the real
+    //    carry-forward hands back is what gets PERSISTED into the turn row.
+    const firstIso = INTERVENING_TURN_ISOS[0]!;
+    const afterTurn1 = computeSurvivingPriorPendings(
+      [ask, menu], [], [], GRAPH_HASH, Date.parse(firstIso),
+    );
+    const askAfter1 = findById(afterTurn1, ask.id);
+    if (askAfter1 === null) throw new Error('the ask must survive the first turn');
+    expect(Date.parse(askAfter1.expires_at_iso)).toBe(
+      ASKED_AT_MS + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+    );
+    expect(askAfter1.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL - 1);
+
+    // ── Turn 2 onward: the competitor is GONE from the set entirely.
+    const remaining = INTERVENING_TURN_ISOS.slice(1);
+    expect(remaining.length).toBeGreaterThan(0); // the probe must actually run
+    const askAlone = ageSetThroughRealTurns([askAfter1], remaining);
+
+    // ⭐ THE STICKINESS, ASSERTED RATHER THAN ASSUMED. Nothing restores the
+    // widened bounds: the ask dies on the clamped window even though the
+    // competitor that caused the clamp existed for a single turn. This is a
+    // real limitation of the fix, not a property anyone should build on.
+    expect(findById(askAlone, ask.id)).toBeNull();
+    expect(resolveAnswer('0.3', []).kind).not.toBe('bind');
+  });
+
+  it('CONTRAST CONTROL for the transient case: the SAME ask, same turns, no competitor at all, still binds', () => {
+    // Without this the test above proves only that the ask expires — which it
+    // would also do if the widening had never worked. The two differ in exactly
+    // one input: whether a competitor was present on the FIRST turn.
+    const ask = askAsPersisted();
+    const firstIso = INTERVENING_TURN_ISOS[0]!;
+    const afterTurn1 = computeSurvivingPriorPendings(
+      [ask], [], [], GRAPH_HASH, Date.parse(firstIso),
+    );
+    const askAfter1 = findById(afterTurn1, ask.id);
+    if (askAfter1 === null) throw new Error('the ask must survive the first turn');
+    // Unclamped: still on the ASK wall bound, not the default one.
+    expect(Date.parse(askAfter1.expires_at_iso)).toBe(ASKED_AT_MS + PENDING_ACTION_ASK_WALL_TTL_MS);
+
+    const askAlone = ageSetThroughRealTurns([askAfter1], INTERVENING_TURN_ISOS.slice(1));
+    const survivor = findById(askAlone, ask.id);
+    expect(survivor).not.toBeNull();
+    expect(resolveAnswer('0.3', survivor === null ? [] : [survivor]).kind).toBe('bind');
   });
 });

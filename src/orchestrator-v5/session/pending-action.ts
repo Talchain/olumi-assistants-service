@@ -734,10 +734,13 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  * `proposed_concept` on the short window — so the claimant set decays unevenly
  * exactly as the paragraph above warns. Widening those three is NOT the fix
  * (two of them have no dial B; see the derivation on
- * {@link enforceSymmetricClaimWindow}). The evenness is enforced separately, by
- * clamping every recorded ask back to the defaults whenever a short-window
- * claimant is live beside it. **Read that function before changing this map:
- * membership here is only half the rule.**
+ * {@link isShortWindowBareNumberClaimant}). The evenness is enforced
+ * separately, by clamping every recorded ask back to the defaults whenever a
+ * short-window claimant is live beside it —
+ * {@link recordedAskWindowMustClamp} decides, {@link clampRecordedAskWindow}
+ * applies, and `commit.ts`'s carry-forward loop composes the two. **Read those
+ * before changing this map: membership here is only half the rule, and the
+ * clamp is STICKY once applied.**
  *
  * Every non-member keeps the default bounds unchanged.
  */
@@ -875,14 +878,33 @@ export function applyRecordedAskLifetimes(
  * recorded ask is clamped back to the defaults so it expires alongside the
  * competitor that would otherwise have vanished from under it.
  *
- * ⛔ ONE-DIRECTIONAL, AND THAT IS THE WHOLE SAFETY ARGUMENT. This function can
- * only ever SHORTEN, and only when a competing short-window claimant is LIVE.
- * It cannot widen anything, so it can introduce no new binding that was not
- * already reachable; the worst it can do is decline a bind the user wanted,
- * which is the fail-closed direction (the number falls through exactly as it
- * did before the widening shipped). Identity is returned whenever the set is
- * unmixed, so the founder's journey — one recorded ask, no competitor — is
- * untouched.
+ * ⛔ ONE-DIRECTIONAL: THE CLAMP ONLY EVER SHORTENS. It cannot widen anything,
+ * so it can introduce no binding that was not already reachable; the worst it
+ * can do is decline a bind the user wanted, which is the fail-closed direction
+ * (the number falls through exactly as it did before the widening shipped).
+ *
+ * ⚠⚠ AND IT IS STICKY — SAY THIS PLAINLY, BECAUSE THE FIRST VERSION OF THIS
+ * PARAGRAPH DID NOT. It read *"only ever shortens, and only WHILE a competing
+ * claimant is LIVE"*, which reads as a guarantee that the widened window comes
+ * back when the competitor goes away. **It does not.** The decision is taken
+ * per turn, but the RESULT is persisted: `commit.ts` pushes the CLAMPED object
+ * into the survivor list, and that is what is written to the turn row. Nothing
+ * anywhere restores the widened bounds. So ONE turn of overlap with a
+ * short-window claimant permanently returns that ask to 2 turns / 10 minutes —
+ * a TRANSIENT competitor reverts the widening for that ask for good.
+ *
+ * That is accepted here, and the reason is a comparison rather than a claim of
+ * harmlessness: the clamped state is EXACTLY the pre-PR state (everything used
+ * to sit at the defaults), so a stuck-clamped ask is no worse than shipping
+ * nothing, while an unclamped one is actively wrong. Fail-closed beats correct
+ * in the average case when the failure writes a number into the user's model.
+ * Whether the widened window SHOULD be restored once the competitor clears is a
+ * real question and deliberately NOT answered in this change — it needs the
+ * arming timestamp carried separately from the current bounds, and it is
+ * reported as a finding rather than implemented under a rework.
+ *
+ * Pinned by the transient-competitor case in `recorded-ask-lifetime.test.ts`,
+ * which asserts the stickiness rather than the comment's original wish.
  *
  * ⚠ MALFORMED VALUES PASS THROUGH UNTOUCHED. {@link isPendingActionExpired}
  * already treats an unparseable `expires_at_iso` as expired; rewriting one into
@@ -941,42 +963,28 @@ export function recordedAskWindowMustClamp(
   );
 }
 
-/**
- * {@link clampRecordedAskWindow} over a pending set, UNCONDITIONALLY. Returns the
- * input by identity when nothing needed clamping.
+/*
+ * ⚠ NO SET-LEVEL CONVENIENCE WRAPPER LIVES HERE, AND THAT IS DELIBERATE.
  *
- * ⚠ SEPARATED FROM THE DECISION ON PURPOSE. The persisted set arrives in two
- * halves — this turn's own pendings and the carry-forward survivors — and the
- * competitor is routinely in the OTHER half from the ask. A convenience that
- * re-decided per array would therefore look right and clamp nothing: the caller
- * must take {@link recordedAskWindowMustClamp} over the UNION once, then apply
- * this to each half. (Caught before landing; it is the same shape as a
- * per-item probe that answers from the wrong scope.)
+ * This file briefly exported `enforceSymmetricClaimWindow(pendings, nowMs)` —
+ * decide-and-apply over one array — plus a `clampRecordedAskWindows` plural
+ * helper. Review found they had ZERO production call sites (complete `rg -a`
+ * manifest, contrast controls `applyRecordedAskLifetimes` and
+ * `clampRecordedAskWindow` both firing in `commit.ts`), while SIX tests bound
+ * to them — INCLUDING the twin pinning the central one-directional safety
+ * claim. A safety property proven against a function production never calls is
+ * unguarded at rest: the next refactor can change the real path and every one
+ * of those tests stays green.
+ *
+ * Production composes the two primitives above differently, and the difference
+ * is load-bearing rather than stylistic: {@link recordedAskWindowMustClamp} is
+ * evaluated ONCE over `prior + thisTurn` — the union, because the competitor is
+ * routinely in the other half from the ask — and
+ * {@link clampRecordedAskWindow} is then applied per pending inside the
+ * carry-forward loop. A wrapper that re-decided per array would look right and
+ * clamp nothing, which is exactly why one must not exist for tests to reach
+ * for. Both were deleted; the tests now drive the production composition.
  */
-export function clampRecordedAskWindows(
-  pendings: readonly PendingAction[],
-): readonly PendingAction[] {
-  let changed = false;
-  const out = pendings.map((pa) => {
-    const next = clampRecordedAskWindow(pa);
-    if (next !== pa) changed = true;
-    return next;
-  });
-  return changed ? out : pendings;
-}
-
-/**
- * Decide-and-apply over a SINGLE set that already contains both the asks and
- * their competitors. Convenience for callers holding one list; the commit seam
- * uses the two-step form above because its set arrives in halves.
- */
-export function enforceSymmetricClaimWindow(
-  pendings: readonly PendingAction[],
-  nowMs: number,
-): readonly PendingAction[] {
-  if (!recordedAskWindowMustClamp(pendings, nowMs)) return pendings;
-  return clampRecordedAskWindows(pendings);
-}
 
 /**
  * Cap mirrors `MAX_CHIPS` in chip-generator.ts. Enforced at both the

@@ -490,11 +490,31 @@ export function computeSurvivingPriorPendingsDetailed(
   // the clamp is applied BEFORE rules 3-5 below, so both then expire together
   // rather than one lingering a turn longer.
   //
-  // ⛔ ONE-DIRECTIONAL. It can only SHORTEN, and only while a competing
-  // short-window claimant is LIVE, so it cannot make any binding reachable that
-  // was not reachable before the widening shipped; the worst it can do is
-  // decline a bind, which is the fail-closed direction. When the set is unmixed
-  // — the founder's journey, one ask and no competitor — it is a no-op.
+  // ⛔ ONE-DIRECTIONAL: the clamp only ever SHORTENS, so it cannot make any
+  // binding reachable that was not reachable before the widening shipped; the
+  // worst it can do is decline a bind, which is the fail-closed direction. When
+  // no competitor has ever been live alongside the ask — the founder's journey
+  // — it is a no-op.
+  //
+  // ⚠⚠ AND IT IS IRREVERSIBLE. THIS COMMENT PREVIOUSLY SAID "only WHILE a
+  // competing claimant is LIVE", which states an invariant this code does not
+  // have, and a reviewer falsified it here. The DECISION is per turn; the
+  // RESULT is persisted — `survivors.push({ ...pa, ... })` at :565 pushes the
+  // CLAMPED object, and that is what lands in the turn row. Nothing restores
+  // the widened bounds afterwards. So a SINGLE turn of overlap with a
+  // short-window claimant permanently returns that ask to 2 turns / 10 minutes:
+  // a TRANSIENT competitor reverts the widening for that ask for good.
+  //
+  // Accepted, by comparison rather than by a claim of harmlessness: the clamped
+  // state is EXACTLY the pre-PR state, so a stuck-clamped ask is no worse than
+  // shipping nothing, while an unclamped one writes a number the user meant for
+  // a different question into their model. Whether the window SHOULD be
+  // restored once the competitor clears is a real question, deliberately NOT
+  // answered here (it needs the arming bounds carried separately from the
+  // current ones) and reported as a finding instead.
+  //
+  // Pinned by the transient-competitor case in `recorded-ask-lifetime.test.ts`,
+  // which asserts the stickiness rather than the wish.
   const clampAskWindows = recordedAskWindowMustClamp([...prior, ...thisTurn], nowMs);
   // Diagnosis D2a (live 2026-07-10 stale-resume specimen): proposal memory
   // is a SINGLE-SLOT store — when this turn's assistant text produced a
