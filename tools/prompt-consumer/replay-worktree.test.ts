@@ -58,6 +58,7 @@ describe('archival replay checkout authority and owned lifecycle, no provider ca
     const before = git(shallow, 'worktree', 'list', '--porcelain');
     let reached = false;
     expect(() => withReplayWorktree(shallow, archivedHead, [], () => { reached = true; return 'must not run'; })).toThrow(`REPLAY_SOURCE_UNAVAILABLE: ${archivedHead}`);
+    expect(() => withReplayWorktree(shallow, git(shallow, 'rev-parse', 'HEAD'), [archivedHead], () => { reached = true; return 'recorder must be available too'; })).toThrow(`REPLAY_SOURCE_UNAVAILABLE: ${archivedHead}`);
     expect(reached).toBe(false);
     expect(git(shallow, 'worktree', 'list', '--porcelain')).toBe(before);
     expect(git(shallow, 'rev-parse', '--is-shallow-repository')).toBe('true'); // No hidden fetch.

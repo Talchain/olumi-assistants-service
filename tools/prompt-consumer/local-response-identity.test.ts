@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
@@ -22,6 +23,7 @@ beforeAll(() => {
   // Exact archived runtime, not a hand-written parser or an assurance-head
   // replacement. Derive recorder authority from the immutable capture itself.
   const recorderHead = loadFrozenLocalResponseCase('logistics-disagreement-decision-1-incumbent').identity.assuranceHead;
+  assert(typeof recorderHead === 'string' && /^[a-f0-9]{40}$/.test(recorderHead), 'Immutable capture must identify its exact recorder head');
   const script = `
     import net from 'node:net';
     let networkAttempts = 0;
