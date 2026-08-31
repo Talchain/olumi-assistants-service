@@ -188,8 +188,10 @@ describe('factor_value_edit — verified panel scale at native amount admission'
       expect.soft(observed?.elicited_from).toEqual({
         round_id: ROUND_ID, participant_id: PARTICIPANT_ID,
       });
-      expect(matches[0]?.scale_frame)
-        .toBe(before.nodes.find((node) => node.id === TARGET_ID)?.scale_frame);
+      const beforeTarget = before.nodes.find((node) => node.id === TARGET_ID);
+      expect(matches[0]?.scale_frame).toBe(
+        beforeTarget && 'scale_frame' in beforeTarget ? beforeTarget.scale_frame : undefined,
+      );
       const beforeObserved = before.nodes.find((node) => node.id === TARGET_ID)?.observed_state;
       expect(observed?.cap).toBe((beforeObserved as { cap?: number } | undefined)?.cap);
       expect(result.handlerFacts).toContainEqual(expect.objectContaining({
