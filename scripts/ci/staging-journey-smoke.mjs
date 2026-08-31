@@ -51,6 +51,60 @@
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
 
+/**
+ * ⭐⭐ THE TWO FAILURE CLASSES, AND WHY THEY EXIST.
+ *
+ * This gate failed 101 CONSECUTIVE RUNS across 5 days 3 hours (last green run
+ * 32983522511 @ 76e86bb8, 2026-08-26T14:58Z; first red 32992061388 @ 45cf25e1,
+ * 2026-08-26T17:04Z). The script blob is byte-identical across that boundary —
+ * the INSTRUMENT never changed. Every one of the 101 failures was the same
+ * single fact: `_diagnostic_trace` was absent from the envelope, because
+ * `CEE_DIAGNOSTIC_TRACE_ENABLED` had been set to "false" on the Render staging
+ * service (measured at the Render API, 2026-08-31).
+ *
+ * The PRODUCT assertions passed on every one of those runs. A fresh guest got a
+ * 10-node model with two comparable options and readiness `ready`, in 33
+ * seconds. And this script printed:
+ *
+ *     The live user journey is broken on the deployed staging build.
+ *
+ * ⭐ THE ALARM WAS RIGHT TO FIRE. The trace absence is a real regression, and
+ * separating the classes does NOT soften it — both classes still fail the run.
+ * The defect is that a TRUE alarm printed a FALSE HEADLINE. Every reader who
+ * checked the product found it working, concluded the alarm was broken, and
+ * stopped looking. A red that says the wrong thing is how a real regression
+ * survives five days under a gate built specifically to make regressions
+ * unmissable — it is the broken-alarm defect (CLAUDE.md trap 7/14) reached
+ * through a MESSAGE rather than through a config.
+ *
+ * So a finding's class is a property of THE CHECK THAT PRODUCED IT. It is never
+ * a string match on the message: a message→class table would be exactly the
+ * hand-maintained mirror this estate keeps paying for (trap 12), and it would
+ * misclassify the first message anybody reworded.
+ *
+ *   JOURNEY BROKEN   — the product did not do what the user is promised.
+ *                      `assertHealthyFrame`, `assertHealthyJourney`
+ *                      (which owns `assertHealthyDraft`),
+ *                      `assertNoUnrequestedAnalysisRefusal`, HTTP status.
+ *   PROVENANCE DARK  — the product may be fine; the run cannot PROVE what ran.
+ *                      `assertTraceObservability`, `assertContinuityJudgeable`,
+ *                      `assertPromptProvenance`.
+ */
+export const VERDICT_JOURNEY_BROKEN = "JOURNEY BROKEN";
+export const VERDICT_PROVENANCE_DARK = "PROVENANCE DARK";
+
+/**
+ * The flag that gates `_diagnostic_trace`, named in the alarm because finding
+ * it cost five days.
+ *
+ * DASHBOARD-ONLY, measured at this tip: `rg -a CEE_DIAGNOSTIC_TRACE_ENABLED
+ * render.yaml render-staging.yaml` returns ZERO hits, with the contrast control
+ * `NODE_ENV|CEE_` returning 2 and 1 in the same run — so the probe is not
+ * blind. Nothing in the repository records its value, and nothing in the
+ * repository can set it. That is why it went dark unobserved.
+ */
+export const TRACE_FLAG = "CEE_DIAGNOSTIC_TRACE_ENABLED";
+
 /** Node kinds that represent a comparable alternative. See src/schemas/cee-v3.ts. */
 const OPTION_KIND = "option";
 
@@ -236,11 +290,14 @@ export function assertHealthyFrame(body) {
   if (typeof body.assistant_text !== "string" || body.assistant_text.trim().length === 0) {
     f.push("turn 1: assistant_text was empty — the user would see a blank reply");
   }
-  const exit = body?._diagnostic_trace?.exit_path;
-  if (typeof exit !== "string" || exit.length === 0) {
-    f.push("turn 1: _diagnostic_trace.exit_path missing — cannot tell which path served this turn");
-  }
-  if (exit === "draft_graph_error") {
+  // NOTE WHAT IS NOT HERE. This function used to also push
+  // `_diagnostic_trace.exit_path missing` into the same flat list as
+  // `assistant_text was empty` — one check answering two questions, and the
+  // reason the verdict could not tell a broken product from a dark trace. An
+  // absent exit_path is a PROVENANCE finding and is now raised by
+  // `assertTraceObservability`, uniformly across every turn rather than only
+  // this one. Same harm, correct class, wider scope.
+  if (body?._diagnostic_trace?.exit_path === "draft_graph_error") {
     f.push("turn 1: exit_path was draft_graph_error");
   }
   return f;
@@ -473,14 +530,18 @@ export function assertHealthyJourney(frameBody, followUpBody) {
       // absent, and the old unconditional message asserted a loss that did not
       // happen. Name the exit_path either way — "which path served this" is the
       // first thing an on-call engineer needs.
+      //
+      // ⚠ AN ABSENT exit_path IS NO LONGER JUDGED HERE. It used to push
+      // "the gate cannot tell a real loss from a legitimate non-readiness exit"
+      // into this JOURNEY list — a finding whose cause is a DARK TRACE, not a
+      // broken journey, and one of the messages that made the 101-run headline
+      // false. `assertContinuityJudgeable` raises it into the PROVENANCE class
+      // instead. The hole it closed stays closed: the turn is still never
+      // silently passed, and BOTH halves are pinned by a test (the provenance
+      // function must SPEAK and this function must stay SILENT), so deleting
+      // the new check cannot quietly reopen it.
       const laterExit = later.body?._diagnostic_trace?.exit_path;
-      if (typeof laterExit !== "string" || laterExit.length === 0) {
-        f.push(
-          `${later.label}: analysis_ready.options is empty AND _diagnostic_trace.exit_path is ` +
-            `absent — the gate cannot tell a real loss from a legitimate non-readiness exit. ` +
-            `Fix the trace: an unclassifiable turn is not a pass.`,
-        );
-      } else if (READINESS_PRODUCING_EXIT_PATHS.has(laterExit)) {
+      if (typeof laterExit === "string" && READINESS_PRODUCING_EXIT_PATHS.has(laterExit)) {
         // ⚠⚠ THIS MESSAGE HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
         // THAT IS WHY IT NOW NAMES CANDIDATES INSTEAD OF A CAUSE.
         //
@@ -535,6 +596,269 @@ export function assertHealthyJourney(frameBody, followUpBody) {
   }
 
   return f;
+}
+
+/**
+ * PROVENANCE — every turn must be able to say WHICH BUILD and WHICH PATH
+ * served it.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT WHERE IT USED TO BE.
+ * ------------------------------------------------------
+ * `exit_path` was asserted in `assertHealthyFrame` — on TURN 1 ONLY, and in the
+ * same flat list as `assistant_text was empty`. So the check answered two
+ * different questions ("is the product working?" and "can we prove what ran?")
+ * under one name, which is precisely the two-concepts-one-predicate defect the
+ * rest of this file was rewritten to remove (see `carriedDraftGraph`). It is
+ * also why the 101-run verdict was false: a provenance finding printed under a
+ * product headline.
+ *
+ * `build_sha` was NEVER asserted at all — only printed. That gap had already
+ * been argued against IN THIS FILE and then not closed: the turn-2 log comment
+ * records that Render made a rolled-back parent build live mid-window on
+ * 17 Aug 2026 (two merges 14s apart, the parent's deploy finishing last), so
+ * "Phase 1 confirmed the build at the start of the run" is NOT evidence about
+ * which build answered a given turn. A per-turn stamp that is printed and never
+ * checked cannot fail; a null one produced no finding across all 101 runs.
+ *
+ * @param {Array<{label: string, d: {build_sha: string|null, exit_path: string|null}|null}>} turns
+ * @returns {string[]} failure messages; empty means the trace is observable.
+ */
+export function assertTraceObservability(turns) {
+  const f = [];
+  for (const t of turns) {
+    const d = t?.d;
+    if (!d) continue;
+    if (typeof d.exit_path !== "string" || d.exit_path.length === 0) {
+      f.push(
+        `${t.label}: _diagnostic_trace.exit_path is absent — this turn cannot say WHICH PATH served it, ` +
+          `so no finding about it can be attributed to a seam, and the draft_graph_error check cannot fire ` +
+          `at all.`,
+      );
+    }
+    if (typeof d.build_sha !== "string" || d.build_sha.length === 0) {
+      f.push(
+        `${t.label}: _diagnostic_trace.environment.build_sha is absent — this turn cannot say WHICH BUILD ` +
+          `answered it. Phase 1 confirms the served build at the START of the run, and Render has made a ` +
+          `rolled-back parent build live mid-window before (17 Aug 2026), so that is not evidence about ` +
+          `the build that served THIS turn.`,
+      );
+    }
+  }
+  return f;
+}
+
+/**
+ * PROVENANCE — the continuity check could not be PERFORMED, because the trace
+ * is dark.
+ *
+ * A post-drafting turn carrying no usable `option_id`s is a LOSS only where
+ * readiness is produced, and `exit_path` is the only thing that tells those
+ * apart. Without it the gate can neither assert the loss (that would be a
+ * fabrication) nor pass the turn (that is the silent-disable this whole file
+ * exists to prevent). So it says what is actually true: the check did not run.
+ *
+ * This is not a journey failure. The product may have behaved perfectly; the
+ * gate simply cannot see well enough to judge. Reporting it as a broken journey
+ * is the false headline that printed 101 times.
+ *
+ * @returns {string[]} failure messages; empty means every later turn was
+ *   classifiable (or there was nothing to bind, which `assertHealthyJourney`
+ *   already judges).
+ */
+export function assertContinuityJudgeable(frameBody, followUpBody) {
+  const f = [];
+  const turns = [
+    { label: "turn 1", body: frameBody },
+    { label: "turn 2", body: followUpBody },
+  ];
+  const draftIdx = turns.findLastIndex((t) => carriedDraftGraph(t.body));
+  // No model at all is a DELIVERY failure — a journey finding, judged there.
+  if (draftIdx === -1) return f;
+  const drafting = turns[draftIdx];
+  // Nothing to bind to is an unbindable-continuity finding, judged there too.
+  // Adding a second message here would be the duplicate-predicate defect.
+  if (readyOptionIds(drafting.body).length === 0) return f;
+
+  for (const later of turns.slice(draftIdx + 1)) {
+    if (readyOptionIds(later.body).length > 0) continue;
+    const laterExit = later.body?._diagnostic_trace?.exit_path;
+    if (typeof laterExit === "string" && laterExit.length > 0) continue;
+    f.push(
+      `${later.label}: analysis_ready.options is empty AND _diagnostic_trace.exit_path is absent — the ` +
+        `gate cannot tell a real loss of the drafted model from a legitimate non-readiness exit, so THE ` +
+        `CONTINUITY CHECK WAS NOT PERFORMED on this turn. An unclassifiable turn is not a pass.`,
+    );
+  }
+  return f;
+}
+
+/**
+ * The deployed service's OWN report of whether the trace is switched on.
+ *
+ * Phase 1 already polls `/healthz` on every run. Reading the posture there is
+ * what turns "the trace is absent" from an INFERENCE into an OBSERVATION, and
+ * it is what lets this alarm discriminate the two seams that produce an
+ * identical payload:
+ *   · the flag is OFF   → a DEPLOY-CONFIG regression (dashboard-only; nothing
+ *                         in this repo changed, and nothing in it can);
+ *   · the flag is ON    → a CODE regression in the trace itself.
+ * Naming one of them without evidence would be the confident-wrong-cause defect
+ * the continuity message above was rewritten to remove.
+ *
+ * ABSENT IS NEVER REPORTED AS OFF. A build that predates the `/healthz` field
+ * cannot speak to the posture, and collapsing "this build does not say" into
+ * "it is off" is the same two-facts-one-symbol defect `graphLine` and
+ * `readinessDiagnosis` carry headers about. A non-boolean is equally
+ * unreportable — the field is a boolean by contract, asserted at the endpoint.
+ *
+ * @returns {"on"|"off"|"not-reported"}
+ */
+export function readTracePosture(healthBody) {
+  const v = healthBody?.diagnostic_trace_enabled;
+  if (v === true) return "on";
+  if (v === false) return "off";
+  return "not-reported";
+}
+
+/**
+ * ⭐⭐ WHAT THIS ALARM'S RED ACTUALLY MEANS — and the claim it must stop making.
+ *
+ * The verdict used to close with "Do not merge over this." That sentence reads
+ * as a merge gate. IT IS NOT ONE, and it never was:
+ *
+ *   · `staging` branch protection requires exactly one context —
+ *     "Lint, TypeCheck, Unit Tests". This check is NOT in that list.
+ *   · This workflow triggers on `push: branches: [staging]` and
+ *     `workflow_dispatch` ONLY. There is no `pull_request` trigger, so it never
+ *     reports on a PR head — which is what a required status check is matched
+ *     against. Requiring it as written would not tighten anything; it would
+ *     block every merge forever on a status that never arrives.
+ *   · And it CANNOT simply be moved to `pull_request`: Phase 1 polls /healthz
+ *     until the DEPLOYED build matches this commit, and a PR head is never
+ *     deployed to staging. It would time out on every PR.
+ *
+ * So this is a POST-MERGE DEPLOY VERIFICATION, structurally incapable of
+ * gating a merge — by construction, not by neglect. The code is already live
+ * when it speaks.
+ *
+ * ⭐ WHY THAT MATTERS MORE THAN IT LOOKS. An alarm that claims an authority it
+ * does not have teaches readers to discount it. When "Do not merge over this"
+ * is visibly not enforced — and it cannot be — the reasonable inference is that
+ * the whole message is theatre, and the next true thing it says is discounted
+ * too. That is the mechanism, alongside the false headline, by which 125
+ * commits landed over 101 consecutive red runs across 5 days 3 hours
+ * (26–31 Aug 2026) with nobody treating a single one as a violation.
+ *
+ * The fix is not to make it required (impossible as written) and not to soften
+ * it (the regression is real). It is to say what is TRUE: this blocks nothing,
+ * the build is already deployed, and responding to it is a PERSON's job.
+ *
+ * The dated figures above are a RECORD of one measured episode, not a live
+ * counter — a hand-maintained number here would drift the moment it was
+ * written (trap 12). The structural claims are pinned by a test that derives
+ * the workflow's triggers from the YAML, so if this ever DOES become a
+ * pre-merge gate, that test reds and this text must change with it.
+ */
+const AUTHORITY_LINE =
+  "⚠ THIS ALARM BLOCKS NOTHING, AND SAYING OTHERWISE IS HOW IT GOT IGNORED. It is not a required " +
+  'status check (staging requires only "Lint, TypeCheck, Unit Tests") and it runs on PUSH TO STAGING — ' +
+  "after the merge, against a build that is ALREADY DEPLOYED. There is no merge to withhold. The next " +
+  "merge will ship over this red exactly as the last one did, because nothing here stops it. Responding " +
+  "to this is a PERSON's job: fix it, or say out loud that it is being accepted and why. (Measured once: " +
+  "125 commits landed over a 101-run red streak, 26–31 Aug 2026.)";
+
+/** What the alarm says about WHY the trace is dark, per observed posture. */
+const POSTURE_LINES = {
+  off:
+    `The deployed service reports diagnostic_trace_enabled=false on /healthz, so ${TRACE_FLAG} is OFF on ` +
+    `this deploy. That makes this a DEPLOY-CONFIG regression, not a code one: the trace works and was ` +
+    `switched off. The flag is DASHBOARD-ONLY — it appears in neither render.yaml nor render-staging.yaml ` +
+    `— so it can be turned off with nothing in this repository changing, and nothing in this repository ` +
+    `can turn it back on. Fix it on the Render dashboard for the staging service.`,
+  on:
+    `The deployed service reports diagnostic_trace_enabled=true on /healthz, so ${TRACE_FLAG} is ON and the ` +
+    `trace is missing anyway. That makes this a CODE regression in the trace itself — look at the trace ` +
+    `builder and the response-envelope egress seam, not at the Render dashboard.`,
+  "not-reported":
+    `This build's /healthz does not report diagnostic_trace_enabled, so the gate cannot tell a switched-off ` +
+    `${TRACE_FLAG} (dashboard-only: it appears in neither render.yaml nor render-staging.yaml) apart from a ` +
+    `code regression in the trace. Check the flag on the Render dashboard for the staging service FIRST, ` +
+    `then the trace builder.`,
+};
+
+/**
+ * THE VERDICT. Pure, so the one thing this gate is READ FOR is unit-testable —
+ * the CLI around it deliberately is not (there is no fixture mode; it always
+ * drives real HTTP).
+ *
+ * The headline must describe what actually failed. For 101 runs it did not, and
+ * that is the entire defect this function exists to close. Both classes still
+ * exit non-zero: this separates the message, never the severity.
+ *
+ * @param {{journeyFailures?: string[], provenanceFailures?: string[],
+ *          tracePosture?: "on"|"off"|"not-reported"}} input
+ * @returns {{exitCode: number, lines: string[]}}
+ */
+export function buildVerdict({ journeyFailures = [], provenanceFailures = [], tracePosture = "not-reported" } = {}) {
+  const lines = [];
+  const journeyBroken = journeyFailures.length > 0;
+  const provenanceDark = provenanceFailures.length > 0;
+
+  if (!journeyBroken && !provenanceDark) {
+    lines.push(
+      "PASS — a user can frame a decision and get a usable graph, and the trace proves which build, which " +
+        "path and which prompt served it.",
+    );
+    return { exitCode: 0, lines };
+  }
+
+  if (journeyBroken) {
+    // ⚠ WORDED FOR EVERY FINDING ROUTED HERE, NOT JUST THE JOURNEY ONES. The
+    // `DEPLOY DID NOT SHIP` failure also lands in this bucket, and on that path
+    // NO TURN WAS DRIVEN — so a headline asserting "a user did not get what
+    // they were promised" would be the same class of false statement this whole
+    // change exists to remove, one case narrower. The headline names the HALF
+    // that is red; the ✗ lines name what.
+    lines.push(
+      `${VERDICT_JOURNEY_BROKEN} — ${journeyFailures.length} problem(s). The PRODUCT half of this gate is ` +
+        `red: either the journey assertions failed, or the deploy-freshness precondition they rest on did.`,
+    );
+    for (const m of journeyFailures) lines.push(`  ✗ ${m}`);
+  }
+
+  if (provenanceDark) {
+    if (journeyBroken) lines.push("");
+    lines.push(
+      `${VERDICT_PROVENANCE_DARK} — ${provenanceFailures.length} problem(s). The run cannot prove WHAT ran.`,
+    );
+    for (const m of provenanceFailures) lines.push(`  ✗ ${m}`);
+    lines.push(
+      journeyBroken
+        ? `  → The product half ALSO failed and is reported above as ${VERDICT_JOURNEY_BROKEN}. The two ` +
+            `classes are independent: neither explains the other, and fixing one will not clear the other.`
+        : `  → The journey's PRODUCT assertions PASSED. A user framed a decision and left holding a usable ` +
+            `model — this is not a product outage. What is dark is the PROVENANCE of it: this run cannot ` +
+            `say which build answered, which path served the turn, or which prompt produced the graph.`,
+    );
+    lines.push(`  → ${POSTURE_LINES[tracePosture] ?? POSTURE_LINES["not-reported"]}`);
+    lines.push(
+      `  → CONSEQUENCE FOR EVERY DOWNSTREAM CLAIM: any "witnessed on staging" claim resting on this run is ` +
+        `UNSUPPORTED ON PROVENANCE GROUNDS. The journey may have run perfectly; the run cannot prove what ` +
+        `ran, so it is not a witness of anything. Do not record it as one.`,
+    );
+  }
+
+  lines.push("");
+  if (journeyBroken) {
+    lines.push("The PRODUCT half of this gate is RED against the deployed staging build.");
+  } else {
+    lines.push(
+      "The live user journey RAN and its product assertions PASSED. What is broken is the ability to PROVE " +
+        "what ran — a real regression, not a softer one, and this build is not witnessed on staging.",
+    );
+  }
+  lines.push(AUTHORITY_LINE);
+  return { exitCode: 1, lines };
 }
 
 /**
@@ -749,15 +1073,21 @@ async function waitForBuild(base, expectSha, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const want = expectSha.slice(0, 7);
   let served = null;
+  let health = null;
   let attempt = 0;
   while (Date.now() < deadline) {
     attempt += 1;
     try {
       const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
       const body = await res.json();
+      // Carry the WHOLE body out, not just `build`. The trace posture the
+      // failure message needs is on this same response, and re-fetching it
+      // later would be a second observation of a service that can change
+      // between them.
+      health = body ?? null;
       served = body?.build ?? null;
       if (served && served.slice(0, 7) === want) {
-        return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
+        return { ok: true, served, health, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
       }
       log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
     } catch (e) {
@@ -771,7 +1101,23 @@ async function waitForBuild(base, expectSha, timeoutMs) {
     if (remaining <= 0) break;
     await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
   }
-  return { ok: false, served, waitedMs: timeoutMs, attempt };
+  return { ok: false, served, health, waitedMs: timeoutMs, attempt };
+}
+
+/**
+ * One /healthz read, for the path where Phase 1 is skipped (no SMOKE_EXPECT_SHA
+ * — never the case in CI, where the workflow always passes `github.sha`).
+ * Returns null rather than throwing: an unreachable /healthz here means the
+ * posture is UNOBSERVED, which `readTracePosture` reports as "not-reported"
+ * rather than inventing an "off".
+ */
+async function fetchHealth(base) {
+  try {
+    const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
@@ -794,27 +1140,40 @@ async function main() {
   log(`# CEE staging live-journey smoke`);
   log(`target: ${base}`);
 
-  const failures = [];
+  // TWO BUCKETS, NOT ONE LIST. A finding's class is decided by the CHECK that
+  // produced it, at the call site, where the class is known. There is no
+  // message→class table anywhere in this file: that would be a hand-maintained
+  // mirror (trap 12) and would misclassify the first message anyone reworded.
+  const journeyFailures = [];
+  const provenanceFailures = [];
+  let health = null;
 
   // ---- PHASE 1: did the build ship? ----
   if (expectSha) {
     log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)})`);
     const fresh = await waitForBuild(base, expectSha, freshnessTimeout);
+    health = fresh.health;
     if (!fresh.ok) {
-      failures.push(
+      journeyFailures.push(
         `DEPLOY DID NOT SHIP: after ${Math.round(fresh.waitedMs / 1000)}s, ${base} is still serving ` +
           `build "${fresh.served ?? "unreachable"}" but this commit is ${expectSha.slice(0, 7)}. ` +
           `The deploy failed or never fired — staging is running older code than the branch tip.`,
       );
       // Do NOT run the journey: it would test the wrong build and a pass would be a lie.
       // No turns were driven, so there are no diagnostics and no bodies.
-      report(failures, []);
+      report(journeyFailures, provenanceFailures, [], health);
       return;
     }
     log(`  OK — serving ${fresh.served} after ${Math.round(fresh.waitedMs / 1000)}s`);
   } else {
     log(`\n## Phase 1 — SKIPPED (no SMOKE_EXPECT_SHA); journey will run against whatever is deployed`);
+    health = await fetchHealth(base);
   }
+  // Print the posture on EVERY run, healthy or not. A diagnostic emitted only
+  // on failure gives you nothing to compare a failure against — the lesson the
+  // 18 Aug intermittent taught this file, applied to the flag that then went
+  // dark for five days.
+  log(`  [posture] ${TRACE_FLAG} per /healthz: ${readTracePosture(health)}`);
 
   // ---- PHASE 2: the journey ----
   const scenarioId = uuid();
@@ -846,8 +1205,8 @@ async function main() {
   // there were eight, carried the answer and never printed it.
   log(`    ${draftGraphCensus(t1.body)}`);
   log(`    readiness: ${readinessDiagnosis(t1.body)}`);
-  if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
-  failures.push(...assertHealthyFrame(t1.body));
+  if (t1.status !== 200) journeyFailures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
+  journeyFailures.push(...assertHealthyFrame(t1.body));
 
   log(`\n### Turn 2 — draft (accept defaults)`);
   const t2 = await postTurn(
@@ -875,10 +1234,17 @@ async function main() {
   );
   log(`    ${draftGraphCensus(t2.body)}`);
   log(`    readiness: ${readinessDiagnosis(t2.body)}`);
-  if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
+  if (t2.status !== 200) journeyFailures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
 
   // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.
-  failures.push(...assertHealthyJourney(t1.body, t2.body));
+  journeyFailures.push(...assertHealthyJourney(t1.body, t2.body));
+
+  // PROVENANCE, kept apart at the call site. `assertContinuityJudgeable` covers
+  // the one finding `assertHealthyJourney` used to raise whose cause is a dark
+  // trace rather than a broken product; `assertTraceObservability` covers the
+  // per-turn exit_path/build_sha stamps for BOTH turns (it used to be turn 1's
+  // exit_path only, inside a product check).
+  provenanceFailures.push(...assertContinuityJudgeable(t1.body, t2.body));
 
   // NEITHER TURN ASKED FOR AN ANALYSIS, and both messages are literals a few
   // lines above — turn 1 frames a decision, turn 2 says "draft the model now".
@@ -886,20 +1252,25 @@ async function main() {
   // inferred from the reply under test. If a future turn is added that DOES
   // request one, it declares `requestedAnalysis: true` and is skipped; there is
   // no heuristic to get wrong.
-  failures.push(
+  journeyFailures.push(
     ...assertNoUnrequestedAnalysisRefusal([
       { label: "turn 1", body: t1.body, requestedAnalysis: false },
       { label: "turn 2", body: t2.body, requestedAnalysis: false },
     ]),
   );
 
-  report(failures, [
-    { label: "turn 1", d: d1, body: t1.body },
-    { label: "turn 2", d: d2, body: t2.body },
-  ]);
+  report(
+    journeyFailures,
+    provenanceFailures,
+    [
+      { label: "turn 1", d: d1, body: t1.body },
+      { label: "turn 2", d: d2, body: t2.body },
+    ],
+    health,
+  );
 }
 
-function report(failures, turns) {
+function report(journeyFailures, provenanceFailures, turns, health) {
   log(`\n## Diagnostics`);
   for (const t of turns) {
     if (!t.d) continue;
@@ -920,17 +1291,20 @@ function report(failures, turns) {
   // on whichever exit path served it.
   const turnDiagnostics = turns.map((t) => t.d);
   const turnBodies = turns.map((t) => t.body);
-  failures.push(...assertPromptProvenance(turnDiagnostics, turnBodies));
+  provenanceFailures.push(...assertPromptProvenance(turnDiagnostics, turnBodies));
+  provenanceFailures.push(...assertTraceObservability(turns));
 
+  // The verdict is BUILT, not composed here, so the headline cannot drift from
+  // the buckets it is describing — the drift that made 101 red runs say the
+  // opposite of what they had measured.
+  const verdict = buildVerdict({
+    journeyFailures,
+    provenanceFailures,
+    tracePosture: readTracePosture(health),
+  });
   log(`\n## Result`);
-  if (failures.length === 0) {
-    log(`PASS — a user can frame a decision and get a usable graph.`);
-    process.exit(0);
-  }
-  log(`FAIL — ${failures.length} problem(s):`);
-  for (const m of failures) log(`  ✗ ${m}`);
-  log(`\nThe live user journey is broken on the deployed staging build. Do not merge over this.`);
-  process.exit(1);
+  for (const line of verdict.lines) log(line);
+  process.exit(verdict.exitCode);
 }
 
 if (isMain) {
