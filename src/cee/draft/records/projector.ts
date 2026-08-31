@@ -2378,11 +2378,25 @@ function projectOnce(
     // `source_quote` STAYS: the user's verbatim is theirs and still reaches the
     // inspector (`schema-v3.ts:1187` carries it for every recognised class), so
     // nothing the user wrote is lost — only the DESIGNATION is withdrawn.
-    // `label_authored` is deliberately NOT set: it answers *"did we write these
-    // characters?"* and we did not — the deriver refused, so the label IS the
-    // user's own text. Two signals, two questions (trap 21); `MINTED_GOAL_-`
-    // `PROVENANCE` sets it because its label is CEE-authored prose, and this
-    // one's is not.
+    // `label_authored` is deliberately NOT set HERE: it answers *"did we write
+    // these characters?"* and at this point we did not — the deriver refused, so
+    // the label is still the user's own text. Two signals, two questions
+    // (trap 21); `MINTED_GOAL_PROVENANCE` sets it because its label is
+    // CEE-authored prose, and this one's is not.
+    //
+    // ⚠ NOT SET HERE ≠ NEVER SET, and the distinction became reachable at the
+    // rebase onto #1180. `boundEveryNodeLabel` (this module's return) shortens
+    // any label past 200 characters and stamps `label_authored: true` on a node
+    // that carries the verbatim — which a goal re-badged here DOES. So an
+    // over-long chosen span legitimately ends up `projector_structural` +
+    // `label_authored` + a whole `source_quote`, and all three are true at once:
+    // CEE chose the span, the display string is ours, the user's words survive.
+    // #1180's reviewed world had only `stated` goals carrying `source_quote`;
+    // this branch mints the second kind, so neither review saw the combination.
+    // It is pinned in `goal-designation-provenance.test.ts` with a discriminating
+    // pair proving the flag tracks the BOUND rather than the badge. Reachable,
+    // not hypothetical: the two longest real `deliberation_frame` goal quotes in
+    // the governed baseline are 178 and 159 characters.
     //
     // ⚠ ONE CONSEQUENCE, DISCLOSED RATHER THAN DISCOVERED: `completion.ts:444`
     // skips `projector_structural` nodes in its destroyed-content guard, so a

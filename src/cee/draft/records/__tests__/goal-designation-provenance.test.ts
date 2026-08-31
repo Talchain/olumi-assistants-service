@@ -225,6 +225,59 @@ describe("a goal the user never designated does not wear the user's badge", () =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 1b. ⭐ THE SEAM THIS PR SHARES WITH #1180 — A STATE NEITHER REVIEW SAW.
+//
+//     #1180 bounds every node label at the projector's return and, for a node
+//     that CARRIES THE VERBATIM, stamps `label_authored: true` because after
+//     shortening the display string really is ours. Its reviewed world had one
+//     kind of goal carrying `source_quote`: `stated`. THIS PR mints a second —
+//     `projector_structural` WITH `source_quote` — so the combination below
+//     came into existence at the rebase and was reviewed by neither side.
+//
+//     ⚠ REACHABLE, NOT HYPOTHETICAL. The two longest real `deliberation_frame`
+//     goal quotes in the governed baseline are 178 and 159 characters against a
+//     200-character bound; a slightly wordier brief trips it.
+//
+//     Measured verdict: the two compose CORRECTLY, and all three signals are
+//     true at once — CEE chose the span (`projector_structural`), the display
+//     string is ours (`label_authored`), and the user's words survive whole
+//     (`source_quote`). Pinned here so it stays that way.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("the label bound (#1180) and the designation badge (#1250) compose", () => {
+  /** `deliberation_frame`, and deliberately past #1180's 200-character bound. */
+  const LONG_DECISION_SPAN =
+    "evaluating whether to invest £800k in robotic picking systems that promise to reduce errors to 0.3% and increase throughput by 40% across every regional distribution centre, or to hire 15 additional quality control staff on permanent contracts";
+
+  it("an OVER-LONG chosen goal span: badge withdrawn, label bounded, verbatim intact", () => {
+    // PIN BOTH PRECONDITIONS IN-TEST (trap 13b): the span must really be the
+    // refusal under test AND really exceed the bound, or this passes on nothing.
+    expect(reasonOf(LONG_DECISION_SPAN), "precondition: the refusal").toBe("deliberation_frame");
+    expect(LONG_DECISION_SPAN.length, "precondition: past #1180's bound").toBeGreaterThan(200);
+
+    const o = drive(LONG_DECISION_SPAN, LONG_DECISION_SPAN);
+    expect(o.recordClass, "#1250: CEE chose this span").toBe(PROJECTOR_STRUCTURAL_CLASS);
+    expect(o.wireProvenance).toBe("ai_inferred");
+    expect(o.wireLabel!.length, "#1180: the label is inside the bound").toBeLessThanOrEqual(200);
+    expect(o.labelAuthored, "#1180: after shortening the display string IS ours").toBe(true);
+    // ⭐ The load-bearing one: shortening the LABEL must never shorten the
+    // user's own words. Bound by identity to the exact span.
+    expect(o.sourceQuote, "the verbatim survives WHOLE").toBe(LONG_DECISION_SPAN);
+  });
+
+  it("DISCRIMINATES: `label_authored` tracks the BOUND, not the badge", () => {
+    // ⭐ The pair. Same badge on both; the flag differs ONLY because one span is
+    // over-long. Without this, the assertion above could pass on a
+    // `label_authored` that this PR had set for its own reasons.
+    const long = drive(LONG_DECISION_SPAN, LONG_DECISION_SPAN);
+    const short = drive(GOVERNED_QUESTION_AS_GOAL, GOVERNED_QUESTION_BRIEF);
+    expect(GOVERNED_QUESTION_AS_GOAL.length, "precondition: inside the bound").toBeLessThan(200);
+    expect(short.recordClass, "same badge as the long one").toBe(long.recordClass);
+    expect(short.labelAuthored, "nothing was shortened, so nothing was authored").toBe(false);
+    expect(long.labelAuthored).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 2. ⛔⛔ THE INTRODUCED HARM, AND THE REASON THIS FILE EXISTS IN ITS PRESENT
 //    FORM. An explicitly designated objective KEEPS its attribution and its
 //    quotation, whatever negation its wording happens to contain.
