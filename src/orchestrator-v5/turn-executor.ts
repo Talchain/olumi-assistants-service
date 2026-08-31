@@ -4716,9 +4716,19 @@ export async function runTurnExecutor(
         // Point at the candidates the question is about. The set is the SAME
         // one the numbered list above is rendered from, so the gesture asserts
         // nothing the question does not already assert — it relocates it onto
-        // the model. Suppressed entirely when no candidate id resolves in the
-        // turn's persisted graph (see the builder's fail-closed list): a
-        // highlight pointing at nothing is worse than no highlight.
+        // the model.
+        //
+        // ⚠ THAT CLAIM HOLDS ONLY BECAUSE THE BUILDER IS ALL-OR-NOTHING, and it
+        // was FALSE when this comment was first written: the builder dropped
+        // unresolvable ids one at a time, so a mixed set here — the
+        // `run_analysis` / `what_would_flip` pending alongside a proposal that
+        // the block below already names — lit a PROPER SUBSET of the numbered
+        // options, which on a "which one did you mean?" turn implies the
+        // answer. The builder now suppresses unless EVERY candidate resolves
+        // (tag `ambiguity_candidate_coverage_partial`), which is what makes the
+        // sentence above true rather than aspirational. Suppressed likewise
+        // when no candidate id resolves at all: a highlight pointing at nothing
+        // is worse than no highlight.
         const ambiguityDirective = buildAmbiguityCandidateUiDirective(
           collectAmbiguityCandidateEntityIds(shortConfirmDispatch.candidates),
           buildGraphNodeLookupFromGraph(context.persistedGraph),
@@ -5108,7 +5118,10 @@ export async function runTurnExecutor(
             // Same gesture, same charter, at the label-collision twin of the
             // branch above: highlight the proposals whose labels the user's
             // reply matched. `ambiguousProposals` is the exact set the
-            // numbered clarification lists.
+            // numbered clarification lists — and, per the builder's
+            // all-or-nothing coverage rule, the gesture is suppressed unless
+            // EVERY one of them resolves in the persisted graph, so it can
+            // never light a subset and imply the answer.
             const labelAmbiguityDirective = buildAmbiguityCandidateUiDirective(
               collectAmbiguityCandidateEntityIds(ambiguousProposals),
               buildGraphNodeLookupFromGraph(context.persistedGraph),

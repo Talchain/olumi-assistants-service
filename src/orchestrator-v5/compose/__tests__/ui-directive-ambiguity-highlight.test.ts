@@ -7,6 +7,14 @@
  * emit nothing at all when it cannot. A highlight pointing at nothing is worse
  * than no highlight, so both directions are pinned here.
  *
+ * ⚠ AND IT MUST POINT AT ALL OF THEM OR NONE. Coverage is all-or-nothing: a
+ * highlight over a PROPER SUBSET of the numbered options is not a weaker
+ * gesture, it is a different and false one — on a turn asking the user to
+ * choose, lighting one of two implies the choice. That rule REVERSES this
+ * suite's own earlier pin ("drops the unresolvable ids but keeps the resolvable
+ * ones"), deliberately; the reversal is pinned by name below so nobody
+ * re-litigates it as an oversight.
+ *
  * ⚠ ON BINDING. Every assertion below binds to its object by IDENTITY (the
  * exact node id / label it must name), never by a predicate another node in the
  * fixture could satisfy — the fixtures deliberately carry DECOY nodes so that
@@ -57,16 +65,19 @@ const candidateViaInlinePatch = (...ids: string[]) => ({
   action: { inline_patch: { handler_id: 'set_factor_value', target_entity_ids: ids } },
 });
 
+/** One id per candidate — the common builder input, spelled as groups. */
+const oneEach = (...ids: string[]): readonly (readonly string[])[] => ids.map((id) => [id]);
+
 describe('collectAmbiguityCandidateEntityIds — the two carriers', () => {
   it('reads preconditions.target_entity_ids', () => {
     expect(collectAmbiguityCandidateEntityIds([candidateViaPreconditions('factor_price')])).toEqual(
-      ['factor_price'],
+      [['factor_price']],
     );
   });
 
   it('reads inline_patch.target_entity_ids', () => {
     expect(collectAmbiguityCandidateEntityIds([candidateViaInlinePatch('factor_churn')])).toEqual([
-      'factor_churn',
+      ['factor_churn'],
     ]);
   });
 
@@ -82,7 +93,7 @@ describe('collectAmbiguityCandidateEntityIds — the two carriers', () => {
         candidateViaPreconditions('factor_price'),
         candidateViaInlinePatch('factor_churn'),
       ]),
-    ).toEqual(['factor_price', 'factor_churn']);
+    ).toEqual([['factor_price'], ['factor_churn']]);
   });
 
   it('dedupes an id carried in BOTH places on one candidate', () => {
@@ -93,10 +104,10 @@ describe('collectAmbiguityCandidateEntityIds — the two carriers', () => {
           action: { inline_patch: { target_entity_ids: ['factor_price'] } },
         },
       ]),
-    ).toEqual(['factor_price']);
+    ).toEqual([['factor_price']]);
   });
 
-  it('is total on malformed shapes — degrades to no ids, never throws', () => {
+  it('is total on malformed shapes — degrades to empty groups, never throws', () => {
     expect(
       collectAmbiguityCandidateEntityIds([
         { preconditions: { target_entity_ids: 'not-an-array' } },
@@ -104,14 +115,43 @@ describe('collectAmbiguityCandidateEntityIds — the two carriers', () => {
         { action: { inline_patch: { target_entity_ids: [42, '', null] } } },
         {},
       ]),
-    ).toEqual([]);
+    ).toEqual([[], [], [], []]);
+  });
+});
+
+/**
+ * THE SHAPE IS THE FACT. The builder's question is "does EVERY option the
+ * question numbers have something to point at?", and a flat union cannot answer
+ * it: merged, a candidate that contributed NOTHING is indistinguishable from
+ * one whose id another candidate also carries. These two cases are the ones a
+ * flatten would silently destroy, and they pull in OPPOSITE directions — the
+ * first must suppress, the second must emit — so no single wrong shape can
+ * satisfy both.
+ */
+describe('collectAmbiguityCandidateEntityIds — candidate boundaries survive', () => {
+  it('emits exactly one group per candidate, so a candidate carrying NOTHING stays visible', () => {
+    const groups = collectAmbiguityCandidateEntityIds([
+      candidateViaPreconditions('factor_price'),
+      {},
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups).toEqual([['factor_price'], []]);
+  });
+
+  it('does NOT dedupe across candidates — two candidates naming one node keep both groups', () => {
+    expect(
+      collectAmbiguityCandidateEntityIds([
+        candidateViaPreconditions('factor_price'),
+        candidateViaInlinePatch('factor_price'),
+      ]),
+    ).toEqual([['factor_price'], ['factor_price']]);
   });
 });
 
 describe('buildAmbiguityCandidateUiDirective — DIRECTION 1: ids present ⇒ it points at them', () => {
   it('names the candidates real node ids, with graph labels, in candidate order', () => {
     const directive = buildAmbiguityCandidateUiDirective(
-      ['factor_price', 'option_launch'],
+      oneEach('factor_price', 'option_launch'),
       lookup(),
     );
     expect(directive).not.toBeNull();
@@ -125,7 +165,7 @@ describe('buildAmbiguityCandidateUiDirective — DIRECTION 1: ids present ⇒ it
 
   it('every emitted target id EXISTS in the graph the user is looking at', () => {
     const directive = buildAmbiguityCandidateUiDirective(
-      ['factor_price', 'factor_churn'],
+      oneEach('factor_price', 'factor_churn'),
       lookup(),
     );
     const graphIds = new Set(GRAPH.nodes.map((n) => n.id));
@@ -138,21 +178,27 @@ describe('buildAmbiguityCandidateUiDirective — DIRECTION 1: ids present ⇒ it
    * an id-as-label fallback would render a raw identifier on the canvas.
    */
   it('resolves labels from the graph and never falls back to the id', () => {
-    const directive = buildAmbiguityCandidateUiDirective(['factor_churn'], lookup());
+    const directive = buildAmbiguityCandidateUiDirective([['factor_churn']], lookup());
     expect(directive!.targets[0]!.label).toBe('Monthly churn');
     expect(directive!.targets[0]!.label).not.toBe('factor_churn');
   });
 
-  it('drops the unresolvable ids but keeps the resolvable ones', () => {
+  /**
+   * WITHIN a candidate, a spare unresolvable id is a detail, not a missing
+   * option: candidate 1 still has something to point at, so the question is
+   * still fully covered. This is the exact boundary the coverage rule turns
+   * on — across candidates the same partial-ness suppresses (below).
+   */
+  it('emits when a candidate carries an unresolvable id ALONGSIDE a resolvable one', () => {
     const directive = buildAmbiguityCandidateUiDirective(
-      ['factor_price', 'ghost_node_not_in_graph'],
+      [['factor_price', 'ghost_node_not_in_graph'], ['option_launch']],
       lookup(),
     );
-    expect(directive!.targets.map((t) => t.id)).toEqual(['factor_price']);
+    expect(directive!.targets.map((t) => t.id)).toEqual(['factor_price', 'option_launch']);
   });
 
   it('emits a block that passes the strict boundary schema', () => {
-    const directive = buildAmbiguityCandidateUiDirective(['factor_price'], lookup());
+    const directive = buildAmbiguityCandidateUiDirective([['factor_price']], lookup());
     expect(UiDirectiveBlockSchema.safeParse(directive).success).toBe(true);
   });
 });
@@ -162,20 +208,24 @@ describe('buildAmbiguityCandidateUiDirective — DIRECTION 2: nothing to point a
     expect(buildAmbiguityCandidateUiDirective([], lookup())).toBeNull();
   });
 
+  it('emits nothing when candidates exist but NONE carries an entity id', () => {
+    expect(buildAmbiguityCandidateUiDirective([[], []], lookup())).toBeNull();
+  });
+
   /**
    * THE LOAD-BEARING GATE. Ids that name nothing in the user's graph must
    * produce no gesture at all — not an empty-targets block, not a partial one.
    */
   it('emits nothing when NO candidate id resolves in the graph', () => {
     expect(
-      buildAmbiguityCandidateUiDirective(['ghost_a', 'ghost_b'], lookup()),
+      buildAmbiguityCandidateUiDirective(oneEach('ghost_a', 'ghost_b'), lookup()),
     ).toBeNull();
   });
 
   it('emits nothing against an EMPTY graph', () => {
     expect(
       buildAmbiguityCandidateUiDirective(
-        ['factor_price'],
+        [['factor_price']],
         buildGraphNodeLookupFromGraph({ nodes: [], edges: [] }),
       ),
     ).toBeNull();
@@ -184,7 +234,7 @@ describe('buildAmbiguityCandidateUiDirective — DIRECTION 2: nothing to point a
   it('emits nothing against an ABSENT graph (degraded persisted read)', () => {
     expect(
       buildAmbiguityCandidateUiDirective(
-        ['factor_price'],
+        [['factor_price']],
         buildGraphNodeLookupFromGraph(null),
       ),
     ).toBeNull();
@@ -202,15 +252,110 @@ describe('buildAmbiguityCandidateUiDirective — DIRECTION 2: nothing to point a
     }));
     const big = buildGraphNodeLookupFromGraph({ nodes, edges: [] });
     const ids = nodes.map((n) => n.id);
-    expect(buildAmbiguityCandidateUiDirective(ids, big)).toBeNull();
+    expect(buildAmbiguityCandidateUiDirective(oneEach(...ids), big)).toBeNull();
     // ...and the cap itself is inclusive, so one fewer still emits.
-    expect(buildAmbiguityCandidateUiDirective(ids.slice(0, -1), big)).not.toBeNull();
+    expect(buildAmbiguityCandidateUiDirective(oneEach(...ids.slice(0, -1)), big)).not.toBeNull();
+  });
+});
+
+/**
+ * ⭐ COVERAGE IS ALL-OR-NOTHING — the rule this change exists for, and the
+ * reversal of a previously ratified position.
+ *
+ * The earlier revision dropped unresolvable ids one at a time and suppressed
+ * only when the set emptied. On a MIXED candidate set that lit a PROPER SUBSET
+ * of the numbered options — and on a turn whose whole purpose is to ask which
+ * option the user meant, lighting one of two implies the answer. The cap door
+ * in the same module had already ratified the opposite position for the same
+ * outcome; the two doors simply disagreed, and this one was wrong.
+ *
+ * ⚠ BOTH DIRECTIONS LIVE HERE, IN ONE BLOCK, ON PURPOSE. A false positive that
+ * DROPS the gesture is a gap; one that INVENTS an implied answer is a lie; they
+ * cannot share a window, so the drop cases and the legitimate-emit cases are
+ * pinned together and a change that darkened the gesture wholesale would fail
+ * the second half rather than pass a shrunken suite.
+ */
+describe('coverage is all-or-nothing — a proper subset would imply the answer', () => {
+  // ── DROP direction: the gesture must go dark ──────────────────────────────
+  it('SUPPRESSES when one of two candidates names an entity NOT in the graph', () => {
+    expect(
+      buildAmbiguityCandidateUiDirective(
+        [['factor_price'], ['entity_not_yet_in_graph']],
+        lookup(),
+      ),
+    ).toBeNull();
+  });
+
+  it('SUPPRESSES when one of two candidates carries no entity id at all', () => {
+    // The named real case: a `run_analysis` / `what_would_flip` pending
+    // alongside a proposal. It has no `target_entity_ids` on either carrier.
+    expect(
+      buildAmbiguityCandidateUiDirective([['option_launch'], []], lookup()),
+    ).toBeNull();
+  });
+
+  it('SUPPRESSES on the end-to-end call-site expression, collector included', () => {
+    // The exact shape turn-executor.ts pipes: collector output straight into
+    // the builder. Pinning the pair together is what stops a future flatten in
+    // the collector re-opening this with the builder untouched.
+    const directive = buildAmbiguityCandidateUiDirective(
+      collectAmbiguityCandidateEntityIds([
+        candidateViaPreconditions('factor_price'),
+        candidateViaInlinePatch('entity_not_yet_in_graph'),
+      ]),
+      lookup(),
+    );
+    expect(directive).toBeNull();
+  });
+
+  // ── EMIT direction: the legitimate counterpart, same run ──────────────────
+  it('STILL EMITS when every candidate resolves — exact ids, in candidate order', () => {
+    const directive = buildAmbiguityCandidateUiDirective(
+      collectAmbiguityCandidateEntityIds([
+        candidateViaPreconditions('factor_price'),
+        candidateViaInlinePatch('option_launch'),
+      ]),
+      lookup(),
+    );
+    expect(directive).not.toBeNull();
+    expect(directive!.targets).toEqual([
+      { id: 'factor_price', label: 'Unit price', kind: 'factor' },
+      { id: 'option_launch', label: 'Launch in Q3', kind: 'option' },
+    ]);
+  });
+
+  /**
+   * The false-suppression trap this change could easily have shipped: two
+   * candidates that legitimately name the SAME node are fully covered, and a
+   * cross-candidate dedup in the collector would empty the second group and
+   * read it as uncovered. One target, both candidates covered, gesture honest.
+   */
+  it('STILL EMITS when two candidates name the SAME node — deduped to one target', () => {
+    const directive = buildAmbiguityCandidateUiDirective(
+      collectAmbiguityCandidateEntityIds([
+        candidateViaPreconditions('factor_price'),
+        candidateViaInlinePatch('factor_price'),
+      ]),
+      lookup(),
+    );
+    expect(directive).not.toBeNull();
+    expect(directive!.targets).toEqual([
+      { id: 'factor_price', label: 'Unit price', kind: 'factor' },
+    ]);
+  });
+
+  it('STILL EMITS for a single candidate whose id resolves', () => {
+    const directive = buildAmbiguityCandidateUiDirective(
+      collectAmbiguityCandidateEntityIds([candidateViaPreconditions('factor_churn')]),
+      lookup(),
+    );
+    expect(directive!.targets.map((t) => t.id)).toEqual(['factor_churn']);
   });
 });
 
 describe('the charter — uncertainty shown, decision NOT implied', () => {
   const directive = () =>
-    buildAmbiguityCandidateUiDirective(['factor_price', 'option_launch'], lookup())!;
+    buildAmbiguityCandidateUiDirective(oneEach('factor_price', 'option_launch'), lookup())!;
 
   /**
    * `focus` and `open_inspector` act on a SINGLE target — using either would
@@ -236,11 +381,11 @@ describe('the charter — uncertainty shown, decision NOT implied', () => {
    */
   it('preserves candidate order rather than imposing one', () => {
     const forward = buildAmbiguityCandidateUiDirective(
-      ['factor_price', 'option_launch'],
+      oneEach('factor_price', 'option_launch'),
       lookup(),
     )!;
     const reversed = buildAmbiguityCandidateUiDirective(
-      ['option_launch', 'factor_price'],
+      oneEach('option_launch', 'factor_price'),
       lookup(),
     )!;
     expect(forward.targets.map((t) => t.id)).toEqual(['factor_price', 'option_launch']);
@@ -262,7 +407,7 @@ describe('the charter — uncertainty shown, decision NOT implied', () => {
  */
 describe('the mount path — the block actually reaches the response', () => {
   it('composeDirectAnswerResponse CARRIES the directive onto the wire', () => {
-    const directive = buildAmbiguityCandidateUiDirective(['factor_price'], lookup())!;
+    const directive = buildAmbiguityCandidateUiDirective([['factor_price']], lookup())!;
     const response = composeDirectAnswerResponse({
       answerKind: 'functional',
       assistant_text: 'Which one would you like? 1) Unit price',
@@ -280,16 +425,21 @@ describe('the mount path — the block actually reaches the response', () => {
  * SUPPRESSION IS OBSERVABLE — the module's own discipline is that every drop is
  * reason-tagged so it is never a silent no-op (the broken-alarm class).
  *
- * The two failure modes MUST stay distinguishable: "this turn had nothing to
- * point at" is normal, whereas "the candidates named entities the user's graph
- * does not contain" is a DRIFT signal (a proposal outliving its nodes, or a
- * degraded persisted read). They suppress identically, so without separate tags
- * the second is invisible — which is precisely how a silently-degrading gesture
+ * The failure modes MUST stay distinguishable: "this turn had nothing to point
+ * at" is normal, whereas "the candidates named entities the user's graph does
+ * not contain" is a DRIFT signal (a proposal outliving its nodes, or a degraded
+ * persisted read). They suppress identically, so without separate tags the
+ * second is invisible — which is precisely how a silently-degrading gesture
  * would go unnoticed.
+ *
+ * ⚠ AND THE THIRD TAG IS THE PRICE OF THIS CHANGE, MADE COUNTABLE. Partial
+ * coverage darkens a gesture that used to render (wrongly). Its live frequency
+ * is unmeasured and this suite claims nothing about it; merged into either
+ * neighbouring tag, that cost would be permanently unmeasurable.
  */
-describe('suppression is reason-tagged, and the two reasons are distinguishable', () => {
+describe('suppression is reason-tagged, and the reasons are distinguishable', () => {
   const reasonsFor = async (
-    ids: readonly string[],
+    groups: readonly (readonly string[])[],
     lk: ReturnType<typeof buildGraphNodeLookupFromGraph>,
   ): Promise<string[]> => {
     const telemetry = await import('../../../utils/telemetry.js');
@@ -301,7 +451,7 @@ describe('suppression is reason-tagged, and the two reasons are distinguishable'
           seen.push(String((payload as { reason?: unknown }).reason));
         }
       });
-    buildAmbiguityCandidateUiDirective(ids, lk);
+    buildAmbiguityCandidateUiDirective(groups, lk);
     spy.mockRestore();
     return seen;
   };
@@ -311,7 +461,19 @@ describe('suppression is reason-tagged, and the two reasons are distinguishable'
   });
 
   it('tags ids that do not resolve in the graph as a DRIFT signal, not as "nothing to point at"', async () => {
-    expect(await reasonsFor(['ghost_a'], lookup())).toEqual(['ambiguity_targets_unresolved']);
+    expect(await reasonsFor([['ghost_a']], lookup())).toEqual(['ambiguity_targets_unresolved']);
+  });
+
+  it('tags PARTIAL coverage distinctly from both — this is the countable cost', async () => {
+    expect(await reasonsFor([['factor_price'], ['ghost_a']], lookup())).toEqual([
+      'ambiguity_candidate_coverage_partial',
+    ]);
+  });
+
+  it('tags a candidate with NO ids alongside a resolvable one as partial coverage', async () => {
+    expect(await reasonsFor([['factor_price'], []], lookup())).toEqual([
+      'ambiguity_candidate_coverage_partial',
+    ]);
   });
 
   it('tags the over-cap suppression distinctly', async () => {
@@ -322,7 +484,7 @@ describe('suppression is reason-tagged, and the two reasons are distinguishable'
     }));
     expect(
       await reasonsFor(
-        nodes.map((n) => n.id),
+        oneEach(...nodes.map((n) => n.id)),
         buildGraphNodeLookupFromGraph({ nodes, edges: [] }),
       ),
     ).toEqual(['ambiguity_too_many_targets']);
@@ -340,8 +502,8 @@ describe('suppression is reason-tagged, and the two reasons are distinguishable'
  */
 describe('discriminating pair — binding by identity', () => {
   it('RED arm: a builder that returned the DECOY instead would not satisfy the identity assertion', () => {
-    const real = buildAmbiguityCandidateUiDirective(['factor_price'], lookup())!;
-    const decoyed = buildAmbiguityCandidateUiDirective(['factor_decoy'], lookup())!;
+    const real = buildAmbiguityCandidateUiDirective([['factor_price']], lookup())!;
+    const decoyed = buildAmbiguityCandidateUiDirective([['factor_decoy']], lookup())!;
     // Both are well-formed directives — "a directive was emitted" cannot tell
     // them apart, which is exactly why the suite asserts ids.
     expect(UiDirectiveBlockSchema.safeParse(decoyed).success).toBe(true);
@@ -349,7 +511,7 @@ describe('discriminating pair — binding by identity', () => {
   });
 
   it('GREEN arm: changing an UNRELATED node leaves the candidates directive identical', () => {
-    const before = buildAmbiguityCandidateUiDirective(['factor_price'], lookup())!;
+    const before = buildAmbiguityCandidateUiDirective([['factor_price']], lookup())!;
     const mutatedGraph = {
       nodes: GRAPH.nodes.map((n) =>
         n.id === 'factor_decoy' ? { ...n, label: 'Renamed decoy' } : n,
@@ -357,7 +519,7 @@ describe('discriminating pair — binding by identity', () => {
       edges: [],
     };
     const after = buildAmbiguityCandidateUiDirective(
-      ['factor_price'],
+      [['factor_price']],
       buildGraphNodeLookupFromGraph(mutatedGraph),
     )!;
     expect(after.targets).toEqual(before.targets);
