@@ -83,6 +83,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { boundNodeLabel } from "./label-bound.js";
 import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
@@ -3849,7 +3850,92 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return { graph: projection.graph, provenance: projection.provenance, dropped: projection.dropped };
+  return boundEveryNodeLabel({
+    graph: projection.graph,
+    provenance: projection.provenance,
+    dropped: projection.dropped,
+  });
+}
+
+/**
+ * ⭐⭐ THE LAST THING THIS MODULE DOES: BRING EVERY LABEL INSIDE THE PUBLISHED
+ * CONTRACT'S BOUND, BEFORE THE GRAPH IS COMMITTED OR HASHED.
+ *
+ * ── WHY IT EXISTS (CEE #1178, staging 28 Aug 2026) ─────────────────────────
+ * A 212-character node label failed the PUBLISHED `NodeV3Schema.label`
+ * (`.min(1).max(200)`) at egress and replaced the user's ENTIRE assistant reply
+ * with "The server produced a response that failed validation." #1178 fixed the
+ * symptom at the boundary; this is the cause. The label was a brief sentence
+ * copied VERBATIM — `label === source_quote` — and nothing upstream bounded it,
+ * because the gate the producer checks itself against is CEE-LOCAL
+ * `schemas/cee-v3.ts`, whose `NodeV3.label` is a bare `z.string()`. Two schemas,
+ * one name (trap 21).
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE THREE MINT SITES ─────────────────────────────
+ * Labels are minted in three places — stated items (`:2185`), claims (`:2593`)
+ * and the decision node (`:3264`). Bounding at each would be a hand-maintained
+ * list that a fourth mint site silently escapes (trap 12); bounding at the one
+ * return covers all of them and anything added later.
+ *
+ * ⭐ AND ONE OF THOSE SITES MAKES THE ORDERING LOAD-BEARING, NOT MERELY TIDY: a
+ * CLAIM node's id is `sha8(claim_kind, label)` (`:2575`). Shortening a label
+ * BEFORE that id is minted would collapse two claims differing only after
+ * character 199 into a single node — trading a dropped receipt for a silently
+ * deleted node, which is strictly worse. Running after every id is minted (and
+ * after the demote/merge passes above, which reason over full labels) is
+ * id-preserving BY CONSTRUCTION.
+ *
+ * ── WHY NOTHING DOWNSTREAM RE-BREAKS IT (derived at the bytes, not assumed) ─
+ * The chain from here is `enforceSingleGoal` → `projectGraphAndOptionsToV3` →
+ * `GraphV3` (`structure/index.ts:392`), and no step in it can LENGTHEN a label:
+ * `enforceSingleGoal`'s `composed.label` is a pure SELECTION (`labels[0]`, not a
+ * string join — the "Compound Goal: A + B" prefix that motivated this module's
+ * sibling is gone), `demoteGoalToOutcome` returns either the current label or a
+ * `deriveGoalObjectiveLabel` result that can only shorten, and
+ * `cleanNodeLabel` (`transforms/schema-v3.ts:197`) only strips and collapses.
+ *
+ * ── ⭐ IDENTITY WHEN NOTHING IS OVER-LONG ──────────────────────────────────
+ * The ordinary draft returns the ORIGINAL projection object, with the original
+ * node objects and the original provenance record — not a rebuilt copy. That is
+ * the over-correction control expressed as code: this pass cannot perturb a
+ * graph it has no work to do on.
+ */
+function boundEveryNodeLabel(projection: RecordProjection): RecordProjection {
+  let changed = false;
+  const provenance: Record<string, RecordProvenance> = { ...projection.provenance };
+
+  const nodes = projection.graph.nodes.map((node) => {
+    const label = boundNodeLabel(node.label);
+    // Referential identity: `boundNodeLabel` returns its input when it fits.
+    if (label === node.label) return node;
+    changed = true;
+
+    // `label_authored` is DERIVED, never hand-set (`cee-v3.ts:281-284`): it
+    // means the display string is OURS rather than the user's verbatim words,
+    // and after shortening that is exactly true.
+    //
+    // ⚠ SCOPED TO NODES THAT CARRY THE VERBATIM, and the scope is the honest
+    // half. The field's contract is to sit BESIDE `source_quote` so a surface
+    // can say *"you said: …"*; stamping it on an `ai_inferred` claim node —
+    // which has no `source_quote` and whose label was never the user's — would
+    // promise a verbatim that does not exist. `provenance_class: "ai_inferred"`
+    // already says that label is not the user's.
+    const carriesVerbatim = typeof node.provenance?.source_quote === "string";
+    const prov =
+      node.provenance !== undefined && carriesVerbatim
+        ? { ...node.provenance, label_authored: true }
+        : node.provenance;
+    if (prov !== undefined) provenance[node.id] = prov;
+
+    return { ...node, label, ...(prov !== undefined ? { provenance: prov } : {}) };
+  });
+
+  if (!changed) return projection;
+  return {
+    graph: { ...projection.graph, nodes },
+    provenance,
+    dropped: projection.dropped,
+  };
 }
 
 /** The determinism-comparison value: one canonical string per projection. */
