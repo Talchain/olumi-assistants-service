@@ -314,7 +314,34 @@ function isUnanchoredAnswerToOutstandingAsk(
 
 /**
  * ⭐⭐⭐ THE AUTHORITY ON "HOW DO WE READ THIS ANSWER?" ALREADY REFUSED TO TURN
- * IT INTO A NUMBER — SO NO NUMBER WRITTEN HERE CAN BE THAT ANSWER.
+ * IT INTO A NUMBER, SO NO NUMBER THIS BLOCK LETS THROUGH CAN BE THAT ANSWER.
+ *
+ * ⚠⚠⚠ THE SCOPE OF THAT SENTENCE, BEFORE ANYTHING ELSE — BECAUSE THE FIRST
+ * VERSION OF IT WAS A FALSE GUARANTEE AND WAS CAUGHT IN REVIEW.
+ *
+ * It read *"NO NUMBER WRITTEN HERE CAN BE THAT ANSWER."* That was false: this
+ * arm sat BELOW the `BASELINE_FRAMING` suppressor, so every `qualitative`
+ * reading carrying baseline vocabulary escaped it — measured, four of them
+ * (`"Change its baseline to a third."`, `"Set the baseline to half."`, …).
+ * The arm is now hoisted ABOVE that suppressor and the sentence is true of THIS
+ * BLOCK, which is the only thing it may ever claim.
+ *
+ * ⛔ WHAT IT STILL DOES **NOT** COVER, and none of this is closed by this
+ * module:
+ *   · a CHIP-ORIGINATED turn skips every prose arm here by design (identity
+ *     alone decides), so this sentence says nothing about that path;
+ *   · FOUR PRODUCTION WRITERS of a factor's own baseline never reach the caller
+ *     at all — the route-level `edit_graph` lane, the `factor_value_edit`
+ *     system event, a compound chain's parts 2..N, and the GM held-consent
+ *     apply — and `add_constraint` passes that block while writing
+ *     `{value, baseline}`. See `turn-executor.ts`'s own corrected note.
+ *
+ * ⭐ THE LESSON, RECORDED BECAUSE IT IS THE SHARPEST ONE AVAILABLE: the false
+ * version of this sentence was written in the SAME COMMIT that removed a false
+ * *"one guard here covers every dispatch path"* from `turn-executor.ts`. **The
+ * comment most likely to be false is the one written to correct a false
+ * comment.** Any guarantee here must name the block it is true of and the paths
+ * it is silent about, or it will be inherited as the larger claim.
  *
  * ⚠ THIS ARM EXISTS BECAUSE `!namesTheFactor` FAILS IN THE DANGEROUS DIRECTION,
  * AND THE PRODUCT ITSELF PROMPTS THE PHRASING THAT DEFEATS IT. Review finding on
@@ -435,29 +462,45 @@ export function findOutstandingEffectAskCollision(params: {
   const match = pairs.filter((p) => p.factorId === params.entityId);
   if (match.length === 0) return null;
   if (!params.chipOriginated) {
-    if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
-    // ⭐⭐ TWO WAYS A TYPED TURN CAN BE THE WRONG FIELD OF THE ASKED PAIR, and
-    // they are genuinely different questions rather than one predicate widened
-    // (trap 21 — name the concepts apart):
+    // ⭐⭐⭐ THE BINDER'S REFUSAL TO NUMBER IS CHECKED **BEFORE** THE `baseline`
+    // SUPPRESSOR, AND THE ORDER IS THE WHOLE POINT — REVIEW BLOCKER, #1292 r2.
     //
-    //   · the user described an EFFECT and merely failed to anchor the option
-    //     ("Set its effect on X to 0.33") — the framing is in the SENTENCE;
-    //   · the user ANSWERED THE PRODUCT'S OWN QUESTION and named no factor
-    //     ("Set it to a third.")          — the framing is in the ASK;
-    //   · the BINDER READ IT AS AN ANSWER AND REFUSED TO NUMBER IT
-    //     ("Set Operational Control Level to a third.")
-    //                                     — the verdict is the AUTHORITY'S.
+    // With this arm below `BASELINE_FRAMING`, every `qualitative` reading
+    // carrying baseline vocabulary escaped it. Measured, four of them:
     //
-    // The second arm is what the witnessed defect needed and what no reading of
-    // the user's own words could ever have supplied. The third is what the
-    // second still missed, because echoing back the factor name the product
-    // itself printed defeated it — see that function's header.
-    if (
-      !isUnanchoredEffectFraming(params.message, params.optionLabels)
-      && !isUnanchoredAnswerToOutstandingAsk(params.message, match)
-      && !isAnswerTheBinderRefusedToNumber(params.message)
-    ) {
-      return null;
+    //     "Change its baseline to a third."   ·  "Set the baseline to half."
+    //     "Set its baseline to high."         ·  "Change the <factor> baseline to a third."
+    //
+    // ⭐ THE HOIST CANNOT COST A LEGITIMATE TWIN, AND THAT IS DERIVABLE RATHER
+    // THAN MERELY MEASURED. `qualitative` is the reading returned when there is
+    // NO DIGIT in the value slot, so a BINDABLE baseline request — one that
+    // carries the number it wants written — can never read `qualitative`.
+    // Confirmed by execution over the bindable baseline forms
+    // ("…to 0.4.", "…to 40%.", "…to 0.25", "…to 0.7", "baselines: set it to
+    // 0.5"): every one reads `null`, none reads `qualitative`.
+    //
+    // So `baseline` vocabulary still suppresses everything it ever suppressed —
+    // it simply no longer licenses writing a number the binder refused to read.
+    if (!isAnswerTheBinderRefusedToNumber(params.message)) {
+      // ⭐⭐ THE OTHER TWO WAYS A TYPED TURN CAN BE THE WRONG FIELD OF THE ASKED
+      // PAIR. These are genuinely different questions, not one predicate
+      // widened (trap 21 — name the concepts apart):
+      //
+      //   · the user described an EFFECT and merely failed to anchor the option
+      //     ("Set its effect on X to 0.33") — the framing is in the SENTENCE;
+      //   · the user ANSWERED THE PRODUCT'S OWN QUESTION and named no factor
+      //     ("Set it to a third.")          — the framing is in the ASK.
+      //
+      // The second is what the witnessed defect needed, and what no reading of
+      // the user's own words could ever have supplied. Both are suppressible by
+      // explicit `baseline` framing; the binder-refusal arm above is not.
+      if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
+      if (
+        !isUnanchoredEffectFraming(params.message, params.optionLabels)
+        && !isUnanchoredAnswerToOutstandingAsk(params.message, match)
+      ) {
+        return null;
+      }
     }
   }
   // `match` is non-empty by the early return above — no second, unreachable

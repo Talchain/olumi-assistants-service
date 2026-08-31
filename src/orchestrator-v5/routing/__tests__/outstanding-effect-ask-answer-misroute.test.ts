@@ -255,6 +255,43 @@ describe('CASE 1b — echoing the factor name back does not license the write', 
     expect(readMissingValueAnswer(`no change to ${FACTOR_LABEL}`)?.kind).toBe('qualitative');
   });
 
+  it('⭐⭐ `baseline` VOCABULARY DOES NOT LICENSE A NUMBER THE BINDER REFUSED TO READ', () => {
+    // REVIEW BLOCKER, #1292 r2. With the binder-refusal arm BELOW the
+    // `BASELINE_FRAMING` suppressor, every qualitative reading carrying baseline
+    // vocabulary escaped — which is exactly what that arm's header claimed
+    // could not happen. The arm is now hoisted above the suppressor.
+    for (const message of [
+      'Change its baseline to a third.',
+      'Set the baseline to half.',
+      'Set its baseline to high.',
+      `Change the ${FACTOR_LABEL} baseline to a third.`,
+    ]) {
+      expect(readMissingValueAnswer(message)?.kind, message).toBe('qualitative');
+      expect(
+        collide(message)?.pairs.map((p) => `${p.optionId}::${p.factorId}`),
+        message,
+      ).toEqual([ASKED_PAIR]);
+    }
+  });
+
+  it('⭐⭐ THE HOIST CANNOT COST A TWIN — no BINDABLE baseline request reads `qualitative`', () => {
+    // This is the derivation the hoist rests on, asserted rather than assumed:
+    // `qualitative` is returned when there is NO DIGIT in the value slot, so a
+    // baseline request carrying the number it wants written can never read it.
+    // If this ever REDs, the hoist has become unsafe and must be re-derived.
+    for (const message of [
+      'Change its baseline to 0.4.',
+      `Change the ${FACTOR_LABEL} baseline to 0.4.`,
+      'Set the baseline to 40%.',
+      `Set the ${FACTOR_LABEL} baseline to 0.25`,
+      'Set its baseline to 0.7',
+      'baselines: set it to 0.5',
+    ]) {
+      expect(readMissingValueAnswer(message)?.kind, message).not.toBe('qualitative');
+      expect(collide(message), message).toBeNull();
+    }
+  });
+
   it('⚠ ONE MEASURED CONSEQUENCE BEYOND THE FOUR, pinned rather than discovered later', () => {
     // Genuinely ambiguous: it asserts the factor's current level AND asks for an
     // assignment, and the binder itself declined to extract a figure. Refusing
