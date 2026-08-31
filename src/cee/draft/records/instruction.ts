@@ -220,10 +220,11 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   what people believe is behind a problem — "some think the product has fallen
   behind", "the CFO believes we raised prices too aggressively" — each of those
   spans answers WHY, and an answer is true or false rather than something the
-  user carries out. It is not a stated_item of any kind: the four above are the
-  only values \`kind\` takes, and there is no fifth. Put the span in
-  \`claims\` instead, with \`claim_kind\` \`factor\` for what it says varies
-  and \`risk\` for what it says threatens the goal.
+  user carries out. Quote it as a stated_item with \`kind\` \`cause\`. It is
+  their words, so it belongs in stated_items; it is an explanation, so it is not
+  an \`option\`. Filing one as an \`option\` puts it on the graph to be scored
+  and ranked, and the product then computes a win probability for something
+  nobody can decide to do.
   Keep every one of them. A disagreement about causes IS the reasoning the user
   arrived with, and a hypothesis dropped to tidy the graph removes the thing
   they are arguing about.
@@ -242,6 +243,9 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
+- \`cause\` — an explanation the user offered for why something is happening: a
+  hypothesis, whoever holds it. Keep every one the brief carries. See the
+  \`option\` entry above for why a cause is never an option.
 - \`figure\` — a quantity the user stated
 Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
 user did not state, and do not round or rescale one they did.

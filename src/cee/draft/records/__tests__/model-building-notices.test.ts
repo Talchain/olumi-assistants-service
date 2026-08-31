@@ -34,6 +34,7 @@ const PRODUCER_REASONS = [
   "ambiguous_ref",
   "ref_kind_illegal",
   "refinement_merged_into_stated_option",
+  "factor_merged_into_stated_cause",
   "undeveloped_duplicate_of_stated",
   "undeveloped_duplicate_of_model",
   "endpoint_demoted_duplicate",

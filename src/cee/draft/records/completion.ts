@@ -379,6 +379,10 @@ export function completionRegressesProtectedContent(
   for (const [survivorId, prov] of Object.entries(after.provenance)) {
     if (!afterById.has(survivorId)) continue; // an absorber that itself vanished excuses nothing
     for (const label of prov.merged_refinements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    // The cause-side twin. Omitting it would leave a legitimately-absorbed label
+    // unaccounted and manufacture a false completion gap — the absorption is the
+    // same shape and the same direction, only the parent's kind differs.
+    for (const label of prov.merged_restatements ?? []) accountedFor.add(`${survivorId}␟${label}`);
     for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(`${survivorId}␟${label}`);
   }
   /**
@@ -672,9 +676,10 @@ export function enumerateCompletionAsk(
       //     `stated_items` whether or not it becomes a node, and that is what the
       //     fidelity postcondition measures.
       //
-      // `option_budget_exceeded` and `refinement_merged_into_stated_option` are
-      // likewise projector DECISIONS, not gaps: asking about either would ask the
-      // model to undo a deliberate, disclosed choice.
+      // `option_budget_exceeded`, `refinement_merged_into_stated_option` and
+      // `factor_merged_into_stated_cause` are likewise projector DECISIONS, not
+      // gaps: asking about any of them would ask the model to undo a deliberate,
+      // disclosed choice.
       //
       // ⭐ AND THE THREE DEMOTE REASONS ARE LISTED EXPLICITLY BELOW rather than
       // left to `default`, so their silence is a DECISION. A demote is a

@@ -88,6 +88,7 @@ import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
+  DraftRecordStatedKind,
   DraftRecordSet,
   DraftStatedItem,
 } from "./grammar.js";
@@ -240,6 +241,14 @@ export interface RecordProvenance {
    * user — the distinction the whole provenance mechanism exists to hold.
    */
   readonly merged_refinements?: readonly string[];
+  /**
+   * Labels of `factor` claims merged into this STATED cause. The cause-side twin
+   * of `merged_refinements`, kept apart from it for the same reason the
+   * disclosure reasons are: a restatement of an explanation is not a refinement
+   * of an alternative. APPEND-ONLY and additive, and read by `completion.ts`'s
+   * content accounting alongside its twin.
+   */
+  readonly merged_restatements?: readonly string[];
   /**
    * Labels of MODEL options withdrawn because their intervention signature was
    * identical to this one's (`undeveloped_duplicate_of_*`). APPEND-ONLY, and
@@ -407,6 +416,18 @@ export interface DroppedRecordRef {
      * the parent. Recorded here so the merge is visible, never silent.
      */
     | "refinement_merged_into_stated_option"
+    /**
+     * ⭐ THE CAUSE-SIDE TWIN, NAMED APART ON PURPOSE (trap 21).
+     *
+     * A `factor` claim restating a stated `cause` is folded into it. It is NOT
+     * `refinement_merged_into_stated_option`: nothing about the user's
+     * ALTERNATIVES was consolidated, and reusing that name would tell a reader
+     * their choice set had been combined when their choice set was never touched.
+     * Same absorption direction as its twin — MODEL-origin content into a
+     * USER-stated node — which is what keeps `completion.ts`'s accounting
+     * invariant true.
+     */
+    | "factor_merged_into_stated_cause"
     /**
      * ⭐⭐ THE DEMOTE. A MODEL-emitted option whose intervention signature is
      * IDENTICAL to a USER-STATED option's: the model proposed an alternative and
@@ -769,6 +790,33 @@ const STATED_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"]>> 
   constraint: "constraint",
   // A stated figure is a quantity the user asserted: a factor node carrying it.
   figure: "factor",
+  // ⭐ A stated cause is an EXPLANATION the user offered — an answer to "why",
+  // which is true or false rather than something they carry out. It is a factor,
+  // and it is emphatically NOT an option: projecting it as one is #1287, where
+  // the product prepared to compute a win probability for "The Price Rise We
+  // Pushed Through in January".
+  cause: "factor",
+};
+
+/**
+ * ⭐⭐ WHICH STATED KIND MAY PARENT WHICH CLAIM KIND, IN PASS 1b.
+ *
+ * `basis` is an EVIDENCE field ("what did you build on?") that this projector
+ * REPURPOSED as a parent pointer ("which stated item is this a restatement of?").
+ * One field, two questions — so something must tell them apart, and that
+ * something is the PARENT'S STATED KIND. This table is that discriminator, and
+ * reading it as a safety gate about optionhood is a misreading: it is
+ * parent-ELIGIBILITY, which is why widening it is coherent.
+ *
+ *   · an `option_refinement` refines a stated `option`   — an alternative
+ *   · a `factor` restates a stated `cause`               — an explanation
+ *
+ * A claim kind absent from this table never merges, which is the default and the
+ * safe direction: it mints its own node and keeps its own identity.
+ */
+const MERGE_PARENT_STATED_KIND: Readonly<Record<string, DraftRecordStatedKind | undefined>> = {
+  option_refinement: "option",
+  factor: "cause",
 };
 
 const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | null>> = {
@@ -1379,7 +1427,7 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * to a factor the stated option already assigns. Compare the raw record values,
  * before either route aliases to a minted option id.
  */
-function refinementConflictsWithStatedOption(
+function claimConflictsWithStatedParent(
   claims: readonly DraftInferenceClaim[],
   parentStatedIndex: number,
   refinementClaimIndex: number,
@@ -2428,7 +2476,17 @@ function projectOnce(
   {
     const candidates = new Map<number, number[]>();
     claims.forEach((claim, index) => {
-      if (claim.claim_kind !== "option_refinement") return;
+      // ⭐⭐ TWO CLAIM KINDS MERGE, AND THE PARENT'S STATED KIND IS WHAT TELLS
+      // THEM APART. Derived from one table rather than two hand-written branches,
+      // so a third pairing cannot be added to one half and forgotten in the other
+      // (trap 12 — the hand-maintained mirror).
+      //
+      // ⚠ BOTH HALVES ARE LOAD-BEARING, measured by a discriminating mutant pair:
+      // revert the parent filter alone and this OVER-MERGES a genuine factor into
+      // a stated option; revert the candidate widening alone and the cause merge
+      // goes inert. Neither mutant alone shows the binding — the pair does.
+      const parentStatedKind = MERGE_PARENT_STATED_KIND[claim.claim_kind];
+      if (parentStatedKind === undefined) return;
       // ⭐ A DEMOTED REFINEMENT IS NOT A CANDIDATE, AND THIS IS WHY THE PASS MUST
       // ITERATE. Two refinements naming one parent trip the choice-set guard and
       // NEITHER merges. Withdraw one and the other becomes the parent's only
@@ -2441,7 +2499,9 @@ function projectOnce(
       // option twice still names one option.
       const namedOptions = [
         ...new Set(
-          basis.filter((b) => Number.isInteger(b) && statedItems[b]?.kind === "option"),
+          basis.filter(
+            (b) => Number.isInteger(b) && statedItems[b]?.kind === parentStatedKind,
+          ),
         ),
       ];
       if (namedOptions.length !== 1) return;
@@ -2457,12 +2517,16 @@ function projectOnce(
       // alternatives; leave them standing.
       if (
         claimIndices.length === 1 &&
-        !refinementConflictsWithStatedOption(claims, parent, claimIndices[0]!)
+        !claimConflictsWithStatedParent(claims, parent, claimIndices[0]!)
       ) {
         refinementParentStatedIndex.set(claimIndices[0]!, parent);
       }
     }
   }
+
+  /** The stated kind of a merge parent, by its record index. */
+  const parentStatedKindOf = (statedIndex: number): string | undefined =>
+    statedItems[statedIndex]?.kind;
 
   // ── Pass 2: claims → nodes. Badge is `ai_inferred`, again taken from the loop.
   claims.forEach((claim, index) => {
@@ -2489,10 +2553,20 @@ function projectOnce(
           // refinement is added alongside them so the record shows what the
           // model contributed without the model's words ever being attributed to
           // the user.
-          provenance[parentId] = {
-            ...parentProv,
-            merged_refinements: [...(parentProv.merged_refinements ?? []), label],
-          };
+          // The absorbed label lands on the field that names what it IS. Both
+          // are append-only, both consume MODEL-origin content into a
+          // USER-stated node, and `completion.ts` accounts for both — see the
+          // invariant stated there.
+          provenance[parentId] =
+            parentStatedKindOf(mergedParent) === "cause"
+              ? {
+                  ...parentProv,
+                  merged_restatements: [...(parentProv.merged_restatements ?? []), label],
+                }
+              : {
+                  ...parentProv,
+                  merged_refinements: [...(parentProv.merged_refinements ?? []), label],
+                };
           const parentNode = nodes.find((n) => n.id === parentId);
           if (parentNode) parentNode.provenance = provenance[parentId];
         }
@@ -2512,7 +2586,10 @@ function projectOnce(
           claim_index: index,
           claim_kind: claim.claim_kind,
           label,
-          reason: "refinement_merged_into_stated_option",
+          reason:
+            parentStatedKindOf(mergedParent) === "cause"
+              ? "factor_merged_into_stated_cause"
+              : "refinement_merged_into_stated_option",
         });
         return;
       }

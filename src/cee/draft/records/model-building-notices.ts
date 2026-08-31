@@ -155,6 +155,13 @@ export const NOTICE_KIND_BY_REASON: Record<
   // left off the graph to bring it inside the bound." Left OFF, not merged —
   // see the file header for why this is not `alternative_consolidated`.
   option_budget_exceeded: "other",
+  // ⭐ A `factor` claim restating a stated `cause` was folded into it. NOT
+  // `alternative_consolidated`: the user's ALTERNATIVES were not consolidated —
+  // nothing in their choice set was touched at all. What merged was the model's
+  // own restatement of an explanation the user gave, into the user's words for
+  // it. Per this file's header rule, the answer when no specific kind is TRUE is
+  // the coarse-but-true bucket, never the nearest-looking label.
+  factor_merged_into_stated_cause: "other",
 };
 
 /** The kinds in the order they are emitted — stable, so the wire is stable. */

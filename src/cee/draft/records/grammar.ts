@@ -169,7 +169,29 @@ import { createHash } from "node:crypto";
  * `constraint` + `NODE_KIND_MAP`; see the note on `DRAFT_RECORD_CLAIM_KINDS`
  * for the full derivation and the positive control that pins it.
  */
-export const DRAFT_RECORD_STATED_KINDS = ["goal", "option", "constraint", "figure"] as const;
+/**
+ * ⭐⭐ `cause` IS THE FIFTH KIND, AND IT EXISTS BECAUSE THE INSTRUCTION ROUTE WAS
+ * MEASURED AND FAILED — twice, in opposite directions.
+ *
+ * v11 told the model to file an explanation as `kind: "claim"`, a value that was
+ * NOT in this enum, so the route was closed on the wire: 0 of 27 cause-instances
+ * reached the destination. v11 was withdrawn on the reasoning that a new kind
+ * "would solve a carrier problem that does not exist", and v12 routed explanations
+ * to `claims` instead.
+ *
+ * ⚠ v12 WAS THEN SERVED AND IGNORED. It is an ancestor of `d0544243`, and
+ * `DRAFT_RECORDS_INSTRUCTION` is a code constant pushed as a system block
+ * (`anthropic.ts:518`) — not store-overridable — so it was demonstrably live when
+ * #1287 was captured ~18 hours later, and the model filed all four of a diagnosis
+ * brief's hypotheses as stated OPTIONS anyway.
+ *
+ * The carrier problem is real, and v11's withdrawal note located it wrongly:
+ * `stated_items` is the half of the record set holding VERBATIM BRIEF SPANS, and a
+ * hypothesis IS one. v12 asked the model to put a verbatim span into `claims` —
+ * the model's OWN half — which fights the grammar's own semantics. There was no
+ * way to say "this verbatim span is an explanation, not a choice". Now there is.
+ */
+export const DRAFT_RECORD_STATED_KINDS = ["goal", "option", "constraint", "figure", "cause"] as const;
 export type DraftRecordStatedKind = (typeof DRAFT_RECORD_STATED_KINDS)[number];
 
 /** ≈ `NumericAnchor.role` (`cee/signals/types.ts:22-27`). */
