@@ -44,13 +44,13 @@ const OPTIONS = [
     id: 'opt_raise', kind: 'option', label: 'Raise prices 15%', is_baseline: false,
     provenance: { provenance_class: 'stated', source_quote: 'raise prices 15%', label_authored: true },
     data: { interventions: { fac_price: 0.575 }, raw_interventions: { fac_price: 1.15 },
-      intervention_details: { fac_price: { display_value: '1.15', normalised_value: 0.575, raw_value: 1.15 } } },
+      intervention_details: { fac_price: { raw_value: 1.15, source: 'cee_hypothesis', reasoning: 'Inferred multiplier for the 15% increase.' } } },
   },
   {
     id: 'opt_reduce', kind: 'option', label: 'Reduce prices 5%', is_baseline: false,
     provenance: { provenance_class: 'stated', source_quote: 'reducing prices 5%', label_authored: true },
     data: { interventions: { fac_price: 0.475 }, raw_interventions: { fac_price: 0.95 },
-      intervention_details: { fac_price: { display_value: '0.95', normalised_value: 0.475, raw_value: 0.95 } } },
+      intervention_details: { fac_price: { raw_value: 0.95, source: 'cee_hypothesis', reasoning: 'Inferred multiplier for the 5% reduction.' } } },
   },
 ];
 
