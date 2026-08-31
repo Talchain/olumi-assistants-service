@@ -169,13 +169,37 @@ function parseJsonColumn<T>(value: unknown, context: JsonColumnContext): T[] {
   const decoded = decodeJsonColumn<T>(value);
   if (decoded.outcome === 'known') return decoded.items;
 
-  // UNAVAILABLE. The `[]` returned below is a SUBSTITUTE, not a reading — the
-  // published `PromptVersion` type (`z.array(...).default([])`) has no way to
-  // say "unknown", so the distinction survives only in this event. It is
-  // emitted AND logged at ERROR because `emit()` writes via `log.info`
+  // UNAVAILABLE. The `[]` returned below is a SUBSTITUTE, not a reading.
+  //
+  // ⚠ THE HONEST SCOPE OF WHAT THIS DELIVERS — READ BEFORE QUOTING IT.
+  // This makes the degradation ATTRIBUTABLE. It does NOT make it PREVENTABLE,
+  // and no consumer can branch on it. Traced end to end:
+  //   - `PromptVersionSchema` types both columns `z.array(...).default([])`
+  //     (schema.ts) — the published type has no channel for "unknown";
+  //   - `GovernedPromptStore.detachPromptDefinition` re-parses through Zod, and
+  //     a substituted `[]` parses CLEANLY, so the one boundary that could have
+  //     failed loud passes it through frozen;
+  //   - the only reader of `PromptVersion.testCases` tree-wide is the admin UI,
+  //     which cannot tell a substituted `[]` from a genuinely empty column.
+  // So `known_empty` and `unavailable` arrive BYTE-IDENTICAL at every consumer.
+  // The telemetry below is the ONLY surviving discriminator, and it is an
+  // observability signal, not a program-branchable one. Claiming otherwise is
+  // exactly how the sibling PR #1286 shipped a three-state model that collapsed
+  // at its durable boundary — true of the local type, false of the outcome.
+  //
+  // ⚠ AND THE CONSEQUENCE THAT IS WORSE THAN UNOBSERVABILITY: the admin UI does
+  // a READ-MODIFY-WRITE over `testCases`. A substituted `[]` read there, plus
+  // one added test case, PATCHes a single-element array over the undecodable
+  // column — turning a transient decode failure into permanent data loss. That
+  // hazard lives in the admin route, not here, and is reported rather than
+  // fixed by this lane; it is the reason this event exists at all.
+  //
+  // It is emitted AND logged at ERROR because `emit()` writes via `log.info`
   // (utils/telemetry.ts), and during the incident five level-30 events fired
   // per probe and nothing paged — level is load-bearing, which is the same
-  // reason `loader.ts` raises its store-failure log to ERROR.
+  // reason `loader.ts` raises its store-failure log to ERROR. The Datadog arm
+  // for this event (utils/telemetry.ts) is what gives ops something to alert
+  // on; without it the signal reaches a log line and nothing else.
   const payload = {
     column: context.column,
     prompt_id: context.promptId,

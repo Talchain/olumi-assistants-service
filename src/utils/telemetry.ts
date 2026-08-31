@@ -3803,6 +3803,28 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.PromptStoreJsonColumnDegraded: {
+          // A prompt-store JSONB list column could not be established as a list,
+          // so an empty list was SUBSTITUTED. Nothing downstream can tell that
+          // apart from a genuinely empty column — the substituted `[]` is
+          // byte-identical to a real one at every consumer — so this counter is
+          // the only thing that can ever say it happened. Ops can alert on
+          // `prompt.store.jsonb_column_degraded_total > 0` over a short window.
+          //
+          // Tagged by `column` and `reason` because they are different faults
+          // with the same consequence: "the column is not a list" (data drift
+          // in the row) versus "the string is not JSON" (a bad write), and the
+          // remedies differ. Same reasoning as `session.read_degraded_total`.
+          //
+          // Deliberately NOT tagged with `prompt_id`/`version`: those are
+          // unbounded and belong in the ERROR log line, which carries them.
+          datadogClient.increment("prompt.store.jsonb_column_degraded_total", 1, {
+            column: String((eventData.column as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
+          });
+          break;
+        }
+
         case TelemetryEvents.PromptLoaderError: {
           datadogClient.increment("prompt.loader.error", 1, {
             task_id: String((eventData.taskId as string) || "unknown"),

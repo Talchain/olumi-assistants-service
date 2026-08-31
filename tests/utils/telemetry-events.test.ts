@@ -1152,13 +1152,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.warmed": [TelemetryEvents.PromptStoreCacheWarmed],
         "prompt.store.background_refresh": [TelemetryEvents.PromptStoreBackgroundRefresh],
 
-        // Prompt store JSONB decode degradation (PR #1288). No Datadog metric
-        // mapping yet: the operator signal this is minted for is the ERROR-level
-        // log (emit() writes via log.info, which cannot trip level-based
-        // alerting — the incident's five level-30 events per probe paged nobody).
-        // The mapping to add when a dashboard consumes it is a count split by
-        // `column` and `reason`, because "the column is not a list" and "the
-        // string is not JSON" are different faults with the same consequence.
+        // Prompt store JSONB decode degradation (PR #1288). Carries BOTH an
+        // ERROR-level log (emit() writes via log.info, which cannot trip
+        // level-based alerting — the incident's five level-30 events per probe
+        // paged nobody) AND a Datadog counter
+        // `prompt.store.jsonb_column_degraded_total`, split by `column` and
+        // `reason`. The counter is not decoration: the substituted `[]` is
+        // byte-identical to a genuinely empty column at every consumer, so this
+        // metric is the only thing that can ever say the degradation happened.
         "prompt.store.jsonb_column_degraded": [TelemetryEvents.PromptStoreJsonColumnDegraded],
 
         // Prompt Test Sandbox events (v2.1)
