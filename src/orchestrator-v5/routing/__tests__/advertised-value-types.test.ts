@@ -183,20 +183,58 @@ const SHAPE_REFUSAL_REASONS: ReadonlySet<string> = new Set([
   'missing_value',
 ]);
 
+/**
+ * ⚠⚠ THE ACCEPTED DIRECTION IS BOUND BY `valid`, NOT BY A NEGATION.
+ *
+ * This helper used to answer the accepted direction with
+ *
+ *   `rejectionReason === undefined || !SHAPE_REFUSAL_REASONS.has(rejectionReason)`
+ *
+ * so ANY validation failure carrying no `rejection_reason` — `ENTITY_NOT_FOUND`,
+ * `ENTITY_KIND_MISMATCH`, `ENTITY_RESOLUTION_SUSPICIOUS` — read as ACCEPTED.
+ * Asymmetric rigour (CLAUDE.md trap 22b): the REFUSED direction is
+ * identity-bound (`toBe('parameter_schema_mismatch')`) while the accepted
+ * direction was bound by a predicate any unrelated error satisfies. The
+ * discrimination was real on the day it was written and unguarded at rest
+ * (trap 13b) — nothing pinned the fixture that made it discriminate.
+ *
+ * MEASURED, not argued. With `f-budget` and its edge removed from
+ * `buildD1Fixture()`, at the pre-fix tip the `number` and `object`
+ * representatives still certified ACCEPTED against a target that does not
+ * exist — only the `string` arm went red, and only incidentally (the delta
+ * resolver needs the factor's existing value, so the string is never rewritten
+ * and falls to `parameter_schema_mismatch`, which IS in the set above). Two of
+ * the three advertised arms were measuring nothing.
+ *
+ * So `valid` is exposed and asserted directly, and `shapeAccepted` FAILS
+ * CLOSED: an unrecognised or absent `rejection_reason` on a failed validation
+ * is no longer evidence of acceptance. `errorCode` is carried so a non-shape
+ * refusal is DIAGNOSED rather than silently rebadged — the reviewer's point
+ * that a semantic refusal must be asserted as itself, not swallowed.
+ */
 function shapeVerdict(param: Partial<ProposalParameter> & { value: unknown }): {
+  readonly valid: boolean;
   readonly shapeAccepted: boolean;
   readonly rejectionReason: string | undefined;
+  readonly errorCode: string | undefined;
 } {
   let action = makeProposal(param);
   const rel = resolveRelativeFactorDelta(action, GRAPH);
   if (rel.resolved) action = rel.action;
   const result = validateToolCall(action, GRAPH, HANDLER_VALIDATION_REGISTRY);
-  if (result.valid) return { shapeAccepted: true, rejectionReason: undefined };
+  if (result.valid) {
+    return { valid: true, shapeAccepted: true, rejectionReason: undefined, errorCode: undefined };
+  }
   const reason = result.error.details?.rejection_reason;
   const rejectionReason = typeof reason === 'string' ? reason : undefined;
+  const rawCode: unknown = result.error.code;
   return {
-    shapeAccepted: rejectionReason === undefined || !SHAPE_REFUSAL_REASONS.has(rejectionReason),
+    valid: false,
+    // FAIL CLOSED — see the note above. A refusal is only "not a shape
+    // refusal" when it NAMES a reason that is not one.
+    shapeAccepted: rejectionReason !== undefined && !SHAPE_REFUSAL_REASONS.has(rejectionReason),
     rejectionReason,
+    errorCode: typeof rawCode === 'string' ? rawCode : undefined,
   };
 }
 
@@ -229,7 +267,11 @@ describe('DERIVED GUARD — advertised `value` types ⊆ accepted `value` types'
 
   it('every advertised top-level arm is accepted by the live acceptor chain', () => {
     const advertised = advertisedValueTypes();
-    const unaccepted: Array<{ type: string; rejectionReason: string | undefined }> = [];
+  const unaccepted: Array<{
+      type: string;
+      rejectionReason: string | undefined;
+      errorCode: string | undefined;
+    }> = [];
 
     for (const type of advertised) {
       const representative = REPRESENTATIVE[type];
@@ -242,16 +284,27 @@ describe('DERIVED GUARD — advertised `value` types ⊆ accepted `value` types'
           'without checking every handler first.',
       ).toBeDefined();
       const verdict = shapeVerdict(representative!);
-      if (!verdict.shapeAccepted) {
-        unaccepted.push({ type, rejectionReason: verdict.rejectionReason });
+      // ⚠ `valid`, not `shapeAccepted`. The advert is only honest if the live
+      // chain actually TAKES the representative. Reading "not refused on
+      // shape" as "accepted" let this loop certify two of the three arms
+      // against a target that had been deleted from the fixture.
+      if (!verdict.valid) {
+        unaccepted.push({
+          type,
+          rejectionReason: verdict.rejectionReason,
+          errorCode: verdict.errorCode,
+        });
       }
     }
 
     expect(
       unaccepted,
-      'The tool schema advertises a `value` type that the acceptor refuses on SHAPE. ' +
-        'The model is being told to send something the product then rejects — this is the ' +
-        'divergence that produced the 81% set_factor_value refusal rate.',
+      'The tool schema advertises a `value` type the live chain does not accept. ' +
+        'A `parameter_schema_mismatch` / `missing_value` here is the advertised-vs-accepted ' +
+        'divergence this guard exists for: the model is told to send something the product ' +
+        'then rejects. ANY OTHER code (ENTITY_NOT_FOUND, ENTITY_KIND_MISMATCH, ' +
+        'ENTITY_RESOLUTION_SUSPICIOUS) means the FIXTURE broke, not the advert — the guard ' +
+        'is no longer measuring what it claims and must be repaired before it is believed.',
     ).toEqual([]);
   });
 
@@ -284,10 +337,20 @@ describe('KNOWN DIVERGENCE — the advertised `string` arm is accepted only as a
    *
    * So for `set_factor_value` the string arm is honest only for the
    * sub-language `resolve-relative-factor-delta.ts` implements. Everything
-   * else is refused. That gap is REAL and is pinned here EXACTLY, so the
-   * suite is green for the right reason and REDs if the set grows or
-   * shrinks — rather than the gap being invisible to the suite, which is
-   * how it shipped in the first place.
+   * else is refused. That gap is REAL and is recorded here rather than left
+   * invisible to the suite, which is how it shipped in the first place.
+   *
+   * ⚠ CORRECTED (#1283 review) — THE STRENGTH OF THIS PIN WAS OVERSTATED.
+   * It said the pin "REDs if the set grows or shrinks". It does not. The
+   * expected value is derived by FILTERING `REFUSED_STRINGS` and comparing to
+   * that same array's own labels, so it bites on an EDIT TO THE ARRAY and is
+   * blind to the refused LANGUAGE growing: a newly-refused string form nobody
+   * has listed here changes nothing it can observe. That is the weak form of
+   * the pattern (CLAUDE.md trap 12d — a derived guard proves agreement, never
+   * completeness), and the honest claim is narrower: it pins that every
+   * member of these two hand-written corpora still lands on the side this
+   * file says it does. Only a corpus sourced from outside the author's head
+   * could bound the language itself.
    */
   const ACCEPTED_STRINGS: ReadonlyArray<[string, Partial<ProposalParameter> & { value: unknown }]> =
     [
@@ -309,7 +372,16 @@ describe('KNOWN DIVERGENCE — the advertised `string` arm is accepted only as a
   ];
 
   it.each(ACCEPTED_STRINGS)('ACCEPTED: %s', (_label, param) => {
-    expect(shapeVerdict(param).shapeAccepted).toBe(true);
+    const verdict = shapeVerdict(param);
+    // IDENTITY-BOUND, the same standard the refused direction already meets.
+    // `shapeAccepted` alone was satisfiable by an error about something else
+    // entirely — assert that the live chain actually took the value, and name
+    // the code when it did not so a broken fixture cannot masquerade as a
+    // passing advert.
+    expect(verdict.valid, `refused with code=${verdict.errorCode} reason=${verdict.rejectionReason}`).toBe(
+      true,
+    );
+    expect(verdict.rejectionReason).toBeUndefined();
   });
 
   it.each(REFUSED_STRINGS)('KNOWN-REFUSED: %s', (_label, param) => {
@@ -329,7 +401,7 @@ describe('KNOWN DIVERGENCE — the advertised `string` arm is accepted only as a
       'prose',
       'empty string',
     ]);
-    const accepted = ACCEPTED_STRINGS.filter(([, p]) => shapeVerdict(p).shapeAccepted).map(
+    const accepted = ACCEPTED_STRINGS.filter(([, p]) => shapeVerdict(p).valid).map(
       ([label]) => label,
     );
     expect(accepted).toEqual([
