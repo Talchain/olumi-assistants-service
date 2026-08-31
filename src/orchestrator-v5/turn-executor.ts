@@ -14677,6 +14677,24 @@ function serialiseError(err: unknown): { name?: string; message?: string } {
  * dropped — the downstream composer still renders them for the user,
  * but they MUST NOT reach the log sink.
  */
+/**
+ * A bounded, user-content-free descriptor of a rejected parameter's TYPE.
+ * Returns exactly one token from the closed set
+ * { 'null', 'array', 'undefined', 'boolean', 'number', 'bigint', 'string',
+ *   'symbol', 'function', 'object' } and NEVER any part of the value
+ * itself — so a rejected value that is user prose contributes only the
+ * word "string" to the log.
+ *
+ * `null` and arrays are separated from plain objects deliberately:
+ * `typeof` collapses all three to 'object', and that distinction is
+ * precisely what names the rejected shape.
+ */
+function describeValueTypeForLog(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
 function buildSafeValidatorLogDetails(
   error: ValidationError,
 ): Record<string, unknown> {
@@ -14703,6 +14721,32 @@ function buildSafeValidatorLogDetails(
   // Handler-supplied reason string (PRECONDITION_UNMET) — a code-level
   // token like "no_options_defined", not user prose.
   if (typeof raw.reason === 'string') safe.reason = raw.reason;
+  // PARAMETER_INVALID's cause. `rejection_reason` is a CLOSED set of
+  // code-authored tokens (missing_value, invalid_operator, unit_mismatch,
+  // bare_ratio_on_unit_factor, value_exceeds_cap, non_finite,
+  // cap_non_positive, delta_no_existing_value, bare_number_outside_cap,
+  // unit_redeclares_scale, unit_ambiguous_probability_domain) — it is
+  // never user prose, so it leaks nothing. Its absence made
+  // PARAMETER_INVALID, the largest validator-failure class in the estate,
+  // unattributable from logs: every occurrence logged the same two keys
+  // (handler_id, parameter) regardless of cause. `reason` above was
+  // whitelisted for PRECONDITION_UNMET and this sibling field was not.
+  if (typeof raw.rejection_reason === 'string') {
+    safe.rejection_reason = raw.rejection_reason;
+  }
+  // Which of the two `missing_value` emit sites fired (see
+  // `preexecuteSetFactorValueStructural`): false = the proposal carried no
+  // `value` parameter at all; true = it carried one whose shape the
+  // acceptor refuses. A boolean carries no user content.
+  if (typeof raw.value_param_present === 'boolean') {
+    safe.value_param_present = raw.value_param_present;
+  }
+  // TYPE ONLY, never the value. `actual_value` may echo user prose and
+  // stays dropped; its TYPE is a bounded code-level descriptor that names
+  // the rejected SHAPE without reproducing any user content.
+  if ('actual_value' in raw) {
+    safe.actual_value_type = describeValueTypeForLog(raw.actual_value);
+  }
   // PARAMETER_INVALID — parameter NAME is handler-declared (safe); the
   // actual_value and constraint_description may echo user prose (dropped).
   if (typeof raw.parameter === 'string') safe.parameter = raw.parameter;

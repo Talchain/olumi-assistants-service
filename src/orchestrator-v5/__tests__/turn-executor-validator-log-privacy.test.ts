@@ -292,6 +292,101 @@ describe('TurnExecutor — validator-log privacy (P1-2)', () => {
     expect(safe).not.toHaveProperty('actual_value');
     expect(safe).not.toHaveProperty('candidates');
   });
+
+  // -------------------------------------------------------------------
+  // PARAMETER_INVALID attribution (2026-08-31). Before this, EVERY
+  // PARAMETER_INVALID logged the same two keys {handler_id, parameter}
+  // regardless of cause, so the largest validator-failure class in the
+  // estate was unattributable from logs. `rejection_reason` is a closed
+  // set of code-authored tokens and leaks nothing; `actual_value_type`
+  // names the rejected SHAPE without reproducing the value.
+  // -------------------------------------------------------------------
+
+  const FACTOR_GRAPH: GraphStateIngress = {
+    nodes: [
+      { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
+      {
+        id: 'f-budget',
+        kind: 'factor',
+        label: 'Marketing budget',
+        observed_state: { value: 0.4, raw_value: 40000, unit: '£', cap: 100000 },
+      },
+    ],
+    edges: [{ from: 'f-budget', to: 'g-revenue' }],
+  } as GraphStateIngress;
+
+  function setFactorValueProposal(parameters: unknown[]): unknown {
+    return {
+      intent_class: 'execute',
+      action: {
+        handler_id: 'set_factor_value',
+        entity: {
+          id: 'f-budget',
+          kind: 'node',
+          resolution_status: 'resolved',
+          resolution_method: 'id_match',
+        },
+        parameters,
+        cited_context_fields: [],
+      },
+    };
+  }
+
+  async function safeDetailsFor(parameters: unknown[], reqId: string) {
+    const adapter = mockAdapter(setFactorValueProposal(parameters));
+    await runTurnExecutor(BASE_PAYLOAD, reqId, {
+      routingAdapter: adapter,
+      graphState: FACTOR_GRAPH,
+    });
+    const warnCalls = warnSpy.mock.calls.filter((c) => {
+      const msg = typeof c[1] === 'string' ? c[1] : '';
+      return msg.includes('validation rejected');
+    });
+    expect(warnCalls.length).toBeGreaterThan(0);
+    const payload = warnCalls[0]![0] as Record<string, unknown>;
+    return payload.safe_details as Record<string, unknown>;
+  }
+
+  it('MEASURED BRANCH: set_factor_value with no `value` parameter is attributable in the log', async () => {
+    // This is the shape that produced all 9 `missing_value` refusals on
+    // staging `ac37890c` (30–31 Aug 2026). Pre-fix the log said only
+    // {handler_id, parameter} — enough to know a parameter failed, not
+    // enough to know WHICH of the two structural branches fired.
+    const safe = await safeDetailsFor([], 'req-param-missing');
+    expect(safe.rejection_reason).toBe('missing_value');
+    expect(safe.value_param_present).toBe(false);
+    expect(safe.actual_value_type).toBe('null');
+    expect(safe.handler_id).toBe('set_factor_value');
+    expect(safe.parameter).toBe('value');
+  });
+
+  it('a wrongly-typed `value` is attributable, and the value itself never reaches the log', async () => {
+    const SECRET_VALUE = 'acquire-shadowco-for-fifty-million';
+    const safe = await safeDetailsFor(
+      [{ name: 'value', value: SECRET_VALUE, source: 'user_explicit', operator: 'set' }],
+      'req-param-string',
+    );
+    // Attributable: the cause token and the rejected TYPE are both present.
+    expect(safe.rejection_reason).toBe('parameter_schema_mismatch');
+    expect(safe.actual_value_type).toBe('string');
+    // PRIVACY — the whole point of the type-only descriptor. The rejected
+    // value is user prose and must never land in any sink.
+    expect(safe).not.toHaveProperty('actual_value');
+    expect(safe).not.toHaveProperty('constraint_description');
+    expect(safe).not.toHaveProperty('issue');
+    expect(allLogPayloads()).not.toContain(SECRET_VALUE);
+  });
+
+  it('actual_value_type names the shape without leaking it, for every rejected type', async () => {
+    // Bind by identity to each distinct type token — a single case could
+    // pass on the wrong descriptor.
+    const objectSafe = await safeDetailsFor(
+      [{ name: 'value', value: { value: 'nope' }, source: 'user_explicit', operator: 'set' }],
+      'req-param-object',
+    );
+    expect(objectSafe.actual_value_type).toBe('object');
+    expect(objectSafe).not.toHaveProperty('actual_value');
+  });
 });
 
 // ---------------------------------------------------------------------------
