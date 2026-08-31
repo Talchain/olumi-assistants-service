@@ -46,6 +46,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { checkPairCoherence } from '../tools/handlers/d1-shared/scale-frame.js';
 import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { verifyAppliedFrom } from '../../collab/apply-verification.js';
@@ -84,6 +85,17 @@ function lookupOrUndefined(graph: GraphV3T): GraphLookup | undefined {
  * behaves the same at 0.3 and at 3e6.
  */
 const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
+
+function scaleValuesAgree(actual: unknown, expected: number): boolean {
+  if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) {
+    return false;
+  }
+  if (actual === expected) return true;
+  // No absolute floor: near-zero values can still disagree by orders of
+  // magnitude. Exact zero only agrees with zero; ordinary division may round.
+  return Math.abs(actual - expected) / Math.max(Math.abs(actual), Math.abs(expected))
+    <= SCALE_CONSISTENCY_TOLERANCE;
+}
 
 export type FactorValueEditResult =
   | {
@@ -234,8 +246,7 @@ function resolveUserUnitInput(args: {
     // never asked for; picking the wrong one would persist a 10x error. So:
     // fail LOUD. This is the boundary check that would have caught the defect.
     const expected = cap !== undefined ? rawValue / cap : rawValue;
-    const scale = Math.max(1, Math.abs(expected));
-    if (Math.abs(value - expected) > SCALE_CONSISTENCY_TOLERANCE * scale) {
+    if (!scaleValuesAgree(value, expected)) {
       return {
         ok: false,
         issue:
@@ -408,6 +419,22 @@ export async function applyFactorValueEdit(
   }
 
   // ── the scale ────────────────────────────────────────────────────────────
+  // Without a cap, contradictory frame/pair records must not degrade into
+  // identity scaling: equal input/output numbers would then hide an unknown
+  // conversion. Use the existing scale authority, without selecting a winner.
+  if (factorCap === undefined && checkPairCoherence({
+    storedFrame: targetNode.scale_frame,
+    value: observed?.value,
+    raw_value: observed?.raw_value,
+  }) === 'incoherent') {
+    return refuse(
+      payload,
+      'scale_inconsistent',
+      `This factor's recorded scale is inconsistent, so I haven't changed anything. ` +
+        `Please clarify its scale before changing the value.`,
+    );
+  }
+
   const resolved = resolveUserUnitInput({
     value: effectiveValue,
     rawValue: effectiveRawValue,
@@ -617,6 +644,31 @@ export async function applyFactorValueEdit(
       payload,
       'merged_graph_invalid',
       `I couldn't save that change. I haven't changed anything.`,
+    );
+  }
+
+  // The event's value declares MODEL-scale intent. The existing writer can
+  // read a scale_frame that the cap-only input adapter cannot invert. Never
+  // commit that disagreement as user-authored knowledge: discard the isolated
+  // candidate before its graph, attribution or success facts reach the store.
+  // This checks the actual conversion without choosing a replacement scale.
+  const modelValue = mergedParse.data.nodes.find((n) => n.id === event.target_id)
+    ?.observed_state?.value;
+  if (!scaleValuesAgree(modelValue, effectiveValue)) {
+    log.warn(
+      {
+        event: 'v5.system_event.factor_value_edit.scale_ambiguous',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        target_id: event.target_id,
+      },
+      'factor_value_edit — candidate contradicts the declared scale; no graph written',
+    );
+    return refuse(
+      payload,
+      'scale_ambiguous',
+      `I couldn't confirm the scale of that value, so I haven't changed anything. ` +
+        `Please tell me the amount and unit you mean.`,
     );
   }
 
