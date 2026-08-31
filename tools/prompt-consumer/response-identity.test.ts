@@ -32,10 +32,10 @@ function capture(body: unknown, v5 = false): ResponseCapture {
 }
 function v1() {
   return { metadata: { object: 'teapot' }, trace: { request_id: 'simulation-request', correlation_id: 'simulation-request',
-    engine: { provider: 'anthropic' }, pipeline: { llm_metadata: buildLlmMetadataProjection({
+    engine: { provider: 'anthropic' }, pipeline: { llm_metadata: { ...buildLlmMetadataProjection({
       model: configuration.model.id, prompt_version: 'draft_graph_default@v195 (staging)', prompt_hash: configuration.prompt.sha256,
       instance_id: 'simulation-instance', cache_age_ms: 120, cache_status: 'fresh', structured_outputs_used: true,
-    }, undefined), cee_provenance: { commit: configuration.sourceHead.slice(0, 8) } } } };
+    }, undefined) }, cee_provenance: { commit: configuration.sourceHead.slice(0, 8) } } } };
 }
 function v5() {
   // Real production extractor and diagnostic builder; no provider/model response is invented.

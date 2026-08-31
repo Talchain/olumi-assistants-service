@@ -44,7 +44,8 @@ describe('existing quality operator re-derives response evidence', () => {
   test('serialized-pass-ignored', () => {
     const raw = { ...reference, status: 'PASS', fleet: { status: 'PASS', universalStatus: 'PASS' }, object: 'a teapot' };
     expect(buildResponseIdentityPacket(raw)).toEqual(buildResponseIdentityPacket(reference));
-    expect(buildResponseIdentityPacket({ ...raw, object: 'a bicycle' })).toEqual(buildResponseIdentityPacket(reference));
+    const unrelated = { ...raw, object: 'a bicycle' };
+    expect(buildResponseIdentityPacket(unrelated)).toEqual(buildResponseIdentityPacket(reference));
   });
   test('corrupt-body-refused', () => {
     const capture = { observedAt: '2026-08-31T13:00:00Z', url: 'https://offline.invalid/assist/v1/draft-graph',
