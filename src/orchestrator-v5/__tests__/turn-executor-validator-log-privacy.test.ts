@@ -338,7 +338,7 @@ describe('TurnExecutor — validator-log privacy (P1-2)', () => {
       routingAdapter: adapter,
       graphState: FACTOR_GRAPH,
     });
-    const warnCalls = warnSpy.mock.calls.filter((c) => {
+    const warnCalls = warnSpy.mock.calls.filter((c: unknown[]) => {
       const msg = typeof c[1] === 'string' ? c[1] : '';
       return msg.includes('validation rejected');
     });
