@@ -444,3 +444,213 @@ describe('a reply that names its own subject is not the collision case', () => {
     expect(response.assistant_text).toContain('Two of my questions are open at once');
   });
 });
+
+/**
+ * ⭐⭐ THE ANSWER MUST LAND, NOT MERELY REACH THE MODEL.
+ *
+ * Reaching the model was the previous link; this is the outcome. With the
+ * reply through, the executor's mutation-warrant gate then DEMOTED the write
+ * ("You did not ask me to edit the model"), so the stated baseline still never
+ * landed. The gate's message signal is LEXICAL, and measured at this seam with
+ * a live baseline question and a competing ask:
+ *
+ *     "Churn rate is at 30%"  → warrant granted  → the baseline commits
+ *     "Churn rate is 30%"     → warrant ABSENT   → demoted, nothing lands
+ *
+ * One token apart; same question, same target, same value. And the second is
+ * the sentence the product ITSELF offers. A user cannot be asked to guess which
+ * spelling of their own answer will be accepted.
+ *
+ * ⚠ THIS WAS AN EXISTING DOWNSTREAM GAP, not a regression introduced upstream:
+ * the warrant module is untouched by this branch. The routing repair made it
+ * REACHABLE, which is what a correct fix does — and the repair is not finished
+ * until the outcome it unblocks actually occurs.
+ *
+ * THE FIX is a fourth warrant source scoped to the named baseline object and
+ * action: a live baseline question whose subject this reply resolved by
+ * identity, the `add_constraint` action, and that question's own target node.
+ *
+ * BOTH DIRECTIONS IN THE SAME RUN, because a whole-turn warrant would be the
+ * mirror harm — every numeric sentence licensing any edit. The three
+ * `LICENSES NOTHING WIDER` cases are the ones that fail if that happens, and
+ * each strips exactly one conjunct of the grant: the object, the authority, and
+ * the live question.
+ */
+function proposesConstraintOnNodeAdapter(nodeId: string, label: string, value: number) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(async () =>
+        mkToolUseResult({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'add_constraint',
+            entity: {
+              id: nodeId,
+              kind: 'node',
+              label,
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [
+              { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+              { name: 'value', value, source: 'user_explicit' },
+              { name: 'unit', value: '%', source: 'user_explicit' },
+            ],
+            cited_context_fields: [],
+          },
+        }),
+      ),
+  };
+}
+
+/**
+ * The state-class the witnessed turn is actually in, derived from the handler's
+ * OWN `mintEligible` conjunction rather than assumed: the target is an outcome
+ * with an incoming edge and no baseline yet, and the level-framed constraint the
+ * question was asked about is already persisted. `buildGraph()` alone carries no
+ * edges, so the mint cell cannot fire on it and an assertion about the baseline
+ * would have been measuring the fixture instead of the fix.
+ */
+function mintEligibleGraph(): GraphV3T {
+  const g = buildGraph() as unknown as {
+    nodes: Array<Record<string, unknown>>;
+    edges: Array<Record<string, unknown>>;
+    goal_constraints?: unknown;
+  };
+  const target = g.nodes.find((n) => n.id === TARGET_ID)!;
+  delete target['observed_state'];
+  target['kind'] = 'outcome';
+  g.edges.push({
+    from: FACTOR_ID,
+    to: TARGET_ID,
+    strength: { mean: 0.3, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: 'positive',
+  });
+  g.goal_constraints = [
+    {
+      constraint_id: 'gc-1',
+      node_id: TARGET_ID,
+      operator: '<=',
+      value: 10,
+      label: TARGET_LABEL,
+      provenance: 'explicit',
+      unit: '%',
+      value_frame: 'level',
+    },
+  ];
+  return g as unknown as GraphV3T;
+}
+
+/** The baseline recorded on a node, by IDENTITY, out of the PERSISTED graph. */
+function baselineOn(graph: unknown, nodeId: string): unknown {
+  return (observedStateOf(graph, nodeId) as { baseline?: unknown } | undefined)?.baseline;
+}
+
+describe("the product's offered answer commits, and licenses nothing else", () => {
+  /** Extracted from the copy the product emits, never transcribed. */
+  const offered = (() => {
+    const copy = formatBaselineAskCollision({
+      targetLabel: TARGET_LABEL,
+      competing: [effectPending()],
+    });
+    const m = /for example "([^"]+)"/.exec(copy);
+    if (m === null) throw new Error(`collision copy no longer offers an example:\n${copy}`);
+    return m[1]!;
+  })();
+
+  it('THE OFFERED ANSWER commits the stated baseline on the node it names', async () => {
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(payload(offered), 'req-offered-commits', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+    // Not the demotion the reviewer witnessed.
+    expect(response.assistant_text).not.toContain('You did not ask me to edit the model');
+    // And nothing else moved.
+    expect(baselineOn(stateAfterTurn(), FACTOR_ID)).toBeUndefined();
+    expect(constraintsOn(stateAfterTurn(), FACTOR_ID)).toHaveLength(0);
+  });
+
+  it('EXACT-INPUT CONTROL — the "is at 30%" spelling commits identically', async () => {
+    // The reviewer's one-token pair. Same graph, same pendings, same adapter,
+    // same target and value; ONLY the wording differs. This spelling already
+    // worked, so it is the reference the offered spelling must match — if the
+    // two ever diverge again, the lexical accident is back.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    await runTurnExecutor(payload(`${TARGET_LABEL} is at 30%`), 'req-at-spelling', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+  });
+
+  it('LICENSES NOTHING WIDER — strips the OBJECT: the same answer cannot write on another node', async () => {
+    // Identical turn; only the proposal's entity differs. If this writes, the
+    // fourth source has become a whole-turn warrant.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(payload(offered), 'req-offered-other-node', {
+      routingAdapter: proposesConstraintOnNodeAdapter(FACTOR_ID, FACTOR_LABEL, 30),
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(constraintsOn(stateAfterTurn(), FACTOR_ID)).toHaveLength(0);
+    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+  });
+
+  it('LICENSES NOTHING WIDER — strips the AUTHORITY: an unrelated numeric sentence cannot write', async () => {
+    // Answer-shaped, names a node, has a number — and no baseline question
+    // resolved ITS subject, so no authority exists. This is what keeps "every
+    // numeric sentence gets a warrant" out.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(
+      payload(`${FACTOR_LABEL} is 30%`),
+      'req-unrelated-sentence',
+      {
+        routingAdapter: proposesConstraintOnNodeAdapter(FACTOR_ID, FACTOR_LABEL, 30),
+        graphState: mintEligibleGraph(),
+      },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+  });
+
+  it('LICENSES NOTHING WIDER — strips the LIVE QUESTION: same wording, no baseline ask, no write', async () => {
+    // Same message, same proposal, same node — only the live baseline question
+    // is gone. Without this the cases above would pass just as well if the
+    // grant ignored the pending set entirely.
+    pendingActionsForRead = [effectPending()];
+
+    const { response } = await runTurnExecutor(payload(offered), 'req-no-baseline-live', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+  });
+
+  it('the bare elliptical answer on the SAME turn is still stopped upstream', async () => {
+    // The whole chain in one case: competition safety first, and the fourth
+    // warrant source never reached, because the reply never resolved a subject.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(payload(ANSWER), 'req-bare-still-stopped', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain('Two of my questions are open at once');
+  });
+});
