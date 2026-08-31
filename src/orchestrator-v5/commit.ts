@@ -743,8 +743,17 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  *   - `system-events/dispatch.ts:1543` and `:1595`, both inside
  *     `dispatchFactorValueEdit` (a MUTATING path, so it needs
  *     `threadHoldsThroughMutatingCommit`, not a plain thread);
- *   - `handlers/chip-click-dispatch.ts:1679`, in
- *     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit);
+ *   - ~~`handlers/chip-click-dispatch.ts:1679`, in
+ *     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit)~~
+ *     — ⭐ CLOSED (2.1353 round 3, PR #1286). That commit now reads the prior
+ *     row with `loadMostRecentPendingActionsIntegrityStrict` and threads
+ *     `priorPendingActions`. On a read FAILURE it still commits (the
+ *     `run_analysis` fact must stay durable) and emits
+ *     `v5.pending_wipe_risk_on_success_commit`; on `pending_actions_corrupt`
+ *     it falls back to the tolerant loader and carries the SURVIVORS, emitting
+ *     `v5.pending_wipe_partial_recovery_on_success_commit`. So a wipe is now
+ *     possible only on a failed read, and never silently. **Do not re-derive
+ *     this entry as still open from the line number — it has moved.**
  *   - `routes/assist.v1.scenario-graph-register.ts:435`, which writes a turn
  *     row through `appendCheckedGraphWrite` with no `pending_actions` at all
  *     (`supabase-store.ts:325` resolves that to `[]` — the same silent wipe).

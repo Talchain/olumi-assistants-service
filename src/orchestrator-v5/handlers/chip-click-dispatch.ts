@@ -63,6 +63,7 @@ import {
 import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
+  loadMostRecentPendingActions,
   loadMostRecentPendingActionsIntegrityStrict,
   loadScenarioSnapshotForRunAnalysis,
 } from '../build-turn-context.js';
@@ -1805,9 +1806,61 @@ export async function dispatchChipClickRunAnalysis(
               : { message: String(priorReadError) },
         },
         'V5 chip_click run_analysis SUCCESS commit — prior-pending read failed; committing anyway ' +
-          'to keep the run_analysis fact durable, so any live pending on the prior row is WIPED by ' +
-          'this commit',
+          'to keep the run_analysis fact durable, so any live pending on the prior row is at risk ' +
+          'from this commit',
       );
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ⭐ SURVIVORS BEAT A TOTAL WIPE — the third option, and it dominates.
+      //
+      // The strict loader throws `pending_actions_corrupt` on ANY parse failure
+      // or scenario mismatch (`supabase-store.ts` ~:2325-2372). In that exact
+      // state the TOLERANT loader returns the SURVIVORS. So on a row holding
+      // three valid holds and one unparseable entry, omitting the key destroys
+      // all four; falling back preserves three.
+      //
+      // Tolerant-as-PRIMARY is correctly rejected above: this commit becomes the
+      // newest row, so a silent truncation would be a lossy write promoted to
+      // authoritative. That argument does NOT carry to tolerant-as-FALLBACK,
+      // because the alternative inside this catch is not lossless strict — it is
+      // `[]`, which `commit.ts` resolves to a TOTAL wipe. Truncation strictly
+      // dominates total wipe under this lane's own declared ordering:
+      //
+      //     LOSING THE USER'S PROPOSAL ≫ LOSING THE MEMORY ≫ LOSING THE REFERENT
+      //
+      // Scoped to `pending_actions_corrupt` deliberately. On store-down and DB
+      // error the tolerant path also yields `[]` (`fetchMostRecentPendingActions`
+      // returns `[]` on a falsy store and swallows throws), so widening the
+      // branch would buy nothing and would blur which failure we recovered from.
+      // `pending_actions_corrupt` fires on `parsePendingAction` returning null —
+      // i.e. PendingAction schema drift, this estate's named dominant risk — so
+      // it is not a rare-enough branch to leave wiping.
+      //
+      // The loud event above still fires either way: recovering survivors is not
+      // a reason to stop reporting that the authoritative read failed.
+      // ══════════════════════════════════════════════════════════════════════
+      if (priorReadCode === 'pending_actions_corrupt') {
+        try {
+          successPriorPendingActions = await loadMostRecentPendingActions(
+            payload.scenario_id,
+            requestId,
+          );
+          log.error(
+            {
+              event: 'v5.pending_wipe_partial_recovery_on_success_commit',
+              request_id: requestId,
+              scenario_id: payload.scenario_id,
+              turn_id: payload.turn_id,
+              recovered_count: successPriorPendingActions?.length ?? 0,
+            },
+            'V5 chip_click run_analysis SUCCESS commit — recovered the readable survivors of a ' +
+              'corrupt pending row; entries this build cannot parse are dropped by this commit',
+          );
+        } catch {
+          // Tolerant read failed too — leave the key omitted and keep the
+          // already-emitted wipe-risk event as the record.
+        }
+      }
     }
 
     try {

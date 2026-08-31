@@ -32,9 +32,11 @@ import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-ca
 // Mutable turn-budget holder so the budget-precedence test can shrink the
 // turn_ms to make `turnAbort` fire before a (deliberately slow) handler throws.
 // `vi.hoisted` guarantees it is initialised before the hoisted `vi.mock` factory.
-const { budgetHolder, commitDirectAnswerMock, priorPendingsMock } = vi.hoisted(() => ({
+const { budgetHolder, commitDirectAnswerMock, priorPendingsMock, tolerantPendingsMock } = vi.hoisted(() => ({
   budgetHolder: { turnMs: 30000 },
   commitDirectAnswerMock: vi.fn(),
+  // The TOLERANT loader — the survivors-beat-a-wipe fallback on a corrupt row.
+  tolerantPendingsMock: vi.fn(),
   // ROUND 2 — the recovered commit now reads the prior turn's pendings before
   // it writes, so this must be stubbed or every commit in this file fails
   // closed against an absent Supabase store.
@@ -76,6 +78,7 @@ vi.mock('../../build-turn-context.js', async () => {
       persistedGraph: null,
     })),
     loadMostRecentPendingActionsIntegrityStrict: priorPendingsMock,
+    loadMostRecentPendingActions: tolerantPendingsMock,
   };
 });
 
@@ -193,11 +196,18 @@ beforeEach(() => {
   events = [];
   priorPendingsMock.mockReset();
   priorPendingsMock.mockResolvedValue([]);
+  // The TOLERANT loader is reset alongside the strict one: `vi.restoreAllMocks`
+  // in afterEach restores SPIES, not `vi.fn()`s created in `vi.hoisted`, so a
+  // `mockResolvedValue` set by one test would otherwise leak into the next and
+  // the fallback's DISCRIMINATING TWIN would be measuring the previous test.
+  tolerantPendingsMock.mockReset();
+  tolerantPendingsMock.mockResolvedValue([]);
   // The real chokepoint RETURNS the response it committed: the SAME object on
   // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
   // notice or suppressed competing run_analysis chips. `response: {}` misstated
-  // that contract, and the dispatcher now CONSUMES the returned value, so the
-  // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+  // that contract, and the dispatcher now CONSUMES the returned value (#1290,
+  // already on staging), so the stub has to echo (CLAUDE.md trap 12 — a stub is
+  // a hand-maintained mirror).
   commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
     response: r,
     performed: true,
@@ -913,6 +923,11 @@ describe('chip-click run_analysis — the SUCCESS commit must not WIPE a live ho
     commitDirectAnswerMock.mockClear();
     priorPendingsMock.mockReset();
     priorPendingsMock.mockResolvedValue([livePriorHold()]);
+    // Same treatment for the tolerant loader — a default of `[]` means the
+    // fallback, if it ever fires unexpectedly, cannot manufacture a passing
+    // carry-forward for a test that never asked for one.
+    tolerantPendingsMock.mockReset();
+    tolerantPendingsMock.mockResolvedValue([]);
   });
 
   function soleCommitMetadata(): Record<string, unknown> {
@@ -1017,6 +1032,85 @@ describe('chip-click run_analysis — the SUCCESS commit must not WIPE a live ho
     const fields = loud[0][0] as Record<string, unknown>;
     expect(fields.request_id).toBe('req-r3-read-fail');
     expect(fields.scenario_id).toBe(SCENARIO_ID);
+    expect(fields.prior_read_code).toBe('store_unavailable');
+
+    // ⭐ THE DOCUMENTED PROPERTY, PINNED. The source deliberately OMITS the key
+    // rather than sending `[]`. Without this assertion, changing the spread to
+    // `priorPendingActions: successPriorPendingActions ?? []` passes every
+    // other test in this file while silently converting "no opinion" into an
+    // explicit empty carry-forward — which `commit.ts` treats identically to a
+    // wipe. The stated guarantee had no guard.
+    expect(
+      soleCommitMetadata().priorPendingActions,
+      'the key must be OMITTED, not sent as [] — commit.ts resolves `?? []`, so an explicit ' +
+        'empty array is indistinguishable from a total wipe',
+    ).toBeUndefined();
+  });
+
+  it('CORRUPT ROW — the readable SURVIVORS are carried forward instead of every hold being destroyed', async () => {
+    // The strict loader throws on ANY unparseable entry; the tolerant loader
+    // returns what it could read. Omitting the key destroys all of them, so
+    // truncation strictly dominates a total wipe here.
+    priorPendingsMock.mockRejectedValue(
+      Object.assign(new Error('one entry unparseable'), { code: 'pending_actions_corrupt' }),
+    );
+    // ⚠ The survivor carries a DIFFERENT id from the strict loader's default
+    // (`HOLD_ID`, set in this block's beforeEach), so the assertion below binds
+    // the carried list to the TOLERANT read by identity. With the same id the
+    // test could not tell a genuine fallback from a strict read that never
+    // failed — provenance, not just presence.
+    tolerantPendingsMock.mockResolvedValue([livePriorHold(OTHER_HOLD_ID)]);
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-corrupt',
+      handlerRegistry: registrySucceeding(),
+    });
+    expect(out.outcome).toBe('ok');
+    expect(tolerantPendingsMock.mock.calls.length, 'the tolerant fallback must have run').toBe(1);
+
+    const priors = soleCommitMetadata().priorPendingActions as Array<{ id?: string }> | undefined;
+    expect(priors, 'a corrupt row must not destroy the holds it CAN still read').toBeDefined();
+    expect(
+      (priors ?? []).map((p) => p.id),
+      'the carried survivors must be the TOLERANT loader’s read, not the strict default',
+    ).toContain(OTHER_HOLD_ID);
+
+    // The wipe-risk alarm still fires — recovering survivors is not a reason to
+    // stop reporting that the authoritative read failed.
+    const loud = (errorSpy?.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[0] as { event?: unknown } | undefined)?.event === 'v5.pending_wipe_risk_on_success_commit',
+    );
+    expect(loud.length, 'the authoritative read still failed and must still be reported').toBe(1);
+
+    // The recovery is itself reported, bound BY EVENT NAME (never by prose):
+    // a truncating write must leave a record of how much it could read.
+    const recovered = (errorSpy?.mock.calls ?? []).filter(
+      (c: unknown[]) =>
+        (c[0] as { event?: unknown } | undefined)?.event ===
+        'v5.pending_wipe_partial_recovery_on_success_commit',
+    );
+    expect(recovered.length, 'a partial recovery must be reported, not silently succeed').toBe(1);
+    expect((recovered[0][0] as Record<string, unknown>).recovered_count).toBe(1);
+  });
+
+  it('DISCRIMINATING TWIN for the fallback — a store_unavailable failure does NOT reach the tolerant loader', async () => {
+    // Scoping matters: on store-down the tolerant path also yields [], so
+    // widening the branch would buy nothing and blur which failure we recovered
+    // from. If this goes green while the corrupt case also passes, the branch
+    // has stopped discriminating on `prior_read_code`.
+    priorPendingsMock.mockRejectedValue(
+      Object.assign(new Error('session read failed'), { code: 'store_unavailable' }),
+    );
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-corrupt-twin',
+      handlerRegistry: registrySucceeding(),
+    });
+    expect(
+      tolerantPendingsMock.mock.calls.length,
+      'the tolerant fallback is scoped to pending_actions_corrupt and must not fire on store-down',
+    ).toBe(0);
   });
 
   it('DISCRIMINATING TWIN for the loud event — it is NOT emitted on the healthy read (an always-on alarm is no alarm)', async () => {
