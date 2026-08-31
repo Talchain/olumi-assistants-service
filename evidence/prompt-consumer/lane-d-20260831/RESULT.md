@@ -92,6 +92,15 @@ Repository lint and production build pass; lint retains two unchanged warnings.
 Hosted required CI and the independent review are recorded separately on the PR
 at its delivery head, not inferred from this local evidence.
 
+The first hosted run at `d0c63861386e9ce652f9696da0abc4d6a8b0be7d` failed one
+new wrong-SDK test. Node 20 correctly rejected the distinct SDK class but
+replaced the assertion's custom message; the test had matched that wording.
+The test-only correction checks `ERR_ASSERTION`, `strictEqual` and both exact
+class references, so an unrelated error cannot satisfy it. The original
+Node 20 failure was reproduced before the change; all 113 focused checks pass
+on both Node 20.19.5 and Node 22.16.0 afterwards. Recorder/runtime bytes and the
+original provider evidence are unchanged; no new provider calls were made.
+
 ## Boundaries
 
 The registry still covers draft records, deterministic recovery and validation

@@ -18,6 +18,7 @@ let report: {
   sameClass: boolean; targetHead: string; captures: number; parserCalls: number;
   consumerCalls: number; transport: string; structuralStatus: string; fidelityStatus: string;
   providerBound: boolean; networkAttempts: number; wrongInterceptorRefused: boolean;
+  wrongInterceptorError?: { name?: string; code?: string; message?: string; operator?: string; actualIsWrongClass: boolean; expectedIsTargetClass: boolean };
   prototypesRestored: boolean; error?: string;
 };
 
@@ -79,9 +80,18 @@ beforeAll(() => {
       const { Messages: CjsMessages } = await import(pathToFileURL(targetRequire.resolve('@anthropic-ai/sdk/resources/messages')).href);
       assert.notEqual(CjsMessages, runtime.Messages);
       let wrongInterceptorRefused = false;
+      let wrongInterceptorError;
       try { await captureDraft({ ...runtime, Messages: CjsMessages }, configuration, brief, { replayResponses: [response(records)] }); }
-      catch (error) { wrongInterceptorRefused = String(error).includes('SDK interceptor does not match'); }
-      console.log('RUNTIME_REPLAY_REPORT=' + JSON.stringify({ sameClass, targetHead: runtime.head, captures: result.captures.length, parserCalls: result.fidelity.participation.parser.calls, consumerCalls: result.fidelity.participation.consumer.calls, transport: result.capture.transport, structuralStatus: result.fidelity.structuralStatus, fidelityStatus: result.fidelity.status, providerBound: result.fidelity.providerBound, networkAttempts, wrongInterceptorRefused, prototypesRestored: runtime.Messages.prototype.stream === originalStream && runtime.Messages.prototype.create === originalCreate, error: result.error }));
+      catch (error) {
+        // Node 20 substitutes its own message for same-shaped, distinct class
+        // references. Check the exact failed identity relation, not prose that
+        // varies by Node version; an unrelated refusal cannot satisfy this.
+        wrongInterceptorError = { name: error.name, code: error.code, message: error.message, operator: error.operator,
+          actualIsWrongClass: error.actual === CjsMessages, expectedIsTargetClass: error.expected === runtime.Messages };
+        wrongInterceptorRefused = error.code === 'ERR_ASSERTION' && error.operator === 'strictEqual'
+          && wrongInterceptorError.actualIsWrongClass && wrongInterceptorError.expectedIsTargetClass;
+      }
+      console.log('RUNTIME_REPLAY_REPORT=' + JSON.stringify({ sameClass, targetHead: runtime.head, captures: result.captures.length, parserCalls: result.fidelity.participation.parser.calls, consumerCalls: result.fidelity.participation.consumer.calls, transport: result.capture.transport, structuralStatus: result.fidelity.structuralStatus, fidelityStatus: result.fidelity.status, providerBound: result.fidelity.providerBound, networkAttempts, wrongInterceptorRefused, wrongInterceptorError, prototypesRestored: runtime.Messages.prototype.stream === originalStream && runtime.Messages.prototype.create === originalCreate, error: result.error }));
     } finally { net.Socket.prototype.connect = originalConnect; }
   `;
   const output = execFileSync(process.execPath, ['--import', pathToFileURL(require.resolve('tsx')).href, '--input-type=module', '-e', script,
@@ -115,5 +125,10 @@ describe('native ESM target adapter capture', () => {
     expect(report.networkAttempts).toBe(0);
     expect(report.prototypesRestored).toBe(true);
   });
-  it(names[2], () => { collected.push(names[2]); expect(report.wrongInterceptorRefused).toBe(true); expect(report.networkAttempts).toBe(0); });
+  it(names[2], () => {
+    collected.push(names[2]);
+    expect(report.wrongInterceptorError).toMatchObject({ name: 'AssertionError', code: 'ERR_ASSERTION', operator: 'strictEqual', actualIsWrongClass: true, expectedIsTargetClass: true });
+    expect(report.wrongInterceptorRefused).toBe(true);
+    expect(report.networkAttempts).toBe(0);
+  });
 });
