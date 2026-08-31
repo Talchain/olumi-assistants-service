@@ -47,6 +47,15 @@ import {
   resolveRunAdmission,
   NO_COMPARISON_NEXT_STEP,
 } from '../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js';
+// The PRODUCTION Run-analysis chain, imported whole so the surface assertions
+// below run over the real functions rather than a re-implementation of them.
+import { loadScenarioSnapshotForRunAnalysis } from '../../src/orchestrator-v5/build-turn-context.js';
+import { createRunAnalysisHandler } from '../../src/orchestrator-v5/tools/handlers/run-analysis.js';
+import { HandlerInvocationFailedError } from '../../src/orchestrator-v5/tools/handler-errors.js';
+import { composeHandlerFailure } from '../../src/orchestrator-v5/compose/handler-failure-responses.js';
+import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js';
+import type { SessionStore } from '../../src/orchestrator-v5/session/store.js';
+import type { ComposeContext } from '../../src/orchestrator-v5/compose/types.js';
 
 // =============================================================================
 // Shape builders — the branch space, enumerated rather than hand-picked
@@ -185,7 +194,19 @@ describe('run admission — every refusal carries a reason', () => {
     // predicate ("some string is present") could be satisfied by a different
     // refusal reaching this graph for a different reason.
     expect(admission.willProceed).toBe(false);
-    expect(admission.blockedNextStep).toBe(NO_COMPARISON_NEXT_STEP);
+    // ⚠ A LITERAL, NOT THE IMPORTED CONSTANT (adversarial review, 2026-08-31).
+    // This assertion previously read `.toBe(NO_COMPARISON_NEXT_STEP)`, i.e. it
+    // imported its expected value from the module under test — so a rewrite of
+    // the constant would have carried the test with it and stayed green. An
+    // expectation derived from the thing it pins is a pin agreeing with itself.
+    expect(admission.blockedNextStep).toBe(
+      'Name at least two different options you are weighing, then run analysis.',
+    );
+    // The constant is what the production path uses, so pin that the exported
+    // symbol IS this literal rather than assuming it.
+    expect(NO_COMPARISON_NEXT_STEP).toBe(
+      'Name at least two different options you are weighing, then run analysis.',
+    );
   });
 
   it('the sentence coaches toward NAMING alternatives rather than apologising', () => {
@@ -268,3 +289,178 @@ describe('run admission — the specific refusals are NOT overwritten', () => {
  *    zero-alternative shape. That depends on how the draft model files an
  *    explanation, which is the records/projection seam and is not touched here.
  */
+
+// =============================================================================
+// ⭐⭐ THE SENTENCE MUST REACH A USER — bound to the OUTPUT, not to the function
+// =============================================================================
+
+/**
+ * ── WHY THIS SECTION EXISTS (adversarial review, 2026-08-31) ───────────────
+ * Everything above is true of `resolveRunAdmission` in ISOLATION. A reviewer's
+ * complete `rg -a` manifest showed the only prose consumer of `blockedNextStep`
+ * — `compose/configure-option-clarify-response.ts:238-240`, reached from
+ * `handlers/edit-graph-dispatch.ts:4018` — is gated on a configure-option
+ * outcome that resolves an OPTION node with `status: 'needs_encoding'`. A
+ * zero-alternatives graph HAS no option node, so that branch cannot fire on the
+ * exact shape this suite was written for: the property held and the user still
+ * heard nothing. That is this estate's "we build more than we plug in" pattern,
+ * and a suite that measures the pure function cannot see it.
+ *
+ * The surface a user actually reaches is **Run analysis**:
+ *
+ *   persisted graph
+ *     → `loadScenarioSnapshotForRunAnalysis` (build-turn-context.ts)   [REAL]
+ *     → `resolveRunAdmission` refuses → `AnalysisNotReadyError`        [REAL]
+ *     → `createRunAnalysisHandler` maps it to `analysis_not_ready`     [REAL]
+ *         with `details.next_step`
+ *     → `composeHandlerFailure` renders `assistant_text`               [REAL]
+ *
+ * Every hop below is the production function. Nothing is re-implemented and no
+ * verdict is hand-built: the only fixtures are the persisted graph and a store
+ * that returns it. The assertions bind to `assistant_text` — what a user reads
+ * — so a fix that satisfies the pure function and stops short of the screen
+ * REDs here.
+ *
+ * ⚠ SCOPE, stated rather than implied. This is an in-process seam witness over
+ * CEE's own functions. It is not a wire capture and not a journey witness: it
+ * says nothing about the UI rendering `assistant_text`, and nothing about the
+ * `/graph-readiness` panel, which is a SECOND silent surface (`blocker_reason`
+ * is emitted only inside `!safeToAnalyse`, and this graph reports
+ * `safeToAnalyse: true`). That panel is deliberately untouched here.
+ */
+
+describe('run admission — the refusal reaches the user through Run analysis', () => {
+  // The exact sentence, written as a LITERAL. Importing the expected value from
+  // the module under test would let a rewrite of the constant carry the test
+  // with it, which is a pin agreeing with itself.
+  const EXPECTED_SENTENCE =
+    'Name at least two different options you are weighing, then run analysis.';
+
+  /** The composer's generic stand-in when `next_step` is ABSENT from details. */
+  const GENERIC_FALLBACK = 'This scenario needs a quick fix before it can be analysed.';
+
+  const CTX: ComposeContext = { handlerRegistry: {} };
+  const INVOCATION = {
+    payload: { scenario_id: '11111111-1111-4111-8111-111111111111' },
+    requestId: 'req_refusal',
+    signal: undefined,
+  } as unknown as HandlerInvocation;
+
+  function storeReturning(graph: unknown): SessionStore {
+    return {
+      loadGraph: async () => graph,
+      loadGraphAndBriefText: async () => ({ graph, briefText: null }),
+    } as unknown as SessionStore;
+  }
+
+  /** The REAL handler over the REAL reader; `plotCalls` proves no run happened. */
+  function runAnalysisOver(graph: unknown, plotCalls: { n: number }) {
+    return createRunAnalysisHandler({
+      plotClient: {
+        run: async () => {
+          plotCalls.n += 1;
+          return { analysis_status: 'computed', results: [], response_hash: 'h', meta: {} };
+        },
+      } as unknown as Parameters<typeof createRunAnalysisHandler>[0]['plotClient'],
+      scenarioReader: async (scenarioId: string) =>
+        loadScenarioSnapshotForRunAnalysis(scenarioId, 'req_refusal', storeReturning(graph)),
+    });
+  }
+
+  async function refusalFor(graph: unknown): Promise<{
+    failure: HandlerInvocationFailedError;
+    assistantText: string;
+    plotCalls: number;
+  }> {
+    const plotCalls = { n: 0 };
+    const handler = runAnalysisOver(graph, plotCalls);
+    let caught: unknown;
+    try {
+      await handler(INVOCATION);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(HandlerInvocationFailedError);
+    const failure = caught as HandlerInvocationFailedError;
+    const { response } = composeHandlerFailure(failure, CTX, 'frame');
+    return { failure, assistantText: response.assistant_text, plotCalls: plotCalls.n };
+  }
+
+  it('THE DEFECT, HOP 1: the refusal carries the sentence on the wire field the composer reads', async () => {
+    const { failure, plotCalls } = await refusalFor(zeroAlternatives);
+    // Bound by identity on the refusal itself, so a different failure reaching
+    // this graph cannot satisfy the assertion.
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    // At pristine this key was ABSENT — `run-analysis.ts:337` omits it when
+    // `verdict.nextStep === null`, and the thrown verdict was `admission.strict`,
+    // whose `nextStep` is null on exactly this cell. Measured RED: `undefined`.
+    expect(failure.details.next_step).toBe(EXPECTED_SENTENCE);
+    // A refused run must not have called the engine.
+    expect(plotCalls).toBe(0);
+  });
+
+  it('THE DEFECT, HOP 2: pressing Run analysis on a model with no alternatives puts the sentence on screen', async () => {
+    // ⭐ THE USER-REACHABLE OUTPUT, asserted on its own so it bites
+    // independently of hop 1. This is what the reviewer asked for: not the pure
+    // function's return value, the prose a user reads.
+    const { assistantText } = await refusalFor(zeroAlternatives);
+    expect(assistantText).toContain(EXPECTED_SENTENCE);
+    // The discrimination, stated positively: at pristine the user got the
+    // composer's generic stand-in, which names nothing and coaches nothing.
+    expect(assistantText).not.toContain(GENERIC_FALLBACK);
+  });
+
+  it('TWIN: a NO_GRAPH refusal keeps its own sentence all the way to the screen', async () => {
+    // ⚠ THIS TWIN WATCHES A DIFFERENT DOOR THAN IT LOOKS LIKE, and saying so is
+    // the point. The null-graph branch throws at `build-turn-context.ts:2716`
+    // — `AnalysisNotReadyError(assessAnalysisReadiness(null))` — which never
+    // reaches the two-term admission and therefore never calls
+    // `refusedVerdict`. Measured: a mutant that made `refusedVerdict` overwrite
+    // EVERY refusal SURVIVED this test. It is kept because it pins that the
+    // most common refusal is unaffected by the change, but it is NOT the
+    // overwrite discriminator; the one below is.
+    const { failure, assistantText } = await refusalFor(null);
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    expect(failure.details.reason_code).toBe('NO_GRAPH');
+    expect(assistantText).toContain('Draft or save a model first, then run analysis.');
+    expect(assistantText).not.toContain(EXPECTED_SENTENCE);
+  });
+
+  it('TWIN (THE OVERWRITE DISCRIMINATOR): a refusal that goes THROUGH the same projection keeps its own sentence', async () => {
+    // ⭐ The opposite-direction twin that actually bites. A graph with ONE
+    // alternative is refused by the STRICT term, so it flows through
+    // `resolveRunAdmission` → the `:2843` throw → `refusedVerdict` — the exact
+    // code path the fix changed — while carrying a specific, non-null
+    // `strict.nextStep` of its own.
+    //
+    // If `refusedVerdict` were widened from "fill an ABSENT reason" to "stamp
+    // the new sentence", this user would be told to name two options when what
+    // they actually need is to resolve two readiness issues. That is strictly
+    // worse than the silence being fixed: it replaces working guidance with
+    // guidance that is wrong for their model.
+    const { failure, assistantText } = await refusalFor(oneAlternative);
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    expect(failure.details.next_step).toBe(
+      'Review all 2 readiness issues together before analysis.',
+    );
+    expect(assistantText).toContain('Review all 2 readiness issues together before analysis.');
+    expect(assistantText).not.toContain(EXPECTED_SENTENCE);
+  });
+
+  it('TWIN: a model with two configured alternatives is never refused at this seam', async () => {
+    // The proceed direction, at the surface rather than at the function: proves
+    // the refusal path is entered because of the graph and not because the
+    // harness refuses everything it is handed.
+    const plotCalls = { n: 0 };
+    const handler = runAnalysisOver(twoAlternativesConfigured, plotCalls);
+    let caught: unknown;
+    try {
+      await handler(INVOCATION);
+    } catch (e) {
+      caught = e;
+    }
+    const refusedNotReady =
+      caught instanceof HandlerInvocationFailedError && caught.cause_kind === 'analysis_not_ready';
+    expect(refusedNotReady).toBe(false);
+  });
+});

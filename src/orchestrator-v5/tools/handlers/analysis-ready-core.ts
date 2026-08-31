@@ -945,6 +945,45 @@ export function admittedVerdict(admission: RunAdmission): ReadinessResult {
 }
 
 /**
+ * The REFUSED verdict for a graph the two-term gate turns away — the mirror of
+ * {@link admittedVerdict}, and the hop that was missing.
+ *
+ * ── WHY THIS EXISTS (adversarial review, 2026-08-31) ───────────────────────
+ * {@link RunAdmission.blockedNextStep} is this module's single derivation of
+ * *"the sentence to put to the user"*. It was true and it was UNREACHABLE: a
+ * complete `rg -a` manifest showed its only prose consumer
+ * (`compose/configure-option-clarify-response.ts:238-240`, reached from
+ * `handlers/edit-graph-dispatch.ts:4018`) is gated on a configure-option
+ * outcome that must resolve an OPTION node with `status: 'needs_encoding'`. A
+ * zero-alternatives graph has no option node, so on the exact shape the
+ * constant was written for, the branch cannot fire.
+ *
+ * The surface a user actually reaches is **Run analysis**, and it throws
+ * {@link AnalysisNotReadyError} carrying `admission.strict` — whose `nextStep`
+ * is `null` precisely when strict readiness had no complaint. `run-analysis.ts`
+ * then omits `next_step` from the failure details entirely, and the composer
+ * falls back to *"This scenario needs a quick fix before it can be analysed."*:
+ * a refusal that names nothing and coaches nothing.
+ *
+ * ⛔ A PROJECTION, NOT A SECOND AUTHORITY. Nothing is recomputed and no new
+ * rule is introduced: this only carries `blockedNextStep` — already derived,
+ * once, by {@link resolveRunAdmission} — into the field the run path reads. The
+ * `??` semantics are inherited whole, so a specific refusal ("Draft or save a
+ * model first", "Review all 2 readiness issues") keeps its own sentence byte
+ * for byte; only an ABSENT one is filled.
+ *
+ * TOTAL, and identity-preserving in both no-op cases: an admission that will
+ * proceed (`blockedNextStep === null`) and one whose strict verdict already
+ * carries the same sentence both return `admission.strict` unchanged, so no
+ * caller can acquire a rewritten verdict by accident.
+ */
+export function refusedVerdict(admission: RunAdmission): ReadinessResult {
+  if (admission.blockedNextStep === null) return admission.strict;
+  if (admission.strict.nextStep === admission.blockedNextStep) return admission.strict;
+  return { ...admission.strict, nextStep: admission.blockedNextStep };
+}
+
+/**
  * ⭐ THE NAMED QUESTIONS BEHIND A REFUSAL — derived here because this module
  * already owns `nextStep`, i.e. "what do I tell the user is outstanding".
  *
