@@ -1090,3 +1090,146 @@ describe("the unauthored decision label agrees with the UI's node vocabulary", (
     expect(decision.provenance?.label_authored).toBeUndefined();
   });
 });
+
+/**
+ * ⭐⭐⭐ `label_placeholder` — THE SIGNAL THAT REPLACES THE STRING MATCH.
+ *
+ * ── WHY A NEW FIELD AND NOT A FIX TO `label_authored` ───────────────────────
+ * Two different questions were riding one boolean (trap 21):
+ *
+ *   Q1  "is this display string OURS rather than the user's?"
+ *   Q2  "did we DERIVE a meaningful label from the brief?"
+ *
+ * On every node but this one the answers coincide. On the decision
+ * placeholder they diverge: the string is ours (Q1 yes) and we derived
+ * nothing (Q2 no). `label_authored` encodes Q2 while its own contract comment
+ * documents Q1 — *"Absent means the label IS the user's own text"* — which is
+ * FALSE of the placeholder.
+ *
+ * `label_authored` is NOT corrected here, deliberately. It has a live consumer
+ * that depends on the answer it currently gives: `hasProvisionalDecision`
+ * (`post-draft-narrative.ts`) reads `label_authored !== true` as half of its
+ * "the projector declined" signature, and gating on that flag ALONE already
+ * shipped a witnessed false claim in the opposite direction — telling users
+ * who had posed a perfectly good decision that we could not find one. So the
+ * concepts are NAMED APART rather than reconciled, which is trap 21's actual
+ * prescription.
+ *
+ * ── WHAT THIS BUYS THE UI ───────────────────────────────────────────────────
+ * A boolean. The consumer no longer has to compare a label against a known
+ * placeholder STRING to decide whether to show its empty state — which is the
+ * entire fragility class this change exists to remove. Two services agreeing
+ * on a display word is a coincidence waiting to lapse; a field is a contract.
+ */
+describe("label_placeholder — an un-chosen mint, marked as one", () => {
+  const UI_DECISION_NODE_LABEL = "Question";
+
+  /** A V1 decision node as the projector banks it on the DECLINE path. */
+  const placeholderV1 = (over: Record<string, unknown> = {}) => ({
+    version: "1",
+    nodes: [
+      {
+        id: "dec_1",
+        kind: "decision",
+        label: UI_DECISION_NODE_LABEL,
+        provenance: {
+          provenance_class: "projector_structural",
+          label_placeholder: true,
+        },
+        ...over,
+      },
+      { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+    ],
+    edges: [],
+  });
+
+  const wireDecision = (v1: unknown) =>
+    projectGraphAndOptionsToV3(v1 as never, { brief: "We are stretched thin." }).graph.nodes.find(
+      (n) => n.kind === "decision",
+    );
+
+  it("⭐ ARM 1 — the placeholder path MARKS the node on the wire", () => {
+    expect(wireDecision(placeholderV1())?.label_placeholder).toBe(true);
+  });
+
+  /**
+   * ⭐ ARM 2. A field that is always present is not a signal. This is the twin
+   * of ARM 1 and must be read with it: together they show the field
+   * DISCRIMINATES rather than merely existing.
+   */
+  it("⭐ ARM 2 — an AUTHORED decision label is NOT marked", () => {
+    const authoredV1 = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: "Build Our Own Fleet or Partner With Couriers",
+          provenance: { provenance_class: "projector_structural", label_authored: true },
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    const wire = wireDecision(authoredV1);
+    expect(wire?.label_authored).toBe(true);
+    expect(wire?.label_placeholder).toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐ A USER RENAME CLEARS IT — BY DERIVATION, NOT BY A WRITER REMEMBERING.
+   *
+   * The flag is RE-DERIVED at the lift on every response (the RESPONSE-ONLY
+   * rule its two siblings already follow), so it clears when the label stops
+   * being the placeholder REGARDLESS of whether a rename writer thought to
+   * drop it. That matters because the rename writer is a different lane
+   * (#1273): a design that required it to remember would be the
+   * hand-maintained mirror this estate keeps paying for (trap 12).
+   *
+   * Both renames below carry the STALE `label_placeholder: true` banked at
+   * draft time — that is the whole point. If the field were merely carried
+   * through, these would pass it to the wire and the UI would show an empty
+   * state over a name the user had chosen.
+   */
+  it("⭐ a user rename clears the mark, even with the stale flag still banked", () => {
+    const renamed = placeholderV1({
+      label: "Should We Move the Warehouse?",
+      provenance: { provenance_class: "projector_structural", label_placeholder: true },
+    });
+    expect(wireDecision(renamed)?.label_placeholder).toBeUndefined();
+  });
+
+  it("⭐ a rename stamped `user_set` clears it too (the #1273 shape)", () => {
+    const renamed = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: "Should We Move the Warehouse?",
+          provenance: "user_set",
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    expect(wireDecision(renamed)?.label_placeholder).toBeUndefined();
+  });
+
+  /**
+   * ⭐ THE BLANK-LABEL PATH, STATED RATHER THAN PAPERED OVER. `NodeV3` ACCEPTS
+   * `""` and `"   "` (measured: only ABSENT and NULL are rejected), and no CEE
+   * validator errors on a blank label. This field's claim is narrow — "this
+   * string is the generic mint we fall back to" — and a blank label is NOT
+   * that. So it is left UNMARKED, and the surface's own unnamed-node handling
+   * governs it. Deliberately NOT widened to mean "not a real name": that would
+   * be one boolean answering two questions again, which is the defect this
+   * field was minted to end.
+   */
+  it("⭐ a blank label is NOT marked as the placeholder — a different question", () => {
+    for (const blank of ["", "   "]) {
+      const v1 = placeholderV1({ label: blank });
+      expect(wireDecision(v1)?.label_placeholder, `blank=${JSON.stringify(blank)}`).toBeUndefined();
+    }
+  });
+});
