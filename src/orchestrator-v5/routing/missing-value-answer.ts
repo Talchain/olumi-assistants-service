@@ -181,6 +181,12 @@ const CQE_APPROX_HEDGES = 'roughly|about|approximately|around|nearly|circa';
  */
 const HEDGE_WORD =
   `${CQE_APPROX_HEDGES}`
+  // ⭐ `approx` / `approx.` — MEASURED DEAD at `de58cff3`, and it is the
+  // ABBREVIATION of `approximately`, which CQE already owns. Admitting the long
+  // form and refusing the short one is a spelling accident, not a rule. It is
+  // added HERE and not to `CQE_APPROX_HEDGES`, because that constant mirrors
+  // CQE's literal and the drift guard asserts CQE ⊆ this set, not equality.
+  + `|approx\\.?`
   + `|maybe|perhaps|possibly|probably`
   + `|i'?d say|i would say|i think|i reckon|i guess|i'?d go with`
   + `|let'?s say|lets say|say|call it`;
@@ -228,6 +234,139 @@ const NUMBER =
   `${HEDGE_LEAD}(?:~\\s*)?(?<value>${NUMBER_DIGITS})(?<pct>${PERCENT_SUFFIX})?${HEDGE_TRAIL}`;
 
 /**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⭐⭐⭐ THE ANSWER FRAME — TWO PARAMETERS, TWO OPPOSITE HARMS, AND THEY MAY
+ * NEVER SHARE A WINDOW (CLAUDE.md trap 22b/22f).
+ *
+ * MEASURED DEAD AT `de58cff3` (this file's own table, plus two more found by an
+ * independent reviewer at the same head). Every one is an ordinary reply to the
+ * question the product itself asked, and every one got the IDENTICAL demand
+ * back:
+ *
+ *   "it's 30%" · "it's about 30%" · "it is about 30%" · "that would be 30%"
+ *   "my guess is 30%" · "it reaches 30%" · "the factor reaches 30%"
+ *   "approx 30%" · "just 30%" · "Just 30%"
+ *
+ * ⚠ THE STANDING OBJECTION, AND WHY IT DOES NOT APPLY. This estate lost NINE
+ * consecutive rounds to a natural-language predicate here, each round fixing one
+ * direction and reopening the other. The ruling that came out of it is not "never
+ * widen" — it is **when a predicate guards two opposite harms it needs TWO
+ * PARAMETERS**. So the widening is split, explicitly, and the two halves are
+ * named, separately tunable, and pointed at different failures:
+ *
+ *   ┌─ PARAMETER 1 — {@link FRAME_LEAD}: WHICH FRAMINGS ARE ADMITTED.
+ *   │  GUARDS THE **GAP** (a legitimate answer dropped; the user is stuck, which
+ *   │  is today's witnessed defect). Widening it admits more real answers and
+ *   │  can NEVER admit a new entity, because every member is contentless.
+ *   │  Cost of being too NARROW: the loop. Cost of being too WIDE: nothing on
+ *   │  its own — a frame carries no noun.
+ *   │
+ *   └─ PARAMETER 2 — {@link FRAME_SUBJECTS}: WHAT MAY STAND BEFORE THE COPULA.
+ *      GUARDS THE **LIE** (binding a number the user meant for a different
+ *      quantity). It is a CLOSED set of phrases that can only ever point at "the
+ *      value under discussion" — the property {@link BARE_REFERENTS} already
+ *      states. `it`, `that`, `my guess`, `the factor` are members;
+ *      `Churn rate`, `Handling time`, `revenue`, `headcount` are not and cannot
+ *      become members, because a contentful noun phrase MIGHT name a graph
+ *      entity and only the graph can tell. Widening THIS is what would produce a
+ *      wrong-entity write.
+ *
+ * **The two cannot be traded off against each other, which is the point.** In
+ * the nine oscillating rounds one window had to be both wide enough to catch
+ * real answers and narrow enough to refuse foreign ones, so every move traded a
+ * gap for a lie. Here, `it's 30%` and `Churn rate is 30%` are separated by
+ * PARAMETER 2 alone, and PARAMETER 1 can be widened to the end of English
+ * without moving that line by one character.
+ *
+ * ⚠ AND TWO FURTHER GUARDS DOWNSTREAM ARE UNTOUCHED BY THIS CHANGE — stated
+ * because the frame is deliberately NOT doing their jobs:
+ *   · the 0–1 RANGE + ORDINAL-SHAPE check (`repair-value-binding.ts:415,443`),
+ *     which is what actually refuses `it's 30`, `it's 150%` and `my guess is
+ *     £40,000`. The frame admits the SHAPE; the range refuses the VALUE. That is
+ *     why `30` bare and `150%` stay refused with the frame in front of them.
+ *   · `deriveOnScreenEffectAsk` — no outstanding ask, no antecedent, no bind.
+ *
+ * ⚠ WHAT IS DELIBERATELY NOT CLOSED: a CONTENTFUL subject
+ * ("Churn rate is 30%"). Text alone cannot tell "the factor you asked about is
+ * 30%" from "a different factor is 30%", and guessing is the wrong-entity write.
+ * Those are pinned in {@link CONTENTFUL_SUBJECT_KNOWN_DROPPED} and this change
+ * makes them TERMINATE (the ask changes) instead of looping — the trap-22f exit:
+ * where the answer cannot be determined, make the ambiguity the product.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+/**
+ * PARAMETER 1 OF 2 — THE GAP GUARD. Contentless material a person puts in front
+ * of the figure. **Every member must be incapable of naming anything**: an
+ * adverb, a copula, or a preposition. That property, not a corpus, is what
+ * bounds it — a member that could name an entity belongs in PARAMETER 2's
+ * question, not this one.
+ *
+ * `just` is here because it is THE FIRST WORD OF THE PRODUCT'S OWN HINT
+ * ({@link MISSING_VALUE_ASK_FORMAT_HINT}: *"Just the percentage is enough…"*)
+ * and `just 30%` was measured DEAD at `de58cff3` — the product refusing an echo
+ * of the sentence it had just printed.
+ */
+const FRAME_ADVERB = `just|only|simply|exactly|precisely|literally`;
+
+/**
+ * The copulas and reaching-verbs that join a frame subject to the figure.
+ * Contentless by the same rule: none of them can introduce a noun.
+ * `'s` is written with an optional apostrophe because {@link normalise} folds
+ * the typographic form to the straight one.
+ */
+const FRAME_COPULA =
+  `'?s|is|was|be|'?d be|would be|'?ll be|will be|should be|could be`
+  + `|reaches|hits|goes to|gets to|comes to|comes out at|ends up at|ends at`
+  + `|lands at|sits at|stands at`;
+
+/**
+ * PARAMETER 2 OF 2 — THE LIE GUARD. The CLOSED set of subjects a frame may
+ * carry.
+ *
+ * ⛔ **A MEMBER MUST BE A PHRASE THAT CAN ONLY POINT AT THE VALUE THE PRODUCT IS
+ * ASKING ABOUT.** That is {@link BARE_REFERENTS}' own stated rule, reused rather
+ * than restated (trap 12), plus the small number of definite descriptions of the
+ * one slot on screen. Adding a contentful noun phrase here is the wrong-entity
+ * write, and no amount of widening PARAMETER 1 can do it.
+ *
+ * ⚠ `the factor` IS ADMITTED AND `Churn rate` IS NOT, and the difference is not
+ * a judgement call: inside a `^…$`-anchored whole-message answer there is no
+ * clause to introduce a second antecedent, so "the factor" has exactly one
+ * possible referent — the factor named in the question on screen. "Churn rate"
+ * names a specific entity that may or may not be that one, and only the graph
+ * knows which.
+ */
+const FRAME_SUBJECTS: readonly string[] = [
+  ...BARE_REFERENTS,
+  'the factor',
+  'that factor',
+  'this factor',
+  'the level',
+  'its level',
+  'my guess',
+  'my answer',
+  'my estimate',
+  'my best guess',
+  'the answer',
+  'the number',
+  'the figure',
+];
+
+/**
+ * The whole frame: an optional adverb, then an optional subject+copula, then an
+ * optional `at`/`to`. Every part is optional and every part is contentless, so
+ * the empty frame is the shape that binds today and this construct is ADDITIVE
+ * BY CONSTRUCTION rather than by inspection — `30%` still matches the identical
+ * way it matches now.
+ */
+const FRAME_LEAD =
+  `(?:(?:${FRAME_ADVERB})\\s+)*`
+  + `(?:(?:${FRAME_SUBJECTS.join('|')})\\s*(?:${FRAME_COPULA})\\s+)?`
+  + `(?:(?:${FRAME_ADVERB})\\s+)*`
+  + `(?:(?:at|to|around)\\s+)?`;
+
+/**
  * The BARE NUMBER — the whole message is the figure and nothing else.
  *
  * ⭐ THE SAME `NUMBER` TOKEN, ANCHORED, NOT A SECOND NUMERIC GRAMMAR. A second
@@ -236,8 +375,141 @@ const NUMBER =
  * either reaches both. A trailing full stop is admitted because people type one;
  * NOTHING else is — no unit, no percent sign, no currency symbol, no word. The
  * `^…$` anchor is the whole guard, and it can only ever decline.
+ *
+ * ⚠ {@link FRAME_LEAD} SITS INSIDE THE ANCHOR, NOT AROUND IT. The message must
+ * still be, in its entirety, frame + figure — a unit, a second figure, a named
+ * target or any word outside the two closed sets fails the claim exactly as it
+ * does today.
  */
-const BARE_NUMBER_PATTERN = new RegExp(`^${NUMBER}\\s*[.!]*$`);
+const BARE_NUMBER_PATTERN = new RegExp(`^${FRAME_LEAD}${NUMBER}\\s*[.!]*$`);
+
+/**
+ * ⭐⭐ THE SPELLED-OUT PERCENTAGE — "Thirty percent", measured DEAD at
+ * `de58cff3` and one of the most ordinary replies there is to a question posed
+ * in prose.
+ *
+ * ⭐ A CLOSED LEXICON WITH ARITHMETIC, NOT A PATTERN OVER WORDS — and that is
+ * what keeps it out of the oscillating class. It reads INTEGER number-words and
+ * nothing else, so the two refusals that matter are STRUCTURAL rather than
+ * rules this reader has to get right:
+ *   · `half`, `a third`, `a quarter` — WORD FRACTIONS. They are not in the
+ *     lexicon and cannot be, so they can never be read. That preserves the
+ *     pinned reason in {@link MISSING_VALUE_ANSWER_KNOWN_DROPPED}: parsing "a
+ *     third" means choosing between 0.33 and 0.333…, i.e. inventing precision
+ *     the user did not give. **This arm invents no precision because it reads no
+ *     fractions.**
+ *   · anything outside the lexicon — one unknown word and the whole reading
+ *     declines. There is no partial credit and no cliff.
+ */
+const SPELLED_ONES: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19,
+};
+
+const SPELLED_TENS: Readonly<Record<string, number>> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+/**
+ * Read a run of number-words as one non-negative integer, or `null`.
+ *
+ * ⚠ IT DOES NOT RANGE-CHECK, DELIBERATELY. "a hundred and fifty percent" reads
+ * 150 and is then refused by the SAME 0–1 guard that refuses `150%`
+ * (`repair-value-binding.ts:415`) — one owner of "is this figure inside the
+ * effect scale", never a second copy here (trap 12). A reader that silently
+ * declined out-of-range words would make the two notations behave differently
+ * for the same number.
+ */
+function readSpelledInteger(words: readonly string[]): number | null {
+  // Bounded: the longest form this lexicon can spell is "a hundred and
+  // twenty five" (five words). A longer run is prose, not a number.
+  if (words.length === 0 || words.length > 5) return null;
+  let total = 0;
+  let current = 0;
+  let seenDigitWord = false;
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i]!;
+    if (word === 'and') {
+      // Only ever between a hundred and its remainder.
+      if (!seenDigitWord || total === 0 || current !== 0) return null;
+      continue;
+    }
+    if (word === 'a') {
+      // "a hundred" only — never a bare "a", and never "a third".
+      if (seenDigitWord || words[i + 1] !== 'hundred') return null;
+      current = 1;
+      seenDigitWord = true;
+      continue;
+    }
+    if (word === 'hundred') {
+      if (!seenDigitWord || current === 0 || current > 9) return null;
+      total += current * 100;
+      current = 0;
+      continue;
+    }
+    const tens = SPELLED_TENS[word];
+    if (tens !== undefined) {
+      if (current !== 0) return null;
+      current = tens;
+      seenDigitWord = true;
+      continue;
+    }
+    const ones = SPELLED_ONES[word];
+    if (ones !== undefined) {
+      if (current !== 0) {
+        // "twenty five" — a tens word followed by a unit. Nothing else.
+        if (current % 10 !== 0 || current < 20 || ones === 0 || ones > 9) return null;
+        current += ones;
+        seenDigitWord = true;
+        continue;
+      }
+      current = ones;
+      seenDigitWord = true;
+      continue;
+    }
+    return null;
+  }
+  if (!seenDigitWord) return null;
+  return total + current;
+}
+
+/**
+ * ⚠ THE PERCENT SUFFIX IS REQUIRED ON THIS ARM, AND ITS ABSENCE IS THE GUARD.
+ *
+ * A digit form has a second legitimate reading — the internal 0–1 spelling
+ * (`0.6`) — which is why bare `0.6` binds and bare `30` is refused by range.
+ * A spelled-out word has NO such second reading: nobody writes the internal
+ * representation in words. So "thirty" alone is not a percentage claim and is
+ * not read as one; only "thirty percent" is. This is the twin that keeps the
+ * arm from becoming a general word-to-number grab.
+ */
+const SPELLED_PERCENT_PATTERN = new RegExp(
+  `^${FRAME_LEAD}(?<words>[a-z][a-z\\s-]*?)${PERCENT_SUFFIX}${HEDGE_TRAIL}\\s*[.!]*$`,
+);
+
+function readSpelledPercent(text: string): NumericClause | null {
+  const m = SPELLED_PERCENT_PATTERN.exec(text);
+  if (m === null) return null;
+  const raw = m.groups?.['words'];
+  if (raw === undefined) return null;
+  const words = raw.split(/[\s-]+/).filter((w) => w.length > 0);
+  const value = readSpelledInteger(words);
+  if (value === null) return null;
+  return {
+    // The user's own words, quoted back — never a digit form they did not type.
+    // ⚠ It is ALSO what `isModelUnitEffectValueText` inspects for the ordinal
+    // shape, and "thirty percent" is not `/^\d+$/`, so a spelled answer can
+    // never be mistaken for a chip ordinal. A digit spelling here would have
+    // silently re-opened that collision.
+    valueText: raw.trim().length > 0 ? `${raw.trim()} percent` : `${value} percent`,
+    modelUnitText: toModelUnitText(String(value), true),
+    referent: null,
+    percentApplied: true,
+  };
+}
 
 /**
  * ⭐⭐ THE CANONICAL MODEL-UNIT SPELLING of a read figure — `null` when the text
@@ -919,8 +1191,23 @@ export type MissingValueAnswer =
       readonly term: string;
     };
 
+/**
+ * ⚠ THE TYPOGRAPHIC APOSTROPHE IS FOLDED TO THE STRAIGHT ONE, and it is not
+ * cosmetic. macOS, iOS and every word processor substitute `’` (U+2019) as the
+ * user types, so `it’s 30%` is what actually arrives on the wire while every
+ * pattern in this file — and `MISSING_VALUE_NO_CHANGE_PHRASES`' `it doesn't
+ * change` — is written with `'`. Without this fold the frame below would read
+ * the keyboard the developer used rather than the one the user has.
+ *
+ * It can only ever ADMIT: no pattern here matches `’`, so no message that binds
+ * today stops binding.
+ */
 function normalise(message: string): string {
-  return message.toLowerCase().replace(/\s+/g, ' ').trim();
+  return message
+    .toLowerCase()
+    .replace(/[‘’ʼ]/gu, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -1015,6 +1302,17 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
     }
   }
 
+  // (1c) ⭐⭐ THE SPELLED-OUT PERCENTAGE — "thirty percent".
+  //
+  // It sits with the other WHOLE-MESSAGE readings and carries the same
+  // `elliptical: true`, for the same reason: the message is frame plus figure
+  // and nothing else, so its only antecedent is the question on screen. It runs
+  // AFTER both digit arms, so no message carrying a digit can ever reach it.
+  const spelled = readSpelledPercent(text);
+  if (spelled !== null) {
+    return { kind: 'numeric', ...spelled, leadingContext: '', elliptical: true };
+  }
+
   // (2) THE ANSWER CARRIED CONTEXT. The final sentence-level clause is the
   // SAME grammar — no new patterns, no widened vocabulary (see CLAUSE_BREAK).
   //
@@ -1105,12 +1403,81 @@ const WHOLE_MESSAGE_QUANTITY = new RegExp(
   + `(?:\\s+[a-z]+)?${HEDGE_TRAIL}\\s*[.!]*$`,
 );
 
+/**
+ * ⭐⭐⭐ A CONTENTFUL SUBJECT STATING A QUANTITY — "Churn rate is 30%".
+ *
+ * ⛔ THIS TERMINATES AND MUST NEVER BIND, AND THE ASYMMETRY IS THE WHOLE
+ * DESIGN. Text alone cannot separate the two readings:
+ *   · the user naming THE FACTOR THE PRODUCT ASKED ABOUT — a perfect answer;
+ *   · the user naming A DIFFERENT quantity — where binding it is the
+ *     wrong-entity write, i.e. the LIE this seam's PARAMETER 2 exists to refuse.
+ * They are the same string. Only the graph knows which, and this module is PURE
+ * by contract ("no graph, no state") — so it declines to choose.
+ *
+ * ⭐ THE TRAP-22f EXIT, APPLIED: where the answer cannot be determined, make the
+ * AMBIGUITY THE PRODUCT. Terminating without binding is exactly that — the
+ * product stops repeating the identical demand and gets to CHANGE the ask
+ * instead, which is the one honest move available. It is also the safe
+ * direction by this predicate's own header: a false positive here means the
+ * product says something more useful than the demand it was about to repeat.
+ *
+ * ⚠ IT REQUIRES A COPULA AND A MESSAGE-FINAL QUANTITY, so it cannot claim a
+ * question ("what is missing?") or an instruction ("run the analysis"), neither
+ * of which ends in a figure.
+ */
+const FRAMED_QUANTITY_LEAD =
+  `\\b(?:${FRAME_COPULA})\\s+(?:(?:${FRAME_ADVERB})\\s+)*(?:(?:at|to|around)\\s+)?`
+  + `${HEDGE_LEAD}(?:~\\s*)?`;
+
+/**
+ * ⚠ TWO ARMS, AND THE DIGIT/WORD SPLIT IS LOAD-BEARING RATHER THAN TIDY.
+ *
+ * The WORD arm must require the percent notation, because without it
+ * "that would be fine" — a copula followed by a word — would terminate, and
+ * termination would stop being earned by an ANSWER. The DIGIT arm does not need
+ * that guard: a message ending in a figure after a copula is a quantity however
+ * it is spelled, so a unit is admitted there ("it's 8 minutes", "my guess is
+ * £40,000" — both wrong-scale, both unmistakably answers, both looping at
+ * `de58cff3`).
+ */
+const CONTENTFUL_SUBJECT_QUANTITY = new RegExp(
+  `(?:`
+  + `${FRAMED_QUANTITY_LEAD}(?:${CURRENCY_SYMBOL_SOURCE})?\\s*(?:${NUMBER_DIGITS})`
+  + `(?:\\s*(?:${NUMERIC_SUFFIX_SOURCE}|%|per\\s?cent|percent))?(?:\\s+[a-z]+)?`
+  + `|`
+  + `${FRAMED_QUANTITY_LEAD}[a-z][a-z\\s-]*?${PERCENT_SUFFIX}`
+  + `)`
+  + `${HEDGE_TRAIL}\\s*[.!]*$`,
+);
+
+/**
+ * The phrasings this module RECOGNISES AS ANSWERS AND DELIBERATELY DOES NOT
+ * BIND, pinned as data so the suite REDs if the set GROWS or SHRINKS (trap 22f's
+ * honest-gap protocol).
+ *
+ * ⚠ THIS IS A DIFFERENT SET FROM {@link MISSING_VALUE_ANSWER_KNOWN_DROPPED},
+ * and the difference is the point (trap 21 — name the concepts apart). That set
+ * is about messages the reader returns `null` for. This one is about messages
+ * the reader still returns `null` for **while the product no longer loops at
+ * them** — a gap that costs one turn and a changed ask, not a dead end.
+ *
+ * Every member is a CONTENTFUL SUBJECT, i.e. exactly the class PARAMETER 2
+ * refuses. Closing them needs the graph, which this module does not have.
+ */
+export const CONTENTFUL_SUBJECT_KNOWN_DROPPED: readonly string[] = [
+  'Churn rate is 30%',
+  'Churn rate is at 30%',
+  'Handling time is 30%',
+];
+
 export function messageAnswersMissingValueAsk(message: string): boolean {
   if (typeof message !== 'string') return false;
   if (readMissingValueAnswer(message) !== null) return true;
   const text = normalise(message);
   // A whole-message quantity the binder cannot use: still an answer.
   if (WHOLE_MESSAGE_QUANTITY.test(text)) return true;
+  // A named quantity the binder must not claim: still unmistakably an answer.
+  if (CONTENTFUL_SUBJECT_QUANTITY.test(text)) return true;
   // A hedged or targeted numeric answer: unbindable, unmistakably an answer.
   return /\b(?:set|change|update|adjust|make|put|use)\b[^.?!]*\d/.test(text);
 }

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BARE_REFERENTS,
+  CONTENTFUL_SUBJECT_KNOWN_DROPPED,
   MISSING_VALUE_ANSWER_KNOWN_DROPPED,
   MISSING_VALUE_ASK_FORMAT_HINT,
   messageAnswersMissingValueAsk,
@@ -26,9 +27,11 @@ import {
   resolveRepairValueBinding,
 } from '../repair-value-binding.js';
 import {
+  CONFIGURE_OPTION_EXAMPLE_VALUE,
   composeConfigureOptionClarifyResponse,
   QUALITATIVE_VALUE_KNOWN_DROPPED,
 } from '../../compose/configure-option-clarify-response.js';
+import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
 import type { StageType } from '@talchain/schemas/boundary';
 
 const OPTION = 'Subcontract inner-city runs';
@@ -58,8 +61,21 @@ function clarify(message: string): string {
 /** The demand the product makes when it has heard nothing yet. */
 const DEMAND = clarify('Configure Subcontract inner-city runs');
 
-/** The product's own advised phrasing, as it appears inside that demand. */
-const ADVISED = `Set the ${OPTION} option's effect on ${FACTOR} to 0.6`;
+/**
+ * The product's own advised phrasing, as it appears inside that demand.
+ *
+ * ⚠ DERIVED FROM THE BUILDER AND THE EXPORTED EXEMPLAR, NOT HAND-COPIED. This
+ * was the literal `` `Set the ${OPTION} option's effect on ${FACTOR} to 0.6` ``
+ * — a hand-maintained mirror of copy owned elsewhere (trap 12), and it went
+ * stale the moment `CONFIGURE_OPTION_EXAMPLE_VALUE` moved from the internal
+ * `0.6` to the human `60%`. Deriving it means a future change to either the
+ * builder or the exemplar re-runs this check instead of silently failing it.
+ */
+const ADVISED = buildConfigureOptionAdvisedFormat(
+  OPTION,
+  FACTOR,
+  CONFIGURE_OPTION_EXAMPLE_VALUE,
+);
 
 describe('ordinary human answers are ACCEPTED and bound (the four forms that looped)', () => {
   // Measured at pristine: ALL FOUR were refused by `matchBareRepairValue` AND by
@@ -566,6 +582,222 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
   it('never throws on hostile input, with or without breaks', () => {
     for (const message of ['-', ' - ', '. - .', ';;;', 'set it to - 0.8', '0.8 - set it to']) {
       expect(() => readMissingValueAnswer(message), message).not.toThrow();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ THE ANSWER FRAME — TWO PARAMETERS, TWO OPPOSITE HARMS.
+//
+// ⚠ THE CORPUS IS NOT FROM THIS AUTHOR'S HEAD (trap 22). Every BIND case below
+// was MEASURED AT THE ROUTE and recorded as a dead end: nine by #1267's own
+// table at `de58cff3`, two more (`just 30%` / `Just 30%`) by an independent
+// reviewer at the same head, three more by the pinned dead-end corpus in
+// `ask-copy-acceptance-pairing.test.ts`. They are phrasings real people typed
+// at a real product, not phrasings imagined here.
+//
+// ⭐ AND EVERY ONE CARRIES ITS OPPOSITE-DIRECTION TWIN — the same frame with
+// something the binder must still refuse in the value slot. A corpus that tests
+// one direction is a guard watching one door (trap 22b), and this estate lost
+// consecutive rounds to exactly that.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('the answer frame — PARAMETER 1 closes the GAP', () => {
+  const READINESS = {
+    status: 'needs_user_input',
+    blockers: [
+      {
+        blocker_type: 'missing_value',
+        option_id: 'o1',
+        option_label: OPTION,
+        factor_id: 'f1',
+        factor_label: FACTOR,
+      },
+    ],
+  };
+
+  const bindsTo = (message: string): string | null => {
+    const resolved = resolveRepairValueBinding({ message, readiness: READINESS as never });
+    if (!resolved.matched || resolved.kind !== 'bind') return null;
+    // BY IDENTITY, never by value alone (trap 19). A reading that bound to some
+    // other pair would satisfy a value-only assertion.
+    expect(resolved.pair.optionId, message).toBe('o1');
+    expect(resolved.pair.factorId, message).toBe('f1');
+    return resolved.valueText;
+  };
+
+  it.each([
+    // [message, twin, why the twin must refuse]
+    ["it's 30%", "it's 30", 'no unit — the two-scales cliff'],
+    ["it's about 30%", "it's 150%", 'out of the 0-1 effect scale'],
+    ['it is 30%', "it's 8 minutes", 'a unit this writer cannot convert'],
+    ['that would be 30%', 'that would be 30% for the subcontracting option', 'names a target'],
+    ['it would be 30%', 'my guess is £40,000', 'a currency, i.e. a human-scale quantity'],
+    ["it'd be 30%", 'just 30', 'no unit'],
+    ['my guess is 30%', 'approx 30', 'no unit'],
+    ['it reaches 30%', 'it reaches 8 minutes', 'a unit'],
+    ['the factor reaches 30%', 'the factor reaches 30', 'no unit'],
+    ['approx 30%', 'a third', 'a word fraction — inventing precision'],
+    ['just 30%', 'half', 'a word fraction'],
+    ['Just 30%', 'Thirty', 'a spelled word with no unit is not a percentage claim'],
+  ])('%s BINDS, and its twin %s does not (%s)', (message, twin) => {
+    expect(bindsTo(message), `"${message}" still dead-ends`).toBe('0.3');
+    expect(bindsTo(twin), `"${twin}" reached a WRITE`).toBeNull();
+  });
+
+  it('⭐ THE SPELLED-OUT PERCENTAGE — a closed integer lexicon, never a fraction', () => {
+    expect(bindsTo('Thirty percent')).toBe('0.3');
+    expect(bindsTo('thirty percent')).toBe('0.3');
+    expect(bindsTo('twenty five percent')).toBe('0.25');
+    expect(bindsTo('twenty-five percent')).toBe('0.25');
+    expect(bindsTo('zero percent')).toBe('0');
+    expect(bindsTo('one hundred percent')).toBe('1');
+    expect(bindsTo('a hundred percent')).toBe('1');
+
+    // ⛔ THE TWINS, and each refuses for a STRUCTURAL reason rather than a rule
+    // this reader has to get right:
+    //   · a word FRACTION is not in the lexicon and cannot be — so "a third"
+    //     can never be resolved to 0.33 or 0.333…, the invented precision the
+    //     estate pinned as a deliberate refusal;
+    //   · an out-of-scale spelled figure meets the SAME 0-1 guard as `150%`,
+    //     one owner, not a second copy;
+    //   · a spelled word with no unit is not a percentage claim at all.
+    for (const refused of [
+      'a third',
+      'half',
+      'a quarter',
+      'two thirds',
+      'A hundred and fifty percent',
+      'Thirty',
+      'one hundred',
+      'eleventy percent',
+      'thirty thirty percent',
+    ]) {
+      expect(bindsTo(refused), `"${refused}" reached a WRITE`).toBeNull();
+    }
+  });
+
+  it('⛔ PARAMETER 2 GUARDS THE LIE — a CONTENTFUL subject never binds', () => {
+    // ⭐ THE DISCRIMINATION, PINNED IN-TEST (trap 13b). `"it's 30%"` and
+    // `"Churn rate is 30%"` are the SAME SHAPE and differ only in the SUBJECT.
+    // If the frame ever admitted a contentful noun phrase, the product would
+    // bind a figure the user stated about a DIFFERENT quantity to the pair it
+    // happened to be asking about — the wrong-entity write.
+    expect(bindsTo("it's 30%")).toBe('0.3');
+    for (const message of [
+      ...CONTENTFUL_SUBJECT_KNOWN_DROPPED,
+      'revenue is 30%',
+      'headcount is 30%',
+      'payroll cost is 30%',
+      'the goal is 30%',
+      'Handling time reaches 30%',
+    ]) {
+      expect(readMissingValueAnswer(message), `"${message}" read as a value`).toBeNull();
+      expect(bindsTo(message), `"${message}" reached a WRITE`).toBeNull();
+    }
+
+    // ⚠ AND THE PINNED SET TERMINATES — the trap-22f exit. Where the answer
+    // cannot be determined from text, the product makes the AMBIGUITY the
+    // product: it stops repeating the identical demand and changes the ask.
+    // A gap recorded in the suite is honest; an invisible one is how the
+    // oscillating rounds happened.
+    expect(CONTENTFUL_SUBJECT_KNOWN_DROPPED.length, 'a vacuous pin is not a pin')
+      .toBeGreaterThan(0);
+    for (const message of CONTENTFUL_SUBJECT_KNOWN_DROPPED) {
+      expect(messageAnswersMissingValueAsk(message), message).toBe(true);
+      expect(clarify(message), message).not.toBe(DEMAND);
+    }
+  });
+
+  it('⚠ TERMINATION IS STILL EARNED BY AN ANSWER, not granted to any message', () => {
+    // The widest thing this change touches is the termination predicate, whose
+    // safe direction is WIDE. "Wide" is not "always" — a message that answers
+    // nothing must still get the demand, or the guard has stopped meaning
+    // anything (this is the contrast control for the block above).
+    for (const message of [
+      'Run the analysis.',
+      'What is missing?',
+      '',
+      'Configure Subcontract inner-city runs',
+      'What does this option do?',
+      'that would be fine',
+      'it is fine',
+      'it would be better',
+    ]) {
+      expect(messageAnswersMissingValueAsk(message), message).toBe(false);
+    }
+  });
+
+  it('⚠ THE TYPOGRAPHIC APOSTROPHE IS THE ONE THE USER ACTUALLY TYPES', () => {
+    // macOS/iOS substitute U+2019 as you type, so `it’s 30%` is what arrives on
+    // the wire while every pattern in the module is written with `'`. Without
+    // the fold in `normalise` the frame would read the developer's keyboard.
+    expect(bindsTo('it’s 30%')).toBe('0.3');
+    expect(bindsTo('it’d be 30%')).toBe('0.3');
+    // OPPOSITE DIRECTION — folding admits, it never converts: the twin still
+    // refuses.
+    expect(bindsTo('it’s 30')).toBeNull();
+  });
+
+  it('⭐ STRICTLY ADDITIVE — every form that bound before binds IDENTICALLY', () => {
+    // ⚠ MEASURED AT PRISTINE `de58cff3` AND ASSERTED HERE AS A WHOLE READING,
+    // not just as "still non-null". A widening that quietly changed
+    // `elliptical`, `referent` or `leadingContext` on an existing form would
+    // re-route it to a different slot authority (`deriveOnScreenEffectAsk` vs
+    // the sole-missing-pair rule) with nothing red.
+    expect(readMissingValueAnswer('30%')).toEqual({
+      kind: 'numeric',
+      valueText: '30%',
+      modelUnitText: '0.3',
+      referent: null,
+      leadingContext: '',
+      elliptical: true,
+      percentApplied: true,
+    });
+    expect(readMissingValueAnswer('set it to 30%')).toEqual({
+      kind: 'numeric',
+      valueText: '30%',
+      modelUnitText: '0.3',
+      referent: 'it',
+      leadingContext: '',
+      elliptical: false,
+      percentApplied: true,
+    });
+    // And the forms the ask itself advertises, driven end to end.
+    for (const [message, expected] of [
+      ['0%', '0'],
+      ['100%', '1'],
+      ['0.6', '0.6'],
+      ['about 30%', '0.3'],
+      ['50 percent', '0.5'],
+      ['~30%', '0.3'],
+    ] as const) {
+      expect(bindsTo(message), message).toBe(expected);
+    }
+  });
+
+  it('⚠ THE NEW ARMS ARE ELLIPTICAL — they carry no antecedent of their own', () => {
+    // The frame's subject is a REFERENT, not an antecedent: "it" points at the
+    // question on screen and nowhere else. So these readings must route through
+    // `deriveOnScreenEffectAsk`, exactly as a bare number does — and
+    // `matchBareRepairValue`, whose caller resolves the slot from "exactly one
+    // pair is missing", must keep refusing them.
+    for (const message of ["it's 30%", 'my guess is 30%', 'Thirty percent', 'just 30%']) {
+      const reading = readMissingValueAnswer(message);
+      expect(reading?.kind, message).toBe('numeric');
+      if (reading?.kind !== 'numeric') continue;
+      expect(reading.elliptical, message).toBe(true);
+      expect(reading.leadingContext, message).toBe('');
+      expect(matchBareRepairValue(message), message).toBeNull();
+    }
+  });
+
+  it('never throws on hostile frame input', () => {
+    for (const message of [
+      "it's", 'my guess is', 'the factor reaches', 'just', 'is 30%', "''s 30%",
+      'a hundred and and fifty percent', 'percent', '%', 'a percent',
+    ]) {
+      expect(() => readMissingValueAnswer(message), message).not.toThrow();
+      expect(() => messageAnswersMissingValueAsk(message), message).not.toThrow();
     }
   });
 });
