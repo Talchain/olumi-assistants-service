@@ -1153,6 +1153,52 @@ describe("label_placeholder — an un-chosen mint, marked as one", () => {
   });
 
   /**
+   * ⭐⭐ THE PRODUCER'S OWN TWO ARMS — ADDED AFTER A SURVIVING MUTANT EXPOSED
+   * THAT NOTHING BOUND THEM.
+   *
+   * The wire-level arms above drive `projectGraphAndOptionsToV3` from a
+   * hand-built V1 fixture, so they bypass the PROJECTOR entirely. A mutant that
+   * made the reader mark EVERY node SURVIVED all five of them — because the
+   * lift's label re-derivation still filtered it, so the suite was agreeing
+   * with itself about a producer it never ran (trap 13b). These two run
+   * `projectRecordsToGraph` and read what the producer actually banks.
+   *
+   * They are a PAIR on purpose: one arm alone cannot show the mark
+   * discriminates, only that it can appear.
+   */
+  it("⭐ PRODUCER ARM 1 — a brief that yields no decision statement banks the mark", () => {
+    const brief = "Our burn rate is too high and the team is stretched thin.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Our burn rate is too high" },
+        { kind: "option", source_quote: "cut contractor spend" },
+        { kind: "option", source_quote: "slow down hiring" },
+      ],
+      claims: [{ claim_kind: "outcome", label: "Monthly Burn", basis: [0] }],
+    };
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decision = projected.nodes.filter((n) => n.kind === "decision")[0];
+    expect(decision.provenance?.label_placeholder).toBe(true);
+    expect(decision.provenance?.label_authored).toBeUndefined();
+  });
+
+  it("⭐ PRODUCER ARM 2 — a brief that DOES state the decision banks NO mark", () => {
+    const brief = "Should we raise the price or keep it as is? Our churn is 3.5% monthly.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Should we raise the price or keep it as is?" },
+        { kind: "option", source_quote: "raise the price" },
+        { kind: "option", source_quote: "keep it as is" },
+      ],
+      claims: [{ claim_kind: "outcome", label: "Monthly Recurring Revenue", basis: [1] }],
+    };
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decision = projected.nodes.filter((n) => n.kind === "decision")[0];
+    expect(decision.provenance?.label_authored).toBe(true);
+    expect(decision.provenance?.label_placeholder).toBeUndefined();
+  });
+
+  /**
    * ⭐ ARM 2. A field that is always present is not a signal. This is the twin
    * of ARM 1 and must be read with it: together they show the field
    * DISCRIMINATES rather than merely existing.
