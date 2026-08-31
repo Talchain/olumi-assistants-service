@@ -190,6 +190,69 @@ export interface ChipClickAutoRunTrigger {
   readonly draftTurnId: string;
 }
 
+/**
+ * ⭐⭐ STANDING INVARIANT FOR STATE-RECOVERY CODE (2.1353 r4):
+ *
+ *     FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS.
+ *
+ * No path may author "there are no pending actions" unless absence was actually
+ * ESTABLISHED. `[]` is a CLAIM about the world, and a read that failed has not
+ * earned it — yet `[]` is exactly what every degrading read tends to return, and
+ * `commit.ts` resolves a threaded `[]` (or an omitted key) to a TOTAL
+ * carry-forward wipe. So an unreadable history that becomes `[]` does not merely
+ * lose information: it publishes a confident, wrong answer that the next turn
+ * treats as authoritative.
+ *
+ * The prior-pending read therefore has THREE outcomes, not two, and they are
+ * modelled on WHAT IS TRUE ABOUT THE WORLD rather than on which error code
+ * fired. That distinction is the point: an error-code split fixes the label and
+ * re-opens the moment a new producer is added to the same code (which is how
+ * round 3 shipped a total loss labelled a partial recovery — `pending_actions_corrupt`
+ * has two producers, and only one of them can ever yield survivors).
+ *
+ *   known_empty           the read SUCCEEDED and there genuinely were none.
+ *                         The ONLY state permitted to author `[]`.
+ *   known_with_survivors  the read was partial; THESE actions survived and are
+ *                         carried. Never `[]` by construction (length >= 1).
+ *   unavailable           we could not establish what was there — unreadable
+ *                         column, wholly unparseable entries, store down, fetch
+ *                         failed. MUST NOT thread anything: the key is omitted
+ *                         so the resulting loss stays attributable to the read
+ *                         failure instead of masquerading as a successful empty.
+ *
+ * ⚠ This type is deliberately LOCAL to this dispatcher. An independent review
+ * found the same "malformed input silently becomes `[]`" shape in the prompt
+ * store (#1288) the same night, so this is a recurring seam rather than an
+ * incident — but that PR has a different owner, and hoisting a shared helper
+ * across both while one is in review would couple two live changes. If this
+ * invariant is adopted estate-wide, THIS is the definition to lift.
+ */
+type PriorPendingsOutcome =
+  | { readonly state: 'known_empty' }
+  | { readonly state: 'known_with_survivors'; readonly pendings: readonly PendingAction[] }
+  | { readonly state: 'unavailable'; readonly reason: string };
+
+/**
+ * The single place the invariant above is enforced: what may this outcome hand
+ * to `CommitMetadata.priorPendingActions`?
+ *
+ * `null` means OMIT THE KEY — never `[]`. Returning `[]` here for `unavailable`
+ * would be the whole defect, so the mapping is written once and read by the one
+ * threading site rather than being re-decided inline.
+ */
+function priorsToThread(
+  outcome: PriorPendingsOutcome,
+): readonly PendingAction[] | null {
+  switch (outcome.state) {
+    case 'known_empty':
+      return [];
+    case 'known_with_survivors':
+      return outcome.pendings;
+    case 'unavailable':
+      return null;
+  }
+}
+
 export interface DispatchChipClickRunAnalysisParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
@@ -1778,12 +1841,19 @@ export async function dispatchChipClickRunAnalysis(
     // dominant here too, the change is a one-line early return and the loud
     // event becomes the abort's telemetry.
     // ══════════════════════════════════════════════════════════════════════
-    let successPriorPendingActions: readonly PendingAction[] | null = null;
+    // Three states, not two — see `PriorPendingsOutcome`. A SUCCESSFUL strict
+    // read that returns nothing is the ONE state entitled to author `[]`:
+    // absence was actually established.
+    let priorOutcome: PriorPendingsOutcome;
     try {
-      successPriorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
+      const strictPriors = await loadMostRecentPendingActionsIntegrityStrict(
         payload.scenario_id,
         requestId,
       );
+      priorOutcome =
+        strictPriors.length === 0
+          ? { state: 'known_empty' }
+          : { state: 'known_with_survivors', pendings: strictPriors };
     } catch (priorReadError) {
       // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
       // a dozen suites mock that class as a bare `class extends Error {}`, so
@@ -1810,14 +1880,63 @@ export async function dispatchChipClickRunAnalysis(
           'from this commit',
       );
 
+      // The authoritative read failed, so by default we DO NOT KNOW what was
+      // there. Only a salvage that actually returns something may move this.
+      priorOutcome = { state: 'unavailable', reason: priorReadCode ?? 'read_failed' };
+
       // ══════════════════════════════════════════════════════════════════════
-      // ⭐ SURVIVORS BEAT A TOTAL WIPE — the third option, and it dominates.
+      // ⭐ SURVIVORS BEAT A TOTAL WIPE — BUT ONLY WHEN THERE ARE SURVIVORS.
       //
-      // The strict loader throws `pending_actions_corrupt` on ANY parse failure
-      // or scenario mismatch (`supabase-store.ts` ~:2325-2372). In that exact
-      // state the TOLERANT loader returns the SURVIVORS. So on a row holding
-      // three valid holds and one unparseable entry, omitting the key destroys
-      // all four; falling back preserves three.
+      // ⚠⚠ ROUND 4 — `pending_actions_corrupt` HAS TWO PRODUCERS WITH OPPOSITE
+      // RECOVERY BEHAVIOUR, AND THE ROUND-3 VERSION OF THIS BLOCK KEYED ON THE
+      // CODE ALONE. Derived at `supabase-store.ts` at this tip:
+      //
+      //   PRODUCER A — `!Array.isArray(raw)` (:2307-2323)
+      //     strict   -> throws `pending_actions_corrupt` (:2319)
+      //     tolerant -> `return []` (:2322). ZERO SURVIVORS, ALWAYS.
+      //
+      //   PRODUCER B — parse failures / scenario mismatches (:2343-2373)
+      //     strict   -> throws `pending_actions_corrupt` (:2370)
+      //     tolerant -> returns the SURVIVORS (:2374) — a real recovery, but
+      //                 ONLY when at least one entry parsed. A row whose every
+      //                 entry is unreadable also yields ZERO.
+      //
+      // On both zero-survivor states the round-3 code assigned `[]`, threaded
+      // it, and `commit.ts` resolved that to a TOTAL WIPE — the exact outcome
+      // omitting the key produces, i.e. the very defect this PR exists to stop
+      // — while logging `…partial_recovery…` with `recovered_count: 0` and the
+      // words "recovered the readable survivors". A TOTAL LOSS REPORTED AS A
+      // RECOVERY, which is worse than the original silent wipe: a "recovered"
+      // event is what stops anyone investigating.
+      //
+      // THE DISCRIMINATOR IS THE RECOVERED COUNT, NOT THE PRODUCER. Keying on
+      // which producer threw would fix only producer A — the branch the review
+      // named — and leave producer B's all-unreadable row still lying. The
+      // claim being made is "we recovered something", so the count is what it
+      // must rest on. (`readMostRecentPendingActions` is also the only place
+      // that could tell the two apart, and it throws an identical code from
+      // both; naming them apart at the producer is the larger change, rowed,
+      // not taken here.)
+      //
+      // WHAT THE ZERO-SURVIVOR CASE DOES, AND WHY IT IS SAFE. The key stays
+      // OMITTED, which is what the threading site below already promises
+      // ("Omitted (not `[]`) when the read FAILED, so the wipe stays honestly
+      // attributable"). The durable outcome is the same carry-forward loss
+      // either way — and that is acceptable HERE, specifically, because in both
+      // zero-survivor states NOTHING WAS EVER REACHABLE: a non-array column and
+      // a row of wholly unparseable entries are equally unreadable to every
+      // consumer, so this commit destroys no live proposal that any code path
+      // could have resumed. The corrupt row itself is NOT deleted — this commit
+      // APPENDS a new turn row, and the read is `.limit(1)` on the newest — so
+      // the original bytes remain in the table for a later build with a wider
+      // parser. What changes is the CLAIM: the event now says the priors were
+      // LOST, so the loss is attributable instead of disguised.
+      //
+      // Aborting the commit instead was considered and REJECTED, on the cargo
+      // argument this path already makes below and which the review accepted:
+      // refusing the commit converts a successful analysis into an unrecorded
+      // one and breaks the rerun escape hatch, which is a strictly larger harm
+      // than superseding a row nothing could read.
       //
       // Tolerant-as-PRIMARY is correctly rejected above: this commit becomes the
       // newest row, so a silent truncation would be a lossy write promoted to
@@ -1841,24 +1960,65 @@ export async function dispatchChipClickRunAnalysis(
       // ══════════════════════════════════════════════════════════════════════
       if (priorReadCode === 'pending_actions_corrupt') {
         try {
-          successPriorPendingActions = await loadMostRecentPendingActions(
-            payload.scenario_id,
-            requestId,
-          );
+          const salvaged = await loadMostRecentPendingActions(payload.scenario_id, requestId);
+          if (salvaged.length > 0) {
+            // A GENUINE partial recovery: at least one hold survived and is
+            // carried. This is the ONLY transition out of `unavailable`.
+            //
+            // ⚠ A salvage returning `[]` may NOT move us to `known_empty`. The
+            // tolerant loader returns `[]` for a non-array column, for wholly
+            // unparseable entries, for a missing store and for a failed read —
+            // none of which established that the history was empty. Treating
+            // that `[]` as knowledge is precisely the defect.
+            priorOutcome = { state: 'known_with_survivors', pendings: salvaged };
+            log.error(
+              {
+                event: 'v5.pending_wipe_partial_recovery_on_success_commit',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                turn_id: payload.turn_id,
+                recovered_count: salvaged.length,
+              },
+              'V5 chip_click run_analysis SUCCESS commit — recovered the readable survivors of a ' +
+                'corrupt pending row; entries this build cannot parse are dropped by this commit',
+            );
+          } else {
+            // ⭐ NOTHING WAS RECOVERABLE. `successPriorPendingActions` stays
+            // null so the key is OMITTED rather than threaded as `[]` — an
+            // unavailable read must not be published as an authoritative empty.
+            // The wording matches the payload: this is a LOSS, not a recovery.
+            log.error(
+              {
+                event: 'v5.pending_wipe_unrecoverable_on_success_commit',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                turn_id: payload.turn_id,
+                recovered_count: 0,
+              },
+              'V5 chip_click run_analysis SUCCESS commit — the prior pending row is unreadable and ' +
+                'NOTHING could be salvaged; any pendings it held are LOST to this commit. Not a ' +
+                'recovery: the row was already unreadable to every consumer, and its bytes remain ' +
+                'in the table because this commit appends a new newest row rather than deleting it',
+            );
+          }
+        } catch {
+          // Defence in depth only: `loadMostRecentPendingActions` swallows both
+          // a missing store and a read failure and resolves to `[]`, so at this
+          // tip it cannot throw. If a future change makes it throw, the key
+          // stays omitted and this is reported as the loss it is — never left
+          // to the reader to infer from silence.
           log.error(
             {
-              event: 'v5.pending_wipe_partial_recovery_on_success_commit',
+              event: 'v5.pending_wipe_unrecoverable_on_success_commit',
               request_id: requestId,
               scenario_id: payload.scenario_id,
               turn_id: payload.turn_id,
-              recovered_count: successPriorPendingActions?.length ?? 0,
+              recovered_count: 0,
+              salvage_threw: true,
             },
-            'V5 chip_click run_analysis SUCCESS commit — recovered the readable survivors of a ' +
-              'corrupt pending row; entries this build cannot parse are dropped by this commit',
+            'V5 chip_click run_analysis SUCCESS commit — the salvage read itself failed; any ' +
+              'pendings on the prior row are LOST to this commit',
           );
-        } catch {
-          // Tolerant read failed too — leave the key omitted and keep the
-          // already-emitted wipe-risk event as the record.
         }
       }
     }
@@ -1893,8 +2053,10 @@ export async function dispatchChipClickRunAnalysis(
         // derives this turn's own pendings from the EGRESS-finalised chips,
         // which is what keeps the "persisted pending ⟹ rendered chip"
         // invariant true.
-        ...(successPriorPendingActions !== null
-          ? { priorPendingActions: successPriorPendingActions }
+        // `priorsToThread` is the single enforcement point of the invariant:
+        // `null` (OMIT) for `unavailable`, `[]` only for an established empty.
+        ...(priorsToThread(priorOutcome) !== null
+          ? { priorPendingActions: priorsToThread(priorOutcome)! }
           : {}),
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
