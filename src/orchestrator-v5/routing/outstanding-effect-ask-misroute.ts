@@ -141,7 +141,7 @@ import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value
 //     `configure-option-clarify-response.ts`, its other consumer;
 //   · "does this message name this label?" — the same word-bounded reader
 //     `configure-option-intent` / `-advice` / `-clarify` already use.
-import { messageAnswersMissingValueAsk } from './missing-value-answer.js';
+import { messageAnswersMissingValueAsk, readMissingValueAnswer } from './missing-value-answer.js';
 import { containsPhrase } from './option-intervention-guard.js';
 
 /** The handlers this module can refuse. Both are D1 graph-mutating writers. */
@@ -312,6 +312,70 @@ function isUnanchoredAnswerToOutstandingAsk(
   return !askedPairs.some((p) => containsPhrase(padded, p.factorLabel.toLowerCase()));
 }
 
+/**
+ * ⭐⭐⭐ THE AUTHORITY ON "HOW DO WE READ THIS ANSWER?" ALREADY REFUSED TO TURN
+ * IT INTO A NUMBER — SO NO NUMBER WRITTEN HERE CAN BE THAT ANSWER.
+ *
+ * ⚠ THIS ARM EXISTS BECAUSE `!namesTheFactor` FAILS IN THE DANGEROUS DIRECTION,
+ * AND THE PRODUCT ITSELF PROMPTS THE PHRASING THAT DEFEATS IT. Review finding on
+ * #1292, measured at this tip. The witnessed harm with the factor name simply
+ * added back was NOT claimed by the unanchored arm:
+ *
+ *     "Set Operational Control Level to a third."   · "… to half."
+ *     "… to high."                                  · "no change to Operational Control Level"
+ *
+ * And the factor name is exactly what the product's own blocker copy puts in
+ * front of the user — *`Factor "Operational Control Level" needs a numeric value
+ * for option "…"`* — so **a user who echoes back the words on their screen
+ * defeated the guard.** Nothing upstream catches them either:
+ * `detectConfigureOptionIntent` returns `matched: false, trigger: null` on all
+ * four (positive control in the same run: the fully-anchored sentence returns
+ * `matched: true`).
+ *
+ * ⭐ THE DISCRIMINATOR IS THE READER'S OWN VERDICT, NOT A NEW READING OF THE
+ * TEXT. `readMissingValueAnswer` returns `qualitative` for all four and `null`
+ * for EVERY legitimate baseline twin — measured, not reasoned:
+ *
+ *     "Set Operational Control Level to a third."   → qualitative   ⇒ refuse
+ *     "Set Operational Control Level to 40%."       → null          ⇒ write
+ *     "Set Operational Control Level to 0.4"        → null          ⇒ write
+ *     "Change its baseline to 0.4."                 → null          ⇒ write
+ *     "Set Driver Retention Rate to 40%."           → null          ⇒ write
+ *
+ * A `qualitative` reading's own contract says the term is *"The user's own
+ * words, quoted back. NEVER mapped to a number."* Writing a number to the factor
+ * on such a turn is a handler overruling an authority that already answered —
+ * which is precisely the witnessed defect (`"Set it to a third."` → 33%).
+ *
+ * ⚠⚠ THE SPELLING IS POSITIVE (`=== 'qualitative'`) AND MUST STAY THAT WAY.
+ * The obvious `!== 'numeric'` would ALSO claim every `null` reading — i.e. every
+ * legitimate twin in the table above — and silently convert this guard into the
+ * blanket ban on `set_factor_value` that this module has refused since it was
+ * written.
+ *
+ * ⚠ `no_change` IS DELIBERATELY NOT IN THIS ARM, AND IT IS NOT A GAP — DERIVED,
+ * NOT ASSUMED. `readNoChange` is WHOLE-MESSAGE-ONLY: an exact match against
+ * `MISSING_VALUE_NO_CHANGE_PHRASES` after stripping one of four fixed openers
+ * (`this option ` / `the option ` / `that option ` / `it `). None of those can
+ * contain a factor label, so a `no_change` reading can never name the factor and
+ * the unanchored arm above already covers every reachable one. (Measured
+ * consequence: `"no change to Operational Control Level"` is not read as
+ * `no_change` at all — it reads `qualitative`, and this arm claims it.) If that
+ * reader ever gains a contextual form, this comment is the thing that must be
+ * re-derived.
+ *
+ * ⚠ ONE MEASURED CONSEQUENCE BEYOND THE FOUR, pinned in the spec rather than
+ * discovered later: *"Actually, Operational Control Level is currently about
+ * 40%, set it to that."* also reads `qualitative` and is now refused. The
+ * sentence is genuinely ambiguous — it asserts the factor's current level AND
+ * asks for an assignment — and the binder itself declined to extract a figure
+ * from it. Refusing costs one clarify turn on an already-blocked graph, which is
+ * this module's declared and unchanged asymmetry.
+ */
+function isAnswerTheBinderRefusedToNumber(message: string): boolean {
+  return readMissingValueAnswer(message)?.kind === 'qualitative';
+}
+
 /** Normalised exactly as the writer normalises, so the two read one string. */
 function readUserValue(message: string): number | null {
   return readOptionEffectValue(message.toLowerCase().replace(/\s+/g, ' ').trim());
@@ -379,13 +443,19 @@ export function findOutstandingEffectAskCollision(params: {
     //   · the user described an EFFECT and merely failed to anchor the option
     //     ("Set its effect on X to 0.33") — the framing is in the SENTENCE;
     //   · the user ANSWERED THE PRODUCT'S OWN QUESTION and named no factor
-    //     ("Set it to a third.")          — the framing is in the ASK.
+    //     ("Set it to a third.")          — the framing is in the ASK;
+    //   · the BINDER READ IT AS AN ANSWER AND REFUSED TO NUMBER IT
+    //     ("Set Operational Control Level to a third.")
+    //                                     — the verdict is the AUTHORITY'S.
     //
     // The second arm is what the witnessed defect needed and what no reading of
-    // the user's own words could ever have supplied.
+    // the user's own words could ever have supplied. The third is what the
+    // second still missed, because echoing back the factor name the product
+    // itself printed defeated it — see that function's header.
     if (
       !isUnanchoredEffectFraming(params.message, params.optionLabels)
       && !isUnanchoredAnswerToOutstandingAsk(params.message, match)
+      && !isAnswerTheBinderRefusedToNumber(params.message)
     ) {
       return null;
     }

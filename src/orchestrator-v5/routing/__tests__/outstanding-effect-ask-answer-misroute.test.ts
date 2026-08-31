@@ -196,6 +196,77 @@ describe('CASE 1 — an unanchored answer to the outstanding ask', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CASE 1b — THE FACTOR-NAME ECHO. Review finding on #1292.
+//
+// `!namesTheFactor` failed in the DANGEROUS direction, and the product itself
+// prompts the phrasing that defeats it: its blocker copy reads
+//   `Factor "Operational Control Level" needs a numeric value for option "…"`
+// so a user who echoes back the words ON THEIR SCREEN escaped the guard. These
+// are the witnessed harm verbatim with the factor name added.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('CASE 1b — echoing the factor name back does not license the write', () => {
+  const ECHOED = [
+    `Set ${FACTOR_LABEL} to a third.`,
+    `Set ${FACTOR_LABEL} to half.`,
+    `Set ${FACTOR_LABEL} to high.`,
+    `no change to ${FACTOR_LABEL}`,
+  ];
+
+  it('⭐⭐ all four are REFUSED, bound by identity to the asked pair', () => {
+    for (const message of ECHOED) {
+      expect(
+        collide(message)?.pairs.map((p) => `${p.optionId}::${p.factorId}`),
+        message,
+      ).toEqual([ASKED_PAIR]);
+    }
+  });
+
+  it('⭐ the discriminator is the BINDER\'S OWN VERDICT, not a new reading of the text', () => {
+    // Each of the four is read as an answer the binder refuses to turn into a
+    // number. That is why writing one to the factor is a handler overruling an
+    // authority that already answered.
+    for (const message of ECHOED) {
+      expect(readMissingValueAnswer(message)?.kind, message).toBe('qualitative');
+    }
+  });
+
+  it('⭐⭐ THE POSITIVE SPELLING IS LOAD-BEARING — every legitimate twin reads `null`', () => {
+    // `!== 'numeric'` would claim ALL of these and turn the guard into the
+    // blanket ban on `set_factor_value` this module has always refused.
+    for (const message of [
+      `Set ${FACTOR_LABEL} to 40%.`,
+      `Set ${FACTOR_LABEL} to 0.4`,
+      'Change its baseline to 0.4.',
+      'Set Driver Retention Rate to 40%.',
+      'What should I put here?',
+      'Run the analysis.',
+    ]) {
+      expect(readMissingValueAnswer(message), message).toBeNull();
+    }
+  });
+
+  it('⭐ a `no_change` reading can never name the factor — derived, not assumed', () => {
+    // `readNoChange` is WHOLE-MESSAGE-ONLY: an exact match against
+    // MISSING_VALUE_NO_CHANGE_PHRASES after stripping one of four fixed openers,
+    // none of which can contain a factor label. So the unanchored arm already
+    // covers every reachable `no_change`, and the factor-name form is not read
+    // as `no_change` at all.
+    expect(readMissingValueAnswer('no change')?.kind).toBe('no_change');
+    expect(readMissingValueAnswer(`no change to ${FACTOR_LABEL}`)?.kind).toBe('qualitative');
+  });
+
+  it('⚠ ONE MEASURED CONSEQUENCE BEYOND THE FOUR, pinned rather than discovered later', () => {
+    // Genuinely ambiguous: it asserts the factor's current level AND asks for an
+    // assignment, and the binder itself declined to extract a figure. Refusing
+    // costs one clarify turn on an already-blocked graph — this module's
+    // declared and unchanged asymmetry.
+    const message = `Actually, ${FACTOR_LABEL} is currently about 40%, set it to that.`;
+    expect(readMissingValueAnswer(message)?.kind).toBe('qualitative');
+    expect(collide(message)?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([ASKED_PAIR]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CASE 2 — THE OPPOSITE-DIRECTION TWIN. Must still WRITE.
 // Fails on a DIFFERENT assertion from CASE 1 (`toBeNull` vs identity equality).
 // ═══════════════════════════════════════════════════════════════════════════

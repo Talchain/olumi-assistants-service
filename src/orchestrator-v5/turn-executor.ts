@@ -9197,7 +9197,34 @@ export async function runTurnExecutor(
       // would silently mutate the factor's own value: the wrong entity, and
       // unrecoverable from the user's point of view. Both the LLM and
       // deterministic producers converge on this execute block BEFORE any
-      // handler runs, so one guard here covers every dispatch path.
+      // handler runs.
+      //
+      // ⚠⚠ THE SENTENCE THAT USED TO END THAT LINE — *"so one guard here covers
+      // every dispatch path"* — WAS FALSE, AND IT WAS LOAD-BEARING. Corrected in
+      // place rather than deleted, because the estate's record of how a false
+      // guarantee got here is what stops it coming back (trap 14).
+      //
+      // This is a PROPOSAL-LANE chokepoint, not a GRAPH-WRITE chokepoint. The
+      // block is nested under `intent_class === 'execute'`, and these production
+      // writers of a factor's own baseline never reach it:
+      //
+      //   · the route-level `edit_graph` lane (`route-v2.ts:6213` →
+      //     `handlers/edit-graph.ts:3019`) — `handleEditGraph` owns its own
+      //     applier and its own commit;
+      //   · the `factor_value_edit` system event (`factor-value-edit.ts:528`);
+      //   · a compound chain's parts 2..N (`approved.slice(1)`, ~:6428), each
+      //     carrying a DIFFERENT entity id from the one checked here;
+      //   · the GM held-consent apply (~:3603).
+      //
+      // And `add_constraint` PASSES this block — it is short-circuited on
+      // handler id — while writing `{value, baseline}` at
+      // `add-constraint.ts:942`.
+      //
+      // ⭐ WHAT IS STILL TRUE, AND IT IS THE ONLY THING THAT MAY BE RELIED ON:
+      // for the `set_factor_value` HANDLER ID, every producer that reaches THIS
+      // block — LLM and deterministic alike — is covered here, so the guard is
+      // route-agnostic WITHIN that lane. Any argument that needs more than that
+      // must name the writer it is claiming about and derive its path.
       // `set_factor_value` stays a legitimate handler for genuine factor
       // edits — we refuse ONLY this case, re-using the existing recoverable-
       // validator path so the turn composes a clarify and commits a
