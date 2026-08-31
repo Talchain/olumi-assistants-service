@@ -23,7 +23,7 @@ with its observed exit code.
 | Boundary | Result | What the control establishes |
 | --- | --- | --- |
 | External oracle / lawful ingress | PASS | Every record fixture is accepted by the unchanged seam; test-only semantic expectations are never passed as producer fields. |
-| Incorrect producer role | RED | A deliberately option-typed explanation retains that role, intervention and model-facing option membership; readiness becomes true. A matching source quote proves the text, not its role. |
+| Incorrect producer role | RED | A deliberately option-typed explanation retains that role, intervention and model-facing option membership; readiness remains false in this fixture. A matching source quote proves the text, not its role. |
 | User-stated versus AI-inferred origin | RED | Identical correctly typed factor records have AI origin through V3 in both briefs; the explicit-user arm loses the expected source quote. This measures V3 origin only. |
 | AI explanation | PASS | A connected factor retains exact identity and proposition, has AI origin at V3, and gains no option or intervention. |
 | Connected competing explanations | PASS | Both non-action factors and a stated fact's quote survive through canonical serialization and compact/model-facing graph formatting, with no decision/options and comparative readiness false. This does not establish a canonical hypothesis enum or numerical carriage of the fact. |
@@ -129,9 +129,10 @@ does not supply provider, persistence or deployed successor proof:
 - **USER-STATED / OLUMI-INFERRED DISTINCTION PROVEN:** NO; user-stated factor
   origin fails through V3. Future-context source fidelity is also unproven.
 - **#1268 RELATIONSHIP:** complementary containment, unchanged here.
-- **ANALYSIS BEHAVIOUR:** pure connected framing can remain not-ready without
-  options; the deliberately misfiled explanation makes readiness true. Genuine
-  supplied/synthetic action controls are ready. No completed analysis claim.
+- **ANALYSIS BEHAVIOUR:** pure connected framing and the deliberately misfiled
+  explanation fixture remain not-ready. The latter still retains the incorrect
+  role, intervention and option membership. Genuine supplied/synthetic action
+  controls are ready. No completed analysis claim.
 - **STILL UNPROVEN:** approved producer contract and generative role quality,
   full source/proposition retention, disconnected canonical retention,
   assumption/evidence/dissent semantics, persistence/reload, subsequent routed
