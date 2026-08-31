@@ -763,8 +763,48 @@ export const MISSING_VALUE_ASK_EXEMPLARS: readonly {
  * write path can act on it, keeps the product from silently choosing either
  * wrong answer on the user's behalf.
  */
+/**
+ * ⭐⭐⭐ IT NOW STATES THE ANSWER SHAPE, AND THAT IS THE HALF THAT WAS MISSING.
+ *
+ * The sentence above this one explained what the number MEANS. It never said
+ * what a REPLY should LOOK like — so the product posed a prose question and
+ * accepted only a bare figure, and the two forms were never introduced to each
+ * other. Measured at pristine `fa2c9e93`, reader AND route, one live claimant:
+ *
+ *   BINDS      `30%` · `about 30%` · `roughly 30%` · `maybe 30%` · `I think 30%`
+ *              · `set it to 30%` · `0%` · `100%` · `0.6`
+ *   DEAD-END   `it's about 30%` · `it's 30%` · `that would be 30%`
+ *              · `my guess is 30%` · `Churn rate is 30%` · `Handling time is 30%`
+ *              · `it reaches 30%` · `Thirty percent` · `approx 30%`
+ *
+ * Sixteen ordinary answers to the product's own question where the IDENTICAL
+ * demand repeats. That is the witnessed *"three attempts running now haven't
+ * landed"* loop, and every one of them is a sentence a person would actually
+ * type in reply to a question phrased as prose.
+ *
+ * ⛔ THE FIX IS NOT A WIDER PARSER. That was tried and parked after five rounds
+ * that each fixed one direction and reopened another (trap 22f); the estate's
+ * ruling is to **make the product ask for exactly what it can consume**. The
+ * binder consumes a bare percentage, so the ask now says *bare percentage* —
+ * five words, at the one place that owns this copy.
+ *
+ * ⚠ IT STAYS HUMAN, DELIBERATELY. It names a PERCENTAGE, never the internal
+ * normalised scale (the founder ruling above), and it carries NO mid-scale
+ * specimen — a copyable figure in the first thing a user reads is a number put
+ * in their mouth, and it would then be stamped `user_specified`. Only the two
+ * anchors appear, and they are interpolated from the exemplar list rather than
+ * spelled beside it, so the sentence cannot drift from the forms the spec
+ * drives through the real binder.
+ *
+ * ⚠ WHAT IT DOES NOT CLAIM. Instructing the shape does not make the dead-end
+ * phrasings bind; it stops the product INVITING them. The dead-end set is
+ * pinned exactly in `__tests__/ask-copy-acceptance-pairing.test.ts` so it REDs
+ * if it grows or shrinks — a gap recorded in the suite is honest, a gap
+ * invisible to it is how the five rounds happened.
+ */
 export const MISSING_VALUE_ASK_FORMAT_HINT: string =
-  'That number is the level the factor reaches, not how much it moves: '
+  'Just the percentage is enough — it is the level the factor reaches, '
+  + 'not how much it moves: '
   + `${MISSING_VALUE_ASK_EXEMPLARS[0]!.example} means zero, `
   + `${MISSING_VALUE_ASK_EXEMPLARS[1]!.example} means its top.`;
 

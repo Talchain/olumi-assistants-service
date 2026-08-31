@@ -22,6 +22,7 @@ import {
   MISSING_VALUE_ASK_FORMAT_HINT,
   MISSING_VALUE_NO_CHANGE_PHRASE,
   MISSING_VALUE_NO_CHANGE_PHRASES,
+  messageAnswersMissingValueAsk,
   readMissingValueAnswer,
 } from '../missing-value-answer.js';
 import { resolveRepairValueBinding } from '../repair-value-binding.js';
@@ -308,6 +309,136 @@ describe('the on-screen ask carries the hint', () => {
     const p = projectReadinessRecovery(READINESS as never, [] as never);
     expect(p.kind).toBe('provide_value');
     expect(p.nextStep).not.toMatch(/more effect value/);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⭐⭐⭐ THE ASK STATES ITS ANSWER SHAPE — measured, not assumed.
+  //
+  // Every guard above pairs the ask's SCALE claim with acceptance. None of them
+  // asked the question a stuck user actually has: **what do I type?** The hint
+  // explained what the number MEANS and never what a reply should LOOK like, so
+  // the product posed a prose question and accepted only a bare figure — and the
+  // two forms were never introduced to each other.
+  //
+  // MEASURED AT PRISTINE `fa2c9e93`, reader + route, one live claimant
+  // (`probe-matrix` / `probe-route`, both directions, controls firing):
+  //
+  //   BINDS     "30%" · "about 30%" · "roughly 30%" · "maybe 30%" · "I think 30%"
+  //             · "set it to 30%" · "0%" · "100%" · "0.6"
+  //   DEAD-END  "it's about 30%" · "it's 30%" · "that would be 30%"
+  //             · "my guess is 30%" · "Churn rate is 30%" · "Handling time is 30%"
+  //             · "it reaches 30%" · "Thirty percent" · "approx 30%"
+  //
+  // Sixteen ordinary answers where the IDENTICAL demand repeats. The fix is not
+  // a wider parser — that was tried and parked after five oscillating rounds
+  // (trap 22f). It is to ASK FOR WHAT THE BINDER CONSUMES, which the ask had
+  // simply never said.
+  // ══════════════════════════════════════════════════════════════════════════
+  it('⭐ THE ASK SAYS WHAT A REPLY LOOKS LIKE, not only what the number means', () => {
+    // The scale claim is necessary and was never sufficient. A user cannot
+    // infer "send a bare figure" from a sentence about what the figure denotes.
+    expect(
+      MISSING_VALUE_ASK_FORMAT_HINT,
+      'the ask explains the scale but never states the answer SHAPE — '
+        + 'a user replying "Churn rate is 30%" gets the identical demand back',
+    ).toMatch(/\bjust the percentage\b/i);
+  });
+
+  it('⭐⭐ EVERY FIGURE THE RENDERED ASK OFFERS BINDS — extracted at RUNTIME from the sentence a user reads', () => {
+    // ⚠⚠ THIS IS STRICTLY STRONGER THAN THE `it.each` OVER THE EXEMPLAR LIST,
+    // and the difference is the whole point. That guard drives the LIST; this
+    // one drives THE STRING THE PRODUCT ACTUALLY EMITS. The hint is composed
+    // from `MISSING_VALUE_ASK_EXEMPLARS[0]` and `[1]` today — but nothing stops
+    // a future edit spelling a third figure inline, and a list-driven guard is
+    // structurally blind to a form the copy gained without the list (trap 12d:
+    // deriving a guard MOVES the risk, it does not remove it).
+    //
+    // So: render the real recovery, scrape every percentage out of the prose,
+    // and drive each through the REAL route.
+    const projection = projectReadinessRecovery(READINESS as never, [
+      { id: 'opt-hire', kind: 'option', label: 'Hire two engineers' },
+      { id: 'fac-payroll', kind: 'factor', label: 'Payroll cost' },
+    ] as never);
+    expect(projection.kind).toBe('provide_value');
+
+    const offered = projection.nextStep.match(/\d+(?:\.\d+)?%/g) ?? [];
+    // Precondition pin (trap 13): a scrape that found nothing would pass the
+    // loop below by iterating zero times. Assert the instrument SAW something,
+    // and saw the anchors the copy owner declares.
+    expect(offered.length, `no figure found in: ${projection.nextStep}`).toBeGreaterThanOrEqual(2);
+    expect(offered).toContain(MISSING_VALUE_ASK_EXEMPLARS[0]!.example);
+    expect(offered).toContain(MISSING_VALUE_ASK_EXEMPLARS[1]!.example);
+
+    for (const example of offered) {
+      const reading = readMissingValueAnswer(example);
+      expect(reading, `the ask offers "${example}" and the reader returns null`).not.toBeNull();
+
+      const resolved = resolveRepairValueBinding({
+        message: example,
+        readiness: READINESS as never,
+      });
+      expect(resolved.matched, `the ask offers "${example}" and the route refuses it`).toBe(true);
+      if (!resolved.matched) continue;
+      expect(resolved.kind).toBe('bind');
+      if (resolved.kind !== 'bind') continue;
+      // Bound to the pair the SAME sentence names — by identity, never by value.
+      expect(resolved.pair.optionId).toBe('opt-hire');
+      expect(resolved.pair.factorId).toBe('fac-payroll');
+      const written = Number(resolved.valueText);
+      expect(written).toBeGreaterThanOrEqual(0);
+      expect(written).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('⭐ THE OPPOSITE DIRECTION — an out-of-scale or unqualified figure still mints NOTHING', () => {
+    // The twin of the guard above. Widening what the ask ADVERTISES must never
+    // widen what the route WRITES: a bare magnitude with no unit is exactly the
+    // two-scales-under-one-name cliff the design refuses (is `30` 0.30 or 30?),
+    // and it must stay refused.
+    for (const refused of ['30', '40,000', '150%', '8 minutes']) {
+      const resolved = resolveRepairValueBinding({
+        message: refused,
+        readiness: READINESS as never,
+      });
+      expect(resolved.matched, `"${refused}" must not reach a write`).toBe(false);
+    }
+  });
+
+  it('⚠ THE HONEST GAP — the dead-end corpus is pinned EXACTLY, so it REDs if it grows OR shrinks', () => {
+    // ⭐ A GAP RECORDED IN THE SUITE IS HONEST; A GAP INVISIBLE TO IT IS HOW
+    // FOUR ROUNDS HAPPENED (trap 22f). These are phrasings MEASURED dead at
+    // pristine `fa2c9e93`: the reader returns null AND the termination
+    // predicate returns false, so the identical demand repeats at the user.
+    //
+    // This lane does not widen the parser to fix them — it makes the ask stop
+    // inviting them. If a later lane widens termination, this REDs and the set
+    // shrinks DELIBERATELY. If a refactor breaks a phrasing that used to work,
+    // it REDs the other way.
+    const KNOWN_DEAD_ENDS: readonly string[] = [
+      "it's about 30%",
+      'it is about 30%',
+      "it's 30%",
+      'that would be 30%',
+      'my guess is 30%',
+      'Churn rate is 30%',
+      'Churn rate is at 30%',
+      'Handling time is 30%',
+      'the factor reaches 30%',
+      'it reaches 30%',
+      'Thirty percent',
+      'approx 30%',
+    ];
+    const stillDead = KNOWN_DEAD_ENDS.filter(
+      (m) => readMissingValueAnswer(m) === null && !messageAnswersMissingValueAsk(m),
+    );
+    expect(stillDead).toEqual(KNOWN_DEAD_ENDS);
+
+    // CONTRAST CONTROL — the probe must be capable of reporting "not dead".
+    // Without this the filter above could return everything by being blind.
+    const live = ['30%', 'about 30%', 'set it to 30%'].filter(
+      (m) => readMissingValueAnswer(m) === null && !messageAnswersMissingValueAsk(m),
+    );
+    expect(live, 'the dead-end probe is blind — it calls working phrasings dead').toEqual([]);
   });
 
   it('⚠ the hint is NOT added to asks that are about something else', () => {
