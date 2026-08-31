@@ -105,6 +105,92 @@ function governedOverlongQuote(): string {
   return node.provenance?.source_quote ?? node.label;
 }
 
+/**
+ * ⭐⭐ THE OVER-LONG OPTION'S REAL SIBLING — the OTHER course of action the same
+ * user stated in the same brief (`11-feedback-loop-trap`, node `5845e0cb`, 92
+ * chars), read out of the governed corpus rather than written here.
+ *
+ * ── WHY THIS EXISTS: THE 31 Aug STAGING RED, AND THE FIX THAT WOULD HAVE BEEN
+ * WORSE THAN THE RED ────────────────────────────────────────────────────────
+ * The badge test below is a PAIR, and the pair is the whole instrument: a
+ * SHORTENED option must earn `label_authored`, and an ORDINARY one must not.
+ * Its ordinary arm used to be the hand-written `"cut prices"`.
+ *
+ * #1180 (this spec) and #1206 (`101219c6`, "an option is a course of action")
+ * were each green alone and red together, with no textual conflict: #1206 added
+ * `deriveOptionActionLabel` at the display boundary (`schema-v3.ts:1337-1345`),
+ * which authors a label for any option quote it can name as a course of action.
+ * `"cut prices"` is exactly that — two tokens, no deliberation frame, no clause
+ * to discard — so it became `"Cut Prices"` with `label_authored: true`, and the
+ * ordinary arm's `toBeUndefined()` stopped holding.
+ *
+ * ⚠ THE ASSERTION IS NOT WHAT WAS WRONG. Flipping `toBeUndefined()` to
+ * `toBe(true)` turns the suite green and DESTROYS the discrimination: under
+ * #1206 both arms are authored, so a flipped assertion would assert nothing
+ * whatever about the bound — the one property this spec exists to protect. The
+ * FIXTURE is what had to catch up.
+ *
+ * ── WHY THIS QUOTE ─────────────────────────────────────────────────────────
+ * It is not a tidier invention; it is the real staging sibling of the real
+ * over-long option, so the pair is now two alternatives a real user actually
+ * stated in one brief (trap 16 — a fixture a lane writes for itself is not
+ * evidence about the wire). It is 92 chars, so THE BOUND LEAVES IT ALONE, and
+ * `deriveOptionActionLabel` REFUSES it (`clause_discarded`: the trailing "who
+ * hand-pick supplier recommendations" would be thrown away). Nothing authors
+ * it, so it reaches the wire as the user's own verbatim.
+ *
+ * ── HOW THE REFUSAL IS PINNED, AND WHY NOT BY ITS `reason` ─────────────────
+ * At the WIRE (`label === the quote` in the test below), not by re-calling
+ * `deriveOptionActionLabel` here. The two are not the same assertion and the
+ * wire one is STRICTLY BROADER: re-calling the producer proves only what this
+ * file believes about that function, while the wire pin proves that NOTHING in
+ * the whole chain — the bound, this deriver, `structure/index.ts`, the v3
+ * transform — authored that label. A `reason === "clause_discarded"` pin would
+ * pass just as happily while some other hop had authored it.
+ *
+ * And this arm does not depend on WHICH refusal it gets: it needs an option
+ * nothing authored, so a quote that began refusing for a different structural
+ * reason would still be doing its job here, while a `reason` pin would red on a
+ * change that cannot affect this spec's property. Which quotes refuse, and for
+ * which reason, is pinned once in `option-action-labels.test.ts` — restating it
+ * here would be two answers to one question (trap 21).
+ *
+ * ── THE ALTERNATIVES CONSIDERED, SO A REVIEWER NEED NOT RE-DERIVE THEM ──────
+ * · `"Should we hire a sales lead?"` (#1206's witnessed `asks_a_question`
+ *   refusal). Real, and already pinned there — but it is NOT IN THIS CORPUS
+ *   (measured: 0 occurrences in the frozen baseline, against 2 for the quote
+ *   above), so it would have to be hand-written into a file whose whole
+ *   discipline is reading its fixtures out of the governed capture. It is also
+ *   a QUESTION — a specimen of the misclassification #1206's instruction half
+ *   exists to stop — which reads oddly as the "ordinary option" arm of an
+ *   over-correction control, and dates the fixture to a defect we intend to
+ *   remove.
+ * · The `"hire a sales lead?"` / `"hire a sales lead"` minimal pair. A genuinely
+ *   elegant discriminator — for the DERIVER'S REFUSAL PREDICATE, which is
+ *   #1206's property and is already pinned by it. This spec's question is
+ *   whether THE BOUND stamps authorship on what it shortened and only on that;
+ *   the refusal is a means here, not the subject.
+ */
+function governedOrdinaryOptionQuote(): string {
+  const withOverlong = corpusCases().find((c) =>
+    (c.graph?.nodes ?? []).some((n) => n.label.length > NODE_LABEL_MAX_CHARS),
+  );
+  if (!withOverlong) throw new Error("corpus carries no over-long label — instrument is blind");
+  const siblings = (withOverlong.graph?.nodes ?? [])
+    .filter((n) => n.kind === "option")
+    .map((n) => n.provenance?.source_quote ?? "")
+    .filter((q) => q.length > 0 && q.length <= NODE_LABEL_MAX_CHARS);
+  // Derived, not mirrored (trap 12) — and it fails loud in BOTH directions: a
+  // zero means the corpus no longer carries the pair this test is built on, and
+  // a two means the choice has become ambiguous and a reader must make it.
+  if (siblings.length !== 1) {
+    throw new Error(
+      `expected exactly one within-bound option sibling of the over-long one, found ${siblings.length}`,
+    );
+  }
+  return siblings[0]!;
+}
+
 /** The whole live chain, exactly as `structure/index.ts:392` documents it. */
 function driveTheRealChain(records: DraftRecordSet, brief: string) {
   const projection = projectRecordsToGraph(records, brief);
@@ -333,12 +419,13 @@ describe("an over-long brief sentence still produces a contract-valid graph", ()
    */
   it("shortening an option's label does NOT flip its provenance badge", () => {
     const quote = governedOverlongQuote();
-    const brief = `We must grow. We could ${quote}. Or cut prices.`;
+    const ordinaryQuote = governedOrdinaryOptionQuote();
+    const brief = `We must grow. We could ${quote}. Alternatively, ${ordinaryQuote}.`;
     const records: DraftRecordSet = {
       stated_items: [
         { kind: "goal", source_quote: "grow marketplace liquidity" },
         { kind: "option", source_quote: quote },
-        { kind: "option", source_quote: "cut prices" },
+        { kind: "option", source_quote: ordinaryQuote },
       ],
       claims: [
         { claim_kind: "factor", label: "Match Quality", basis: [1] },
@@ -363,12 +450,33 @@ describe("an over-long brief sentence still produces a contract-valid graph", ()
       (n) => n.kind === "option",
     );
 
-    const shortened = options.find((n) => String(n.label).endsWith("…"));
-    const ordinary = options.find((n) => !String(n.label).endsWith("…"));
+    // ⭐ BOUND BY IDENTITY, never by a value predicate another option could
+    // satisfy (trap 19). These used to be found by `label.endsWith("…")` and its
+    // negation, which identifies an arm by the very property under test: any
+    // change that shortened both, or neither, would have silently re-pointed
+    // both `find`s at one node — or at none — rather than failing.
+    const shortened = options.find((n) => String(n.source_quote) === quote);
+    const ordinary = options.find((n) => String(n.source_quote) === ordinaryQuote);
 
     // PIN BOTH PRECONDITIONS, or the comparison below is between two nothings.
-    expect(shortened, "one option must have been shortened").toBeDefined();
-    expect(ordinary, "one option must NOT have been shortened").toBeDefined();
+    expect(shortened, "the over-long option must reach the wire").toBeDefined();
+    expect(ordinary, "the within-bound option must reach the wire").toBeDefined();
+    expect(
+      String(shortened!.label).endsWith("…"),
+      "the over-long option must actually have been shortened",
+    ).toBe(true);
+
+    // ⭐⭐ AND THE PRECONDITION THE 31 Aug RED PROVED IS NOT OPTIONAL. The
+    // ordinary arm only discriminates while something is genuinely leaving this
+    // label alone — when #1206 began authoring the previous fixture, the arm
+    // stopped being an arm. So the "untouched" half is now ASSERTED, at the
+    // wire, before anything is concluded from it: the label that arrives IS the
+    // user's verbatim, and it is within bound so the bound had no work to do.
+    expect(ordinaryQuote.length).toBeLessThanOrEqual(NODE_LABEL_MAX_CHARS);
+    expect(
+      String(ordinary!.label),
+      "nothing may author the ordinary option's label, or this pair stops discriminating",
+    ).toBe(ordinaryQuote);
 
     // ⭐ THE DISCRIMINATION: the shortened option keeps the SAME badge as the
     // untouched one. A single-armed assertion could not tell "correct" from
