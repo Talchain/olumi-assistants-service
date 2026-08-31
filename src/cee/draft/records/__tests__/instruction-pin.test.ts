@@ -666,7 +666,7 @@ describe("the draft records instruction preserves source identity and historical
     );
   });
 
-  it("pins the v5 CONNECT half independently, so the half that changed is legible", () => {
+  it("pins the v13 SOURCE CANDIDATE CONNECT half independently, preserving historical attribution", () => {
     // v4 changes the connect half too: "chain the option the USER named" replaces
     // v3's "an option_refinement IS an option needing its own chain". That v3
     // sentence closed one direction of a defect and opened its mirror — the model
@@ -684,10 +684,18 @@ describe("the draft records instruction preserves source identity and historical
     // for: this edit is legible as "the option-effect-value section changed"
     // without reading the diff. See the v10 block above for why the sentence it
     // replaced was false at `f18d941b`.
+    // v13 changes only this half: bounded numberless reasoning factors may stay
+    // disconnected. This SOURCE CANDIDATE has no live producer/PMS measurement.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("b631a9538e5c1e9a5bcb1e0c884c2cb81f7920ab5c1b61f3a15ba12d106691f9");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4544);
+    ).toBe("d57325271db09478de0f83d547d4331a69c6ea034c0257fbb0c1128aea4c707e");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4896);
+    // HISTORIC — v10/v11/v12's shared connect half stays distinct so earlier
+    // measurements cannot silently become evidence for this unmeasured candidate.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("b631a9538e5c1e9a5bcb1e0c884c2cb81f7920ab5c1b61f3a15ba12d106691f9");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(4544);
     // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
     // the 1-of-23 measurement was served these bytes.
     expect(
