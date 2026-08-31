@@ -110,7 +110,13 @@ behind one nominal deployment. Matching samples need two distinct responses per
 observed instance spanning the known effective cache expiry, with observed cache
 reload. `settling` specifies `notBefore`, `effectiveExpiryMs` and a source
 component reference; before-cutoff observations remain in the report. Duplicate
-bodies do not count twice. Optional `expectedInstanceIds` is a requested sample
+bodies do not count twice. Serving/promotion current-response levels reuse the
+issued fleet's **non-deduplicated** window only after validating the complete
+receipt collection, mode and configuration. Historical selection differences
+remain visible without becoming current-cache failures; corrupt or unbound
+history still fails integrity. Without a bound fleet window, all supplied
+responses participate. An empty current window is UNVERIFIED, never PASS.
+Optional `expectedInstanceIds` is a requested sample
 set, not an authoritative fleet inventory. The existing `instance_id` is a
 prompt-loader process marker, not a platform inventory. Matching observed instances never
 means universal deployment convergence.
@@ -123,6 +129,9 @@ handoff. This tools-only change does not add that instrumentation. The separate
 local-response replay checks immutable provider bodies through the real parser
 and immediate graph consumer; it does not certify final canonical consumption,
 deployed traffic or reasoning quality merely because identity matches.
+
+Primary has explicitly deferred the production telemetry boundary until
+post-Monday ([ruling](https://github.com/Talchain/olumi-programme-docs/issues/26#issuecomment-5479713730)).
 
 Exit 1 means a detected contradiction; exit 2 means incomplete proof. Only CC
 can assign/integrate serving instrumentation and perform promotion or rollback.

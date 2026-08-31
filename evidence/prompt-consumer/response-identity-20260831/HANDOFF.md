@@ -38,6 +38,31 @@ This is historical local-provider origin plus initial-consumer replay, NOT a new
 model draw, observed deployed response, full adapter/canonical lineage or user
 journey. No specific prompt block is isolated as the cause of the degradation.
 
+## Independent window-scope correction
+
+[Independent review](https://github.com/Talchain/olumi-assistants-service/pull/1271#issuecomment-5479798614)
+at `1e2dd1435de7429078eefe26e46f0390107b6a5a` found one tools-only false FAIL:
+fleet excluded a valid pre-cutoff predecessor, but serving/promotion reaggregated
+it into current response levels. The review's five-case test reproduced 4/5
+before the correction and 5/5 afterward. Its source/reports remain at
+programme-docs `26fae0d0636cf959aaa20f09faa8495d94674606`, under
+`codex-evidence/resume-20260831/1271-response-review/`.
+
+The existing serving evaluator now reuses the validated fleet's
+`windowResponses`, not deduplicated sample counts. Full decoded history remains
+retained and receipt/mode/configuration/integrity checked. No caller filtering
+is required or accepted. Inside-window and no-cutoff contradictions remain FAIL;
+matching current selection remains PASS only at that narrow rung. Complete
+response/provider and promotion evidence remain UNVERIFIED.
+
+`response-window.test.ts` adopts the independent five cases and adds vertical
+collection-binding, duplicate-association, fleet-authority, historical-integrity,
+empty-window and observed-status controls. These are explicitly synthetic
+captures through the actual metadata producer/decoder/fleet/serving/promotion,
+not new HTTP/provider draws or deployed acceptance. Use the exact corrected head
+and validation report in the PR delivery comment; independent re-review is still
+required and the original CHANGES_REQUIRED verdict is not self-overturned.
+
 ## First unclosed link: assigned serving telemetry
 
 Current-source inspection was pinned to
@@ -63,6 +88,8 @@ schema (explicit absence on degradation), returned model, output hashes and
 consumer invocation. Do not infer invocation from source hashes alone.
 
 This cross-boundary production work remains UNASSIGNED in this successor.
+Primary explicitly deferred it until post-Monday in
+[ruling 5479713730](https://github.com/Talchain/olumi-programme-docs/issues/26#issuecomment-5479713730).
 No `src`, prompt, schema, dependency, model-selection or deployment changes are
 included. Primary must assign its exact target/head/integration order before it
 is built; CC alone integrates, deploys, promotes or rolls back. Independent

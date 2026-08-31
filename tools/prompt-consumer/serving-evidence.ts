@@ -333,13 +333,13 @@ export function evaluateServingEvidence(input: ServingEvidenceInput): ServingEvi
     if (response.mode !== input.mode || response.configurationSha256 !== configurationHash(config)) {
       responseCollectionStatus = 'FAIL'; responseIssues.push('Actual response targets a different mode/configuration');
     }
+    // A cutoff excludes historical selection, never evidence-integrity failures.
+    responseCollectionStatus = statusOf([responseCollectionStatus, response.levels.binding.status]);
+    if (response.levels.binding.status !== 'PASS') responseIssues.push(...response.levels.binding.issues);
   }
-  const actualResponse: Level = { status: statusOf([responseCollectionStatus, responseIdentities.length ? 'PASS' : 'UNVERIFIED', ...responseIdentities.map(r => r.status)]),
-    issues: responseIdentities.length ? responseIssues : [...responseIssues, 'No actual response telemetry supplied; GET snapshots and local provider probes cannot substitute'] };
-  const actualResponseSelection: Level = { status: statusOf([responseCollectionStatus, responseIdentities.length ? 'PASS' : 'UNVERIFIED',
-    ...responseIdentities.flatMap(r => [r.levels.binding.status, r.levels.selectedPrompt.status, r.levels.requestedModel.status, r.levels.instance.status, r.levels.build.status])]), issues: responseIssues };
   let fleet: Level = { status: 'UNVERIFIED', issues: ['No per-response observed-instance settling evidence supplied'] };
   let responseFleet: ResponseFleetReport | null = null;
+  let currentResponses: readonly ResponseIdentityReport[] = responseIdentities;
   if (input.responseFleet) {
     const candidate = input.responseFleet;
     if (!isResponseFleetReport(candidate) || candidate.mode !== input.mode || candidate.configurationSha256 !== configurationHash(config)) {
@@ -350,19 +350,27 @@ export function evaluateServingEvidence(input: ServingEvidenceInput): ServingEvi
       // same evidence. Compare complete decoded receipts, not body hashes alone.
       const responseHashes = [...new Set(responseIdentities.map(r => evidenceHash(r)))].sort();
       const fleetHashes = [...new Set(candidate.responses.map(r => evidenceHash(r)))].sort();
-      fleet = JSON.stringify(responseHashes) === JSON.stringify(fleetHashes)
-        ? { status: candidate.status, issues: candidate.issues }
-        : { status: 'FAIL', issues: ['Fleet evidence and actual response collection disagree'] };
+      if (JSON.stringify(responseHashes) === JSON.stringify(fleetHashes)) {
+        fleet = { status: candidate.status, issues: candidate.issues };
+        // Reuse the issued fleet's declared window only after whole-history
+        // receipt/mode/configuration binding. Keep duplicates: deduplication is
+        // solely for sample counts and must not hide a conflicting association.
+        currentResponses = candidate.windowResponses;
+      } else fleet = { status: 'FAIL', issues: ['Fleet evidence and actual response collection disagree'] };
     }
   }
+  const actualResponse: Level = { status: statusOf([responseCollectionStatus, currentResponses.length ? 'PASS' : 'UNVERIFIED', ...currentResponses.map(r => r.status)]),
+    issues: currentResponses.length ? responseIssues : [...responseIssues, 'No actual response telemetry supplied in the current window; GET snapshots and local provider probes cannot substitute'] };
+  const actualResponseSelection: Level = { status: statusOf([responseCollectionStatus, currentResponses.length ? 'PASS' : 'UNVERIFIED',
+    ...currentResponses.flatMap(r => [r.levels.binding.status, r.levels.selectedPrompt.status, r.levels.requestedModel.status, r.levels.instance.status, r.levels.build.status])]), issues: responseIssues };
   const deployedProviderStatus = input.mode === 'observed'
-    ? statusOf([actualResponse.status, responseIdentities.length ? 'PASS' : 'UNVERIFIED', ...responseIdentities.flatMap(r => [r.levels.binding.status, r.levels.providerBound.status, r.levels.build.status])]) : 'UNVERIFIED';
+    ? statusOf([actualResponse.status, currentResponses.length ? 'PASS' : 'UNVERIFIED', ...currentResponses.flatMap(r => [r.levels.binding.status, r.levels.providerBound.status, r.levels.build.status])]) : 'UNVERIFIED';
   const result: ServingEvidenceReport = frozen({
     configuration: config, configurationSha256: configurationHash(config), evidenceSha256: evidenceHash(input), mode: input.mode,
     levels, configuredModels, cacheWindow: { status: cacheStatus, issues: cacheIssues }, promptIdentityStatus, identityStatus,
     status: statusOf([identityStatus, levels.providerBound.status, levels.deployed.status, levels.observed.status, levels.configuredRouter.status, actualResponse.status, fleet.status]), observationCount: count, deployedProviderStatus,
     actualResponse, actualResponseSelection, responseIdentities, responseFleet, fleet,
-    limitation: 'PASS is identity scope only. GET loaded evidence binds a digest prefix/length/edge bytes to selected PMS bytes, not an individual response. Configured identities and generic verifier callbacks are not server-origin observations. Per-response telemetry and observed-instance consistency are separate; missing composition/provider fields stay UNVERIFIED. Neither a requested instance list nor a sample proves whole-fleet convergence. No semantic/promotion certification.',
+    limitation: 'PASS is identity scope only. GET loaded evidence binds a digest prefix/length/edge bytes to selected PMS bytes, not an individual response. Configured identities and generic verifier callbacks are not server-origin observations. Full response history is retained and integrity-checked; current response levels use the bound fleet window, or all supplied responses without one. Missing composition/provider fields stay UNVERIFIED. Neither a requested instance list nor a sample proves whole-fleet convergence. No semantic/promotion certification.',
     deploymentPermission: 'NOT_GRANTED',
   });
   issuedServingReports.add(result);

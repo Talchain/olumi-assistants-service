@@ -40,6 +40,13 @@ export function evaluateResponseIdentity(input: {
     if (levels[name].status !== 'FAIL') levels[name].status = status;
     if (issue) levels[name].issues.push(issue);
   };
+  // Intrinsic corruption/contradiction cannot be excused as an old selection
+  // outside a promotion window. Expected-configuration mismatches stay scoped
+  // to their individual identity level instead.
+  const invalid = (name: LevelName, issue: string) => {
+    add(name, 'FAIL', issue);
+    if (name !== 'binding') add('binding', 'FAIL', issue);
+  };
   const object = (value: unknown, path: string): Record<string, unknown> => {
     if (!present(value)) return {};
     if (!record(value)) { add('binding', 'FAIL', `${path} is not an object`); return {}; }
@@ -47,9 +54,9 @@ export function evaluateResponseIdentity(input: {
   };
   const same = (name: LevelName, label: string, values: unknown[]): string | null => {
     const available = values.filter(present);
-    if (available.some(v => typeof v !== 'string')) add(name, 'FAIL', `${label} is invalid`);
+    if (available.some(v => typeof v !== 'string')) invalid(name, `${label} is invalid`);
     const strings = available.filter((v): v is string => typeof v === 'string');
-    if (new Set(strings).size > 1) add(name, 'FAIL', `contradictory ${label}`);
+    if (new Set(strings).size > 1) invalid(name, `contradictory ${label}`);
     return new Set(strings).size === 1 ? strings[0]! : null;
   };
   let body: Record<string, unknown> = {}, v5 = false;
@@ -98,11 +105,11 @@ export function evaluateResponseIdentity(input: {
   const match = versionText?.match(/^([^\s@]+)@v([1-9]\d*) \((?:staging|production)\)$/);
   const prompt = { id: match?.[1] ?? null, version: match ? Number(match[2]) : null,
     sha256: same('selectedPrompt', 'prompt hash', v5 ? [...identities.map(r => r.hash), correlation.prompt_hash] : [meta.prompt_hash, trace.prompt_hash, provenance.prompt_hash]) };
-  if (versionText && !match && !versionText.startsWith('default:')) add('selectedPrompt', 'FAIL', 'invalid current draft prompt_version syntax');
+  if (versionText && !match && !versionText.startsWith('default:')) invalid('selectedPrompt', 'invalid current draft prompt_version syntax');
   if (versionText?.startsWith('default:')) add('selectedPrompt', 'FAIL', 'response used a default prompt, not the configured PMS prompt');
-  if (prompt.sha256 && !/^[a-f0-9]{16,64}$/.test(prompt.sha256)) add('selectedPrompt', 'FAIL', 'selected prompt digest is invalid');
+  if (prompt.sha256 && !/^[a-f0-9]{16,64}$/.test(prompt.sha256)) invalid('selectedPrompt', 'selected prompt digest is invalid');
   if ((prompt.id && prompt.id !== config.prompt.id) || (prompt.version !== null && prompt.version !== config.prompt.version) || (prompt.sha256 && !config.prompt.sha256.startsWith(prompt.sha256))) add('selectedPrompt', 'FAIL', 'selected prompt differs from intended configuration');
-  if (present(provenance.prompt_store_version) && (!Number.isInteger(provenance.prompt_store_version) || (prompt.version !== null && provenance.prompt_store_version !== prompt.version))) add('selectedPrompt', 'FAIL', 'provenance prompt store version disagrees');
+  if (present(provenance.prompt_store_version) && (!Number.isInteger(provenance.prompt_store_version) || (prompt.version !== null && provenance.prompt_store_version !== prompt.version))) invalid('selectedPrompt', 'provenance prompt store version disagrees');
   if (prompt.id && prompt.version !== null && fullHash(prompt.sha256)) add('selectedPrompt', 'PASS');
   const requestedModel = same('requestedModel', 'requested model', v5 ? calls.map(r => r.model) : [meta.model, trace.model, provenance.model, provenance.model_id, engine.model]);
   const provider = same('requestedModel', 'reported provider', v5 ? calls.map(r => r.provider) : [engine.provider]);
@@ -114,17 +121,17 @@ export function evaluateResponseIdentity(input: {
   const cacheAge = v5 ? undefined : meta.cache_age_ms, cacheState = v5 ? undefined : meta.cache_status;
   const cacheAgeMs = typeof cacheAge === 'number' && Number.isFinite(cacheAge) && cacheAge >= 0 ? cacheAge : null;
   const cacheStatus = typeof cacheState === 'string' && ['fresh', 'stale', 'expired', 'miss'].includes(cacheState) ? cacheState : null;
-  if ((present(cacheAge) && cacheAgeMs === null) || (present(cacheState) && cacheStatus === null)) add('instance', 'FAIL', 'invalid cache metadata');
+  if ((present(cacheAge) && cacheAgeMs === null) || (present(cacheState) && cacheStatus === null)) invalid('instance', 'invalid cache metadata');
   const builds = [capture.serviceBuild, v5 ? environment.build_sha : provenance.commit].filter(present);
   let sourceHead: string | null = null;
   for (const build of builds) {
-    if (typeof build !== 'string' || !/^[a-f0-9]{7,40}$/.test(build)) add('build', 'FAIL', 'observed build identity is invalid');
+    if (typeof build !== 'string' || !/^[a-f0-9]{7,40}$/.test(build)) invalid('build', 'observed build identity is invalid');
     else {
       if (build.length === 40 && sourceHead === null) sourceHead = build;
       if (!config.sourceHead.startsWith(build)) add('build', 'FAIL', `observed build ${build} differs from intended full source head ${config.sourceHead}`);
     }
   }
-  if (builds.length > 1 && typeof builds[0] === 'string' && typeof builds[1] === 'string' && !builds[0].startsWith(builds[1]) && !builds[1].startsWith(builds[0])) add('build', 'FAIL', `conflicting observed build identities: ${builds.join(' / ')}`);
+  if (builds.length > 1 && typeof builds[0] === 'string' && typeof builds[1] === 'string' && !builds[0].startsWith(builds[1]) && !builds[1].startsWith(builds[0])) invalid('build', `conflicting observed build identities: ${builds.join(' / ')}`);
   if (sourceHead) add('build', 'PASS', 'Explicit full build identity is source-derived, not observed component execution.');
   else add('build', 'UNVERIFIED', 'No explicit full build identity; a matching short prefix is not a full-head observation.');
   for (const name of ['providerBound', 'instruction', 'schema', 'parser', 'projector', 'consumer'] as const) add(name, 'UNVERIFIED', name === 'providerBound'
