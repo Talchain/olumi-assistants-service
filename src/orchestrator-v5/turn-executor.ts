@@ -10239,6 +10239,20 @@ export async function runTurnExecutor(
           signal: turnAbort.signal,
           orientationText: routingResult.orientationText,
           proposal: action,
+          // ⭐ BASELINE-ANSWER AUTHORITY — threaded ONLY when this turn is a
+          // reply to a live baseline question that named its own subject. The
+          // handler uses it to record the baseline WITHOUT touching the success
+          // constraint on the same node: one target carries two semantic
+          // quantities, and answering about one is not permission to rewrite
+          // the other. Absent on every ordinary edit, and absence changes
+          // nothing.
+          ...(resolvedBaselineAnswerAuthority !== null
+            ? {
+                baselineAnswerAuthority: {
+                  targetId: resolvedBaselineAnswerAuthority.targetId,
+                },
+              }
+            : {}),
           analysisReady: analysisReadyForTurn,
           explanation: explanationInvocationPayload,
           analysisProjection,

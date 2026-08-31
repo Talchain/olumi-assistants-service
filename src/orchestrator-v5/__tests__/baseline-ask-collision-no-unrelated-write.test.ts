@@ -654,3 +654,138 @@ describe("the product's offered answer commits, and licenses nothing else", () =
     expect(response.assistant_text).toContain('Two of my questions are open at once');
   });
 });
+
+
+
+/**
+ * ⭐⭐ ONE TARGET, TWO SEMANTIC QUANTITIES — and answering about one is not
+ * permission to rewrite the other.
+ *
+ * The warrant that admits an answer is scoped to (handler, target). That is one
+ * scope too coarse: a target carries its BASELINE (where it is now) and its
+ * SUCCESS CONSTRAINT (where the user needs it to get to). Measured at the head
+ * before this fix, the offered answer "Churn rate is 30%" with a model proposal
+ * of 30:
+ *
+ *   - rewrote the user's own 10% success limit to 30%;
+ *   - DROPPED its `value_frame: level`;
+ *   - recorded NO baseline at all;
+ *   - replied "Updated constraint: Churn rate must be at most 30%."
+ *
+ * A user answering a question the product asked had their own success criterion
+ * silently rewritten — worse than the refusal this branch set out to fix.
+ *
+ * The two failures share one cause: the frame is inherited only while the value
+ * and unit are unchanged, so a turn that "updates" the limit to the answer's
+ * number destroys the attestation the baseline mint depends on. Preserving the
+ * row is what makes the baseline recordable.
+ *
+ * BOTH DIRECTIONS, SAME RUN. The explicit-limit-change twin is the counterpart:
+ * identical graph, identical handler, entity, unit and proposal value 30 —
+ * changing ONLY the message — and it must still write 30%.
+ */
+describe('an answer states a current level, never a new limit', () => {
+  const offered = (() => {
+    const copy = formatBaselineAskCollision({
+      targetLabel: TARGET_LABEL,
+      competing: [effectPending()],
+    });
+    const m = /for example "([^"]+)"/.exec(copy);
+    if (m === null) throw new Error(`collision copy no longer offers an example:\n${copy}`);
+    return m[1]!;
+  })();
+
+  /** The persisted row for the target, by IDENTITY, out of the PERSISTED graph. */
+  function rowOnTarget(): Record<string, unknown> | undefined {
+    return constraintsOn(stateAfterTurn(), TARGET_ID)[0];
+  }
+
+  it('THE ANSWER PRESERVES THE SUCCESS LIMIT and records the baseline', async () => {
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(payload(offered), 'req-answer-preserves-limit', {
+      // The proposal a model plausibly makes when it mis-reads the answer as a
+      // limit: the SAME number the user stated. This is the witnessed shape.
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 30),
+      graphState: mintEligibleGraph(),
+    });
+
+    // The user's own success criterion is untouched — operator, value, unit AND
+    // frame, each asserted, because the witnessed defect corrupted value and
+    // frame together.
+    expect(rowOnTarget()).toMatchObject({
+      node_id: TARGET_ID,
+      operator: '<=',
+      value: 10,
+      unit: '%',
+      value_frame: 'level',
+    });
+    // And the answer is actually recorded.
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+    // The receipt says what happened, and does not claim an update.
+    expect(response.assistant_text).not.toContain('Updated constraint');
+  });
+
+  it('EXPLICIT LIMIT CHANGE TWIN — the same proposal from a real instruction still writes 30%', async () => {
+    // The counterpart, and the reason the fix is authority-scoped rather than a
+    // blanket "never touch constraints on an answer turn". Same graph, same
+    // handler, entity, unit and proposal value; ONLY the message differs. If
+    // this ever stops writing, the fix has become a blanket handler ban.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const { response } = await runTurnExecutor(
+      payload(`Add a constraint: ${TARGET_LABEL} must be at most 30%.`),
+      'req-explicit-limit-change',
+      {
+        routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 30),
+        graphState: mintEligibleGraph(),
+      },
+    );
+
+    expect(rowOnTarget()).toMatchObject({ operator: '<=', value: 30 });
+    expect(response.assistant_text).toContain('Updated constraint');
+  });
+
+  it('a mis-read operator cannot append a second limit either', async () => {
+    // The same harm wearing a different shape: a model that reads the answer as
+    // a limit may also propose the OTHER operator, which would not match the
+    // existing row and would append rather than overwrite. Matching on the
+    // TARGET rather than the proposed operator is what closes this.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+
+    const adapter = {
+      chatWithTools: vi
+        .fn<(a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () =>
+          mkToolUseResult({
+            intent_class: 'execute',
+            action: {
+              handler_id: 'add_constraint',
+              entity: {
+                id: TARGET_ID,
+                kind: 'node',
+                label: TARGET_LABEL,
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [
+                { name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+                { name: 'value', value: 30, source: 'user_explicit' },
+                { name: 'unit', value: '%', source: 'user_explicit' },
+              ],
+              cited_context_fields: [],
+            },
+          }),
+        ),
+    };
+
+    await runTurnExecutor(payload(offered), 'req-answer-wrong-operator', {
+      routingAdapter: adapter,
+      graphState: mintEligibleGraph(),
+    });
+
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)).toHaveLength(1);
+    expect(rowOnTarget()).toMatchObject({ operator: '<=', value: 10, value_frame: 'level' });
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+  });
+});
