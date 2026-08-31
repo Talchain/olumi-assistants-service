@@ -63,7 +63,7 @@ function drive(records: DraftRecordSet, brief: string): Chain {
   return {
     graph: projected.graph,
     options: projected.options as never,
-    nodes: (projected.graph as { nodes: never[] }).nodes,
+    nodes: projected.graph.nodes,
     safeToAnalyse: assessment.safeToAnalyse,
     status: (assessment.analysisReady as { status?: string } | undefined)?.status,
     blocking: assessment.blockingIssues.map((i) => i.code),
