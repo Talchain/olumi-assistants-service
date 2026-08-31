@@ -33,6 +33,11 @@
 import { describe, it, expect } from 'vitest';
 import { OBSERVED_STATE_SOURCE_LITERALS } from '@talchain/schemas';
 import { compactGraph } from '../../../../src/orchestrator/context/graph-compact.js';
+import {
+  FORGEABLE_USER_AUTHORSHIP_LITERALS,
+  valueSourceAuthorship,
+} from '../../../../src/cee/transforms/provenance-display.js';
+import { USER_EDIT_SOURCE } from '../../../../src/orchestrator/canonicalise-value-ops.js';
 import type { GraphV3T } from '../../../../src/schemas/cee-v3.js';
 
 type ObservedState = Record<string, unknown>;
@@ -267,5 +272,99 @@ describe('compactGraph — the user typed this number, and the model must be tol
     const n = nodeById(g, 'fac_panel');
     expect(n.provenance).not.toBe('ai_inferred');
     expect(n.source).not.toBe('assumption');
+  });
+});
+
+/**
+ * ⚠⚠ THE KNOWN GAP, PINNED IN THE SUITE RATHER THAN LEFT IN PROSE.
+ *
+ * Every test above sits on the SAFE side of one predicate: they all assert that
+ * a user-authored value is not called the model's own. None of them can observe
+ * the opposite error — the product telling a user *"you gave me this figure"*
+ * about a value they never supplied — because the stamp this projection trusts
+ * is not a single-meaning receipt.
+ *
+ * `stampUserEditProvenance` (`orchestrator/canonicalise-value-ops.ts`) writes
+ * `USER_EDIT_SOURCE` onto EVERY value-writing `update_node` op reaching either
+ * edit seam, overriding an explicit LLM-claimed producer source. And
+ * `orchestrator-v5/routing/mutation-consent.ts` records that `edit_graph` is
+ * *"genuinely UNCOVERED by withheld-consent enforcement"*, with `update_node`
+ * ops applying *"regardless of what the user's message asked for"* (ROADMAP
+ * 2.628a). `cee/context-integrity/not-modelled-manifest.ts` states the
+ * consequence outright: one literal serves both (a) a genuine user edit and
+ * (b) a MODEL-AUTHORED op.
+ *
+ * The gap is ACCEPTED — making `user_override` defer would reopen the defect
+ * this whole file exists to close, for the common case, in exchange for a rarer
+ * one. What is NOT acceptable is that it be invisible. So it is pinned as a
+ * set, and this block asserts that set EXACTLY: it REDs if a literal is added
+ * to it AND if one is removed, which is the estate's honest-gap rule.
+ */
+describe('the forged-stamp gap is pinned, not merely described', () => {
+  const pinned = [...FORGEABLE_USER_AUTHORSHIP_LITERALS].sort();
+
+  /**
+   * `toEqual` on the whole set, not `toContain`. A containment check would stay
+   * green as class (b) grew, which is precisely the blindness being fixed.
+   */
+  it('⭐ the gap set is EXACTLY the literals whose user_set verdict rests on a forgeable stamp', () => {
+    expect(pinned).toEqual(['user_override']);
+  });
+
+  /**
+   * ⭐ THE DERIVED ANCHOR — this is what makes the pin fail loud instead of
+   * ageing quietly (CLAUDE.md trap 12: a hand-maintained list drifts, and the
+   * drift always reads as green).
+   *
+   * `not-modelled-manifest.ts` names as a RE-SURFACE TRIGGER: *"`stampUser
+   * EditProvenance` gains a distinct stamp for model-authored ops"*. That
+   * trigger is a sentence someone has to remember to act on. Reading the
+   * stamper's own exported constant makes it mechanical: the day the owning
+   * lane splits the stamp, `USER_EDIT_SOURCE` stops matching this set and this
+   * test REDs, pointing the next session at the gap that just changed shape.
+   */
+  it('⭐ the stamper\'s own literal is in the set — so a distinct model-authored stamp REDs here', () => {
+    expect(
+      FORGEABLE_USER_AUTHORSHIP_LITERALS.has(USER_EDIT_SOURCE),
+      `stampUserEditProvenance now writes "${USER_EDIT_SOURCE}", which this gap set does not ` +
+        `name. If the stamp was SPLIT so model-authored ops are distinguishable, the gap has ` +
+        `changed shape: re-read the RE-SURFACE TRIGGER block in ` +
+        `cee/context-integrity/not-modelled-manifest.ts, which names two readers, not one.`,
+    ).toBe(true);
+  });
+
+  /**
+   * CONTRAST CONTROL 1 (CLAUDE.md trap 13e). The set must name literals that
+   * actually GOVERN — a gap set naming an inert literal records nothing, and
+   * would pass every assertion above.
+   */
+  it('contrast control: every pinned literal really does project to user_set', () => {
+    expect(pinned.length).toBeGreaterThan(0);
+    for (const literal of pinned) {
+      expect(
+        valueSourceAuthorship(literal)?.provenance,
+        `${literal} is pinned as a forgeable authorship claim but does not make one`,
+      ).toBe('user_set');
+    }
+  });
+
+  /**
+   * CONTRAST CONTROL 2. The set must be a STRICT subset of the literals that
+   * project to `user_set`. A set that named all of them would be
+   * unfalsifiable-by-breadth — it would "cover" the gap by asserting everything
+   * is suspect, which is the same as asserting nothing.
+   *
+   * It also pins the substantive claim: `panel_elicited` is server-VERIFIED
+   * against the collab store before it is stamped, so it is deliberately OUT.
+   */
+  it('contrast control: the gap is a strict subset — some user_set literals are NOT forgeable this way', () => {
+    const governing = OBSERVED_STATE_SOURCE_LITERALS.filter(
+      (l) => valueSourceAuthorship(l)?.provenance === 'user_set',
+    );
+    expect(governing.length, 'no literal projects to user_set — the comparison is vacuous').toBeGreaterThan(0);
+
+    const notForgeable = governing.filter((l) => !FORGEABLE_USER_AUTHORSHIP_LITERALS.has(l));
+    expect(notForgeable.length).toBeGreaterThan(0);
+    expect(notForgeable).toContain('panel_elicited');
   });
 });

@@ -632,6 +632,27 @@ const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
  * `not-modelled-manifest.user-authorship.test.ts` carries this trigger list
  * beside the corpus-limit note, so the gap is visible from the suite too.
  *
+ * ⚠⚠ THIS GAP NOW HAS A SECOND DEPENDENT, AND IT IS THE MORE DANGEROUS ONE.
+ * Added 31 Aug 2026. `cee/transforms/provenance-display.ts` `SOURCE_AUTHORSHIP`
+ * projects `user_override` to `user_set`, and
+ * `orchestrator-v5/format/format-graph-for-context.ts` carries that literal
+ * into the MODEL'S OWN CONTEXT, where the model then says it out loud.
+ *
+ * The direction of harm is the inverse of this module's, which is why it is
+ * recorded here rather than left to that file alone. THIS suppressor can only
+ * OMIT one of our own inventions from a disclosure — the less-bad direction the
+ * header above commits to. THAT reader can make a FALSE CLAIM ABOUT THE USER:
+ * for class (b) it tells someone *"you gave me this figure"* about a value they
+ * never supplied. Same literal, same forged stamp, opposite failure mode.
+ *
+ * ⭐ SO WHEN ANY TRIGGER ABOVE FIRES, TWO READERS MOVE, NOT ONE. That reader
+ * pins the gap as `FORGEABLE_USER_AUTHORSHIP_LITERALS` with a spec asserting
+ * the set EXACTLY and anchoring its membership to `USER_EDIT_SOURCE` at the
+ * stamper — so trigger 2 ("`stampUserEditProvenance` gains a distinct stamp for
+ * model-authored ops") REDs there automatically. It does NOT fire here: this
+ * module's trust set is still a hand-reviewed list, so this paragraph is the
+ * mechanism, and it is the thing to re-read before closing 2.628a.
+ *
  * ── ⚠ THE ASYMMETRY, STATED BECAUSE IT DECIDES EVERY OPEN CASE ─────────────
  * WRONGLY CLAIMING A USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY
  * OMITTING ONE OF OUR OWN INVENTIONS FROM THE LIST. Where authorship cannot be
