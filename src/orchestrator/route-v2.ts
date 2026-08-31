@@ -4493,7 +4493,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // appended exactly as before, byte for byte.
         const draftResponse =
           clarifyV2DeferredDisclosure !== null && dg.graph !== null
-            ? hasOptionFactorLabelMirror(dg.graph.nodes ?? [])
+            ? // ⚠ OPTIONAL CHAIN, DELIBERATELY. `dg.graph` is typed
+              // `GraphV3T | null` but a dispatcher result can carry it
+              // UNDEFINED, and `undefined !== null` passes the guard above —
+              // which cost a 500 on the decision-shaped positive control
+              // (`route-v2-process-meta-intake.test.ts`) because the previous
+              // code never dereferenced it and this does. Reading an absent
+              // graph as NO NODES is also the right answer: no nodes, no
+              // mirror, so the reply falls to the unchanged append branch.
+              hasOptionFactorLabelMirror(dg.graph?.nodes ?? [])
               ? {
                   ...dg.response,
                   assistant_text: promoteFramingAboveNextStep(

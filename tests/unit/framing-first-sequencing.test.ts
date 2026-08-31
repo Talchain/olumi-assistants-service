@@ -19,6 +19,7 @@ import {
   normaliseNodeLabelKey,
   optionLabelsMirroringFactorLabels,
   POST_DRAFT_DISPLACEABLE_CHIP_IDS,
+  type FramingSignalNode,
   promoteFramingAboveNextStep,
   promoteFramingChips,
 } from '../../src/orchestrator-v5/clarify-v2/framing-first-sequencing.js';
@@ -144,6 +145,28 @@ describe('the mechanical discriminator — an option label that mirrors a factor
       { id: 'f1', kind: 'factor', label: 'Retention' },
       { id: 'f2', kind: 'factor', label: 'Onboarding quality' },
     ]))).toBe(true);
+  });
+
+  /**
+   * ⚠ THE 500. `dg.graph` is typed `GraphV3T | null`, and route-v2's long-
+   * standing guard is `dg.graph !== null` — which is TRUE for `undefined`. The
+   * previous code never dereferenced the graph, so nothing noticed; the first
+   * version of this lane read `dg.graph.nodes` behind that guard and threw a
+   * TypeError on every decision-shaped draft whose dispatcher result carried no
+   * `graph` key, turning the positive control in
+   * `route-v2-process-meta-intake.test.ts` from 200 into 500.
+   *
+   * Caught by CI, NOT by this lane's own blast-radius sample — which had the
+   * file in front of it and did not run it. The predicate must therefore be
+   * total over a missing node list, and say so here.
+   */
+  it('REGRESSION: a missing or undefined node list is read as NO NODES, never thrown on', () => {
+    expect(() => hasOptionFactorLabelMirror(undefined as never)).toThrow();
+    // The call site's shape — `graph?.nodes ?? []` — must be total.
+    const noGraph: { nodes?: readonly FramingSignalNode[] } | undefined = undefined;
+    expect(hasOptionFactorLabelMirror(noGraph?.nodes ?? [])).toBe(false);
+    const graphWithoutNodes: { nodes?: readonly FramingSignalNode[] } = {};
+    expect(hasOptionFactorLabelMirror(graphWithoutNodes?.nodes ?? [])).toBe(false);
   });
 
   it('an empty or label-free graph cannot fire it', () => {
