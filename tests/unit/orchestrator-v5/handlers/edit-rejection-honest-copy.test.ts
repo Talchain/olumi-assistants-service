@@ -60,20 +60,26 @@ const UNKNOWN_FAILURE_COPY =
 const CODE_TABLE: ReadonlyArray<{
   code: EditRejectionCode;
   reason: EditRejectionReason;
-  userFault: boolean;
+  blame: 'user' | 'system' | 'mixed';
 }> = [
   // The user's request genuinely was the problem — the accusation is TRUE here.
-  { code: 'MAX_OPERATIONS_EXCEEDED', reason: 'too_many_operations', userFault: true },
-  { code: 'STRUCTURAL_VALIDATION_FAILED', reason: 'structural_validation', userFault: true },
-  { code: 'PLOT_SEMANTIC_REJECTED', reason: 'structural_validation', userFault: true },
+  { code: 'MAX_OPERATIONS_EXCEEDED', reason: 'too_many_operations', blame: 'user' },
+  { code: 'STRUCTURAL_VALIDATION_FAILED', reason: 'structural_validation', blame: 'user' },
+  { code: 'PLOT_SEMANTIC_REJECTED', reason: 'structural_validation', blame: 'user' },
   // Outage — the analysis service could not be reached at all.
-  { code: 'PLOT_UNAVAILABLE', reason: 'service_unavailable', userFault: false },
-  // System-side failures: our own synthesis, encoding or reconciliation broke.
-  { code: 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS', reason: 'internal_failure', userFault: false },
-  { code: 'SYNTHESIZED_GRAPH_INVALID', reason: 'internal_failure', userFault: false },
-  { code: 'APPLIED_GRAPH_UNAVAILABLE', reason: 'internal_failure', userFault: false },
-  { code: 'OPTION_INTERVENTIONS_UNRESOLVABLE', reason: 'internal_failure', userFault: false },
-  { code: 'OPERATION_DID_NOT_LAND', reason: 'internal_failure', userFault: false },
+  { code: 'PLOT_UNAVAILABLE', reason: 'service_unavailable', blame: 'system' },
+  // System-side failures: our own synthesis or reconciliation broke.
+  { code: 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS', reason: 'internal_failure', blame: 'system' },
+  { code: 'SYNTHESIZED_GRAPH_INVALID', reason: 'internal_failure', blame: 'system' },
+  { code: 'APPLIED_GRAPH_UNAVAILABLE', reason: 'internal_failure', blame: 'system' },
+  { code: 'OPERATION_DID_NOT_LAND', reason: 'internal_failure', blame: 'system' },
+  // ⭐ MIXED — one code, two opposite causes. `encode-option-interventions.ts`
+  // emits an unresolved id both when the USER'S value is rejected by the
+  // canonical guards (`deriveValue`'s catch: unit mismatch / out-of-range /
+  // ambiguous bare number) and when OUR side cannot proceed (target factor
+  // unresolvable, no cap, ambiguous factor edges, encoder threw). No specific
+  // copy is true across it, so it must attribute nothing.
+  { code: 'OPTION_INTERVENTIONS_UNRESOLVABLE', reason: 'unknown_failure', blame: 'mixed' },
 ];
 
 describe('edit_graph rejection copy — honest over the whole code domain', () => {
@@ -122,8 +128,30 @@ describe('edit_graph rejection copy — honest over the whole code domain', () =
     expect(assistantText).toMatch(/nothing in your model has changed/);
   });
 
+  it('a MIXED-cause code attributes blame in NEITHER direction', () => {
+    // The narrow regression this pins: mapping a mixed domain to
+    // `internal_failure` takes the blame for a guard that worked correctly (a
+    // unit-mismatched value IS the user's), and prescribes "try again in a
+    // moment", which is futile for that half. Mapping it to
+    // `structural_validation` blames the user for the system-side half. Both
+    // are false over part of the domain, so the copy must claim neither.
+    for (const row of CODE_TABLE.filter((r) => r.blame === 'mixed')) {
+      const reason = mapCodeToRejectionReason(row.code);
+      expect(reason, `${row.code} must not blame the user`).not.toBe('structural_validation');
+      expect(reason, `${row.code} must not blame our side`).not.toBe('internal_failure');
+      const text = buildEditRejectionResponse(reason).assistantText;
+      expect(text).not.toMatch(/on my side/i);
+      expect(text).not.toMatch(/simpler terms/i);
+      // It must still tell the truth about the model, and offer BOTH routes —
+      // retry for the system half, rephrase for the user half.
+      expect(text).toMatch(/nothing in your model has changed/);
+      expect(text).toMatch(/Try again/);
+      expect(text).toMatch(/describe the change a different way/);
+    }
+  });
+
   it('no failure the user did not cause inherits the structural-validation accusation', () => {
-    for (const row of CODE_TABLE.filter((r) => !r.userFault)) {
+    for (const row of CODE_TABLE.filter((r) => r.blame !== 'user')) {
       const text = buildEditRejectionResponse(mapCodeToRejectionReason(row.code)).assistantText;
       expect(text, `code ${row.code} still blames the user`).not.toBe(STRUCTURAL_ACCUSATION);
       expect(text, `code ${row.code} still asks for simpler terms`).not.toMatch(/simpler terms/i);

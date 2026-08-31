@@ -3744,7 +3744,18 @@ export async function handleEditGraph(
         failureBranch = 'option_interventions_unresolvable';
         failureCode = 'OPTION_INTERVENTIONS_UNRESOLVABLE';
         // Detailed id list stays in `failureMessage` for telemetry/diagnostics only;
-        // the block's rejection.reason (which the UI may surface) is kept generic.
+        // the block's rejection.reason is kept generic.
+        //
+        // ⚠ CORRECTED — this line used to read "(which the UI may surface)".
+        // That is FALSE, and it contradicted this same file at two other points
+        // ("never surfaced to the user"). `rejection.reason` does not reach a
+        // rendered surface and does not even reach the wire: the published
+        // `GraphPatchBlockSchema` is `.strict()` and carries no `rejection`
+        // field at all (verified at the bytes in @talchain/schemas 0.50.0 —
+        // the block is type/status/operation/target_id/before/after).
+        // The user-facing sentence comes solely from `mapCodeToRejectionReason`
+        // → `buildEditRejectionResponse`. Keeping it generic is still right;
+        // the stated reason for doing so was wrong.
         failureMessage = `Option intervention value(s) could not be encoded: ${encoded.unresolvedOptionIds.join(', ')}`;
         return buildRejectionResult(
           'Option interventions could not be safely encoded.',
@@ -4390,9 +4401,25 @@ export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectio
     case 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS':
     case 'SYNTHESIZED_GRAPH_INVALID':
     case 'APPLIED_GRAPH_UNAVAILABLE':
-    case 'OPTION_INTERVENTIONS_UNRESOLVABLE':
     case 'OPERATION_DID_NOT_LAND':
       return 'internal_failure';
+
+    // ⭐ A MIXED DOMAIN — one code, two opposite causes, so NEITHER specific
+    // copy is true across it. Derived from the producer
+    // (`encode-option-interventions.ts`), not from the code's name:
+    // `deriveValue` returns the defer signal both when the USER'S OWN VALUE is
+    // rejected by the canonical guards (`:161` — "unit mismatch / range /
+    // ambiguous", e.g. a headcount given for a £ factor) and when OUR side
+    // cannot proceed (target factor unresolvable, no cap available, ambiguous
+    // factor edges, encoder threw).
+    //
+    // `internal_failure` would take the blame for a guard working correctly AND
+    // prescribe a futile "try again"; `structural_validation` would blame the
+    // user for the system-side half. `unknown_failure` is the honest answer: it
+    // attributes nothing and offers BOTH routes forward. Splitting the code at
+    // the producer would let each half get specific copy — rowed, not done here.
+    case 'OPTION_INTERVENTIONS_UNRESOLVABLE':
+      return 'unknown_failure';
 
     // ── No code supplied: cause not established, so claim nothing. ──
     case undefined:
