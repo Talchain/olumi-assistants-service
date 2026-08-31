@@ -20,7 +20,8 @@ import { describe, expect, it } from "vitest";
 import corpus from "./fixtures/class-b-semantic-boundary.json";
 import { projectDraftRecords } from "../seam.js";
 import { normaliseDraftResponse } from "../../../../adapters/llm/normalisation.js";
-import { Graph } from "../../../../schemas/graph.js";
+import { LLMDraftResponse } from "../../../../adapters/llm/shared-schemas.js";
+import { FactorData, Graph, OptionData } from "../../../../schemas/graph.js";
 import { GraphV3 } from "../../../../schemas/cee-v3.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
 import { assessCanonicalAnalysisReadiness } from "../../../../orchestrator/tools/analysis-ready-helper.js";
@@ -33,10 +34,27 @@ type RecordFixture = { readonly brief: string; readonly records: unknown };
 function drive(fixture: RecordFixture) {
   const seam = projectDraftRecords(fixture.records, fixture.brief);
   if (!seam.ok) throw new Error(`Current-record fixture rejected: ${seam.reason}`);
-  const normalised = Graph.parse(
+  const normalised = LLMDraftResponse.parse(
     normaliseDraftResponse(structuredClone(seam.projection.graph)),
   );
-  const projected = projectGraphAndOptionsToV3(normalised, { brief: fixture.brief });
+  // Validate the public shape too, but keep the actual LLM adapter's output as
+  // the transform input (Graph also permits nullable goal fields in its type).
+  Graph.parse(normalised);
+  // Graph's public data union includes constraint data that V1Graph's transform
+  // signature does not. Data-bearing fixture nodes are factors/options. Validate
+  // that narrower data with the existing schemas, without a cast or mutation,
+  // and require the entire serialized graph to remain exactly unchanged.
+  const transformInput = {
+    ...normalised,
+    nodes: normalised.nodes.map(({ data, ...node }) => data === undefined ? node : {
+      ...node,
+      data: node.kind === "option" ? OptionData.parse(data) : FactorData.parse(data),
+    }),
+  };
+  expect(JSON.parse(JSON.stringify(transformInput))).toStrictEqual(
+    JSON.parse(JSON.stringify(normalised)),
+  );
+  const projected = projectGraphAndOptionsToV3(transformInput, { brief: fixture.brief });
   const graph = GraphV3.parse(JSON.parse(JSON.stringify(projected.graph)));
   const compaction = compactGraphForContextPack(GraphStateIngressSchema.parse(graph), {
     requestId: "class-b-semantic-boundary",

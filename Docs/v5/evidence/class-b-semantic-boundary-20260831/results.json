@@ -10,7 +10,7 @@
     "test_files_included": false
   },
   "input_sha256": {
-    "src/cee/draft/records/__tests__/class-b-semantic-boundary.test.ts": "81e82ae7f78fbae94e2a9830c7aed594be126cb2a3cd71526f0f21095b4fe0f2",
+    "src/cee/draft/records/__tests__/class-b-semantic-boundary.test.ts": "1bc1b1f151f0dc41f2a4f43a9a46121601f1a8d493b5163188bda4e84f746b14",
     "src/cee/draft/records/__tests__/fixtures/class-b-semantic-boundary.json": "aed5f3cd9ba70740f7e3426d7a0d43b9dd3bfd2a7b163c1355933f893cf0834f"
   },
   "runs": [
@@ -193,5 +193,12 @@
     "routed_subsequent_turn",
     "completed_analysis",
     "deployed_or_mounted_successor"
-  ]
+  ],
+  "isolated_test_typecheck": {
+    "command": "pnpm exec tsc -p Docs/v5/evidence/class-b-semantic-boundary-20260831/typecheck.config.json --noEmit --pretty false",
+    "exit_code": 0,
+    "scope": "new boundary test and its imported dependencies",
+    "full_test_tree_ratchet": false,
+    "report": "raw/test-typecheck.log"
+  }
 }

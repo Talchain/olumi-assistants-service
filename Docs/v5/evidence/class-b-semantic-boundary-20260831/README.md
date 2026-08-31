@@ -9,7 +9,8 @@ Source under test: `ac37890c3fc0d730560e09ffcb88b2c8951cc67d` (CEE staging snaps
 Installed contract: vendored `@talchain/schemas@0.50.0`. Node: `v22.16.0`.
 The branch changes tests, authored fixtures and this evidence only.
 The existing source-only `pnpm typecheck` gate passed. It excludes test files;
-that result is not a test-file typecheck claim.
+the separate isolated check of this test and its imports also passed using
+`typecheck.config.json`. No full test-tree typecheck/ratchet claim is made.
 
 ## Measured result
 
@@ -55,7 +56,7 @@ From the CEE repository with the frozen lockfile installed:
 
 ```sh
 pnpm exec vitest run --config vitest.required.config.ts \
-  src/cee/draft/records/__tests__/class-b-semantic-boundary.test.ts
+  src/cee/draft/records/__tests__/class-b-semantic-boundary.test.ts --maxWorkers 1
 ```
 
 Expected baseline process exit is **1**, with the three failures above. The
@@ -63,11 +64,25 @@ fixture JSON lives beside the records tests under
 `fixtures/class-b-semantic-boundary.json`. Its records use only current declared
 fields. They are hand-authored acceptance inputs, not provider captures.
 
-The test executes `projectDraftRecords` → real normalization → V3 projection →
-JSON round-trip and strict `GraphV3` parsing → strict compact graph ingress →
+The isolated typecheck, expected exit 0, is:
+
+```sh
+pnpm exec tsc -p Docs/v5/evidence/class-b-semantic-boundary-20260831/typecheck.config.json
+```
+
+The test executes `projectDraftRecords` → real normalization and
+`LLMDraftResponse`/`Graph` validation → V3 projection → JSON round-trip and
+strict `GraphV3` parsing → strict compact graph ingress →
 the real graph formatter and readiness helper. It manually assembles the
 formatter input from compactor output. It does not execute actual persistence,
 reload, a routed subsequent turn, a provider draw, ranking or a browser journey.
+
+The V1 transform signature excludes a constraint-data branch allowed by the
+public graph schema. This fixture helper validates its factor/option data with
+the existing schemas and checks the full serialized graph is unchanged before
+the transform. It does not cast around that mismatch or silently replace data.
+The actual `LLMDraftResponse` output remains the input: the extra `Graph.parse`
+validation does not substitute Graph's broader nullable-goal representation.
 
 ## Ownership and next implementation boundary
 
@@ -91,8 +106,10 @@ fabricated causal links or merely a dropped-record disclosure.
 - #1268: separate sequencing containment, currently reported BRITTLE by the
   delivery board. No changes or new liveness claim here.
 - Baseline lane: owns final-record reconciliation/parse recovery. No overlap.
-- Graph Truth: owns separately coordinated explicit baseline-quantity adoption.
-  No quantity, label/source restamping, shared schema or pruning edit here.
+- Graph Truth: quantity-only hunk remains separate; its conditional adoption
+  lease is now held pending proof of same-quantity binding. `basis` support and
+  `source_quote` alone do not authorize quantity equality. No quantity,
+  label/source restamping, shared schema or pruning edit here.
 - System B, Lane C ontology, Canvas and Reasoning: untouched.
 
 Independent liveness evidence at programme-docs commit
