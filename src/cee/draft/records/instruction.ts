@@ -330,7 +330,7 @@ and \`basis\` still records whatever the user said that you built them on.
   it — to another factor, or to the goal. Do not draw a link INTO it: if
   something else bears on that factor, connect that influence to a factor
   further along the chain, or to the goal.
-- Every other factor needs at least one \`causal_link\` onward, and the chain
+- In a model with options, every other factor needs at least one \`causal_link\` onward, and the chain
   must end at the \`goal\`. A factor that leads nowhere is not part of the
   decision.
 - If a stated figure or constraint bears on the goal, say so with a
@@ -339,8 +339,13 @@ and \`basis\` still records whatever the user said that you built them on.
   from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
   the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
 
-Do not emit a factor you cannot connect. But never drop something the user
-stated: keep it in \`stated_items\`, and connect it if it bears on the goal.
+With no decision or options, keep unresolved explanations as numberless
+\`factor\` claims when the model already has a goal and connected outcome/risk
+spine. Keep their distinct explanations even when no causal link is justified;
+do not invent a link, value or prior merely to connect them or enable analysis.
+Outside that case, do not emit a factor you cannot connect. But never drop
+something the user stated: keep it in \`stated_items\`, and connect it if it
+bears on the goal.
 
 ## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES
 

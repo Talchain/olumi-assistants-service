@@ -13,6 +13,7 @@ import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/
 import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
+import { retainedDecisionFreeFactorIds } from "./decision-free-retention.js";
 import { factorHasExpressiblePrior } from "../cee/provenance/unquantified-factor.js";
 import {
   type GraphValidationInput,
@@ -679,11 +680,13 @@ function validateReachability(
     }
   }
 
-  // NO_PATH_TO_GOAL: All nodes (except decision) must reach goal
-  // Runs unconditionally — the reverse BFS above is rooted at the GOAL, so this
-  // is exactly as answerable for a decision-free map as for any other graph.
+  // Unresolved numberless factors can remain reasoning in the bounded
+  // decision-free shape. Every other node keeps its reachability requirement;
+  // cardinality, bridge, cycle, reference and numeric checks are unchanged.
+  const retainedForReasoning = retainedDecisionFreeFactorIds(graph);
   for (const node of graph.nodes) {
     if (node.kind === "decision") continue; // Exempt decision from reverse check
+    if (retainedForReasoning.has(node.id)) continue;
 
     if (!canReachGoal.has(node.id)) {
       errors.push({

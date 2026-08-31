@@ -9,6 +9,7 @@
  */
 
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+import { retainedDecisionFreeFactorIds } from "../../../../validators/decision-free-retention.js";
 // The single reachability kernel. This module previously carried a private
 // byte-duplicate of `status-quo-fix.ts`'s `hasPathToGoal`, and neither filtered
 // `edge_type` — so a bidirected edge (an unmeasured confounder, never a causal
@@ -442,9 +443,13 @@ export function handleUnreachableFactors(
     }
   }
 
+  const retainedForReasoning = retainedDecisionFreeFactorIds(graph);
   for (const node of nodes) {
     if (node.kind !== "factor") continue;
     if (transitivelyReachable.has(node.id)) continue;
+    // Retention is independent of computation. Do not manufacture a prior or
+    // connection, or mark an unresolved qualitative hypothesis as droppable.
+    if (retainedForReasoning.has(node.id)) continue;
 
     // This factor is unreachable from options — reclassify as external
     (node as any).category = "external";
