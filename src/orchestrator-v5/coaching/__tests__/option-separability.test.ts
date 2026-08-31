@@ -87,6 +87,11 @@ import measuredRuns from './fixtures/measured-analysis-fields-2026-08-31.json';
 /** The contender band the headline module passes in — its own MIN_LEAD_MARGIN. */
 const BAND = 0.05;
 
+/** The elimination ceiling the headline module passes in — its own
+ *  `ELIMINATED_WIN_PROBABILITY_CEILING`, the constant behind the user-facing
+ *  "each has less than a 1% chance of winning". */
+const CEIL = 0.01;
+
 interface Opt {
   readonly id: string;
   readonly label: string;
@@ -208,8 +213,8 @@ describe('separability — the statistic and its two parameters', () => {
     // Fail-safe direction: unanswerable must never read as "not separated".
     expect(fieldSeparation([0.9])).toBeNull();
     expect(fieldSeparation([])).toBeNull();
-    expect(isFieldUnseparable([0.9], BAND).unseparable).toBe(false);
-    expect(isFieldUnseparable([], BAND).unseparable).toBe(false);
+    expect(isFieldUnseparable([0.9], BAND, CEIL).unseparable).toBe(false);
+    expect(isFieldUnseparable([], BAND, CEIL).unseparable).toBe(false);
   });
 
   it('counts contenders within the band, leader included', () => {
@@ -228,8 +233,8 @@ describe('the two parameters guard different populations — twins', () => {
     expect(contenderBandProbability(flat, BAND)).toBeGreaterThanOrEqual(2);
     expect(contenderBandProbability(lifted, BAND)).toBeGreaterThanOrEqual(2);
 
-    expect(isFieldUnseparable(flat, BAND).unseparable).toBe(true);
-    expect(isFieldUnseparable(lifted, BAND).unseparable).toBe(false);
+    expect(isFieldUnseparable(flat, BAND, CEIL).unseparable).toBe(true);
+    expect(isFieldUnseparable(lifted, BAND, CEIL).unseparable).toBe(false);
   });
 
   it('P2 TWIN — rival level with the leader withheld, leader alone kept, P1 identical in both', () => {
@@ -243,8 +248,104 @@ describe('the two parameters guard different populations — twins', () => {
     expect(fieldSeparation(rivalLevel) as number).toBeLessThan(MIN_FIELD_SEPARATION);
     expect(fieldSeparation(clearOfField) as number).toBeLessThan(MIN_FIELD_SEPARATION);
 
-    expect(isFieldUnseparable(rivalLevel, BAND).unseparable).toBe(true);
-    expect(isFieldUnseparable(clearOfField, BAND).unseparable).toBe(false);
+    expect(isFieldUnseparable(rivalLevel, BAND, CEIL).unseparable).toBe(true);
+    expect(isFieldUnseparable(clearOfField, BAND, CEIL).unseparable).toBe(false);
+  });
+});
+
+describe('⭐ ZERO-TAIL INVARIANCE — dead options cannot buy back a winner', () => {
+  /**
+   * ⚠ THE HOLE THIS PINS WAS FOUND BY INDEPENDENT REVIEW AT `9afa8699`, NOT BY
+   * THIS AUTHOR'S CORPUS — which is the whole argument for an outside reviewer,
+   * and it is recorded here rather than quietly fixed.
+   *
+   * P1's reference point is the uniform share `1/n`, so it is a function of how
+   * many options are COUNTED. Appending two zero-win options to the captured
+   * field moved `n` 4 → 6 and separation 0.072667 → 0.165400, clearing the
+   * floor — with every original probability, the total mass, the top-two gap,
+   * the leader id and the producer's `is_tie` unchanged. P2 could not catch it:
+   * an option on zero is nowhere near the leader, so the contender count stayed
+   * at 2.
+   *
+   * The product's emitted sentence was the tell, and it indicted itself:
+   *
+   *   "Selling to the Wrong Customers currently leads. 2 options are
+   *    effectively eliminated (each has less than a 1% chance of winning)."
+   *
+   * It called the arms dead and let them restore the claim.
+   */
+  const CAPTURED = [0.3045, 0.2895, 0.2177, 0.1883];
+
+  it('the exact review counterexample: two zero-win tails do not restore the winner', () => {
+    const before = isFieldUnseparable(CAPTURED, BAND, CEIL);
+    const after = isFieldUnseparable([...CAPTURED, 0, 0], BAND, CEIL);
+
+    expect(before.unseparable).toBe(true);
+    expect(after.unseparable).toBe(true);
+    // Not merely the same verdict — the SAME STATISTIC. A verdict that agreed
+    // by luck on this field would drift on the next one.
+    expect(after.separation).toBeCloseTo(before.separation as number, 12);
+    expect(after.contenders).toBe(before.contenders);
+  });
+
+  it('and the raw n-dependent statistic really would have flipped it (positive control)', () => {
+    // Without this control the test above could pass on a predicate that never
+    // looked at the tail at all, and the fix would be unproven. This is the
+    // measured before-state, reproduced from the statistic itself.
+    expect(fieldSeparation(CAPTURED) as number).toBeCloseTo(0.072667, 5);
+    expect(fieldSeparation([...CAPTURED, 0, 0]) as number).toBeCloseTo(0.1654, 4);
+    expect(fieldSeparation([...CAPTURED, 0, 0]) as number).toBeGreaterThan(
+      MIN_FIELD_SEPARATION,
+    );
+  });
+
+  it('holds for EVERY measured run and any number of dead tails', () => {
+    // The property, not the instance. 21 runs x {1,2,3} appended zero-win
+    // options: the verdict must never move.
+    let checked = 0;
+    for (const r of CORPUS) {
+      const base = isFieldUnseparable(fieldOf(r), BAND, CEIL);
+      for (const k of [1, 2, 3]) {
+        const padded = [...fieldOf(r), ...Array<number>(k).fill(0)];
+        const v = isFieldUnseparable(padded, BAND, CEIL);
+        expect(v.unseparable, `${r.token} +${k} dead`).toBe(base.unseparable);
+        expect(v.separation as number).toBeCloseTo(base.separation as number, 12);
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(63);
+  });
+
+  it('a LIVE option still moves the statistic — the invariance is narrow, by design', () => {
+    // ⚠ The claim is NOT "n-invariant", and pinning the boundary stops that
+    // overstatement being inherited. An option above the elimination ceiling is
+    // a real contender and SHOULD change how separated the field looks; only
+    // options the product itself calls dead are ignored.
+    const withDead = isFieldUnseparable([...CAPTURED, 0.005], BAND, CEIL);
+    const withLive = isFieldUnseparable([...CAPTURED, 0.05], BAND, CEIL);
+    expect(withDead.separation).toBeCloseTo(
+      isFieldUnseparable(CAPTURED, BAND, CEIL).separation as number,
+      12,
+    );
+    expect(withLive.separation).not.toBeCloseTo(withDead.separation as number, 6);
+  });
+
+  it("CONTROL — the reviewer's decisive six-option field stays decisive, padded or not", () => {
+    // The must-not-break arm, measured in the same run as the fix. A remedy
+    // that silenced genuinely decisive wide fields would be worse than the hole.
+    const decisiveSix = [0.62, 0.14, 0.1, 0.06, 0.05, 0.03];
+    expect(isFieldUnseparable(decisiveSix, BAND, CEIL).unseparable).toBe(false);
+    expect(isFieldUnseparable([0.62, 0.3, 0.08, 0, 0, 0], BAND, CEIL).unseparable).toBe(
+      false,
+    );
+  });
+
+  it('an all-dead field is unanswerable, not unseparable (fail-safe direction)', () => {
+    // Filtering could have created a new way to reach a verdict on nothing.
+    // Fewer than two live options means no ordering to judge, so the module
+    // keeps today's behaviour rather than acquiring a new silence.
+    expect(isFieldUnseparable([0.004, 0.003, 0.003], BAND, CEIL).unseparable).toBe(false);
+    expect(isFieldUnseparable([0.98, 0.005, 0.005], BAND, CEIL).unseparable).toBe(false);
   });
 });
 
@@ -272,7 +373,7 @@ describe('the measured corpus — 21 real runs from deployed CEE 3a79b40', () =>
     expect(run.robustness_level).toBe('very_low');
 
     // And the field it said that about.
-    const v = isFieldUnseparable(fieldOf(run), BAND);
+    const v = isFieldUnseparable(fieldOf(run), BAND, CEIL);
     expect(v.unseparable).toBe(true);
     expect(v.separation as number).toBeLessThan(MIN_FIELD_SEPARATION);
     expect(v.contenders).toBeGreaterThanOrEqual(2);
@@ -287,7 +388,7 @@ describe('the measured corpus — 21 real runs from deployed CEE 3a79b40', () =>
     // it is not — a claim about a component generalised into a claim about the
     // product.
     const withheldFields = CORPUS.filter(
-      (r) => isFieldUnseparable(fieldOf(r), BAND).unseparable,
+      (r) => isFieldUnseparable(fieldOf(r), BAND, CEIL).unseparable,
     ).map((r) => r.token);
     expect(withheldFields).toEqual([CLOSE_CALL_RUN_TOKEN, LYING_RUN_TOKEN]);
 
@@ -310,7 +411,7 @@ describe('the measured corpus — 21 real runs from deployed CEE 3a79b40', () =>
     expect(run.near_tie_is_tie).toBe(true);
     expect(run.shipped_summary).toContain('the analysis treats this as a close call');
     // Its field IS unseparable — so it is kept by PLACEMENT, not by the predicate.
-    expect(isFieldUnseparable(fieldOf(run), BAND).unseparable).toBe(true);
+    expect(isFieldUnseparable(fieldOf(run), BAND, CEIL).unseparable).toBe(true);
     // And it still gets a sentence, and that sentence still flags the closeness.
     const text = headlineOf(run);
     expect(text).not.toBeNull();
@@ -325,7 +426,7 @@ describe('MANDATORY CONTROL — class-a and class-c measured runs are unharmed',
       const runs = runsOfClass(briefClass);
       expect(runs).toHaveLength(7);
       for (const r of runs) {
-        const v = isFieldUnseparable(fieldOf(r), BAND);
+        const v = isFieldUnseparable(fieldOf(r), BAND, CEIL);
         expect(
           v.unseparable,
           `${r.token} (${briefClass}) separation=${v.separation} contenders=${v.contenders}`,
@@ -371,13 +472,38 @@ describe('the headline withholds an unsupportable winner, end to end', () => {
     expect(d.reason).toBe('options_not_separable');
   });
 
+  it('⭐ the padded field emits NO headline — the review counterexample, end to end', () => {
+    // The reviewer measured this at the handler, where the emitted receipt was
+    //   "Selling to the Wrong Customers currently leads. 2 options are
+    //    effectively eliminated (each has less than a 1% chance of winning)."
+    // Asserted here at the builder, which is where the verdict is made and
+    // where a regression would originate. Two zero-win arms appended to the
+    // real captured field; leader, labels and every live probability unchanged.
+    const padded: readonly Opt[] = [
+      ...LYING_FIELD,
+      { id: 'opt_dead_1', label: 'Commission an External Audit', p: 0 },
+      { id: 'opt_dead_2', label: 'Freeze All Roadmap Work', p: 0 },
+    ];
+    const text = headlineFor(padded, lyingRun.leading_option_id as string);
+    expect(text).toBeNull();
+    // Bind to the reason, not just the null: a null from `unsafe_label` or a
+    // length cap would satisfy `toBeNull()` while the hole stayed open.
+    expect(
+      describeAnalysisHeadline({
+        enrichment: envelope(padded),
+        leading_option_id: lyingRun.leading_option_id as string,
+        status_kind: 'ok',
+      }).reason,
+    ).toBe('options_not_separable');
+  });
+
   it('binds to the FIELD, not to one option carrying a particular value', () => {
     // Permuting the field's ORDER must not change the verdict — the statistic
     // is a property of the multiset, and a test that happened to key on
     // `options[0]` would pass on a different object entirely.
     const reversed = [...LYING_FIELD].reverse();
     expect(headlineFor(reversed, lyingRun.leading_option_id as string)).toBeNull();
-    expect(isFieldUnseparable(reversed.map((o) => o.p), BAND).unseparable).toBe(true);
+    expect(isFieldUnseparable(reversed.map((o) => o.p), BAND, CEIL).unseparable).toBe(true);
   });
 
   it('⚠ DISCLOSED RESIDUAL — a non-argmax designated leader is NOT covered', () => {
@@ -450,7 +576,7 @@ describe('STRUCTURAL GUARANTEE — a confident run can never be withheld', () =>
         const margin = leader - rest;
         if (margin < BAND) continue;
         checked += 1;
-        expect(isFieldUnseparable(field, BAND).unseparable).toBe(false);
+        expect(isFieldUnseparable(field, BAND, CEIL).unseparable).toBe(false);
       }
     }
     // The sweep must actually have swept. A silently-empty loop would pass.
@@ -466,7 +592,7 @@ describe('STRUCTURAL GUARANTEE — a confident run can never be withheld', () =>
       for (let lead = 0; lead < 5; lead += 1) {
         const leader = 1 / n + lead / 100;
         const rest = (1 - leader) / (n - 1);
-        if (isFieldUnseparable([leader, ...Array<number>(n - 1).fill(rest)], BAND).unseparable) {
+        if (isFieldUnseparable([leader, ...Array<number>(n - 1).fill(rest)], BAND, CEIL).unseparable) {
           withheld += 1;
         }
       }

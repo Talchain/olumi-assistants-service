@@ -1292,6 +1292,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // ANY value of MIN_FIELD_SEPARATION. A second constant here would have
     // turned a proof into a corpus result.
     MIN_LEAD_MARGIN,
+    // ⭐ The SAME ceiling that generates "N options are effectively eliminated
+    // (each has less than a 1% chance of winning)" a few lines below. Passing
+    // it in keeps one definition of "cannot win" in this module and closes the
+    // zero-tail hole found at `9afa8699`: without it, appending two zero-win
+    // options to a withheld field moved the uniform reference from 1/4 to 1/6,
+    // raised separation 0.0727 → 0.1654, and handed the suppressed leader claim
+    // straight back — while the product was calling those same arms eliminated
+    // in the next sentence.
+    ELIMINATED_WIN_PROBABILITY_CEILING,
   );
   if (separability.unseparable) {
     return {

@@ -147,6 +147,61 @@ export const MIN_FIELD_SEPARATION = 0.15;
 export const MIN_FIELD_SIZE = 2;
 
 /**
+ * ⭐⭐ THE LIVE FIELD — the options still in contention.
+ *
+ * ⚠ THE HOLE THIS CLOSES, found by independent review at `9afa8699` and NOT by
+ * this author's corpus. P1's reference point is the uniform share `1/n`, so
+ * it is a function of HOW MANY OPTIONS ARE COUNTED. Take the captured field
+ * this gate correctly withholds — 0.3045 / 0.2895 / 0.2177 / 0.1883 — and
+ * append TWO ZERO-WIN OPTIONS. Every original probability, the total mass, the
+ * top-two gap, the leader id and the producer's own `near_tie.is_tie` are
+ * unchanged. But `n` moves 4 → 6, the uniform reference drops 0.25 → 0.1667,
+ * and separation rises **0.072667 → 0.165400**, clearing the floor. P2 is no
+ * help: the contender count stays 2, because an option on zero is nowhere near
+ * the leader. The product then emitted:
+ *
+ *   "Selling to the Wrong Customers currently leads. 2 options are effectively
+ *    eliminated (each has less than a 1% chance of winning)."
+ *
+ * **It declared those arms dead and then let them buy back permission to name
+ * the very winner this gate exists to suppress.** Padding a close field with
+ * options that cannot win is not evidence about the options that can.
+ *
+ * ⭐ THE REMEDY IS THE PRODUCT'S OWN VOCABULARY, NOT A NEW THRESHOLD. The
+ * sentence above is generated from {@link ELIMINATED_WIN_PROBABILITY_CEILING}
+ * in `analysis-result-headline.ts` — the module ALREADY has a definition of
+ * "cannot win" and already tells the user which arms meet it. The statistic is
+ * simply made to count the same options the product says are still in play.
+ * One vocabulary, one definition, no second constant.
+ *
+ * ⚠ WHAT WAS DELIBERATELY NOT DONE, because both fit the counterexample
+ * instead of fixing the invariant, and a threshold tuned to a counterexample is
+ * the oscillation pattern this estate has already paid four rounds for:
+ * `MIN_FIELD_SEPARATION` is UNCHANGED at 0.15, and there is no special case for
+ * six options or for any field size.
+ *
+ * ⚠ THE PROPERTY THIS BUYS, STATED EXACTLY — it is narrower than "n-invariant"
+ * and must not be quoted as more. Adding or removing any number of options that
+ * the product itself classifies as effectively eliminated cannot change the
+ * verdict, EXACTLY (they are filtered before either parameter is computed).
+ * Adding a LIVE option still moves the reference, and that is correct: a real
+ * contender is real information about how separated the field is. An option
+ * straddling the ceiling therefore still shifts the statistic slightly, by
+ * design — the product is telling the user it is still in play.
+ *
+ * @param ceiling the elimination ceiling, supplied by the caller
+ *   (`ELIMINATED_WIN_PROBABILITY_CEILING`) so this file never mints a rival
+ *   definition of "cannot win" — the same derive-don't-mirror rule the
+ *   contender band follows, and for the same reason.
+ */
+export function liveField(
+  probabilities: readonly number[],
+  ceiling: number,
+): readonly number[] {
+  return probabilities.filter((p) => p >= ceiling);
+}
+
+/**
  * Normalised excess concentration of the field — P1's statistic.
  *
  * Returns `null` when the field is too small to have a shape, so a caller can
@@ -228,9 +283,15 @@ export interface SeparabilityVerdict {
 export function isFieldUnseparable(
   probabilities: readonly number[],
   contenderBand: number,
+  eliminatedCeiling: number,
 ): SeparabilityVerdict {
-  const separation = fieldSeparation(probabilities);
-  const contenders = contenderBandProbability(probabilities, contenderBand);
+  // ⭐ BOTH parameters are computed over the LIVE field, never the raw one.
+  // Filtering once, here, is what makes the zero-tail invariance exact rather
+  // than approximate: neither P1's reference point nor P2's count can see an
+  // option the product has already called eliminated. See `liveField`.
+  const live = liveField(probabilities, eliminatedCeiling);
+  const separation = fieldSeparation(live);
+  const contenders = contenderBandProbability(live, contenderBand);
   if (separation === null) {
     return { unseparable: false, separation, contenders };
   }
