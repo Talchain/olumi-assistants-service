@@ -237,14 +237,6 @@ function signalIdSegment(item: Record<string, unknown>, label: string): string {
  * So the labels are read from BOTH shapes and unioned: the node walk is what
  * makes the gate real on a drafted graph, and the `readGraphOptionLabels` call
  * keeps the reconciler's own accepted input shapes working.
- *
- * ⚠ STANDING TRIPWIRE FOR THE ADJACENT LANE, deliberately NOT fixed here (it is
- * another lane's shipped file, and "while we're here" work is prohibited):
- * `draft-option-widening-blocks.ts:499-504` (`isRepairState`) passes
- * `readGraphOptionLabels(graph)` straight to the reconciler with NO node walk,
- * so #1006's own trap-21 anti-collision gate looks live and is dark on a real
- * GraphV3. Its gate 5 walks the nodes correctly a few lines later, which is why
- * the omission reads as deliberate at a glance. Reported, not touched.
  */
 function readOptionLabels(graph: GraphV3T | null | undefined): string[] {
   const labels = [...readGraphOptionLabels(graph ?? null)];
