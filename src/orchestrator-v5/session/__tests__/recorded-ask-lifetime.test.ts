@@ -44,12 +44,16 @@ import {
 import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
 import {
   applyRecordedAskLifetimes,
+  enforceSymmetricClaimWindow,
   isPendingActionExpired,
+  isShortWindowBareNumberClaimant,
   PENDING_ACTION_ASK_TURN_TTL,
   PENDING_ACTION_ASK_WALL_TTL_MS,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  PENDING_KIND_CLAIMS_BARE_NUMBER,
   PENDING_KIND_IS_RECORDED_ASK,
+  recordedAskWindowMustClamp,
   withRecordedAskLifetime,
   type PendingAction,
   type PendingActionAction,
@@ -90,8 +94,18 @@ const graph = {
     effect_direction: 'positive',
   })),
 };
-const GRAPH_HASH = computeAnalysisAffectingGraphHash(graph);
-if (GRAPH_HASH === null) throw new Error('Fixture graph must have a canonical hash');
+// ⚠ NARROWED ONCE, INTO ITS OWN BINDING — fixed at source after `Typecheck
+// Drift (ratchet)` went RED on this file at `db895427`. `computeAnalysisAffectingGraphHash`
+// returns `string | null`, and TypeScript does not carry the module-level
+// null-check narrowing INTO A CLOSURE (`ageThroughRealTurns` below), so the
+// call there saw `string | null` against a `string | undefined` parameter.
+// `tsconfig.build.json` excludes tests, which is why `pnpm build` was exit 0
+// and blind to it — CLAUDE.md trap 2's refinement exactly. Absorbing this into
+// `typecheck-baseline.txt` was not an option: the baseline records
+// pre-existing debt, and this file is new in this PR.
+const GRAPH_HASH_OR_NULL = computeAnalysisAffectingGraphHash(graph);
+if (GRAPH_HASH_OR_NULL === null) throw new Error('Fixture graph must have a canonical hash');
+const GRAPH_HASH: string = GRAPH_HASH_OR_NULL;
 
 /** The ask exactly as `route-v2`'s configure-option clarify arms it. */
 const ASK_ID = '00000000-0000-4000-8000-0000000000a1';
@@ -388,5 +402,175 @@ describe('dial B — a user who has genuinely moved on, at the same distance', (
     expect(persistedOffer).toBe(offer);
     expect(ageThroughRealTurns(offer)).toBeNull();
     expect(isPendingActionExpired(offer, ANSWERED_AT_MS)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⭐⭐ THE CLAIMANT SET MOVES AS ONE — the class this suite could not see.
+//
+// Added after an adversarial review found that the widening MANUFACTURED a new
+// stale-hijack. `PENDING_KIND_CLAIMS_BARE_NUMBER` has SEVEN true members;
+// `PENDING_KIND_IS_RECORDED_ASK` widens FOUR. The three left behind still claim
+// a bare number and still expire at 2 turns — so the competitor vanishes from
+// under the ambiguity gate at `repair-value-binding.ts:514-518`, and the older
+// ask WINS a number the user typed for the newer, expired question.
+//
+// ⚠ WHY THE EXISTING AMBIGUITY TWIN COULD NOT CATCH IT — the reviewer's point,
+// not a restatement of the fix. That twin uses `elicit_target_baseline`, which
+// is a WIDENED kind: it is the SYMMETRIC case, where both claimants move
+// together and the gate fires as designed. Nothing in the corpus paired a
+// NON-widened claimant against a widened one, and no mutant reached the class
+// either — M4/M5 remove `elicit_*` FROM the widened set, which probes the same
+// symmetric axis from the other end. A corpus that varies only along the axis
+// the author was thinking about cannot see the axis they were not.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('the claimant set moves as one — a NON-widened competitor', () => {
+  /** A numbered clarify menu. Claims a bare number; NOT a recorded ask. */
+  const numberedMenu = (): PendingAction => ({
+    ...askAsShipped,
+    id: '00000000-0000-4000-8000-0000000000e5',
+    chip_id: 'chip_clarify_v2_proceed',
+    action: {
+      kind: 'clarify_v2_round',
+      brief: 'Pricing',
+      asked_dimensions: [],
+      round: 1,
+    } as unknown as PendingActionAction,
+  });
+
+  /**
+   * Age a WHOLE pending set through the real carry-forward authority, so the
+   * competitor is visible to it on every turn — which is the entire point.
+   * `ageThroughRealTurns` above carries ONE pending and therefore cannot
+   * observe a claimant-set property at all.
+   */
+  function ageSetThroughRealTurns(
+    set: readonly PendingAction[],
+    turnIsos: readonly string[] = INTERVENING_TURN_ISOS,
+  ): readonly PendingAction[] {
+    let carried: readonly PendingAction[] = set;
+    for (const iso of turnIsos) {
+      carried = computeSurvivingPriorPendings(carried, [], [], GRAPH_HASH, Date.parse(iso));
+    }
+    return carried;
+  }
+  const findById = (set: readonly PendingAction[], id: string): PendingAction | null =>
+    set.find((pa) => pa.id === id) ?? null;
+
+  it('PREMISE: the claimant set is genuinely uneven — the menu claims a bare number and is NOT widened', () => {
+    // Derived from the two maps rather than asserted from the fixture, so this
+    // premise REDs loudly if either map moves. Both halves matter: a kind that
+    // did not claim a bare number could not hijack, and a kind that WAS widened
+    // would expire alongside the ask and create no asymmetry.
+    expect(PENDING_KIND_CLAIMS_BARE_NUMBER.clarify_v2_round).toBe(true);
+    expect(PENDING_KIND_IS_RECORDED_ASK.clarify_v2_round).toBe(false);
+    expect(isShortWindowBareNumberClaimant('clarify_v2_round')).toBe(true);
+    // CONTRAST CONTROL, in the same run: the kind the existing ambiguity twin
+    // uses IS widened, so it is not a member of the uneven set. If this read
+    // true as well, the predicate would not be discriminating.
+    expect(isShortWindowBareNumberClaimant('elicit_target_baseline')).toBe(false);
+    // And the uneven set is exactly the three the review named — written out,
+    // because a derived assertion cannot notice the map itself is short.
+    const uneven = (Object.keys(PENDING_KIND_CLAIMS_BARE_NUMBER) as PendingActionKind[])
+      .filter((k) => isShortWindowBareNumberClaimant(k))
+      .sort();
+    expect(uneven).toEqual(['clarify_v2_round', 'proposed_concept', 'set_factor_value']);
+  });
+
+  it('THE MANUFACTURED HIJACK: a widened ask must not outlive a competing numbered menu', () => {
+    const ask = askAsPersisted();
+    const menu = numberedMenu();
+    // POSITIVE CONTROL FIRST: both are genuinely live when they sit in the set
+    // together, so what follows is about the WINDOW and not about an inert
+    // fixture that was already dead.
+    expect(isPendingActionExpired(ask, ASKED_AT_MS)).toBe(false);
+    expect(isPendingActionExpired(menu, ASKED_AT_MS)).toBe(false);
+
+    // Aged through the REAL carry-forward authority, with BOTH present on every
+    // turn — the sequence the reviewer described.
+    const carried = ageSetThroughRealTurns([ask, menu]);
+    const carriedMenu = findById(carried, menu.id);
+    const carriedAsk = findById(carried, ask.id);
+
+    // ⭐ THE PROPERTY, stated as EXPIRY PARITY rather than as a number, so it
+    // stays true if either TTL constant is retuned: the ask must not still be
+    // claiming bare numbers at a moment its competitor is already gone.
+    expect(carriedMenu).toBeNull();
+    expect(carriedAsk).toBeNull();
+  });
+
+  it('THE HARM AT THE GATE: the menu index is never bound into the option/factor cell', () => {
+    // Asserted separately from the expiry parity above so it bites on its own.
+    // Before the fix the ask was the SOLE live claimant at
+    // `repair-value-binding.ts:514-518` — the competitor having silently
+    // expired out of the claimant set — so the ambiguity gate never fired and
+    // `resolveRecordedOptionEffectAnswer` returned `bind`, writing the user's
+    // MENU INDEX into the option/factor cell as an effect size.
+    const carried = ageSetThroughRealTurns([askAsPersisted(), numberedMenu()]);
+    const claimants = carried.filter((pa) => !isPendingActionExpired(pa, ANSWERED_AT_MS));
+    expect(resolveAnswer('1', claimants).kind).not.toBe('bind');
+  });
+
+  it('DISCRIMINATING TWIN: with NO competitor the widened window survives, and the answer still binds', () => {
+    // The other direction of the same harm, and this PR's whole value. A clamp
+    // that fired unconditionally would silently revert the fix and send the
+    // founder's 25-minute answer back to the LLM — and the test above would
+    // still pass. Neither case alone shows the binding is right.
+    const ask = askAsPersisted();
+    const carried = ageSetThroughRealTurns([ask]);
+    const carriedAsk = findById(carried, ask.id);
+    expect(carriedAsk).not.toBeNull();
+    expect(resolveAnswer('0.3', carriedAsk === null ? [] : [carriedAsk]).kind).toBe('bind');
+  });
+
+  it('TWIN: an EXPIRED competitor does not clamp — the gate reads liveness, not membership', () => {
+    // A dead competitor cannot have its answer stolen, so it must not cost the
+    // ask its window. Keyed on liveness rather than on presence in the array.
+    const ask = askAsPersisted();
+    const deadMenu: PendingAction = {
+      ...numberedMenu(),
+      expires_at_iso: new Date(ASKED_AT_MS - 1000).toISOString(),
+    };
+    expect(isPendingActionExpired(deadMenu, ASKED_AT_MS)).toBe(true);
+    expect(recordedAskWindowMustClamp([ask, deadMenu], ASKED_AT_MS)).toBe(false);
+    const input = [ask, deadMenu];
+    expect(enforceSymmetricClaimWindow(input, ASKED_AT_MS)).toBe(input);
+  });
+
+  it('TWIN: the clamp only ever SHORTENS, lands exactly on the defaults, and never touches an offer', () => {
+    // The safety argument, pinned. A one-directional transform cannot make any
+    // binding reachable that was not reachable before the widening shipped.
+    const menu = numberedMenu();
+    const offer: PendingAction = {
+      ...askAsShipped,
+      id: '00000000-0000-4000-8000-0000000000f6',
+      action: { kind: 'what_would_flip' } as PendingActionAction,
+    };
+    const [clampedOffer] = enforceSymmetricClaimWindow([offer, menu], ASKED_AT_MS);
+    expect(clampedOffer).toBe(offer); // a non-ask, returned by identity
+
+    const ask = askAsPersisted();
+    const [clampedAsk] = enforceSymmetricClaimWindow([ask, menu], ASKED_AT_MS);
+    if (clampedAsk === undefined) throw new Error('enforceSymmetricClaimWindow must preserve arity');
+    expect(clampedAsk.expires_at_turn_count).toBeLessThanOrEqual(ask.expires_at_turn_count);
+    expect(Date.parse(clampedAsk.expires_at_iso)).toBeLessThanOrEqual(
+      Date.parse(ask.expires_at_iso),
+    );
+    // Exactly the defaults — not some third number invented by the clamp.
+    expect(clampedAsk.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    expect(Date.parse(clampedAsk.expires_at_iso)).toBe(
+      ASKED_AT_MS + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+    );
+  });
+
+  it('TWIN: a malformed expiry is passed through untouched and stays fail-closed', () => {
+    // Mirrors the same rule on `withRecordedAskLifetime`: rewriting an
+    // unparseable stamp into a valid clamp would convert an expired verdict
+    // into a live 10-minute window.
+    const malformed: PendingAction = { ...askAsPersisted(), expires_at_iso: 'not-a-date' };
+    const [out] = enforceSymmetricClaimWindow([malformed, numberedMenu()], ASKED_AT_MS);
+    if (out === undefined) throw new Error('enforceSymmetricClaimWindow must preserve arity');
+    expect(out.expires_at_iso).toBe('not-a-date');
+    expect(isPendingActionExpired(out, ASKED_AT_MS)).toBe(true);
   });
 });

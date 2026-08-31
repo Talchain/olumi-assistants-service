@@ -57,6 +57,8 @@ import type {
 } from './session/pending-action.js';
 import {
   applyRecordedAskLifetimes,
+  clampRecordedAskWindow,
+  recordedAskWindowMustClamp,
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
   PENDING_ACTIONS_PER_TURN_CAP,
@@ -468,6 +470,32 @@ export function computeSurvivingPriorPendingsDetailed(
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
+  // ⭐⭐ THE CLAIMANT SET MOVES AS ONE (adversarial review, 2026-08-31).
+  //
+  // `applyRecordedAskLifetimes` widens the four recorded-ask kinds at the arm
+  // seam. The other THREE bare-number claimants — `set_factor_value`,
+  // `clarify_v2_round`, `proposed_concept` — keep the default window, so
+  // without this the claimant set decays UNEVENLY: a numbered menu expires at
+  // 2 turns, a widened `elicit_option_effect` runs to 12, the user types the
+  // MENU INDEX, and the elicit is now the sole live claimant at
+  // `repair-value-binding.ts:514-518` and BINDS it into the option/factor cell.
+  // That is the stale-hijack harm the lifetime note exists to prevent,
+  // manufactured by the widening itself.
+  //
+  // ⭐ ENFORCED HERE, NOT AT THE COMMIT SEAM, and the reason is the sequence:
+  // the competitor is routinely armed on a LATER turn than the ask, so a
+  // one-shot guard at arm time would miss it entirely. This function runs on
+  // EVERY carried turn and already owns the turn-count decrement, so a
+  // competitor appearing at any point brings the asks back down with it — and
+  // the clamp is applied BEFORE rules 3-5 below, so both then expire together
+  // rather than one lingering a turn longer.
+  //
+  // ⛔ ONE-DIRECTIONAL. It can only SHORTEN, and only while a competing
+  // short-window claimant is LIVE, so it cannot make any binding reachable that
+  // was not reachable before the widening shipped; the worst it can do is
+  // decline a bind, which is the fail-closed direction. When the set is unmixed
+  // — the founder's journey, one ask and no competitor — it is a no-op.
+  const clampAskWindows = recordedAskWindowMustClamp([...prior, ...thisTurn], nowMs);
   // Diagnosis D2a (live 2026-07-10 stale-resume specimen): proposal memory
   // is a SINGLE-SLOT store — when this turn's assistant text produced a
   // capturable offer (a fresh `proposed_concept` entry in `thisTurn`),
@@ -495,14 +523,18 @@ export function computeSurvivingPriorPendingsDetailed(
   let expiredWallCount = 0;
   let hashInvalidatedCount = 0;
   let expiredTurnsCount = 0;
-  for (const pa of prior) {
-    const key = pendingMatchKey(pa);
+  for (const priorPa of prior) {
+    const key = pendingMatchKey(priorPa);
     if (consumed.has(key)) { consumedCount += 1; continue; } // 1. applied / dismissed
     if (
       thisTurnKeys.has(key)
-      || (pa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
-      || (pa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
+      || (priorPa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
+      || (priorPa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
     ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
+    // 2b. SYMMETRIC CLAIM WINDOW — clamp before rules 3-5 read the bounds, so a
+    // clamped ask expires on the same turn as the competitor it was outliving.
+    // Identity when the set is unmixed or the pending is not a recorded ask.
+    const pa = clampAskWindows ? clampRecordedAskWindow(priorPa) : priorPa;
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.
@@ -1100,10 +1132,21 @@ export async function commitDirectAnswer(
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
   const nowMsForPendings = Date.now();
-  // RECORDED-ASK LIFETIME (2026-08-31). Applied HERE, at the single seam where
-  // pendings are persisted (`pending_actions: finalPendings` below is the only
-  // writer into the turn row), rather than at each of the ~15 creation sites
-  // that arm one. A per-site stamp is a hand-maintained mirror — trap 12 — and
+  // RECORDED-ASK LIFETIME (2026-08-31). Applied HERE, at the single seam that
+  // ARMS pendings, rather than at each of the ~15 creation sites that arm one.
+  //
+  // ⚠ WORDING CORRECTED AFTER REVIEW. This read "the single seam where pendings
+  // are persisted (`pending_actions: finalPendings` below is the only writer
+  // into the turn row)", which is FALSE — and this very file names the
+  // counter-example at :698: `routes/assist.v1.scenario-graph-register.ts:435`
+  // writes a turn row through `appendCheckedGraphWrite` with NO
+  // `pending_actions`, which `supabase-store.ts` resolves to `[]` (another
+  // wipe). The accurate and load-bearing claim is the narrower one: every
+  // pending that is ARMED is armed here, so a kind-derived window at this seam
+  // cannot be missed by a creation site. An overstated claim about a chokepoint
+  // is how a second writer stays invisible.
+  //
+  // A per-site stamp is a hand-maintained mirror — trap 12 — and
   // the drift would be invisible: a new ask site that forgot it would simply
   // expire in two turns and read as "the user never answered". Deriving the
   // window from the KIND at the chokepoint makes a missed site impossible by

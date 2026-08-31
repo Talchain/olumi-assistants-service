@@ -727,6 +727,18 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  * expired out of the claimant set — the exact stale-hijack harm, manufactured
  * by an asymmetric widening. The claimant set has to move as one.
  *
+ * ⚠⚠ AND THAT RULE IS NOT SATISFIED BY THIS MAP ALONE — it was stated here and
+ * then broken by this map's own membership (adversarial review, 2026-08-31).
+ * {@link PENDING_KIND_CLAIMS_BARE_NUMBER} has SEVEN true members and this map
+ * widens FOUR, leaving `set_factor_value`, `clarify_v2_round` and
+ * `proposed_concept` on the short window — so the claimant set decays unevenly
+ * exactly as the paragraph above warns. Widening those three is NOT the fix
+ * (two of them have no dial B; see the derivation on
+ * {@link enforceSymmetricClaimWindow}). The evenness is enforced separately, by
+ * clamping every recorded ask back to the defaults whenever a short-window
+ * claimant is live beside it. **Read that function before changing this map:
+ * membership here is only half the rule.**
+ *
  * Every non-member keeps the default bounds unchanged.
  */
 export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
@@ -815,6 +827,155 @@ export function applyRecordedAskLifetimes(
     return next;
   });
   return changed ? out : pendings;
+}
+
+/**
+ * ⭐⭐ THE CLAIMANT SET MOVES AS ONE — the asymmetry this file's own note
+ * demanded and its first implementation did not deliver (adversarial review,
+ * 2026-08-31).
+ *
+ * ── THE DEFECT, AND IT WAS MANUFACTURED BY THE FIX ABOVE ───────────────────
+ * {@link PENDING_KIND_CLAIMS_BARE_NUMBER} has SEVEN true members;
+ * {@link PENDING_KIND_IS_RECORDED_ASK} widens FOUR. The three left behind —
+ * `set_factor_value`, `clarify_v2_round`, `proposed_concept` — still claim a
+ * bare number, and still expire at 2 turns / 10 minutes. So:
+ *
+ *   turn T    a `clarify_v2_round` arms a NUMBERED MENU (TTL 2)
+ *   turn T+3  the menu has expired; a widened `elicit_option_effect` (TTL 12)
+ *             armed at T-1 is still live
+ *   turn T+3  the user types "1", meaning the MENU INDEX
+ *             → `repair-value-binding.ts:514-518` finds exactly one live
+ *               claimant, so the ambiguity gate does not fire
+ *             → `resolveRecordedOptionEffectAnswer` returns `bind`
+ *             → 1 is written into the option/factor cell
+ *
+ * That is precisely the stale-hijack harm the two-dial note above exists to
+ * prevent, newly created, with a 6x wider window. The ambiguity gate was never
+ * wrong; it was reading a claimant set that had decayed unevenly underneath it.
+ *
+ * ── WHY NOT SIMPLY WIDEN ALL SEVEN ────────────────────────────────────────
+ * Because membership in the widened set is a claim that dial B exists, and for
+ * two of the three it does not. Derived at the mint sites, not assumed:
+ *
+ *   · `clarify_v2_round` (`clarify-v2-dispatch.ts:176`) mints
+ *     `preconditions: {}` — NO graph hash. Carry-forward rule 4 can therefore
+ *     never invalidate it, so a 30-minute window would be a 30-minute window
+ *     with no relevance gate at all.
+ *   · `proposed_concept` is the one claimant in
+ *     {@link CONFIRMATION_EXPECTING_ACTION_TYPES}: a bare "yes" resolves it, so
+ *     a longer window IS the stale-hijack harm in a second direction the
+ *     widening cannot fail closed on.
+ *   · `set_factor_value` (`rescale-cap-pending.ts:97-100`) does pin a hash, but
+ *     widening one of the three and not the others leaves the set uneven again.
+ *
+ * So the two questions are named apart rather than aligned (trap 21): *"how
+ * long may this ask be ANSWERED?"* stays with
+ * {@link PENDING_KIND_IS_RECORDED_ASK}, and *"is the claimant set even?"* is
+ * answered here. When the set is MIXED, nobody gets the long window — every
+ * recorded ask is clamped back to the defaults so it expires alongside the
+ * competitor that would otherwise have vanished from under it.
+ *
+ * ⛔ ONE-DIRECTIONAL, AND THAT IS THE WHOLE SAFETY ARGUMENT. This function can
+ * only ever SHORTEN, and only when a competing short-window claimant is LIVE.
+ * It cannot widen anything, so it can introduce no new binding that was not
+ * already reachable; the worst it can do is decline a bind the user wanted,
+ * which is the fail-closed direction (the number falls through exactly as it
+ * did before the widening shipped). Identity is returned whenever the set is
+ * unmixed, so the founder's journey — one recorded ask, no competitor — is
+ * untouched.
+ *
+ * ⚠ MALFORMED VALUES PASS THROUGH UNTOUCHED. {@link isPendingActionExpired}
+ * already treats an unparseable `expires_at_iso` as expired; rewriting one into
+ * a valid clamp would convert that fail-closed verdict into a live window.
+ */
+export function isShortWindowBareNumberClaimant(kind: PendingActionKind): boolean {
+  return PENDING_KIND_CLAIMS_BARE_NUMBER[kind] && !PENDING_KIND_IS_RECORDED_ASK[kind];
+}
+
+/**
+ * Clamp ONE recorded ask back to the default bounds. Never widens; returns the
+ * input by identity for a non-ask and for an ask already inside the defaults.
+ *
+ * ⚠ THE CALLER OWNS THE DECISION, and the separation is deliberate. Whether to
+ * clamp is a property of the WHOLE pending set
+ * ({@link recordedAskWindowMustClamp}); whether this particular pending changes
+ * is a property of the pending. Folding the set-level test in here would make
+ * the function answer it from whatever slice it happened to be handed — and the
+ * competitor is routinely in a different slice from the ask, so it would look
+ * right and clamp nothing.
+ */
+export function clampRecordedAskWindow(pa: PendingAction): PendingAction {
+  if (!PENDING_KIND_IS_RECORDED_ASK[pa.action.kind]) return pa;
+
+  const currentTurns = pa.expires_at_turn_count;
+  const nextTurns =
+    Number.isFinite(currentTurns) && currentTurns > PENDING_ACTION_DEFAULT_TURN_TTL
+      ? PENDING_ACTION_DEFAULT_TURN_TTL
+      : currentTurns;
+
+  const currentExpiryMs = Date.parse(pa.expires_at_iso);
+  const emittedMs = Date.parse(pa.emitted_at_iso);
+  let nextExpiryIso = pa.expires_at_iso;
+  if (Number.isFinite(currentExpiryMs) && Number.isFinite(emittedMs)) {
+    const ceilMs = emittedMs + PENDING_ACTION_DEFAULT_WALL_TTL_MS;
+    if (ceilMs < currentExpiryMs) nextExpiryIso = new Date(ceilMs).toISOString();
+  }
+
+  if (nextTurns === currentTurns && nextExpiryIso === pa.expires_at_iso) return pa;
+  return { ...pa, expires_at_turn_count: nextTurns, expires_at_iso: nextExpiryIso };
+}
+
+/**
+ * True when the pending set contains a LIVE bare-number claimant that does not
+ * get the widened window — i.e. the set is mixed and the asks must come back
+ * down to meet it.
+ */
+export function recordedAskWindowMustClamp(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): boolean {
+  return pendings.some(
+    (pa) =>
+      isShortWindowBareNumberClaimant(pa.action.kind) &&
+      !isPendingActionExpired(pa, nowMs),
+  );
+}
+
+/**
+ * {@link clampRecordedAskWindow} over a pending set, UNCONDITIONALLY. Returns the
+ * input by identity when nothing needed clamping.
+ *
+ * ⚠ SEPARATED FROM THE DECISION ON PURPOSE. The persisted set arrives in two
+ * halves — this turn's own pendings and the carry-forward survivors — and the
+ * competitor is routinely in the OTHER half from the ask. A convenience that
+ * re-decided per array would therefore look right and clamp nothing: the caller
+ * must take {@link recordedAskWindowMustClamp} over the UNION once, then apply
+ * this to each half. (Caught before landing; it is the same shape as a
+ * per-item probe that answers from the wrong scope.)
+ */
+export function clampRecordedAskWindows(
+  pendings: readonly PendingAction[],
+): readonly PendingAction[] {
+  let changed = false;
+  const out = pendings.map((pa) => {
+    const next = clampRecordedAskWindow(pa);
+    if (next !== pa) changed = true;
+    return next;
+  });
+  return changed ? out : pendings;
+}
+
+/**
+ * Decide-and-apply over a SINGLE set that already contains both the asks and
+ * their competitors. Convenience for callers holding one list; the commit seam
+ * uses the two-step form above because its set arrives in halves.
+ */
+export function enforceSymmetricClaimWindow(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): readonly PendingAction[] {
+  if (!recordedAskWindowMustClamp(pendings, nowMs)) return pendings;
+  return clampRecordedAskWindows(pendings);
 }
 
 /**
