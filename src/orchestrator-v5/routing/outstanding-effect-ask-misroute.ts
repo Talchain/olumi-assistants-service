@@ -390,9 +390,10 @@ export function findOutstandingEffectAskCollision(params: {
       return null;
     }
   }
-  return match.length > 0
-    ? { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) }
-    : null;
+  // `match` is non-empty by the early return above — no second, unreachable
+  // emptiness guard here. A guard that cannot fail reads as protection and is
+  // not, which is the shape this estate hunts.
+  return { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) };
 }
 
 /**
