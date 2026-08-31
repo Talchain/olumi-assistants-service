@@ -63,6 +63,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
+import { OPTION_FRAMING_WARNING_ID } from '../../cee/draft/records/option-framing-recovery.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { loadMostRecentPendingActions } from '../build-turn-context.js';
 import {
@@ -312,7 +313,14 @@ export function draftResultToOlumiResponse(
     // `risk_adjusted` / `goal_setting` / `out_of_scope` are preserved
     // (rule 3). The scrub is idempotent — running it again before the
     // central egress is a no-op.
-    assistantText = sanitiseCoachingProse(narrative.text, result.graphOutput).text;
+    // Preserve the producer's unresolved framing disclosure on the native V5
+    // receipt. The detailed record carrier is otherwise reduced to a count.
+    const framingNotices = (result.draftWarnings ?? [])
+      .filter(warning => warning.id === OPTION_FRAMING_WARNING_ID)
+      .map(warning => [warning.explanation, warning.fix_hint].filter(Boolean).join(' '))
+      .filter(Boolean);
+    const narrativeWithFraming = [...framingNotices, narrative.text].join('\n\n');
+    assistantText = sanitiseCoachingProse(narrativeWithFraming, result.graphOutput).text;
     emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
       request_id: requestId,
       scenario_id: payload.scenario_id,
