@@ -185,7 +185,23 @@ const PATTERNS = {
   // captured, not ignored, so the extractor can refuse by name instead of
   // emitting bare digits for a magnitude it cannot read.
   contextualNumber: new RegExp(
-    "(?<context>price|cost|rate|revenue|budget|margin|churn|conversion|growth|target|threshold|limit)" +
+    // ⚠ THIS VOCABULARY IS A CLOSED LIST STANDING IN FOR AN OPEN CLASS, and
+    // that is where the next figure gets lost. MEASURED on the deployed build
+    // at `ac37890c`: "our tooling COST of 180000" and "our tooling BUDGET is
+    // 180000" both extracted 180000 at explicit/0.90, while "our tooling SPEND
+    // of 180000" and "we SPEND 180000 a year on tooling" extracted NOTHING —
+    // one word apart, same frame, opposite outcome. The list held twelve nouns
+    // of measurement and no verb of spending, so the commonest way a team
+    // states a cost fell straight through, and the assistant asked the user for
+    // a number they had already typed ("Figures from your brief I could not
+    // find in the model: 180000 a year").
+    //
+    // `spending|spend` joins the ONE list rather than arriving as a second
+    // pattern: the digit grammar, the magnitude alphabet and the unreadable-
+    // suffix refusal below are all inherited unchanged, which is the whole
+    // reason this pattern is spelled once (CLAUDE.md trap 12).
+    "(?<context>price|cost|rate|revenue|budget|margin|churn|conversion|growth|target|threshold|limit" +
+      "|spending|spend)" +
       "\\s+(?:of|is|at|was|be)?\\s*(?:[£$€])?" +
       `(?<amount>${AMOUNT_DIGITS})` +
       magnitudeSuffixPattern("mult") +
