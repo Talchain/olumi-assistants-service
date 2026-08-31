@@ -125,6 +125,7 @@ describe('DERIVED: every test file the consent module cites by name exists', () 
 });
 
 describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor commit closure', () => {
+  const INTERNAL_OPTION_WRITER = 'orchestrator-v5/system-events/option-intervention-edit.ts';
   /**
    * Every `commitDirectAnswer(` call site in `src/` that passes a `graph`.
    * `turn-executor.ts` is excluded because its writes funnel through
@@ -154,6 +155,11 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     'orchestrator-v5/handlers/chip-click-dispatch.ts',
     // V4 add-option / decline / offer.
     'orchestrator/route-v2.ts',
+    // INTERNAL / UNADMITTED / UNCOVERED: no production consumer today and
+    // no consent check inside this helper. Its caller must eventually supply
+    // reviewed admission; the mutation referee is NOT evidence of consent.
+    // Recording the writer does not license wiring it into a public path.
+    INTERNAL_OPTION_WRITER,
   ];
 
   function walk(dir: string, out: string[] = []): string[] {
@@ -169,7 +175,8 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     return out;
   }
 
-  const graphBearingWriters = walk(SRC_ROOT)
+  const productionFiles = walk(SRC_ROOT);
+  const graphBearingWriters = productionFiles
     .filter((p) => {
       // `grep -a` equivalent: readFileSync is NUL-safe, unlike plain grep
       // (CLAUDE.md trap 17 — a NUL-bearing source file is invisible to it,
@@ -197,5 +204,35 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     // withheld-consent backstop does not cover. That is a decision to make
     // deliberately, in review — not a line to discover in production.
     expect(graphBearingWriters).toEqual([...KNOWN_UNCOVERED_WRITERS].sort());
+  });
+
+  // Deliberately a source-spelling guard, not call-graph/authentication proof.
+  // Computed paths/reflection are outside its scope; even conservative type
+  // imports or comments require review of this still-unadmitted classification.
+  function mentionsInternalOptionWriter(body: string): boolean {
+    return body.includes('option-intervention-edit') || /\bexecuteOptionInterventionEdit\b/.test(body);
+  }
+
+  it('records the real internal writer but finds no production consumer under the declared scan', () => {
+    expect(productionFiles.length).toBeGreaterThan(0);
+    expect(graphBearingWriters).toContain(INTERNAL_OPTION_WRITER);
+    const writerPath = join(SRC_ROOT, INTERNAL_OPTION_WRITER);
+    expect(productionFiles).toContain(writerPath);
+    expect(mentionsInternalOptionWriter(readFileSync(writerPath, 'utf8'))).toBe(true);
+    const consumers = productionFiles.filter(p => p !== writerPath
+      && mentionsInternalOptionWriter(readFileSync(p, 'utf8')));
+    expect(consumers.map(p => p.slice(SRC_ROOT.length))).toEqual([]);
+  });
+
+  it.each([
+    ['direct import', "import { executeOptionInterventionEdit } from './option-intervention-edit.js';", true],
+    ['aliased import', "import { executeOptionInterventionEdit as write } from './option-intervention-edit.js';", true],
+    ['re-export', "export * from './option-intervention-edit.js';", true],
+    ['namespace', "import * as optionWriter from './option-intervention-edit.js';", true],
+    ['dynamic literal', "await import('./option-intervention-edit.js');", true],
+    ['named invocation', 'executeOptionInterventionEdit(input, store);', true],
+    ['unrelated writer', "import { dispatchSystemEvent } from './dispatch.js';", false],
+  ] as const)('the internal-reference detector distinguishes %s', (_name, source, expected) => {
+    expect(mentionsInternalOptionWriter(source)).toBe(expected);
   });
 });

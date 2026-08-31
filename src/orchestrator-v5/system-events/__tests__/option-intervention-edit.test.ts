@@ -153,8 +153,9 @@ describe('explicit option-intervention preparation — existing canonical operat
   it.each(['nested', 'slash'] as const)('never reports unchanged from a stale top-level cell when %s source wins', carrier => {
     const g = graph();
     const option = g.nodes.find(n => n.id === 'option')!;
-    if (carrier === 'nested') option.data = { interventions: { factor: intervention(0.3) } };
-    else option['data/interventions/factor'] = intervention(0.3);
+    // These are intentionally raw legacy fields, not declared NodeV3 fields.
+    if (carrier === 'nested') Object.assign(option, { data: { interventions: { factor: intervention(0.3) } } });
+    else Object.assign(option, { 'data/interventions/factor': intervention(0.3) });
     expect(mergeInterventionSources(option)?.factor).toBe(0.3);
     expect(option.interventions!.factor.value).toBe(0.2);
     expect(prepare(g, { modelValue: 0.2 })).toMatchObject({ kind: 'refused' });
@@ -221,7 +222,9 @@ describe('option-intervention candidate — target-only final persisted postimag
 
   it('refuses an unrelated legacy normalization rather than laundering it by projecting both sides', () => {
     const before = canonicalGraph();
-    before.nodes.find(n => n.id === 'other_option')!.data = { interventions: { factor: { value: 0.9 } } };
+    Object.assign(before.nodes.find(n => n.id === 'other_option')!, {
+      data: { interventions: { factor: { value: 0.9 } } },
+    });
     const original = clone(before);
     expect(apply(before).kind).toBe('refused');
     expect(before).toEqual(original);
