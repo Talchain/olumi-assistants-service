@@ -31,6 +31,7 @@ import { resolveRunAdmission } from "../../../../orchestrator-v5/tools/handlers/
 import { detectEdgeFormat } from "../../../unified-pipeline/utils/edge-format.js";
 import { validateGraph } from "../../../../validators/graph-validator.js";
 import { pathsNameNode } from "../../../../validators/violation-paths.js";
+import { retainedDecisionFreeFactorIds } from "../../../../validators/decision-free-retention.js";
 
 const requestId = "class-b-retention-repair";
 const connectedFixture = corpus.cases.nonaction_connected;
@@ -79,9 +80,9 @@ function repairBoundaries(input: GraphT) {
   return [afterSimpleRepair, afterUnreachable, structuredClone(graph)];
 }
 
-function expectRetainedNumberlessFactor(graph: GraphT, input: GraphT) {
-  const before = subject(input);
-  const retained = subject(graph);
+function expectRetainedNumberlessFactor(graph: GraphT, input: GraphT, id = subjectId) {
+  const before = subject(input, id);
+  const retained = subject(graph, id);
   expect(retained).toMatchObject({ id: before.id, kind: "factor", label: before.label });
   expect(before).not.toHaveProperty("data.value");
   expect(retained).not.toHaveProperty("data.value");
@@ -101,7 +102,93 @@ function hasNoPathError(graph: GraphT, id: string) {
   return pathsNameNode(paths, id);
 }
 
+function minimalSpine(withPeer = false): GraphT {
+  return project({
+    brief: "We want to understand retention.",
+    records: {
+      stated_items: [{ kind: "goal", source_quote: "understand retention" }],
+      claims: [
+        { claim_kind: "factor", label: "Pricing may explain churn", basis: [0] },
+        { claim_kind: "outcome", label: "Retained customers", basis: [0] },
+        ...(withPeer ? [{ claim_kind: "factor", label: "Onboarding may explain churn", basis: [0] }] : []),
+        { claim_kind: "causal_link", label: "retention reaches goal", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    },
+  });
+}
+
 describe("Class-B numberless retention: next repair/admission boundaries", () => {
+  it("MINIMAL_SPINE — keeps the admitted no-inbound hypothesis through real repair without inventing a feeder", async () => {
+    const input = minimalSpine();
+    const ids = input.nodes.filter((node) => node.kind === "factor").map((node) => node.id);
+    expect(ids).toHaveLength(1);
+    expect([...retainedDecisionFreeFactorIds(input)]).toEqual(ids);
+    const graph = simpleRepair(structuredClone(input), requestId, { deferSweepOwnedPatterns: true });
+    const ctx = { graph, requestId, repairTrace: {} } as StageContext;
+    await runDeterministicSweep(ctx);
+    const after = Graph.parse(ctx.graph);
+    expectRetainedNumberlessFactor(after, input, ids[0]);
+    expect(incident(after, ids[0])).toEqual([]);
+    expect(after.edges).toHaveLength(input.edges.length);
+    expect(validateGraph({ graph: after, requestId }).valid).toBe(true);
+  });
+
+  it.each([false, true])("PEER_IDENTITY — protects both unresolved hypotheses regardless of node order (reversed=%s)", (reverse) => {
+    const input = minimalSpine(true);
+    if (reverse) input.nodes.reverse();
+    const ids = input.nodes.filter((node) => node.kind === "factor").map((node) => node.id);
+    expect(ids).toHaveLength(2);
+    const after = simpleRepair(structuredClone(input), requestId);
+    for (const id of ids) {
+      expectRetainedNumberlessFactor(after, input, id);
+      expect(incident(after, id)).toEqual([]);
+    }
+  });
+
+  it("EXISTING_FEEDER — leaves a connected numberless peer eligible for the existing repair", () => {
+    const input = minimalSpine();
+    const unresolved = input.nodes.find((node) => node.kind === "factor")!;
+    const outcome = input.nodes.find((node) => node.kind === "outcome")!;
+    const goal = input.nodes.find((node) => node.kind === "goal")!;
+    input.nodes.push({ id: "existing_feeder", kind: "factor", label: "Existing connected cause" },
+      { id: "other_outcome", kind: "outcome", label: "Other outcome" });
+    input.edges.push({ ...input.edges[0], id: "existing_input", from: "existing_feeder", to: outcome.id },
+      { ...input.edges[0], id: "other_goal_path", from: "other_outcome", to: goal.id });
+    expect([...retainedDecisionFreeFactorIds(input)]).toEqual([unresolved.id]);
+    const after = simpleRepair(structuredClone(input), requestId);
+    expect(incident(after, unresolved.id)).toEqual([]);
+    expect(after.edges.filter((edge) => edge.to === "other_outcome")).toEqual([
+      expect.objectContaining({ from: "existing_feeder", strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.75 }),
+    ]);
+  });
+
+  it.each([0, 0.5])("VALUED_FEEDER — leaves the existing repair for supplied value %s unchanged", (value) => {
+    const input = minimalSpine();
+    const factor = input.nodes.find((node) => node.kind === "factor")!;
+    factor.data = { value, extractionType: "explicit" };
+    expect(retainedDecisionFreeFactorIds(input).size).toBe(0);
+    const after = simpleRepair(structuredClone(input), requestId);
+    expect(subject(after, factor.id).data).toStrictEqual(factor.data);
+    expect(incident(after, factor.id)).toEqual([
+      expect.objectContaining({ from: factor.id, strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.75 }),
+    ]);
+  });
+
+  it.each([
+    { distribution: "uniform" as const, range_min: 0.4, range_max: 0.8 },
+    { distribution: "uniform" as const, range_min: 0, range_max: 1, prior_is_unquantified: true },
+  ])("PRIOR_FEEDER — preserves the supplied distribution and existing feeder behaviour ($range_min,$range_max)", (prior) => {
+    const input = minimalSpine();
+    const factor = input.nodes.find((node) => node.kind === "factor")!;
+    factor.prior = prior;
+    expect(retainedDecisionFreeFactorIds(input).size).toBe(0);
+    const after = simpleRepair(structuredClone(input), requestId);
+    expect(subject(after, factor.id).prior).toStrictEqual(prior);
+    expect(incident(after, factor.id)).toEqual([
+      expect.objectContaining({ from: factor.id, strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.75 }),
+    ]);
+  });
+
   it("COMPOSED_REPAIR — actual sweep retains the unresolved factor through strict canonical/context ingress while analysis stays blocked", async () => {
     const input = project(disconnectedFixture);
     const stabilised = stabiliseGraph(ensureDagAndPrune(input));

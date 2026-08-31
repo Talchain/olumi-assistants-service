@@ -27,7 +27,7 @@ function hasLevel(record: unknown): boolean {
  * decision-free shape. This is retention eligibility, never run admission.
  *
  * The first slice requires one existing goal and an already connected
- * outcome/risk spine, with no orphan terminal to repair. Quantities (including
+ * outcome/risk spine whose terminals already reach the goal. Quantities (including
  * real 0 and 0.5), distributions, constraints and action graphs keep their
  * existing rules. No role or origin is inferred from labels or provenance.
  */
@@ -44,6 +44,9 @@ export function retainedDecisionFreeFactorIds(graph: RetentionGraph): Set<string
 
   for (const node of graph.nodes) {
     if (node.kind !== "factor") continue;
+    // Connected factors already survive normally and remain valid existing
+    // feeders. Only the unresolved population needs the shared exception.
+    if (canReachAnyGoal(node.id, graph.edges, goalIds)) continue;
     if (hasLevel(node) || hasLevel(node.data) || hasLevel(node.observed_state)) continue;
     if (node.prior !== undefined && node.prior !== null) continue;
     retained.add(node.id);

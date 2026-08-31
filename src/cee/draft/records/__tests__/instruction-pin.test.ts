@@ -455,12 +455,23 @@ const PREREGISTERED_V12_INSTRUCTION_SHA256 =
   "9c3906151c4a6abec7906fc430c3c26bc8d6c92559a8e859401dd03b9682f232";
 const PREREGISTERED_V12_INSTRUCTION_BYTES = 12280;
 
-describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v12 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V12_INSTRUCTION_SHA256);
+// Source candidate only: these pins identify the bounded retention instruction,
+// not a provider measurement or a served/PMS version. Keep v12's record intact.
+const CANDIDATE_V13_INSTRUCTION_SHA256 =
+  "6fbac9beae2598e9943d3f33fcd6b58fa995eb6bb3a3b610af5f8355c3438f02";
+const CANDIDATE_V13_INSTRUCTION_BYTES = 12632;
+
+describe("the draft records instruction preserves source identity and historical attribution", () => {
+  it("hashes to the registered v13 SOURCE CANDIDATE at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(CANDIDATE_V13_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V12_INSTRUCTION_BYTES,
+      CANDIDATE_V13_INSTRUCTION_BYTES,
     );
+  });
+
+  it("is DISTINCT from the historical v12 instruction and cannot inherit its measurements", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V12_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V12_INSTRUCTION_BYTES);
   });
 
   it("is DISTINCT from the WITHDRAWN v11 bytes, so v11's measurement stays its own", () => {
@@ -1051,8 +1062,13 @@ describe("the instruction says nothing it must not say", () => {
    * to invent. It must keep BOTH of its balancing sentences: the one that removes
    * a claim, and the one that forbids dropping anything the user stated.
    */
-  it("keeps both balancing sentences in the connect half", () => {
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("Do not emit a factor you cannot connect.");
-    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("But never drop something the user\nstated");
+  it("keeps the conditional connection rule and protection of user-stated material", () => {
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("Outside that case, do not emit a factor you cannot connect.");
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("But never drop\nsomething the user stated");
+  });
+
+  it("names the v13 numberless-retention exception without instructing fabricated links or priors", () => {
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("With no decision or options, keep unresolved explanations as numberless");
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("do not invent a link, value or prior merely to connect them or enable analysis.");
   });
 });

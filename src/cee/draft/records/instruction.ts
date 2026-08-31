@@ -25,6 +25,9 @@ import { createHash } from "node:crypto";
  * one name is trap 21, and this estate has paid for it.
  *
  * ── ⭐ VERSIONS, AND WHICH ONE THE EVIDENCE BELONGS TO ─────────────────────
+ * v13 — source candidate for bounded numberless-factor retention. Unmeasured
+ *       as producer output; its source hash is registered separately from the
+ *       historic v12 bytes in instruction-pin.test.ts. No PMS/serving claim.
  * v2 — sha256 `e630587523d29ace…`, 2,351 bytes. THE MEASURED ONE. Every result
  *      recorded up to 2026-08-11 (the 0/27-accepted enumeration, both arm-R1
  *      measured blocks) was taken against exactly these bytes.

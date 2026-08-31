@@ -23,6 +23,13 @@ describe("decision-free numberless retention boundaries", () => {
     expect(input).toStrictEqual(before);
   });
 
+  it("does not classify the same factor as unresolved once an authored link connects it", () => {
+    const input = graph();
+    expect([...retainedDecisionFreeFactorIds(input)]).toEqual(["hypothesis"]);
+    const connected = { ...input, edges: [...input.edges, { from: "hypothesis", to: "outcome" }] };
+    expect([...retainedDecisionFreeFactorIds(connected)]).toEqual([]);
+  });
+
   it.each(["decision", "option"])("does not exempt the adjacent %s-present shape", (kind) => {
     const input = graph();
     expect([...retainedDecisionFreeFactorIds({
