@@ -4268,7 +4268,7 @@ function buildRejectionResult(
   baseGraphHash: string,
   turnId: string,
   startTime: number,
-  code?: string,
+  code?: EditRejectionCode,
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
   attempts?: number,
   diagnostics?: EditGraphTraceDiagnostics,
@@ -4295,15 +4295,17 @@ function buildRejectionResult(
     "edit_graph rejected — all attempts exhausted",
   );
 
-  // Never surface raw structural violation text to the user.
-  // The raw reason is preserved in the block's rejection.reason for
-  // debugging; the assistant text always gives a safe, actionable recovery
-  // message via the centralised builder. Mapping (V5 A4 Commit 3):
-  //   MAX_OPERATIONS_EXCEEDED       -> too_many_operations
-  //   STRUCTURAL_VALIDATION_FAILED  -> structural_validation
-  //   PLOT_SEMANTIC_REJECTED        -> structural_validation
-  //   PLOT_UNAVAILABLE              -> structural_validation
-  //   anything else                 -> structural_validation (safe default)
+  // Never surface raw structural violation text to the user. The raw reason is
+  // preserved in the block's rejection.reason for debugging; the assistant text
+  // gives a safe, actionable recovery message via the centralised builder.
+  //
+  // ⚠ THE MAPPING IS NOT A FORMATTING DETAIL — IT IS A TRUTH CLAIM. See
+  // `mapCodeToRejectionReason` for the complete table. Until 2026-08-31 this
+  // comment read "anything else -> structural_validation (safe default)", and
+  // that default was not safe: it told a user whose analysis service had gone
+  // down that their own change was structurally invalid, and did the same for
+  // five system-side failure codes that were never given an arm. Whatever you
+  // add here, check what the copy ASSERTS about whose fault it was.
   const friendly = buildEditRejectionResponse(mapCodeToRejectionReason(code));
 
   return {
@@ -4317,16 +4319,87 @@ function buildRejectionResult(
   };
 }
 
-function mapCodeToRejectionReason(code?: string): EditRejectionReason {
+/**
+ * Every rejection code `buildRejectionResult` can be handed, as a runtime
+ * array AND (derived from it) the compile-time union.
+ *
+ * ⭐ THIS IS THE COMPLETENESS GUARD, and it is derived rather than
+ * hand-maintained (CLAUDE.md trap 12). Because `buildRejectionResult`'s
+ * `code` parameter is typed `EditRejectionCode`, a new call site passing a
+ * literal that is absent from this array is a COMPILE ERROR — the compiler
+ * reads every call site, so this list cannot silently go short the way a
+ * hand-copied list does. And because the switch below closes on a `never`
+ * arm, adding a member here without giving it a case is also a compile
+ * error. The two together mean an unmapped code cannot reach a user.
+ */
+export const EDIT_REJECTION_CODES = [
+  'MAX_OPERATIONS_EXCEEDED',
+  'STRUCTURAL_VALIDATION_FAILED',
+  'PLOT_SEMANTIC_REJECTED',
+  'PLOT_UNAVAILABLE',
+  'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS',
+  'SYNTHESIZED_GRAPH_INVALID',
+  'APPLIED_GRAPH_UNAVAILABLE',
+  'OPTION_INTERVENTIONS_UNRESOLVABLE',
+  'OPERATION_DID_NOT_LAND',
+] as const;
+
+export type EditRejectionCode = (typeof EDIT_REJECTION_CODES)[number];
+
+/**
+ * An unmapped code is an UNKNOWN failure, and the honest copy for an unknown
+ * failure is not a specific accusation.
+ *
+ * ⚠ WHY THIS RETURNS RATHER THAN THROWS — the choice was deliberate. A throw
+ * here converts a rejection the user could recover from into a 500 they
+ * cannot, so fail-loud in the RUNTIME direction would harm exactly the person
+ * this fix is for. The loudness is therefore placed where it costs the user
+ * nothing and catches the mistake earlier: the `never` parameter makes an
+ * unmapped code a COMPILE error, and `log.error` makes one that somehow
+ * defeats the type a searchable operational signal. The user still gets copy
+ * that is true.
+ */
+function reasonForUnmappedCode(code: never): EditRejectionReason {
+  log.error(
+    { rejection_code: String(code) },
+    'edit_graph — rejection code has no copy mapping; falling back to unknown-failure copy',
+  );
+  return 'unknown_failure';
+}
+
+export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectionReason {
   switch (code) {
+    // ── The user's request genuinely was the problem. Naming it is honest. ──
     case 'MAX_OPERATIONS_EXCEEDED':
       return 'too_many_operations';
     case 'STRUCTURAL_VALIDATION_FAILED':
     case 'PLOT_SEMANTIC_REJECTED':
+      return 'structural_validation';
+
+    // ── An outage. Nothing to do with what the user asked for. ──
     case 'PLOT_UNAVAILABLE':
-      return 'structural_validation';
+      return 'service_unavailable';
+
+    // ── Our own side broke after the change was understood. Also not theirs. ──
+    // Note each of these call sites already passes an honest human-readable
+    // string as `reason` (e.g. "the system could not capture the final applied
+    // state"); that sentence survives only in `rejection.reason` for the turn
+    // trace. Before this mapping existed the arm below was `default`, so the
+    // user saw the structural accusation instead — honest copy was written and
+    // then thrown away.
+    case 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS':
+    case 'SYNTHESIZED_GRAPH_INVALID':
+    case 'APPLIED_GRAPH_UNAVAILABLE':
+    case 'OPTION_INTERVENTIONS_UNRESOLVABLE':
+    case 'OPERATION_DID_NOT_LAND':
+      return 'internal_failure';
+
+    // ── No code supplied: cause not established, so claim nothing. ──
+    case undefined:
+      return 'unknown_failure';
+
     default:
-      return 'structural_validation';
+      return reasonForUnmappedCode(code);
   }
 }
 

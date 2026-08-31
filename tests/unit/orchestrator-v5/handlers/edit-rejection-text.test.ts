@@ -14,12 +14,26 @@ const BANNED_TOKENS = [
   /\b\d+\s+(?:operation|edge|node)/i,
 ];
 
-const REASONS: EditRejectionReason[] = [
-  'too_many_operations',
-  'structural_validation',
-  'parse_failure',
-  'entity_not_found',
-];
+/**
+ * ⭐ EXHAUSTIVE BY THE COMPILER, not by hand (CLAUDE.md trap 12).
+ *
+ * A `Record` keyed on the union REQUIRES every member, so adding a new
+ * `EditRejectionReason` without listing it here fails typecheck. The previous
+ * plain array did not: a new reason could join the union and silently escape
+ * every invariant below — which is exactly how `service_unavailable`'s absence
+ * would have gone unnoticed.
+ */
+const ALL_REASONS: Record<EditRejectionReason, true> = {
+  too_many_operations: true,
+  structural_validation: true,
+  parse_failure: true,
+  entity_not_found: true,
+  service_unavailable: true,
+  internal_failure: true,
+  unknown_failure: true,
+};
+
+const REASONS = Object.keys(ALL_REASONS) as EditRejectionReason[];
 
 describe('buildEditRejectionResponse', () => {
   for (const reason of REASONS) {

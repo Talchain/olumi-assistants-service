@@ -815,6 +815,49 @@ describe("handleEditGraph", () => {
     expect(data.rejection?.code).toBe("PLOT_UNAVAILABLE");
   });
 
+  it("tells the user the analysis service was unreachable — never that their own change was invalid", async () => {
+    // ⭐ The wire-path twin of edit-rejection-honest-copy.test.ts. That suite
+    // pins the mapper; this one drives the REAL rejection path end to end, so
+    // the copy is bound to the code the running product actually produces
+    // rather than to a fixture of it (CLAUDE.md trap 16: a fixture you wrote
+    // yourself is not evidence about the wire).
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient: PLoTClient = {
+      run: vi.fn(),
+      validatePatch: vi.fn().mockRejectedValue(new Error("PLoT timeout")),
+    };
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    // Precondition pinned IN-TEST: this really is the PLoT-unavailable path,
+    // so the copy assertion below is provably about that code and not about
+    // some other rejection the fixture happened to trigger.
+    expect(data.rejection?.code).toBe("PLOT_UNAVAILABLE");
+
+    const text = result.assistantText ?? "";
+    expect(text).toBe(
+      "I couldn't reach the analysis service, so nothing in your model has changed. " +
+        "Try again in a moment.",
+    );
+    // The false accusation, in full, must be gone from this path.
+    expect(text).not.toContain("describe what you'd like to add or change in simpler terms");
+    expect(text).not.toMatch(/simpler terms/i);
+    // And the copy's factual claim must match the result it ships with.
+    expect(result.appliedGraph).toBeNull();
+    expect(result.wasRejected).toBe(true);
+    // Recovery is offered, not a dead end.
+    expect(result.suggestedActions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    assertNoBannedInternalTokens(text, (t, re) => expect(t).not.toMatch(re));
+  });
+
   // ------------------------------------------------------------------
   // LLM parse failures
   // ------------------------------------------------------------------
