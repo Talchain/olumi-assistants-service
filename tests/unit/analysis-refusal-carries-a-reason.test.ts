@@ -45,6 +45,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveRunAdmission,
+  AnalysisNotReadyError,
   NO_COMPARISON_NEXT_STEP,
 } from '../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js';
 // The PRODUCTION Run-analysis chain, imported whole so the surface assertions
@@ -371,6 +372,13 @@ describe('run admission — the refusal reaches the user through Run analysis', 
     failure: HandlerInvocationFailedError;
     assistantText: string;
     plotCalls: number;
+    /**
+     * TRUE when this refusal came from the TWO-TERM throw at
+     * `build-turn-context.ts:2843` — the one call site that routes through
+     * `refusedVerdict`. See `wentThroughRefusedVerdict` below for why that is
+     * observable rather than assumed.
+     */
+    viaRefusedVerdict: boolean;
   }> {
     const plotCalls = { n: 0 };
     const handler = runAnalysisOver(graph, plotCalls);
@@ -383,14 +391,51 @@ describe('run admission — the refusal reaches the user through Run analysis', 
     expect(caught).toBeInstanceOf(HandlerInvocationFailedError);
     const failure = caught as HandlerInvocationFailedError;
     const { response } = composeHandlerFailure(failure, CTX, 'frame');
-    return { failure, assistantText: response.assistant_text, plotCalls: plotCalls.n };
+    return {
+      failure,
+      assistantText: response.assistant_text,
+      plotCalls: plotCalls.n,
+      viaRefusedVerdict: wentThroughRefusedVerdict(failure),
+    };
+  }
+
+  /**
+   * ⭐⭐ WHICH THROW DID THIS REFUSAL COME FROM? ASSERTED, NOT COMMENTED.
+   *
+   * ── WHY THIS EXISTS (review, 2026-08-31) ──────────────────────────────────
+   * The two twins below have IDENTICAL assertion shapes, and only one of them
+   * is discriminating. `NO_GRAPH` throws at `build-turn-context.ts:2716`
+   * (`AnalysisNotReadyError(assessAnalysisReadiness(null))`) and never reaches
+   * the two-term admission, so it is structurally blind to any change in
+   * `refusedVerdict` — a mutant that stamps unconditionally leaves it green.
+   * `oneAlternative` throws at `:2843` and IS the discriminator.
+   *
+   * Nothing in the tests said which was which; the discrimination rested on
+   * routing that no assertion touched. That is precisely the vacuous shape the
+   * NO_GRAPH twin was already replaced once for, waiting to come back on the
+   * next refactor. So the routing is now OBSERVED.
+   *
+   * The observable is the SECOND constructor argument. The `:2843` throw passes
+   * `admission.assessment.analysisReady` as `structuralReadiness`; the three
+   * one-argument throws (`:2716` NO_GRAPH, `:2785`, `:2792`) cannot — the
+   * assessor returns `analysisReady: undefined` for a graph it could not
+   * identify, and inventing one would be the mirror of the defect this file
+   * closes. So a present `structuralReadiness` is a witness that the refusal
+   * came through the admission, and therefore through `refusedVerdict`.
+   */
+  function wentThroughRefusedVerdict(failure: HandlerInvocationFailedError): boolean {
+    const cause = (failure as { cause?: unknown }).cause;
+    return cause instanceof AnalysisNotReadyError && cause.structuralReadiness !== undefined;
   }
 
   it('THE DEFECT, HOP 1: the refusal carries the sentence on the wire field the composer reads', async () => {
-    const { failure, plotCalls } = await refusalFor(zeroAlternatives);
+    const { failure, plotCalls, viaRefusedVerdict } = await refusalFor(zeroAlternatives);
     // Bound by identity on the refusal itself, so a different failure reaching
     // this graph cannot satisfy the assertion.
     expect(failure.cause_kind).toBe('analysis_not_ready');
+    // The same routing precondition as the twin below: this refusal reaches the
+    // user THROUGH `refusedVerdict`, which is what makes the change observable.
+    expect(viaRefusedVerdict).toBe(true);
     // At pristine this key was ABSENT — `run-analysis.ts:337` omits it when
     // `verdict.nextStep === null`, and the thrown verdict was `admission.strict`,
     // whose `nextStep` is null on exactly this cell. Measured RED: `undefined`.
@@ -419,11 +464,16 @@ describe('run admission — the refusal reaches the user through Run analysis', 
     // EVERY refusal SURVIVED this test. It is kept because it pins that the
     // most common refusal is unaffected by the change, but it is NOT the
     // overwrite discriminator; the one below is.
-    const { failure, assistantText } = await refusalFor(null);
+    const { failure, assistantText, viaRefusedVerdict } = await refusalFor(null);
     expect(failure.cause_kind).toBe('analysis_not_ready');
     expect(failure.details.reason_code).toBe('NO_GRAPH');
     expect(assistantText).toContain('Draft or save a model first, then run analysis.');
     expect(assistantText).not.toContain(EXPECTED_SENTENCE);
+    // ⚠ AND THE ROUTING, ASSERTED: this refusal does NOT pass through
+    // `refusedVerdict`, so it is STRUCTURALLY BLIND to any change in it. Stated
+    // as an assertion rather than a comment so the blindness is a pinned fact
+    // and not a claim a reader has to take on trust.
+    expect(viaRefusedVerdict).toBe(false);
   });
 
   it('TWIN (THE OVERWRITE DISCRIMINATOR): a refusal that goes THROUGH the same projection keeps its own sentence', async () => {
@@ -438,8 +488,15 @@ describe('run admission — the refusal reaches the user through Run analysis', 
     // they actually need is to resolve two readiness issues. That is strictly
     // worse than the silence being fixed: it replaces working guidance with
     // guidance that is wrong for their model.
-    const { failure, assistantText } = await refusalFor(oneAlternative);
+    const { failure, assistantText, viaRefusedVerdict } = await refusalFor(oneAlternative);
     expect(failure.cause_kind).toBe('analysis_not_ready');
+    // ⭐ THE PRECONDITION THIS TWIN'S DISCRIMINATION RESTS ON, PINNED IN-TEST.
+    // Without it this test has the same assertion shape as the NO_GRAPH twin
+    // above and no reader — or refactor — can tell which one actually reaches
+    // the code under test. Asserted FIRST, so if a change ever routes this
+    // graph away from the two-term throw the test REDs here, loudly, instead of
+    // quietly decaying into a passing tautology.
+    expect(viaRefusedVerdict).toBe(true);
     expect(failure.details.next_step).toBe(
       'Review all 2 readiness issues together before analysis.',
     );
