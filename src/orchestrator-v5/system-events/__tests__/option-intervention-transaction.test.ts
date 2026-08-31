@@ -5,8 +5,12 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash, computeVersionAnalysisAffectingHashRecord } from '../../context/graph-identity.js';
+import { GM_HELD_HANDLER_ID } from '../../handlers/edit-graph-referee-gate.js';
+import { toModelVersionMutationReceiptV1 } from '../../model-management/mutation-receipt.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
+import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
+import type { AtomicCommittedModelVersionReceipt, SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { applyOptionInterventionEdit, executeOptionInterventionEdit } from '../option-intervention-edit.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -68,6 +72,42 @@ function inputFor(graph: ReturnType<typeof canonicalGraph>, overrides: Partial<E
   };
 }
 
+function pendingHold(graph: ReturnType<typeof canonicalGraph>, turns = 4): PendingAction {
+  const now = Date.now();
+  const pending = parsePendingAction({
+    id: 'pending-unrelated-change', scenario_id: SCENARIO_ID, chip_id: 'gmh_abcdef123456',
+    preconditions: { graph_hash: inputFor(graph).expectedGraphHash },
+    expires_at_turn_count: turns,
+    expires_at_iso: new Date(now + 600_000).toISOString(),
+    emitted_at_iso: new Date(now).toISOString(),
+    action: {
+      kind: 'apply_proposed_change', proposal_ref: 'gmh_abcdef123456',
+      inline_patch: {
+        handler_id: GM_HELD_HANDLER_ID, apply_wiring: 'held_execute_v1',
+        operations: [{ op: 'update_node', path: 'other_factor', value: { observed_state: { value: 0.7 } } }],
+        operations_count: 1, candidate_id: 'candidate-unrelated-change',
+        candidate_kind: 'update_node_field', mutation_class: 'tune', blocker_code: null,
+        base_hash_match: true, params: {}, target_entity_ids: [],
+      },
+      public_label: 'Continue with this change', public_message: 'Yes',
+    },
+  });
+  if (pending === null) throw new Error('Pending fixture must pass the existing persisted parser');
+  return pending;
+}
+
+/** Reuse the canonical commit's metadata; this fixture does not author hashes or actor identity. */
+function receiptFor(write: SessionTurnWrite): AtomicCommittedModelVersionReceipt {
+  if (write.modelVersion === undefined) throw new Error('Real commit must produce version metadata');
+  return {
+    ...write.modelVersion,
+    version_id: '11111111-1111-4111-8111-111111111111', version_number: 1,
+    creation_kind: 'initial', source_version_id: null, parent_version_id: null,
+    root_version_id: '22222222-2222-4222-8222-222222222222', undo_version_id: null,
+    graph: clone(write.graph), event_id: `model_version_created_mutation_${write.modelVersion.mutation_id}`,
+  };
+}
+
 /**
  * Only serialized bytes survive between facades. This exercises the real
  * commitDirectAnswer call, not PostgreSQL, auth, an RPC or public egress.
@@ -80,12 +120,14 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
   failPendingRead?: boolean;
   omitParentRead?: boolean;
   omitFactRead?: boolean;
+  pendingActions?: readonly PendingAction[];
+  versionReceipt?: (write: SessionTurnWrite) => AtomicCommittedModelVersionReceipt;
 } = {}) {
   let graphJson = JSON.stringify(initial);
   let concurrentGraphJson: string | undefined;
   let loads = 0;
   const attempts: SessionTurnWrite[] = [];
-  const rows = new Map<string, { id: string; json: string }>();
+  const rows = new Map<string, { id: string; json: string; receiptJson?: string }>();
   const fresh = (): SessionStore => createMockSessionStore({
     loadGraph: async scenarioId => {
       expect(scenarioId).toBe(SCENARIO_ID);
@@ -93,9 +135,14 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
       if (loads === options.failLoadAt) throw new Error('canonical read unavailable');
       return JSON.parse(graphJson);
     },
-    readMostRecentPendingActions: async () => {
+    readMostRecentPendingActions: async (scenarioId, readOptions) => {
+      expect(scenarioId).toBe(SCENARIO_ID);
+      expect(readOptions).toEqual({ validation: 'strict' });
       if (options.failPendingRead) throw new Error('pending authority unavailable');
-      return [];
+      const latest = [...rows.values()].at(-1);
+      // A fresh facade reads the serialized post-commit pending list, not the seed.
+      return latest === undefined ? clone(options.pendingActions ?? [])
+        : (JSON.parse(latest.json) as SessionTurnWrite).pending_actions ?? [];
     },
     append: async write => {
       attempts.push(clone(write));
@@ -109,14 +156,20 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
           graphJson = concurrentGraphJson;
           concurrentGraphJson = undefined;
         }
-        return { id: previous.id };
+        return { id: previous.id, ...(previous.receiptJson === undefined ? {}
+          : { modelVersionReceipt: JSON.parse(previous.receiptJson) as AtomicCommittedModelVersionReceipt }) };
       }
       const stored = clone(write);
       const id = `persisted-row-${rows.size + 1}`;
-      rows.set(key, { id, json: JSON.stringify(stored) });
+      const receipt = options.versionReceipt?.(stored);
+      // Negative receipts must be structurally valid and reach the transaction's
+      // post-commit identity check rather than fail at receipt construction.
+      if (receipt !== undefined) toModelVersionMutationReceiptV1(SCENARIO_ID, receipt);
+      rows.set(key, { id, json: JSON.stringify(stored),
+        ...(receipt === undefined ? {} : { receiptJson: JSON.stringify(receipt) }) });
       if (stored.graph !== undefined) graphJson = JSON.stringify(stored.graph);
-      // Guest/no-version outcome: ordinary graph+turn+fact persistence succeeds.
-      return { id };
+      // No fixture receipt means the existing guest/no-version success path.
+      return { id, ...(receipt === undefined ? {} : { modelVersionReceipt: clone(receipt) }) };
     },
     readRecent: async (scenarioId, limit = 20) => {
       if (options.omitParentRead) return [];
@@ -149,6 +202,8 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
     attempts,
     durableRows: () => [...rows.values()].map(row => JSON.parse(row.json) as SessionTurnWrite),
     durableGraph: () => JSON.parse(graphJson) as ReturnType<typeof canonicalGraph>,
+    durableReceipts: () => [...rows.values()].flatMap(row => row.receiptJson === undefined ? []
+      : [JSON.parse(row.receiptJson) as AtomicCommittedModelVersionReceipt]),
     loadCount: () => loads,
     stageConcurrentGraphOnDuplicate: (graph: unknown) => { concurrentGraphJson = JSON.stringify(graph); },
   };
@@ -328,6 +383,107 @@ describe('option-intervention transaction — real commit, serialized store boun
     expect(result.graph).toEqual(await persistence.fresh().loadGraph(SCENARIO_ID));
     expect(persistence.durableRows()).toHaveLength(1);
   });
+
+  it('carries an unrelated executable hold through the real commit and cold read with exactly one TTL decrement', async () => {
+    const before = canonicalGraph();
+    const pending = pendingHold(before);
+    const originalPending = clone(pending);
+    const persistence = jsonStore(before, { pendingActions: [pending] });
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed') throw new Error(`Expected commit, got ${result.kind}`);
+    const coldPending = await persistence.fresh().readMostRecentPendingActions(SCENARIO_ID, { validation: 'strict' });
+    expect(coldPending).toEqual([{
+      ...originalPending,
+      preconditions: { ...originalPending.preconditions, graph_hash: result.analysisGraphHash },
+      expires_at_turn_count: 3,
+    }]);
+    expect(parsePendingAction(coldPending[0])).toEqual(coldPending[0]);
+    expect(result.analysisGraphHash).not.toBe(originalPending.preconditions.graph_hash);
+    expect(pending).toEqual(originalPending);
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1);
+    expect(persistence.durableRows()[0]?.pending_actions).toEqual(coldPending);
+    expect(persistence.durableRows()[0]?.handler_facts).toHaveLength(1);
+    // Threading is not consent to execute the unrelated held operation.
+    expect(persistence.durableGraph().nodes.find(node => node.id === 'other_factor')?.observed_state?.value)
+      .toBe(0.6);
+    expect(result.response.assistant_text).not.toMatch(/lapsed/i);
+  });
+
+  it('lets the same hold lapse honestly when the one commit exhausts its turn TTL', async () => {
+    const before = canonicalGraph();
+    const pending = pendingHold(before, 1);
+    expect(pending.expires_at_turn_count).toBe(1);
+    const persistence = jsonStore(before, { pendingActions: [pending] });
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed') throw new Error(`Expected commit, got ${result.kind}`);
+    expect(persistence.durableRows()).toHaveLength(1);
+    expect(persistence.durableRows()[0]?.pending_actions).toEqual([]);
+    expect(await persistence.fresh().readMostRecentPendingActions(SCENARIO_ID, { validation: 'strict' })).toEqual([]);
+    expect(result.response.assistant_text).toMatch(/lapsed/i);
+    expect(persistence.durableRows()[0]?.assistantMessage).toBe(result.response.assistant_text);
+    expect(persistence.durableGraph().nodes.find(node => node.id === 'other_factor')?.observed_state?.value)
+      .toBe(0.6);
+  });
+
+  it('returns the optional version receipt only when it describes the committed turn and postimage', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before, { versionReceipt: receiptFor });
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed') throw new Error(`Expected receipted commit, got ${result.kind}`);
+    expect(persistence.durableReceipts()).toHaveLength(1);
+    const receipt = persistence.durableReceipts()[0]!;
+    expect(result.response.model_version_receipt).toEqual(toModelVersionMutationReceiptV1(SCENARIO_ID, receipt));
+    expect(result.response.model_version_receipt?.source_turn_id).toBe(TURN_ID);
+    expect(result.response.model_version_receipt?.graph).toEqual(result.graph);
+    expect(result.graph).toEqual(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(persistence.durableRows()).toHaveLength(1);
+    expect(persistence.durableRows()[0]?.handler_facts).toHaveLength(1);
+  });
+
+  it.each(['different_turn', 'different_postimage'] as const)(
+    'withholds Applied for a structurally valid receipt with %s after the graph, parent and fact actually commit',
+    async mismatch => {
+      const before = canonicalGraph();
+      const persistence = jsonStore(before, { versionReceipt: write => {
+        const receipt = receiptFor(write);
+        if (mismatch === 'different_turn') {
+          return { ...receipt, source_turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' };
+        }
+        const oldIdentity = computeGraphIdentityHash(before);
+        const oldAnalysis = computeVersionAnalysisAffectingHashRecord(before);
+        if (oldIdentity === null || oldAnalysis === null) throw new Error('Old receipt fixture must hash');
+        // An internally consistent old receipt must not certify the new graph.
+        return { ...receipt, graph: clone(before), graph_identity_hash: oldIdentity.value,
+          analysis_affecting_hash: oldAnalysis.value };
+      } });
+      const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+      expect(result).toEqual({ kind: 'unverified', reason: 'committed_receipt_mismatch', commitAttempted: true });
+      expect(result).not.toHaveProperty('response');
+      expect(persistence.attempts).toHaveLength(1);
+      expect(persistence.durableRows()).toHaveLength(1);
+      expect(persistence.durableRows()[0]?.handler_facts).toHaveLength(1);
+      const cold = await persistence.fresh().loadGraph(SCENARIO_ID);
+      expect(cold).toEqual(persistence.durableRows()[0]?.graph);
+      expect(persistence.durableGraph().nodes.find(node => node.id === 'option')?.interventions?.factor.value)
+        .toBe(0.3);
+      const receipt = persistence.durableReceipts()[0]!;
+      expect(toModelVersionMutationReceiptV1(SCENARIO_ID, receipt)).toBeDefined();
+      if (mismatch === 'different_turn') {
+        expect(receipt.source_turn_id).not.toBe(TURN_ID);
+        expect(receipt.graph).toEqual(cold);
+      } else {
+        expect(receipt.source_turn_id).toBe(TURN_ID);
+        expect(receipt.graph).toEqual(before);
+        expect(receipt.graph).not.toEqual(cold);
+        expect(receipt.graph_identity_hash).toBe(computeGraphIdentityHash(before)?.value);
+        expect(receipt.analysis_affecting_hash).toBe(computeVersionAnalysisAffectingHashRecord(before)?.value);
+      }
+    },
+  );
 
   it('does not render a model-scale intervention as a percentage or an unlicensed raw currency amount', async () => {
     const initial = canonicalGraph();
