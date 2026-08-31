@@ -83,6 +83,9 @@ vi.mock('../session/index.js', () => ({
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { formatBaselineAskCollision } = await import(
+  '../tools/handlers/d1-shared/format-confirmation.js'
+);
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -356,5 +359,88 @@ describe('an answer to the baseline question never writes onto the competing ask
 
     expect(graphWrites().length).toBeGreaterThan(0);
     expect(constraintsOn(stateAfterTurn(), FACTOR_ID)).toHaveLength(1);
+  });
+});
+
+/**
+ * ⭐⭐ THE OTHER DIRECTION, AT THE SAME TURN BOUNDARY.
+ *
+ * The block above proves an ELLIPTICAL answer is stopped. This one proves the
+ * stop is not indiscriminate: a reply that names its own subject must still
+ * reach the lane that binds it, with the very same competing ask live.
+ *
+ * It matters because the two live in one predicate, and the first version of
+ * this transition failed exactly here — it refused the product's OWN offered
+ * disambiguating answer, so the user was told what to say and then rejected for
+ * saying it. The elliptical block alone cannot see that: every one of its cases
+ * points in the same direction.
+ *
+ * The assertion is the INVERSE of the elliptical case's mechanism, and it is
+ * structural for the same reason: being intercepted means the model is never
+ * consulted, so `chatWithTools` HAVING been called is the fall-through itself.
+ */
+describe('a reply that names its own subject is not the collision case', () => {
+  /** The product's own offered example, taken from the copy it actually emits. */
+  const offeredExample = (() => {
+    const copy = formatBaselineAskCollision({
+      targetLabel: TARGET_LABEL,
+      competing: [effectPending()],
+    });
+    const m = /for example "([^"]+)"/.exec(copy);
+    if (m === null) throw new Error(`collision copy no longer offers an example:\n${copy}`);
+    return m[1]!;
+  })();
+
+  it("offers an example that is itself subject-bearing — the promise it must keep", () => {
+    expect(offeredExample).toBe(`${TARGET_LABEL} is 30%`);
+  });
+
+  it('the OFFERED example reaches the model with the competing ask live', async () => {
+    pendingActionsForRead = [baselinePending(), effectPending()];
+    const adapter = writesOntoTheOtherFactorAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload(offeredExample),
+      'req-offered-example-routes',
+      { routingAdapter: adapter, graphState: buildGraph() },
+    );
+
+    // Not intercepted: it resolves its own subject, so it continues to the lane
+    // whose handler records the baseline (proven at the handler in
+    // add-constraint-collision-subject-authority.test.ts).
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+    // And it is NOT answered with the collision warning it was offered by.
+    expect(response.assistant_text).not.toContain('Two of my questions are open at once');
+  });
+
+  it('the pre-existing corpus sentence "Churn is about 12%." reaches the model too', async () => {
+    pendingActionsForRead = [baselinePending(), effectPending()];
+    const adapter = writesOntoTheOtherFactorAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload('Churn is about 12%.'),
+      'req-corpus-sentence-routes',
+      { routingAdapter: adapter, graphState: buildGraph() },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+    expect(response.assistant_text).not.toContain('Two of my questions are open at once');
+  });
+
+  it('DISCRIMINATING TWIN — the bare answer on the SAME turn is still stopped', async () => {
+    // Same harness, same pendings, same graph; only the reply differs. Without
+    // this, the two cases above would pass just as well if the collision branch
+    // had been deleted outright.
+    pendingActionsForRead = [baselinePending(), effectPending()];
+    const adapter = writesOntoTheOtherFactorAdapter();
+
+    const { response } = await runTurnExecutor(payload(ANSWER), 'req-twin-bare-stopped', {
+      routingAdapter: adapter,
+      graphState: buildGraph(),
+    });
+
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain('Two of my questions are open at once');
   });
 });
