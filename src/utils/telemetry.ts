@@ -547,6 +547,24 @@ export const TelemetryEvents = {
 
   // Prompt Management events (v2.0)
   PromptStoreError: "prompt.store_error",
+  /**
+   * A prompt-store JSONB list column could not be established as a list, so the
+   * store SUBSTITUTED an empty list rather than failing the whole read.
+   *
+   * WHY IT EXISTS. The tolerant decoder that replaced three
+   * `JSON.parse(x || '[]')` sites correctly stopped one poisoned row taking
+   * down every version of a task — but it originally returned `[]` and emitted
+   * NOTHING, which converts a crash into a silent degradation: exactly the
+   * failure mode of the ~2.5h incident it was written to end (`draft_graph`
+   * served the bundled default while `/healthz` reported `prompts_ready: true`).
+   *
+   * FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS. The returned `[]` is
+   * indistinguishable from a genuinely empty column, so this event is the ONLY
+   * thing that tells the two apart. It carries `outcome: 'unavailable'` and, by
+   * construction, no survivor/recovery vocabulary — there is no per-item
+   * salvage on this path, and an event that claimed some would be lying.
+   */
+  PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
   PromptLoaderError: "prompt.loader.error",
   PromptLoadedFromStore: "prompt.loader.store",
   PromptLoadedFromDefault: "prompt.loader.default",

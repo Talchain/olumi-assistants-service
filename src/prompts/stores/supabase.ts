@@ -89,20 +89,107 @@ function getJwtClaim(token: string, claim: string): string | undefined {
  * `[]` rather than throwing — a prompt row is not worth taking the store down
  * for, and the caller's health surface now reports a store failure loudly
  * (see `promptStoreDegradationReasons`).
+ *
+ * ⚠ AND THE SECOND HALF, WHICH THE FIRST VERSION OF THIS HELPER OMITTED. As
+ * first written, the `catch` and the trailing `return []` emitted NOTHING, so a
+ * row holding `test_cases: {}` degraded to `[]` with a clean health surface and
+ * no log at any level. Nothing threw, so `loadPrompt` never reached its catch,
+ * `fallbackReason` never became `fetch_error`, and this PR's own
+ * `critical_prompt_fetch_error` alarm could not fire for the class the helper
+ * had just started tolerating. **That is the same silent degradation the
+ * incident was — a guard that logs nothing and continues is the same outage
+ * with better manners.** Undecodable input now emits
+ * `TelemetryEvents.PromptStoreJsonColumnDegraded` and logs at ERROR.
  */
-function parseJsonColumn<T>(value: unknown): T[] {
-  if (value == null) return [];
-  if (Array.isArray(value)) return value as T[];
+
+/** Why a column could not be established as a list. */
+type JsonColumnDegradationReason =
+  /** Decoded fine and is simply not a list (`{}`, `42`, `true`, `"null"`). */
+  | 'jsonb_not_array'
+  /** A string that is not valid JSON at all. */
+  | 'jsonb_unparseable';
+
+/**
+ * The decode OUTCOME as a first-class value.
+ *
+ * **FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS.** Three outcomes must
+ * stay distinguishable and only the first may author `[]`:
+ *
+ *   - `known_empty`          — read successfully, genuinely nothing there
+ *   - `known_with_survivors` — read partially, these specific items survived
+ *   - `unavailable`          — could not establish what was there
+ *
+ * `known` below covers the first (`items.length === 0`) and the ordinary
+ * populated case. **`known_with_survivors` is NOT REACHABLE here and is named
+ * only to be excluded**: a JSON list decodes whole or not at all, and this
+ * helper performs no per-item validation, so there is nothing to salvage. That
+ * is why the degradation event carries no survivor or recovery field — an
+ * event reporting survivors it never had is a lie the payload cannot support.
+ *
+ * Note the `unavailable` variant carries NO `items`. The decoder therefore
+ * cannot author an empty list for a read it could not make; the substitution
+ * happens once, visibly, in `parseJsonColumn` below, where it is emitted and
+ * logged.
+ */
+type JsonColumnDecode<T> =
+  | { readonly outcome: 'known'; readonly items: T[] }
+  | { readonly outcome: 'unavailable'; readonly reason: JsonColumnDegradationReason };
+
+/** Pure decode. No telemetry, no substitution — just the outcome. */
+function decodeJsonColumn<T>(value: unknown): JsonColumnDecode<T> {
+  if (value == null) return { outcome: 'known', items: [] };
+  if (Array.isArray(value)) return { outcome: 'known', items: value as T[] };
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (trimmed === '') return [];
+    if (trimmed === '') return { outcome: 'known', items: [] };
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      return Array.isArray(parsed) ? (parsed as T[]) : [];
+      parsed = JSON.parse(trimmed) as unknown;
     } catch {
-      return [];
+      return { outcome: 'unavailable', reason: 'jsonb_unparseable' };
     }
+    // `"null"`, `"{}"` and `"42"` all parse CLEANLY and are still not lists —
+    // they never touch the catch, which is why a corpus of "malformed JSON"
+    // alone cannot cover this branch.
+    return Array.isArray(parsed)
+      ? { outcome: 'known', items: parsed as T[] }
+      : { outcome: 'unavailable', reason: 'jsonb_not_array' };
   }
+  return { outcome: 'unavailable', reason: 'jsonb_not_array' };
+}
+
+/** Identity of the column being read, so the event names the offending row. */
+interface JsonColumnContext {
+  readonly column: 'variables' | 'test_cases';
+  readonly promptId: string;
+  readonly version: number;
+}
+
+function parseJsonColumn<T>(value: unknown, context: JsonColumnContext): T[] {
+  const decoded = decodeJsonColumn<T>(value);
+  if (decoded.outcome === 'known') return decoded.items;
+
+  // UNAVAILABLE. The `[]` returned below is a SUBSTITUTE, not a reading — the
+  // published `PromptVersion` type (`z.array(...).default([])`) has no way to
+  // say "unknown", so the distinction survives only in this event. It is
+  // emitted AND logged at ERROR because `emit()` writes via `log.info`
+  // (utils/telemetry.ts), and during the incident five level-30 events fired
+  // per probe and nothing paged — level is load-bearing, which is the same
+  // reason `loader.ts` raises its store-failure log to ERROR.
+  const payload = {
+    column: context.column,
+    prompt_id: context.promptId,
+    version: context.version,
+    reason: decoded.reason,
+    value_type: typeof value,
+    outcome: 'unavailable' as const,
+  };
+  emit(TelemetryEvents.PromptStoreJsonColumnDegraded, payload);
+  log.error(
+    { event: TelemetryEvents.PromptStoreJsonColumnDegraded, ...payload },
+    `Prompt store column '${context.column}' is undecodable (${decoded.reason}); ` +
+      'substituting an empty list — this is NOT evidence the column was empty',
+  );
   return [];
 }
 
@@ -746,7 +833,11 @@ export class SupabasePromptStore
     }
 
     const version = versions as VersionRow;
-    const versionVariables = parseJsonColumn<PromptVariable>(version.variables);
+    const versionVariables = parseJsonColumn<PromptVariable>(version.variables, {
+      column: 'variables',
+      promptId: prompt.id,
+      version: version.version,
+    });
     const content = interpolatePrompt(version.content, variables, versionVariables);
 
     return {
@@ -812,7 +903,11 @@ export class SupabasePromptStore
       versions: versions.map((v) => ({
         version: v.version,
         content: v.content,
-        variables: parseJsonColumn<PromptVariable>(v.variables),
+        variables: parseJsonColumn<PromptVariable>(v.variables, {
+          column: 'variables',
+          promptId: prompt.id,
+          version: v.version,
+        }),
         createdBy: v.created_by ?? 'system',
         createdAt: v.created_at,
         changeNote: v.change_note ?? undefined,
@@ -820,7 +915,11 @@ export class SupabasePromptStore
         requiresApproval: v.requires_approval ?? false,
         approvedBy: v.approved_by ?? undefined,
         approvedAt: v.approved_at ?? undefined,
-        testCases: parseJsonColumn<PromptTestCase>(v.test_cases),
+        testCases: parseJsonColumn<PromptTestCase>(v.test_cases, {
+          column: 'test_cases',
+          promptId: prompt.id,
+          version: v.version,
+        }),
       })),
     };
   }
