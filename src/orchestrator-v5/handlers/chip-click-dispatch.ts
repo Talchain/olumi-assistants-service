@@ -934,6 +934,21 @@ async function tryComposeRecoverableChipOutcome(
   }
 
   let turnPersisted = false;
+  // ⭐ THE SHIPPED ANSWER MUST BE THE COMMITTED ANSWER (Codex #1286 verdict
+  // `5483244874`, issue (b): "actual commit lapse copy is missing from the
+  // dispatcher-returned answer").
+  //
+  // This path threads `priorPendingActions`, so `commitDirectAnswer`'s
+  // carry-forward pass can retire a live consent hold — and when it does it
+  // APPENDS the honest one-sentence F-HELD lapse notice to the response it
+  // persists, returning that amended copy as `CommitResult.response`
+  // (commit.ts, `buildHeldLapseNotice`). Returning the PRE-COMMIT object here
+  // wrote the notice to the turn row and never spoke it: the user's live
+  // proposal died silently and the row disagreed with the wire about what the
+  // user had been told. `commit.ts`'s own return-site docblock states the
+  // contract this now honours — callers that consume `CommitResult.response`
+  // surface it on the wire, so wire copy == durable copy.
+  let responseForWire = recovered.response;
   if (priorPendingActions !== null) {
     const refusalFact = acquiresRefusalContinuity
       ? buildAnalysisRefusalFact({
@@ -943,7 +958,7 @@ async function tryComposeRecoverableChipOutcome(
         })
       : null;
     try {
-      await commitDirectAnswer(recovered.response, {
+      const committed = await commitDirectAnswer(recovered.response, {
         scenario_id: scenarioId,
         turn_id: payload.turn_id,
         turn_class: 'handler',
@@ -964,6 +979,11 @@ async function tryComposeRecoverableChipOutcome(
         contentGraph: graph,
       });
       turnPersisted = true;
+      // `?? recovered.response` is load-bearing, not defensive noise: ~100
+      // suites in this repo stub `commitDirectAnswer`, and a bare `vi.fn()`
+      // resolves to `undefined`. Reading `.response` unguarded would ship an
+      // undefined wire body on every one of those paths.
+      responseForWire = committed?.response ?? recovered.response;
     } catch (commitError) {
       log.error(
         {
@@ -1003,7 +1023,7 @@ async function tryComposeRecoverableChipOutcome(
 
   return {
     outcome: 'handler_recovered',
-    response: recovered.response,
+    response: responseForWire,
     commitPerformed: turnPersisted,
     causeKind: err.cause_kind,
     analysisReady,
@@ -1706,7 +1726,7 @@ export async function dispatchChipClickRunAnalysis(
     );
 
     try {
-      await commitDirectAnswer(response, {
+      const committed = await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'handler',
@@ -1761,7 +1781,19 @@ export async function dispatchChipClickRunAnalysis(
 
       return {
         outcome: 'ok',
-        response,
+        // ⭐ Same contract as the recovery exit above: ship the COMMITTED copy,
+        // so an F-HELD lapse notice the chokepoint attached reaches the user
+        // instead of being persisted into the turn row and never spoken.
+        //
+        // ⚠ SCOPE, STATED EXACTLY (CLAUDE.md trap 20). On `staging` this exit
+        // threads NO `priorPendingActions`, so its carry-forward is inert and
+        // this line changes nothing today. PR #1286 adds that threading, at
+        // which point this exit can build a notice and this line is what makes
+        // it audible. It is fixed here — rather than left for #1286 — because
+        // the two exits are ONE defect, and a harm closed on one path and left
+        // open on its neighbour is how the closed half gets re-opened
+        // (CLAUDE.md trap 21).
+        response: committed?.response ?? response,
         commitPerformed: true,
         analysisReady,
         graph: snapshotGraph,
