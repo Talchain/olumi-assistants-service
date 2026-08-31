@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertExactCaseIds } from './contract.js';
-import { LOCAL_RESPONSE_ARCHIVE, type evaluateLocalResponseIdentity } from './local-response-identity.js';
+import { LOCAL_RESPONSE_ARCHIVE, loadFrozenLocalResponseCase, type evaluateLocalResponseIdentity } from './local-response-identity.js';
 import { loadQualityPair } from './quality-report.js';
+import { withReplayWorktree } from './replay-worktree.js';
 
 type Report = Awaited<ReturnType<typeof evaluateLocalResponseIdentity>>;
 const names = ['original response and actual consumer', 'same-brief semantic degradation', 'diagnostic and action counterparts', 'wrong prompt model and provider',
@@ -15,18 +14,14 @@ const names = ['original response and actual consumer', 'same-brief semantic deg
 const collected: string[] = [];
 const root = resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
-let temporary: string | undefined, runtimeRoot: string | undefined;
+let setupComplete = false;
 let reports: Record<string, Report>, networkAttempts: number, networkGuardExercised: boolean;
 beforeEach(() => expect.hasAssertions());
 
 beforeAll(() => {
-  temporary = mkdtempSync(join(tmpdir(), 'local-response-replay-'));
-  runtimeRoot = join(temporary, 'runtime');
   // Exact archived runtime, not a hand-written parser or an assurance-head
-  // replacement. Reuse dependencies only when their committed pins match.
-  execFileSync('git', ['diff', '--exit-code', LOCAL_RESPONSE_ARCHIVE.sourceHead, 'HEAD', '--', 'package.json', 'pnpm-lock.yaml', 'vendor'], { cwd: root, stdio: 'pipe' });
-  execFileSync('git', ['worktree', 'add', '--detach', runtimeRoot, LOCAL_RESPONSE_ARCHIVE.sourceHead], { cwd: root, stdio: 'pipe' });
-  symlinkSync(resolve(root, 'node_modules'), join(runtimeRoot, 'node_modules'), 'dir');
+  // replacement. Derive recorder authority from the immutable capture itself.
+  const recorderHead = loadFrozenLocalResponseCase('logistics-disagreement-decision-1-incumbent').identity.assuranceHead;
   const script = `
     import net from 'node:net';
     let networkAttempts = 0;
@@ -92,21 +87,22 @@ beforeAll(() => {
       console.log('LOCAL_RESPONSE_REPORT=' + JSON.stringify({ reports, networkAttempts, networkGuardExercised }));
     } finally { net.Socket.prototype.connect = connect; }
   `;
-  const output = execFileSync(process.execPath, ['--import', pathToFileURL(require.resolve('tsx')).href, '--input-type=module', '-e', script,
+  const output = withReplayWorktree(root, LOCAL_RESPONSE_ARCHIVE.sourceHead, [recorderHead], runtimeRoot => execFileSync(process.execPath, ['--import', pathToFileURL(require.resolve('tsx')).href, '--input-type=module', '-e', script,
     runtimeRoot, pathToFileURL(resolve(root, 'tools/prompt-consumer/local-response-identity.ts')).href,
     pathToFileURL(resolve(root, 'tools/prompt-consumer/runtime-draft.ts')).href], {
     cwd: root, encoding: 'utf8', timeout: 50_000, maxBuffer: 8_000_000,
-    env: { ...process.env, LOG_LEVEL: 'fatal', ANTHROPIC_API_KEY: 'no-provider-call', CEE_ANTHROPIC_STRUCTURED_OUTPUTS: 'true' },
-  });
+    env: { ...process.env, GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0', LOG_LEVEL: 'fatal', ANTHROPIC_API_KEY: 'no-provider-call', CEE_ANTHROPIC_STRUCTURED_OUTPUTS: 'true' },
+  }));
   const line = output.split('\n').find(value => value.startsWith('LOCAL_RESPONSE_REPORT='));
   if (!line) throw new Error('Native ESM replay did not issue its report');
   ({ reports, networkAttempts, networkGuardExercised } = JSON.parse(line.slice('LOCAL_RESPONSE_REPORT='.length)));
+  setupComplete = true;
 }, 60_000);
 
 afterAll(() => {
-  try { if (runtimeRoot) execFileSync('git', ['worktree', 'remove', '--force', runtimeRoot], { cwd: root, stdio: 'pipe' }); }
-  finally { if (temporary) rmSync(temporary, { recursive: true, force: true }); }
-  assertExactCaseIds(names, collected);
+  // A failed beforeAll already fails the suite: do not replace its first error
+  // with uncollected-case/absent-worktree noise. Successful replay stays strict.
+  if (setupComplete) assertExactCaseIds(names, collected);
 });
 const test = (name: typeof names[number], run: () => void) => it(name, () => { collected.push(name); run(); });
 describe('fixed historical response identity and actual consumer replay', () => {

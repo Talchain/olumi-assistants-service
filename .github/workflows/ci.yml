@@ -216,6 +216,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The full suite replays immutable provider captures against their
+          # archived runtime AND recorder commits, including other branches.
+          # Match the required job's history authority; tests never fetch or
+          # substitute HEAD when archival source is unavailable.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 9
