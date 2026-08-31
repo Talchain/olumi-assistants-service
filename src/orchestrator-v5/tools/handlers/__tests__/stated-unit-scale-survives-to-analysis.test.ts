@@ -26,7 +26,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { normaliseFactorValue } from '../d1-shared/normalise-factor-value.js';
-import { recoverScaleFrame } from '../d1-shared/scale-frame.js';
+import { checkPairCoherence, recoverScaleFrame, resolveScaleFrame } from '../d1-shared/scale-frame.js';
 import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
@@ -190,6 +190,124 @@ describe('stated unit survives the edit and the analysis computes on it', () => 
   });
 
   /**
+   * ⭐⭐ THE OPPOSITE-DIRECTION TWIN FOR THE SUB-1 CLASS — the arm whose absence
+   * let a 100× move ship silently.
+   *
+   * This class is LIVE in this repo, not hypothetical:
+   * `compound-goal/extractor.ts:704-709` stores `"4%"` as
+   * `{value: 0.04, unit: '%'}`, so a model editing such a factor and mirroring
+   * the number it can see emits `{rawInput: 0.06, unit: '%'}`.
+   *
+   * MEASURED at base `caceba1a`: `{raw_value: 0.06, value: 0.06}`.
+   * MEASURED at the unbounded head `853ec1b5`: `{raw_value: 0.06, value: 0.0006}`.
+   * The analysis gate blocks NEITHER pair — so the number simply moved by 100×
+   * with no refusal on either side of the change, which is the worst available
+   * shape: silent, confident and wrong on one of the two live readings.
+   *
+   * This arm pins the write back to the BASE behaviour. Note what that means
+   * for the merge rule: this direction is a LIE risk, not a GAP — nothing that
+   * analysed before stops analysing, so restoring it costs the user nothing.
+   */
+  it('a sub-1 percent edit is written unchanged and the run is unaffected', () => {
+    const written = normaliseFactorValue({ rawInput: 0.06, unit: '%', inputHasUnit: true });
+
+    expect(written.raw_value, 'the stated magnitude survives verbatim').toBe(0.06);
+    expect(
+      written.value,
+      'the number must NOT be divided by 100 — under this repo own extractor convention it is already a level',
+    ).toBe(0.06);
+    expect(written.value, 'and specifically NOT the 0.0006 the unbounded limb produced').not.toBe(
+      0.0006,
+    );
+
+    // THE RUN IS UNAFFECTED — bound by IDENTITY, with a decoy present.
+    const SUBONE_ID = 'sub-one-churn';
+    const { caplessRawBaselineFactorIds, verdict } = analysisVerdict([
+      nodeFrom(SUBONE_ID, written),
+      nodeFrom(DECOY_ID, { raw_value: 0.06, value: 0.06 }),
+    ]);
+    expect(caplessRawBaselineFactorIds).not.toContain(SUBONE_ID);
+    expect(verdict).toEqual({ blocked: false });
+
+    // CONTRAST CONTROL: the SAME unit ABOVE the bound still frames, so this arm
+    // is a bound and not a blanket refusal of the capability.
+    expect(
+      normaliseFactorValue({ rawInput: 12, unit: '%', inputHasUnit: true }).value,
+    ).toBeCloseTo(0.12, 12);
+  });
+
+  /**
+   * ⭐⭐ "NO SCALE WAS RECORDED" IS NOT "A SCALE WAS RECORDED AND IT IS
+   * INCOMPATIBLE" — the conflation a sibling PR (#1230) was closed for, whose
+   * root-cause insight this arm is now the only home for.
+   *
+   * `resolveScaleFrame` collapses BOTH states to `undefined`. Reading only that
+   * collapsed answer let the stated unit OVERRIDE a recorded frame the code had
+   * just refused to trust: measured at head `853ec1b5`, a "12 percent" edit on
+   * `{storedFrame: 5, value: 7, raw_value: 7}` (`incoherent`) was written
+   * `{12, 0.12}`. A contradicted frame is POSITIVE EVIDENCE of corruption, and
+   * its siblings were framed by whatever the real frame was — so a unit-pinned
+   * level there is not comparable to them.
+   *
+   * `checkPairCoherence` is three-valued and only `incoherent` suppresses, which
+   * is what keeps this from re-closing the gap: see the contrast control.
+   */
+  it('a CONTRADICTED recorded frame suppresses the pinned limb; a merely ABSENT one does not', () => {
+    const CONTRADICTED = { storedFrame: 5, value: 7, raw_value: 7 };
+
+    // PRECONDITION PINNED IN-TEST (trap 13b): this fixture really is the
+    // incoherent state, and the resolver really does collapse it to `undefined`
+    // — so a GREEN result below is the new guard's doing, not the fixture
+    // failing to reproduce the condition.
+    expect(checkPairCoherence(CONTRADICTED), 'precondition: this pair contradicts its frame').toBe(
+      'incoherent',
+    );
+    expect(
+      resolveScaleFrame(CONTRADICTED),
+      'precondition: the resolver collapses contradiction to the same undefined as absence',
+    ).toBeUndefined();
+
+    const onContradicted = normaliseFactorValue({
+      rawInput: 12,
+      unit: 'percent',
+      inputHasUnit: true,
+      factorUnit: 'percent',
+      factorScaleFrame: 5,
+      factorObservedValue: 7,
+      factorObservedRawValue: 7,
+    });
+
+    expect(
+      onContradicted,
+      'the stated unit must not overturn a recorded frame the code refused to trust',
+    ).toEqual({ raw_value: 12, value: 12 });
+
+    // AND THE GATE STILL REFUSES IT, loudly — bound by identity.
+    const CORRUPT_ID = 'corrupt-frame-factor';
+    const { caplessRawBaselineFactorIds, verdict } = analysisVerdict([
+      nodeFrom(CORRUPT_ID, onContradicted),
+    ]);
+    expect(caplessRawBaselineFactorIds).toContain(CORRUPT_ID);
+    expect(verdict).toMatchObject({
+      blocked: true,
+      reason_code: 'baseline_scale_unresolved',
+    });
+
+    // ⭐ CONTRAST CONTROL — THE DISCRIMINATION, without which the guard above
+    // would be indistinguishable from a blanket that re-closed the capability.
+    // A factor with NO pair is `not_checkable`, NOT `incoherent`, and still
+    // reaches the pinned limb.
+    expect(
+      checkPairCoherence({ storedFrame: undefined, value: undefined, raw_value: undefined }),
+      'absence must classify differently from contradiction',
+    ).toBe('not_checkable');
+    expect(
+      normaliseFactorValue({ rawInput: 12, unit: 'percent', inputHasUnit: true }),
+      'the capability arm must be untouched by the contradiction guard',
+    ).toEqual({ raw_value: 12, value: 0.12 });
+  });
+
+  /**
    * ⭐ THE FACTOR'S STORED UNIT DOES NOT LICENSE A FRAME. `set-factor-value.ts`
    * rules that a bare-number proposal is ambiguous "regardless of whether the
    * factor's existing observed_state.unit is '%'. Refuse rather than guess."
@@ -251,21 +369,100 @@ describe('the pinned frame is magnitude-set independent; the laddered one is not
     ).not.toBe(withSibling);
   });
 
-  it('the draft projector and the edit writer resolve one authority, not two copies', () => {
-    // `deriveFactorScaleFrame` must return exactly what the pinned authority
-    // says whenever the authority speaks — this is the derived-not-mirrored pin.
-    for (const [unit, mag] of [
-      ['percent', 45],
-      ['%', 12],
-      ['bps', 30],
-    ] as const) {
-      const pinned = unitPinnedScaleFrame(unit, mag);
-      expect(pinned, `${unit} must pin`).toBeDefined();
-      expect(deriveFactorScaleFrame([mag], unit), `${unit}: projector must agree`).toBe(pinned);
+  /**
+   * ⭐⭐ THE ONE-AUTHORITY PIN, OVER A CORPUS THAT INCLUDES THE CLASS THE
+   * ORIGINAL VERSION EXCLUDED.
+   *
+   * ⚠ WHY THIS TEST WAS REWRITTEN RATHER THAN EXTENDED. Its first version
+   * iterated `{45, 12, 30}` and asserted `pinned === derive([m], unit)`. Both
+   * halves were wrong for the same reason: the corpus contained only
+   * magnitudes `> 1`, and `>` is exactly where the two authorities agreed. On
+   * `m ∈ (0, 1]` the pinned authority returned 100 while the projector returned
+   * `undefined` — so the guard carrying the change's central argument PASSED
+   * while the property it named FAILED (trap 22: the corpus shared the code's
+   * asymmetry). Adding a case would have left the equality claim overstated;
+   * the CLAIM had to change too.
+   *
+   * The invariant asserted here is the one the code actually honours, over the
+   * whole domain — **NEVER CONTRADICTS, MAY ABSTAIN**:
+   *
+   *     pinned === undefined  ||  pinned === deriveFactorScaleFrame([m], unit)
+   *
+   * Abstention is the safe direction at an edit seam, so the disjunction is not
+   * a weakening — it is the honest shape of a guard that must never hand back a
+   * frame the draft pipeline would not have written.
+   *
+   * ⚠ NON-FINITE MAGNITUDES ARE DELIBERATELY EXCLUDED from this corpus.
+   * `nextNiceNumberAbove` (`projector.ts`) INFINITE-LOOPS on `NaN`/`Infinity` —
+   * a pre-existing defect, byte-identical at base, out of scope here — so a
+   * differential that fed them would hang rather than fail. `unitPinnedScaleFrame`
+   * refuses them directly and that is asserted separately below.
+   */
+  it('the two authorities never contradict, across a corpus that spans the sub-1 class', () => {
+    const UNITS = ['percent', '%', 'per cent', 'pct', 'percentage', 'bps', 'basis points',
+      '% NRR', 'pp', 'GBP', 'widgets', 'fraction'] as const;
+    // ⭐ SPANS (0,1] — the class the previous corpus excluded — plus the
+    //   agreeing band, the pinned bounds, and above them.
+    const MAGS = [0, 0.0001, 0.04, 0.3, 0.5, 0.9, 0.999, 1, 1.0001, 1.5, 12, 45, 99, 100,
+      100.001, 150, 4500, 9999, 10000, 10001, 123456] as const;
+
+    let checked = 0;
+    let abstentions = 0;
+    let agreements = 0;
+    for (const unit of UNITS) {
+      for (const m of MAGS) {
+        const pinned = unitPinnedScaleFrame(unit, m);
+        checked += 1;
+        if (pinned === undefined) {
+          abstentions += 1;
+          continue;
+        }
+        agreements += 1;
+        expect(
+          deriveFactorScaleFrame([m], unit),
+          `${unit} @ ${m}: the pinned authority spoke, so the projector must say the same`,
+        ).toBe(pinned);
+      }
     }
-    // CONTRAST: where the authority is silent, the projector still ladders —
-    // so the assertion above is discriminating, not trivially true.
-    expect(unitPinnedScaleFrame('widgets', 45)).toBeUndefined();
-    expect(deriveFactorScaleFrame([45], 'widgets')).toBe(50);
+
+    // THE CORPUS PINS ITS OWN SIZE (trap: a loop that silently iterates nothing
+    // asserts nothing).
+    expect(checked, 'corpus size').toBe(UNITS.length * MAGS.length);
+    expect(checked).toBe(252);
+    // AND ITS OWN DISCRIMINATION: both outcomes must actually occur, or the
+    // invariant is satisfied vacuously by one branch.
+    expect(agreements, 'the authority must SPEAK somewhere').toBeGreaterThan(0);
+    expect(abstentions, 'the authority must ABSTAIN somewhere').toBeGreaterThan(0);
+  });
+
+  /**
+   * ⭐⭐ THE SUB-1 ARM, NAMED RATHER THAN LEFT TO AN UNBOUNDED PREDICATE.
+   *
+   * A `%` value in `(0, 1]` is genuinely TWO states in this estate and nothing
+   * at this seam can tell them apart:
+   *   · `compound-goal/extractor.ts:704-709` stores `"4%"` as
+   *     `{value: 0.04, unit: '%'}` — the number IS ALREADY a level;
+   *   · a user stating "0.5 percent", where the true level is 0.005.
+   * Framing it would be a silent 100× on the first reading. So the authority
+   * ABSTAINS and the decision stays with the analysis seam.
+   */
+  it('a percent magnitude at or below 1 pins NOTHING, exactly as the projector does', () => {
+    for (const m of [0.0001, 0.04, 0.3, 0.5, 0.9, 0.999, 1]) {
+      expect(unitPinnedScaleFrame('percent', m), `percent @ ${m} must abstain`).toBeUndefined();
+      expect(
+        deriveFactorScaleFrame([m], 'percent'),
+        `projector @ ${m}: the two must abstain together`,
+      ).toBeUndefined();
+      expect(unitPinnedScaleFrame('bps', m), `bps @ ${m} must abstain`).toBeUndefined();
+    }
+    // CONTRAST CONTROL, immediately above the bound: the abstention is a BOUND,
+    // not a blanket that would have re-closed the gap this PR exists to open.
+    expect(unitPinnedScaleFrame('percent', 1.0001), 'just above 1 must still pin').toBe(100);
+    expect(unitPinnedScaleFrame('percent', 12)).toBe(100);
+    // Non-finite and negative are refused directly (never reaching the projector,
+    // which infinite-loops on non-finite input — pre-existing, out of scope).
+    for (const m of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -30]) {
+      expect(unitPinnedScaleFrame('percent', m), `percent @ ${m}`).toBeUndefined();
+    }
   });
 });

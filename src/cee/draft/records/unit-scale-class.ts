@@ -21,12 +21,27 @@
  *     (9 of 25 framings distorted, worst 100x).
  *
  *   · `unitPinnedScaleFrame` returns ONLY the two UNIT-PINNED CONSTANTS
- *     (percent → 100, basis points → 10,000). These are functions of the UNIT
- *     ALONE. They cannot depend on which magnitudes are in view, so deriving
- *     one at the edit yields the SAME number the projector would have written,
- *     for every possible sibling set. Sibling distortion is impossible by
- *     construction, not by luck — which is precisely why this narrow limb is
- *     safe at a seam where the general function is forbidden.
+ *     (percent → 100, basis points → 10,000), and only inside the bounds that
+ *     make them true. Which CONSTANT it returns is a function of the UNIT
+ *     ALONE — it cannot depend on which magnitudes are in view — so it can
+ *     never hand back a laddered, sibling-dependent number. Sibling distortion
+ *     is impossible by construction, not by luck, which is precisely why this
+ *     narrow limb is safe at a seam where the general function is forbidden.
+ *
+ *     ⚠ THE PRECISE CLAIM, BOUNDED — an earlier version of this sentence read
+ *     "the SAME number the projector would have written, for every possible
+ *     sibling set", and that universal was FALSE on `m ∈ (0, 1]`, where this
+ *     returned 100 and the projector returned nothing. The true invariant is
+ *     **never contradicts, may abstain**:
+ *
+ *         unitPinnedScaleFrame(u, m) === undefined
+ *           ||  unitPinnedScaleFrame(u, m) === deriveFactorScaleFrame([m], u)
+ *
+ *     It holds for every unit and every finite magnitude, it is asserted
+ *     differentially over a corpus that INCLUDES the sub-1 class the original
+ *     guard excluded, and the abstentions are the safe direction. See
+ *     `unitPinnedScaleFrame`'s own docstring for the two bounds and why the
+ *     lower one cannot be widened without taking a product decision.
  *
  * A caller that wants the ladder must still go to `deriveFactorScaleFrame`.
  */
@@ -135,7 +150,11 @@
  * `{ value: 0.04, unit: '%' }` — a FRACTION under a '%' label — while a '%' value
  * `>= 1` IS percentage points. PLoT documents both halves at
  * `intervention-normaliser.ts:1153-1180`, citing CEE's own
- * `compound-goal/extractor.ts:925-934`, and CEE's relabel runs only on the
+ * `compound-goal/extractor.ts:704-709` (⚠ this citation read `:925-934` until
+ * 2026-08-31; at that tip those lines are `CLAUSE_BOUNDARY_RE` and the
+ * convention had moved. The convention is real — `return { value: num / 100,
+ * unit }` — the line numbers had drifted, which is the hand-maintained-mirror
+ * defect one storey down. Re-derive before relying on it), and CEE's relabel runs only on the
  * regex-extracted branch, so a fractional value under a raw '%' label reaches PLoT
  * on the primary draft path. Any caller converting a magnitude MUST read the VALUE
  * as well as the unit. This classifier answers "which scale family is this token?"
@@ -286,12 +305,60 @@ export function isBasisPointsUnit(unit: string | undefined): boolean {
  * is a refusal to guess, not an oversight: `pp` is a DIFFERENCE between two
  * percentages and has no fixed divisor, and `unknown` is the honest state for
  * a currency or a count. Widening either family moves live levels silently.
+ *
+ * ⭐⭐ THE CONTRACT THIS FUNCTION ACTUALLY HONOURS, stated as an invariant over
+ * the WHOLE input domain rather than as a claim about the class its author had
+ * in view:
+ *
+ *     unitPinnedScaleFrame(u, m) === undefined
+ *       ||  unitPinnedScaleFrame(u, m) === deriveFactorScaleFrame([m], u)
+ *
+ * **NEVER CONTRADICTS; MAY ABSTAIN.** It is deliberately NOT "always equals" —
+ * above the pinned bound (`150` percent) this abstains while the projector
+ * ladders to 200, and abstaining is the safe direction at an edit seam. What
+ * matters is that where this speaks, it says exactly what the projector would
+ * have said for that magnitude, so no caller can be handed a frame the draft
+ * pipeline would not have written.
+ *
+ * ⚠⚠ THE LOWER BOUND IS LOAD-BEARING AND WAS ADDED AFTER REVIEW MEASURED ITS
+ * ABSENCE. This function previously had an UPPER bound and no lower one, so on
+ * `m ∈ (0, 1]` it returned 100 while `deriveFactorScaleFrame` returned
+ * `undefined` — `projector.ts` returns at `max <= 1` BEFORE the pinned limbs
+ * are ever consulted. The two authorities were one authority only on `(1, 100]`,
+ * and the guard written to pin them together iterated `{45, 12, 30}` and `1.5+`
+ * — a corpus that EXCLUDED the entire class on which the property failed
+ * (trap 22: the corpus shared the code's asymmetry).
+ *
+ * The consequence was not academic. `normalise-factor-value.ts` consults this
+ * at an edit, so `{rawInput: 0.06, unit: '%'}` moved from level `0.06` to
+ * `0.0006` — a silent 100× on a number the analysis already computed on, with
+ * NO refusal on either side of the change (measured: the baseline gate blocks
+ * neither pair, while it does block `{12, 12}`).
+ *
+ * ⭐ AND THE CLASS IS AMBIGUOUS AT SOURCE, WHICH IS WHY ABSTAINING IS THE ONLY
+ * HONEST ANSWER RATHER THAN A CAUTIOUS ONE. A sub-1 number under a `%` label is
+ * genuinely TWO different states in this estate and nothing at this seam can
+ * tell them apart:
+ *   · this repo's own producer convention — `compound-goal/extractor.ts:704-709`
+ *     stores `"4%"` as `{value: 0.04, unit: "%"}`, so the number IS ALREADY a
+ *     level and dividing it by 100 is the 100× lie;
+ *   · a user genuinely stating "0.5 percent", where the true level is 0.005.
+ * Guessing either way ships a confident wrong number on the other. So this
+ * abstains, the write falls back to raw, and the analysis seam's gate keeps the
+ * decision — the estate's own "refuse rather than guess" rule, applied to a
+ * predicate that cannot be settled by more parsing (trap 22f). Widening this
+ * bound is a PRODUCT decision about which convention wins; it is not a tidy-up,
+ * and it must not be taken by deleting a comparison.
  */
 export function unitPinnedScaleFrame(
   unit: string | undefined,
   magnitude: number,
 ): number | undefined {
   if (!Number.isFinite(magnitude) || magnitude < 0) return undefined;
+  // ⚠ STRICTLY `> 1`, matching `deriveFactorScaleFrame`'s `max <= 1` return
+  // EXACTLY. Not `>= 1`: at m === 1 the projector writes no frame, so pinning
+  // one here would re-open the divergence at a single point.
+  if (!(magnitude > 1)) return undefined;
   const scaleClass = classifyUnitScaleClass(unit);
   if (scaleClass === "percent" && magnitude <= 100) return 100;
   if (scaleClass === "basis_points" && magnitude <= 10000) return 10000;
