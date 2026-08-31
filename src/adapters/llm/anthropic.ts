@@ -91,6 +91,7 @@ import {
 } from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 import { reconcileDraftOptionFraming } from '../../cee/draft/records/option-framing.js';
+import { reconcileDraftCauseFraming } from '../../cee/draft/records/cause-framing.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
@@ -2165,7 +2166,31 @@ export async function draftGraphWithAnthropic(
     // so guarding only the initial seam would let the invalid label return.
     const optionFraming = reconcileDraftOptionFraming(activeRecords, activeProjection);
     activeProjection = optionFraming.projection;
-    const recordDisclosures = [...activeProjection.dropped, ...optionFraming.unresolved];
+
+    // ⭐ THE CONDITIONAL OPTION FLOOR (CEE #1287). Runs AFTER the decision-framing
+    // guard, and answers a DIFFERENT question (see `cause-framing.ts`): that one
+    // asks "the user IS choosing — did the model put the QUESTION on the graph?",
+    // this one asks "is the user choosing at all, or did the model promote their
+    // EXPLANATIONS to branches?". Ordering matters only in that a question-shaped
+    // option is already gone by here, so this guard never re-judges one; the two
+    // withdraw disjoint node sets and their disclosures are carried side by side.
+    const causeFraming = reconcileDraftCauseFraming(activeRecords, activeProjection);
+    activeProjection = causeFraming.projection;
+    if (causeFraming.withdrawn.length > 0) {
+      log.info({
+        event: "cee.draft.cause_framing_withdrawn",
+        withdrawn: causeFraming.withdrawn.length,
+        fell_to_mapping_shape: causeFraming.fellToMappingShape,
+        reasons: causeFraming.withdrawn.map((entry) => entry.reason),
+        node_ids: causeFraming.withdrawn.map((entry) => entry.node_id),
+      }, "[Anthropic] withdrew stated causes modelled as options (#1287)");
+    }
+
+    const recordDisclosures = [
+      ...activeProjection.dropped,
+      ...optionFraming.unresolved,
+      ...causeFraming.withdrawn,
+    ];
 
     const recordsSidecar = buildDraftRecordsSidecar({
       records: activeRecords,

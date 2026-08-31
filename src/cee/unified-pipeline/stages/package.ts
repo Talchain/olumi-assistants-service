@@ -32,6 +32,7 @@ import {
 } from "../../structure/index.js";
 import { matchesStatusQuoLabel } from "../../structure/status-quo-patterns.js";
 import { optionFramingWarnings } from "../../draft/records/option-framing-recovery.js";
+import { causeFramingWarnings } from "../../draft/records/cause-framing.js";
 import { verificationPipeline } from "../../verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../../schemas/ceeResponses.js";
 import {
@@ -660,6 +661,15 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   const framingWarnings = optionFramingWarnings(ctx.recordDisclosures);
   if (framingWarnings.length > 0) {
     draftWarnings = [...(draftWarnings ?? []), ...framingWarnings];
+  }
+
+  // The cause-framing withdrawal must be DISCLOSED for the same reason the
+  // question-framing one is: the user's own words left the comparison, and a
+  // silent removal is the same defect one level down. The second warning says
+  // that ending with no comparison is the CORRECT outcome here, not a failure.
+  const causeWarnings = causeFramingWarnings(ctx.recordDisclosures);
+  if (causeWarnings.length > 0) {
+    draftWarnings = [...(draftWarnings ?? []), ...causeWarnings];
   }
   ctx.draftWarnings = draftWarnings ?? [];
 
