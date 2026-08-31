@@ -151,7 +151,7 @@ const effectTargetPending = {
   expires_at_turn_count: 2,
   expires_at_iso: '2099-12-31T23:59:59.000Z',
   emitted_at_iso: '2026-08-08T00:00:00.000Z',
-} as PendingAction;
+} as unknown as PendingAction;
 
 const COMPETING_SPELLINGS: ReadonlyArray<readonly [string, PendingAction]> = [
   ['elicit_option_effect', effectPending],

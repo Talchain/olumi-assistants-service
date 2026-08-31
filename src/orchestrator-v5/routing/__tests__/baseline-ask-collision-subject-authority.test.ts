@@ -295,6 +295,47 @@ describe('the counterpart routes the transition must not have taken', () => {
     expect((dispatch as { pending: PendingAction }).pending.id).toBe('pending-baseline');
   });
 
+  /**
+   * ⚠ THE BOUNDARY OF THIS TRANSITION, PINNED RATHER THAN LEFT IMPLIED.
+   *
+   * Everything here depends on the baseline pending still being LIVE and still
+   * being PERSISTED. Two ways it can be neither:
+   *
+   *   - EXPIRED — `filterLivePendingActions` drops it, so there is no baseline
+   *     to collide with and the pre-existing silence returns;
+   *   - EVICTED — `PENDING_ACTIONS_PER_TURN_CAP` is 3 and a turn's OWN pendings
+   *     are kept first, so a prior-turn baseline ask can be dropped at commit.
+   *     It is then simply absent from the set this function reads.
+   *
+   * In BOTH cases this transition does nothing at all, by construction. That is
+   * a real limit on its coverage, not an oversight, and it is asserted here so
+   * the limit is visible in the suite and REDs if it ever silently changes.
+   */
+  it('an EXPIRED baseline question is outside this transition: the pre-existing silence returns', () => {
+    const expiredBaseline = {
+      ...(baselinePending as unknown as Record<string, unknown>),
+      expires_at_iso: new Date(NOW - 1_000).toISOString(),
+    } as unknown as PendingAction;
+    // Both reply kinds, so neither direction can claim coverage it lacks.
+    expect(
+      (resume('30%', [expiredBaseline, effectPending]) as { skip_reason: string }).skip_reason,
+    ).toBe('no_pending_question');
+    expect(
+      (resume('Churn is about 12%.', [expiredBaseline, effectPending]) as { skip_reason: string })
+        .skip_reason,
+    ).toBe('no_pending_question');
+  });
+
+  it('an EVICTED (absent) baseline question is outside this transition too', () => {
+    // The competitor survived the cap; the baseline ask did not.
+    expect((resume('30%', [effectPending]) as { skip_reason: string }).skip_reason).toBe(
+      'no_pending_question',
+    );
+    expect(
+      (resume('Churn is about 12%.', [effectPending]) as { skip_reason: string }).skip_reason,
+    ).toBe('no_pending_question');
+  });
+
   it('with no live question at all, silence is preserved for both reply kinds', () => {
     expect((resume('30%', []) as { skip_reason: string }).skip_reason).toBe('no_pending_question');
     expect((resume('Churn is about 12%.', []) as { skip_reason: string }).skip_reason).toBe(
