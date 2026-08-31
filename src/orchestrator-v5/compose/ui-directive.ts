@@ -254,7 +254,46 @@ type UiDirectiveSuppressReason =
    * suppression keeps the answer's PROSE (which already names the blocker) and
    * declines only the gesture.
    */
-  | 'remedy_surface_unmapped';
+  | 'remedy_surface_unmapped'
+  /**
+   * The ambiguity highlight: the candidates carry no graph-entity id at all
+   * (neither carrier populated), so there is nothing to point at.
+   */
+  | 'ambiguity_no_candidate_entities'
+  /**
+   * The ambiguity highlight, and THE ONE WORTH WATCHING: the candidates DO name
+   * entities, but none of them resolves in the turn's persisted graph. That is
+   * the difference between "this turn had nothing to point at" and "this turn
+   * tried to point at entities the user's graph does not contain", and the
+   * second is a drift signal — a proposal outliving the nodes it targets, or a
+   * persisted read that came back degraded. Both suppress identically and would
+   * be indistinguishable without separate tags.
+   */
+  | 'ambiguity_targets_unresolved'
+  /**
+   * The ambiguity highlight: more resolvable candidates than the cap, so the
+   * gesture would flood the canvas rather than point at anything.
+   */
+  | 'ambiguity_too_many_targets'
+  /**
+   * The ambiguity highlight: the assembled block failed the strict boundary
+   * parse. Should be unreachable (every field is builder-controlled and the
+   * targets come from a kind-gated lookup), which is exactly why it is tagged
+   * rather than dropped silently — an unreachable arm that starts firing is a
+   * contract change nobody announced.
+   */
+  | 'ambiguity_schema_parse_failed';
+
+/**
+ * The `fact_type` tag for the ambiguity rows.
+ *
+ * ⚠ IT IS NOT A FACT TYPE, AND THAT IS THE POINT. Every other row in this file
+ * rides a `HandlerFact` and stamps its `fact_type`; this row exists precisely
+ * BECAUSE the ambiguity turn has no fact. The field is a plain `string` on the
+ * telemetry helper, so the honest tag is one that says which turn class emitted
+ * the gesture rather than borrowing a fact name this turn never produced.
+ */
+const AMBIGUITY_FACT_TYPE = 'ambiguity_clarification';
 
 function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
   emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
@@ -1069,4 +1108,205 @@ export function buildFocusInspectorDirective(
       // bare figure binds via `routing/repair-value-binding.ts`.
       return null;
   }
+}
+
+// ============================================================================
+// THE AMBIGUITY-CANDIDATE HIGHLIGHT — "point at what the question is about".
+//
+// Every builder above rides a HANDLER FACT: the user did something and the
+// gesture follows the result. That is a real coverage gap rather than a design
+// choice, and it is TURN-CLASS shaped. `buildBlocksFromFacts` is the only path
+// that can emit a directive, and it is gated on `facts.length > 0` — so the
+// deterministic clarify / ambiguity / refusal / no-analysis pre-routes, which
+// call `composeAnswer` with no facts at all, are STRUCTURALLY incapable of
+// gesturing. A fresh user spends their first several turns on exactly those
+// paths, and every one of them points at nothing.
+//
+// This builder covers ONE of them: the ambiguity clarification. When CEE asks
+// "which one did you mean?", it highlights the candidates it is asking about.
+//
+// WHY THIS ONE IS TRUTHFUL BY CONSTRUCTION. The candidate set is already
+// computed to BUILD the question — the numbered list the user reads is
+// rendered from the same proposals whose entities are highlighted here. The
+// gesture therefore asserts nothing the question does not already assert; it
+// relocates an assertion the user is already reading from the chat panel onto
+// the model it is about.
+//
+// ⚠ THE CHARTER CONSTRAINT, AND IT IS THE POINT OF THE SLICE RATHER THAN A
+// CAVEAT. Olumi's own contributions stay PROVISIONAL and DISTINGUISHABLE from
+// the user's, and this gesture exists to show what Olumi is UNCERTAIN about —
+// never to imply it has decided. That rules out more than it looks like:
+//   - `highlight` and NOT `focus`/`open_inspector`. The single-target verbs
+//     would have to CHOOSE one candidate to centre or open, which is precisely
+//     the decision the turn is asking the USER to make. `highlight` pulses
+//     every target equally and moves neither viewport nor selection.
+//   - NO ordering signal. `targets` is emitted in the candidate set's own
+//     order — the same order as the numbered list the user is reading — and
+//     carries no rank, no score, no "most likely" first.
+//   - NO `note`. The schema offers a caption slot; a caption here would be the
+//     natural place for a nudge ("probably this one"), and there is nothing to
+//     say that the numbered list does not already say. Zero free text is also
+//     zero hallucination surface and nothing for the egress scrubber to scrub.
+//
+// ⚠ `source` IS DELIBERATELY NOT STAMPED, and this is a REPORTED GAP rather
+// than an oversight. The 0.39.0 vocabulary is `ladder` | `gate` | `composer`,
+// and NONE of the three names this authoring path: `ladder` means fact-derived
+// (this row has no fact, which is the entire reason it exists), `gate` means
+// the advice-gate per-class mapping, and `composer` is defined at the contract
+// as "an LLM-PROPOSED gesture ... validated fail-closed". Stamping `composer`
+// on a fully deterministic gesture would tell every capture and every
+// telemetry consumer that an LLM authored it, which is false — and picking the
+// least-bad label to fill a required-looking slot is how a vocabulary stops
+// meaning anything. The enum's own absence semantics permit this: absence ⇔
+// "not stamped", and a consumer MUST NOT infer `ladder` from it. Omitting
+// asserts nothing. A fourth value for deterministic FACT-LESS pre-route
+// gestures is a schemas change and a separate, ratifiable decision; it is
+// named in this lane's report rather than smuggled in here.
+// ============================================================================
+
+/**
+ * Defensive upper bound on highlighted candidates.
+ *
+ * The UI pulses EVERY resolvable target, so an unbounded set would flood the
+ * canvas — the failure mode of a "point at it" gesture is not a wrong target
+ * but too many, at which point it points at nothing in particular. Live
+ * ambiguity sets are small by construction (they are the proposals whose
+ * labels the user's reply matched), and nothing in the pending-action store
+ * bounds them, so the bound is asserted HERE rather than assumed upstream.
+ * Over the cap the directive is suppressed entirely rather than truncated: a
+ * silently truncated highlight would point at a SUBSET of what the question
+ * asks about, which is the one outcome worse than no gesture.
+ */
+export const AMBIGUITY_HIGHLIGHT_MAX_TARGETS = 6;
+
+/**
+ * The graph entities one ambiguous candidate is about.
+ *
+ * ⚠ TWO CARRIERS, ONE CONCEPT — read BOTH. `PendingActionPreconditions
+ * .target_entity_ids` ("node/edge ids that must still exist for this action to
+ * be safe to resume") and `inline_patch.target_entity_ids` ("graph entities
+ * the patch targets") are differently-named twins of the same fact, written by
+ * different producers. Reading only one silently under-covers whichever
+ * proposals the other producer minted, and that under-coverage looks exactly
+ * like a candidate with no graph entity — i.e. it fails CLOSED and invisibly.
+ * The union is deduped against the graph lookup below, so a candidate carrying
+ * the id in both places contributes it once.
+ */
+interface AmbiguityCandidateSource {
+  /**
+   * ⚠ BOTH FIELDS ARE `unknown` ON PURPOSE — this is not laziness, and the
+   * typecheck gate proved it. `PendingAction.action` is a DISCRIMINATED UNION
+   * and only some variants carry `inline_patch` at all (a `set_factor_value`
+   * pending has no property in common with an `{ inline_patch }` shape, so
+   * TypeScript's weak-type check rejects the narrower structural type
+   * outright). Declaring the shape we WISH the carriers had would either not
+   * compile or force a cast that silently asserts a property the variant does
+   * not have. `unknown` + the total readers below state the honest contract:
+   * this builder accepts any pending and extracts ids where they exist.
+   */
+  readonly preconditions?: unknown;
+  readonly action?: unknown;
+}
+
+/** Narrow an unknown to a readable record, or null. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Read a `target_entity_ids`-shaped field defensively (unknown → []). */
+function readEntityIds(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * Collect the graph-entity ids the ambiguous candidates are about, in
+ * candidate order (the order the numbered clarification lists them).
+ *
+ * Pure and total: any shape that is not what it claims to be contributes
+ * nothing rather than throwing — this runs on a clarification turn, and a
+ * malformed pending must degrade to "no gesture", never to a failed turn.
+ */
+export function collectAmbiguityCandidateEntityIds(
+  candidates: readonly AmbiguityCandidateSource[],
+): readonly string[] {
+  const ids: string[] = [];
+  for (const cand of candidates) {
+    const preconditions = asRecord(cand.preconditions);
+    const fromPreconditions =
+      preconditions === null ? [] : readEntityIds(preconditions.target_entity_ids);
+    const action = asRecord(cand.action);
+    const inlinePatch = action === null ? null : asRecord(action.inline_patch);
+    const fromInlinePatch =
+      inlinePatch === null ? [] : readEntityIds(inlinePatch.target_entity_ids);
+    for (const id of [...fromPreconditions, ...fromInlinePatch]) {
+      if (!ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Build the ambiguity-candidate `highlight` directive, or null on any
+ * fail-closed condition. Deterministic: no LLM input, no clock, no randomness.
+ *
+ * Fail-closed (returns null, never a partial block):
+ *   - no candidate entity ids at all (nothing to point at);
+ *   - NO id resolves in `lookup` — the ids name entities that are not in the
+ *     graph the user is looking at, so a highlight would point at nothing.
+ *     ⚠ This is the load-bearing gate. `lookup` is built from the turn's
+ *     persisted graph and already drops any node whose kind is outside the
+ *     `TargetRefKind` union, so a resolved ref is an entity that EXISTS and is
+ *     addressable. Unresolvable ids are dropped individually; if that empties
+ *     the set the directive is suppressed.
+ *   - more resolvable targets than `AMBIGUITY_HIGHLIGHT_MAX_TARGETS`;
+ *   - the final strict `UiDirectiveBlockSchema` parse fails (validate before
+ *     emit, the discipline every builder in this file follows — drop the
+ *     block, never weaken the schema).
+ *
+ * Labels come from the lookup, never from the proposal's chip copy and NEVER
+ * from the id (the Phase-3 §0.1 invariant): the chip label describes the
+ * CHANGE being offered ("Add a cost constraint"), whereas a TargetRef label
+ * names the ENTITY being pointed at. Using the chip's copy here would put a
+ * change-description on a node reference and make the two disagree on screen.
+ */
+export function buildAmbiguityCandidateUiDirective(
+  candidateEntityIds: readonly string[],
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  if (candidateEntityIds.length === 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_no_candidate_entities');
+  }
+
+  const targets: { id: string; label: string; kind: GraphNodeRef['kind'] }[] = [];
+  const seen = new Set<string>();
+  for (const id of candidateEntityIds) {
+    if (seen.has(id)) continue;
+    const ref = lookup.get(id);
+    // Unresolvable ⇒ not in the graph the user is looking at ⇒ dropped.
+    if (ref === undefined) continue;
+    seen.add(id);
+    targets.push({ id: ref.id, label: ref.label, kind: ref.kind });
+  }
+
+  if (targets.length === 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_targets_unresolved');
+  }
+  if (targets.length > AMBIGUITY_HIGHLIGHT_MAX_TARGETS) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_too_many_targets');
+  }
+
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb: 'highlight',
+    targets,
+  };
+
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  if (!parsed.success) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_schema_parse_failed');
+  }
+  return emitDirective(AMBIGUITY_FACT_TYPE, parsed.data);
 }

@@ -57,7 +57,14 @@ import {
 import {
   buildGateRemedySectionDirective,
   buildGateFlipSectionDirective,
+  buildAmbiguityCandidateUiDirective,
+  collectAmbiguityCandidateEntityIds,
 } from './compose/ui-directive.js';
+// The ambiguity highlight resolves its candidate ids against the turn's
+// persisted graph — the same lookup the wave-4 directive rows use for the
+// mutation / what_would_flip branches, which likewise have no enrichment graph
+// to read. Labels come from here, never from the id (Phase-3 §0.1).
+import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -4706,11 +4713,22 @@ export async function runTurnExecutor(
             message: 'Not now.',
           },
         ];
+        // Point at the candidates the question is about. The set is the SAME
+        // one the numbered list above is rendered from, so the gesture asserts
+        // nothing the question does not already assert — it relocates it onto
+        // the model. Suppressed entirely when no candidate id resolves in the
+        // turn's persisted graph (see the builder's fail-closed list): a
+        // highlight pointing at nothing is worse than no highlight.
+        const ambiguityDirective = buildAmbiguityCandidateUiDirective(
+          collectAmbiguityCandidateEntityIds(shortConfirmDispatch.candidates),
+          buildGraphNodeLookupFromGraph(context.persistedGraph),
+        );
         const ambiguousResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: ambiguousAssistantText,
           stage: context.stage,
           suggested_actions: consentResolutionChips,
+          ...(ambiguityDirective === null ? {} : { blocks: [ambiguityDirective] }),
         });
         sonnetTextForLog = ambiguousResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -5087,11 +5105,22 @@ export async function runTurnExecutor(
             const ambiguousAssistantText = allLabelsAreFallback
               ? 'I had more than one offer open. Which would you like?'
               : `Which one would you like? ${numberedList}`;
+            // Same gesture, same charter, at the label-collision twin of the
+            // branch above: highlight the proposals whose labels the user's
+            // reply matched. `ambiguousProposals` is the exact set the
+            // numbered clarification lists.
+            const labelAmbiguityDirective = buildAmbiguityCandidateUiDirective(
+              collectAmbiguityCandidateEntityIds(ambiguousProposals),
+              buildGraphNodeLookupFromGraph(context.persistedGraph),
+            );
             const ambiguousResponse = composeAnswer({
               answerKind: 'functional',
               assistant_text: ambiguousAssistantText,
               stage: context.stage,
               suggested_actions: labelAmbiguousChips,
+              ...(labelAmbiguityDirective === null
+                ? {}
+                : { blocks: [labelAmbiguityDirective] }),
             });
             sonnetTextForLog = ambiguousResponse.assistant_text;
             resolvedTurnClass = 'direct_answer';
