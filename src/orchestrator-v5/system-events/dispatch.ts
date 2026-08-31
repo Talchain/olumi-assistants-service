@@ -830,8 +830,24 @@ async function dispatchEdgeStrengthEdit(
         },
       };
     }
+    // ⭐ THE SHIPPED ANSWER MUST BE THE COMMITTED ANSWER — PR #1290's contract,
+    // in a site #1290 never touched (it closed the two `chip-click-dispatch.ts`
+    // exits; this one and `dispatchStructuralDelete`'s twin below are the same
+    // defect, reported independently by the founder and by a reviewer that
+    // raised them rather than dropping them when they fell outside #1290).
+    //
+    // This exit threads `priorPendingActions` (immediately below), so
+    // `commitDirectAnswer`'s carry-forward pass can retire a live consent hold —
+    // and when it does it AMENDS the response it persists, in two places, both
+    // keyed off that same input: it appends the honest one-sentence F-HELD lapse
+    // notice (`buildHeldLapseNotice`) and it suppresses competing `run_analysis`
+    // suggestion chips (steer-don't-bind). It returns that amended copy as
+    // `CommitResult.response`. Discarding it wrote the notice into the turn row
+    // and never spoke it: the user's live proposal died silently and the durable
+    // record disagreed with the wire about what the user had been told.
+    let responseForWire: OlumiResponse = response;
     try {
-      await commitDirectAnswer(response, {
+      const committed = await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'direct_answer',
@@ -848,6 +864,11 @@ async function dispatchEdgeStrengthEdit(
         ...(contentGraph !== null ? { contentGraph } : {}),
         coaching_state: null,
       });
+      // `?? response` is load-bearing, not defensive noise: ~100 suites in this
+      // repo stub `commitDirectAnswer`, and a bare `vi.fn()` resolves to
+      // `undefined`. Reading `.response` unguarded would ship an undefined wire
+      // body on every one of those paths.
+      responseForWire = committed?.response ?? response;
     } catch (err) {
       log.error(
         {
@@ -865,7 +886,7 @@ async function dispatchEdgeStrengthEdit(
       return { response, commitPerformed: false, graph: null };
     }
     return {
-      response,
+      response: responseForWire,
       commitPerformed: true,
       graph: contentGraph,
     };
@@ -1213,8 +1234,22 @@ async function dispatchStructuralDelete(
     // to delete and was refused, with no graph write and no new pending. The
     // exact valid newest pending set is fed to canonical carry-forward, which
     // alone owns TTL, wall expiry and graph-hash survival.
+    // ⭐ THE SHIPPED ANSWER MUST BE THE COMMITTED ANSWER — the exact twin of the
+    // `dispatchEdgeStrengthEdit` refusal exit above, and the same defect PR
+    // #1290 closed on the two `chip-click-dispatch.ts` exits. This exit threads
+    // `priorPendingActions` (immediately below), so `commitDirectAnswer`'s
+    // carry-forward can retire a live consent hold and AMEND the response it
+    // persists — the F-HELD lapse notice and the steer-don't-bind chip
+    // suppression, both keyed off that same input — returning the amended copy
+    // as `CommitResult.response`. Discarding it persisted the honest notice into
+    // the turn row and never spoke it.
+    //
+    // Fixed together with its twin rather than one at a time: a harm closed on
+    // one path and left open on its neighbour is how the closed half gets
+    // re-opened (CLAUDE.md trap 21).
+    let responseForWire: OlumiResponse = response;
     try {
-      await commitDirectAnswer(response, {
+      const committed = await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'direct_answer',
@@ -1229,6 +1264,9 @@ async function dispatchStructuralDelete(
         ...(contentGraph !== null ? { contentGraph } : {}),
         coaching_state: null,
       });
+      // `?? response` is load-bearing — see the identical note on the edge
+      // writer's exit above (a bare `vi.fn()` stub resolves to `undefined`).
+      responseForWire = committed?.response ?? response;
     } catch (err) {
       log.error(
         {
@@ -1254,7 +1292,7 @@ async function dispatchStructuralDelete(
       },
       'V5 structural_delete refused — committed honestly, no graph written',
     );
-    return { response, commitPerformed: true, graph: contentGraph };
+    return { response: responseForWire, commitPerformed: true, graph: contentGraph };
   }
 
   // ── the mutation path: ONE atomic commit ─────────────────────────────────
