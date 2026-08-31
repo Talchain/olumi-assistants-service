@@ -1,0 +1,699 @@
+[
+  {
+    "token": "20260830T234430Z-fresh-028196",
+    "brief_class": "a",
+    "leading_option_id": "93b9dfdd",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.6791666666666569
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.27846666666666875
+      },
+      {
+        "option_id": "de9f3c3e",
+        "option_label": "Hire One Engineer Plus Tooling Investment",
+        "win_probability": 0.042366666666666004
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.4006999999999882,
+    "shipped_summary": "Hire Three More Support Engineers Next Quarter came out ahead in 68% of runs of this model, but treat this as provisional: the link between Support Headcount Added and First-Response Time Improvement is fragile. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.6791666666666569,
+      "separation": 0.51875,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260830T235204Z-fresh-652c73",
+    "brief_class": "a",
+    "leading_option_id": "93b9dfdd",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.881833333333329
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.10183333333333411
+      },
+      {
+        "option_id": "de9f3c3e",
+        "option_label": "Hire One Engineer Plus Tooling Investment",
+        "win_probability": 0.01633333333333336
+      }
+    ],
+    "robustness_level": "high",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.7799999999999949,
+    "shipped_summary": "Hire Three More Support Engineers Next Quarter came out ahead in 88% of runs of this model.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.881833333333329,
+      "separation": 0.82275,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260830T235352Z-fresh-3084a2",
+    "brief_class": "a",
+    "leading_option_id": "cdd7875d",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.4412000000000048
+      },
+      {
+        "option_id": "a1261e67",
+        "option_label": "Hire One Engineer (Partial Hire)",
+        "win_probability": 0.04249999999999933
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.5162999999999988
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": true,
+    "near_tie_gap": 0.07509999999999395,
+    "shipped_summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Keep budget at or below £240,000”. From your brief: “Our support budget for the year is £240,000 and each engineer costs about £65,000 fully loaded.”. We could not line it up with anything this analysis measures, so no option can be put forward yet. Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again. This analysis ran without a value for how “Hold the Headcount We Have” affects “Current Ticket Backlog Pressure”, so that option was analysed as leaving it unchanged. Set that value and run the analysis again to see whether the comparison changes.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.5162999999999988,
+      "separation": 0.27445,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T001516Z-fresh-4d753d",
+    "brief_class": "a",
+    "leading_option_id": "88a34525",
+    "options": [
+      {
+        "option_id": "88a34525",
+        "option_label": "Invest in support tooling or automation instead of headcount",
+        "win_probability": 0.4301
+      },
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.23456666666666665
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.31416666666666665
+      },
+      {
+        "option_id": "eedd5ad7",
+        "option_label": "Hire one or two engineers (partial hire)",
+        "win_probability": 0.021166666666666667
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.11593333333333333,
+    "shipped_summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Keep budget at or below £240,000”. From your brief: “Our support budget for the year is £240,000 and each engineer costs about £65,000 fully loaded.”. We could not line it up with anything this analysis measures, so no option can be put forward yet. Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.4301,
+      "separation": 0.240133,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T001650Z-fresh-a224f7",
+    "brief_class": "a",
+    "leading_option_id": "93b9dfdd",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.6601666666666517
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.2803666666666703
+      },
+      {
+        "option_id": "eedd5ad7",
+        "option_label": "Hire one or two engineers (partial hire)",
+        "win_probability": 0.05946666666666644
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.3797999999999814,
+    "shipped_summary": "Hire Three More Support Engineers Next Quarter came out ahead in 66% of runs of this model, but treat this as provisional: the result is sensitive to First-Response Time Improvement. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.6601666666666517,
+      "separation": 0.49025,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T001827Z-fresh-2cb014",
+    "brief_class": "a",
+    "leading_option_id": "cdd7875d",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.31993333333333357
+      },
+      {
+        "option_id": "ad20b1a5",
+        "option_label": "Hire One or Two Engineers (Partial Hire)",
+        "win_probability": 0.0018333333333333333
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.6782333333333328
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.35829999999999923,
+    "shipped_summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Keep budget at or below £240,000”. From your brief: “Our support budget for the year is £240,000 and each engineer costs about £65,000 fully loaded.”. We could not line it up with anything this analysis measures, so no option can be put forward yet. Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.6782333333333328,
+      "separation": 0.51735,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T002010Z-fresh-2ea4dc",
+    "brief_class": "a",
+    "leading_option_id": "cdd7875d",
+    "options": [
+      {
+        "option_id": "93b9dfdd",
+        "option_label": "Hire Three More Support Engineers Next Quarter",
+        "win_probability": 0.22406666666666641
+      },
+      {
+        "option_id": "ad20b1a5",
+        "option_label": "Hire One or Two Engineers (Partial Hire)",
+        "win_probability": 0.004966666666666674
+      },
+      {
+        "option_id": "cdd7875d",
+        "option_label": "Hold the Headcount We Have",
+        "win_probability": 0.7709666666666655
+      }
+    ],
+    "robustness_level": "moderate",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.546899999999999,
+    "shipped_summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Keep budget at or below £240,000”. From your brief: “Our support budget for the year is £240,000 and each engineer costs about £65,000 fully loaded.”. We could not line it up with anything this analysis measures, so no option can be put forward yet. Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.7709666666666655,
+      "separation": 0.65645,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260830T235531Z-fresh-0897e9",
+    "brief_class": "b",
+    "leading_option_id": "b8e1cbe6",
+    "options": [
+      {
+        "option_id": "27ba0c2b",
+        "option_label": "Run a structured diagnosis before committing to any fix",
+        "win_probability": 0.004133333333333333
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.23563333333333336
+      },
+      {
+        "option_id": "919b683c",
+        "option_label": "We Are Simply Selling to the Wrong Customers",
+        "win_probability": 0.19633333333333183
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.5638999999999974
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.32826666666666404,
+    "shipped_summary": "Onboarding Is the Problem came out ahead in 56% of runs of this model, but treat this as provisional: the link between Onboarding effectiveness and time-to-value and Early customer success and activation is fragile. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.5638999999999974,
+      "separation": 0.418533,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260830T235714Z-fresh-a8959a",
+    "brief_class": "b",
+    "leading_option_id": "829646c3",
+    "options": [
+      {
+        "option_id": "1e6e2d98",
+        "option_label": "Run a structured diagnosis before committing to any fix (Status Quo)",
+        "win_probability": 0.013383333333333297
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.4653833333333339
+      },
+      {
+        "option_id": "919b683c",
+        "option_label": "We Are Simply Selling to the Wrong Customers",
+        "win_probability": 0.16315
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.35808333333333464
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.10729999999999928,
+    "shipped_summary": "The Product Has Fallen Behind came out ahead in 47% of runs of this model, but treat this as provisional: the link between Product competitiveness relative to alternatives and Customer retention improvement is fragile. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.4653833333333339,
+      "separation": 0.287178,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260830T235845Z-fresh-5faab3",
+    "brief_class": "b",
+    "leading_option_id": "919b683c",
+    "options": [
+      {
+        "option_id": "27ba0c2b",
+        "option_label": "Run a structured diagnosis before committing to any fix",
+        "win_probability": 0.3229333333333336
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.2221
+      },
+      {
+        "option_id": "919b683c",
+        "option_label": "We Are Simply Selling to the Wrong Customers",
+        "win_probability": 0.3608333333333336
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.09413333333333339
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": true,
+    "near_tie_gap": 0.03789999999999999,
+    "shipped_summary": "We Are Simply Selling to the Wrong Customers came out ahead in 36% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.3608333333333336,
+      "separation": 0.147778,
+      "contenders_within_5pp": 2
+    }
+  },
+  {
+    "token": "20260831T002215Z-fresh-6c5a96",
+    "brief_class": "b",
+    "leading_option_id": "20fa4cbe",
+    "options": [
+      {
+        "option_id": "20fa4cbe",
+        "option_label": "Selling to the Wrong Customers",
+        "win_probability": 0.30445833333333355
+      },
+      {
+        "option_id": "257779d6",
+        "option_label": "Run Diagnostic Before Committing",
+        "win_probability": 0.1883083333333329
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.21770833333333311
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.2895250000000002
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": true,
+    "near_tie_gap": 0.014933333333333354,
+    "shipped_summary": "Selling to the Wrong Customers currently leads. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.30445833333333355,
+      "separation": 0.072611,
+      "contenders_within_5pp": 2
+    }
+  },
+  {
+    "token": "20260831T002340Z-fresh-ef6370",
+    "brief_class": "b",
+    "leading_option_id": "9dd49a0d",
+    "options": [
+      {
+        "option_id": "20fa4cbe",
+        "option_label": "Selling to the Wrong Customers",
+        "win_probability": 0.25735
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.18835
+      },
+      {
+        "option_id": "9dd49a0d",
+        "option_label": "Run Diagnostic Before Committing (Status Quo)",
+        "win_probability": 0.39015
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.16415
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.13279999999999997,
+    "shipped_summary": "Run Diagnostic Before Committing (Status Quo) came out ahead in 39% of runs of this model, but treat this as provisional: the link between Customer-Fit Quality and Customer Churn Rate is fragile. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.39015,
+      "separation": 0.186867,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T002507Z-fresh-7582fc",
+    "brief_class": "b",
+    "leading_option_id": "1e6e2d98",
+    "options": [
+      {
+        "option_id": "1e6e2d98",
+        "option_label": "Run a structured diagnosis before committing to any fix (Status Quo)",
+        "win_probability": 0.3613916666666683
+      },
+      {
+        "option_id": "829646c3",
+        "option_label": "The Product Has Fallen Behind",
+        "win_probability": 0.280191666666667
+      },
+      {
+        "option_id": "919b683c",
+        "option_label": "We Are Simply Selling to the Wrong Customers",
+        "win_probability": 0.27080833333333365
+      },
+      {
+        "option_id": "b8e1cbe6",
+        "option_label": "Onboarding Is the Problem",
+        "win_probability": 0.08760833333333334
+      }
+    ],
+    "robustness_level": "very_low",
+    "near_tie_is_tie": true,
+    "near_tie_gap": 0.08120000000000127,
+    "shipped_summary": "Run a structured diagnosis before committing to any fix (Status Quo) came out ahead in 36% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 4,
+      "leader_probability": 0.3613916666666683,
+      "separation": 0.148522,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T002735Z-fresh-4ba747",
+    "brief_class": "b",
+    "leading_option_id": "4b8c9441",
+    "options": [
+      {
+        "option_id": "20fa4cbe",
+        "option_label": "Selling to the Wrong Customers",
+        "win_probability": 0.15985
+      },
+      {
+        "option_id": "4b8c9441",
+        "option_label": "Run a structured diagnosis across all three hypotheses before committing",
+        "win_probability": 0.84015
+      }
+    ],
+    "robustness_level": "high",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.6802999999999999,
+    "shipped_summary": "Run a structured diagnosis across all three hypotheses before committing came out ahead in 84% of runs of this model. 2 of your options were left out of this comparison because they have no values set. To include them, say 'Help me configure one of my options.'",
+    "derived": {
+      "field_size": 2,
+      "leader_probability": 0.84015,
+      "separation": 0.6803,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T000014Z-fresh-602462",
+    "brief_class": "c",
+    "leading_option_id": "cfb3526c",
+    "options": [
+      {
+        "option_id": "1f40d810",
+        "option_label": "Status Quo: defer reporting feature",
+        "win_probability": 0.33893333333333403
+      },
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.06313333333333339
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.5979333333333325
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.2589999999999985,
+    "shipped_summary": "Buy an Off-the-Shelf Analytics Product came out ahead in 60% of runs of this model, but treat this as provisional: the link between Time to delivery and Deadline missed is fragile. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.5979333333333325,
+      "separation": 0.3969,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T000135Z-fresh-4d0baf",
+    "brief_class": "c",
+    "leading_option_id": "f5022eb5",
+    "options": [
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.020200000000000027
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.005000000000000009
+      },
+      {
+        "option_id": "f5022eb5",
+        "option_label": "Status Quo: Delay Reporting Feature",
+        "win_probability": 0.9747999999999998
+      }
+    ],
+    "robustness_level": "high",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.9545999999999998,
+    "shipped_summary": "Status Quo: Delay Reporting Feature came out ahead in 97% of runs of this model.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.9747999999999998,
+      "separation": 0.9622,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T000330Z-fresh-ae5895",
+    "brief_class": "c",
+    "leading_option_id": "cfb3526c",
+    "options": [
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.002566666666666664
+      },
+      {
+        "option_id": "a5faa678",
+        "option_label": "Without Pulling the Platform Team Off the Migration",
+        "win_probability": 0.38996666666666707
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.6074666666666664
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.2174999999999993,
+    "shipped_summary": "Buy an Off-the-Shelf Analytics Product came out ahead in 61% of runs of this model, but treat this as provisional: the link between Time to Delivery and Delivery Misses Financial Year Deadline is fragile. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.6074666666666664,
+      "separation": 0.4112,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T002935Z-fresh-073b37",
+    "brief_class": "c",
+    "leading_option_id": "cfb3526c",
+    "options": [
+      {
+        "option_id": "1f40d810",
+        "option_label": "Status Quo: defer reporting feature",
+        "win_probability": 0.23590000000000008
+      },
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.0028999999999999963
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.7611999999999988
+      }
+    ],
+    "robustness_level": "moderate",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.5252999999999987,
+    "shipped_summary": "Buy an Off-the-Shelf Analytics Product came out ahead in 76% of runs of this model, but treat this as provisional: the result is sensitive to Self-serve reporting available to customers. One of your options was left out of this comparison because it has no values set. To include it, say 'Help me configure one of my options.'",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.7611999999999988,
+      "separation": 0.6418,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T003134Z-fresh-6c8075",
+    "brief_class": "c",
+    "leading_option_id": "4190f8ca",
+    "options": [
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.71625
+      },
+      {
+        "option_id": "fac40c30",
+        "option_label": "Status Quo: Defer reporting feature",
+        "win_probability": 0.28375
+      }
+    ],
+    "robustness_level": "moderate",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.43250000000000005,
+    "shipped_summary": "Build New Reporting Feature In-House came out ahead in 72% of runs of this model, but treat this as provisional: the result is sensitive to Self-serve reporting available to customers. 'Buy an Off-the-Shelf Analytics Product' was left out of this comparison because it has no values set. To include it, say 'Help me configure Buy an Off-the-Shelf Analytics Product.'",
+    "derived": {
+      "field_size": 2,
+      "leader_probability": 0.71625,
+      "separation": 0.4325,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T003313Z-fresh-a80074",
+    "brief_class": "c",
+    "leading_option_id": "cfb3526c",
+    "options": [
+      {
+        "option_id": "1f40d810",
+        "option_label": "Status Quo: defer reporting feature",
+        "win_probability": 0.026350000000000023
+      },
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.01084999999999999
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.9627999999999998
+      }
+    ],
+    "robustness_level": "high",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.9364499999999998,
+    "shipped_summary": "Buy an Off-the-Shelf Analytics Product came out ahead in 96% of runs of this model. This analysis ran without a value for one option effect, so that option was analysed as leaving that factor unchanged. Set that value and run the analysis again to see whether the comparison changes.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.9627999999999998,
+      "separation": 0.9442,
+      "contenders_within_5pp": 1
+    }
+  },
+  {
+    "token": "20260831T003459Z-fresh-29c4f3",
+    "brief_class": "c",
+    "leading_option_id": "cfb3526c",
+    "options": [
+      {
+        "option_id": "4190f8ca",
+        "option_label": "Build New Reporting Feature In-House",
+        "win_probability": 0.039233333333333294
+      },
+      {
+        "option_id": "cfb3526c",
+        "option_label": "Buy an Off-the-Shelf Analytics Product",
+        "win_probability": 0.6989333333333324
+      },
+      {
+        "option_id": "fac40c30",
+        "option_label": "Status Quo: Defer reporting feature",
+        "win_probability": 0.26183333333333353
+      }
+    ],
+    "robustness_level": "low",
+    "near_tie_is_tie": false,
+    "near_tie_gap": 0.4370999999999989,
+    "shipped_summary": "Buy an Off-the-Shelf Analytics Product came out ahead in 70% of runs of this model, but treat this as provisional: the link between Time to delivery and Delivery deadline missed is fragile. The result is not yet robust — small changes could flip it.",
+    "derived": {
+      "field_size": 3,
+      "leader_probability": 0.6989333333333324,
+      "separation": 0.5484,
+      "contenders_within_5pp": 1
+    }
+  }
+]
