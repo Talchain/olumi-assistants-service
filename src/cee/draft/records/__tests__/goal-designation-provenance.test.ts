@@ -430,6 +430,13 @@ describe("the external adversarial corpus, judged by hand and replayed through t
     readonly designates: boolean;
     /** Why, in one clause — the human reasoning, recorded not inferred. */
     readonly because: string;
+    /**
+     * ⛔ Set ONLY where the hand verdict and the shipped behaviour DISAGREE.
+     * The row is still replayed and still asserted — against what the code
+     * actually does — so the divergence is visible in a run instead of being
+     * quietly dropped from the table. See the KNOWN-OPEN census below.
+     */
+    readonly knownOpen?: true;
   }[] = [
     {
       quote: "This is not about cutting costs: we want to double our delivery speed",
@@ -440,6 +447,20 @@ describe("the external adversarial corpus, judged by hand and replayed through t
       quote: "We are not trying to grow headcount — the aim is to raise output per engineer",
       designates: true,
       because: "names the aim explicitly",
+    },
+    {
+      // ⛔⛔ THE ROW THAT DISAGREES, AND IT IS IN THE TABLE FOR THAT REASON.
+      // I judge this NOT a designated objective: it names a PROBLEM ("we cannot
+      // ship weekly"), never a target. The shipped behaviour keeps the user's
+      // badge, because the refusal is `clause_discarded` — a DISPLAY verdict.
+      // An earlier draft of this suite simply omitted the row, which is the
+      // "carve out the discrepancy instead of recording it" defect (trap 13b) —
+      // committed inside the fix for a defect of that same class. Recorded, and
+      // asserted against the CODE's behaviour, so the gap is countable.
+      quote: "Cost is not the problem; the problem is that we cannot ship weekly",
+      designates: false,
+      because: "names a problem, not a target",
+      knownOpen: true,
     },
     {
       quote: "Cut cloud spend by 25% without any change that degrades latency",
@@ -498,20 +519,42 @@ describe("the external adversarial corpus, judged by hand and replayed through t
     },
   ];
 
+  it("the table is the WHOLE external corpus — every MEASURED_HARMS goal quote, none pruned", () => {
+    // ⛔ THE ANTI-PRUNING ASSERTION. A corpus the author may quietly shorten is
+    // a corpus that will agree with the code, because the rows that disagree are
+    // exactly the ones it is tempting to drop. `authored-node-labels.test.ts`
+    // MEASURED_HARMS carries 14 quotes; all 14 are here.
+    expect(HAND_JUDGED).toHaveLength(14);
+    expect(new Set(HAND_JUDGED.map((c) => c.quote)).size, "no duplicate rows").toBe(14);
+  });
+
   it("the corpus carries both directions — an all-one-way corpus proves nothing", () => {
     // ⭐ The contrast control for the whole section (trap 13e). If either arm
     // ever empties, every row below can pass on a predicate that stopped
     // discriminating.
     expect(HAND_JUDGED.filter((c) => c.designates).length).toBe(8);
-    expect(HAND_JUDGED.filter((c) => !c.designates).length).toBe(5);
+    expect(HAND_JUDGED.filter((c) => !c.designates).length).toBe(6);
+  });
+
+  it("the KNOWN-OPEN set is EXACTLY the rows where hand and code disagree", () => {
+    // ⭐ trap 22f's KNOWN-DROPPED discipline: the gap is pinned by name, so the
+    // suite stays green for the RIGHT reason and REDs if the set grows OR
+    // shrinks. Shrinking is a WIN that must be noticed, not absorbed.
+    expect(HAND_JUDGED.filter((c) => c.knownOpen).map((c) => c.quote)).toEqual([
+      "Cost is not the problem; the problem is that we cannot ship weekly",
+    ]);
   });
 
   it.each(HAND_JUDGED)(
     "designates=$designates ($because): $quote",
-    ({ quote, designates }) => {
+    ({ quote, designates, knownOpen }) => {
+      // Where hand and code AGREE, the hand verdict is the expectation. Where
+      // they disagree, the row is asserted against the CODE and carries
+      // `knownOpen`, which the census above pins by name. Nothing is dropped.
+      const expected = knownOpen ? !designates : designates;
       const o = drive(quote, `${quote}. We could act now, or wait a quarter.`);
-      expect(o.wireProvenance, quote).toBe(designates ? "from_brief" : "ai_inferred");
-      expect(o.recordClass, quote).toBe(designates ? "stated" : PROJECTOR_STRUCTURAL_CLASS);
+      expect(o.wireProvenance, quote).toBe(expected ? "from_brief" : "ai_inferred");
+      expect(o.recordClass, quote).toBe(expected ? "stated" : PROJECTOR_STRUCTURAL_CLASS);
       // The user's verbatim survives in BOTH directions — that is the whole
       // point of withdrawing the designation rather than the words.
       expect(o.sourceQuote, `${quote}: the verbatim must survive either way`).toBe(quote);
