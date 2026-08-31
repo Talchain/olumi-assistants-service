@@ -231,7 +231,15 @@ export const OLUMI_ACTION_TOOL = {
               '`{ value: 5, unit: "%", cap: 100 }`, NOT `0.05`. Use the ' +
               '`operator` field for relative changes (set / increase / ' +
               'decrease / multiply). Do NOT include an `explanation` ' +
-              'payload on this handler.\n' +
+              'payload on this handler. ⭐ A `value` parameter is ' +
+              'MANDATORY on this handler: the `parameters` array MUST ' +
+              'contain an entry named `value`. If the user has not given ' +
+              'you a number you can use, do NOT emit set_factor_value ' +
+              'with the `value` parameter missing — emit `intent_class: ' +
+              '"clarify"` and ask for the number instead. A ' +
+              'set_factor_value call with no `value` parameter is ' +
+              'ALWAYS rejected, so proposing one only costs the user a ' +
+              'turn.\n' +
               '\n' +
               'Graph structural changes (draft_graph, edit_graph) are ' +
               'dispatched by the system before routing and never reach this ' +
@@ -294,22 +302,58 @@ export const OLUMI_ACTION_TOOL = {
                 // Dropped here so Sonnet is no longer encouraged to emit
                 // it; the handler's StructuredValueSchema is now strict
                 // and rejects the key explicitly.
+                //
+                // ⭐ ADVERTISED-vs-ACCEPTED divergence repair (2026-08-31).
+                // This union is what the model is TOLD it may send. Every
+                // arm here must be accepted by at least one live acceptor,
+                // or the product advertises a shape it then refuses — the
+                // defect that drove `set_factor_value` to an 81% refusal
+                // rate (30/37 proposals, staging window 30–31 Aug).
+                // Derived by sweeping all 7 registered handlers for what
+                // they actually parse out of `parameters[].value`:
+                //
+                //   • `boolean` REMOVED — ZERO acceptors. No registered
+                //     handler reads a boolean out of a parameter value
+                //     (contrast-controlled: the same sweep found string=2
+                //     and number=5 in set-factor-value.ts, so the zero is
+                //     a real absence, not a blind probe). It was pure
+                //     advertisement.
+                //   • inner `value` NARROWED to number — all three
+                //     consumers of the `{ value, unit?, cap? }` wrapper
+                //     require a numeric inner value
+                //     (set-factor-value.ts `SetFactorValueValueSchema`,
+                //     validator.ts `parseValueParameter`,
+                //     resolve-relative-factor-delta.ts).
+                //   • outer `string` RETAINED — it is LOAD-BEARING and
+                //     removing it would break two live paths:
+                //       (a) `add_constraint` routes THREE string-valued
+                //           parameters through this same shared schema
+                //           (`constraint_type` is a mandatory
+                //           z.enum(['at_least','at_most']), plus `label`
+                //           and `unit`) — narrowing to number makes a
+                //           valid add_constraint call unrepresentable;
+                //       (b) `set_factor_value` accepts a string PERCENT
+                //           DELTA ("+5%") which
+                //           `resolve-relative-factor-delta.ts` rewrites to
+                //           an absolute number BEFORE validation.
+                //     The string arm is therefore accepted only for a
+                //     SUB-LANGUAGE, not wholesale. That residual gap is
+                //     pinned as an explicit known-divergence set in
+                //     `__tests__/advertised-value-types.test.ts` so it
+                //     REDs if it grows OR shrinks.
+                //
+                // Any future handler needing a new shape must add its arm
+                // HERE and be accepted by an acceptor, or the derived
+                // guard reds.
                 value: {
                   anyOf: [
                     { type: 'number' },
                     { type: 'string' },
-                    { type: 'boolean' },
                     {
                       type: 'object',
                       additionalProperties: false,
                       properties: {
-                        value: {
-                          anyOf: [
-                            { type: 'number' },
-                            { type: 'string' },
-                            { type: 'boolean' },
-                          ],
-                        },
+                        value: { type: 'number' },
                         unit: { type: 'string' },
                         cap: { type: 'number' },
                       },

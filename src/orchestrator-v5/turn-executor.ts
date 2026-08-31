@@ -14677,6 +14677,24 @@ function serialiseError(err: unknown): { name?: string; message?: string } {
  * dropped — the downstream composer still renders them for the user,
  * but they MUST NOT reach the log sink.
  */
+/**
+ * A bounded, user-content-free descriptor of a rejected parameter's TYPE.
+ * Returns exactly one token from the closed set
+ * { 'null', 'array', 'undefined', 'boolean', 'number', 'bigint', 'string',
+ *   'symbol', 'function', 'object' } and NEVER any part of the value
+ * itself — so a rejected value that is user prose contributes only the
+ * word "string" to the log.
+ *
+ * `null` and arrays are separated from plain objects deliberately:
+ * `typeof` collapses all three to 'object', and that distinction is
+ * precisely what names the rejected shape.
+ */
+function describeValueTypeForLog(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
 function buildSafeValidatorLogDetails(
   error: ValidationError,
 ): Record<string, unknown> {
@@ -14703,6 +14721,61 @@ function buildSafeValidatorLogDetails(
   // Handler-supplied reason string (PRECONDITION_UNMET) — a code-level
   // token like "no_options_defined", not user prose.
   if (typeof raw.reason === 'string') safe.reason = raw.reason;
+  // PARAMETER_INVALID's cause. Every value that reaches `rejection_reason` is
+  // a CODE-AUTHORED LITERAL — never user prose — so it leaks nothing, and that
+  // is the whole privacy claim this whitelist rests on.
+  //
+  // ⚠ CORRECTED (#1283 review). This comment used to ENUMERATE the tokens as
+  // "a CLOSED set of 11", and the list was wrong three ways at the bytes:
+  // it OMITTED two real members of `ProposalRejectionReason`
+  // (`delta_no_cap_and_no_unit`, `cap_redeclares_scale` —
+  // `evaluate-factor-value-proposal.ts:121-137`, both genuinely emitted at
+  // :578 and :540), and it INCLUDED `unit_ambiguous_probability_domain`,
+  // which is not in that union at all (it is an independent literal at
+  // `add-constraint.ts:698`). A twelfth independent literal,
+  // `parameter_schema_mismatch`, comes from `validator.ts:527`.
+  //
+  // The enumeration is DELIBERATELY NOT RESTATED HERE. A hand-copied list of
+  // another module's union is the estate's dominant defect (CLAUDE.md trap
+  // 12) — this one drifted before the PR carrying it even merged, and a
+  // reader who trusted it would have believed two live tokens did not exist.
+  // DERIVE it instead: `ProposalRejectionReason` is the union
+  // (evaluate-factor-value-proposal.ts), it reaches this field through
+  // `rejection_reason: evaluation.reason` (validator.ts:939,
+  // normalise-factor-value.ts:137 `satisfies ProposalRejectionReason`,
+  // set-factor-value.ts:377), and the two independent literals are named
+  // above. The privacy property holds over ALL of them and does not depend on
+  // knowing the count. Its absence made
+  // PARAMETER_INVALID, the largest validator-failure class in the estate,
+  // unattributable from logs: every occurrence logged the same two keys
+  // (handler_id, parameter) regardless of cause. `reason` above was
+  // whitelisted for PRECONDITION_UNMET and this sibling field was not.
+  if (typeof raw.rejection_reason === 'string') {
+    safe.rejection_reason = raw.rejection_reason;
+  }
+  // Which of the two `missing_value` emit sites fired (see
+  // `preexecuteSetFactorValueStructural`): false = the proposal carried no
+  // `value` parameter at all; true = it carried one whose shape the
+  // acceptor refuses. A boolean carries no user content.
+  //
+  // ⚠ SCOPE (#1283 review): in practice this reads `false` or is absent. The
+  // `true` site (`validator.ts:801`) is PRE-EMPTED at this tip — the generic
+  // parameter loop rejects an unsupported shape as `parameter_schema_mismatch`
+  // before the structural precheck runs, which this PR's own
+  // "the structural precheck's 'present but unparseable' branch is PRE-EMPTED
+  // at this tip" test asserts. So the field is a CONSTANT in production, not
+  // the discriminator its name promises. Keeping it is right — it fails loud
+  // the day the ordering changes — but do not read a `true` in a log as
+  // evidence of anything until that test goes red.
+  if (typeof raw.value_param_present === 'boolean') {
+    safe.value_param_present = raw.value_param_present;
+  }
+  // TYPE ONLY, never the value. `actual_value` may echo user prose and
+  // stays dropped; its TYPE is a bounded code-level descriptor that names
+  // the rejected SHAPE without reproducing any user content.
+  if ('actual_value' in raw) {
+    safe.actual_value_type = describeValueTypeForLog(raw.actual_value);
+  }
   // PARAMETER_INVALID — parameter NAME is handler-declared (safe); the
   // actual_value and constraint_description may echo user prose (dropped).
   if (typeof raw.parameter === 'string') safe.parameter = raw.parameter;
